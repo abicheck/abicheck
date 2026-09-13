@@ -884,7 +884,7 @@ class TestEveryDumpExecutionBranchGrantsTheLicence:
         (`side.path is None`, then `is_header_only_evidence`) is the production
         one rather than a hand-set flag.
         """
-        from abicheck.api_types import DumpRequest, InputSpec
+        from abicheck.service import DumpRequest, InputSpec
         from abicheck.service_dump_pipeline import resolve_dump_request
 
         if branch == "binary":

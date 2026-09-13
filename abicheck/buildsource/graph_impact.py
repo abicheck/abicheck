@@ -35,13 +35,14 @@ import hashlib
 import json
 from typing import TYPE_CHECKING, Any
 
+from abicheck.model.source_graph_query import PUBLIC_VISIBILITIES
+
 from .call_graph import (
     CALL_KIND_FUNCTION_POINTER,
     CALL_KIND_VIRTUAL,
     RESOLUTION_OVERAPPROX,
 )
 from .graph_facts import CONF_HIGH
-from .source_graph_query import PUBLIC_VISIBILITIES
 
 if TYPE_CHECKING:
     from ..model.graph_facts import GraphEdge, GraphNode

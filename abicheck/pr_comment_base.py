@@ -534,7 +534,7 @@ def _demangle_symbol(raw: str, demangled_map: dict[str, str]) -> tuple[str, str]
 
 
 #: Human-readable labels for a CoverageFailure dict's "provider" field
-#: (`contract_coverage_ledger.py`'s recorded provider names) — used only as
+#: (`policy/coverage_ledger.py`'s recorded provider names) — used only as
 #: a fallback when a provider name isn't already self-explanatory; every
 #: unrecognized provider still renders (just its raw string), never dropped.
 _CONTRACT_PROVIDER_LABEL = {

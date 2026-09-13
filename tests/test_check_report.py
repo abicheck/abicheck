@@ -511,7 +511,7 @@ class TestAugmentReport:
         """
         import copy
 
-        from abicheck.aggregate import GateInfo
+        from abicheck.workflows.aggregate import GateInfo
 
         scan_report = {
             "scan_schema_version": "1.9",
@@ -549,7 +549,7 @@ class TestAugmentReport:
         """The complement: `deferred` exists so the trailing aggregate computes
         the gate from the real value, so neutralizing there would defeat it.
         """
-        from abicheck.aggregate import GateInfo
+        from abicheck.workflows.aggregate import GateInfo
 
         scan_report = {
             "scan_schema_version": "1.9",
@@ -804,7 +804,7 @@ class TestAugmentReport:
         # The invariant behind the fix: the writer must zero exactly the
         # blocks the reader consults. Asserting it against the shared
         # traversal is what stops the two drifting apart again.
-        from abicheck.aggregate import contract_coverage_blocks
+        from abicheck.workflows.aggregate import contract_coverage_blocks
 
         out = augment_report(
             {

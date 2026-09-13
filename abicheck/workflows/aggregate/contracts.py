@@ -488,7 +488,7 @@ class TargetReport:
     reason: str | None = None  # unavailable, or not_comparable/operational_error detail
     unexpected: bool = False
     #: The findings this report listed, and whether that list is all of them
-    #: (:class:`~abicheck.aggregate_findings.ReportFindings`). ``None`` for an
+    #: (:class:`~abicheck.workflows.aggregate.reconcile.ReportFindings`). ``None`` for an
     #: unavailable report — one that never arrived, was unreadable, or
     #: produced a not-comparable/operational-error result, so it listed
     #: nothing and established nothing.

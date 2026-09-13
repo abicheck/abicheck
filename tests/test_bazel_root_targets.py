@@ -403,14 +403,14 @@ def test_build_config_accepts_single_bare_string_target():
 
 
 def test_input_spec_of_coerces_build_targets():
-    from abicheck.api_types import InputSpec
+    from abicheck.service import InputSpec
 
     spec = InputSpec.of(Path("lib.so"), build_targets=["//:math", "//:util"])
     assert spec.build_targets == ("//:math", "//:util")
 
 
 def test_input_spec_default_build_targets_is_empty():
-    from abicheck.api_types import InputSpec
+    from abicheck.service import InputSpec
 
     assert InputSpec(path=Path("lib.so")).build_targets == ()
 
@@ -419,7 +419,7 @@ def test_compare_request_carries_build_targets_per_side():
     # CompareRequest.old/new are InputSpec verbatim (ADR-055 D1), so a field
     # added there needs no CompareRequest-specific plumbing -- pinned here so
     # a future InputSpec refactor can't silently drop compare's own access.
-    from abicheck.api_types import CompareRequest, InputSpec
+    from abicheck.service import CompareRequest, InputSpec
 
     req = CompareRequest(
         old=InputSpec(path=Path("old.so"), build_targets=("//:old",)),
@@ -430,16 +430,16 @@ def test_compare_request_carries_build_targets_per_side():
 
 
 def test_dump_request_input_carries_build_targets():
-    from abicheck.api_types import DumpRequest, InputSpec
+    from abicheck.service import DumpRequest, InputSpec
 
     req = DumpRequest(input=InputSpec(path=Path("lib.so"), build_targets=("//:math",)))
     assert req.input.build_targets == ("//:math",)
 
 
 def test_embed_side_build_source_forwards_build_targets(monkeypatch, tmp_path: Path):
-    from abicheck.api_types import InputSpec
     from abicheck.buildsource import embed as embed_mod
     from abicheck.model import AbiSnapshot
+    from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
     from abicheck.service_input_resolution import embed_side_build_source
 

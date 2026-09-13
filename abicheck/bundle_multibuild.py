@@ -36,13 +36,13 @@ This module never unions. It answers exactly two questions:
    own docstring for the full list of deliberate exclusions and why each one
    is excluded.
 2. :func:`pair_variants` — given two variant-labelled sets of
-   :class:`~abicheck.bundle_facts.BundleFacts`, pair up same-fingerprint
+   :class:`~abicheck.model.bundle_facts.BundleFacts`, pair up same-fingerprint
    variants for an ordinary diff, and report every variant that exists on
    only one side as its own, explicit outcome — never dropped, never merged
    with the nearest available build.
 
 This is a leaf module with respect to :mod:`abicheck.bundle`/
-:mod:`abicheck.bundle_facts`: it only needs the ``BundleFacts`` type (a plain
+:mod:`abicheck.model.bundle_facts`: it only needs the ``BundleFacts`` type (a plain
 dataclass, no live-binary or filesystem dependency) and doesn't call into
 either module's own comparison machinery — pairing decides *which* facts get
 compared, not *how*.
@@ -138,7 +138,7 @@ def variant_fingerprint(
 
     All coordinates degrade to the empty string / empty mapping when unknown
     — a caller with no real per-variant identity at all (every caller today)
-    gets exactly :data:`~abicheck.bundle_facts.DEFAULT_VARIANT_FINGERPRINT`
+    gets exactly :data:`~abicheck.model.bundle_facts.DEFAULT_VARIANT_FINGERPRINT`
     back (``"default"``), the same literal value an existing/deserialized
     ``BundleFacts`` with no multibuild distinction already carries — so
     pairing a legacy unqualified baseline against an equivalently unqualified

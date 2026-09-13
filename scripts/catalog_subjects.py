@@ -48,64 +48,13 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
-
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import example_catalog  # noqa: E402
 
+from abicheck.model.yaml_strict import load_strict_yaml  # noqa: E402
+
 SUBJECTS_PATH = example_catalog.CATALOG_DIR / "catalog_subjects.yaml"
-
-
-class _DuplicateKeyCheckingLoader(yaml.SafeLoader):
-    """`yaml.SafeLoader` with one behavior change: a mapping that repeats a
-    key is a load error instead of the PyYAML default of silently keeping
-    only the last value.
-
-    A hand-edited `catalog_subjects.yaml` that accidentally repeats a subject
-    slug (two `leaked-internal-types:` entries, most plausibly from a
-    copy-paste) would otherwise silently drop the first entry's `cases` --
-    exactly the kind of silent misclassification this whole module exists to
-    close. Mirrors `catalog_classification.py`'s (and
-    `abicheck/impact/use_cases.py`'s) identical `_DuplicateKeyCheckingLoader`
-    -- same name, same technique -- scoped to this loader class alone, not a
-    process-wide `yaml` monkeypatch.
-    """
-
-
-def _construct_mapping_rejecting_duplicates(
-    loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False
-) -> dict[object, object]:
-    """See `catalog_classification.py`'s identical function for why this also
-    preserves PyYAML's own unhashable-key check rather than only adding the
-    duplicate-key one."""
-    mapping: dict[object, object] = {}
-    for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
-        try:
-            hash(key)
-        except TypeError as exc:
-            raise yaml.constructor.ConstructorError(
-                "while constructing a mapping",
-                node.start_mark,
-                f"found unhashable key: {key!r}",
-                key_node.start_mark,
-            ) from exc
-        if key in mapping:
-            raise yaml.constructor.ConstructorError(
-                "while constructing a mapping",
-                node.start_mark,
-                f"found duplicate key: {key!r}",
-                key_node.start_mark,
-            )
-        mapping[key] = loader.construct_object(value_node, deep=deep)
-    return mapping
-
-
-_DuplicateKeyCheckingLoader.add_constructor(
-    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
-    _construct_mapping_rejecting_duplicates,
-)
 
 
 @dataclass(frozen=True)
@@ -123,10 +72,9 @@ def load_subjects(path: Path | None = None) -> dict[str, Subject]:
     """Parse `catalog/catalog_subjects.yaml` into slug -> Subject."""
     manifest = path or SUBJECTS_PATH
     text = manifest.read_text(encoding="utf-8")
-    try:
-        raw = yaml.load(text, Loader=_DuplicateKeyCheckingLoader)  # nosec B506
-    except yaml.YAMLError as exc:
-        raise ValueError(f"{manifest}: invalid YAML ({exc})") from exc
+    raw = load_strict_yaml(
+        text, error=lambda msg: ValueError(f"{manifest}: invalid YAML ({msg})")
+    )
     raw = raw or {}
     if not isinstance(raw, dict):
         raise ValueError(f"{manifest}: top level must be a mapping, got {raw!r}")

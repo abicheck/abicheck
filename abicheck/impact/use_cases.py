@@ -307,7 +307,7 @@ def _public_entry_index(library_graph: SourceGraphSummary) -> dict[str, str]:
     (two distinct declarations sharing a label with no mapping edge joining
     them) is still treated as ambiguous.
     """
-    from ..buildsource.source_graph_query import PUBLIC_VISIBILITIES
+    from abicheck.model.source_graph_query import PUBLIC_VISIBILITIES
 
     def is_public(node: GraphNode) -> bool:
         if node.kind == "binary_symbol":
@@ -704,7 +704,8 @@ def explain_use_case_impact(
     if not wanted or not definitions:
         return {}
 
-    from ..buildsource.source_graph_query import is_consumer_compiled_public_entry
+    from abicheck.model.source_graph_query import is_consumer_compiled_public_entry
+
     from ..internal_leak import (
         CALL_GRAPH_TRAVERSAL_POLICY,
         _consumer_compiled_reachability,

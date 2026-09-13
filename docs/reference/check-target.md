@@ -178,7 +178,7 @@ own) — neither of those two carries `report_schema_version`.
   available — `check_evidence_coverage` records why).
 - `compatibility_verdict`/`policy_gate_decision` — the new, richer fields —
   **alongside**, never instead of, the legacy `verdict`/`severity` fields
-  `abicheck/aggregate.py` already parses (the dual-write requirement).
+  `abicheck/workflows/aggregate/` already parses (the dual-write requirement).
 - `operational_errors` — non-empty exactly when this check hit an
   infrastructure/config problem rather than (or in addition to) a
   compatibility finding.

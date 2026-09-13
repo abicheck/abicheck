@@ -110,8 +110,8 @@ def test_compare_one_library_stamps_contract_coverage_failure_count(
     # monkeypatched out; a `contract_context` of None exercises the "no
     # ledger" path (`coverage_failures_for_context(None) == ()`), pinning
     # that the new count field is computed and stamped without raising.
-    from abicheck.api_types import CompareResult
     from abicheck.checker import DiffResult, Verdict
+    from abicheck.service import CompareResult
 
     old_path = tmp_path / "libfoo.so.1"
     new_path = tmp_path / "libfoo.so.2"
@@ -165,8 +165,8 @@ def test_compare_one_library_stamps_coverage_warnings_onto_the_entry(
     embedded verbatim into both the primary release JSON's "libraries"
     list and `--output-dir`'s summary.json, so nothing else needs to copy
     it once it lands here (Codex review, fresh evidence)."""
-    from abicheck.api_types import CompareResult
     from abicheck.checker import DiffResult, Verdict
+    from abicheck.service import CompareResult
 
     old_path = tmp_path / "libfoo.so.1"
     new_path = tmp_path / "libfoo.so.2"
@@ -219,8 +219,8 @@ def test_compare_one_library_omits_coverage_warnings_key_when_none(
 ) -> None:
     """Absent, not an empty list -- matching every other format's own
     `if result.coverage_warnings:` convention (reporter.py)."""
-    from abicheck.api_types import CompareResult
     from abicheck.checker import DiffResult, Verdict
+    from abicheck.service import CompareResult
 
     old_path = tmp_path / "libfoo.so.1"
     new_path = tmp_path / "libfoo.so.2"
@@ -340,8 +340,8 @@ def test_compare_one_library_stashes_old_snapshot_only_when_requested(
     too (JUnit/`--bundle-facts-out`), since bundle analysis on its own
     never needed the full snapshot.
     """
-    from abicheck.api_types import CompareResult
     from abicheck.checker import DiffResult, Verdict
+    from abicheck.service import CompareResult
 
     old_path = tmp_path / "libfoo.so.1"
     new_path = tmp_path / "libfoo.so.2"

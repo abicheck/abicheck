@@ -337,7 +337,7 @@ def _dump_cache_extra_key(
 
     ``lang_explicit`` (G31 Phase C follow-up): whether *lang* is a genuinely
     explicit request rather than the request-level default (see
-    :attr:`abicheck.api_types.DumpRequest.lang_explicit`). Two calls with the
+    :attr:`abicheck.workflows.contracts.DumpRequest.lang_explicit`). Two calls with the
     identical *lang* string but different ``lang_explicit`` can resolve to a
     genuinely different force-C++-vs-auto-detect decision on a
     language-ambiguous header, and therefore a different parsed AST — folded

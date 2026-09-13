@@ -27,7 +27,6 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `enable_debuginfod` | `bool` | `False` |
 | `debuginfod_url` | `str \| None` | `None` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
-| `env_matrix_path` | `Path \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |
 | `contract_mode` | `str \| None` | `None` |
@@ -233,7 +232,6 @@ Both sides of a comparison, resolved and ready to classify.
 | `old_evidence` | `SideEvidence` | *(required)* |
 | `new_evidence` | `SideEvidence` | *(required)* |
 | `resolved_execution_context` | `ResolvedExecutionContext \| None` | `None` |
-| `resolved_env_matrix` | `EnvironmentMatrix \| None \| _UnresolvedEnvMatrixType` | `<unresolved env matrix>` |
 
 ## `classify_compare_pair`
 

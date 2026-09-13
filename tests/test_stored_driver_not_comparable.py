@@ -27,10 +27,10 @@ import pytest
 from click.testing import CliRunner
 from test_release_scope_completeness import _elf_snap
 
-from abicheck.bundle_facts import capture_bundle_facts
 from abicheck.model import AbiSnapshot
 from abicheck.model.scope_acquisition import AcquisitionState
 from abicheck.serialization import save_bundle_facts, save_snapshot
+from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
 
 def _scoped(name: str, scope: str) -> AbiSnapshot:

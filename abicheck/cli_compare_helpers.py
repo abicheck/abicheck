@@ -383,11 +383,6 @@ def _preflight_manifests_and_audit(
     *,
     old_dump_manifest: Path | None,
     new_dump_manifest: Path | None,
-    # ADR-068 D4/Phase 5: no longer read here -- `--audit-suppressions`
-    # without `--suppress` is a no-op now, not a rejection (see below).
-    # Kept on the signature so the caller's kwargs-forwarding stays uniform.
-    audit_suppressions: bool,
-    suppress: Path | None,
     pack_paths: Any,
     policy_file_path: Path | None,
     contract_evaluation: bool,
@@ -416,17 +411,6 @@ def _preflight_manifests_and_audit(
                 new_manifest_obj = load_manifest(new_dump_manifest)
         except ManifestValidationError as exc:
             raise click.UsageError(str(exc)) from exc
-
-    # ADR-068 D4/Phase 5: `--audit-suppressions` with no `--suppress` used to
-    # be a hard UsageError here ("nothing to audit"). It is now a no-op --
-    # there is genuinely nothing to audit without a suppression file, and a
-    # rendering-only flag (this one now matches --show-filtered/
-    # --surface-metrics' own shape: it only ever gates whether an
-    # already-computed, possibly-absent section is shown) should never
-    # reject an otherwise-valid invocation just because it has nothing to
-    # display. `_attach_suppression_audit` below is unconditionally guarded
-    # on `suppress is not None` already, so `result.suppression_audit` stays
-    # `None` exactly as it would without the flag.
 
     # Manifest validity, ahead of the --dry-run emit for the same reason as
     # the two guards above -- see the helper for what deliberately does *not*
@@ -1494,8 +1478,6 @@ def run_compare(
     old_manifest_obj, new_manifest_obj = _preflight_manifests_and_audit(
         old_dump_manifest=old_dump_manifest,
         new_dump_manifest=new_dump_manifest,
-        audit_suppressions=audit_suppressions,
-        suppress=suppress,
         pack_paths=pack_paths,
         policy_file_path=policy_file_path,
         contract_evaluation=contract_evaluation,

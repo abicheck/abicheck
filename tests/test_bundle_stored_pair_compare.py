@@ -29,11 +29,11 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.bundle_facts import capture_bundle_facts
 from abicheck.checker_policy import Verdict
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import save_bundle_facts
+from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 from abicheck.workflows.bundle_stored_pair_compare import (
     compare_stored_bundle_facts_pair,
 )

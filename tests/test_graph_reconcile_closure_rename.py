@@ -720,16 +720,16 @@ class TestCoordinateEvidenceIsStated:
         emission must render the flag it RECORDED rather than recomputing
         one from the identities alone.
         """
-        from abicheck.buildsource.entity_identity import (
-            IDENTITY_TIER_CANONICAL,
-            CanonicalIdentity,
-        )
         from abicheck.buildsource.graph_reconcile import (
             GraphReconciliation,
             ReconciledPair,
             diff_graph_reconciliation_findings,
         )
         from abicheck.buildsource.graph_reconcile_outcome import classify
+        from abicheck.model.entity_identity import (
+            IDENTITY_TIER_CANONICAL,
+            CanonicalIdentity,
+        )
 
         def _identity(qn: str) -> CanonicalIdentity:
             return CanonicalIdentity(

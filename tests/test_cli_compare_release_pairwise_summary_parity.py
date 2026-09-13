@@ -38,12 +38,12 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from abicheck.api_types import CompareResult
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change, DiffResult
 from abicheck.cli_compare_release_pairwise import _compare_one_library
 from abicheck.model import AbiSnapshot
 from abicheck.report_summary import build_summary
+from abicheck.service import CompareResult
 
 
 def _synthetic_diff_result() -> DiffResult:

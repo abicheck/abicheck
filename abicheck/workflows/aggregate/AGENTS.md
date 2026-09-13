@@ -11,8 +11,8 @@ across profiles, folds compatibility/coverage/gate axes, and returns one
 
 Imports may follow the workflow layer contract: model, compare, policy,
 storage, and extraction owners. Existing flat compare/model modules are
-migration dependencies only. Never import `abicheck.aggregate`,
-`abicheck.aggregate_findings`, or `abicheck.aggregate_manifest`; those are
+migration dependencies only. Never import `abicheck.workflows.aggregate`,
+`abicheck.workflows.aggregate.reconcile`, or `abicheck.workflows.aggregate.resolve`; those are
 external compatibility facades.
 
 ## Canonical entry points
@@ -25,7 +25,7 @@ external compatibility facades.
 - `fold.py` owns the immutable aggregate result and its derived gate facts.
 - `execute.py::aggregate_reports_dir` composes the stages.
 
-`abicheck.aggregate` remains the supported compatibility import path for
+`abicheck.workflows.aggregate` remains the supported compatibility import path for
 external callers. New internal callers use the modules above.
 
 ## Tests
@@ -51,7 +51,7 @@ and required-target coverage. Contract coverage and analysis assurance remain
 orthogonal contributions as well. New fields must be carried through the typed
 result and the stable aggregate schema deliberately.
 
-A migration change must keep `abicheck.aggregate` import identity compatible,
+A migration change must keep `abicheck.workflows.aggregate` import identity compatible,
 update the facade's explicit `__all__`, and prove no production caller imports
 the facade. Reduce the aggregation entries in `architecture/debt.yaml`; never
 raise their baselines to accommodate a move.

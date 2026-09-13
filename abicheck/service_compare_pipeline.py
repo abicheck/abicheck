@@ -95,22 +95,6 @@ __all__ = [
 ]
 
 
-class _UnresolvedEnvMatrixType:
-    """Sentinel default for ``resolved_env_matrix`` (Codex review, PR #1221
-    fourth round): a bare ``EnvironmentMatrix | None`` default cannot tell
-    "resolved, confirmed no matrix" apart from "never resolved at all",
-    which let a caller-built :class:`ResolvedComparePair` silently drop a
-    request's real ``env_matrix``/``env_matrix_path`` intent. See
-    :class:`ResolvedComparePair`'s own docstring.
-    """
-
-    def __repr__(self) -> str:  # pragma: no cover - debug aid only
-        return "<unresolved env matrix>"
-
-
-_UNRESOLVED_ENV_MATRIX = _UnresolvedEnvMatrixType()  # the one instance; `is`-compared
-
-
 @dataclasses.dataclass(frozen=True)
 class ResolvedComparePair:
     """Both sides of a comparison, resolved and ready to classify.
@@ -125,22 +109,6 @@ class ResolvedComparePair:
     plus each side's resolved ``CompileContext`` when ``compile_context_gate``
     judges it safe — still no ``evaluation_config`` (resolves one layer up).
 
-    ``resolved_env_matrix`` (Codex review, PR #1221 third round) is
-    ``request.effective_env_matrix()``'s answer, resolved by
-    :func:`resolve_compare_request` itself before side acquisition -- not
-    threaded in separately by ``run_compare_request`` -- so every caller of
-    :func:`resolve_compare_request` rejects a bad ``env_matrix_path`` before
-    extraction, and :func:`classify_compare_pair` reads an immutable value
-    that travels with this frozen pair. Declared last, append-only, since
-    an earlier slot would repoint a positional caller's value (PR #1221).
-
-    Defaults to the :data:`_UNRESOLVED_ENV_MATRIX` sentinel, not ``None``
-    (Codex review, PR #1221 fourth round): a caller-built pair that never
-    adopted this field stays at that sentinel, which
-    :func:`classify_compare_pair` reads as "not resolved yet" and falls back
-    to ``request.effective_env_matrix()`` for -- distinct from
-    :func:`resolve_compare_request` storing a real ``None`` to mean
-    "resolved, and there genuinely is no matrix".
     """
 
     old: AbiSnapshot
@@ -150,9 +118,6 @@ class ResolvedComparePair:
     old_evidence: SideEvidence
     new_evidence: SideEvidence
     resolved_execution_context: ResolvedExecutionContext | None = None
-    resolved_env_matrix: EnvironmentMatrix | None | _UnresolvedEnvMatrixType = (
-        _UNRESOLVED_ENV_MATRIX
-    )
 
 
 def resolve_sides_sequentially(request: CompareRequest) -> bool:
@@ -361,11 +326,6 @@ def resolve_compare_request(
     # silently resolve instead of raising here. `run_compare_request`'s
     # `deadline_scope` is already active by the time this runs.
     deadline.check()
-    # ADR-020b / ADR-068 D5 / Codex review (PR #1221, third round): resolve
-    # `env_matrix_path` here, before side acquisition, so *every* caller
-    # (not only `run_compare_request`) rejects a bad matrix before
-    # extraction, and the value travels on `ResolvedComparePair` below.
-    env_matrix = request.effective_env_matrix()
     # ADR-063 Phase 4: reject a request no resolved collector/backend
     # combination can satisfy before any extraction runs (PlanningError),
     # rather than discovering the gap mid-run or not at all. See
@@ -508,7 +468,6 @@ def resolve_compare_request(
         new_fmt=new_fmt,
         old_evidence=old_evidence,
         new_evidence=new_evidence,
-        resolved_env_matrix=env_matrix,
         resolved_execution_context=ResolvedExecutionContext.from_plan(
             plan, compile_contexts=compile_contexts
         ),
@@ -535,15 +494,11 @@ def classify_compare_pair(
     instead of calling this; everything else composes the two through
     :func:`abicheck.service.run_compare_request`.
 
-    The environment matrix is read from ``pair.resolved_env_matrix`` --
-    :func:`resolve_compare_request` already resolved ``env_matrix_path``,
-    before side acquisition, so this reads that immutable value instead of
-    re-reading a possibly-since-edited file (Codex review, PR #1221 third
-    round). When still the ``_UNRESOLVED_ENV_MATRIX`` sentinel -- a
-    caller-built ``pair`` that never went through :func:`resolve_compare_request`
-    -- this falls back to ``request.effective_env_matrix()`` instead of
-    silently dropping the request's own matrix intent (Codex review, PR
-    #1221 fourth round).
+    The environment matrix is read straight off ``request.env_matrix``: the
+    former ``env_matrix_path`` alternative was retired, so the field already
+    holds the resolved :class:`~abicheck.environment_matrix.EnvironmentMatrix`
+    (``.abicheck.yml``'s ``deployment:`` key, resolved once by
+    ``resolve_compare_config``) and there is nothing left to load here.
     """
     from . import deadline
     from .buildsource.evidence_report import (
@@ -561,16 +516,8 @@ def classify_compare_pair(
     # complete with no subprocess/extraction work at all.
     deadline.check()
 
-    # ADR-020b / ADR-068 D5: read the already-resolved matrix from the pair
-    # rather than re-resolving here -- except a caller-built pair still at
-    # the `_UNRESOLVED_ENV_MATRIX` sentinel, which falls back to the
-    # request's own intent instead of silently dropping it (Codex review,
-    # PR #1221 fourth round; see `ResolvedComparePair`'s own docstring).
-    env_matrix: EnvironmentMatrix | None = (
-        request.effective_env_matrix()
-        if isinstance(pair.resolved_env_matrix, _UnresolvedEnvMatrixType)
-        else pair.resolved_env_matrix
-    )
+    # ADR-020b / ADR-068 D5: already resolved on the request itself.
+    env_matrix: EnvironmentMatrix | None = request.env_matrix
 
     # ADR-063 Phase 8's "--depth floor vs ceiling" gap: the *ceiling* half,
     # narrowing what this classification may see to the requested rung. The
@@ -795,20 +742,14 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
     under) calls the two phases directly rather than keeping a second
     resolution implementation.
 
-    Returns a :class:`~abicheck.api_types.CompareResult` (ADR-055 D2), not the
+    Returns a :class:`~abicheck.workflows.contracts.CompareResult` (ADR-055 D2), not the
     bare ``(DiffResult, old, new)`` tuple it returned before 0.6: a struct can
     gain a field without breaking positional callers, which a tuple cannot.
     ``CompareResult.as_tuple()`` reproduces the old shape for a caller that
     wants it back in one line.
 
     Raises:
-        ValidationError: If the request fails :meth:`CompareRequest.validate`,
-            or if ``env_matrix_path`` names a missing/malformed environment
-            matrix -- resolved by :func:`resolve_compare_request` itself,
-            before its own extraction work starts (Codex review, PR #1221
-            third round: previously resolved eagerly only by this function,
-            which left every *other* caller of ``resolve_compare_request``
-            unprotected; now every caller gets the same early failure).
+        ValidationError: If the request fails :meth:`CompareRequest.validate`.
         PlanningError: See :func:`resolve_compare_request` — raised from
             inside its own call here.
         SnapshotError: If either input cannot be loaded.
@@ -828,9 +769,8 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
     from . import deadline
 
     with deadline.deadline_scope(request.budget_s):
-        # deadline_scope never raises on entry -- check() before the file I/O
-        # `resolve_compare_request` now performs at its own top (env_matrix
-        # resolution included).
+        # deadline_scope never raises on entry -- check() before the work
+        # `resolve_compare_request` performs at its own top.
         deadline.check()
         pair = resolve_compare_request(request)
         return classify_compare_pair(request, pair)
@@ -950,7 +890,7 @@ def run_compare(
     every pre-existing caller.
 
     Returns:
-        A :class:`~abicheck.api_types.CompareResult`. This returned the bare
+        A :class:`~abicheck.workflows.contracts.CompareResult`. This returned the bare
         ``(DiffResult, old, new)`` tuple before 0.6; ``.as_tuple()`` gives that
         shape back for a caller that unpacks positionally.
     Raises:

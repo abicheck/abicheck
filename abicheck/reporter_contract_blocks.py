@@ -209,7 +209,7 @@ def add_contract_context(
     # empty ledger is the real, checkable answer "this domain closed", which
     # an absent key could not distinguish from "not computed".
     from .contract_coverage_exit import coverage_exit_for_context
-    from .contract_coverage_ledger import coverage_failures_for_context
+    from .policy.coverage_ledger import coverage_failures_for_context
 
     failures = coverage_failures_for_context(ctx)
     d["contract_coverage_failures"] = [f.to_dict() for f in failures]

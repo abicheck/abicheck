@@ -101,18 +101,6 @@ _MOVED_FACADES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         ),
     ),
     (
-        "abicheck.contract_coverage_ledger",
-        "abicheck.policy.coverage_ledger",
-        (
-            "REQUIRED_PROVIDERS",
-            "CoverageFailure",
-            "coverage_failures",
-            "coverage_failures_for_context",
-            "coverage_exit_contribution",
-            "suppression_reaches_coverage_failures",
-        ),
-    ),
-    (
         "abicheck.contract_gating",
         "abicheck.policy.contract_finding_relevance",
         ("contract_relevance_of", "evaluation_status_of", "is_evaluated"),
@@ -129,53 +117,6 @@ _MOVED_FACADES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
             "first_matching_reclassify_verdict",
             "reclassify_rule_for_change",
             "resolve_kind_sets",
-        ),
-    ),
-    (
-        "abicheck.api_types",
-        "abicheck.workflows.contracts",
-        ("CompareRequest", "CompareResult", "DumpRequest", "OutputSpec"),
-    ),
-    (
-        "abicheck.api_types",
-        "abicheck.workflows.request_inputs",
-        (
-            "InputSpec",
-            "FRONTEND_CONTEXTS",
-            "SUPPORTED_LANGS",
-            "SUPPORTED_FRONTENDS",
-            "SUPPORTED_DEBUG_FORMATS",
-            "frontend_context_errors",
-            "frontend_value_errors",
-            "required_path",
-        ),
-    ),
-    (
-        "abicheck.api_types",
-        "abicheck.model.header_ast_frontends",
-        ("HEADER_AST_FRONTENDS",),
-    ),
-    (
-        "abicheck.qualified_name_segments",
-        "abicheck.compare.qualified_name_normalization",
-        (
-            "segments",
-            "raw_segments",
-            "version_strip_segments",
-            "strip_inline_abi_namespaces",
-            "version_suffix",
-            "is_inline_abi_namespace_segment",
-        ),
-    ),
-    (
-        "abicheck.qualified_name_segments",
-        "abicheck.storage.closure_identity",
-        (
-            "renumber_anonymous_closure_identities",
-            "defer_closure_identity_renumbering",
-            "collect_anonymous_type_ordinals",
-            "apply_anonymous_type_ordinals",
-            "_LAMBDA_IDENTITY_FIELDS",
         ),
     ),
 )

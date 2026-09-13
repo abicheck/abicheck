@@ -8,13 +8,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from abicheck.api_types import CompareRequest, CompareResult, InputSpec
 from abicheck.checker_types import DiffResult
 from abicheck.comparability import compute_extraction_contract
 from abicheck.errors import ScopeMismatchError, SnapshotError, ValidationError
 from abicheck.model import AbiSnapshot, DependencyInfo, Function, Visibility
 from abicheck.serialization import load_snapshot, save_snapshot
 from abicheck.service import (
+    CompareRequest,
+    CompareResult,
+    InputSpec,
     _render_deps_section_md,
     collect_metadata,
     compare_snapshots,
@@ -2127,7 +2129,7 @@ class TestCompareRequestAllowBuildQuery:
     """
 
     def _request(self, tmp_path, **kwargs):
-        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import CompareRequest, InputSpec
 
         old = AbiSnapshot(library="libtest", version="1.0")
         new = AbiSnapshot(library="libtest", version="2.0")
@@ -2234,7 +2236,7 @@ class TestCompareRequestAllowBuildQuery:
         """
         import dataclasses
 
-        from abicheck.api_types import CompareRequest
+        from abicheck.service import CompareRequest
 
         fields = {f.name for f in dataclasses.fields(CompareRequest)}
         assert not fields & {

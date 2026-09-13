@@ -116,7 +116,7 @@ class TestReleaseFanOutStampsResolvedConfig:
         return AbiSnapshot(library="libfoo.so", version=version)
 
     def _run_compare_pair_with(self, pack_application, tmp_path: Path):
-        from abicheck.api_types import CompareResult
+        from abicheck.service import CompareResult
 
         fake_diff = _result()
         fake_result = CompareResult(

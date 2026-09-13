@@ -36,11 +36,12 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from abicheck.bundle_facts import BundleFacts, capture_bundle_facts
-from abicheck.bundle_facts_store import write_bundle_facts_package
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model.bundle_facts import BundleFacts
 from abicheck.project_snapshot_store import DirectoryObjectStore, write_project_manifest
 from abicheck.serialization import snapshot_to_json
+from abicheck.storage.bundle_facts_package import write_bundle_facts_package
+from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
 
 def _snap(name: str, version: str, functions: list[Function]) -> AbiSnapshot:

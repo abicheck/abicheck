@@ -7,7 +7,6 @@ canonical_for:
   - python-api
 depends_on:
   - abicheck/service.py
-  - abicheck/api_types.py
   - abicheck/workflows/contracts.py
   - abicheck/workflows/request_inputs.py
   - abicheck/model/header_ast_frontends.py
@@ -202,8 +201,7 @@ directly buys you two things a keyword shim can't:
 
 ```python
 from pathlib import Path
-from abicheck.api_types import DumpRequest, InputSpec
-from abicheck.service import run_dump_request
+from abicheck.service import DumpRequest, InputSpec, run_dump_request
 
 request = DumpRequest(
     input=InputSpec(
@@ -245,9 +243,13 @@ since a manifest already declares the equivalent surface itself.
 
 ```python
 from pathlib import Path
-from abicheck.api_types import CompareRequest, InputSpec
-from abicheck.service import run_compare_request
-from abicheck.service import resolve_compare_request, classify_compare_pair
+from abicheck.service import (
+    CompareRequest,
+    InputSpec,
+    classify_compare_pair,
+    resolve_compare_request,
+    run_compare_request,
+)
 
 request = CompareRequest(
     old=InputSpec(path=Path("libfoo.so.1")),
@@ -285,7 +287,7 @@ A baseline comparison — what `run_scan(ScanRequest(baseline=...))` did — is 
 
 ```python
 from pathlib import Path
-from abicheck.api_types import CompareRequest, InputSpec
+from abicheck.service import CompareRequest, InputSpec
 from abicheck.service import run_compare_request
 
 result = run_compare_request(CompareRequest(
@@ -317,7 +319,7 @@ Phase 6).
 an `InputSpec` plus the run-scoped level arguments rather than a request:
 
 ```python
-from abicheck.api_types import InputSpec
+from abicheck.service import InputSpec
 from abicheck.service import estimate_scan
 
 rows = estimate_scan(

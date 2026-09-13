@@ -26,7 +26,7 @@ limits) stays in `abicheck/snapshot_io.py` and is *not* reimplemented here.
 ## Permitted imports
 
 Per ADR-061 D1, `storage/` may depend only on `model`, plus the public root
-surfaces (`abicheck.api_types`, `abicheck.errors`). It may not import
+surfaces (`abicheck.workflows.contracts`, `abicheck.errors`). It may not import
 extraction, comparison, policy, workflow, report, or frontend modules — a
 storage module that needs to know a verdict, a `ChangeKind`, or a CLI flag
 is in the wrong layer. `scripts/check_architecture.py` enforces this.

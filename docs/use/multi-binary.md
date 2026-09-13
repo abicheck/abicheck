@@ -16,7 +16,7 @@ depends_on:
   - abicheck/workflows/release_assurance_members.py
   - abicheck/frontends/cli/options/release.py
   - abicheck/bundle.py
-  - abicheck/bundle_facts.py
+  - abicheck/model/bundle_facts.py
 lifecycle: active
 generated: false
 ---

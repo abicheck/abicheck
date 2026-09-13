@@ -29,11 +29,11 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.bundle_facts import capture_bundle_facts
 from abicheck.bundle_side_input import compare_release_against_bundle_facts
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.model import AbiSnapshot
 from abicheck.serialization import save_bundle_facts
+from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
 
 class TestCompareReleaseAgainstBundleFactsEnvMatrixDigestWithNoCompletedComparison:

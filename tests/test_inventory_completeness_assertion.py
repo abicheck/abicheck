@@ -29,13 +29,14 @@ from hypothesis import given, settings, strategies as st
 from test_release_scope_bundle import _lib
 from test_release_scope_completeness import _invoke_json, _write_stored_package
 
-from abicheck.bundle_facts import BundleFacts, capture_bundle_facts
-from abicheck.bundle_facts_serialization import (
+from abicheck.model import AbiSnapshot
+from abicheck.model.bundle_facts import BundleFacts
+from abicheck.model.scope_acquisition import InventoryCompleteness
+from abicheck.storage.bundle_facts_codec import (
     bundle_facts_from_dict,
     bundle_facts_to_dict,
 )
-from abicheck.model import AbiSnapshot
-from abicheck.model.scope_acquisition import InventoryCompleteness
+from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 from abicheck.workflows.release_scope import (
     build_stored_baseline_scope_record,
     release_inventory_evidence,
@@ -85,13 +86,13 @@ class TestAssertionRoundTrips:
 
     @pytest.mark.parametrize("complete", [True, False])
     def test_project_snapshot_package(self, tmp_path: Path, complete: bool) -> None:
-        from abicheck.bundle_facts_store import (
-            read_bundle_facts_package,
-            write_bundle_facts_package,
-        )
         from abicheck.project_snapshot_store import (
             DirectoryObjectStore,
             write_project_manifest,
+        )
+        from abicheck.storage.bundle_facts_package import (
+            read_bundle_facts_package,
+            write_bundle_facts_package,
         )
         from abicheck.storage.variant_composition import (
             read_variant_composition_inventory_complete,

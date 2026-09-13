@@ -125,12 +125,12 @@ class TestSniffRecognizesALeadingSkippableFrame:
         sibling gzip-FEXTRA-EOCD test's own coverage shape."""
         import json
 
-        from abicheck.bundle_facts import capture_bundle_facts
         from abicheck.serialization import bundle_facts_to_dict, load_bundle_facts
         from abicheck.storage.bundle_archive import (
             open_regular_file_for_format_sniff,
             sniff_bundle_archive_format,
         )
+        from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
         zstandard = pytest.importorskip("zstandard")
         facts = capture_bundle_facts({})

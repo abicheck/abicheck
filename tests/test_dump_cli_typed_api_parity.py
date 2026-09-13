@@ -92,10 +92,9 @@ import pytest
 from _dump_compile_args_normalize import split_compile_args
 from click.testing import CliRunner
 
-from abicheck.api_types import DumpRequest, InputSpec
 from abicheck.cli import main
 from abicheck.compile_context import CompileContext
-from abicheck.service import run_dump_request
+from abicheck.service import DumpRequest, InputSpec, run_dump_request
 
 pytestmark = [
     pytest.mark.integration,

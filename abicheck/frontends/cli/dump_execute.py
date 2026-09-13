@@ -93,7 +93,7 @@ def execute_dump_cli_run(
     *exec_resolved* is the caller's own execution-only
     :class:`~abicheck.service_dump_pipeline.ResolvedDumpRequest` -- built by
     the caller (``dump_cmd``) from the same
-    :class:`~abicheck.api_types.DumpRequest` ``--dry-run`` already resolved,
+    :class:`~abicheck.workflows.contracts.DumpRequest` ``--dry-run`` already resolved,
     but re-pointed at the *normalized* ``so_path`` (following a GNU ld
     linker script / dev symlink: ``resolve_dump_request``'s own
     ``detect_binary_format(side.path)`` call runs before any such

@@ -32,12 +32,13 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 
+from abicheck.model.entity_identity import CanonicalIdentity
+
 from ..model.graph_identity import (
     closure_location_free_identity,
     closure_marker_locations,
     path_basename,
 )
-from .entity_identity import CanonicalIdentity
 
 #: Which provider carried the *location* half of an
 #: :data:`OUTCOME_COORDINATES_ONLY` classification. ``declaring_file`` is a

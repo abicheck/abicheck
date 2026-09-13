@@ -41,7 +41,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.api_types import DumpRequest, InputSpec
+from abicheck.service import DumpRequest, InputSpec
 
 _ALL_DEPTHS: tuple[str | None, ...] = (None, "binary", "headers", "build", "source")
 

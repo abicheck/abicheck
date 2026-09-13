@@ -212,7 +212,7 @@ def run_dump_request(
     ``abi_dump`` tool. Runs, in order:
 
     1. :meth:`DumpRequest.validate` — the same value/cross-flag rules
-       :class:`~abicheck.api_types.CompareRequest` applies;
+       :class:`~abicheck.workflows.contracts.CompareRequest` applies;
     2. the input's evidence resolution (``depth`` → collect mode, headers,
        ``dump_manifest``, merged :class:`CompileContext`);
     3. :func:`abicheck.service.resolve_input`, plus inline build/source

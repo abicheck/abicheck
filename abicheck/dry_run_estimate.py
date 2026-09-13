@@ -18,11 +18,11 @@
 ADR-068 Phase 4 (the typed-API slice) retired this module's own request and
 result types. :class:`ScanRequest`/:class:`ScanResult` (and their
 ``--artifact-set`` siblings) are gone: a comparison's typed input is
-:class:`~abicheck.api_types.CompareRequest`, its typed output
-:class:`~abicheck.api_types.CompareResult`, and there is exactly one of each.
+:class:`~abicheck.workflows.contracts.CompareRequest`, its typed output
+:class:`~abicheck.workflows.contracts.CompareResult`, and there is exactly one of each.
 What remains here is the ADR-035 D10 dry-run *cost model* --
 :func:`estimate_scan` projects the per-layer cost of resolving one
-:class:`~abicheck.api_types.InputSpec` at a given evidence depth, without
+:class:`~abicheck.workflows.contracts.InputSpec` at a given evidence depth, without
 running a compiler or parsing a binary -- and the header-input expansion
 helpers the extractors share.
 
@@ -700,7 +700,7 @@ def estimate_scan(
     Coarse anchors (see ``_COST_PER_*``): ranks layers for a depth/budget
     pick, not a precise wall-clock prediction.
 
-    Takes the canonical :class:`~abicheck.api_types.InputSpec` one side of a
+    Takes the canonical :class:`~abicheck.workflows.contracts.InputSpec` one side of a
     comparison is already described by, plus the run-scoped scalars that are
     not a property of the operand itself. ADR-068's Phase 4 typed-API slice
     retired the ``ScanRequest`` this used to take: a cost preview is a

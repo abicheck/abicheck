@@ -35,6 +35,14 @@ from __future__ import annotations
 from collections import deque
 from typing import TYPE_CHECKING
 
+from abicheck.model.source_graph_query import (
+    _TYPE_ENTITY_KINDS,
+    PUBLIC_VISIBILITIES,
+    decl_declaring_files,
+    is_internal_dependency_node,
+    is_public_dependency_node,
+)
+
 from ..model.graph_facts import GraphEdge
 from ..model.source_graph import EVIDENCE_TIER_L5, SourceGraphSummary
 from .header_graph import (
@@ -43,13 +51,6 @@ from .header_graph import (
     HEADER_TYPE_GRAPH_PASS,
 )
 from .source_graph_compare import _kind_map, _label_map
-from .source_graph_query import (
-    _TYPE_ENTITY_KINDS,
-    PUBLIC_VISIBILITIES,
-    decl_declaring_files,
-    is_internal_dependency_node,
-    is_public_dependency_node,
-)
 
 if TYPE_CHECKING:
     from ..checker_types import Change

@@ -359,13 +359,14 @@ def load_bundle_facts(
     """Load a BundleFacts; see ``storage.bundle_facts_validation.load_bundle_facts_dispatch``
     for the ``format="auto"``/G40-archive dispatch and the ``max_json_object_nodes`` budget
     override."""
+    from ..model.bundle_facts import DEFAULT_MAX_JSON_OBJECT_NODES
     from ..serialization import snapshot_from_dict
     from ..snapshot_io import read_snapshot_text
     from . import bundle_facts_archive
     from .bundle_facts_validation import load_bundle_facts_dispatch
 
     budget = (
-        bundle_facts_archive.DEFAULT_MAX_JSON_OBJECT_NODES
+        DEFAULT_MAX_JSON_OBJECT_NODES
         if max_json_object_nodes is None
         else max_json_object_nodes
     )

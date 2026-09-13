@@ -1361,7 +1361,7 @@ def test_dump_request_and_compare_request_lang_explicit_forces_cpp_mode(
     import subprocess as _subprocess
 
     from abicheck import service
-    from abicheck.api_types import CompareRequest, DumpRequest, InputSpec
+    from abicheck.service import CompareRequest, DumpRequest, InputSpec
 
     header = tmp_path / "widget.h"
     header.write_text("struct Widget { int x; int y; };\n")

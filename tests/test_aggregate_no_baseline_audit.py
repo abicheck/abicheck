@@ -34,8 +34,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
 from abicheck.policy.outcome import RUN_OUTCOME_SCHEMA_VERSION
+from abicheck.workflows.aggregate import ExpectedTargets, aggregate_reports_dir
 
 LINUX = "linux-x86_64"
 MACOS = "macos-arm64"

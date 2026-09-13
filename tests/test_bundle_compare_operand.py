@@ -31,7 +31,6 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.bundle_facts import capture_bundle_facts
 from abicheck.serialization import save_bundle_facts
 from abicheck.workflows.bundle_compare_operand import (
     SMALL_MARKER_SCAN_BYTES,
@@ -39,6 +38,7 @@ from abicheck.workflows.bundle_compare_operand import (
     classify_bundle_compare_operands,
     looks_like_stored_bundle_facts,
 )
+from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
 _MARKER_JSON = json.dumps(
     {

@@ -35,7 +35,7 @@ configs modulo exactly one permitted difference (*which* front end stated a
 value: ``explicit_cli`` vs. ``api_request``, and the option spelling that
 goes with it), and ``tests/test_compatibility_evaluation_frontend.py`` runs
 the CLI's own ``compare`` kwargs against the equivalent
-:class:`~abicheck.api_types.CompareRequest` through it:
+:class:`~abicheck.workflows.contracts.CompareRequest` through it:
 
 - :func:`compare_cli_inputs` -- the ``compare`` command's real kwargs
   (``cli.py``'s option destinations: ``--contract``, ``--scope-public-headers``,
@@ -45,7 +45,7 @@ the CLI's own ``compare`` kwargs against the equivalent
   caller would pass), since several of those options carry a non-``None``
   click default that must not be mistaken for a stated value.
 - :func:`compare_request_inputs` -- the same semantic fields off a typed
-  :class:`~abicheck.api_types.CompareRequest`.
+  :class:`~abicheck.workflows.contracts.CompareRequest`.
 - :meth:`ProjectCompatibilityInputs.from_build_config` -- the project's own
   ``.abicheck.yml`` (``buildsource.build_config.BuildConfig``), contributing
   at ``project_config`` tier.
@@ -1014,7 +1014,7 @@ def resolve_compatibility_evaluation_config(
         ``None`` for an input only the CLI can state, where the CLI spelling
         is the only truthful one.
 
-        *api_field* is the :class:`~abicheck.api_types.CompareRequest`
+        *api_field* is the :class:`~abicheck.workflows.contracts.CompareRequest`
         spelling, because that is the typed surface this resolver was built
         against -- but "the API" is not one namespace. ``ScanRequest`` names
         the same three inputs ``scope_to_public_surface``/``policy_file``/
@@ -1757,7 +1757,7 @@ def compare_request_inputs(
     policy_file: PolicyFile | None = None,
     suppression: SuppressionSource | None = None,
 ) -> ExplicitCompatibilityInputs:
-    """Normalize a typed :class:`~abicheck.api_types.CompareRequest`.
+    """Normalize a typed :class:`~abicheck.workflows.contracts.CompareRequest`.
 
     Every field is read as *stated*: unlike the CLI, the typed request has no
     "unset" representation for ``policy`` (defaults to ``"strict_abi"``) or
