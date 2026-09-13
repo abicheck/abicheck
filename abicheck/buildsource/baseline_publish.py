@@ -46,30 +46,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .build_output import BuildOutput, BuildOutputTarget
+from .build_output import BuildOutput, BuildOutputTarget, _resolve_under_root
 
 #: Default ``key_prefix`` (ADR-047 section 10) when a baseline channel's
 #: ``.abicheck.yml`` entry doesn't set one -- matches the ADR's own example
 #: (``key_prefix: "abicheck-baseline-main"``).
 DEFAULT_ACCEPTED_MAIN_KEY_PREFIX = "abicheck-baseline-main"
-
-
-def _resolve_under_root(root: Path, rel: str) -> Path | None:
-    """Resolve *rel* under *root*, refusing an absolute path or an escape.
-
-    A local copy of :func:`~.build_output._resolve_under_root`'s identical
-    guard -- mirrors :mod:`~.baseline_set`'s own precedent of keeping this
-    small safety check duplicated per-module (see
-    ``_resolve_under_baseline_dir``'s docstring there) rather than importing
-    a leading-underscore helper across a module boundary.
-    """
-    if Path(rel).is_absolute():
-        return None
-    candidate = (root / rel).resolve()
-    root_resolved = root.resolve()
-    if candidate != root_resolved and not candidate.is_relative_to(root_resolved):
-        return None
-    return root / rel
 
 
 @dataclass

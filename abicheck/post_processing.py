@@ -78,20 +78,6 @@ class PipelineStep(Protocol):
 # ---------------------------------------------------------------------------
 
 
-def _safe_index(snap: AbiSnapshot) -> bool:
-    """Index ``snap`` for lookups, tolerating partial snapshots.
-
-    Returns ``True`` when the snapshot indexed cleanly and is safe to read
-    from, ``False`` otherwise. Keeping the swallowed exception out of a
-    ``try/except/continue`` loop body avoids a silently-ignored-error pattern.
-    """
-    try:
-        snap.index()
-    except Exception:  # noqa: BLE001 — defensive; snapshots may be partial
-        return False
-    return True
-
-
 def _matches_suppression_key(symbol: str, key: str) -> bool:
     """Return ``True`` iff *symbol* is suppressed by *key*.
 

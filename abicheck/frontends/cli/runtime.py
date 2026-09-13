@@ -309,23 +309,6 @@ def _resolve_debug_artifact(
     )
 
 
-def _validate_show_only(
-    ctx: click.Context,
-    param: click.Parameter,
-    value: str | None,
-) -> str | None:
-    """Eagerly validate --show-only tokens so invalid ones surface early."""
-    if value is None:
-        return None
-    from ...reporter import ShowOnlyFilter
-
-    try:
-        ShowOnlyFilter.parse(value)
-    except ValueError as exc:
-        raise click.BadParameter(str(exc)) from exc
-    return value
-
-
 def _validate_view(
     ctx: click.Context,
     param: click.Parameter,

@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .appcompat_consumer_impact import (
+    _change_covers_symbol,
     attach_consumer_impact,
     consumer_impact_explanations,
     enrich_covered_changes,
@@ -584,20 +585,6 @@ def _is_relevant_to_app(change: Change, app: AppRequirements) -> bool:
             return True
 
     return False
-
-
-def _change_covers_symbol(change: Change, symbol: str) -> bool:
-    """Does *change* already account for *symbol* (exact, demangled, or via
-    ``affected_symbols``)? Mirrors :func:`_is_relevant_to_app`'s matching in
-    reverse -- symbol-name lookup, not app-requirements lookup."""
-    if change.symbol == symbol:
-        return True
-    from .demangle import demangle as _demangle_symbol
-
-    plain = _demangle_symbol(change.symbol)
-    if plain and plain == symbol:
-        return True
-    return bool(change.affected_symbols and symbol in change.affected_symbols)
 
 
 def uncovered_missing_symbols(

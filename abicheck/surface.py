@@ -65,6 +65,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .compare.surface_graph import _type_identifiers
 from .demangle import demangle
 from .model import ScopeOrigin
 from .model.mangled_name import (
@@ -310,26 +311,6 @@ _TYPE_NOISE: frozenset[str] = frozenset(
 )
 
 _IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_:]*")
-
-
-def _type_identifiers(type_str: str | None) -> set[str]:
-    """Extract candidate record/enum/typedef names from a type string.
-
-    Handles pointers, references, ``const``/``volatile``, arrays, and
-    template arguments (``A<B, C>`` yields ``A``, ``B``, ``C``). Built-in
-    keywords are dropped. Both the fully-qualified name and its trailing
-    ``::`` segment are returned so callers can match either encoding.
-    """
-    if not type_str:
-        return set()
-    out: set[str] = set()
-    for tok in _IDENT_RE.findall(type_str):
-        if tok in _TYPE_NOISE:
-            continue
-        out.add(tok)
-        if "::" in tok:
-            out.add(tok.rsplit("::", 1)[1])
-    return out
 
 
 # ``PublicSurface`` itself now lives in ``policy/public_surface.py`` --

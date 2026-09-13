@@ -712,8 +712,10 @@ def _stable_leading_template_args(old_args: str, new_args: str) -> bool:
     >>> _stable_leading_template_args("A", "B")  # 1-arg degenerate case
     True
     """
-    old_list = [p.strip() for p in _split_top_level_commas_local(old_args)]
-    new_list = [p.strip() for p in _split_top_level_commas_local(new_args)]
+    from .internal_leak import _split_top_level_commas  # local import: cycle-free
+
+    old_list = [p.strip() for p in _split_top_level_commas(old_args)]
+    new_list = [p.strip() for p in _split_top_level_commas(new_args)]
     if not old_list or not new_list:
         return False
     # Degenerate single-arg template: nothing leading to compare.
@@ -727,31 +729,6 @@ def _stable_leading_template_args(old_args: str, new_args: str) -> bool:
         len(old_list),
     )
     return 1 <= diff_idx < len(old_list)
-
-
-def _split_top_level_commas_local(s: str) -> list[str]:
-    """Split *s* on commas not nested inside ``<...>``. Lightweight local
-    copy of the helper in ``internal_leak`` to avoid a cross-module
-    dependency for a small parser.
-    """
-    parts: list[str] = []
-    depth = 0
-    buf: list[str] = []
-    for ch in s:
-        if ch == "<":
-            depth += 1
-            buf.append(ch)
-        elif ch == ">":
-            depth -= 1
-            buf.append(ch)
-        elif ch == "," and depth == 0:
-            parts.append("".join(buf))
-            buf = []
-        else:
-            buf.append(ch)
-    if buf:
-        parts.append("".join(buf))
-    return parts
 
 
 def _extract_template_args(demangled: str) -> str | None:

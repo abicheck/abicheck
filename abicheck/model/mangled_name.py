@@ -135,6 +135,18 @@ def strip_macho_itanium_decoration(mangled: str) -> str:
     resolve that narrower case themselves; see
     ``extract.headers.clang.context.strip_darwin_itanium_decoration``).
 
+    **Known gap, carried here from the two `buildsource` graph copies this
+    replaced** (their own self-review round, fresh evidence): the "always
+    safe" claim above holds for a *compiler-produced* mangled name, not for
+    an explicit GNU ``asm("__Zfake")`` label -- clang reports that literal
+    spelling verbatim on any platform, confirmed empirically, and stripping
+    it corrupts that decl's identity. A caller that joins against a symbol
+    table should try the exact spelling first and fall back to this strip
+    (``buildsource.template_graph._resolve_emitted_symbol`` does);
+    ``call_graph``/``type_graph``'s own joins still call this
+    unconditionally, which is a real, separately-scoped gap in those joins
+    rather than in this function.
+
     Returns *mangled* unchanged for every other shape. The single canonical
     home for this specific structural check -- previously duplicated,
     independently, by :func:`_itanium_strip_prefix` below,

@@ -55,6 +55,7 @@ from ..model.graph_facts import (
     GraphEdge,
     GraphNode,
 )
+from ..model.mangled_name import strip_macho_itanium_decoration
 from ..model.source_graph import function_decl_identity
 from .adapters.base import source_from_argv
 from .clang_ast_run import run_clang_ast_dump
@@ -177,46 +178,9 @@ class CallEdge:
 def _identity(node: dict[str, Any]) -> str:
     """Stable callee/caller identity: the mangled name when clang emits one
     (encodes the full signature, keeps overloads distinct), else the name."""
-    return _normalize_mangled(str(node.get("mangledName") or node.get("name") or ""))
-
-
-def _normalize_mangled(mangled: str) -> str:
-    """Strip a spurious macOS Mach-O ABI leading underscore from an Itanium
-    mangled name clang reports (``__ZN...`` -> ``_ZN...``).
-
-    On Darwin, clang's own AST dump reports a C++ decl's ``mangledName`` with
-    the platform's extra linker-symbol-table underscore still attached (the
-    same decoration ``macho_metadata.py`` strips when parsing the *binary*
-    export table) -- but the ``Function``/``Variable`` objects this identity
-    must join against (``header_graph._decl_identity``, seeded from the flat
-    ``AbiSnapshot``) carry the already-stripped, one-underscore form, since
-    that normalization already happened upstream in ``macho_metadata.py``/
-    ``dumper._dump_macho``. Left unstripped, a header-only graph's
-    call/type-graph node for a public *function* (as opposed to a type --
-    types don't get this decoration) never joins its ``SOURCE_DECLARES``-
-    seeded, provenance-tagged counterpart, so it can never be recognized as
-    a public graph entry (``is_public_dependency_node``) -- silently
-    dropping every ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` finding rooted
-    at a function on macOS. ``__Z`` is an unambiguous, platform-independent
-    marker (a real Itanium mangled name always starts with ``_Z``; a literal
-    C++ identifier starting with two underscores is reserved and never
-    emitted here), so this is a no-op on Linux/Windows, where clang's
-    ``mangledName`` is already the bare ``_Z...`` form.
-
-    **Known gap, not fixed here** (self-review round, fresh evidence): the
-    "no-op on Linux/Windows" claim above does not hold for an explicit GNU
-    ``asm("__Zfake")`` label -- clang reports that literal spelling
-    verbatim on *any* platform, confirmed empirically. Called
-    unconditionally (unlike :mod:`template_graph`'s own
-    ``_normalize_mangled``, whose join now tries the exact spelling first
-    and only falls back to this strip -- see that module's
-    ``_resolve_emitted_symbol``), this corrupts such a decl's identity here
-    too, silently failing (or mis-joining) the same way. Porting the same
-    guarded-fallback fix to this module's own join
-    (:func:`augment_graph_with_calls`) needs its own scoped change, not a
-    drive-by extension of this docstring.
-    """
-    return mangled[1:] if mangled.startswith("__Z") else mangled
+    return strip_macho_itanium_decoration(
+        str(node.get("mangledName") or node.get("name") or "")
+    )
 
 
 def _function_identity(node: dict[str, Any], scope: list[str]) -> str:
@@ -240,7 +204,7 @@ def _function_identity(node: dict[str, Any], scope: list[str]) -> str:
     type_obj = node.get("type")
     type_qual = str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
     return function_decl_identity(
-        _normalize_mangled(str(node.get("mangledName") or "")),
+        strip_macho_itanium_decoration(str(node.get("mangledName") or "")),
         name,
         qualified_name,
         type_qual,
