@@ -452,3 +452,58 @@ class TestReleaseJobMemoryBudgetIsDepthAware:
         monkeypatch.setenv("ABICHECK_RELEASE_JOB_MEM_GIB", "2.5")  # type: ignore[attr-defined]
         for depth in (None, "binary", "headers", "build", "source"):
             assert release_job_mem_budget_gib(depth) == 2.5
+
+
+class TestReconciliationIsComputedOncePerPair:
+    """The reconciled surfaces are shared, not recomputed per detector.
+
+    Every per-pair detector asks for the same reconciled pair, and building
+    one resolves a canonical identity for every declaration in both FULL
+    maps. Recomputing it per detector made a comparison 25-70% slower across
+    the scaling benchmarks -- caught by the PR-vs-base performance gate, not
+    by any test, which is why this one exists: the memo is load-bearing, and
+    a refactor that drops it reintroduces the regression silently.
+
+    Asserted structurally (how many times the work happens) rather than by
+    wall-clock, so it cannot flake on a noisy runner.
+    """
+
+    def test_one_reconciliation_per_declaration_kind(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck import diff_symbols
+        from abicheck.compare import surface_reconcile
+
+        calls: list[int] = []
+        real = surface_reconcile.reconcile_surfaces
+
+        def _counting(*args: object, **kwargs: object) -> object:
+            calls.append(1)
+            return real(*args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(diff_symbols, "reconcile_surfaces", _counting)
+
+        names = ["_Z3foov", "_Z3barv"]
+        compare(_snapshot(names, evidence=True), _snapshot(names, evidence=False))
+
+        # One for functions, one for variables -- not one per detector.
+        assert len(calls) == 2, (
+            f"reconciliation ran {len(calls)} times; the per-pair memo is gone"
+        )
+
+    def test_the_memo_does_not_leak_across_different_pairs(self) -> None:
+        """A cached entry is matched on the NEW snapshot's identity, so a
+        second comparison of the same OLD against a *different* NEW must not
+        be served the first one's surfaces."""
+        names = ["_Z3foov"]
+        old = _snapshot(names, evidence=True)
+        unchanged = _snapshot(names, evidence=False)
+        without = _snapshot([], evidence=False)
+
+        assert not [
+            c for c in compare(old, unchanged).changes if c.kind in _SURFACE_EXIT_KINDS
+        ]
+        # Same OLD object, a different NEW: the declaration really is gone.
+        assert [
+            c for c in compare(old, without).changes if c.kind in _SURFACE_EXIT_KINDS
+        ]

@@ -48,16 +48,22 @@ loses a population it had before.
 from __future__ import annotations
 
 from collections.abc import Callable, Container
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from .export_transition import surface_exit_is_evidence_gap
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from ..model import Function, Variable
+    from ..model import AbiSnapshot, Function, Variable
 
-__all__ = ["reconcile_surfaces"]
+__all__ = [
+    "RECONCILED_FUNCTIONS",
+    "RECONCILED_VARIABLES",
+    "cached_reconciliation",
+    "reconcile_surfaces",
+    "store_reconciliation",
+]
 
 _Decl = TypeVar("_Decl", "Function", "Variable")
 
@@ -166,3 +172,45 @@ def _admit(
     for key, peer in proposals.items():
         if claims[id(peer)] == 1:
             dst[key] = peer
+
+
+#: Cache keys for the two per-pair reconciliations below.
+RECONCILED_FUNCTIONS = "_abicheck_reconciled_functions"
+RECONCILED_VARIABLES = "_abicheck_reconciled_variables"
+
+_ReconciledPair = tuple[dict[str, _Decl], dict[str, _Decl]]
+
+
+def cached_reconciliation(
+    old: AbiSnapshot, new: AbiSnapshot, slot: str
+) -> _ReconciledPair[Any] | None:
+    """The reconciliation already computed for exactly this pair, if any.
+
+    Every per-pair detector asks for the same reconciled surfaces, and
+    building them is not free: it resolves a canonical identity for every
+    declaration in both FULL maps. Recomputing that per detector made a
+    comparison 25-70% slower across the scaling benchmarks (the PR-vs-base
+    performance gate caught it), so the result is memoised on the OLD
+    snapshot, keyed by the NEW one.
+
+    The cache entry holds a strong reference to *new* and is matched with
+    ``is``, so a recycled object address can never alias two different
+    snapshots -- the same reasoning as ``scripts/fact_detector_misuse_scope``
+    's ``_memoize_per_tree``, which caches on the node rather than in a
+    module-level ``id()`` dict. Scoped to one comparison in practice: the
+    snapshots are read-only while detectors run.
+    """
+    cached = old.__dict__.get(slot)
+    if cached is not None and cached[0] is new:
+        return cached[1]  # type: ignore[no-any-return]
+    return None
+
+
+def store_reconciliation(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    slot: str,
+    result: _ReconciledPair[_Decl],
+) -> _ReconciledPair[_Decl]:
+    old.__dict__[slot] = (new, result)
+    return result

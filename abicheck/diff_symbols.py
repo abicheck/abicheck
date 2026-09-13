@@ -30,7 +30,13 @@ from .compare.elf_only_demangle import (
 )
 from .compare.fact_comparison import compare_facts
 from .compare.functions import function_identity_index
-from .compare.surface_reconcile import reconcile_surfaces
+from .compare.surface_reconcile import (
+    RECONCILED_FUNCTIONS,
+    RECONCILED_VARIABLES,
+    cached_reconciliation,
+    reconcile_surfaces,
+    store_reconciliation,
+)
 from .detector_registry import registry
 from .diff_cxx_rules import (
     old_virtual_signatures,
@@ -270,7 +276,10 @@ def _reconciled_function_surfaces(
     surviving declaration reported by nothing (Codex review, P1). See
     :mod:`abicheck.compare.surface_reconcile`.
     """
-    return reconcile_surfaces(
+    cached = cached_reconciliation(old, new, RECONCILED_FUNCTIONS)
+    if cached is not None:
+        return cached
+    result = reconcile_surfaces(
         _public_functions(old),
         _public_functions(new),
         old_all=old.function_map,
@@ -280,6 +289,7 @@ def _reconciled_function_surfaces(
         resolve_in_old=_full_map_alias_resolver(old.function_map),
         resolve_in_new=_full_map_alias_resolver(new.function_map),
     )
+    return store_reconciliation(old, new, RECONCILED_FUNCTIONS, result)
 
 
 def _full_map_alias_resolver(
@@ -296,10 +306,15 @@ def _full_map_alias_resolver(
     peer, a C++ one only an extern-C peer -- and "no candidate" and "several
     candidates" both answer ``None``, so an overload set is never guessed at.
     """
-    index = SymbolIdentityIndex.for_functions(full_map)
+    # Built on first use, not at construction: the index resolves a canonical
+    # identity per declaration in the full map, and a pair with no
+    # evidence-gap candidate at all must not pay for it.
+    index: list[SymbolIdentityIndex[Function]] = []
 
     def _resolve(key: str, decl: Function) -> Function | None:
-        match = index.unique_alias_match(
+        if not index:
+            index.append(SymbolIdentityIndex.for_functions(full_map))
+        match = index[0].unique_alias_match(
             f"name:{decl.name}",
             where=None if decl.is_extern_c else _is_extern_c_function,
         )
@@ -315,13 +330,21 @@ def _reconciled_variable_surfaces(
     same reason: the variable value/access detectors join their own filtered
     maps too, so reconciling only inside the removal path would leave them
     blind to the pair (Codex review, P1)."""
-    return reconcile_surfaces(
-        _public_variables(old),
-        _public_variables(new),
-        old_all=old.variable_map,
-        new_all=new.variable_map,
-        old_exported=_observed_exports(old, VARIABLE_SYMBOL_TYPES),
-        new_exported=_observed_exports(new, VARIABLE_SYMBOL_TYPES),
+    cached = cached_reconciliation(old, new, RECONCILED_VARIABLES)
+    if cached is not None:
+        return cached
+    return store_reconciliation(
+        old,
+        new,
+        RECONCILED_VARIABLES,
+        reconcile_surfaces(
+            _public_variables(old),
+            _public_variables(new),
+            old_all=old.variable_map,
+            new_all=new.variable_map,
+            old_exported=_observed_exports(old, VARIABLE_SYMBOL_TYPES),
+            new_exported=_observed_exports(new, VARIABLE_SYMBOL_TYPES),
+        ),
     )
 
 
