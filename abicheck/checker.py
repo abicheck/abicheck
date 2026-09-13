@@ -131,6 +131,8 @@ from .policy.classification import (
     RISK_KINDS as _RISK_KINDS,
     Verdict,
     compute_verdict,
+    excluded_from_verdict_as_persistent_hygiene,
+    policy_kind_sets,
 )
 from .policy.disposition_close import finalize_ledger
 from .policy.disposition_ledger import (
@@ -205,9 +207,79 @@ def _compute_verdict_for(
     if stage is not None:
         stage.classify(all_unsuppressed)
         all_unsuppressed = evaluated_for_policy(all_unsuppressed)
+    all_unsuppressed = _drop_persistent_hygiene(all_unsuppressed, policy, policy_file)
     if policy_file is not None:
         return policy_file.compute_verdict(all_unsuppressed)
     return compute_verdict(all_unsuppressed, policy=policy)
+
+
+def _drop_persistent_hygiene(
+    changes: list[Change],
+    policy: str,
+    policy_file: PolicyFile | None,
+) -> list[Change]:
+    """*changes* minus the pre-existing cross-source hygiene debt that must
+    not drive this release's verdict
+    (:func:`~abicheck.policy.classification.
+    excluded_from_verdict_as_persistent_hygiene`).
+
+    Applied here, at the one verdict chokepoint, rather than in
+    :func:`_verdict_scored_population` alongside the ``RESOLVED`` exclusion:
+    deciding this needs the finding's *resolved* category, which is a
+    function of the active policy, and only this function has it. The
+    category is resolved against the same kind sets the verdict computation
+    itself is about to use -- ``policy_file.base_policy`` when a policy
+    document is in effect, so a document that changed the base profile does
+    not get judged against ``strict_abi``'s partitions.
+
+    **A kind the policy document speaks about is never excluded**, whether it
+    speaks through ``overrides:`` or ``reclassify:``. Those rules are applied
+    by ``PolicyFile.compute_verdict``, not by the base kind sets, so the
+    category this function resolves does not see them: a project that
+    deliberately set ``exported_not_public: breaking`` would have had every
+    persistent instance silently dropped from its own verdict -- the exact
+    opposite of what it asked for. Verified by executing that case, not by
+    reasoning about it; an earlier revision of this docstring asserted it
+    "fails in the safe direction" and was simply wrong
+    (``TestPersistentHygieneRespectsAnExplicitPolicy``).
+
+    The exclusion is deliberately withheld for *any* mention of the kind,
+    including one that lowers its severity, rather than only for a
+    promotion. A project that has written the kind into its policy at all is
+    managing that kind itself, and quietly removing its findings from the
+    verdict is not this function's call to make.
+    """
+    base = policy_file.base_policy if policy_file is not None else policy
+    sets = policy_kind_sets(base)
+    policy_governed = _policy_governed_kinds(policy_file)
+    return [
+        c
+        for c in changes
+        if c.kind in policy_governed
+        or not excluded_from_verdict_as_persistent_hygiene(c, *sets)
+    ]
+
+
+def _policy_governed_kinds(policy_file: PolicyFile | None) -> frozenset[ChangeKind]:
+    """Every ``ChangeKind`` *policy_file* states a rule about.
+
+    Both rule namespaces, because both change a finding's resolved verdict
+    and neither is visible in the base profile's kind sets: ``overrides:``
+    (kind-global) and ``reclassify:`` (selector-scoped, which still names
+    the kinds it applies to).
+    """
+    if policy_file is None:
+        return frozenset()
+    governed: set[ChangeKind] = set(getattr(policy_file, "overrides", {}) or {})
+    for rule in getattr(policy_file, "reclassify", ()) or ():
+        kinds = getattr(rule, "kinds", None) or getattr(rule, "kind", None)
+        if kinds is None:
+            continue
+        if isinstance(kinds, (list, tuple, set, frozenset)):
+            governed.update(kinds)
+        else:
+            governed.add(kinds)
+    return frozenset(governed)
 
 
 def _verdict_scored_population(

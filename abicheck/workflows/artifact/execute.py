@@ -403,6 +403,7 @@ def _resolve_side_snapshot_impl(
                 includes,
                 side.version,
                 lang,
+                exclude_headers=side.exclude_headers,
                 lang_explicit=lang_explicit,
                 is_elf=True if fmt == "elf" else None,
                 pdb_path=side.pdb,

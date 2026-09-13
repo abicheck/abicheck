@@ -34,6 +34,7 @@ import itertools
 
 import pytest
 
+from abicheck.buildsource import cross_source_checks as _crosschecks
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.checker import compare
@@ -540,9 +541,22 @@ class TestResolvedExcludedFromTheGate:
         assert gate_contribution_for_change(leaks[0], None) == 0
         assert result.verdict == Verdict.NO_CHANGE
 
-    def test_persistent_leak_still_gates_normally(self) -> None:
-        # Negative control: this exclusion is specific to RESOLVED, not a
-        # blanket exemption for every cross-source finding.
+    def test_persistent_leak_is_reported_but_does_not_drive_the_verdict(
+        self,
+    ) -> None:
+        """A hygiene problem present on *both* sides is pre-existing debt,
+        not something this release did, so it stays fully reported and
+        contributes nothing to the pairwise verdict.
+
+        This used to assert ``COMPATIBLE_WITH_RISK`` as a negative control
+        for the RESOLVED exclusion. The control it was providing -- "the
+        exclusion is state-specific, not a blanket exemption for every
+        cross-source finding" -- is what ``test_introduced_leak_still_gates_
+        normally`` below states, and states better: an INTRODUCED finding is
+        the one this release is actually answerable for. What the two
+        exclusions share is that neither hides anything, which is what the
+        ``in result.changes`` assertion here pins.
+        """
         from abicheck.checker_policy import Verdict
 
         old = _phl_isolated_snapshot(leaked=True)
@@ -551,7 +565,11 @@ class TestResolvedExcludedFromTheGate:
         leaks = [c for c in result.changes if c.kind == ChangeKind.PRIVATE_HEADER_LEAK]
         assert len(leaks) == 1
         assert leaks[0].cross_source_evolution == CrossSourceEvolution.PERSISTENT
-        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+        # Reported, with its own kind and category untouched ...
+        assert leaks[0] in result.changes
+        assert leaks[0].kind == ChangeKind.PRIVATE_HEADER_LEAK
+        # ... and not charged to this release's verdict.
+        assert result.verdict == Verdict.NO_CHANGE
 
     def test_introduced_leak_still_gates_normally(self) -> None:
         # Negative control, the other direction.
@@ -622,9 +640,17 @@ class TestResolvedExcludedFromEveryVerdictRecompute:
         # already-fixed leak into the verdict just because the recompute ran.
         assert result.verdict == Verdict.NO_CHANGE
 
-    def test_surface_metrics_recompute_still_gates_a_persistent_leak(self) -> None:
-        # Negative control: the exclusion is RESOLVED-specific, not a side
-        # effect of `--surface-metrics` recomputing at all.
+    def test_surface_metrics_recompute_also_excludes_a_persistent_leak(
+        self,
+    ) -> None:
+        """The persistent-hygiene exclusion has to survive the same opt-in
+        recomputations the RESOLVED one does.
+
+        Both exclusions are applied at ``checker._compute_verdict_for``, the
+        single chokepoint every recompute routes through, precisely so a
+        step that rebuilds the scored population cannot reintroduce what an
+        earlier pass excluded -- the omission round 13 found for RESOLVED.
+        """
         from abicheck.checker_policy import Verdict
 
         old = _phl_isolated_snapshot_with_addition(leaked=True)
@@ -633,7 +659,8 @@ class TestResolvedExcludedFromEveryVerdictRecompute:
         leaks = [c for c in result.changes if c.kind == ChangeKind.PRIVATE_HEADER_LEAK]
         assert len(leaks) == 1
         assert leaks[0].cross_source_evolution == CrossSourceEvolution.PERSISTENT
-        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+        assert leaks[0] in result.changes
+        assert result.verdict == Verdict.NO_CHANGE
 
 
 # --------------------------------------------------------------------------- #
@@ -1127,3 +1154,199 @@ class TestFourChecksNotEvaluatedCrux:
             CrossSourceEvolution.INTRODUCED,
             CrossSourceEvolution.RESOLVED,
         )
+
+
+#: Every cross-source hygiene check's ``ChangeKind``, read off the check
+#: registry rather than hand-listed, so a newly registered check joins the
+#: category-scoping tests below automatically.
+_CROSS_SOURCE_KINDS = tuple(
+    ChangeKind(name)
+    for name in sorted(
+        v
+        for k, v in vars(_crosschecks).items()
+        if k.startswith("CHECK_") and isinstance(v, str)
+    )
+)
+
+
+class TestPersistentHygieneVerdictExclusionIsCategoryScoped:
+    """The persistent-hygiene verdict exclusion must be scoped to findings
+    that resolve to ``COMPATIBLE_WITH_RISK``, and must not be reachable for
+    anything a project deliberately gated on.
+
+    Stated against ``excluded_from_verdict_as_persistent_hygiene`` directly
+    rather than only through ``compare()``: two of the eleven cross-source
+    checks default to ``API_BREAK``, and the predicate is the one place the
+    category condition lives. A version of this fix that excluded every
+    PERSISTENT finding would hide a persistent ODR violation -- a real
+    defect *in the candidate*, which being pre-existing does not make less
+    true -- and no ``compare()``-level test over the RISK-kind checks would
+    have noticed.
+    """
+
+    @staticmethod
+    def _persistent(kind: ChangeKind, **kw: object) -> Change:
+        return Change(
+            kind=kind,
+            symbol="sym",
+            description="",
+            cross_source_evolution=CrossSourceEvolution.PERSISTENT,
+            **kw,  # type: ignore[arg-type]
+        )
+
+    def test_risk_kinds_are_excluded(self) -> None:
+        from abicheck.policy.classification import (
+            excluded_from_verdict_as_persistent_hygiene,
+            policy_kind_sets,
+        )
+
+        sets = policy_kind_sets("strict_abi")
+        # Every cross-source check whose kind carries COMPATIBLE_WITH_RISK,
+        # enumerated from the registry rather than hand-listed so a newly
+        # added hygiene check is covered without editing this test.
+        risk_checks = [k for k in _CROSS_SOURCE_KINDS if k in sets[3]]
+        assert risk_checks, "no RISK-category cross-source kinds found"
+        for kind in risk_checks:
+            assert excluded_from_verdict_as_persistent_hygiene(
+                self._persistent(kind), *sets
+            ), kind
+
+    def test_api_break_kinds_are_not_excluded(self) -> None:
+        """A persistent ``odr_type_variant`` / ``header_build_context_
+        mismatch`` still drives the verdict: it names a defect the candidate
+        has, not bookkeeping about what changed."""
+        from abicheck.policy.classification import (
+            excluded_from_verdict_as_persistent_hygiene,
+            policy_kind_sets,
+        )
+
+        sets = policy_kind_sets("strict_abi")
+        non_risk = [k for k in _CROSS_SOURCE_KINDS if k not in sets[3]]
+        assert non_risk, (
+            "expected at least one cross-source check outside the RISK "
+            "category -- if every check became RISK this test is vacuous "
+            "and the guard it protects is untested"
+        )
+        for kind in non_risk:
+            assert not excluded_from_verdict_as_persistent_hygiene(
+                self._persistent(kind), *sets
+            ), kind
+
+    def test_an_explicit_promotion_wins_over_the_exclusion(self) -> None:
+        """A per-finding ``effective_verdict`` -- what a policy's
+        modulation/reclassification sets -- outranks the exclusion. A project
+        that has said it wants to be gated on a hygiene kind is gated on it,
+        persistent or not."""
+        from abicheck.checker_policy import Verdict
+        from abicheck.policy.classification import (
+            excluded_from_verdict_as_persistent_hygiene,
+            policy_kind_sets,
+        )
+
+        sets = policy_kind_sets("strict_abi")
+        promoted = self._persistent(
+            ChangeKind.EXPORTED_NOT_PUBLIC, effective_verdict=Verdict.BREAKING
+        )
+        assert not excluded_from_verdict_as_persistent_hygiene(promoted, *sets)
+
+    def test_other_evolution_states_are_untouched(self) -> None:
+        """Only PERSISTENT. An INTRODUCED finding is this release's doing and
+        must still drive the verdict; an unstamped finding (every non-
+        cross-source finding in the codebase) must be unaffected, which is
+        what keeps this change inert for runs that never ran a hygiene
+        check."""
+        from abicheck.policy.classification import (
+            excluded_from_verdict_as_persistent_hygiene,
+            policy_kind_sets,
+        )
+
+        sets = policy_kind_sets("strict_abi")
+        for state in (
+            CrossSourceEvolution.INTRODUCED,
+            CrossSourceEvolution.RESOLVED,
+            CrossSourceEvolution.NOT_EVALUATED,
+            None,
+        ):
+            change = Change(
+                kind=ChangeKind.EXPORTED_NOT_PUBLIC,
+                symbol="sym",
+                description="",
+                cross_source_evolution=state,
+            )
+            assert not excluded_from_verdict_as_persistent_hygiene(change, *sets), state
+
+
+class TestPersistentHygieneRespectsAnExplicitPolicy:
+    """A kind the project's policy document speaks about is never excluded.
+
+    Found by *executing* the case rather than reasoning about it. An earlier
+    revision of ``checker._drop_persistent_hygiene`` carried a docstring
+    asserting this "fails in the safe direction" -- it did not: a project
+    that deliberately set ``exported_not_public: breaking`` had every
+    persistent instance silently dropped from its own verdict, the exact
+    opposite of what it asked for. ``overrides:``/``reclassify:`` are applied
+    by ``PolicyFile.compute_verdict``, not by the base profile's kind sets,
+    so the category the exclusion resolves cannot see them.
+    """
+
+    @staticmethod
+    def _persistent() -> Change:
+        return Change(
+            kind=ChangeKind.EXPORTED_NOT_PUBLIC,
+            symbol="undeclared",
+            description="",
+            cross_source_evolution=CrossSourceEvolution.PERSISTENT,
+        )
+
+    def test_an_explicit_promotion_keeps_the_finding_in_the_verdict(self) -> None:
+        from abicheck.checker import _drop_persistent_hygiene
+        from abicheck.checker_policy import Verdict
+        from abicheck.policy_file import PolicyFile
+
+        policy = PolicyFile(
+            base_policy="strict_abi",
+            overrides={ChangeKind.EXPORTED_NOT_PUBLIC: Verdict.BREAKING},
+        )
+        scored = _drop_persistent_hygiene([self._persistent()], "strict_abi", policy)
+        assert len(scored) == 1
+        # And it really reaches the verdict, not merely the population.
+        assert policy.compute_verdict(scored) == Verdict.BREAKING
+
+    def test_an_explicit_demotion_also_keeps_it(self) -> None:
+        """Withheld for *any* mention, not only a promotion: a project that
+        has written the kind into its policy is managing that kind itself,
+        and quietly removing its findings is not the exclusion's call."""
+        from abicheck.checker import _drop_persistent_hygiene
+        from abicheck.checker_policy import Verdict
+        from abicheck.policy_file import PolicyFile
+
+        policy = PolicyFile(
+            base_policy="strict_abi",
+            overrides={ChangeKind.EXPORTED_NOT_PUBLIC: Verdict.COMPATIBLE},
+        )
+        assert (
+            len(_drop_persistent_hygiene([self._persistent()], "strict_abi", policy))
+            == 1
+        )
+
+    def test_an_unrelated_override_does_not_disable_the_exclusion(self) -> None:
+        """Vacuity guard. If the guard were "any policy document at all", the
+        exclusion would stop working for every project that has a policy
+        file -- which is most of them -- and the two tests above would still
+        pass."""
+        from abicheck.checker import _drop_persistent_hygiene
+        from abicheck.checker_policy import Verdict
+        from abicheck.policy_file import PolicyFile
+
+        policy = PolicyFile(
+            base_policy="strict_abi",
+            overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE},
+        )
+        assert (
+            _drop_persistent_hygiene([self._persistent()], "strict_abi", policy) == []
+        )
+
+    def test_no_policy_document_still_excludes(self) -> None:
+        from abicheck.checker import _drop_persistent_hygiene
+
+        assert _drop_persistent_hygiene([self._persistent()], "strict_abi", None) == []

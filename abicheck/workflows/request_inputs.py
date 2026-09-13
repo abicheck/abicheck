@@ -100,6 +100,18 @@ class InputSpec:
     # each of the ~7 call sites that dereference it.
     path: Path | None
     headers: tuple[Path, ...] = ()
+    #: ``--exclude-header`` patterns (fnmatch-style) applied to *headers*
+    #: after any directory operand is expanded. See
+    #: ``header_utils.apply_header_exclusions`` for the matching rule and for
+    #: why a header-directory operand is all-or-nothing without this.
+    #:
+    #: Part of the extraction identity, not a display filter: it changes
+    #: which translation unit is parsed, so it is folded into the header list
+    #: that both the AST cache key and the whole-snapshot cache key already
+    #: hash. Excluding a header on one side and not the other therefore
+    #: produces two genuinely different surfaces, which is what a caller
+    #: asked for -- it is not silently reconciled.
+    exclude_headers: tuple[str, ...] = ()
     includes: tuple[Path, ...] = ()
     version: str = ""
     pdb: Path | None = None
@@ -199,6 +211,7 @@ class InputSpec:
         path: Path | str | None = None,
         *,
         headers: Iterable[Path | str] | None = None,
+        exclude_headers: Iterable[str] | None = None,
         includes: Iterable[Path | str] | None = None,
         version: str = "",
         pdb: Path | str | None = None,
@@ -218,6 +231,7 @@ class InputSpec:
         return cls(
             path=Path(path) if path is not None else None,
             headers=_path_tuple(headers),
+            exclude_headers=tuple(exclude_headers or ()),
             includes=_path_tuple(includes),
             version=version,
             pdb=Path(pdb) if pdb is not None else None,

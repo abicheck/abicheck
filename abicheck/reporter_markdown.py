@@ -1434,6 +1434,64 @@ def compute_library_files(
     )
 
 
+#: A kind contributing more findings than this to one non-gating section is
+#: summarised rather than itemised in the Markdown report.
+#:
+#: Chosen from the failure it fixes rather than from taste: a single
+#: conda-forge MKL comparison emitted 39,956 ``exported_not_public``
+#: findings, 39,955 of them ``persistent``, producing a ~120,000-line
+#: report in which no other finding could be found. Any threshold in the
+#: tens makes that report readable; a reader who wants every line has
+#: always had ``-o json=...``, which is unaffected. Deliberately well above
+#: the release summary's own per-library cap of 10
+#: (``report/release_display_limits.py``): this is a single-library report,
+#: where a reader legitimately expects to see individual findings, so it
+#: only engages for a genuine flood.
+KIND_ROLLUP_THRESHOLD = 25
+
+#: Symbols named inline for a rolled-up kind. Enough to recognise what the
+#: kind is picking up, few enough that the count stays the headline.
+KIND_ROLLUP_SAMPLES = 5
+
+
+def _roll_up_large_kinds(
+    changes: list[Change],
+) -> tuple[list[Change], tuple[_rmd.KindRollup, ...]]:
+    """Split *changes* into (itemised, rolled-up-per-kind).
+
+    The ``compute_*`` half of the rollup: it decides *which* kinds are
+    summarised and gathers plain values; ``report.render_markdown`` formats
+    them and decides nothing (``abicheck/report/AGENTS.md``).
+
+    Applied only to non-gating sections. A breaking finding is never rolled
+    up however many there are -- a reader approving or rejecting a release
+    has to see each one, and a flood of them is itself the signal.
+    """
+    by_kind: dict[str, list[Change]] = {}
+    for c in changes:
+        by_kind.setdefault(getattr(c.kind, "value", str(c.kind)), []).append(c)
+    itemised: list[Change] = []
+    rollups: list[_rmd.KindRollup] = []
+    for kind, group in by_kind.items():
+        if len(group) <= KIND_ROLLUP_THRESHOLD:
+            itemised.extend(group)
+            continue
+        rollups.append(
+            _rmd.KindRollup(
+                kind=kind,
+                count=len(group),
+                sample_symbols=tuple(
+                    str(c.symbol) for c in group[:KIND_ROLLUP_SAMPLES] if c.symbol
+                ),
+            )
+        )
+    # Stable order: the itemised remainder keeps the caller's order, and the
+    # rollups are sorted by descending count so the biggest contributor --
+    # the one a reader is most likely looking for -- reads first.
+    rollups.sort(key=lambda r: (-r.count, r.kind))
+    return itemised, tuple(rollups)
+
+
 def compute_severity_sections(
     breaking: list[Change],
     source_breaks: list[Change],
@@ -1485,10 +1543,12 @@ def compute_severity_sections(
         ]
         sev_label = _section_severity_label(severity_config, "potential_breaking")
         if deployment_risk:
+            risk_items, risk_rollups = _roll_up_large_kinds(deployment_risk)
             groups.append(
                 _rmd.ChangeGroup(
                     heading=f"## {_RISK_ICON} Deployment Risk Changes{sev_label}",
-                    changes=tuple(deployment_risk),
+                    changes=tuple(risk_items),
+                    rollups=risk_rollups,
                     oneline=True,
                     note_lines=(
                         "> These changes are **binary-compatible** but may cause the library to fail",
@@ -1498,10 +1558,12 @@ def compute_severity_sections(
                 )
             )
         if hygiene:
+            hygiene_items, hygiene_rollups = _roll_up_large_kinds(hygiene)
             groups.append(
                 _rmd.ChangeGroup(
                     heading=f"## {_HYGIENE_ICON} Cross-Source Hygiene Findings{sev_label}",
-                    changes=tuple(hygiene),
+                    changes=tuple(hygiene_items),
+                    rollups=hygiene_rollups,
                     oneline=True,
                     note_lines=(
                         "> These findings compare each snapshot's own evidence sources against each",
@@ -1520,10 +1582,12 @@ def compute_severity_sections(
         additions_list = [c for c in compatible if c.kind in _ADDITION_KINDS]
         if quality:
             sev_label = _section_severity_label(severity_config, "quality_issues")
+            quality_items, quality_rollups = _roll_up_large_kinds(quality)
             groups.append(
                 _rmd.ChangeGroup(
                     heading=f"## {_QUALITY_ICON} Quality Issues{sev_label}",
-                    changes=tuple(quality),
+                    changes=tuple(quality_items),
+                    rollups=quality_rollups,
                     oneline=True,
                 )
             )

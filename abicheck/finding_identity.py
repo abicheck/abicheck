@@ -1018,6 +1018,13 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
     "func_removed": "func_removal",
     "func_removed_elf_only": "func_removal",
     "func_added": "func_addition",
+    # The addition counterpart of the `func_removed`/`func_removed_elf_only`
+    # pair above, and paired for the identical reason: which of the two a
+    # symbol gets depends only on which evidence tier observed it (a header
+    # declaration vs. the export table alone), not on what happened. A
+    # `finding_id:` suppression written against one must keep matching when a
+    # later run has header evidence it did not, or vice versa.
+    "func_added_elf_only": "func_addition",
     "var_removed": "var_removal",
     "var_added": "var_addition",
     "symbol_version_node_removed": "version_def_removal",

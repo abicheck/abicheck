@@ -59,7 +59,7 @@ from ..serialization import load_snapshot
 from ..service_dump_cache import cached_run_dump
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
     from ..dump_manifest import DumpManifest
@@ -415,6 +415,47 @@ def _resolve_raw_typeinfo(path: Path, version: str) -> AbiSnapshot | None:
     return None
 
 
+def _apply_header_exclusions_to_inputs(
+    headers: list[Path], exclude_headers: Sequence[str]
+) -> list[Path]:
+    """*headers* with ``--exclude-header`` patterns applied.
+
+    A directory operand is expanded first, because a pattern naming one
+    header cannot otherwise match anything inside a directory entry -- and a
+    header directory is precisely the case ``--exclude-header`` exists for
+    (``header_utils.apply_header_exclusions`` explains why).
+
+    Expansion happens **only** when at least one pattern was given, so a run
+    without the flag passes its header list through untouched and behaves
+    byte-for-byte as before, directory entries included. This matters beyond
+    tidiness: the resulting list is hashed into both the AST cache key
+    (``dumper_ast_config._cache_key``) and the whole-snapshot cache key
+    (``snapshot_cache._cache_key``), so unconditionally expanding here would
+    invalidate every warm cache entry in every existing checkout for no
+    behavioural gain. Conversely, that same hashing is what makes the
+    exclusion cache-correct without touching either key: excluding a header
+    changes the list, which changes both keys, so a filtered parse can never
+    reuse an unfiltered entry.
+
+    Provenance is unaffected: ``public_headers``/``public_header_dirs`` are
+    separate parameters that this never touches, so a ``-H`` directory keeps
+    its directory-shaped scope fingerprint (see ``header_utils.
+    split_public_header_inputs`` for why that distinction is load-bearing).
+    """
+    if not exclude_headers:
+        return headers
+    from ..header_utils import apply_header_exclusions, iter_directory_headers
+    from .extraction import PRUNED_HEADER_DIR_SEGMENTS
+
+    expanded: list[Path] = []
+    for h in headers:
+        if h.is_dir():
+            expanded.extend(iter_directory_headers(h, PRUNED_HEADER_DIR_SEGMENTS))
+        else:
+            expanded.append(h)
+    return apply_header_exclusions(expanded, exclude_headers)
+
+
 def resolve_input(
     path: Path,
     headers: list[Path] | None = None,
@@ -422,6 +463,13 @@ def resolve_input(
     version: str = "",
     lang: str = "c++",
     *,
+    # Keyword-only, and *appended* rather than inserted next to `headers`
+    # where it reads best: this signature has positional callers, and a
+    # mid-signature insertion silently rebinds every one of them a slot to
+    # the left without raising or failing to type-check (the
+    # `api.positional_slot_rebinding` bug class in
+    # `tests/regressions/manifest.py`).
+    exclude_headers: Sequence[str] = (),
     lang_explicit: bool = False,
     is_elf: bool | None = None,
     pdb_path: Path | None = None,
@@ -504,7 +552,7 @@ def resolve_input(
         SnapshotError: If the snapshot cannot be loaded from the input.
         ValidationError: If the input format cannot be detected.
     """
-    _headers = headers or []
+    _headers = _apply_header_exclusions_to_inputs(headers or [], exclude_headers)
     _includes = includes or []
 
     # ADR-062/ADR-063 storage-v2: a directory input is only ever a

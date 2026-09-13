@@ -51,7 +51,11 @@ from dataclasses import dataclass
 from ..change_registry import REGISTRY as _REGISTRY, Verdict as Verdict
 from ..model.change_catalog.kinds import ChangeKind as ChangeKind, HasKind as HasKind
 from ..model.change_catalog.registry import VALID_BASE_POLICIES as VALID_BASE_POLICIES
-from .evidence_status import EvidenceStatus, has_binary_evidence
+from .evidence_status import (
+    EvidenceStatus,
+    has_binary_evidence,
+    is_cross_source_persistent,
+)
 
 # ---------------------------------------------------------------------------
 # Classification sets — DERIVED from change_registry.py (single source of truth)
@@ -441,6 +445,52 @@ def effective_category(
     if kind in compatible:
         return Verdict.COMPATIBLE
     return Verdict.BREAKING  # unclassified → fail-safe
+
+
+def excluded_from_verdict_as_persistent_hygiene(
+    change: HasKind,
+    breaking: frozenset[ChangeKind],
+    api_break: frozenset[ChangeKind],
+    compatible: frozenset[ChangeKind],
+    risk: frozenset[ChangeKind],
+) -> bool:
+    """Whether *change* is pre-existing hygiene debt that must not drive the
+    pairwise verdict.
+
+    Two conditions, both required, and the second is what keeps this safe:
+
+    1. The finding is a cross-source hygiene finding stamped
+       :attr:`~abicheck.policy.evidence_status.CrossSourceEvolution.PERSISTENT`
+       -- the identical problem is present on OLD and on NEW, so this
+       release changed nothing about it.
+    2. It resolves, **under the active policy and including any per-finding
+       ``effective_verdict`` override**, to ``COMPATIBLE_WITH_RISK``.
+
+    Condition 2 is not a formality. Two of the eleven cross-source checks
+    carry ``API_BREAK`` by default (``odr_type_variant``,
+    ``header_build_context_mismatch``), and a persistent ODR violation is a
+    real defect *in the candidate*, not bookkeeping -- excluding it would
+    hide a genuine source-level break on the grounds that it was already
+    there. Resolving the category through :func:`effective_category` rather
+    than the kind's intrinsic set is what also makes a deliberate policy
+    promotion win: a project that overrides ``exported_not_public`` to
+    ``breaking`` has said it wants to be gated on it, and this predicate
+    then answers ``False``.
+
+    Deliberately parallel to the ``RESOLVED`` exclusion
+    (``is_cross_source_resolved``, plan §7 F-9) but at a different
+    chokepoint: ``RESOLVED`` is zeroed at the *gate/exit-code* layer,
+    ``PERSISTENT`` at the *verdict* layer. A ``RESOLVED`` finding names a
+    problem the candidate no longer has; a ``PERSISTENT`` one names a
+    problem the candidate has and the baseline had too. Neither is a change,
+    and neither is suppressed: both stay in the report, tagged.
+    """
+    if not is_cross_source_persistent(change):
+        return False
+    return (
+        effective_category(change, breaking, api_break, compatible, risk)
+        == Verdict.COMPATIBLE_WITH_RISK
+    )
 
 
 def compute_verdict(

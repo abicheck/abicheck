@@ -87,6 +87,11 @@ VALUE_INSENSITIVE = frozenset(
         "enum_member_value_changed",
         "enum_underlying_size_changed",
         "func_added",
+        # Same bucket, same reason as `func_added`/`func_removed_elf_only`:
+        # its identity is the mangled export name, and its `new_value` holds
+        # that same name rather than any C/C++ type spelling, so there is
+        # nothing for canonicalization to normalize.
+        "func_added_elf_only",
         "func_deleted",
         "func_deleted_dwarf",
         "func_removed",

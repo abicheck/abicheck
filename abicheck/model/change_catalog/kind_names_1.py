@@ -51,6 +51,11 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "exported ELF-only function removed -> binary break",
     ),
     ("FUNC_ADDED", "func_added", "new public symbol → COMPATIBLE"),
+    (
+        "FUNC_ADDED_ELF_ONLY",
+        "func_added_elf_only",
+        "exported ELF-only function added -> compatible addition",
+    ),
     ("FUNC_RETURN_CHANGED", "func_return_changed", "return type changed → BREAKING"),
     (
         "FUNC_PARAMS_CHANGED",

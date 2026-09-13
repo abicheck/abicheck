@@ -36,6 +36,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Sequence
+from fnmatch import fnmatch
 from pathlib import Path
 
 from ._compiler_options import split_gcc_options
@@ -170,6 +171,49 @@ def iter_directory_headers(
             if f.suffix.lower() in HEADER_SUFFIXES and f.is_file():
                 found.append(f)
     return sorted(found)
+
+
+def apply_header_exclusions(
+    headers: Sequence[Path], patterns: Sequence[str]
+) -> list[Path]:
+    """*headers* minus every entry matching one of *patterns*.
+
+    The one shared implementation of ``--exclude-header``. A pattern is
+    fnmatch-style and is tried against three spellings of each header, so a
+    user does not have to know which one this codebase happens to carry:
+
+    * the bare file name (``fftw3.h``),
+    * the full path (``/opt/include/fftw/fftw3.h``), and
+    * the path with ``**/`` semantics (``**/fftw/*`` matching any depth).
+
+    Why this exists at all: a header *directory* operand is all-or-nothing
+    without it. A library whose public include tree contains two headers that
+    cannot be parsed in the same translation unit -- the FFTW2/FFTW3 typedef
+    clash in Intel MKL's ``include/`` is the reported case -- makes
+    ``-H include/`` fail outright, and before this there was no flag, config
+    key, or descriptor element anywhere in abicheck that could exclude one
+    header from a parse. The only options were to name every other header
+    individually or to give up on header-aware analysis for that library.
+
+    Deliberately a *path* filter and nothing more. It does not know about
+    ABI visibility, public/private surface, or include graphs -- excluding a
+    header removes it from the parsed translation unit, and anything only it
+    declared is then simply not observed, which the surface/evidence layers
+    already know how to report as reduced evidence rather than as removal.
+    """
+    if not patterns:
+        return list(headers)
+    kept: list[Path] = []
+    for h in headers:
+        text = str(h)
+        name = h.name
+        if any(
+            fnmatch(name, pat) or fnmatch(text, pat) or fnmatch(text, f"*/{pat}")
+            for pat in patterns
+        ):
+            continue
+        kept.append(h)
+    return kept
 
 
 def split_public_header_inputs(

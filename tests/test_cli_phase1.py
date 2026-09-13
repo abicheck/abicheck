@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from click.testing import CliRunner
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.cli import main
+from abicheck.compat.descriptor import CompatDescriptor
 from abicheck.model import AbiSnapshot
 
 
@@ -88,8 +87,13 @@ def test_compat_check_cmd_breaking_exits_1_and_writes_report(tmp_path, monkeypat
     old_so.write_bytes(b"\x7fELF")
     new_so.write_bytes(b"\x7fELF")
 
-    old_d = SimpleNamespace(libs=[old_so], headers=[], version="1.0")
-    new_d = SimpleNamespace(libs=[new_so], headers=[], version="2.0")
+    # Real ``CompatDescriptor`` objects, not ``SimpleNamespace`` stand-ins:
+    # the compat front end now normalizes what ``parse_descriptor`` returns
+    # (expanding ``<headers>``/``<libs>`` directory operands), and a
+    # duck-typed double silently diverges from the type the production path
+    # is written against.
+    old_d = CompatDescriptor(version="1.0", headers=[], libs=[old_so])
+    new_d = CompatDescriptor(version="2.0", headers=[], libs=[new_so])
 
     monkeypatch.setattr(
         "abicheck.compat.cli.parse_descriptor",

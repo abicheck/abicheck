@@ -7,7 +7,9 @@ examples/case90-93 fixtures live in tests/test_bundle_examples.py.
 
 from __future__ import annotations
 
+import dataclasses
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -87,6 +89,55 @@ def _snapshot(libraries: dict[str, ElfMetadata]) -> BundleSnapshot:
         metadata=libraries,
         resolution=graph,
     )
+
+
+def _removal_pair(
+    libraries: dict[str, ElfMetadata],
+    *,
+    provider: str,
+    symbol: str,
+    version: str = "",
+    provider_old_soname: str | None = None,
+    old_needed: dict[str, list[str]] | None = None,
+) -> tuple[BundleSnapshot, BundleSnapshot]:
+    """An (old, new) pair in which *provider* exported *symbol* and no longer does.
+
+    ``bundle_intra_dep_removed`` is defined as a *diff-confirmed* removal, so
+    a fixture that exercises it has to contain one. Several tests below used
+    ``compare_bundle(new, new, ...)`` as a shortcut for "nothing in the
+    bundle exports this symbol" -- which asserted that comparing a bundle
+    against *itself* reports a removed dependency, and is the shape that let
+    Intel MKL's 293 never-in-bundle libc/MPI imports read as removals of a
+    release that removed nothing. Each such fixture is rebuilt through this
+    helper so it constructs the scenario its own docstring already described.
+
+    *libraries* is the NEW side, exactly as each test already spells it. OLD
+    is derived from it by giving *provider* an additional export of *symbol*
+    (optionally under *version*, and optionally under a pre-bump
+    *provider_old_soname*), so the consumer genuinely reached an in-bundle
+    provider before and does not after. *old_needed* additionally restores a
+    consumer's OLD ``DT_NEEDED`` edges, for the refactors that dropped the
+    edge and the export together -- without it such a consumer never reached
+    the provider in OLD either, and the pair states a different scenario than
+    the test describes.
+    """
+    old_provider = libraries[provider]
+    old_libraries = dict(libraries)
+    for lib, needed in (old_needed or {}).items():
+        old_libraries[lib] = dataclasses.replace(
+            old_libraries[lib], needed=list(needed)
+        )
+    old_libraries[provider] = dataclasses.replace(
+        old_provider,
+        soname=(
+            old_provider.soname if provider_old_soname is None else provider_old_soname
+        ),
+        symbols=[
+            *old_provider.symbols,
+            ElfSymbol(name=symbol, visibility="default", version=version),
+        ],
+    )
+    return _snapshot(old_libraries), _snapshot(libraries)
 
 
 def _write_elf_shared_object_stub(path: Path) -> None:
@@ -314,17 +365,23 @@ class TestIntraDepRemoved:
         A prior revision gated this allow-list match on the symbol *also*
         looking system-shaped, which made --bundle-system-providers inert
         for exactly this case."""
-        new = _snapshot(
+        old, new = _removal_pair(
             {
+                # The in-bundle provider that dropped the export -- without
+                # one there is no removal for the allow-list to suppress.
+                "libacme_core.so": _meta(soname="libacme_core.so.1"),
                 "libfoo.so": _meta(
                     soname="libfoo.so.1",
                     needed=["libacme_math.so.2"],
                     imports=["acme_custom_op"],
                 ),
-            }
+            },
+            provider="libacme_core.so",
+            symbol="acme_custom_op",
+            old_needed={"libfoo.so": ["libacme_core.so.1"]},
         )
         # Without the allow-list entry: real, reportable finding.
-        without_extra = compare_bundle(new, new, per_library_results=[])
+        without_extra = compare_bundle(old, new, per_library_results=[])
         assert any(
             f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
             and f.symbol == "acme_custom_op"
@@ -332,7 +389,7 @@ class TestIntraDepRemoved:
         )
         # With the exact soname allow-listed: finding must be suppressed.
         with_extra = compare_bundle(
-            new,
+            old,
             new,
             per_library_results=[],
             system_providers=["libacme_math.so.2"],
@@ -378,17 +435,21 @@ class TestIntraDepRemoved:
         version-*generic* entry (`libmkl_core`/`libmkl_core.so`, no numeric
         major) matching any real runtime version, not for treating two
         different, explicitly-pinned majors as interchangeable."""
-        new = _snapshot(
+        old, new = _removal_pair(
             {
+                "libvendor_core.so": _meta(soname="libvendor_core.so.1"),
                 "libfoo.so": _meta(
                     soname="libfoo.so.1",
                     needed=["libvendor.so.2"],
                     imports=["vendor_custom_op"],
                 ),
-            }
+            },
+            provider="libvendor_core.so",
+            symbol="vendor_custom_op",
+            old_needed={"libfoo.so": ["libvendor_core.so.1"]},
         )
         with_extra = compare_bundle(
-            new,
+            old,
             new,
             per_library_results=[],
             system_providers=["libvendor.so.1"],
@@ -407,7 +468,7 @@ class TestIntraDepRemoved:
         # it. The unresolved import remains in .dynsym; the bundle layer
         # must still flag it (the system-symbol allow-list separately
         # filters out genuinely-external imports).
-        new = _snapshot(
+        old, new = _removal_pair(
             {
                 "libcore.so": _meta(soname="libcore.so.1"),  # provider gone
                 "libalgo.so": _meta(
@@ -415,9 +476,14 @@ class TestIntraDepRemoved:
                     needed=[],  # DT_NEEDED stripped too
                     imports=["onedal_internal_op"],  # not a system symbol
                 ),
-            }
+            },
+            provider="libcore.so",
+            symbol="onedal_internal_op",
+            # The refactor this test describes dropped the DT_NEEDED edge
+            # *and* the export, so OLD is the release that still had both.
+            old_needed={"libalgo.so": ["libcore.so.1"]},
         )
-        result = compare_bundle(new, new, per_library_results=[])
+        result = compare_bundle(old, new, per_library_results=[])
         intra_removed = [
             f
             for f in result.bundle_findings
@@ -674,7 +740,7 @@ class TestIntraDepRemoved:
     def test_unversioned_internal_sibling_import_still_fires(self) -> None:
         # The flip side of the version filter: an *unversioned* import that no
         # sibling provides is still a dropped intra-bundle dependency.
-        new = _snapshot(
+        old, new = _removal_pair(
             {
                 "libcore.so": _meta(soname="libcore.so.1", exports=["dummy"]),
                 "libalgo.so": _meta(
@@ -682,9 +748,11 @@ class TestIntraDepRemoved:
                     needed=["libcore.so.1"],
                     imports=["onedal_internal_op"],  # version="" → internal
                 ),
-            }
+            },
+            provider="libcore.so",
+            symbol="onedal_internal_op",
         )
-        result = compare_bundle(new, new, per_library_results=[])
+        result = compare_bundle(old, new, per_library_results=[])
         intra_removed = [
             f
             for f in result.bundle_findings
@@ -721,7 +789,7 @@ class TestIntraDepRemoved:
         # Contrast with the previous test: when the required version resolves
         # against an *intra-bundle* sibling soname but that sibling no longer
         # exports the symbol, it IS a dropped intra-bundle dependency.
-        new = _snapshot(
+        old, new = _removal_pair(
             {
                 "libcore.so": _meta(
                     soname="libcore.so.1", exports=["dummy"]
@@ -733,9 +801,12 @@ class TestIntraDepRemoved:
                     import_versions={"core_op": "LIBCORE_1.0"},
                     versions_required={"libcore.so.1": ["LIBCORE_1.0"]},
                 ),
-            }
+            },
+            provider="libcore.so",
+            symbol="core_op",
+            version="LIBCORE_1.0",
         )
-        result = compare_bundle(new, new, per_library_results=[])
+        result = compare_bundle(old, new, per_library_results=[])
         intra_removed = [
             f
             for f in result.bundle_findings
@@ -749,7 +820,7 @@ class TestIntraDepRemoved:
         # unique: the same label ("FOO_1.0") can be required from both an
         # intra-bundle sibling and an external soname. Provider evidence is
         # then ambiguous and must NOT suppress the dropped-sibling finding.
-        new = _snapshot(
+        old, new = _removal_pair(
             {
                 "libcore.so": _meta(
                     soname="libcore.so.1", exports=["dummy"]
@@ -766,9 +837,12 @@ class TestIntraDepRemoved:
                         "libthirdparty.so.2": ["FOO_1.0"],
                     },
                 ),
-            }
+            },
+            provider="libcore.so",
+            symbol="core_op",
+            version="FOO_1.0",
         )
-        result = compare_bundle(new, new, per_library_results=[])
+        result = compare_bundle(old, new, per_library_results=[])
         intra_removed = [
             f
             for f in result.bundle_findings
@@ -785,7 +859,7 @@ class TestIntraDepRemoved:
         # the bundle still contains libcore.so (filename-stem match), so the
         # versioned import must NOT be treated as external — the release will
         # fail to load and bundle_intra_dep_removed must fire.
-        new = _snapshot(
+        old, new = _removal_pair(
             {
                 "libcore.so": _meta(soname="libcore.so.2", exports=["other_op"]),
                 "libalgo.so": _meta(
@@ -795,9 +869,15 @@ class TestIntraDepRemoved:
                     import_versions={"core_op": "LIBCORE_1.0"},
                     versions_required={"libcore.so.1": ["LIBCORE_1.0"]},
                 ),
-            }
+            },
+            provider="libcore.so",
+            symbol="core_op",
+            version="LIBCORE_1.0",
+            # OLD is the pre-bump release: libcore.so still advertised
+            # libcore.so.1, the soname the surviving sibling still NEEDs.
+            provider_old_soname="libcore.so.1",
         )
-        result = compare_bundle(new, new, per_library_results=[])
+        result = compare_bundle(old, new, per_library_results=[])
         intra_removed = [
             f
             for f in result.bundle_findings
@@ -814,7 +894,7 @@ class TestIntraDepRemoved:
         # drops the export the sibling is unresolved at load — provider
         # evidence must win over the system-version-namespace shortcut, which
         # would otherwise classify GOMP_parallel@GOMP_4.0 as external.
-        new = _snapshot(
+        old, new = _removal_pair(
             {
                 "libgomp.so": _meta(soname="libgomp.so.1", exports=["other_gomp"]),
                 "libalgo.so": _meta(
@@ -824,9 +904,12 @@ class TestIntraDepRemoved:
                     import_versions={"GOMP_parallel": "GOMP_4.0"},
                     versions_required={"libgomp.so.1": ["GOMP_4.0"]},
                 ),
-            }
+            },
+            provider="libgomp.so",
+            symbol="GOMP_parallel",
+            version="GOMP_4.0",
         )
-        result = compare_bundle(new, new, per_library_results=[])
+        result = compare_bundle(old, new, per_library_results=[])
         intra_removed = [
             f
             for f in result.bundle_findings
@@ -862,7 +945,7 @@ class TestIntraDepRemoved:
         # verneed provider (ElfImport.version_soname) must resolve each import
         # independently: the bundled core_op (dropped) fires, while the genuinely
         # external tp_init must NOT be reported as bundle_intra_dep_removed.
-        new = _snapshot(
+        old, new = _removal_pair(
             {
                 "libcore.so": _meta(
                     soname="libcore.so.1", exports=["dummy"]
@@ -881,9 +964,12 @@ class TestIntraDepRemoved:
                         "libthirdparty.so.2": ["FOO_1.0"],
                     },
                 ),
-            }
+            },
+            provider="libcore.so",
+            symbol="core_op",
+            version="FOO_1.0",
         )
-        result = compare_bundle(new, new, per_library_results=[])
+        result = compare_bundle(old, new, per_library_results=[])
         intra_removed = {
             f.symbol
             for f in result.bundle_findings
@@ -2981,7 +3067,7 @@ class TestArtifactSetDiscovery:
 class TestVerdictAggregation:
     def test_bundle_verdict_promotes_aggregate(self) -> None:
         # All per-library diffs are NO_CHANGE; bundle finding alone forces BREAKING.
-        new = _snapshot(
+        old, new = _removal_pair(
             {
                 "libcore.so": _meta(soname="libcore.so.1", exports=["x"]),
                 "libalgo.so": _meta(
@@ -2989,9 +3075,11 @@ class TestVerdictAggregation:
                     needed=["libcore.so.1"],
                     imports=["x", "missing_sym"],
                 ),
-            }
+            },
+            provider="libcore.so",
+            symbol="missing_sym",
         )
-        result = compare_bundle(new, new, [])
+        result = compare_bundle(old, new, [])
         # The bundle layer should flag missing_sym as removed.
         assert result.bundle_verdict == Verdict.BREAKING
         assert result.verdict == Verdict.BREAKING
@@ -4161,3 +4249,389 @@ class TestSonameSkewCohortScoping:
         findings = _detect_soname_skew(old, new, ["libonedal_"])
         assert [f.kind for f in findings] == [ChangeKind.BUNDLE_SONAME_SKEW]
         assert "libonedal_thread" in findings[0].affected_libraries[0]
+
+
+# ---------------------------------------------------------------------------
+# bundle_intra_dep_removed: the old-in-bundle-provider precondition
+# ---------------------------------------------------------------------------
+
+from abicheck.bundle_detector_heuristics import (  # noqa: E402
+    DEFAULT_SYSTEM_SYMBOLS,
+    _looks_system_symbol,
+    extra_needed_all_system,
+)
+from abicheck.bundle_models import ResolutionGraph  # noqa: E402
+
+
+class TestIntraDepRemovedRequiresAnOldInBundleProvider:
+    """The bug class behind MKL's 293 false ``bundle_intra_dep_removed``
+    findings: a symbol no bundle member ever exported, in *either* release,
+    reported as a removed intra-bundle dependency of the new one.
+
+    ``bundle_intra_dep_removed`` is ``BREAKING`` and its description asserts
+    that runtime load *will* fail with an undefined symbol. Both claims rest
+    on a version-compatible in-bundle sibling having provided the symbol to
+    this consumer in OLD. This class states that as an executable invariant
+    over the whole input grid, rather than pinning the one reported repro:
+    the original defect passed on three of the eight cells below for the
+    wrong reason (the DT_NEEDED allow-list happened to fire), so a test of
+    any single cell proves nothing about the mechanism.
+
+    The oracle is deliberately independent of the detector: a case's label
+    is derived from how the *fixture* was built (did OLD have an in-bundle
+    exporter of this symbol?), never from anything the detector computes.
+    """
+
+    SYMBOL = "fflush"  # not in DEFAULT_SYSTEM_SYMBOLS; see test_the_grid_is_not_vacuous
+    VENDOR_SYMBOL = "vendor_op"
+
+    @staticmethod
+    def _pair(
+        *,
+        old_has_in_bundle_provider: bool,
+        needed: list[str],
+        symbol: str,
+        versioned: bool = False,
+    ) -> tuple[BundleSnapshot, BundleSnapshot]:
+        """One (old, new) pair. NEW never exports *symbol* from any member.
+
+        ``old_has_in_bundle_provider`` is the single fact the invariant
+        turns on, and it is applied here -- to the fixture -- so the
+        expectation below never reads anything the detector derived.
+        """
+        # A vendor-namespaced version label, deliberately not a toolchain
+        # one: `_import_is_external` short-circuits every GLIBC_/CXXABI_-
+        # shaped requirement as external before the code under test runs,
+        # which would make the whole versioned half of this grid vacuous.
+        import_versions = {symbol: "VENDOR_1.0"} if versioned else None
+        consumer = _meta(
+            soname="libconsumer.so.1",
+            needed=needed,
+            imports=[symbol],
+            import_versions=import_versions,
+        )
+        old_libs: dict[str, ElfMetadata] = {"libconsumer.so": consumer}
+        new_libs: dict[str, ElfMetadata] = {"libconsumer.so": consumer}
+        if old_has_in_bundle_provider:
+            # The provider is in OLD and reachable from the consumer (its
+            # soname is among the consumer's DT_NEEDED), and is gone in NEW.
+            old_libs["libprovider.so"] = _meta(
+                soname="libprovider.so.1",
+                exports=[symbol],
+                export_versions={symbol: "VENDOR_1.0"} if versioned else None,
+            )
+            new_libs["libprovider.so"] = _meta(soname="libprovider.so.1")
+        return _snapshot(old_libs), _snapshot(new_libs)
+
+    #: (label, DT_NEEDED edges of the consumer in both releases).
+    #: "libprovider.so.1" is appended by _pair's caller where an in-bundle
+    #: provider exists, so the consumer genuinely reaches it in OLD.
+    NEEDED_SHAPES: tuple[tuple[str, list[str]], ...] = (
+        ("no DT_NEEDED at all", []),
+        ("system-only DT_NEEDED", ["libc.so.6"]),
+        ("mixed DT_NEEDED", ["libc.so.6", "libvendor.so.1"]),
+        ("non-system DT_NEEDED", ["libvendor.so.1"]),
+    )
+
+    def test_never_reported_when_no_old_in_bundle_provider(self) -> None:
+        """The invariant, swept across every DT_NEEDED shape x versioned/
+        unversioned x allow-listed/not-allow-listed symbol name.
+
+        Batched so one run names every disagreeing cell at once rather than
+        stopping at the first.
+        """
+        offenders: list[str] = []
+        for needed_label, needed in self.NEEDED_SHAPES:
+            for versioned in (False, True):
+                for sym_label, symbol in (
+                    ("allow-listed-shape symbol", self.SYMBOL),
+                    ("vendor-shaped symbol", self.VENDOR_SYMBOL),
+                ):
+                    old, new = self._pair(
+                        old_has_in_bundle_provider=False,
+                        needed=needed,
+                        symbol=symbol,
+                        versioned=versioned,
+                    )
+                    result = compare_bundle(old, new, per_library_results=[])
+                    bad = [
+                        f
+                        for f in result.bundle_findings
+                        if f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+                        and f.symbol == symbol
+                    ]
+                    if bad:
+                        vlabel = "versioned" if versioned else "unversioned"
+                        offenders.append(f"{needed_label} / {vlabel} / {sym_label}")
+        assert not offenders, (
+            "bundle_intra_dep_removed claims a diff-confirmed removal for a "
+            "symbol no bundle member ever exported, in these cells: "
+            + "; ".join(offenders)
+        )
+
+    def test_a_real_removal_is_still_reported_across_the_same_grid(self) -> None:
+        """The other direction, over the identical grid: when OLD *did*
+        carry a reachable in-bundle provider, every cell must still fire.
+
+        Without this, the fix above is indistinguishable from deleting the
+        detector -- which is exactly the failure mode the repository's
+        matrix-test guidance warns about (an implementation returning
+        "no findings" for every input passing the suite in full).
+        """
+        missing: list[str] = []
+        for needed_label, needed in self.NEEDED_SHAPES:
+            for versioned in (False, True):
+                old, new = self._pair(
+                    old_has_in_bundle_provider=True,
+                    needed=[*needed, "libprovider.so.1"],
+                    symbol=self.VENDOR_SYMBOL,
+                    versioned=versioned,
+                )
+                result = compare_bundle(old, new, per_library_results=[])
+                fired = any(
+                    f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+                    and f.symbol == self.VENDOR_SYMBOL
+                    for f in result.bundle_findings
+                )
+                if not fired:
+                    vlabel = "versioned" if versioned else "unversioned"
+                    missing.append(f"{needed_label} / {vlabel}")
+        assert not missing, (
+            "a genuinely removed intra-bundle provider went unreported in "
+            "these cells: " + "; ".join(missing)
+        )
+
+    def test_self_comparison_never_reports_a_removal(self) -> None:
+        """The metamorphic form of the same invariant: comparing *any*
+        bundle against itself removes nothing, so no shape of input may
+        produce ``bundle_intra_dep_removed``.
+
+        Stated separately because this is the property that nine fixtures
+        in ``TestIntraDepRemoved`` were unknowingly violating -- each used
+        ``compare_bundle(new, new, ...)`` as shorthand for "no member
+        exports this symbol" and then asserted a removal was reported.
+        A shortcut like that is invisible one test at a time; as an
+        invariant over every shape it is immediate.
+        """
+        offenders: list[str] = []
+        for needed_label, needed in self.NEEDED_SHAPES:
+            for versioned in (False, True):
+                for symbol in (self.SYMBOL, self.VENDOR_SYMBOL):
+                    for with_provider in (False, True):
+                        _old, new = self._pair(
+                            old_has_in_bundle_provider=with_provider,
+                            needed=needed,
+                            symbol=symbol,
+                            versioned=versioned,
+                        )
+                        result = compare_bundle(new, new, per_library_results=[])
+                        if any(
+                            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+                            for f in result.bundle_findings
+                        ):
+                            offenders.append(
+                                f"{needed_label} / {symbol} / "
+                                f"versioned={versioned} / provider={with_provider}"
+                            )
+        assert not offenders, (
+            "a bundle compared against itself reported a removed "
+            "intra-bundle dependency in these cells: " + "; ".join(offenders)
+        )
+
+    def test_the_grid_is_not_vacuous(self) -> None:
+        """Vacuity guard on the two sweeps above.
+
+        Both would pass trivially if the symbols they use were suppressed
+        before the code path under test is even reached -- by the
+        symbol-name allow-list, or by every fixture failing to register a
+        consumer at all. Assert the preconditions directly so a later
+        allow-list broadening cannot silently hollow the grid out.
+        """
+        assert self.VENDOR_SYMBOL not in DEFAULT_SYSTEM_SYMBOLS
+        assert not _looks_system_symbol(self.VENDOR_SYMBOL)
+        # Every fixture actually presents the consumer's import to the
+        # detector -- i.e. the symbol reaches `resolution.consumers`.
+        for _label, needed in self.NEEDED_SHAPES:
+            old, _new = self._pair(
+                old_has_in_bundle_provider=False,
+                needed=needed,
+                symbol=self.VENDOR_SYMBOL,
+            )
+            assert "libconsumer.so" in {
+                c.library for c in old.resolution.consumers[self.VENDOR_SYMBOL]
+            }
+
+    def test_unaccounted_symbol_downgrades_to_the_unresolved_kind(self) -> None:
+        """Suppressing the false BREAKING must not silently discard the
+        observation. A symbol with no in-bundle history that the outward
+        DT_NEEDED evidence does *not* account for (a non-system edge) and
+        whose name is not allow-listed is still surfaced -- under the kind
+        that claims no diff confirmation, at COMPATIBLE_WITH_RISK.
+        """
+        old, new = self._pair(
+            old_has_in_bundle_provider=False,
+            needed=["libvendor.so.1"],
+            symbol=self.VENDOR_SYMBOL,
+        )
+        result = compare_bundle(old, new, per_library_results=[])
+        kinds = {
+            f.kind for f in result.bundle_findings if f.symbol == self.VENDOR_SYMBOL
+        }
+        assert ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY in kinds
+        assert ChangeKind.BUNDLE_INTRA_DEP_REMOVED not in kinds
+        from abicheck.change_registry import REGISTRY
+
+        meta = REGISTRY.get(ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY.value)
+        assert meta is not None
+        assert meta.default_verdict == Verdict.COMPATIBLE_WITH_RISK
+
+    def test_zero_dt_needed_consumer_is_fully_suppressed(self) -> None:
+        """The MKL shape specifically: a consumer declaring no DT_NEEDED at
+        all, importing a libc symbol no bundle member ever exported, emits
+        nothing -- not a BREAKING removal and not a RISK either. A library
+        with no declared dependencies resolves every undefined symbol from
+        the global namespace its host process assembles, which is outside
+        the bundle's scope by construction.
+        """
+        old, new = self._pair(
+            old_has_in_bundle_provider=False, needed=[], symbol=self.SYMBOL
+        )
+        result = compare_bundle(old, new, per_library_results=[])
+        assert [f for f in result.bundle_findings if f.symbol == self.SYMBOL] == []
+
+
+class TestExtraNeededAllSystemPrimitive:
+    """Property tests for the shared primitive behind both unresolved-import
+    detectors (``bundle_detector_heuristics.extra_needed_all_system``),
+    stated as its own contract and decoupled from either caller's domain
+    logic -- AGENTS.md's "primitive-level property tests" rule. Both call
+    sites hand-rolled this and both hand-rolled the same empty-sequence bug,
+    which is precisely the evidence that it wanted to be one tested
+    primitive rather than two inline expressions.
+    """
+
+    @staticmethod
+    def _graph(edges: list[str]) -> ResolutionGraph:
+        return ResolutionGraph(extra_needed={"lib": list(edges)})
+
+    def test_no_outward_edges_is_true(self) -> None:
+        """The empty case, which is the bug both callers had. A library
+        declaring no outward DT_NEEDED edge has no non-system outward
+        dependency -- vacuously, and that is the correct reading."""
+        assert extra_needed_all_system("lib", self._graph([]), set()) is True
+
+    def test_unknown_library_is_true(self) -> None:
+        """A library absent from the graph is the empty case, not an error."""
+        assert extra_needed_all_system("absent", self._graph([]), set()) is True
+
+    def test_universally_quantified_over_the_edges(self) -> None:
+        """The contract is "every edge", so adding any non-covered edge to a
+        covered set must flip the answer, and the result must not depend on
+        the order the edges appear in."""
+        import itertools
+
+        covered = ["libc.so.6", "libm.so.6"]
+        assert extra_needed_all_system("lib", self._graph(covered), set()) is True
+        for perm in itertools.permutations([*covered, "libvendor.so.1"]):
+            assert (
+                extra_needed_all_system("lib", self._graph(list(perm)), set()) is False
+            ), f"order-dependent result for {perm}"
+
+    def test_explicit_allow_list_covers_an_otherwise_uncovered_edge(self) -> None:
+        """The allow-list is the second of the two independent ways an edge
+        is covered, and it composes with the shape heuristic rather than
+        replacing it."""
+        g = self._graph(["libc.so.6", "libvendor.so.1"])
+        assert extra_needed_all_system("lib", g, set()) is False
+        assert extra_needed_all_system("lib", g, {"libvendor.so.1"}) is True
+
+    def test_answers_only_about_the_named_library(self) -> None:
+        """A sibling's uncovered edges never leak into this library's answer."""
+        g = ResolutionGraph(
+            extra_needed={"lib": ["libc.so.6"], "other": ["libvendor.so.1"]}
+        )
+        assert extra_needed_all_system("lib", g, set()) is True
+        assert extra_needed_all_system("other", g, set()) is False
+
+
+@pytest.mark.integration
+class TestZeroDtNeededBundleEndToEnd:
+    """The reported defect against real compiled binaries, through the public
+    ``compare`` workflow rather than the detector alone.
+
+    The property grid above proves the emission rule. This proves the thing
+    that was actually broken: a release of libraries carrying **zero**
+    ``DT_NEEDED`` entries -- Intel MKL's shape -- whose undefined libc imports
+    were reported as removed intra-bundle dependencies, taking a compatible
+    release to exit 4. ``-nostdlib`` reproduces that shape exactly: the
+    libraries import ``fflush``/``sin`` and declare no dependencies at all.
+
+    Validating through the CLI matters here beyond habit. The unit fixtures
+    build their resolution graph from hand-written ``ElfMetadata``; only a
+    real binary proves that a real toolchain produces the input shape the
+    fix is written against.
+    """
+
+    @staticmethod
+    def _build(root: Path, *, with_addition: bool) -> Path:
+        root.mkdir(parents=True, exist_ok=True)
+        core = root / "core.c"
+        core.write_text(
+            "#include <stdio.h>\nint mkl_core_op(void){ fflush(stdout); return 1; }\n",
+            encoding="utf-8",
+        )
+        rt = root / "rt.c"
+        body = (
+            "#include <stdio.h>\n#include <math.h>\n"
+            "int mkl_rt_op(void){ fflush(stdout); return (int)sin(1.0); }\n"
+        )
+        if with_addition:
+            body += "int mkl_rt_new_op(void){ return 2; }\n"
+        rt.write_text(body, encoding="utf-8")
+        for src, out in ((core, "libmkl_core.so"), (rt, "libmkl_rt.so")):
+            subprocess.run(
+                # -nostdlib is what produces the zero-DT_NEEDED shape.
+                [
+                    "gcc",
+                    "-shared",
+                    "-fPIC",
+                    "-nostdlib",
+                    "-o",
+                    str(root / out),
+                    str(src),
+                ],
+                check=True,
+            )
+        return root
+
+    def test_zero_dt_needed_libc_imports_are_not_a_breaking_release(
+        self, tmp_path: Path
+    ) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        old = self._build(tmp_path / "old", with_addition=False)
+        new = self._build(tmp_path / "new", with_addition=True)
+
+        # Guard the fixture's own premise: if a future toolchain starts
+        # emitting DT_NEEDED here, this test silently stops exercising the
+        # condition and would pass for the wrong reason.
+        needed = subprocess.run(
+            ["readelf", "-d", str(new / "libmkl_rt.so")],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert "NEEDED" not in needed, (
+            "fixture no longer has the zero-DT_NEEDED shape this test exists "
+            "to exercise"
+        )
+
+        result = CliRunner().invoke(
+            main, ["compare", str(old), str(new), "--depth", "binary"]
+        )
+        assert "bundle_intra_dep_removed" not in result.output, result.output
+        # 0 == compatible under the legacy verdict scheme; 4 was the reported
+        # false ABI break.
+        assert result.exit_code == 0, result.output

@@ -24,10 +24,11 @@ Commands:
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 import click
 
@@ -77,8 +78,12 @@ from ._helpers import (  # noqa: F401
     _setup_logging as _setup_logging,
     _warn_stub_flags as _warn_stub_flags,
     _write_affected_list as _write_affected_list,
+    build_descriptor_suppression as build_descriptor_suppression,
+    expand_descriptor_headers as expand_descriptor_headers,
+    expand_descriptor_libs as expand_descriptor_libs,
 )
-from .descriptor import parse_descriptor
+from .descriptor import CompatDescriptor, parse_descriptor
+from .multi_library import merge_results, pair_libraries
 from .xml_report import write_xml_report
 
 # Re-exports for backwards compatibility (these used to be defined inline).
@@ -95,7 +100,6 @@ __all__ = [
 if TYPE_CHECKING:
     from ..checker import DiffResult
     from ..model import AbiSnapshot
-    from .descriptor import CompatDescriptor
 
 
 # ── compat group ──────────────────────────────────────────────────────────────
@@ -936,26 +940,19 @@ def compat_check_cmd(  # noqa: PLR0913
         quiet,
     )
 
-    old_snap, old_version, new_snap, new_version = _take_snapshots_with_logging(
-        old_d,
-        new_d,
-        old_desc,
-        new_desc,
-        vnum1,
-        vnum2,
-        _log1_handler,
-        _log2_handler,
-        headers_list_path=headers_list_path,
-        single_header=single_header,
-        skip_headers_set=_skip_headers_set,
-        quiet=quiet,
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
-        gcc_options=gcc_options,
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        lang=lang,
-    )
+    _snapshot_kwargs: _SnapshotOptions = {
+        "headers_list_path": headers_list_path,
+        "single_header": single_header,
+        "skip_headers_set": _skip_headers_set,
+        "quiet": quiet,
+        "gcc_path": gcc_path,
+        "gcc_prefix": gcc_prefix,
+        "gcc_options": gcc_options,
+        "sysroot": sysroot,
+        "nostdinc": nostdinc,
+        "lang": lang,
+    }
+    _library_pairs, _unpaired_old, _unpaired_new = _plan_library_pairs(old_d, new_d)
 
     if headers_only:
         _do_echo("Note: -headers-only is accepted — ELF/DWARF checks still run.", quiet)
@@ -969,11 +966,66 @@ def compat_check_cmd(  # noqa: PLR0913
         skip_internal_types,
         suppress,
     )
+    # The descriptors' own <skip_namespaces>/<skip_symbols>/<skip_types>/
+    # <skip_constants> rules, merged in alongside the CLI's. Parsed by
+    # nothing before, so a descriptor could declare 16 exclusions, have none
+    # applied, and still report a confident verdict over the unnarrowed
+    # surface. Built before the snapshots (it depends only on the parsed
+    # descriptors and the CLI flags) so the comparison loop below can be one
+    # loop over every library pair rather than one call plus a fan-out
+    # helper -- which keeps this command's single Tier-1 `checker.compare`
+    # call site single (`CLI_CONTRACT_ALLOWLIST` pins it; a second one would
+    # be a new direct bypass, not another instance of the allowlisted one).
+    _descriptor_suppression = build_descriptor_suppression([old_d, new_d])
+    if _descriptor_suppression is not None:
+        suppression = _merge_suppression(suppression, _descriptor_suppression)
 
+    # One iteration for an ordinary single-library descriptor (the `[(None,
+    # None)]` sentinel means "no library selection"); one per paired library
+    # otherwise. The first iteration keeps the per-phase log handlers, which
+    # are a property of the *run* rather than of each library.
+    _pairs: list[tuple[Path | None, Path | None]] = list(_library_pairs) or [
+        (None, None)
+    ]
+    _results: list[DiffResult] = []
     try:
-        result = compare(
-            old_snap, new_snap, suppression=suppression, policy="strict_abi"
-        )
+        for _index, (_old_lib, _new_lib) in enumerate(_pairs):
+            if _index == 0:
+                old_snap, old_version, new_snap, new_version = (
+                    _take_snapshots_with_logging(
+                        old_d,
+                        new_d,
+                        old_desc,
+                        new_desc,
+                        vnum1,
+                        vnum2,
+                        _log1_handler,
+                        _log2_handler,
+                        old_lib=_old_lib,
+                        new_lib=_new_lib,
+                        **_snapshot_kwargs,
+                    )
+                )
+            else:
+                old_snap, _ = _snapshot_from_compat_input(
+                    old_d, vnum1, old_desc, lib_override=_old_lib, **_snapshot_kwargs
+                )
+                new_snap, _ = _snapshot_from_compat_input(
+                    new_d, vnum2, new_desc, lib_override=_new_lib, **_snapshot_kwargs
+                )
+            _results.append(
+                compare(
+                    old_snap, new_snap, suppression=suppression, policy="strict_abi"
+                )
+            )
+        if len(_results) > 1:
+            _do_echo(
+                f"Compared {len(_results)} libraries from the descriptor pair.", quiet
+            )
+            result = merge_results(_results, label=f"{len(_results)} libraries")
+        else:
+            result = _results[0]
+        result = _record_unpaired_libraries(result, _unpaired_old, _unpaired_new, quiet)
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _compat_fail("comparing snapshots", exc)
 
@@ -1125,8 +1177,18 @@ def _snapshot_from_compat_input(
     sysroot: Path | None,
     nostdinc: bool,
     lang: str | None,
+    lib_override: Path | None = None,
 ) -> tuple[AbiSnapshot, str]:
-    """Convert compat input (descriptor or dump) into a concrete snapshot."""
+    """Convert compat input (descriptor or dump) into a concrete snapshot.
+
+    *lib_override* selects which of the descriptor's ``<libs>`` entries to
+    snapshot. It exists because a descriptor may name many libraries and
+    this function produces exactly one snapshot: the caller
+    (``compat.multi_library``) pairs the two sides' libraries and drives this
+    once per pair. Before that fan-out existed, this function took
+    ``libs[0]`` and printed a warning naming the rest -- answering a
+    28-library release by comparing one library.
+    """
     from ..model import AbiSnapshot as _AbiSnapshot
 
     if isinstance(data, _AbiSnapshot):
@@ -1140,18 +1202,25 @@ def _snapshot_from_compat_input(
         from dataclasses import replace as _replace
 
         desc = _replace(desc, version=vnum_override)
-    so = desc.libs[0]
-    if len(desc.libs) > 1:
-        _do_echo(
-            f"Warning: descriptor {desc_path.name} has {len(desc.libs)} <libs> entries; "
-            f"using only the first: {so}",
-            quiet,
-        )
+    # `lib_override` is how the multi-library fan-out asks for one specific
+    # member (see `compat.multi_library`). Without it this is a single-library
+    # descriptor and `libs[0]` is the only entry.
+    so = lib_override if lib_override is not None else desc.libs[0]
+    # The descriptor's own <skip_headers>/<skip_including> rules union with
+    # the CLI's -skip-headers FILE rather than replacing it: both are
+    # exclusions, and ABICC applies both. The descriptor's are per-side by
+    # construction (each side names its own), which is why they are merged
+    # here rather than once in `_load_compat_inputs`.
+    effective_skip = set(skip_headers_set) | set(desc.skip_headers)
     hdrs = _resolve_headers_from_list(
         headers_list_path,
         single_header,
         desc.headers,
-        skip_headers=skip_headers_set or None,
+        skip_headers=effective_skip or None,
+    )
+    descriptor_options = _descriptor_compile_options(desc)
+    combined_gcc_options = " ".join(
+        opt for opt in (gcc_options, descriptor_options) if opt
     )
     if not so.exists():
         _compat_fail(
@@ -1172,7 +1241,7 @@ def _snapshot_from_compat_input(
             version=desc.version,
             gcc_path=gcc_path,
             gcc_prefix=gcc_prefix,
-            gcc_options=gcc_options,
+            gcc_options=combined_gcc_options or None,
             sysroot=sysroot,
             nostdinc=nostdinc,
             lang=lang,
@@ -1239,8 +1308,18 @@ def _load_descriptor_or_dump(
             "  or convert via descriptor using 'abicheck compat dump' to abicheck JSON."
         )
 
-    # Otherwise parse as XML descriptor
-    return parse_descriptor(path, relpath=relpath)
+    # Otherwise parse as XML descriptor. Directory operands in <headers>/
+    # <libs> are expanded here, at the boundary, so every downstream consumer
+    # sees a concrete file list -- ABICC's ordinary usage points both elements
+    # at directories, and an unexpanded one previously reached the header
+    # parser as `#include "<dir>"` / the binary parser as "Unrecognised binary
+    # format".
+    desc = parse_descriptor(path, relpath=relpath)
+    return dataclasses.replace(
+        desc,
+        headers=expand_descriptor_headers(desc.headers),
+        libs=expand_descriptor_libs(desc.libs),
+    )
 
 
 def _load_compat_inputs(
@@ -1282,6 +1361,108 @@ def _load_compat_inputs(
     return old_d, new_d, skip_headers_set
 
 
+def _descriptor_compile_options(desc: CompatDescriptor) -> str:
+    """The descriptor's own ``<include_paths>``/``<defines>``/
+    ``<gcc_options>`` as one compile-flag string.
+
+    A ``<headers>`` directory very often only parses with the include roots
+    and defines the descriptor itself declares -- MKL's does. Those elements
+    were read by nothing before, so a descriptor that fully specified how to
+    compile its own headers still failed to compile them, for a reason that
+    named neither the descriptor nor the missing flag.
+
+    Appended *after* any ``-gcc-options`` given on the command line, so an
+    explicit CLI flag stays last-wins where the compiler treats it that way.
+    """
+    parts = [f"-I{p}" for p in desc.include_paths]
+    parts += [d if d.startswith("-D") else f"-D{d}" for d in desc.defines]
+    parts += list(desc.gcc_options)
+    return " ".join(parts)
+
+
+class _SnapshotOptions(TypedDict):
+    """The dump options every library in one ``compat check`` run shares.
+
+    A ``TypedDict`` rather than a ``dict[str, object]`` bag: these are
+    forwarded straight into ``_snapshot_from_compat_input``'s keyword
+    parameters, and an untyped bag turns every one of those parameters into
+    ``object`` at the call site -- mypy then cannot tell a misspelled key or
+    a swapped ``sysroot``/``gcc_path`` from a correct call.
+    """
+
+    headers_list_path: Path | None
+    single_header: str | None
+    skip_headers_set: set[str]
+    quiet: bool
+    gcc_path: str | None
+    gcc_prefix: str | None
+    gcc_options: str | None
+    sysroot: Path | None
+    nostdinc: bool
+    lang: str | None
+
+
+def _plan_library_pairs(
+    old_d: CompatDescriptor | AbiSnapshot,
+    new_d: CompatDescriptor | AbiSnapshot,
+) -> tuple[list[tuple[Path, Path]], list[Path], list[Path]]:
+    """Pair the two sides' ``<libs>`` entries, or return no pairs at all.
+
+    Returns ``([], [], [])`` whenever either side is an already-built
+    snapshot (a JSON/Perl dump names no library list to fan out over) or
+    either side names one library or fewer -- the single-library path then
+    runs exactly as it did before, which is what keeps this change inert for
+    every ordinary one-library descriptor.
+    """
+    if not isinstance(old_d, CompatDescriptor) or not isinstance(
+        new_d, CompatDescriptor
+    ):
+        return [], [], []
+    if len(old_d.libs) <= 1 and len(new_d.libs) <= 1:
+        return [], [], []
+    return pair_libraries(old_d.libs, new_d.libs)
+
+
+def _record_unpaired_libraries(
+    result: DiffResult,
+    unpaired_old: list[Path],
+    unpaired_new: list[Path],
+    quiet: bool,
+) -> DiffResult:
+    """Record libraries present on only one side as coverage warnings.
+
+    Deliberately **not** findings. A descriptor's ``<libs>`` list is a
+    selection, and an entry with no counterpart on the other side is "not
+    supplied there", which is not the same fact as "removed from the
+    release" (ADR-065: *absent is not removed* -- proving a removal needs
+    inventory evidence a descriptor does not carry). Reporting them as
+    removals would manufacture exactly the false break this whole change set
+    exists to stop; dropping them silently would hide that the run covered
+    less than the descriptor named. A coverage warning is the disposition
+    that says both.
+    """
+    if not unpaired_old and not unpaired_new:
+        return result
+    warnings = [
+        *(
+            f"Library {p.name} is named by the old descriptor with no "
+            f"counterpart in the new one; it was not compared (not evidence "
+            f"of removal -- a descriptor names a selection, not an inventory)."
+            for p in unpaired_old
+        ),
+        *(
+            f"Library {p.name} is named by the new descriptor with no "
+            f"counterpart in the old one; it was not compared."
+            for p in unpaired_new
+        ),
+    ]
+    for w in warnings:
+        _do_echo(f"Warning: {w}", quiet)
+    return dataclasses.replace(
+        result, coverage_warnings=[*result.coverage_warnings, *warnings]
+    )
+
+
 def _take_snapshots_with_logging(
     old_d: CompatDescriptor | AbiSnapshot,
     new_d: CompatDescriptor | AbiSnapshot,
@@ -1292,6 +1473,8 @@ def _take_snapshots_with_logging(
     log1_handler: logging.Handler | None,
     log2_handler: logging.Handler | None,
     *,
+    old_lib: Path | None = None,
+    new_lib: Path | None = None,
     headers_list_path: Path | None,
     single_header: str | None,
     skip_headers_set: set[str],
@@ -1316,6 +1499,7 @@ def _take_snapshots_with_logging(
             old_d,
             vnum1,
             old_desc,
+            lib_override=old_lib,
             headers_list_path=headers_list_path,
             single_header=single_header,
             skip_headers_set=skip_headers_set,
@@ -1337,6 +1521,7 @@ def _take_snapshots_with_logging(
             new_d,
             vnum2,
             new_desc,
+            lib_override=new_lib,
             headers_list_path=headers_list_path,
             single_header=single_header,
             skip_headers_set=skip_headers_set,

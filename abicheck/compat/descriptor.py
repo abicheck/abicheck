@@ -19,17 +19,35 @@ Implements:
 - ``CompatDescriptor`` dataclass matching ABICC's -old/-new descriptor format
 - ``parse_descriptor()`` — validates required fields, supports multi-value tags
 
-Typical ABICC descriptor (old.xml):
+Both descriptor shapes ABICC accepts are parsed. A well-formed document:
+
+    <descriptor>
+      <version>2025.0</version>
+      <headers>/usr/include/foo</headers>
+      <libs>/usr/lib/libfoo.so</libs>
+    </descriptor>
+
+and ABICC's own rootless *fragment*, which is what real pipelines
+(Intel MKL's among them) actually ship -- sibling elements with no wrapper:
+
     <version>2025.0</version>
     <headers>/usr/include/foo</headers>
     <libs>/usr/lib/libfoo.so</libs>
 
-Extended form (multiple headers/libs):
+Until ``_parse_descriptor_root`` handled the second shape, this docstring
+showed it as the "typical" descriptor while the parser rejected it with a
+document-level XML error -- so the example a reader was most likely to copy
+was the one guaranteed not to work.
+
+Extended form (multiple headers/libs), valid under either shape:
     <version>2025.0</version>
     <headers>/usr/include/foo</headers>
     <headers>/usr/include/foo/detail</headers>
     <libs>/usr/lib/libfoo.so</libs>
     <libs>/usr/lib/libfoo_extra.so</libs>
+
+``<headers>`` and ``<libs>`` accept a **directory** as well as a file; see
+:func:`~abicheck.compat._helpers.expand_descriptor_headers`.
 """
 
 from __future__ import annotations
@@ -38,6 +56,14 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+# Type-only: defusedxml parses into stdlib ``Element`` objects; the alias
+# never constructs or parses anything, so it introduces no unsafe parser.
+from xml.etree.ElementTree import Element  # noqa: S405
 
 import defusedxml.ElementTree as ET
 
@@ -46,14 +72,80 @@ from ..errors import ValidationError
 log = logging.getLogger(__name__)
 
 
+#: Descriptor elements this parser reads and acts on.
+_SUPPORTED_ELEMENTS: frozenset[str] = frozenset(
+    {
+        "version",
+        "headers",
+        "libs",
+        "include_paths",
+        "add_include_paths",
+        "gcc_options",
+        "defines",
+        "skip_headers",
+        "skip_including",
+        "skip_namespaces",
+        "skip_constants",
+        "skip_symbols",
+        "skip_types",
+    }
+)
+
+#: Elements ABICC defines that this parser recognises but does **not** act
+#: on. Listed explicitly so they produce a "not applied" warning naming the
+#: element, rather than the silent drop every unread element used to get: a
+#: descriptor's ``<skip_libs>`` that quietly does nothing is worse than one
+#: that is rejected, because the run still produces a confident verdict
+#: computed over a surface the descriptor said to narrow.
+_KNOWN_UNAPPLIED_ELEMENTS: frozenset[str] = frozenset(
+    {
+        "skip_libs",
+        "search_headers",
+        "search_libs",
+        "tools",
+        "cross_prefix",
+        "include_preamble",
+        "libs_depend",
+        "opencl",
+    }
+)
+
+
 @dataclass
 class CompatDescriptor:
-    """Parsed ABICC XML descriptor."""
+    """Parsed ABICC XML descriptor.
+
+    Beyond ``version``/``headers``/``libs``, the elements below carry the
+    *narrowing* rules a real descriptor relies on. They were parsed by
+    nothing before -- ``parse_descriptor`` read three elements and dropped
+    every other child silently -- which meant a descriptor's declared skips
+    had no effect at all while the run still reported a confident verdict.
+    Intel MKL's descriptors carry 16 such skips, all load-bearing.
+    """
 
     version: str
     headers: list[Path]
     libs: list[Path]
     path: Path = field(default_factory=lambda: Path("."))
+    #: ``<skip_headers>``/``<skip_including>`` -- header names or paths to
+    #: exclude from the parsed surface. Matched the same way ``-skip-headers
+    #: FILE`` entries are (basename or full path).
+    skip_headers: list[str] = field(default_factory=list)
+    #: ``<skip_namespaces>`` -- C++ namespaces whose declarations are
+    #: internal.
+    skip_namespaces: list[str] = field(default_factory=list)
+    #: ``<skip_constants>`` -- macro/constant names to exclude.
+    skip_constants: list[str] = field(default_factory=list)
+    #: ``<skip_symbols>`` / ``<skip_types>`` -- exact names to exclude.
+    skip_symbols: list[str] = field(default_factory=list)
+    skip_types: list[str] = field(default_factory=list)
+    #: ``<include_paths>``/``<add_include_paths>`` -- include search roots,
+    #: and ``<defines>``/``<gcc_options>`` -- extra compile flags. Without
+    #: these a ``<headers>`` directory that relies on the descriptor's own
+    #: include roots cannot parse at all.
+    include_paths: list[Path] = field(default_factory=list)
+    defines: list[str] = field(default_factory=list)
+    gcc_options: list[str] = field(default_factory=list)
 
 
 def parse_descriptor(path: Path, *, relpath: str | None = None) -> CompatDescriptor:
@@ -77,12 +169,7 @@ def parse_descriptor(path: Path, *, relpath: str | None = None) -> CompatDescrip
     if not path.is_file():
         raise ValidationError(f"Descriptor path is not a regular file: {path}")
 
-    try:
-        tree = ET.parse(str(path))  # defusedxml.ElementTree.parse
-    except ET.ParseError as exc:
-        raise ValidationError(f"Invalid XML in descriptor {path}: {exc}") from exc
-
-    root = tree.getroot()
+    root = _parse_descriptor_root(path)
     base = path.parent
 
     def _get_all(tag: str) -> list[str]:
@@ -115,6 +202,8 @@ def parse_descriptor(path: Path, *, relpath: str | None = None) -> CompatDescrip
     header_strs = _get_all("headers")
     headers = [_resolve(s, resolve_base) for s in header_strs]
 
+    _warn_unread_elements(root, path)
+
     log.debug(
         "Parsed descriptor %s: version=%s, %d lib(s), %d header dir(s)",
         path,
@@ -123,7 +212,28 @@ def parse_descriptor(path: Path, *, relpath: str | None = None) -> CompatDescrip
         len(headers),
     )
 
-    return CompatDescriptor(version=version, headers=headers, libs=libs, path=path)
+    return CompatDescriptor(
+        version=version,
+        headers=headers,
+        libs=libs,
+        path=path,
+        # ABICC accepts both one-per-element and whitespace/newline-separated
+        # lists inside a single element; `_get_tokens` handles both so a
+        # descriptor written either way behaves identically.
+        skip_headers=_get_tokens(_get_all, "skip_headers")
+        + _get_tokens(_get_all, "skip_including"),
+        skip_namespaces=_get_tokens(_get_all, "skip_namespaces"),
+        skip_constants=_get_tokens(_get_all, "skip_constants"),
+        skip_symbols=_get_tokens(_get_all, "skip_symbols"),
+        skip_types=_get_tokens(_get_all, "skip_types"),
+        include_paths=[
+            _resolve(t, resolve_base)
+            for t in _get_tokens(_get_all, "include_paths")
+            + _get_tokens(_get_all, "add_include_paths")
+        ],
+        defines=_get_tokens(_get_all, "defines"),
+        gcc_options=_get_tokens(_get_all, "gcc_options"),
+    )
 
 
 def _resolve(p: str, base: Path) -> Path:
@@ -155,3 +265,120 @@ def _resolve(p: str, base: Path) -> Path:
                 "Use absolute paths for libraries outside the descriptor directory."
             ) from None
     return resolved
+
+
+#: Synthetic wrapper element used to parse a rootless ABICC descriptor
+#: *fragment*. Never appears in a descriptor a user wrote; chosen to match
+#: the root element this project's own documentation shows, so an error
+#: message naming it is not confusing to a reader who did supply a root.
+_SYNTHETIC_ROOT = "descriptor"
+
+
+def _parse_descriptor_root(path: Path) -> Element:
+    """Return the element whose direct children hold the descriptor fields.
+
+    ABICC's real descriptors are XML *fragments*: sibling ``<version>``,
+    ``<headers>`` and ``<libs>`` elements with no wrapper root. That is not a
+    well-formed XML document, so a plain ``ET.parse`` rejects the file
+    outright -- which made ``abicheck compat`` unable to consume the
+    descriptors of the very tool it is a drop-in replacement for. Intel MKL's
+    own CI descriptors are of exactly this shape, and hit exit 6.
+
+    ABICC is tolerant here, so this is: a file that parses as a document is
+    used as-is, and only a file that does *not* is retried once wrapped in a
+    synthetic root. Parsing stays on ``defusedxml`` in both attempts -- the
+    text is wrapped, never the parser bypassed -- so the XXE protections are
+    identical on either path.
+
+    A file that fails both attempts is malformed for a reason the wrapper
+    cannot explain away (an unclosed tag, a stray ``&``), and the *original*
+    document-level error is what is reported: the fragment retry is an
+    accommodation, not a diagnosis, and its own error would point at a
+    synthetic line number the user's file does not have.
+    """
+    try:
+        return ET.parse(str(path)).getroot()  # defusedxml.ElementTree.parse
+    except ET.ParseError as exc:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            raise ValidationError(f"Invalid XML in descriptor {path}: {exc}") from exc
+        wrapped = (
+            f"<{_SYNTHETIC_ROOT}>{_strip_xml_declaration(text)}</{_SYNTHETIC_ROOT}>"
+        )
+        try:
+            root = ET.fromstring(wrapped)  # defusedxml.ElementTree.fromstring
+        except ET.ParseError:
+            raise ValidationError(f"Invalid XML in descriptor {path}: {exc}") from exc
+        log.debug(
+            "Descriptor %s parsed as an ABICC fragment (no single root element)",
+            path,
+        )
+        return root
+
+
+def _strip_xml_declaration(text: str) -> str:
+    """*text* without a leading ``<?xml ...?>`` declaration.
+
+    An XML declaration is only legal at the very start of a document, so it
+    cannot survive being wrapped in a synthetic root -- a fragment file that
+    carries one (some generators emit it even for a fragment) would otherwise
+    fail the retry for a reason unrelated to why the first parse failed.
+    Only a *leading* declaration is removed, and only one: a ``<?xml`` later
+    in the file is a real error and stays one.
+    """
+    stripped = text.lstrip()
+    if not stripped.startswith("<?xml"):
+        return text
+    end = stripped.find("?>")
+    if end == -1:
+        return text
+    return stripped[end + 2 :]
+
+
+def _get_tokens(get_all: Callable[[str], list[str]], tag: str) -> list[str]:
+    """Whitespace-separated tokens across every *tag* element.
+
+    ABICC descriptors spell a list either way -- one element per value, or
+    one element holding a newline-separated block -- and real descriptors mix
+    the two. Splitting on whitespace covers both; no supported element's
+    values may contain a space (they are header names, namespaces, symbol
+    names and compile flags), so this cannot split one value in half.
+
+    The one case it would: a ``<gcc_options>`` value like ``-I /some/path``,
+    which splits into two tokens -- which is correct, since that is exactly
+    how the two tokens reach a compiler command line anyway.
+    """
+    out: list[str] = []
+    for raw in get_all(tag):
+        out.extend(raw.split())
+    return out
+
+
+def _warn_unread_elements(root: Element, path: Path) -> None:
+    """Warn about descriptor elements this parser does not act on.
+
+    Every child element outside :data:`_SUPPORTED_ELEMENTS` was silently
+    dropped before this existed -- including every ``<skip_*>`` rule, which
+    is how a descriptor could declare 16 exclusions, have none of them
+    applied, and still produce a confident verdict over the unnarrowed
+    surface. A warning is the minimum honest disposition: the run continues
+    (rejecting an unknown element outright would break drop-in
+    compatibility with descriptors carrying elements newer than this
+    parser), but nobody is told a rule was applied when it was not.
+    """
+    seen: set[str] = set()
+    for el in root:
+        tag = getattr(el, "tag", None)
+        if not isinstance(tag, str) or tag in _SUPPORTED_ELEMENTS or tag in seen:
+            continue
+        seen.add(tag)
+        if tag in _KNOWN_UNAPPLIED_ELEMENTS:
+            log.warning(
+                "Descriptor %s: <%s> is a recognised ABICC element that "
+                "abicheck does not apply; its rule has no effect on this run.",
+                path,
+                tag,
+            )
+        else:
+            log.warning("Descriptor %s: unknown element <%s> ignored.", path, tag)

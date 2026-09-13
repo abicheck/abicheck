@@ -2752,9 +2752,15 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # ABICC compatibility wrapper (P1 "ABICC compatibility is a parallel
         # frontend and engine path"): its own parallel engine path calls
         # both `dumper.dump()` and `checker.compare()` directly.
-        "abicheck/compat/cli.py:317:19:dumper.dump",
-        "abicheck/compat/cli.py:974:17:checker.compare",
-        "abicheck/compat/cli.py:1169:15:dumper.dump",
+        # Line-pinned, so these move whenever the file does. Still the same
+        # three sites, not new ones: one `dumper.dump` in the descriptor
+        # dump path, one in `_snapshot_from_compat_input`, and the single
+        # `checker.compare` the multi-library comparison loop shares across
+        # every paired library (kept a *single* call site deliberately --
+        # see that loop's own comment).
+        "abicheck/compat/cli.py:321:19:dumper.dump",
+        "abicheck/compat/cli.py:1017:16:checker.compare",
+        "abicheck/compat/cli.py:1238:15:dumper.dump",
     }
 )
 
