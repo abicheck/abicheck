@@ -271,6 +271,106 @@ def test_sides_with_different_unit_counts_still_share_one_gate(
 
 
 @pytest.mark.usefixtures("_fresh_gate")
+def test_a_serial_side_is_gated_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A pool of one still takes a slot, so it cannot overshoot the bound.
+
+    Regression test for a defect found in review. The serial path used to skip
+    the gate entirely -- defensible-looking, since one worker is what the
+    pre-parallel pass did -- but ``service.compare`` runs the two sides
+    concurrently, so a side that resolves to one worker (few headers, or an
+    explicit ``jobs=1``) added an *ungated* child alongside the other side's
+    full quota. With the host limit pinned to 1, that is two concurrent
+    children against a cap of one: the memory-derived clamp defeated on
+    precisely the host that produced it.
+    """
+    monkeypatch.setattr(igw, "host_job_limit", lambda **_kw: 1)
+    compiler = _FakeCompiler(20)
+    monkeypatch.setattr(igw.deadline, "run_bounded", compiler)
+    assert igw.resolve_jobs(2) == 1, "the two-unit side must resolve to one worker"
+
+    def serial_side() -> None:
+        ClangIncludeExtractor().extract_from_build(_build(2))
+
+    def pooled_side() -> None:
+        ClangIncludeExtractor(jobs=4).extract_from_build(_build(12, first=5))
+
+    threads = [
+        threading.Thread(target=serial_side),
+        threading.Thread(target=pooled_side),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert compiler.peak_inflight == 1
+
+
+@pytest.mark.usefixtures("_fresh_gate")
+def test_waiting_for_a_slot_is_bounded_by_the_aggregate_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A probe gives up on the gate when its own wall-clock budget runs out.
+
+    An unbounded ``acquire()`` is not merely slow: in a process serving
+    concurrent requests, one request's long probe holds the only slot while a
+    short-budget request blocks behind it, overruns its own budget, and only
+    then reports it. Here the slot is held for the whole test and the waiting
+    extractor must come back within its own 0.3s budget, having run nothing.
+    """
+    monkeypatch.setattr(igw, "host_job_limit", lambda **_kw: 1)
+    compiler = _FakeCompiler(8)
+    monkeypatch.setattr(igw.deadline, "run_bounded", compiler)
+
+    held = igw._clang_slots()
+    assert held.acquire(timeout=1)
+    try:
+        extractor = ClangIncludeExtractor(jobs=4, aggregate_timeout_s=0.3)
+        started = time.monotonic()
+        out = extractor.extract_from_build(_build(6))
+        elapsed = time.monotonic() - started
+    finally:
+        held.release()
+
+    assert out == {}
+    assert compiler.calls == [], "no probe may run while the gate is full"
+    assert elapsed < 5.0, f"blocked for {elapsed:.1f}s instead of its 0.3s budget"
+    assert any("time budget exhausted" in d for d in extractor.diagnostics)
+
+
+@pytest.mark.usefixtures("_fresh_gate")
+def test_waiting_for_a_slot_is_bounded_by_the_scan_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The request's own ``--budget`` also caps the wait, and stops the walk.
+
+    The companion to the test above, for the other of the two live budgets:
+    the aggregate cap is generous here and the scan deadline is what expires,
+    so the outcome must be the walk-stopping one rather than a per-extractor
+    time-budget report -- the two mean different things to the fold.
+    """
+    monkeypatch.setattr(igw, "host_job_limit", lambda **_kw: 1)
+    compiler = _FakeCompiler(8)
+    monkeypatch.setattr(igw.deadline, "run_bounded", compiler)
+
+    held = igw._clang_slots()
+    assert held.acquire(timeout=1)
+    try:
+        extractor = ClangIncludeExtractor(jobs=4, aggregate_timeout_s=60.0)
+        started = time.monotonic()
+        with deadline.deadline_scope(0.3):
+            out = extractor.extract_from_build(_build(6))
+        elapsed = time.monotonic() - started
+    finally:
+        held.release()
+
+    assert out == {}
+    assert compiler.calls == []
+    assert elapsed < 5.0, f"blocked for {elapsed:.1f}s past its 0.3s scan budget"
+    assert any("scan deadline exceeded" in d for d in extractor.diagnostics)
+
+
+@pytest.mark.usefixtures("_fresh_gate")
 def test_the_gate_is_never_replaced_once_built(monkeypatch: pytest.MonkeyPatch) -> None:
     """Whatever a later caller asks for, the existing gate object survives.
 

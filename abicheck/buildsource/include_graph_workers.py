@@ -224,9 +224,17 @@ def run_probes(
     """
     aggregate_deadline = time.monotonic() + aggregate_timeout_s
     resolved_jobs = resolve_jobs(len(planned), jobs=jobs, diagnostics=diagnostics)
+    slots = _clang_slots()
     if resolved_jobs <= 1:
+        # Still gated. A serial pool is one child rather than none, and
+        # `service.compare` runs the two sides concurrently: a side whose unit
+        # count (or explicit `jobs=1`) makes it serial would otherwise add an
+        # *ungated* child alongside the other side's full quota --
+        # ``host_job_limit + 1``, or two children where the memory-derived cap
+        # is one, which is the clamp defeated exactly on the host that needed
+        # it (Codex review, PR #1275). Uncontended, the acquire is free.
         return [
-            _run_probe(unit, aggregate_deadline, per_unit_timeout_s, None)
+            _run_probe(unit, aggregate_deadline, per_unit_timeout_s, slots)
             for unit in planned
         ]
     # One process-wide gate, not one per pool: `service.compare` resolves
@@ -238,7 +246,6 @@ def run_probes(
     # processes* across the request; the pools above it can stay
     # independent. Sized from the host budget alone and never replaced -- see
     # `_clang_slots_state` for the concrete way a per-pool size defeated it.
-    slots = _clang_slots()
     deadline_ts = deadline.current_deadline_ts()
     with ThreadPoolExecutor(max_workers=resolved_jobs) as pool:
         futures = [
@@ -274,22 +281,69 @@ def _run_probe_in_worker(
         return _run_probe(unit, aggregate_deadline, per_unit_timeout_s, slots)
 
 
+def _acquire_slot(
+    slots: threading.Semaphore, aggregate_deadline: float
+) -> ProbeOutcome | None:
+    """Take a slot in the process-wide gate, or say why this probe gives up.
+
+    ``None`` means the slot is held and the caller must release it. Otherwise
+    the returned outcome is the one the ordered fold would have recorded had
+    the probe never started, which is the honest reading: it never did.
+
+    The wait is capped at whichever of the two live budgets expires first --
+    this extractor's own aggregate wall clock and the request's ``--budget``
+    scan deadline -- rather than being unbounded. Unbounded is not merely
+    slow: in a process serving concurrent requests, one request's long probe
+    would hold a slot while another request's short-budget probe blocks
+    behind it, so the second request overruns its own budget waiting and only
+    reports it afterwards. Which budget ran out decides the outcome, because
+    the two mean different things to the fold: an exhausted aggregate stops
+    this extractor, an exhausted scan deadline stops the whole walk.
+    """
+    wait = aggregate_deadline - time.monotonic()
+    scan_remaining = deadline.remaining()
+    if scan_remaining is not None:
+        wait = min(wait, scan_remaining)
+    if wait <= 0 or not slots.acquire(timeout=wait):
+        if time.monotonic() >= aggregate_deadline:
+            return ProbeOutcome("aggregate_expired")
+        left = deadline.remaining()
+        if left is not None and left <= 0:
+            return ProbeOutcome(
+                "scan_deadline",
+                detail="budget exhausted while waiting for a clang -M slot",
+            )
+        # Neither budget is out, so the wait was cut short by nothing this
+        # function can name (a spurious timeout). Treated as the aggregate
+        # budget rather than guessed at: it stops this extractor and leaves
+        # the rest of the walk -- and every other extractor -- alone.
+        return ProbeOutcome("aggregate_expired")
+    return None
+
+
 def _run_probe(
     unit: DepfileProbe,
     aggregate_deadline: float,
     per_unit_timeout_s: float,
-    slots: threading.Semaphore | None,
+    slots: threading.Semaphore,
 ) -> ProbeOutcome:
     """Run one planned ``clang -M``, reporting the outcome as data.
 
     Records nothing anywhere -- no shared state at all -- so it is safe to
     call from several threads at once: the caller's ordered fold owns every
     mutation, which is also what keeps the diagnostics order deterministic.
+
+    Waiting for the process-wide gate is itself bounded by the same two
+    budgets that bound the probe (see :func:`_acquire_slot`): a bare
+    ``acquire()`` would let a short-``--budget`` request block on an unrelated
+    concurrent request's long probe and only *then* report that its own budget
+    was gone (Codex review, PR #1275).
     """
     if time.monotonic() >= aggregate_deadline:
         return ProbeOutcome("aggregate_expired")
-    if slots is not None:
-        slots.acquire()
+    denied = _acquire_slot(slots, aggregate_deadline)
+    if denied is not None:
+        return denied
     try:
         # Re-read after any queueing: the per-call timeout must reflect
         # what is left of the aggregate budget *now*, not at submit time.
@@ -345,8 +399,7 @@ def _run_probe(
         except (OSError, subprocess.SubprocessError) as exc:
             return ProbeOutcome("error", detail=str(exc))
     finally:
-        if slots is not None:
-            slots.release()
+        slots.release()
     # ``getattr`` rather than direct attribute access on ``stderr``/
     # ``returncode``: the sequential loop only read those two when
     # ``stdout`` came back blank, so a stand-in result object that carries

@@ -926,7 +926,13 @@ component figures, not an end-to-end speedup claim.
   their full quota at once (`tests/test_include_graph_parallel.py::
   test_sides_with_different_unit_counts_still_share_one_gate`, and
   `perf.shared_resource_gate_keyed_on_a_per_caller_value` in
-  `tests/regressions/manifest.py`). One
+  `tests/regressions/manifest.py`). Two further review rounds on the same
+  gate are worth reading before touching it: the *serial* path (one unit, or
+  `jobs=1`) must take a slot too -- one child is not no children, and an
+  ungated one alongside the other side's full quota is `host_limit + 1` -- and
+  the wait for a slot must be bounded by the run's aggregate and `--budget`
+  deadlines, or a short-budget request blocks past its own budget behind an
+  unrelated request's long probe and reports the overrun only afterwards. One
   thing that is *not* a valid shortcut here, and was ruled out with a real
   clang: replacing the per-header probes with a single umbrella TU. A header
   with an include guard that a *previous* header in the umbrella already

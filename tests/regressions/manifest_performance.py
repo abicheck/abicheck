@@ -83,7 +83,13 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "resource actually held concurrently while two callers that "
             "resolve to *different* sizes overlap; a single-caller test, or "
             "one where both callers happen to resolve the same size, passes "
-            "against a gate that is no gate at all."
+            "against a gate that is no gate at all. Two corollaries, each "
+            "its own defect found on the same gate: every path that takes "
+            "the resource goes through it -- a *serial* path is one holder, "
+            "not none, and exempting it admits one over the cap -- and "
+            "waiting for it is bounded by whatever deadlines bound the work "
+            "itself, or one caller's long hold makes another overrun a "
+            "budget it was supposed to be held to."
         ),
         # Found in review on the PR that introduced the bounded-parallel
         # `clang -M` include-map pass. The gate was keyed on each pool's own
