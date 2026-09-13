@@ -46,6 +46,8 @@ import pytest
 
 from abicheck.bundle import (
     _looks_like_stored_snapshot_file,
+    _stored_document_library_filename,
+    _stored_file_snapshot_evidence,
     build_bundle_snapshot_mixed,
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
@@ -263,3 +265,172 @@ class TestMalformedFileMemberIsSkippedNotFatal:
 
         assert "libgood.so.1" in snap.metadata
         assert "libbad.so.1" not in snap.metadata
+
+
+class TestRecoveredLibraryIdentity:
+    """Codex review, PR #1269 (P1): a release key is canonicalized, so a
+    file-backed member must recover the *represented* filename from its own
+    document or a sibling's `DT_NEEDED` stops resolving.
+
+    The failure this guards is not "a field is missing" but "a real
+    intra-bundle dependency edge is classified as external", so it is
+    asserted at the graph, not only at the reader.
+    """
+
+    def test_versioned_dt_needed_resolves_to_the_canonicalized_key(
+        self, tmp_path: Path
+    ) -> None:
+        # The consumer records DT_NEEDED against the *versioned* filename...
+        consumer = _snapshot("libcons.so", needed=("libprov.so.1",))
+        # ...while the provider's release key is the canonicalized name, and
+        # the provider has no DT_SONAME of its own to fall back on.
+        provider = AbiSnapshot(
+            library="libprov.so.1",
+            version="1",
+            functions=[],
+            variables=[],
+            types=[],
+            elf=ElfMetadata(soname="", symbols=[ElfSymbol(name="_Z4provv")]),
+        )
+        libraries = {
+            "libcons.so": _write(consumer, tmp_path / "c.abicheck.json", "zstd"),
+            "libprov.so": _write(provider, tmp_path / "p.abicheck.json", "zstd"),
+        }
+
+        snap = build_bundle_snapshot_mixed(libraries)
+
+        # The user-facing consequence, not the lookup table: the edge must
+        # be intra-bundle, never "extra" (external).
+        assert "libprov.so.1" in snap.resolution.intra_needed.get("libcons.so", ()), (
+            "the provider's represented filename was discarded, so the "
+            "consumer's DT_NEEDED=libprov.so.1 resolved to nothing: "
+            f"intra={snap.resolution.intra_needed}, "
+            f"extra={snap.resolution.extra_needed}"
+        )
+        assert "libprov.so.1" not in snap.resolution.extra_needed.get("libcons.so", ())
+        assert snap.resolution.soname_to_name["libprov.so.1"] == "libprov.so"
+
+    def test_filename_is_recovered_from_the_document(self, tmp_path: Path) -> None:
+        path = _write(
+            _snapshot("libnamed.so.2"), tmp_path / "renamed.abicheck.json", "none"
+        )
+        _elf, filename = _stored_file_snapshot_evidence(path)
+        # The oracle is the snapshot's own recorded library name -- not the
+        # file it happens to be stored under, which differs here on purpose.
+        assert filename == Path("libnamed.so.2")
+
+
+class TestRecoveredFilenameIsUntrustedInput:
+    """The recovered name is whatever a document on disk claims, and it lands
+    in a path mapping -- so the predicate is tested directly against hostile
+    values, not only through a well-formed writer's output."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "../../etc/passwd",
+            "/etc/passwd",
+            "a/b.so",
+            "a\\b.so",
+            "..",
+            ".",
+            "",
+            "   ",
+        ],
+    )
+    def test_path_bearing_or_empty_names_are_rejected(self, value: str) -> None:
+        assert _stored_document_library_filename({"library": value}) is None
+
+    @pytest.mark.parametrize("value", [None, 42, ["libx.so"], {"name": "libx.so"}])
+    def test_non_string_names_are_rejected(self, value: object) -> None:
+        assert _stored_document_library_filename({"library": value}) is None
+
+    def test_absent_key_is_rejected(self) -> None:
+        assert _stored_document_library_filename({}) is None
+
+    @pytest.mark.parametrize(
+        "value", ["libx.so", "libx.so.1", "libx.so.1.2.3", "lib-x_y+z.so"]
+    )
+    def test_plain_basenames_are_accepted(self, value: str) -> None:
+        assert _stored_document_library_filename({"library": value}) == Path(value)
+
+
+class TestSchemaCeiling:
+    """Codex review, PR #1269 (P1): reading the `elf` section directly
+    bypassed the ADR-050 D1 hard-rejection ceiling every other snapshot
+    reader applies, admitting a future-schema document into the bundle graph
+    on partially interpreted evidence.
+
+    The oracle is `storage.snapshot_schema_versions`' own constants, derived
+    independently of the branch under test, so this cannot pass by agreeing
+    with a hardcoded copy of the number.
+    """
+
+    @staticmethod
+    def _document(schema_version: int) -> str:
+        return json.dumps(
+            {
+                "library": "libfuture.so",
+                "schema_version": schema_version,
+                "elf": {"soname": "libfuture.so.1"},
+            }
+        )
+
+    def test_future_schema_is_not_admitted(self, tmp_path: Path) -> None:
+        from abicheck.storage.snapshot_schema_versions import SCHEMA_VERSION
+
+        path = tmp_path / "future.abicheck.json"
+        path.write_text(self._document(SCHEMA_VERSION + 1))
+
+        assert _stored_file_snapshot_evidence(path) == (None, None)
+        assert (
+            "libfuture.so"
+            not in build_bundle_snapshot_mixed({"libfuture.so": path}).metadata
+        )
+
+    def test_the_current_schema_is_admitted(self, tmp_path: Path) -> None:
+        """The complement, so a ceiling accidentally set one too low -- which
+        would reject every snapshot this build itself writes -- fails here
+        rather than passing as 'nothing was admitted'."""
+        from abicheck.storage.snapshot_schema_versions import SCHEMA_VERSION
+
+        path = tmp_path / "current.abicheck.json"
+        path.write_text(self._document(SCHEMA_VERSION))
+
+        elf, _filename = _stored_file_snapshot_evidence(path)
+        assert elf is not None
+        assert elf.soname == "libfuture.so.1"
+
+    def test_older_schemas_are_admitted(self, tmp_path: Path) -> None:
+        """A stored snapshot from an older abicheck is an ordinary operand --
+        the ceiling rejects *newer*, never older."""
+        from abicheck.storage.snapshot_schema_versions import SCHEMA_VERSION
+
+        for older in (1, SCHEMA_VERSION // 2, SCHEMA_VERSION - 1):
+            path = tmp_path / f"old-{older}.abicheck.json"
+            path.write_text(self._document(older))
+            elf, _ = _stored_file_snapshot_evidence(path)
+            assert elf is not None, f"schema_version {older} was rejected"
+
+    def test_below_the_hard_rejection_threshold_still_decodes(
+        self, tmp_path: Path
+    ) -> None:
+        """The rule mirrors `decode_snapshot`'s two tiers exactly: a version
+        newer than this build but *below* the ADR-050 threshold warns and
+        decodes rather than being refused. Asserted so this reader cannot
+        drift into a stricter third rule of its own."""
+        from abicheck.storage.snapshot_schema_versions import (
+            _MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION,
+            SCHEMA_VERSION,
+        )
+
+        below = _MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION - 1
+        if below <= 0 or below <= SCHEMA_VERSION:
+            pytest.skip(
+                "this build's SCHEMA_VERSION is already at or past the "
+                "hard-rejection threshold, so the warn tier is unreachable"
+            )
+        path = tmp_path / "warn.abicheck.json"
+        path.write_text(self._document(below))
+        elf, _ = _stored_file_snapshot_evidence(path)
+        assert elf is not None

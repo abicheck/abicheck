@@ -69,8 +69,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Any, cast
 
 from .bundle_detector_heuristics import (  # noqa: F401  (re-exported for back-compat)
     _build_demangled_index as _build_demangled_index,
@@ -265,26 +265,37 @@ def build_bundle_snapshot_mixed(libraries: dict[str, Path]) -> BundleSnapshot:
     stored_paths: dict[str, Path] = {}
     extra_aliases: dict[str, tuple[str, ...]] = {}
     alias_nodes_so_far = 0
+    # A file-backed member is read once, for both halves of its evidence:
+    # re-reading to recover the filename separately would decompress a
+    # multi-gigabyte header-depth snapshot twice.
+    file_backed_filenames: dict[str, Path] = {}
     for name, path in stored.items():
-        elf = _stored_elf_metadata(path)
+        if path.is_dir():
+            elf = _stored_elf_metadata(path)
+        else:
+            elf, recovered = _stored_file_snapshot_evidence(path)
+            if recovered is not None:
+                file_backed_filenames[name] = recovered
         if elf is None:
             continue
         metadata[name] = elf
-        # `_stored_library_identity` reads a directory-backed package's own
-        # `ArtifactRef.native_identity`; a file-backed stored snapshot has no
-        # such ref document, so its real filename/aliases are simply not
-        # recorded evidence -- the same "a stored package produced by
-        # something else may not carry it" degrade that function already
-        # documents, not a new failure mode. `ElfMetadata.soname` (which a
-        # file-backed member does carry) stays available to
-        # `_detect_soname_skew`; only its no-`DT_SONAME` filename fallback is
-        # unavailable for this operand shape.
+        # Two readers, one contract. A directory-backed package records its
+        # identity in `ArtifactRef.native_identity`; a file-backed snapshot
+        # has no ref document but records `AbiSnapshot.library`, which every
+        # platform dumper sets to the artifact's own `Path.name`. Both routes
+        # recover the real filename, because without it a canonicalized
+        # bundle key is all `build_bundle_snapshot_from_metadata` has to
+        # synthesize a path from, and a sibling's `DT_NEEDED` naming the
+        # versioned filename verbatim stops resolving (see
+        # `_stored_file_snapshot_evidence`'s docstring). Filesystem *aliases*
+        # remain directory-only: a loose snapshot records no alias set, which
+        # is an absent-evidence degrade, not a failure.
         if path.is_dir():
             real_filename, aliases, alias_nodes_so_far = _stored_library_identity(
                 path, alias_nodes_so_far
             )
         else:
-            real_filename, aliases = None, ()
+            real_filename, aliases = file_backed_filenames.get(name), ()
         if real_filename is not None:
             stored_paths[name] = real_filename
         if aliases:
@@ -385,9 +396,51 @@ def _is_stored_member(path: Path) -> bool:
     return _looks_like_stored_snapshot_file(path)
 
 
-def _stored_file_elf_metadata(path: Path) -> ElfMetadata | None:
+def _stored_document_library_filename(document: dict[str, Any]) -> Path | None:
+    """The real on-disk library filename a stored snapshot document recorded
+    (`AbiSnapshot.library`), or `None` when it records nothing usable.
+
+    Treated as untrusted content, because it is: the value is whatever a
+    document on disk claims. Only a bare basename is accepted -- anything
+    carrying a directory separator, a parent reference, or a drive/root is
+    rejected rather than normalized, since this value lands in
+    `build_bundle_snapshot_from_metadata`'s `paths` mapping. That mapping is
+    never filesystem-probed for a stored member (`build_bundle_snapshot_
+    mixed` passes `probe_filesystem_names=frozenset(live)` precisely so a
+    stored member's recovered name is never resolved against the caller's
+    own cwd), so this is defence in depth rather than the only guard -- but
+    a name that can only ever be compared against a `DT_NEEDED` string has
+    no legitimate reason to contain a path at all.
+    """
+    raw = document.get("library")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    candidate = raw.strip()
+    if "/" in candidate or "\\" in candidate:
+        return None
+    if candidate in {".", ".."} or PurePosixPath(candidate).name != candidate:
+        return None
+    return Path(candidate)
+
+
+def _stored_file_snapshot_evidence(
+    path: Path,
+) -> tuple[ElfMetadata | None, Path | None]:
     """`_stored_elf_metadata`'s file-backed half: the `ElfMetadata` of a
-    loose stored snapshot document.
+    loose stored snapshot document, plus the real on-disk library filename
+    that document recorded.
+
+    The filename is this half's counterpart to `_stored_library_identity`'s
+    `ArtifactRef.native_identity` lookup, and it is load-bearing for the same
+    reason: a release key is canonicalized (`libprov.so.1.abicheck.json` ->
+    `libprov.so`), so without a recovered filename
+    `build_bundle_snapshot_from_metadata` synthesizes `Path(<bundle key>)`,
+    `soname_to_name` never contains the versioned `libprov.so.1` a sibling's
+    `DT_NEEDED` names verbatim, and that real intra-bundle edge is
+    misclassified as an external dependency -- silently dropping the
+    provider-migration and removal findings that depend on reachability
+    (Codex review, PR #1269). `AbiSnapshot.library` carries exactly this: every
+    platform dumper sets it to the artifact's own `Path.name`.
 
     Reads through `snapshot_io.read_snapshot_text` (the canonical storage
     envelope reader -- plain/gzip/zstd by magic bytes, with the
@@ -402,9 +455,11 @@ def _stored_file_elf_metadata(path: Path) -> ElfMetadata | None:
     `document["elf"]` without unwrapping would find nothing and report every
     modern snapshot as "no ELF metadata present".
 
-    Returns `None` -- never raises -- for anything that doesn't parse,
-    matching the sibling half's (and `build_bundle_snapshot`'s) own
-    "unresolvable member is skipped, not fatal" contract.
+    Returns `(None, None)` -- never raises -- for anything that doesn't
+    parse, matching the sibling half's (and `build_bundle_snapshot`'s) own
+    "unresolvable member is skipped, not fatal" contract. A recovered
+    filename absent or unusable is `None` on its own, which
+    `build_bundle_snapshot_from_metadata` already degrades from.
     """
     import json
 
@@ -414,14 +469,45 @@ def _stored_file_elf_metadata(path: Path) -> ElfMetadata | None:
         from_sectioned_document,
         is_sectioned_document,
     )
+    from .storage.snapshot_schema_versions import (
+        _MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION,
+        SCHEMA_VERSION as SNAPSHOT_SCHEMA_VERSION,
+    )
 
     try:
         document = json.loads(read_snapshot_text(path))
         if not isinstance(document, dict):
             log.debug("bundle: stored snapshot %s is not a JSON object", path)
-            return None
+            return None, None
         if is_sectioned_document(document):
             document = from_sectioned_document(document)
+        schema_version = int(document.get("schema_version", 1))
+        # ADR-050 D1's hard-rejection ceiling, applied *before* decoding --
+        # the same rule `storage.snapshot_codec.decode_snapshot` enforces for
+        # every snapshot read through `serialization.load_snapshot`, and that
+        # `storage.import_v1` enforces for the directory-backed half via its
+        # required `max_known_schema_version`. Reading the `elf` section
+        # directly bypassed both, so a document written by a newer abicheck --
+        # which may carry verdict-blocking fields this reader has no code path
+        # for -- was admitted into the bundle graph on partially interpreted
+        # evidence, even when its own per-library comparison had already been
+        # refused as incomparable (Codex review, PR #1269). Unresolved rather
+        # than raised: an unusable member is skipped, the contract the rest of
+        # this function keeps.
+        if (
+            schema_version > SNAPSHOT_SCHEMA_VERSION
+            and schema_version >= _MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION
+        ):
+            log.warning(
+                "bundle: stored snapshot %s declares schema_version %d, newer "
+                "than this abicheck supports (%d) -- it cannot participate in "
+                "bundle-level analysis. Upgrade abicheck to read it.",
+                path,
+                schema_version,
+                SNAPSHOT_SCHEMA_VERSION,
+            )
+            return None, None
+        library_filename = _stored_document_library_filename(document)
         elf_data = document.get("elf")
         if not isinstance(elf_data, dict):
             # `debug`, not `warning`, and deliberately so: bundle analysis is
@@ -432,12 +518,12 @@ def _stored_file_elf_metadata(path: Path) -> ElfMetadata | None:
             # ordinary header-only release directory, which corrupts
             # `-o json=-` output (tests/test_cli_compare_release_view.py).
             log.debug("bundle: stored snapshot %s has no ELF metadata", path)
-            return None
-        schema_version = int(document.get("schema_version", 1))
-        return cast("ElfMetadata", elf_from_dict(elf_data, schema_version))
+            return None, None
+        elf = cast("ElfMetadata", elf_from_dict(elf_data, schema_version))
+        return elf, library_filename
     except Exception as exc:
         log.warning("bundle: failed to resolve stored snapshot %s: %s", path, exc)
-        return None
+        return None, None
 
 
 def _stored_elf_metadata(path: Path) -> ElfMetadata | None:
@@ -478,7 +564,7 @@ def _stored_elf_metadata(path: Path) -> ElfMetadata | None:
     from .snapshot_platform_blocks import elf_from_dict
 
     if not path.is_dir():
-        return _stored_file_elf_metadata(path)
+        return _stored_file_snapshot_evidence(path)[0]
 
     try:
         document = read_legacy_snapshot_document(path)

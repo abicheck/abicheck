@@ -11,3 +11,10 @@
   *compatible* bundle verdict carried by phantom `bundle_library_added`
   findings. Detection is by content (magic bytes / JSON object opener), never
   by filename suffix.
+- Bundle analysis: a stored snapshot document declaring a `schema_version`
+  newer than this build supports is no longer admitted into the bundle graph.
+  The file-backed reader decoded the `elf` section directly, bypassing the
+  ADR-050 D1 hard-rejection ceiling every other snapshot reader applies, so a
+  member whose own per-library comparison was already refused as incomparable
+  could still contribute bundle-level findings from partially interpreted
+  evidence.
