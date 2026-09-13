@@ -26,11 +26,11 @@ detector in ``diff_platform``.
 from __future__ import annotations
 
 from .checker_types import Change
+from .compare.template_surface import reconciled_public_function_maps
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot, Function
 from .model.change_catalog.kinds import ChangeKind
-from .model.surface_facts import in_public_surface
 
 # Canonical integer-width buckets. A change that moves a spelling from one
 # bucket to a *different* bucket (and is not a sign-only change) is a width flip.
@@ -165,8 +165,8 @@ def _diff_integer_model(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # Windows/LLP64: ``long`` is 32-bit, so int<->long is NOT a model flip there.
     is_llp64 = "pe" in (old.platform, new.platform)
 
-    old_map = {f.mangled: f for f in old.functions if in_public_surface(f)}
-    new_map = {f.mangled: f for f in new.functions if in_public_surface(f)}
+    # Reconciled, not raw -- see compare/template_surface.py.
+    old_map, new_map = reconciled_public_function_maps(old, new)
 
     flips, total, up, down = _scan_function_integer_flips(old_map, new_map, is_llp64)
     typedef_flips, typedef_up, typedef_down = _scan_typedef_integer_flips(

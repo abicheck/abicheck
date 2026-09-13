@@ -83,7 +83,10 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TypeVar
 
-from .compatibility_evaluation_config import CompatibilityEvaluationConfig
+from .compatibility_evaluation_config import (
+    CompatibilityEvaluationConfig,
+    _frozen_tuple,
+)
 from .contract_relevance_types import (
     CONTRACT_EVIDENCE_SCHEMA_VERSION,
     DECISION_RECEIPT_SCHEMA_VERSION,
@@ -96,30 +99,6 @@ from .contract_relevance_types import (
 )
 
 _T = TypeVar("_T")
-
-
-def _frozen_tuple(s: Sequence[_T], *, element_type: type[_T]) -> tuple[_T, ...]:
-    """Freeze *s* into an order-preserving tuple, validating element types.
-
-    Rejects a bare ``str``/``bytes`` (iterating one yields characters, not
-    the intended single element) and materializes before validating so a
-    one-shot iterable isn't silently consumed by the check alone -- mirrors
-    ``compatibility_evaluation_config._frozen_tuple``.
-    """
-    if isinstance(s, (str, bytes)):
-        raise TypeError(
-            f"Expected a sequence of items, not a bare {type(s).__name__} "
-            f"{s!r} -- iterating a string/bytes value yields individual "
-            "characters, not the intended elements; wrap a single value in "
-            "a list/tuple explicitly."
-        )
-    materialized = tuple(s)
-    invalid = [item for item in materialized if not isinstance(item, element_type)]
-    if invalid:
-        raise TypeError(
-            f"Every element must be a {element_type.__name__}, not: {invalid!r}"
-        )
-    return materialized
 
 
 def _frozen_mapping(m: Mapping[str, object]) -> MappingProxyType[str, object]:

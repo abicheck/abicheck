@@ -35,13 +35,14 @@ from __future__ import annotations
 from collections import defaultdict
 
 from .checker_types import Change
+from .compare.template_surface import reconciled_abi_visible_functions
 from .detector_registry import registry
 from .diff_helpers import (
     build_type_map as _build_type_map,
     lookup_matched_type as _lookup_matched_type,
     make_change,
 )
-from .diff_symbols import _public_variables
+from .diff_symbols import _reconciled_variable_surfaces
 from .diff_types_surface import (
     _RESERVED_FIELD_RE,
     _directly_referenced,
@@ -49,7 +50,6 @@ from .diff_types_surface import (
 )
 from .model import AbiSnapshot, Function, TypeField, stdlib_namespaces_excluded
 from .model.change_catalog.kinds import ChangeKind
-from .model.surface_facts import is_abi_visible
 
 
 @registry.detector("var_values")
@@ -60,8 +60,12 @@ def _diff_var_values(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     use stale compile-time-inlined values (constant propagation).
     """
     changes: list[Change] = []
-    old_map = _public_variables(old)
-    new_map = _public_variables(new)
+    # The shared evidence-gap-reconciled join, not a bare `_public_variables`
+    # pair: a promised-but-unexported variable whose captured value moved
+    # from 1 to 2 reported nothing at all when only one side's run
+    # established contract evidence, because the surviving pair never met
+    # (Codex review, P1). See abicheck.compare.surface_reconcile.
+    old_map, new_map = _reconciled_variable_surfaces(old, new)
 
     for mangled, v_old in old_map.items():
         v_new = new_map.get(mangled)
@@ -225,8 +229,8 @@ def _diff_const_overloads(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     existed in old, but only the non-const version remains in new.
     """
     changes: list[Change] = []
-    old_funcs = [f for f in old.functions if is_abi_visible(f)]
-    new_funcs = [f for f in new.functions if is_abi_visible(f)]
+    # Reconciled, not raw -- see compare/template_surface.py.
+    old_funcs, new_funcs = reconciled_abi_visible_functions(old, new)
 
     # Group by (name, param_signature) to find const/non-const pairs
     _ParamSig = tuple[str, int, str]  # (type, pointer_depth, kind)

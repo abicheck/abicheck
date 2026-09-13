@@ -207,7 +207,7 @@ aggregate:
 
 Both sub-keys are independently optional; only present when at least one was
 set. A plan generated from a `CONFIG` with no `aggregate: gate:` block (or
-neither sub-key set) omits `gate` entirely, and `aggregate --run-plan` then
+neither sub-key set) omits `gate` entirely, and `aggregate --manifest` then
 applies the hard-coded default policy, same as before this option existed.
 There is no per-invocation CLI override — `project plan`'s former
 `--gate-missing-required`/`--gate-unexpected-target` flags were removed (no
@@ -221,17 +221,53 @@ hard-coded default policy — exactly the version-skew inversion
 `aggregate_manifest_version`'s `2.0` bump (see
 [Aggregate Reports](../use/aggregate-reports.md)) exists to prevent, just one
 layer up, in the *persisted* `run-plan.json` artifact rather than only in the
-manifest `aggregate --run-plan` projects from it in memory. A plan with no
+manifest `aggregate --manifest` projects from it in memory. A plan with no
 `gate` keeps the unchanged `v1` schema string — the bump is additive-only,
 scoped to this one capability. A `gate` block paired with a declared `v1`
 schema, a missing `schema` field, or an unrecognized/malformed `schema`
 string is rejected as malformed input, not silently honored.
 
+## Top-level `skipped` block
+
+A plan that resolves **no** checks carries a `skipped` block saying why, and
+is stamped `"schema": "abicheck.run-plan/v3"`:
+
+```json
+{
+  "schema": "abicheck.run-plan/v3",
+  "skipped": {
+    "reason": "no_checks_declared",
+    "declared_checks": 0,
+    "explanation": "CONFIG declares no targets:/bundles: checks[], ..."
+  },
+  "checks": []
+}
+```
+
+Two empty plans mean opposite things, and the block is what separates them
+(plan slice 7r, which retired `project plan --allow-empty` — a bypass switch
+that existed only because the artifact could not tell them apart):
+
+| `reason` | What it means | `project plan` exit |
+|---|---|---|
+| `no_checks_declared` | `CONFIG` declares no `checks[]` at all — a project bootstrapping `.abicheck.yml`. Nothing was skipped that was ever asked for; run `abicheck project validate CONFIG` for the config's own well-formedness. | `0` |
+| `checks_declared_none_resolved` | `CONFIG` declares `checks[]` and none resolved to a `(target, profile)` cell — usually a missing `--build-output`, or a profile id that does not match its `build-output.json`. Every downstream matrix/aggregate step would be silently skipped. | `1` |
+
+`declared_checks` is the evidence the classification rests on, carried so a
+consumer can check the label rather than trust it. A plan with at least one
+check never carries the block and keeps its `v1`/`v2` schema string: the
+bump is additive-only and scoped to this one capability, for the same reason
+`gate`'s `v2` bump is — a pre-v3 reader sees only `checks: []` and cannot
+tell a deliberate, explained skip from a plan whose every check failed to
+resolve, so it must reject the artifact rather than read it as the other
+case. A `skipped` block paired with a declared pre-v3 schema is rejected as
+malformed input, not silently honored.
+
 ## CLI
 
 ```bash
 abicheck project plan [CONFIG] [--build-output PROFILE=DIR ...] \
-    [--project OWNER/REPO] [--head-sha SHA] [--allow-empty] \
+    [--project OWNER/REPO] [--head-sha SHA] \
     [-o json=...|text] [-o OUTPUT]
 ```
 
@@ -242,15 +278,17 @@ profile's `abicheck-build-<profile>/` directory (containing
 
 | Exit | Meaning |
 |------|---------|
-| `0` | Generated with no coverage-gap errors (warnings may still exist), and at least one check resolved (or `--allow-empty` was given). |
-| `1` | A required/explicit check could not be resolved against the supplied `--build-output` directories, or the run-plan resolved to zero checks without `--allow-empty` (ADR-054: fail-closed by default, so a consumer with no guard of its own doesn't silently skip every downstream check). |
+| `0` | Generated with no coverage-gap errors (warnings may still exist), and at least one check resolved — or `CONFIG` declared no `checks[]` at all, which is an *explained skipped plan* (see `skipped` below). |
+| `1` | A required/explicit check could not be resolved against the supplied `--build-output` directories, or `CONFIG` declared `checks[]` that resolved to zero cells (ADR-054's fail-closed default, so a consumer with no guard of its own doesn't silently skip every downstream check). There is no flag that accepts this case. |
 | `64` | Usage error — `CONFIG` or a `--build-output` value is unreadable, or `CONFIG` fails `project validate`. |
 
 ```bash
-abicheck aggregate REPORTS_DIR --run-plan RUN_PLAN_JSON [...]
+abicheck aggregate REPORTS_DIR --manifest RUN_PLAN_JSON [...]
 ```
 
-`aggregate --run-plan` (ADR-054) projects `run-plan.json` down to the
+`aggregate --manifest` (ADR-054; plan slice 7q folded the former separate
+run-plan flag into it, recognizing the plan by its own `schema` rather than
+by its filename) projects `run-plan.json` down to the
 expected-target set internally — `abicheck aggregate --manifest`'s
 `{"targets": [{"id", "required"}]}` wire shape (ADR-047 §5's required
 sub-task) — using each check's own `check_id` as the expected target id,

@@ -55,6 +55,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
 
 from .. import deadline, process_resources
+from ..extract.env_flags import env_flag
 from ..parallel_probe import OrderedDiagnostics, run_parallel_probes
 from .model import CoverageStatus, LayerConfidence, LayerCoverage
 from .preprocessor_probe_families import (
@@ -128,8 +129,7 @@ def preprocessor_scan_enabled() -> bool:
     tier's compiler-shell-out cost) — the coverage row reports why, exactly
     like a missing compile DB or missing ``clang`` does.
     """
-    raw = os.environ.get("ABICHECK_PREPROCESSOR_SCAN", "").strip().lower()
-    return raw not in ("0", "false", "no", "off")
+    return env_flag("ABICHECK_PREPROCESSOR_SCAN")
 
 
 def _preprocessor_scan_jobs(n_items: int) -> int:

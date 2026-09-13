@@ -66,6 +66,7 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
     purge_external_outputs as purge_external_outputs,
 )
 from .errors import SnapshotError, ValidationError
+from .evidence_depth import layer_payload_empty
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -226,26 +227,6 @@ def dump_source_only(
 # ---------------------------------------------------------------------------
 
 
-def _layer_payload_empty(pack: BuildSourcePack, key: str) -> bool:
-    """True when *key*'s embedded payload carries no facts.
-
-    A coverage row can read ``PARTIAL``/``PRESENT`` while the payload is empty —
-    e.g. ``_run_inline_source_abi`` returns an empty ``SourceAbiSurface()`` when
-    clang is unavailable after L3 was found. The status alone then hides the
-    miss, so we inspect the actual payload (Codex review, PR #422).
-    """
-    if key == "L3":
-        be = pack.build_evidence
-        return be is None or (not be.targets and not be.compile_units)
-    if key == "L4":
-        sa = pack.source_abi
-        return sa is None or not any(sa.reachable_buckets().values())
-    if key == "L5":
-        sg = pack.source_graph
-        return sg is None or not sg.nodes
-    return False
-
-
 def _missing_requested_evidence_layers(
     pack: BuildSourcePack | None, collect_mode: str
 ) -> list[str]:
@@ -278,7 +259,7 @@ def _missing_requested_evidence_layers(
         if (
             cov is None
             or cov.status == CoverageStatus.NOT_COLLECTED
-            or _layer_payload_empty(pack, key)
+            or layer_payload_empty(pack, key)
         ):
             missing.append(layer.value)
     return missing

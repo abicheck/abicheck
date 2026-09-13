@@ -134,9 +134,10 @@ from ..model.graph_facts import (
     GraphNode,
     _decl_node_id,
 )
+from ..model.mangled_name import strip_macho_itanium_decoration
 from ..model.source_graph import function_decl_identity
 from .clang_ast_run import run_clang_ast_dump
-from .type_graph import EDGE_TYPE_INHERITS, _normalize_mangled, parse_clang_ast_types
+from .type_graph import EDGE_TYPE_INHERITS, parse_clang_ast_types
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary
@@ -238,14 +239,13 @@ def _method_info(node: dict[str, Any], scope: list[str]) -> _MethodInfo | None:
     name = str(node.get("name") or "")
     if not name:
         return None
-    # _normalize_mangled strips a spurious macOS Mach-O leading underscore
-    # (Codex review, fresh evidence, verified against real
+    # Codex review, fresh evidence, verified against real
     # `clang++ --target=x86_64-apple-darwin` output: mangledName reports
-    # "__ZN1D1fEv", not the standard "_ZN1D1fEv") -- left unstripped, an
+    # "__ZN1D1fEv", not the standard "_ZN1D1fEv". Left unstripped, an
     # override edge's decl:// node never joins the call/type graph's own
-    # node for the SAME method (both already normalize via this exact
-    # helper), leaving it a disconnected duplicate on Darwin.
-    mangled = _normalize_mangled(str(node.get("mangledName") or ""))
+    # node for the SAME method (all of them now normalize through the one
+    # model-owned helper), leaving it a disconnected duplicate on Darwin.
+    mangled = strip_macho_itanium_decoration(str(node.get("mangledName") or ""))
     type_obj = node.get("type")
     type_qual = str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
     qualified_name = "::".join([*scope, name]) if scope else name

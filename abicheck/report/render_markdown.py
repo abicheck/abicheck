@@ -46,7 +46,7 @@ from typing import Any
 
 from ..checker_types import Change
 from .disposition_audit import DispositionAudit, render_disposition_audit_lines
-from .kind_rollup import KindRollup, render_kind_rollups
+from .kind_rollup import KindRollup
 from .surface_changes import SurfaceChangeSection, render_surface_changes_lines
 
 
@@ -456,21 +456,6 @@ class ChangeGroup:
 @dataclass(frozen=True, slots=True)
 class SeveritySectionsData:
     groups: tuple[ChangeGroup, ...]
-
-
-def render_severity_sections(data: SeveritySectionsData) -> list[str]:
-    lines: list[str] = []
-    for group in data.groups:
-        lines += [group.heading, ""]
-        if group.note_lines:
-            lines += list(group.note_lines)
-            lines.append("")
-        fmt = _format_change_md_oneline if group.oneline else _format_change_md
-        for c in group.changes:
-            lines.append(fmt(c))
-        lines += render_kind_rollups(group.rollups)
-        lines.append("")
-    return lines
 
 
 # ---------------------------------------------------------------------------

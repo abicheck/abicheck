@@ -63,6 +63,17 @@ on:
         description: 'Evidence depth passed to every dump call (binary, headers, build, or source). Omit for the CLI default.'
         type: string
         default: ''
+      build-config:
+        description: >-
+          Path to the project's abicheck config, forwarded to actions/baseline
+          as build-config and from there to every `dump --config`. Needed even
+          when `.abicheck.yml` sits at the repository root: `dump` runs
+          `build.query` only under an explicit `--config`, so without this the
+          baseline is extracted under different rules than the candidate side
+          the check-target Action analyses -- the mismatch actions/baseline's
+          own input exists to close (Codex review).
+        type: string
+        default: ''
       baseline-generation:
         description: >-
           Forwarded to actions/baseline's baseline-generation input --
@@ -294,6 +305,7 @@ jobs:
           profile: ${{ matrix.profile_id }}
           build-info: ${{ inputs.build-info != '' && format('build-output/{0}/{1}', matrix.profile_id, inputs.build-info) || '' }}
           depth: ${{ inputs.depth }}
+          build-config: ${{ inputs.build-config }}
           baseline-generation: ${{ inputs.baseline-generation }}
           generator-git-sha: ${{ steps.identity.outputs.ref }}
           generator-action-ref: ${{ job.workflow_ref }}

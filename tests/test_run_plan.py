@@ -40,6 +40,7 @@ from abicheck.buildsource.project_targets import (
 from abicheck.buildsource.run_plan import (
     RUN_PLAN_KIND_BUNDLE,
     RUN_PLAN_KIND_TARGET,
+    SKIP_CHECKS_DECLARED_NONE_RESOLVED,
     RunPlan,
     RunPlanCheck,
     _compose_gcc_options,
@@ -326,8 +327,14 @@ class TestLibraryRedirect:
         existence on a profile is gated on the *library*'s presence there."""
         config = _parsed(self._RAW)
         plan, report = generate_run_plan(config, {"linux": _bo("some-other-lib")})
-        assert report.ok
         assert not plan.checks
+        # The redirect itself raises no error -- the only error is the
+        # zero-checks one every declared-but-unresolved plan gets since plan
+        # slice 7r (which is also what the retired --allow-empty used to
+        # wave through).
+        assert [e for e in report.errors if "zero checks" not in e] == []
+        assert plan.skipped is not None
+        assert plan.skipped.reason == SKIP_CHECKS_DECLARED_NONE_RESOLVED
 
 
 class TestBundleChecks:
@@ -381,8 +388,12 @@ class TestBundleChecks:
     ) -> None:
         config = _parsed(self._RAW)
         plan, report = generate_run_plan(config, {"linux": _bo("libpvxs")})
-        assert report.ok
         assert not plan.checks
+        # The missing member raises no error of its own; only the
+        # zero-checks classification does (plan slice 7r).
+        assert [e for e in report.errors if "zero checks" not in e] == []
+        assert plan.skipped is not None
+        assert plan.skipped.reason == SKIP_CHECKS_DECLARED_NONE_RESOLVED
 
     def test_bundle_check_errors_when_a_member_is_missing_and_profile_is_explicit(
         self,
@@ -1525,45 +1536,6 @@ class TestRunPlanGenerateCli:
         result = CliRunner().invoke(main, ["project", "plan", str(config)])
         assert result.exit_code == 64
 
-    # ── --allow-empty (ADR-054: fail-closed by default on zero checks) ──────
-
-    def test_empty_run_plan_exits_one_by_default(self, tmp_path: Path) -> None:
-        config = _write_config(tmp_path, {"targets": {}})
-        result = CliRunner().invoke(main, ["project", "plan", str(config)])
-        assert result.exit_code == 1, result.output
-        assert "--allow-empty" in result.output
-        # The run-plan artifact is still emitted (an empty checks: list),
-        # even though the command signals failure via exit code.
-        assert '"checks": []' in result.stdout
-
-    def test_empty_run_plan_exits_zero_with_allow_empty(self, tmp_path: Path) -> None:
-        config = _write_config(tmp_path, {"targets": {}})
-        result = CliRunner().invoke(
-            main, ["project", "plan", str(config), "--allow-empty"]
-        )
-        assert result.exit_code == 0, result.output
-        assert '"checks": []' in result.stdout
-
-    def test_non_empty_run_plan_ignores_allow_empty(self, tmp_path: Path) -> None:
-        """--allow-empty only relaxes the zero-checks case -- a resolved,
-        non-empty run-plan is unaffected either way."""
-        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
-        build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])
-        result = CliRunner().invoke(
-            main,
-            [
-                "project",
-                "plan",
-                str(config),
-                "--build-output",
-                f"linux={build_dir}",
-                "--allow-empty",
-            ],
-        )
-        assert result.exit_code == 0, result.output
-        data = json.loads(result.stdout)
-        assert len(data["checks"]) == 1
-
 
 def _write_bindings_file(tmp_path: Path, bindings: dict) -> Path:
     import yaml
@@ -1773,7 +1745,8 @@ class TestRunPlanGenerateCliToolchainBindings:
 # is not public CLI surface anymore (ADR-054): it was a pure intermediate-
 # format conversion. Its logic is `to_aggregate_manifest()`, unit-tested
 # directly above (TestToAggregateManifest); the CLI-level entry point is now
-# `aggregate --run-plan`, covered in tests/test_aggregate.py::TestAggregateCLI.
+# `aggregate --manifest` on a run-plan, covered in
+# tests/test_aggregate.py::TestAggregateCLI.
 
 
 @pytest.mark.parametrize(

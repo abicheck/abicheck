@@ -25,6 +25,7 @@ import gzip
 import hashlib
 import json
 import os
+from pathlib import Path
 
 import pytest
 from _production_scale_snapshot import (
@@ -1039,7 +1040,6 @@ def test_write_through_character_device_does_not_replace_it(tmp_path):
     through it instead; verify write_snapshot does the same (no error, and
     /dev/null is still a character device afterward, not a regular file)."""
     import stat as stat_mod
-    from pathlib import Path
 
     dev_null = Path("/dev/null")
     if not dev_null.exists() or not stat_mod.S_ISCHR(dev_null.stat().st_mode):

@@ -24,7 +24,7 @@ from __future__ import annotations
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
-from .diff_symbols import _public_functions
+from .diff_symbols import _reconciled_function_surfaces
 from .model import AbiSnapshot
 from .model.change_catalog.kinds import ChangeKind
 
@@ -131,8 +131,7 @@ def _diff_template_inner_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
     For production ELF-based snapshots, FUNC_PARAMS_CHANGED is the primary signal.
     """
     changes: list[Change] = []
-    old_map = _public_functions(old)
-    new_map = _public_functions(new)
+    old_map, new_map = _reconciled_function_surfaces(old, new)
 
     for mangled in set(old_map) & set(new_map):
         f_old = old_map[mangled]

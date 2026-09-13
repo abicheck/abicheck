@@ -39,7 +39,8 @@ GitHub Action's input, not a general project-integration operation — its
 underlying :func:`~abicheck.buildsource.baseline_publish.derive_baseline_libraries`
 stays a library function callers invoke directly) and ``run-plan
 to-aggregate-manifest`` (a pure intermediate-format conversion now folded into
-``aggregate --run-plan``, so a caller never has to know the projection exists).
+``aggregate --manifest``, which recognizes the plan by its own schema, so a
+caller never has to know the projection exists).
 
 Split out of :mod:`abicheck.cli` per the sibling-module pattern; imported for
 side-effect at the bottom of :mod:`abicheck.cli` so ``@main.group``/
@@ -460,19 +461,6 @@ def _parse_build_output_specs(
         "compatible, matching `project validate --toolchain-bindings`."
     ),
 )
-@click.option(
-    "--allow-empty",
-    is_flag=True,
-    default=False,
-    help=(
-        "Accept a run-plan that resolves to zero checks (exit 0 instead of "
-        "1). Off by default: an empty run-plan silently skips every "
-        "downstream matrix/aggregate step, so a consumer that doesn't add "
-        "its own guard would report success having checked nothing. Pass "
-        "this only for a deliberately empty bootstrap run (e.g. before any "
-        "targets: are declared yet)."
-    ),
-)
 @export_options(["json", "text"], default_format="json")
 @verbose_option
 def project_plan_cmd(
@@ -481,7 +469,6 @@ def project_plan_cmd(
     project: str,
     head_sha: str,
     toolchain_bindings: Path | None,
-    allow_empty: bool,
     exports: ExportSet,
     verbose: bool,
 ) -> None:
@@ -490,7 +477,7 @@ def project_plan_cmd(
     CONFIG's optional ``aggregate: gate:`` block (CLI cleanup phase two, PR 2
     follow-up) is stamped onto the generated ``run-plan.json``'s own ``gate``
     block, exactly as a hand-authored ``aggregate --manifest``'s own ``gate``
-    block would be -- so ``abicheck aggregate --run-plan run-plan.json``
+    block would be -- so ``abicheck aggregate --manifest run-plan.json``
     applies the same policy either way. This replaces the former
     ``--gate-missing-required``/``--gate-unexpected-target`` flags (removed,
     no CLI alias): the policy is durable project configuration, not
@@ -528,16 +515,30 @@ def project_plan_cmd(
     composed into ``compile_gcc_options`` regardless of
     ``--toolchain-bindings`` (P1 toolchain-profile audit).
 
+    A plan that resolves to **no** checks is answered by what CONFIG
+    declared, not by a bypass flag (plan slice 7r retired ``--allow-empty``,
+    no alias). CONFIG declaring no ``checks[]`` at all -- a project
+    bootstrapping ``.abicheck.yml`` -- produces an *explained skipped plan*:
+    exit 0, with the run-plan's own ``skipped`` block (schema
+    ``abicheck.run-plan/v3``) recording the reason, the declared-check count
+    it rests on, and a pointer to ``abicheck project validate CONFIG`` for
+    the config's own well-formedness. CONFIG declaring ``checks[]`` that
+    resolve to nothing is the opposite case -- every downstream matrix and
+    aggregate step silently skipped while the workflow reports success --
+    and is a hard error with no way to accept it, which is the capability
+    ``--allow-empty`` used to provide.
+
     \b
     Exit codes:
       0   Generated with no coverage-gap errors (warnings may still exist),
-          and at least one check resolved (or --allow-empty was given).
+          and at least one check resolved -- or none were declared, which is
+          an explained skipped plan.
       1   A required/explicit check could not be resolved against the
           supplied --build-output directories, (with --toolchain-bindings) a
           declared profiles.<id>.compile.binding does not resolve against
           it or its probed identity disagrees with the declared
-          compiler_family/compiler_version/target, or the run-plan resolved
-          to zero checks without --allow-empty.
+          compiler_family/compiler_version/target, or CONFIG declared
+          checks[] that resolved to zero cells.
       64  Usage error (CONFIG, a --build-output value, or
           --toolchain-bindings is unreadable, or CONFIG fails
           project validation).
@@ -607,19 +608,6 @@ def project_plan_cmd(
 
     report.errors.extend(binding_errors)
 
-    if not plan.checks and not allow_empty:
-        # Fail-closed by default (ADR-054): an empty run-plan otherwise
-        # silently skips every downstream matrix/aggregate step, so a
-        # consumer with no guard of its own would report success having
-        # gated nothing. `generate_run_plan` itself only warns here — that
-        # warning documents *why* the plan is empty, this error is what
-        # makes it a hard stop for a caller that doesn't add its own check.
-        report.errors.append(
-            "run-plan resolved to zero checks -- pass --allow-empty to "
-            "accept this (e.g. bootstrapping .abicheck.yml before any "
-            "targets:/bundles: checks[] are declared yet)."
-        )
-
     for e in report.errors:
         click.echo(f"error: {e}", err=True)
     for w in report.warnings:
@@ -629,6 +617,10 @@ def project_plan_cmd(
         if fmt == "json":
             return json.dumps(plan.to_dict(), indent=2)
         lines = [f"run-plan: {len(plan.checks)} check(s)"]
+        if plan.skipped is not None:
+            lines.append(
+                f"  skipped ({plan.skipped.reason}): {plan.skipped.explanation}"
+            )
         lines.extend(
             f"  - {c.check_id} (required={c.required}, gate_mode={c.gate_mode})"
             for c in plan.checks

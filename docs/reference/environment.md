@@ -15,6 +15,16 @@ Conventions used below:
 - "Module" is the code that reads the variable (the source of truth for its
   behaviour).
 
+> **Boolean variables, one value domain.** Every `ABICHECK_*` boolean knob on
+> this page is parsed by one shared reader (`abicheck/env_flags.py`, registry
+> `BOOLEAN_ENV_FLAGS`): `1`/`true`/`yes`/`on` turn it on and
+> `0`/`false`/`no`/`off` turn it off, case-insensitively and ignoring
+> surrounding whitespace, whichever way the variable's own default points.
+> Unset, empty, or any value outside those ten tokens means **the documented
+> default** — never the opposite of it. So `ABICHECK_CC_DISABLE=0` leaves
+> extraction on, which it did not before this reader existed (it treated any
+> non-empty value, `0` included, as "disable").
+
 > **Note:** `ABICHECK_BUILD_DIR` and `ABICHECK_INPUTS_VERSION` appear in the
 > code but are **module constants, not environment variables** — abicheck never
 > reads them from the environment. They are not listed here.
@@ -30,9 +40,9 @@ compares from C/C++ headers (`dump`, `compare` with `--sources`/headers,
 | Variable | Values | Default | Effect | Module |
 |----------|--------|---------|--------|--------|
 | `ABICHECK_AST_FRONTEND` | `castxml`, `clang`, `hybrid` (any other value is ignored) | unset → resolves to `castxml` | Pins the AST frontend when the request is `auto` (no explicit `--ast-frontend`). An explicit `--ast-frontend castxml`/`clang`/`hybrid` on the CLI is honoured verbatim and takes precedence over this variable. Does **not** suppress the automatic castxml→clang fallback on a castxml toolchain-version / direct-include error, which only happens when the frontend was auto-selected (no flag *and* no `castxml`/`clang`/`hybrid` pin here). `hybrid` (G28 Phase 3) runs both castxml and clang and merges them — needs both tools installed, never auto-selected by `auto` itself. | `dumper.py` (`_resolve_header_backend`); flag in `cli_options.py` |
-| `ABICHECK_AUTO_SYSTEM_INCLUDES` | truthy / falsey (`0`, `false`, `no`, `off` disable) | `1` (enabled) | When enabled, abicheck probes the host compiler for its system include search paths and feeds them to the castxml/clang frontend. Set to a falsey value to suppress the probe (e.g. a hermetic build that supplies its own `-isystem`/`--sysroot`). | `dumper_sysinc.py` (`_auto_system_includes_enabled`) |
+| `ABICHECK_AUTO_SYSTEM_INCLUDES` | truthy / falsey (see the boolean note above) | `1` (enabled) | When enabled, abicheck probes the host compiler for its system include search paths and feeds them to the castxml/clang frontend. Set to a falsey value to suppress the probe (e.g. a hermetic build that supplies its own `-isystem`/`--sysroot`). | `dumper_sysinc.py` (`_auto_system_includes_enabled`) |
 | `ABICHECK_CLANG_LAYOUT_TOOL` | path to a compiled binary | unset → enrichment skipped | Opt-in path to the G28 Phase 4 companion tool (`tools/clang-layout-tool/`, built separately with LibTooling — never a default/hard dependency). When set and the snapshot's L2 backend is `clang` or `hybrid`, enriches its `RecordType`s with real field offsets/vtable-pointer placement clang's own `-ast-dump=json` never computes. Falls back to a bare `abicheck-clang-layout-tool` on `PATH` if unset. Any failure (missing binary, compile error, timeout) silently skips enrichment — never a hard error. | `clang_layout_tool.py` (`find_layout_tool_bin`) |
-| `ABICHECK_ALLOW_UNSUPPORTED_CASTXML` | truthy (`1`, `true`, `yes`, `on`) | unset → gate enforced | The CastXML version gate (`castxml_policy.py`) rejects an authoritative L2 CastXML scan whose resolved `castxml --version` falls outside the supported range (`>=0.6.11,<0.8.0`, bundled/linked Clang `>=18`) — notably the legacy PyPI `castxml` distribution — **before** any header is parsed. `--allow-unsupported-castxml` (`dump`/`compare`/`scan`, same family as `--compiler`/`--ast-frontend`) is the CLI spelling of this opt-in, scoped to one invocation; the env var also works directly for scripting. This is an explicit, exploratory-mode-only opt-in to proceed *with castxml anyway*; the resulting snapshot's `ast_toolchain_supported` is `false` with `ast_toolchain_unsupported_reasons` recording why, so it is not silently indistinguishable from a normal supported scan. This is not the only way past the gate: when the frontend was auto-selected (no explicit `--ast-frontend`/`ABICHECK_AST_FRONTEND` pin) and `ABICHECK_ALLOW_AST_FALLBACK=1` is also set, the gate failure instead triggers a graceful fallback to the clang backend rather than a hard error — see the `ABICHECK_AST_FRONTEND` row above and `--allow-ast-frontend-fallback` in [CLI usage](../use/cli-usage.md). With neither opt-in set, the gate fails closed. | `dumper_toolchain.py` (`_allow_unsupported_castxml_enabled`), `dumper.py` (`_castxml_dump`), `cli_options.py` (`_enable_unsupported_castxml_for_command`) |
+| `ABICHECK_ALLOW_UNSUPPORTED_CASTXML` | truthy / falsey (see the boolean note above) | unset → gate enforced | The CastXML version gate (`castxml_policy.py`) rejects an authoritative L2 CastXML scan whose resolved `castxml --version` falls outside the supported range (`>=0.6.11,<0.8.0`, bundled/linked Clang `>=18`) — notably the legacy PyPI `castxml` distribution — **before** any header is parsed. `--allow-unsupported-castxml` (`dump`/`compare`/`scan`, same family as `--compiler`/`--ast-frontend`) is the CLI spelling of this opt-in, scoped to one invocation; the env var also works directly for scripting. This is an explicit, exploratory-mode-only opt-in to proceed *with castxml anyway*; the resulting snapshot's `ast_toolchain_supported` is `false` with `ast_toolchain_unsupported_reasons` recording why, so it is not silently indistinguishable from a normal supported scan. This is not the only way past the gate: when the frontend was auto-selected (no explicit `--ast-frontend`/`ABICHECK_AST_FRONTEND` pin) and `ABICHECK_ALLOW_AST_FALLBACK=1` is also set, the gate failure instead triggers a graceful fallback to the clang backend rather than a hard error — see the `ABICHECK_AST_FRONTEND` row above and `--allow-ast-frontend-fallback` in [CLI usage](../use/cli-usage.md). With neither opt-in set, the gate fails closed. | `dumper_toolchain.py` (`_allow_unsupported_castxml_enabled`), `dumper.py` (`_castxml_dump`), `cli_options.py` (`_enable_unsupported_castxml_for_command`) |
 
 See the `--ast-frontend` flag in [CLI usage](../use/cli-usage.md).
 
@@ -60,6 +70,7 @@ and [Build & source data](../learn/build-source-data.md).
 | `ABICHECK_PATTERN_SCAN_JOBS` | `auto`, `0`, `1`, or a positive integer | unset / `auto` → `min(cpu, 8)` above a 256-file floor, else serial | Worker count for the lexical (compiler-free) ABI-risk pattern pre-scan. `0`/`1` force serial (CI/test determinism, constrained sandboxes); `N` caps at `N` (still serial below the file floor). Always serial inside a daemonic process. | `buildsource/pattern_facts.py` (`_resolve_scan_jobs`) |
 | `ABICHECK_CALL_GRAPH_JOBS` | positive integer | unset → `min(n_units, cpu, 8)` | Overrides the CPU-derived worker count for the best-effort L5 clang call-graph pass. Capped by `min(n_units, N, max(8, 2×cpu))` and by the shared L4 memory cap (`ABICHECK_L4_JOB_MEM_GIB`). An unparsable value falls back to `1`. | `buildsource/call_graph.py` (`_call_graph_jobs`) |
 | `ABICHECK_INCLUDE_MAP_JOBS` | positive integer (`1` forces serial), `0` → auto | unset / `0` → auto: `min(n_units, max(2, cpu))` | Worker count for the per-compile-unit `clang -M` include-map probes (also what the L2 per-header include closure drives, one synthetic unit per header). Serial below 3 units regardless. An explicit value is clamped to the oversubscription ceiling **and** the available-memory cap; an unparsable value falls back to the auto default and records an extractor diagnostic. Concurrently spawned `clang -M` children are additionally capped process-wide, so two sides resolving at once cannot oversubscribe the host. | `buildsource/include_graph_workers.py` (`resolve_jobs`) |
+| `ABICHECK_RELEASE_JOB_MEM_GIB` | float GiB (floored at `0.25`) | depth-dependent: `1.0` at binary depth, `4.0` at `headers`, `6.0` at `build`/`source` | Per-worker RAM budget for the release fan-out's auto worker count (a directory/package `compare`). The default varies by the run's `--depth` because a worker's real footprint does: at binary depth it holds two snapshots, at header depth it also runs that member's own header-AST parse and holds two much larger snapshots (a measured six-member toolkit bundle peaked at 20.4 GiB, ~3.4 GiB per member). An explicit value here wins at every depth. Skipped entirely when RAM cannot be probed. | `workflows/release_jobs.py` (`release_job_mem_budget_gib`) |
 | `ABICHECK_INCLUDE_MAP_JOB_MEM_GIB` | float GiB (floored at `0.25`) | `0.5` | Per-worker RAM budget for the include-map pool's memory cap. Much smaller than the L4 default because `clang -M` is preprocess-only — it builds no AST. Same `min(MemAvailable, cgroup headroom)` probe as L4 (Linux only). | `buildsource/include_graph_workers.py` (`resolve_jobs`) |
 
 ---
@@ -77,11 +88,30 @@ therefore configured entirely by environment. See
 | `ABICHECK_CC_HEADERS` | `os.pathsep`-joined header roots | `""` (empty) | Public-header roots used to classify which decls belong to the public surface (ADR-015). | `cc_wrapper.py` |
 | `ABICHECK_CC_LIBRARY` | string | `""` (empty) | Library name stamped into the pack manifest / target id. | `cc_wrapper.py` |
 | `ABICHECK_CC_VERSION` | string | `""` (empty) | Version stamped into the pack manifest. | `cc_wrapper.py` |
-| `ABICHECK_CC_DISABLE` | any non-empty value | unset (extraction on) | When set, the wrapper is a pure pass-through: it runs the real compile and skips all fact extraction. | `cc_wrapper.py` |
+| `ABICHECK_CC_DISABLE` | truthy / falsey (see the boolean note above) | unset / falsey (extraction on) | When truthy, the wrapper is a pure pass-through: it runs the real compile and skips all fact extraction. A falsey value (`0`, `false`, `no`, `off`) leaves extraction **on** — it no longer disables capture the way any non-empty value once did. | `cc_wrapper.py` |
 
 > Fact extraction is best-effort and never fails the build: a missing front-end
 > or a parse error degrades to a warning on stderr and preserves the compiler's
 > exit code.
+
+---
+
+## Snapshot storage limits
+
+Decompression-bomb ceilings applied when reading a stored snapshot envelope
+(plain / gzip / zstd). Both are public knobs: a real bundle member's snapshot
+can legitimately exceed the default, and the ceiling is a process-level
+property of the *read*, so it is set in the environment rather than in
+`.abicheck.yml` (the sibling node budget, `resource_limits.max_bundle_facts_decode_nodes`,
+is a config key because it is resolved per comparison). The legacy
+underscore-prefixed spellings (`_ABICHECK_SNAPSHOT_MAX_DECODED_BYTES`,
+`_ABICHECK_SNAPSHOT_MAX_STORED_BYTES`) are still honoured and take precedence
+when both are set.
+
+| Variable | Values | Default | Effect | Module |
+|----------|--------|---------|--------|--------|
+| `ABICHECK_SNAPSHOT_MAX_DECODED_BYTES` | positive integer (bytes); a malformed or non-positive value is ignored | `DEFAULT_MAX_DECODED_BYTES` | Ceiling on the *decoded* size of a snapshot envelope, enforced incrementally during decompression — a stream that exceeds it is rejected rather than buffered. Raise it to read a legitimately large snapshot (e.g. a big bundle member at header depth). | `snapshot_io.py` (`_max_decoded_bytes`) |
+| `ABICHECK_SNAPSHOT_MAX_STORED_BYTES` | positive integer (bytes); same parsing rule | `DEFAULT_MAX_STORED_BYTES` | Ceiling on the *stored* (on-disk) size abicheck will buffer before decoding at all, applied to a **gzip or zstd** envelope only — a plain (uncompressed) file's stored size equals its decoded size, so it is checked against the decoded ceiling above instead. Deliberately independent of that ceiling: a valid multi-member gzip stream's overhead scales with member count, not payload size, so raising the decoded ceiling must not widen this one. | `snapshot_io.py` (`_max_stored_bytes`, `read_snapshot_bytes`) |
 
 ---
 

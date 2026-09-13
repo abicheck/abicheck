@@ -64,7 +64,7 @@ from .sparse_section_codec import (
     LayoutSection,
     ProvenanceSection,
 )
-from .types_section_codec import TypesSection
+from .types_section_codec import TypesSection, _freeze
 
 __all__ = [
     "BASELINE_SET_SECTION_KIND",
@@ -234,30 +234,6 @@ _MIGRATIONS: Mapping[
     **{kind: {} for kind in SECTION_SCHEMA_VERSIONS},
     BUNDLE_COMPOSITION_SECTION_KIND: {1: _bundle_composition_v1_to_v2},
 }
-
-
-def _freeze(value: Any) -> Any:
-    """*value* — already `canonical_form`'s output, so a tree of only
-    `dict`/`list`/`str`/`int`/`float`/`bool`/`None` — rebuilt so nothing
-    reachable from a `SectionDTO` after construction is mutable: every
-    mapping becomes a `MappingProxyType` over a `dict` of already-frozen
-    values, every list becomes a `tuple` of already-frozen values.
-
-    `canonical_form` already rebuilds every container, so `__post_init__`'s
-    stored `payload` never aliases the caller's own object — but the
-    rebuilt containers were still ordinary, mutable `dict`/`list`, reachable
-    both through `dto.payload` directly and through a *nested* value inside
-    an earlier `to_dict()` call's return, either of which could then mutate
-    this frozen DTO's own stored content after construction already
-    validated it (Codex review, a second finding on the same field after
-    the copy-on-construction fix: a shallow copy stops the *caller's*
-    mapping from aliasing this DTO's storage, but does nothing once the
-    values inside that storage are themselves mutable)."""
-    if isinstance(value, Mapping):
-        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
-    if isinstance(value, list):
-        return tuple(_freeze(item) for item in value)
-    return value
 
 
 def _unfreeze(value: Any) -> Any:
