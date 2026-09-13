@@ -42,6 +42,7 @@ one still declared.
 
 from __future__ import annotations
 
+import itertools
 import os
 import subprocess
 from pathlib import Path
@@ -318,8 +319,16 @@ def test_run_sh_refuses_the_same_input_independently(name: str) -> None:
     itself rather than lean on the preflight step -- defense in depth, since
     the two scripts are separate entry points.
 
-    Swept over every mode, for the same reason the preflight check is. A
-    rejection sitting inside one mode's own branch is not this contract:
+    Swept over every mode *and* every meaningful value, for the same
+    reasons the preflight check is -- and the value axis specifically
+    because widening only the preflight sweep left this entry point
+    covered by a single `"true"` probe, so reverting `run.sh`'s own
+    `audit`/`estimate` predicate to an exact-`"true"` match kept all 43
+    cases green while a direct `audit=yes` run proceeded silently (Codex
+    review). Defense in depth is not depth if only one layer is tested for
+    the whole input class.
+
+    A rejection sitting inside one mode's own branch is not this contract:
     `require-complete-analysis` was guarded only in the compare arm, so a
     direct `run.sh` run with `mode: dump` and the input set went on to
     analyse -- while a compare-only version of this test passed (Codex
@@ -330,13 +339,16 @@ def test_run_sh_refuses_the_same_input_independently(name: str) -> None:
     inputs the "Run abicheck" step never forwards; for those, preflight is
     the whole contract and the ordering test above is what backs it.
     """
-    for mode in ("compare", "dump", "deps-tree", "deps-compare"):
+    for mode, value in itertools.product(
+        ("compare", "dump", "deps-tree", "deps-compare"),
+        _meaningful_values(RETIRED_INPUTS[name]),
+    ):
         result = _run_script(
             RUN_SH,
             {
                 "INPUT_MODE": mode,
                 "INPUT_NEW_LIBRARY": "libfoo.so",
-                _input_env_var(name): _meaningful_value(RETIRED_INPUTS[name]),
+                _input_env_var(name): value,
                 # run.sh would otherwise try to do real work; every
                 # retired-input rejection precedes the mode dispatch, so it
                 # never gets there.
@@ -346,14 +358,15 @@ def test_run_sh_refuses_the_same_input_independently(name: str) -> None:
         )
         combined = result.stdout + result.stderr
         assert result.returncode != 0, (
-            f"run.sh accepts retired input {name!r} on mode {mode!r}; only "
-            f"the preflight step rejects it, so an entry point that skips "
-            f"preflight runs a narrower analysis silently.\n{combined}"
+            f"run.sh accepts retired input {name!r}={value!r} on mode "
+            f"{mode!r}; only the preflight step rejects it, so an entry "
+            f"point that skips preflight runs a narrower analysis "
+            f"silently.\n{combined}"
         )
         assert name in combined, (
-            f"run.sh exits non-zero for {name!r} on mode {mode!r} but never "
-            f"names it -- that is some other error, not this input's "
-            f"rejection.\n{combined}"
+            f"run.sh exits non-zero for {name!r}={value!r} on mode {mode!r} "
+            f"but never names it -- that is some other error, not this "
+            f"input's rejection.\n{combined}"
         )
 
 
