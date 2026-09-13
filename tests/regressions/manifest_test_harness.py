@@ -162,7 +162,18 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1298,),
         seed_tests=("tests/test_workflow_exec_harness.py",),
-        public_surfaces=("github-action",),
+        # `()` per the field's own rule, even though this class is *about*
+        # executing composite-action steps: the seed tests drive `run_step`
+        # with synthetic `{"run": ...}` bodies, and the one that reaches for
+        # the repository's own steps still executes a generated body padded
+        # to the real length rather than the checked-in step. The public-
+        # surface reproduction -- the real `actions/check-target/action.yml`
+        # assurance-overlay step, which is what actually went red -- lives in
+        # `tests/test_reusable_workflows_assurance_overlay_extra_args_config.
+        # py`; it is named here rather than listed as a seed test, since it is
+        # that step's own domain test and carries none of this class's
+        # generalized suite (Codex review, PR #1299).
+        public_surfaces=(),
         axes={
             "claim": (
                 "tmpdir-is-the-directory-we-made",
