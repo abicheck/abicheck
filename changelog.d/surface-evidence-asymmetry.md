@@ -47,7 +47,7 @@
   header depth on their own. `ABICHECK_RELEASE_JOB_MEM_GIB` still overrides
   the default at every depth. A release whose members are *stored* snapshots
   is still sized as binary depth — see `docs/contribute/known-gaps.md` for
-  why the conservative fix for that was tried and reverted.
+  the measurement behind leaving that to its own change.
 
 ### Added
 
