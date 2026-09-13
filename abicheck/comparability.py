@@ -1244,21 +1244,20 @@ def check_contracts_comparable(
     :func:`compute_extraction_contract`), so the exact same "pure addition"
     case would otherwise still raise ``ProfileMismatchError`` immediately
     after the scope carve-out waives it. A ``profile_fingerprint`` mismatch
-    confined to ``header_sequence`` does not raise when the new sequence is
-    the old sequence, byte-for-byte unchanged, with new entries appended
-    STRICTLY AFTER it (see :func:`_header_sequence_is_additive_reorder_free`)
-    — proving every *existing* header's own preprocessing context (the
-    headers parsed before it) is identical to before, not merely that
-    existing headers keep their relative order to each other. A new header
-    inserted before or between existing ones (Codex review, PR #641
-    follow-up, seventh P1) still raises even though it superficially looks
-    additive, since it changes what an existing header downstream of the
-    insertion point is parsed after — the same "reorder of existing headers"
-    risk this carve-out was always meant to exclude, just reached via
-    insertion rather than a literal swap. A reorder of existing headers
-    entangled with growth (the same genuine profile-relevant risk) still
-    raises too, same as any other profile drift this carve-out doesn't
-    cover. **Also requires
+    confined to ``header_sequence`` does not raise when the old sequence is
+    an order-preserving *subsequence* of the new one (see
+    :func:`_header_sequence_is_additive_reorder_free`) — every existing
+    header keeps its relative position to every other existing header, and
+    only genuinely-new, independently corroborated entries appear among
+    them. Interior insertion is accepted deliberately: a ``-H <dir>``
+    header surface expands in sorted order, so adding one public header to
+    a versioned inventory lands it in the middle of the sequence virtually
+    always, and refusing that shape produced no ABI verdict at all for an
+    ordinary additive release (the ``libpvxs`` ``pvxs/json.h`` report). A
+    *reorder* of two existing headers, or a *removal*, breaks the
+    subsequence relation and still raises, same as any other profile drift
+    (toolchain/ABI flags, language standard, target, include-resolution
+    configuration) this carve-out doesn't cover. **Also requires
     :func:`_scope_growth_corroborated` (Codex review, PR #641 follow-up,
     P1):** an additive-shaped ``header_sequence`` on its own is not
     sufficient — a header already declared identically on both sides via

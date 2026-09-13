@@ -484,4 +484,56 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "envelope": ("flat", "sectioned"),
         },
     ),
+    BugClass(
+        id="comparability.header_inventory_growth_is_not_profile_drift",
+        invariant=(
+            "A *versioned public-header inventory* is ABI/API input, never "
+            "an extraction-context identity. The comparability gate's "
+            '`profile_fields["header_sequence"]` exists to catch a '
+            "REORDER of declared headers (which changes the macro/pragma "
+            "state a later header is parsed under), so its carve-out must "
+            "accept every order-preserving INSERTION of genuinely-new, "
+            "scope-corroborated headers -- at any position, not only "
+            "strictly trailing. A `-H <dir>` surface expands in sorted "
+            "order, so an added public header lands INTERIOR essentially "
+            "always; requiring a trailing append turned an ordinary "
+            "additive release into `ProfileMismatchError` with no ABI "
+            "verdict at all. Reorder and removal of existing headers, and "
+            "every genuine extraction-context difference (toolchain/ABI "
+            "flags, language standard, target, include-resolution "
+            "configuration), must still hard-fail -- including when they "
+            "ride alongside the waived growth."
+        ),
+        fixed_by=(641,),
+        seed_tests=(
+            "tests/test_comparability_header_inventory_growth.py",
+            "tests/test_comparability_gate.py",
+        ),
+        axes={
+            "header_surface": ("declared_headers", "public_header_dirs"),
+            "insertion_position": ("leading", "interior", "trailing"),
+            "drift_field": (
+                "compiler_family",
+                "language_standard",
+                "target_triple",
+                "macro_ops",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "An interior insertion genuinely does change the "
+                    "preprocessing context of every declared header parsed "
+                    "after it, so the new header's macros/pragmas can "
+                    "produce findings in an otherwise untouched header. "
+                    "Those are recorded and reported as ordinary findings "
+                    "rather than suppressed, which is the accepted trade: "
+                    "declining the carve-out instead produced no verdict at "
+                    "all. Not separately attributed to the insertion in the "
+                    "report."
+                ),
+                reference="PR #641 follow-up (libpvxs pvxs/json.h report)",
+            ),
+        ),
+    ),
 )

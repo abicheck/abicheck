@@ -2054,6 +2054,75 @@ proven to fail against the pre-fix code), plus a new
 `..._false_for_insertion_before_all` case for the leading-insertion shape.
 Full fast unit suite green, mypy/ruff clean.
 
+**Field report (libpvxs `pvxs/json.h`) — the eleventh pass's trailing-only
+rule is reverted to an order-preserving *insertion* rule.** The eleventh
+pass above justified narrowing to a strict trailing append with "matching
+the shape the real pvxs F8 scenario ... already produces, so no real-world
+carve-out outcome regresses". That claim held for the *test fixtures*,
+which list headers in the order they were created (`[a, b]` -> `[a, b,
+c]`), and was false for the *production* path: a `-H <dir>` /
+`--header old=<dir> new=<dir>` public-header surface is expanded by
+`header_utils.iter_directory_headers`, which returns its result **sorted**.
+An added public header therefore lands *interior* to `header_sequence`
+essentially always. A real PVXS CI run comparing `libpvxs.so.1.5` across a
+revision that adds `src/pvxs/json.h` (alongside ordinary content changes in
+`src/pvxs/data.h` and `src/pvxs/source.h`) failed with
+
+```
+Error: 'libpvxs.so.1.5' ... are not comparable: old and new snapshots were
+extracted under different compile contexts (profile_fingerprint mismatch;
+differing fields: header_sequence)
+```
+
+and produced no ABI verdict at all.
+
+That outcome contradicts this repository's own product rule (AGENTS.md,
+"Record before disposing" / `vision.md`): a changed public-header set is
+*versioned ABI/API input* to be compared and reported (an added header, an
+added API), not an incompatible *extraction context*. The eleventh pass's
+underlying observation is still true — a header inserted before another
+does change the macro/pragma state that later one is parsed under — but it
+describes a possible source of *extra findings*, which the pipeline records
+and reports, and that is strictly better than refusing to produce a verdict
+for the most common shape an additive release takes. Weighed the other way,
+the trailing-only rule was trading a real, total loss of function for a
+hypothetical, reported-not-silent imprecision.
+
+`_header_sequence_is_additive_reorder_free` now accepts exactly the
+order-preserving-insertion shape: **the old sequence must be an ordered
+subsequence of the new one** (`_is_ordered_subsequence`, extracted as a
+leaf primitive so it carries its own property tests per AGENTS.md
+"Primitive-level property tests"), with every inserted entry still
+independently corroborated against `_scope_newly_added_headers` and every
+pre-existing guard (duplicate entries, `<single-header>` sentinel,
+`_scope_growth_corroborated`) unchanged. What still fails closed is
+unchanged and was re-verified per field: a *reorder* of two existing
+headers, a *removal*, and every genuine extraction-context difference —
+`compiler_family`, `compiler_version`, `abi_dialect`, `language_standard`,
+`target_triple`, `pointer_width`/`endianness`, `macro_ops`,
+`pass_through_flags`, `include_sequence`, `frontend_context_kind` — both on
+their own and when riding alongside the now-waived inventory growth.
+
+Registered as bug class
+`comparability.header_inventory_growth_is_not_profile_drift`
+(`tests/regressions/manifest_evidence.py`), with the residual (an interior
+insertion can perturb a later header's preprocessing context, producing
+findings that are reported but not attributed to the insertion) recorded as
+its `KnownGap` rather than left as prose.
+
+New regression tests: `tests/test_comparability_header_inventory_growth.py`
+— the reported shape end-to-end through `compute_extraction_contract` +
+`check_contracts_comparable` at every insertion position, the real
+`public_header_dirs` CLI shape with content changes riding along, one
+rejection case per independently-drifting profile field, and the invariant
+itself stated exhaustively over ~4k enumerated (old, new) ordered
+selections against an independent `itertools.combinations` oracle (with
+vacuity guards on both the oracle and the function under test), plus the
+extracted primitive's own contract (reflexivity, transitivity, reversal
+rejection). The eleventh pass's two `..._false_for_insertion_*` unit tests
+are flipped back to `..._true_for_insertion_*` with the reasoning above.
+All seven behavioral tests proven to fail against the pre-fix code.
+
 **A twelfth review pass** (Codex, one P1) found a second gap left as a
 **documented limitation, not fixed** — the same category as the
 common-root-rebasing gap above, not a further carve-out round: an appended

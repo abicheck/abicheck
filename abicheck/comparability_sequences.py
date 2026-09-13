@@ -92,10 +92,9 @@ def _header_sequence_is_additive_reorder_free(
 ) -> bool:
     """Whether *new_value* (``profile_fields["header_sequence"]``, a
     json-encoded order-preserving-deduplicated header identity list) is
-    *old_value* with new entries appended STRICTLY AFTER it, unchanged --
-    never with a new header inserted before or between existing ones, and
-    never with an EXISTING header reordered relative to another (Codex
-    review, PR #641 follow-up, seventh P1) -- AND every appended entry is
+    *old_value* with new entries INSERTED, never with an EXISTING header
+    reordered relative to another -- i.e. *old_value* is an (order-
+    preserving) subsequence of *new_value* -- AND every inserted entry is
     itself in *scope_new_headers* (:func:`_scope_newly_added_headers`;
     Codex review, PR #641 follow-up, ninth P1): the appended sequence
     entries must correspond to headers genuinely new to the declared
@@ -103,19 +102,40 @@ def _header_sequence_is_additive_reorder_free(
     with an unrelated scope addition (see that function's own docstring for
     the concrete scenario this rules out).
 
-    Trailing-append is the only shape that's actually safe: the aggregate
-    driver TU the dumper generates parses declared headers sequentially, so
-    a new header's macros/pragmas can change how every header parsed AFTER
-    it resolves. Merely preserving the *relative* order of the existing
-    headers to each other (this function's original, insufficient check)
-    is not enough -- ``[a.h, c.h]`` -> ``[a.h, b.h, c.h]`` keeps ``a.h``
-    before ``c.h`` on both sides, but ``c.h`` is now parsed with ``b.h``'s
-    macros/pragmas already in effect, a genuinely different extraction
-    context that can produce a real, non-additive ABI difference despite
-    looking like a pure addition. Only requiring every new entry to land
-    strictly after the entire unchanged old sequence rules this out: the
-    old sequence's own internal parsing context never changes. Declines
-    (like :func:`abicheck.comparability._scope_field_is_additive_superset`)
+    Order preservation of the EXISTING headers is the invariant that
+    matters, and interior insertion of a genuinely new header does not
+    violate it. An earlier round of this function required every new entry
+    to land strictly AFTER the entire unchanged old sequence, reasoning
+    that the aggregate driver TU the dumper generates parses declared
+    headers sequentially, so a header inserted before another changes the
+    macro/pragma state that later one is parsed under. That reasoning is
+    real but it does not justify refusing to compare: it describes a
+    possible source of *extra findings*, which the pipeline records and
+    reports, whereas declining the carve-out produces no ABI verdict at all
+    for the single most common shape a versioned public-header inventory
+    takes. A `-H <dir>` header surface is expanded in SORTED order
+    (:func:`abicheck.header_utils.iter_directory_headers`), so adding one
+    public header -- ``pvxs/json.h`` to a directory that already declares
+    ``pvxs/data.h`` and ``pvxs/log.h`` -- lands the new entry in the MIDDLE
+    of the sequence essentially always. Under the trailing-only rule that
+    legitimate, purely additive release was reported as
+    ``ProfileMismatchError`` ("differing fields: header_sequence") and no
+    comparison ran, which is precisely the "a changed public-header set is
+    ABI/API input, not an incomparable extraction context" rule this gate
+    must not break.
+
+    So the shape accepted here is: *old_value* is an order-preserving
+    subsequence of *new_value*. Every existing header keeps its relative
+    position to every other existing header; only genuinely-new entries
+    (each independently corroborated against *scope_new_headers*) appear
+    between them. A REORDERING of two existing headers -- the extraction-
+    context change this field exists to catch -- still fails closed, since
+    it breaks the subsequence relation. So does a removal (an old entry
+    missing from the new sequence is not a subsequence match), and so does
+    any change to toolchain/ABI flags, language standard, target, or
+    include-resolution configuration, none of which this field or this
+    carve-out touches at all. Declines (like
+    :func:`abicheck.comparability._scope_field_is_additive_superset`)
     whenever either side is the ``<single-header>`` sentinel, since there
     is no real order to verify there.
 
@@ -144,11 +164,28 @@ def _header_sequence_is_additive_reorder_free(
         return False
     if len(new_list) < len(old_list):
         return False
-    if new_list[: len(old_list)] != old_list:
+    if not _is_ordered_subsequence(old_list, new_list):
         return False
     if scope_new_headers is None:
         return False
-    return set(new_list[len(old_list) :]) <= scope_new_headers
+    return (set(new_list) - set(old_list)) <= scope_new_headers
+
+
+def _is_ordered_subsequence(inner: list[str], outer: list[str]) -> bool:
+    """Whether every element of *inner* appears in *outer* in the same
+    relative order (a greedy left-to-right match, which is exact because
+    its caller rejects duplicate entries on either side first).
+
+    Kept as its own leaf primitive rather than inlined, per AGENTS.md's
+    "Primitive-level property tests": it states one contract independent of
+    any header/profile semantics (reflexivity, transitivity, rejection of
+    every non-trivial reversal, agreement with an independent
+    combinations-based oracle), so it is property-tested directly rather
+    than only through :func:`_header_sequence_is_additive_reorder_free`'s
+    domain wrapper.
+    """
+    it = iter(outer)
+    return all(entry in it for entry in inner)
 
 
 # The only profile_fields key the include-sequence-owned-growth carve-out
