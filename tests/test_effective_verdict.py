@@ -286,7 +286,7 @@ def test_leaf_mode_markdown_impact_carries_the_unattributed_caveat() -> None:
         verdict=Verdict.BREAKING,
         evidence_tiers=["header", "elf"],
     )
-    md = to_markdown(result, report_mode="leaf")
+    md = to_markdown(result, report_mode="root-cause")
     assert "available evidence does not fully confirm" in md
 
 
@@ -350,7 +350,7 @@ def test_leaf_mode_type_change_row_carries_the_unattributed_caveat() -> None:
         verdict=Verdict.BREAKING,
         evidence_tiers=["header"],  # no binary evidence -> UNATTRIBUTED
     )
-    md = to_markdown(result, report_mode="leaf")
+    md = to_markdown(result, report_mode="root-cause")
     assert "available evidence does not fully confirm" in md
 
 

@@ -413,22 +413,16 @@ def compare_release_cmd(
     # usage error. `None` (the default) is a true no-op, matching every
     # pre-existing caller.
     depth: str | None = None,
-    # Codex review (PR #1154 follow-up): `compare`'s directory/package
-    # fan-out forwards --view's derived show_only/demangle/explain_patterns
-    # here too -- `report_mode` is not accepted: `_dispatch_release_compare`
-    # already rejects every value but "full" before this is ever called, so
-    # there is nothing left for this engine itself to branch on. `None`/
-    # `False` (the defaults) are true no-ops, matching every pre-existing
-    # caller (this command has no `--view`/`--show-only`/`--demangle` Click
-    # option of its own; only `compare`'s directory/package dispatch above
-    # ever supplies a non-default value). *demangle* stays the raw tri-state
-    # (unresolved against any one format) -- this command's own body
-    # resolves it separately against `fmt`/`secondary_fmt`, mirroring
-    # single-pair `compare`'s own `demangle_explicit` split for its
-    # `-o` render.
+    # `compare`'s directory/package fan-out forwards --view's derived
+    # show_only here; `report_mode` is not accepted, since
+    # `_dispatch_release_compare` already rejects every value but "full"
+    # before this is ever called, so there is nothing left for this engine
+    # to branch on. `None` (the default) is a true no-op, matching every
+    # pre-existing caller (this command has no `--view`/`--show-only` Click
+    # option of its own). Demangling is not threaded at all any more (plan
+    # slice 7o): this command's body resolves it from each destination's
+    # own format, which is now the only input it has.
     show_only: str | None = None,
-    demangle: bool | None = None,
-    explain_patterns: bool = False,
     # Codex review (PR #1154 follow-up): "Reject unsupported impact views
     # instead of silently dropping them" -- `compare --view impact`'s
     # aggregate counterpart. Unlike `report_mode`'s "leaf"/"root-cause"
@@ -756,7 +750,6 @@ def compare_release_cmd(
                 compile_context=compile_context,
                 depth=depth,
                 show_only=show_only,
-                explain_patterns=explain_patterns,
                 public_header_dirs=public_header_dirs,
                 collapse_versioned_symbols=collapse_versioned_symbols,
                 project_policy_overrides=project_policy_overrides,
@@ -1162,7 +1155,7 @@ def compare_release_cmd(
             # ["policy.env_matrix"]` are correct regardless of how many
             # library comparisons actually completed.
             from .checker import env_matrix_content_digest
-            from .cli_compare_options import _resolve_demangle
+            from .service_render import resolve_demangle_for_format
 
             env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
 
@@ -1210,7 +1203,7 @@ def compare_release_cmd(
                     scope_public_headers=scope_public_headers,
                     scope_terms=scope_terms,
                     assurance_terms=assurance_terms,
-                    demangle=_resolve_demangle(secondary_fmt, demangle),
+                    demangle=resolve_demangle_for_format(secondary_fmt),
                     show_only=show_only,
                     env_matrix_source_sha256=env_matrix_source_sha256,
                     require_complete_analysis=require_complete_analysis,
@@ -1245,7 +1238,7 @@ def compare_release_cmd(
                 scope_public_headers=scope_public_headers,
                 scope_terms=scope_terms,
                 assurance_terms=assurance_terms,
-                demangle=_resolve_demangle(fmt, demangle),
+                demangle=resolve_demangle_for_format(fmt),
                 show_only=show_only,
                 env_matrix_source_sha256=env_matrix_source_sha256,
                 require_complete_analysis=require_complete_analysis,

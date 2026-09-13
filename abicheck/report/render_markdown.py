@@ -174,59 +174,6 @@ def _format_change_md(c: object, impact: str | None = None) -> str:
     return line
 
 
-def _format_leaf_type_change(c: object) -> list[str]:
-    """Format a single leaf-mode (``--report-mode leaf``) type change entry."""
-    symbol = getattr(c, "symbol", None)
-    desc = getattr(c, "description", "")
-    lines = [f"### {symbol} — {desc}"]
-    affected = getattr(c, "affected_symbols", None)
-    if affected:
-        lines.append(f"\n**Affected interfaces ({len(affected)}):**")
-        for sym in affected[:10]:
-            lines.append(f"- `{sym}`")
-        if len(affected) > 10:
-            lines.append(f"- ... ({len(affected) - 10} more)")
-    caused_count = getattr(c, "caused_count", 0)
-    if caused_count > 0:
-        lines.append(f"\n> {caused_count} derived change(s) collapsed")
-    # ADR-049 Phase 3 (Codex review, fresh evidence): --report-mode leaf
-    # routes root TYPE_* changes through this function, never through
-    # _format_change_md -- unlike the full/root-cause views, a leaf-mode
-    # type finding's own contract decision (already stamped when
-    # --contract was requested) was silently dropped. Mirrors
-    # _format_change_md's own "no-op unless already stamped" idiom.
-    contract_relevance = getattr(c, "contract_relevance", None)
-    if contract_relevance is not None:
-        text = _contract_decision_text(
-            contract_relevance,
-            getattr(c, "contract_reason_code", None),
-            getattr(c, "contract_assurance", None),
-        )
-        lines.append(f"\n> Contract: {text}")
-    lines.append("")
-    return lines
-
-
-@dataclass(frozen=True, slots=True)
-class LeafTypeSection:
-    heading: str
-    changes: tuple[Change, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class LeafTypeSectionsData:
-    sections: tuple[LeafTypeSection, ...]
-
-
-def render_leaf_type_sections(data: LeafTypeSectionsData) -> list[str]:
-    lines: list[str] = []
-    for section in data.sections:
-        lines += [section.heading, ""]
-        for c in section.changes:
-            lines += _format_leaf_type_change(c)
-    return lines
-
-
 # ---------------------------------------------------------------------------
 # Root-cause grouped sections (--report-mode root-cause)
 # ---------------------------------------------------------------------------
@@ -753,6 +700,12 @@ class ReviewDigest:
     surface_changes: SurfaceChangeSection | None = None  #: workstream G S1
     quality_issues_count: int = 0  #: non-addition compatible findings, own row
     env_matrix_source_sha256: str | None = None
+    #: ADR-067: the rules that reclassified findings, as
+    #: `PatternModulation.to_dict()` rows. The digest is the summary a
+    #: reviewer approves a merge from, so an accepted result may not omit
+    #: why it was accepted -- the same reason `disposition_audit` is here.
+    #: Empty for every run with ADR-027's opt-in `--pattern-verdicts` off.
+    pattern_modulations: tuple[Any, ...] = ()
 
 
 def render_review_digest(digest: ReviewDigest) -> str:
@@ -809,6 +762,16 @@ def render_review_digest(digest: ReviewDigest) -> str:
     if digest.disposition_audit is not None:
         lines += ["**Disposition audit:**", ""]
         lines += render_disposition_audit_lines(digest.disposition_audit)
+    if digest.pattern_modulations:
+        from .pattern_modulations_markdown import (
+            render_pattern_modulations_from_mapping,
+        )
+
+        lines += ["**Pattern-modulated findings:**"]
+        lines += render_pattern_modulations_from_mapping(
+            digest.pattern_modulations, include_heading=False
+        )
+        lines.append("")
     if digest.surface_changes is not None and digest.surface_changes.total:
         lines += render_surface_changes_lines(digest.surface_changes)  # workstream G
 

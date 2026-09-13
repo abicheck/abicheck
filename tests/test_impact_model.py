@@ -522,12 +522,12 @@ class TestAssessChangeWithCachedImpactAssessment:
 
 class TestReporterIntegration:
     """Codex review: two production call sites this slice initially missed --
-    --report-mode leaf's own _leaf_entry() builds its dict independently of
+    A grouped document builds its finding dicts independently of
     _change_to_dict, and _add_suppression()'s suppressed_changes list was
     never routed through assess_change(suppressed=True) at all, so the
     advertised decision.state == "suppressed" was unreachable in practice."""
 
-    def test_leaf_mode_type_change_carries_reachability_state(self) -> None:
+    def test_root_cause_mode_type_change_carries_reachability_state(self) -> None:
         change = _change(
             kind=ChangeKind.TYPE_SIZE_CHANGED,
             symbol="ns::internal::Foo",
@@ -538,8 +538,8 @@ class TestReporterIntegration:
         result = DiffResult(
             old_version="1.0", new_version="2.0", library="libfoo.so", changes=[change]
         )
-        payload = json.loads(reporter.to_json(result, report_mode="leaf"))
-        entry = payload["leaf_changes"][0]
+        payload = json.loads(reporter.to_json(result, report_mode="root-cause"))
+        entry = payload["root_causes"][0]["findings"][0]
         assert entry["reachability_state"] == "unreachable"
         assert entry["impact_assessment"]["reachability_state"] == "unreachable"
 

@@ -173,7 +173,15 @@ class TestReportSurfacing:
         assert len(removed) == 1
         assert removed[0]["demangled_symbol"] == _DEMANGLED
 
-    def test_json_omits_demangled_symbol_for_a_header_backed_removal(self) -> None:
+    def test_json_carries_demangled_symbol_for_a_header_backed_removal(self) -> None:
+        """Plan slice 7o widened this field to every mangled finding.
+
+        It used to be emitted only for an ``ELF_ONLY``-visibility removal --
+        the one case whose ``symbol``/``description`` were *unreadable*
+        without it -- which left a JSON/SARIF consumer of an ordinary C++
+        removal with the mangled name and no way to show a human one. Both
+        names now travel together on every machine projection, which is
+        what makes the human side's automatic demangling lossless."""
         from abicheck.reporter import to_json
 
         old = _snapshot(
@@ -193,7 +201,8 @@ class TestReportSurfacing:
             c for c in report["changes"] if c["kind"] == ChangeKind.FUNC_REMOVED.value
         ]
         assert len(removed) == 1
-        assert "demangled_symbol" not in removed[0]
+        assert removed[0]["symbol"] == _MANGLED
+        assert removed[0]["demangled_symbol"] == _DEMANGLED
 
     def test_sarif_carries_demangled_symbol_for_an_elf_only_removal(
         self, deterministic_demangle

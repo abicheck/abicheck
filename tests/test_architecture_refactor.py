@@ -12,8 +12,10 @@ import pytest
 
 from abicheck.change_registry import (
     REGISTRY,
+    ChangeEntity,
     ChangeKindMeta,
     ChangeKindRegistry,
+    ChangeOperation,
     Verdict,
 )
 from abicheck.checker_policy import (
@@ -28,6 +30,20 @@ from abicheck.checker_policy import (
     SDK_VENDOR_COMPAT_KINDS,
     ChangeKind,
 )
+
+
+def _entry(*args: object, **kwargs: object) -> ChangeKindMeta:
+    """A ``ChangeKindMeta`` with the two display dimensions filled in.
+
+    Plan slice 7o made ``entity``/``operation`` mandatory on any entry that
+    reaches a registry. Every construction in this module tests something
+    *else* (overrides, templates, immutability, pickling), so each supplies
+    a neutral pair rather than restating them 30 times; the mandatory-ness
+    itself is asserted in ``tests/test_view_internal_grammar.py``."""
+    kwargs.setdefault("entity", ChangeEntity.FUNCTION)
+    kwargs.setdefault("operation", ChangeOperation.MODIFIED)
+    return ChangeKindMeta(*args, **kwargs)  # type: ignore[arg-type]
+
 
 # ─── Part A: ChangeKindRegistry tests ────────────────────────────────────────
 
@@ -108,8 +124,8 @@ class TestChangeKindRegistry:
         import pytest
 
         entries = [
-            ChangeKindMeta("test_kind", Verdict.BREAKING, impact="x"),
-            ChangeKindMeta("test_kind", Verdict.COMPATIBLE, impact="x"),
+            _entry("test_kind", Verdict.BREAKING, impact="x"),
+            _entry("test_kind", Verdict.COMPATIBLE, impact="x"),
         ]
         with pytest.raises(ValueError, match="Duplicate"):
             ChangeKindRegistry(entries)
@@ -122,7 +138,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entries = [
-            ChangeKindMeta(
+            _entry(
                 "test_kind",
                 Verdict.BREAKING,
                 impact="x",
@@ -143,7 +159,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entries = [
-            ChangeKindMeta(
+            _entry(
                 "test_kind",
                 Verdict.BREAKING,
                 impact="x",
@@ -163,7 +179,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entries = [
-            ChangeKindMeta(
+            _entry(
                 "test_kind",
                 Verdict.BREAKING,
                 impact="x",
@@ -182,7 +198,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entries = [
-            ChangeKindMeta("test_kind", Verdict.BREAKING, impact="x", is_addition=True),
+            _entry("test_kind", Verdict.BREAKING, impact="x", is_addition=True),
         ]
         with pytest.raises(ValueError, match="is_addition=True"):
             ChangeKindRegistry(entries)
@@ -203,7 +219,7 @@ class TestChangeKindRegistry:
         loop, so each policy gets its own independent test result.
         """
         entries = [
-            ChangeKindMeta(
+            _entry(
                 "test_kind",
                 Verdict.BREAKING,
                 impact="x",
@@ -243,13 +259,13 @@ class TestChangeKindRegistry:
     def test_valid_policy_override_is_accepted(self):
         """A genuinely different, known-policy override passes construction."""
         entries = [
-            ChangeKindMeta(
+            _entry(
                 "test_kind",
                 Verdict.BREAKING,
                 impact="x",
                 policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
             ),
-            ChangeKindMeta(
+            _entry(
                 "compatible_addition", Verdict.COMPATIBLE, impact="x", is_addition=True
             ),
         ]
@@ -268,7 +284,7 @@ class TestChangeKindRegistry:
         import pytest
 
         source = {"plugin_abi": Verdict.COMPATIBLE}
-        entry = ChangeKindMeta("test_kind", Verdict.BREAKING, policy_overrides=source)
+        entry = _entry("test_kind", Verdict.BREAKING, policy_overrides=source)
 
         # The dataclass's own copy can't be mutated in place.
         with pytest.raises(TypeError):
@@ -292,7 +308,7 @@ class TestChangeKindRegistry:
         """
         import pytest
 
-        entry = ChangeKindMeta(
+        entry = _entry(
             "test_kind",
             Verdict.BREAKING,
             impact="x",
@@ -314,7 +330,7 @@ class TestChangeKindRegistry:
         """
         import pytest
 
-        entry = ChangeKindMeta(
+        entry = _entry(
             "test_kind",
             Verdict.BREAKING,
             impact="x",
@@ -342,7 +358,7 @@ class TestChangeKindRegistry:
         """
         import pytest
 
-        entry = ChangeKindMeta(
+        entry = _entry(
             "test_kind",
             Verdict.BREAKING,
             impact="x",
@@ -367,7 +383,7 @@ class TestChangeKindRegistry:
         """
         import pytest
 
-        entry = ChangeKindMeta(
+        entry = _entry(
             "test_kind",
             Verdict.BREAKING,
             impact="x",
@@ -419,7 +435,7 @@ class TestChangeKindRegistry:
 
         import pytest
 
-        entry = ChangeKindMeta(
+        entry = _entry(
             "test_kind",
             Verdict.BREAKING,
             impact="x",
@@ -551,7 +567,7 @@ class TestChangeKindRegistry:
         """
         import pytest
 
-        entry = ChangeKindMeta(
+        entry = _entry(
             "test_kind",
             Verdict.BREAKING,
             impact="x",
@@ -588,7 +604,7 @@ class TestChangeKindRegistry:
         """
         import pytest
 
-        entry = ChangeKindMeta(
+        entry = _entry(
             "test_kind",
             Verdict.BREAKING,
             impact="x",
@@ -605,14 +621,14 @@ class TestChangeKindRegistry:
     def test_setstate_does_not_validate_matching_the_constructor(self):
         """Restoring (unpickling) a standalone entry must not be stricter than building one.
 
-        Direct construction, ``ChangeKindMeta("x", Verdict.BREAKING)``, is
+        Direct construction, ``_entry("x", Verdict.BREAKING)``, is
         legal today with an empty ``impact``/an unrecognized
         ``policy_overrides`` key — catalog validation is deliberately
         deferred to ``ChangeKindRegistry.__init__``'s own loop over every
         entry it actually holds, not applied per-instance at construction
         time. An earlier revision of ``__setstate__`` called
         ``_validate_entry`` unconditionally, which broke that symmetry:
-        ``pickle.loads(pickle.dumps(ChangeKindMeta("x", Verdict.BREAKING)))``
+        ``pickle.loads(pickle.dumps(_entry("x", Verdict.BREAKING)))``
         regressed from working to raising ``ValueError``, and would
         equally have broken loading a standalone, not-yet-registry-inserted
         pickle predating impact text becoming mandatory (Codex review,
@@ -625,13 +641,13 @@ class TestChangeKindRegistry:
 
         import pytest
 
-        entry = ChangeKindMeta("x", Verdict.BREAKING)
+        entry = _entry("x", Verdict.BREAKING)
         assert entry.impact == ""
         rehydrated = pickle.loads(pickle.dumps(entry))
         assert rehydrated == entry
         assert rehydrated.impact == ""
 
-        entry2 = ChangeKindMeta(
+        entry2 = _entry(
             "y",
             Verdict.BREAKING,
             impact="i",
@@ -663,7 +679,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entries = [
-            ChangeKindMeta(
+            _entry(
                 "test_kind",
                 Verdict.BREAKING,
                 impact="x",
@@ -683,7 +699,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entries = [
-            ChangeKindMeta(
+            _entry(
                 "test_kind",
                 Verdict.BREAKING,
                 impact="x",
@@ -696,7 +712,7 @@ class TestChangeKindRegistry:
     def test_description_template_using_only_vocab_is_accepted(self):
         """A template using only TEMPLATE_VOCAB fields passes construction."""
         entries = [
-            ChangeKindMeta(
+            _entry(
                 "test_kind",
                 Verdict.BREAKING,
                 impact="x",
@@ -721,7 +737,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entries = [
-            ChangeKindMeta(
+            _entry(
                 "test_kind",
                 Verdict.BREAKING,
                 impact="x",
@@ -736,7 +752,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entries = [
-            ChangeKindMeta(
+            _entry(
                 "test_kind",
                 Verdict.BREAKING,
                 impact="x",
@@ -762,7 +778,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entries = [
-            ChangeKindMeta(
+            _entry(
                 "test_kind",
                 Verdict.BREAKING,
                 impact="x",
@@ -783,7 +799,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entries = [
-            ChangeKindMeta(
+            _entry(
                 "test_kind",
                 Verdict.BREAKING,
                 impact="x",
@@ -810,7 +826,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entries = [
-            ChangeKindMeta(
+            _entry(
                 "test_kind",
                 Verdict.BREAKING,
                 impact="x",
@@ -833,7 +849,7 @@ class TestChangeKindRegistry:
         import pytest
 
         entries = [
-            ChangeKindMeta(
+            _entry(
                 "test_kind",
                 Verdict.BREAKING,
                 impact="x",
@@ -864,7 +880,7 @@ class TestChangeKindRegistry:
         """
         import pytest
 
-        entries = [ChangeKindMeta("test_kind", Verdict.BREAKING)]
+        entries = [_entry("test_kind", Verdict.BREAKING)]
         with pytest.raises(ValueError, match="impact must be non-empty"):
             ChangeKindRegistry(entries)
 
@@ -878,7 +894,7 @@ class TestChangeKindRegistry:
         """
         import pytest
 
-        entries = [ChangeKindMeta("test_kind", Verdict.BREAKING, impact="   \n\t  ")]
+        entries = [_entry("test_kind", Verdict.BREAKING, impact="   \n\t  ")]
         with pytest.raises(ValueError, match="impact must be non-empty"):
             ChangeKindRegistry(entries)
 
@@ -894,7 +910,7 @@ class TestChangeKindRegistry:
 
     def test_adding_kind_is_one_entry(self):
         """Adding a new kind to the registry is a single ChangeKindMeta entry."""
-        entry = ChangeKindMeta(
+        entry = _entry(
             kind="hypothetical_new_kind",
             default_verdict=Verdict.BREAKING,
             impact="This is what goes wrong.",

@@ -27,7 +27,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from .report.change_operation import operation_for_kind
+from .report.change_operation import (
+    ACTION_TOKEN_OPERATIONS as ACTION_TOKEN_OPERATIONS,
+    ELEMENT_TOKEN_ENTITIES as ELEMENT_TOKEN_ENTITIES,
+    entity_for_change as entity_for_change,
+    entity_for_kind as entity_for_kind,
+    operation_for_kind as operation_for_kind,
+)
 from .report.kind_rollup import roll_up_large_kinds
 
 if TYPE_CHECKING:
@@ -49,7 +55,6 @@ from .model.change_catalog.kinds import HasKind
 from .policy.classification import (
     evidence_status_for_result,
     impact_for,
-    policy_kind_sets as _policy_kind_sets,
 )
 from .policy.contract_finding_relevance import is_evaluated
 from .policy.evidence_status import EvidenceStatus
@@ -167,8 +172,8 @@ class ShowOnlyFilter:
     def parse(cls, raw: str) -> ShowOnlyFilter:
         """Parse a comma-separated --show-only string into a filter."""
         severity_tokens = {"breaking", "api-break", "risk", "compatible"}
-        element_tokens = {"functions", "variables", "types", "enums", "elf"}
-        action_tokens = {"added", "removed", "changed"}
+        element_tokens = set(ELEMENT_TOKEN_ENTITIES)
+        action_tokens = set(ACTION_TOKEN_OPERATIONS)
 
         severities: set[str] = set()
         elements: set[str] = set()
@@ -237,79 +242,36 @@ class ShowOnlyFilter:
         }.get(eff)
         return label in self.severities
 
-    def _check_element(self, kind_val: str) -> bool:
-        """Return True if *kind_val* matches the element filter."""
+    def _check_element(self, change: object, kind_val: str) -> bool:
+        """Return True if *change* matches the element filter.
+
+        Plan slice 7o: resolves through the change catalog's own declared
+        :class:`ChangeEntity` (:func:`entity_for_change`), not through a
+        second interpretation of the kind's *name*. Takes the whole finding
+        rather than its kind because a polymorphic kind's entity is a
+        property of the finding, not of the kind.
+        """
         if not self.elements:
             return True
-        _ELEMENT_PREFIXES: dict[str, tuple[str, ...]] = {
-            "functions": (
-                "func_",
-                "param_",
-                "method_",
-                "base_class_",
-                "template_",
-                "return_pointer_level_",
-            ),
-            "variables": ("var_", "constant_"),
-            "types": ("type_", "struct_", "union_", "field_", "typedef_"),
-            "enums": ("enum_",),
-            "elf": (
-                "soname_",
-                "needed_",
-                "symbol_",
-                "rpath_",
-                "runpath_",
-                "ifunc_",
-                "common_",
-                "dwarf_",
-                "calling_convention_",
-                "compat_version_",
-                "visibility_",
-            ),
-        }
-        _ELEMENT_EXACT: dict[str, tuple[str, ...]] = {
-            "functions": (
-                "removed_const_overload",
-                "anon_field_changed",
-                "used_reserved_field",
-                "frame_register_changed",
-                # ADR-027 anti-pattern: a function exposing std:: by value.
-                "public_api_exposes_stl_by_value",
-            ),
-            "types": (
-                # ADR-027 type-level idiom transitions / anti-patterns whose
-                # kind names don't match the type_/struct_/... prefixes.
-                "opaque_invariant_broken",
-                "polymorphic_type_non_virtual_dtor",
-                "handle_type_changed",
-            ),
-            "elf": (
-                "toolchain_flag_drift",
-                "source_level_kind_changed",
-                "value_abi_trait_changed",
-                "struct_return_convention_changed",
-            ),
-        }
-        for elem in self.elements:
-            prefixes = _ELEMENT_PREFIXES.get(elem, ())
-            if prefixes and any(kind_val.startswith(p) for p in prefixes):
-                return True
-            exact = _ELEMENT_EXACT.get(elem, ())
-            if exact and kind_val in exact:
-                return True
-        return False
+        entity = entity_for_change(change, kind_val)
+        if entity is None:
+            return False
+        return any(
+            ELEMENT_TOKEN_ENTITIES[elem].value == entity for elem in self.elements
+        )
 
     @staticmethod
     def _check_action(kind_val: str, actions: frozenset[str]) -> bool:
-        """Return True if *kind_val* matches the action filter."""
+        """Return True if *kind_val* matches the action filter.
+
+        Plan slice 7o: resolves through the catalog's declared
+        :class:`ChangeOperation` (:func:`operation_for_kind`).
+        """
         if not actions:
             return True
-        op = operation_for_kind(kind_val)
-        # NB: "changed" (the --show-only token) maps to operation "modified".
-        return (
-            (op == "added" and "added" in actions)
-            or (op == "removed" and "removed" in actions)
-            or (op == "modified" and "changed" in actions)
+        operation = operation_for_kind(kind_val)
+        return any(
+            ACTION_TOKEN_OPERATIONS[action].value == operation for action in actions
         )
 
     def matches(
@@ -323,7 +285,7 @@ class ShowOnlyFilter:
         """Return True if *change* passes this filter."""
         if not self._check_severity(change, policy, kind_sets, policy_file, today):
             return False
-        if not self._check_element(change.kind.value):
+        if not self._check_element(change, change.kind.value):
             return False
         return self._check_action(change.kind.value, self.actions)
 
@@ -597,45 +559,6 @@ def _build_impact_table(
 # ---------------------------------------------------------------------------
 # Leaf-change mode helpers
 # ---------------------------------------------------------------------------
-
-
-def _format_leaf_type_change(c: Change) -> list[str]:
-    """Format a single leaf-mode type change entry."""
-    return _rmd._format_leaf_type_change(c)
-
-
-def compute_leaf_type_sections(
-    type_changes: list[Change], policy: str
-) -> _rmd.LeafTypeSectionsData:
-    """The structured intermediate for :func:`_build_leaf_type_sections`."""
-    breaking_set, api_break_set, _, _ = _policy_kind_sets(policy)
-    breaking_types = [c for c in type_changes if c.kind in breaking_set]
-    api_break_types = [c for c in type_changes if c.kind in api_break_set]
-    other_types = [
-        c
-        for c in type_changes
-        if c.kind not in breaking_set and c.kind not in api_break_set
-    ]
-
-    sections: list[_rmd.LeafTypeSection] = []
-    for heading, section_changes in [
-        ("## Breaking Type Changes", breaking_types),
-        ("## Source-Level Type Breaks", api_break_types),
-        ("## Other Type Changes", other_types),
-    ]:
-        if not section_changes:
-            continue
-        sections.append(
-            _rmd.LeafTypeSection(heading=heading, changes=tuple(section_changes))
-        )
-    return _rmd.LeafTypeSectionsData(sections=tuple(sections))
-
-
-def _build_leaf_type_sections(type_changes: list[Change], policy: str) -> list[str]:
-    """Build severity-grouped type-change sections for leaf-change view."""
-    return _rmd.render_leaf_type_sections(
-        compute_leaf_type_sections(type_changes, policy)
-    )
 
 
 #: The report's stable per-finding fingerprint. The implementation moved to
@@ -1708,6 +1631,7 @@ def compute_review_digest(
         ),
         surface_changes=compute_surface_changes(result, findings),
         env_matrix_source_sha256=result.env_matrix_source_sha256,
+        pattern_modulations=tuple(getattr(result, "pattern_modulations", ()) or ()),
     )
 
 
@@ -1909,7 +1833,6 @@ _DISPATCH_MARKDOWN_NAMES = frozenset(
     {
         "to_markdown",
         "to_review_digest",
-        "_to_markdown_leaf",
         "_to_markdown_root_cause",
         "_markdown_alternate_rendering",
     }

@@ -900,6 +900,26 @@ def _diff_inline_bodies(
 # -- templates ---------------------------------------------------------------
 
 
+#: The extractor's own ``relations["template_kind"]`` mapped onto the
+#: ``ChangeEntity`` value. Function and class templates share one
+#: ``reachable_templates`` bucket, so the bucket cannot tell them apart --
+#: but the distinction was already recorded per entity, just unread.
+_ENTITY_FOR_TEMPLATE_KIND = {
+    "FunctionTemplateDecl": "function",
+    "ClassTemplateDecl": "type",
+}
+
+
+def _template_entity(entity: object) -> str | None:
+    """The display entity for one template entity, when recorded.
+
+    ``None`` when the producer recorded no ``template_kind``, which leaves
+    the finding on its kind's declared fallback rather than guessing.
+    """
+    relations = getattr(entity, "relations", None) or {}
+    return _ENTITY_FOR_TEMPLATE_KIND.get(str(relations.get("template_kind", "")))
+
+
 def _diff_templates(
     old: SourceAbiSurface, new: SourceAbiSurface, compat: FactCompatibility
 ) -> list[Change]:
@@ -924,6 +944,7 @@ def _diff_templates(
             Change(
                 kind=ChangeKind.UNINSTANTIATED_TEMPLATE_REMOVED,
                 symbol=name,
+                entity_discriminator=_template_entity(ov),
                 description=(
                     f"Public template {name!r} was removed without any binary "
                     "presence. Source that instantiates it no longer compiles."
@@ -944,6 +965,7 @@ def _diff_templates(
                 Change(
                     kind=ChangeKind.TEMPLATE_BODY_CHANGED,
                     symbol=name,
+                    entity_discriminator=_template_entity(nv),
                     description=(
                         f"Uninstantiated public template {name!r} implementation "
                         "changed. Invisible to artifact comparison; consumers pick "

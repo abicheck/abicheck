@@ -182,17 +182,16 @@ class TestF19OutputFormatInvariance:
         old_p, new_p = _write_pair(tmp_path)
         suppress = _write_suppression(tmp_path)
 
+        # Plan slice 7o shrank the rendering space this crosses: the
+        # demangle tri-state and the two disclosure tokens are no longer
+        # decisions a caller makes, and `leaf` retired against `root-cause`.
+        # What is left of the space is the report mode, crossed with the
+        # `show=` filter (a display selector, which must equally not move
+        # the exit code).
         seen: list[tuple[tuple[str, ...], int]] = []
-        for (
-            view_demangle,
-            audit_flag,
-            view_patterns,
-            view_mode,
-        ) in itertools.product(
-            ("demangle", "no-demangle"),
-            (True, False),
-            (True, False),
-            ("full", "leaf", "impact", "root-cause"),
+        for view_mode, show in itertools.product(
+            ("full", "impact", "root-cause"),
+            (None, "show=breaking", "show=added"),
         ):
             args = [
                 "compare",
@@ -200,17 +199,13 @@ class TestF19OutputFormatInvariance:
                 str(new_p),
                 "-o",
                 f"{fmt}=-",
-                "--view",
-                view_demangle,
                 "--suppress",
                 str(suppress),
                 "--view",
                 view_mode,
             ]
-            if audit_flag:
-                args += ["--view", "suppressions"]
-            if view_patterns:
-                args += ["--view", "patterns"]
+            if show is not None:
+                args += ["--view", show]
             result = CliRunner().invoke(main, args)
             seen.append((tuple(args[3:]), result.exit_code))
 
@@ -218,51 +213,41 @@ class TestF19OutputFormatInvariance:
         # rather than stopping at the first.
         wrong = [entry for entry in seen if entry[1] != self._EXPECTED_EXIT_CODE]
         assert not wrong, wrong
-        # Vacuity guard: the loop really ran its whole 32-permutation share.
-        assert len(seen) == 32
+        # Vacuity guard: the loop really ran its whole 9-permutation share.
+        assert len(seen) == 9
 
-    def test_json_canonical_facts_identical_across_demangle_audit_explain(
+    def test_json_canonical_facts_carry_the_unconditional_suppression_audit(
         self, tmp_path: Path
     ) -> None:
         """Held at --format json (the only format whose full structured
         payload is directly comparable) so the comparison is over the real
-        canonical fields, not a rendering artifact of format choice itself."""
+        canonical fields, not a rendering artifact of format choice itself.
+
+        Plan slice 7o: the three axes this used to cross (demangle, the
+        audit-render request, the pattern-render request) no longer exist,
+        which is a stronger statement of the same property than crossing
+        them was -- the audit cannot be *absent* for want of a token,
+        because there is no token.
+        """
         old_p, new_p = _write_pair(tmp_path)
         suppress = _write_suppression(tmp_path)
 
-        payloads = []
-        for view_demangle, audit_flag, view_patterns in itertools.product(
-            ("demangle", "no-demangle"), (True, False), (True, False)
-        ):
-            args = [
+        result = CliRunner().invoke(
+            main,
+            [
                 "compare",
                 str(old_p),
                 str(new_p),
                 "-o",
                 "json=-",
-                "--view",
-                view_demangle,
                 "--suppress",
                 str(suppress),
-            ]
-            if audit_flag:
-                args += ["--view", "suppressions"]
-            if view_patterns:
-                args += ["--view", "patterns"]
-            result = CliRunner().invoke(main, args)
-            assert result.exit_code == 4, result.output
-            payloads.append(_canonical_facts(json.loads(result.stdout)))
-
-        first = payloads[0]
-        for other in payloads[1:]:
-            assert other == first
-
-        # ADR-068 D4/Phase 5: suppression_audit is unconditional now -- it
-        # must be present (and identical) whether or not `--view suppressions`
-        # was passed, proving computation is no longer gated by the request
-        # to render it.
-        assert first["suppression_audit"] is not None
-        assert first["suppression_audit"]["stale_rules"] == [
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        facts = _canonical_facts(json.loads(result.stdout))
+        assert facts["suppression_audit"] is not None
+        assert facts["suppression_audit"]["stale_rules"] == [
             "workaround (symbol=never_matches_anything)"
         ]
 
@@ -298,36 +283,29 @@ class TestF19OutputFormatInvariance:
         assert out_md.exists() and out_sarif.exists()
         assert "libfoo.so.1" in out_md.read_text(encoding="utf-8")
 
-    def test_view_filtered_token_does_not_change_canonical_result(
-        self, tmp_path: Path
-    ) -> None:
-        """ADR-067 S1: the disposition/out-of-surface ledger is already
-        unconditional -- the retired ``--show-filtered``, now ``--view
-        filtered``, only ever gates whether the markdown/text rendering
-        echoes it. Confirmed here at the JSON boundary (which always carries
-        out_of_surface_changes/suppressed_changes) and at the exit-code
-        boundary."""
+    def test_the_disposition_ledger_needs_no_token(self, tmp_path: Path) -> None:
+        """ADR-067 S1, and plan slice 7o's first deliverable.
+
+        The ledger was always computed; ``--view filtered`` gated only
+        whether the human render echoed it. The token is gone, so the
+        property is now stated where it actually lives: a plain invocation
+        carries the whole accounting, and asking for it is not a thing a
+        caller can fail to do."""
         old_p, new_p = _write_pair(tmp_path)
 
-        without = CliRunner().invoke(
+        plain = CliRunner().invoke(
             main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
-        with_flag = CliRunner().invoke(
+        assert plain.exit_code == 4, plain.output
+        payload = json.loads(plain.stdout)
+        assert "disposition_audit" in payload
+        assert payload["disposition_audit"]["detected_total"] >= len(payload["changes"])
+        # And the retired token is a usage error with no hidden alias.
+        retired = CliRunner().invoke(
             main,
-            [
-                "compare",
-                str(old_p),
-                str(new_p),
-                "-o",
-                "json=-",
-                "--view",
-                "filtered",
-            ],
+            ["compare", str(old_p), str(new_p), "-o", "json=-", "--view", "filtered"],
         )
-        assert without.exit_code == with_flag.exit_code == 4
-        assert _canonical_facts(json.loads(without.stdout)) == _canonical_facts(
-            json.loads(with_flag.stdout)
-        )
+        assert retired.exit_code == 64, retired.output
 
 
 class TestF20ExplainPatternsNeverChangesAnalysis:
@@ -358,33 +336,29 @@ class TestF20ExplainPatternsNeverChangesAnalysis:
             assert result.exit_code == 64, (flag, result.output)
             assert "No such option" in result.output, (flag, result.output)
 
-    def test_view_patterns_does_not_change_verdict_or_exit_code(
+    def test_the_pattern_ledger_is_disclosed_without_a_token(
         self, tmp_path: Path
     ) -> None:
+        """Plan slice 7o: ``--view patterns`` is retired and the ledger is
+        unconditional, so the property the old token had to be checked
+        against (it must not move the verdict) now holds by construction --
+        what is left to assert is that the disclosure happens on a plain
+        run, and that the retired spelling is a usage error with no alias."""
         old_p, new_p = _write_pair(tmp_path)
 
-        without = CliRunner().invoke(
+        plain = CliRunner().invoke(
             main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
-        with_patterns = CliRunner().invoke(
+        assert plain.exit_code == 4, plain.output
+        # A run with no modulation discloses nothing extra (the ledger is
+        # an accounting of what happened, not a per-run banner).
+        assert "Pattern-aware modulations" not in plain.output
+
+        retired = CliRunner().invoke(
             main,
-            [
-                "compare",
-                str(old_p),
-                str(new_p),
-                "-o",
-                "json=-",
-                "--view",
-                "patterns",
-            ],
+            ["compare", str(old_p), str(new_p), "-o", "json=-", "--view", "patterns"],
         )
-        assert without.exit_code == with_patterns.exit_code == 4
-        payload_without = json.loads(without.stdout)
-        payload_with = json.loads(with_patterns.stdout)
-        assert payload_without["verdict"] == payload_with["verdict"]
-        assert _canonical_facts(payload_without) == _canonical_facts(payload_with)
-        # --view patterns' only visible effect is on stderr, never stdout.
-        assert without.stdout == with_patterns.stdout
+        assert retired.exit_code == 64, retired.output
 
     def test_pattern_verdicts_is_unconditional_on_compare_snapshots(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -411,11 +385,10 @@ class TestF20ExplainPatternsNeverChangesAnalysis:
 
         monkeypatch.setattr(service_module, "compare_snapshots", _spy)
 
-        for view_patterns in (False, True):
-            args = ["compare", str(old_p), str(new_p), "-o", "json=-"]
-            if view_patterns:
-                args += ["--view", "patterns"]
-            result = CliRunner().invoke(main, args)
+        for _ in range(2):
+            result = CliRunner().invoke(
+                main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
+            )
             assert result.exit_code == 4, result.output
 
         assert len(captured) == 2
@@ -546,9 +519,10 @@ class TestViewGrammar:
         like the pre-existing ``--show-only`` it replaces, it genuinely
         narrows the *displayed* ``changes[]`` array (documented as "does
         not affect exit codes", never claimed to leave the array
-        byte-identical); ``leaf``/``demangle``/``patterns`` change no
-        content at all, only how it is grouped/spelled/explained, so those
-        three combined must still leave the JSON payload untouched."""
+        byte-identical). What is left of the token space after plan slice
+        7o -- the report modes -- changes no content at all, only how it is
+        grouped, so combining one with anything else must still leave the
+        JSON payload untouched."""
         old_p, new_p = _write_pair(tmp_path)
         baseline = CliRunner().invoke(
             main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
@@ -562,11 +536,11 @@ class TestViewGrammar:
                 "-o",
                 "json=-",
                 "--view",
-                "leaf",
+                "root-cause",
                 "--view",
-                "demangle",
+                "impact",
                 "--view",
-                "patterns",
+                "full",
             ],
         )
         assert baseline.exit_code == combined.exit_code == 4
@@ -782,15 +756,31 @@ class TestSurfaceMetricsAreUnconditional:
         assert "public_surface_shrank" in kinds
 
 
-class TestAuditSuppressionsNoOpWithoutSuppress:
-    """ADR-068 D4/Phase 5: asking for the suppression-audit *render* with no
-    --suppress is a no-op (nothing to audit), not a usage error -- a
-    rendering selector must never reject an otherwise-valid invocation.
-    ``--audit-suppressions`` is gone; ``--view suppressions`` is the
-    spelling, and it inherits the same rule."""
+class TestSuppressionAuditIsUnconditionalAndStillHonest:
+    """ADR-068 D4/Phase 5, closed out by plan slice 7o.
 
-    def test_no_suppress_is_not_rejected(self, tmp_path: Path) -> None:
+    Phase 5's rule was that asking for the suppression-audit *render* with
+    no ``--suppress`` must be a no-op rather than a usage error. 7o made
+    the audit unconditional, which keeps the honest half of that rule and
+    removes the request: a run with no suppression file has nothing to
+    audit and says so by carrying no audit, and a run with one carries it
+    without being asked."""
+
+    def test_no_suppression_file_means_no_audit_and_no_error(
+        self, tmp_path: Path
+    ) -> None:
         old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
+        )
+        assert result.exit_code == 4, result.output
+        assert json.loads(result.stdout).get("suppression_audit") is None
+
+    def test_a_suppression_file_means_an_audit_with_no_token(
+        self, tmp_path: Path
+    ) -> None:
+        old_p, new_p = _write_pair(tmp_path)
+        suppress = _write_suppression(tmp_path)
         result = CliRunner().invoke(
             main,
             [
@@ -799,12 +789,12 @@ class TestAuditSuppressionsNoOpWithoutSuppress:
                 str(new_p),
                 "-o",
                 "json=-",
-                "--view",
-                "suppressions",
+                "--suppress",
+                str(suppress),
             ],
         )
         assert result.exit_code == 4, result.output
-        assert json.loads(result.stdout).get("suppression_audit") is None
+        assert json.loads(result.stdout)["suppression_audit"] is not None
 
 
 # ── F-19/F-16: the invariant, over the whole permutation space ───────────────
@@ -828,10 +818,14 @@ class TestAuditSuppressionsNoOpWithoutSuppress:
 # the bug *class*, not the one reported input"):
 #
 # 1. **The space is the full product**, enumerated by `_permutations()`:
-#    7 `--format` values x 4 `--view` report modes x 3 demangle states
-#    (unset/demangle/no-demangle) x 2 `--view patterns` x 2 `--view filtered`
-#    x 2 `--view suppressions` x 3 `--view show=` states x 3 extra `--write`
-#    sets = **6048** invocations. The `slow`-marked test runs every one of
+#    7 `--format` values x 3 `--view` report modes x 3 `--view show=` states
+#    x 3 extra export sets = **189** invocations. (Plan slice 7o shrank this
+#    space by retiring four of its axes outright: the demangle tri-state,
+#    `--view patterns`, `--view filtered` and `--view suppressions` are no
+#    longer decisions a caller makes, and `leaf` retired against
+#    `root-cause`. The invariant is unchanged -- there is simply less
+#    rendering space left for it to hold over, which is the point of that
+#    slice.) The `slow`-marked test runs every one of
 #    them; the default-lane test runs a seeded *random* sample of that same
 #    space rather than a hand-picked list, so the fast suite still searches
 #    the space instead of re-checking one corner of it.
@@ -851,14 +845,13 @@ _FORMATS: tuple[str, ...] = (
     "review",
     "oneline",
 )
-_REPORT_MODES: tuple[str, ...] = ("full", "leaf", "impact", "root-cause")
-_DEMANGLE: tuple[str | None, ...] = (None, "demangle", "no-demangle")
+_REPORT_MODES: tuple[str, ...] = ("full", "impact", "root-cause")
 _SHOW: tuple[str | None, ...] = (None, "show=breaking", "show=added")
 #: Extra `--write` artifacts *beyond* the json extractor every case adds.
 _EXTRA_WRITES: tuple[tuple[str, ...], ...] = ((), ("markdown",), ("sarif", "junit"))
 
 #: The full space, as a product of the axes above.
-_PERMUTATION_SPACE_SIZE = 6048
+_PERMUTATION_SPACE_SIZE = 189
 
 
 def _permutations() -> list[tuple[Any, ...]]:
@@ -867,10 +860,6 @@ def _permutations() -> list[tuple[Any, ...]]:
         itertools.product(
             _FORMATS,
             _REPORT_MODES,
-            _DEMANGLE,
-            (False, True),  # --view patterns
-            (False, True),  # --view filtered
-            (False, True),  # --view suppressions
             _SHOW,
             _EXTRA_WRITES,
         )
@@ -937,7 +926,7 @@ def _run_permutation(
     through its own disclosure below rather than against the unfiltered
     oracle.
     """
-    fmt, mode, demangle, patterns, filtered, suppressions, show, extra = case
+    fmt, mode, show, extra = case
     extractor = out_dir / "canonical.json"
     args = [
         "compare",
@@ -952,16 +941,8 @@ def _run_permutation(
         "--view",
         mode,
     ]
-    for token, enabled in (
-        ("patterns", patterns),
-        ("filtered", filtered),
-        ("suppressions", suppressions),
-    ):
-        if enabled:
-            args += ["--view", token]
-    for optional in (demangle, show):
-        if optional is not None:
-            args += ["--view", optional]
+    if show is not None:
+        args += ["--view", show]
     for i, extra_fmt in enumerate(extra):
         args += ["-o", f"{extra_fmt}={out_dir / f'extra{i}.out'}"]
     result = CliRunner().invoke(main, args)
@@ -989,7 +970,7 @@ def _assert_agrees_with_oracle(
     verdict, the suppression and out-of-surface ledgers, the assurance
     status) must still equal the oracle exactly.
     """
-    mode, show = case[1], case[6]
+    mode, show = case[1], case[2]
     if show is None:
         assert facts == oracle, case
         return
@@ -1028,14 +1009,7 @@ class TestF19CanonicalResultIsInvariantOverTheWholeRenderingSpace:
         exact failure mode the sampled predecessor of this class had) fails
         here rather than passing quietly with less coverage."""
         assert len(_permutations()) == (
-            len(_FORMATS)
-            * len(_REPORT_MODES)
-            * len(_DEMANGLE)
-            * 2
-            * 2
-            * 2
-            * len(_SHOW)
-            * len(_EXTRA_WRITES)
+            len(_FORMATS) * len(_REPORT_MODES) * len(_SHOW) * len(_EXTRA_WRITES)
         )
         assert len(_permutations()) == _PERMUTATION_SPACE_SIZE
 

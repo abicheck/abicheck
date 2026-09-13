@@ -609,6 +609,7 @@ class TestPrepareScriptIsolatesEachCommand:
 
     @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
     def test_the_rendered_script_is_valid_shell(self, profile_id):
+        require_bash()
         # Parse-checked rather than eyeballed: a script nobody can run is not
         # reproduction instructions. `bash -n` needs no network and builds nothing.
         require_bash()

@@ -40,11 +40,16 @@ import cycle.
 from __future__ import annotations
 
 import string
-from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass, field, fields
+from collections.abc import Mapping
+from dataclasses import MISSING, dataclass, field, fields
 from enum import Enum
-from types import MappingProxyType
 from typing import Any
+
+from ._immutable_mapping import _ImmutableDict as _ImmutableDict
+from .dimensions import (
+    ChangeEntity as ChangeEntity,
+    ChangeOperation as ChangeOperation,
+)
 
 
 class Verdict(str, Enum):
@@ -87,163 +92,6 @@ _VERDICT_BLIND_POLICIES: frozenset[str] = frozenset({"sdk_vendor", "plugin_abi"}
 #: re-export this name unchanged, so every existing
 #: ``from abicheck.diff_helpers import TEMPLATE_VOCAB`` caller is unaffected.
 TEMPLATE_VOCAB = frozenset({"symbol", "name", "old", "new", "detail"})
-
-
-class _ImmutableDict(Mapping[str, Verdict]):
-    """An immutable mapping that is deliberately *not* a ``dict`` subclass.
-
-    ``ChangeKindMeta.policy_overrides`` needs to be immutable after
-    construction (see ``__post_init__`` below) *and* round-trip cleanly
-    through ``dataclasses.asdict()``/``copy.deepcopy()``/``pickle`` the same
-    way an ordinary ``dict`` field already does. Three earlier designs each
-    closed one gap and left another (Codex review, PR #882, fresh evidence
-    each time):
-
-    - ``types.MappingProxyType`` gives immutability for free but cannot be
-      pickled at all (``asdict()``'s recursive dict handling only
-      special-cases a literal ``dict``; anything else falls back to a plain
-      ``copy.deepcopy()``, which mappingproxy has no support for).
-    - A plain ``dict`` subclass overriding the mutating methods
-      (``__setitem__``/``update``/``__ior__``/re-invoked ``__init__``, etc.)
-      fixes that, and round-trips correctly once given a custom
-      ``__reduce__`` (the *default* pickle/deepcopy protocol for a dict
-      subclass reconstructs item-by-item, which hits the very mutators being
-      overridden). But being a genuine ``dict`` instance means its storage
-      is still reachable through ``dict``'s own *unbound* methods called
-      directly: ``dict.__setitem__(entry.policy_overrides, "unknown",
-      Verdict.API_BREAK)`` mutates the underlying hash table in C, bypassing
-      every overridden Python-level method entirely — there is no override
-      that can intercept a call to the base type's own descriptor.
-
-    The only way to close that last gap is to not be a ``dict`` at all:
-    ``dict.__setitem__(obj, ...)`` requires its first argument to *be* a
-    ``dict`` instance (or subclass), and raises ``TypeError`` immediately
-    for anything else. This class implements the read-only
-    ``collections.abc.Mapping`` protocol (``__getitem__``/``__iter__``/
-    ``__len__``, which is all ``Mapping`` needs to derive ``__contains__``/
-    ``keys()``/``values()``/``items()``/``get()``) over ``self._data`` — a
-    private ``types.MappingProxyType`` view (not a plain ``dict``: a plain
-    dict there would itself be reachable and mutable one attribute access
-    away, via ``entry.policy_overrides._data["unknown"] = ...`` — Codex
-    review, PR #882, fresh evidence; the earlier "wrap a mutable dict, only
-    guard access through this class's own methods" framing missed exactly
-    this). ``Mapping`` supplies no ``__setitem__``/``update``/``pop``/etc.
-    at all — those are ``MutableMapping``-only mixin methods, and this
-    class implements only the read-only ``Mapping`` protocol. Separately,
-    neither ABC defines ``__or__``/``__ior__`` at all (Codex review, PR
-    #882, fresh evidence corrected an earlier revision of this docstring
-    that mis-attributed them to ``MutableMapping``): PEP 584's `|`/`|=`
-    are a ``dict``-specific addition to the concrete type, not a mixin any
-    ABC provides. Either way, ``entry.policy_overrides["x"] = y`` and
-    ``entry.policy_overrides |= {...}`` both raise ``TypeError`` from
-    Python's own attribute/operator resolution — no per-method overriding
-    needed to block them. Two methods
-    are still overridden below to close the remaining reflection-level
-    gaps: ``__init__`` guards against ``entry.policy_overrides.__init__
-    ({...})`` re-invoking it directly on an already-constructed instance
-    (the same shape of bypass a plain dict subclass has, just for this
-    class's own constructor instead of ``dict.__init__``), and
-    ``__setattr__`` guards against reassigning ``_data``/``_initialized``
-    directly (``entry.policy_overrides._data = {...}``), which would
-    otherwise swap in an unvalidated mapping wholesale without going
-    through ``__init__`` at all — the two guards share the same
-    ``_initialized`` flag, so together they reject every attribute write on
-    a real instance after its one legitimate ``__init__`` call.
-
-    ``isinstance(x, dict)`` does not hold for this class, unlike the earlier
-    dict-subclass design — checked against every consumer of
-    ``ChangeKindMeta.policy_overrides``/``ChangeKindRegistry.
-    policy_overrides_for()`` in this codebase: none relies on ``dict``-ness
-    specifically, only on the ``Mapping`` protocol (``.items()``,
-    ``[key]``, ``in``), which this class provides. ``dataclasses.asdict()``
-    is the one place ``dict``-ness *is* observable indirectly: its generic
-    branch reaches every non-dict/list/tuple/dataclass field via
-    ``copy.deepcopy()``, so ``__deepcopy__`` below deliberately returns a
-    plain, mutable ``dict`` — the disconnected copy ``asdict()``/
-    ``copy.deepcopy()`` produce is ordinary and JSON-serializable, matching
-    exactly what an ordinary ``dict`` field would give you, while the
-    *original* entry's own ``policy_overrides`` stays immutable regardless.
-    Pickling is a different mechanism (``__reduce__``) and keeps
-    reconstructing a genuine, immutable ``_ImmutableDict``.
-    """
-
-    __slots__ = ("_data", "_initialized")
-
-    def __init__(
-        self,
-        source: Mapping[str, Verdict] | Iterable[tuple[str, Verdict]] = (),
-    ) -> None:
-        # A second call on an already-constructed instance
-        # (``entry.policy_overrides.__init__({"unknown": ...})``) would
-        # otherwise silently replace ``_data`` with unvalidated content —
-        # ``__init__`` is legitimately invoked exactly once per real object,
-        # by ``ChangeKindMeta.__post_init__`` and by ``__reduce__``'s
-        # reconstruction below, always on a brand-new instance. This also
-        # doubles as the guard ``__setattr__`` below relies on.
-        if getattr(self, "_initialized", False):
-            raise TypeError("policy_overrides is immutable after construction")
-        # ``_data`` is itself a ``types.MappingProxyType`` view over a
-        # private dict with no other reference anywhere, not a plain dict —
-        # a plain dict here would still be reachable and mutable through
-        # ``entry.policy_overrides._data["unknown"] = ...`` (Codex review,
-        # PR #882, fresh evidence): "no public mutator" only protects the
-        # ``Mapping`` interface, not an attribute one attribute-access away.
-        # This has none of MappingProxyType's earlier pickling problems —
-        # those applied to the *field's* own type (asdict()/deepcopy()/
-        # pickle handling a bare mappingproxy value), not to something used
-        # purely as this class's own private storage, which its own
-        # __reduce__/__deepcopy__ above already convert to a plain dict
-        # before handing off to pickle/deepcopy's machinery.
-        self._data = MappingProxyType(dict(source))
-        self._initialized = True
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        # Blocks the sibling bypass to the one above: reassigning ``_data``
-        # directly (``entry.policy_overrides._data = {...}``) would swap in
-        # an unvalidated mapping wholesale, without going through
-        # ``__init__`` at all (Codex review, PR #882, fresh evidence).
-        # ``_initialized`` is only ever ``True`` after ``__init__`` has
-        # already set both slots, so this rejects every later attribute
-        # write on a real instance while still allowing ``__init__`` itself
-        # to set them the first time.
-        if getattr(self, "_initialized", False):
-            raise TypeError("policy_overrides is immutable after construction")
-        object.__setattr__(self, name, value)
-
-    def __getitem__(self, key: str) -> Verdict:
-        return self._data[key]
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._data)
-
-    def __len__(self) -> int:
-        return len(self._data)
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}({self._data!r})"
-
-    def __deepcopy__(self, memo: dict[int, Any]) -> dict[str, Verdict]:
-        # Deliberately returns a plain, ordinary (mutable) dict rather than
-        # another _ImmutableDict — matching exactly what an *ordinary* dict
-        # field would produce under copy.deepcopy() (a disconnected copy,
-        # unremarkable in every way, keys/values already immutable so a
-        # shallow dict() copy is a real deep copy here). This is also what
-        # makes dataclasses.asdict() work: its generic-value branch calls
-        # copy.deepcopy() on any field that isn't itself a dict/list/tuple/
-        # dataclass, so without this override asdict()'s output kept the
-        # live _ImmutableDict — a non-dict Mapping json.dumps() cannot
-        # serialize, unlike the plain dict an ordinary field would have
-        # produced (Codex review, PR #882, fresh evidence). The *original*
-        # entry's own policy_overrides attribute is completely unaffected —
-        # this only governs what a disconnected copy of it looks like.
-        # pickle round-trips take a different path (__reduce__ below) and
-        # keep reconstructing a genuine, immutable _ImmutableDict, since
-        # pickle's job is faithfully reconstructing the same object/type,
-        # not producing JSON-primitive-friendly output.
-        return dict(self._data)
-
-    def __reduce__(self) -> tuple[Any, ...]:
-        return (self.__class__, (dict(self._data),))
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,6 +161,45 @@ class ChangeKindMeta:
     # when the text embeds computed offsets, demangled signatures, vtable slot
     # indices, counts, etc. that no fixed template can express.
     description_template: str | None = None
+    # Plan slice 7o: the two canonical display dimensions, declared here
+    # rather than parsed back out of ``kind``. ``None`` is accepted by the
+    # constructor (the same way an empty ``impact`` is) and rejected by
+    # ``_validate_entry`` for any entry that actually reaches a registry,
+    # so a direct ``ChangeKindMeta("x", Verdict.BREAKING)`` in a test stays
+    # legal while the production catalog cannot carry an unclassified kind.
+    #
+    # Keyword-only (Codex review, PR #1284), per ``model/AGENTS.md``'s
+    # "append new fields at the end, keyword-only where a default is
+    # needed": these dataclasses are public API, and a defaulted *positional*
+    # parameter lets an outside caller couple these two dimensions to
+    # declaration order, which is exactly what the next appended field would
+    # then silently break.
+    #
+    # Declared **last**, deliberately: ``__setstate__`` restores a slotted
+    # dataclass from a positional, field-declaration-order tuple, so a new
+    # field inserted anywhere but the end would silently re-map every
+    # position after it when loading a pickle written by an older build
+    # (caught by ``test_setstate_normalizes_a_legacy_plain_dict_policy_
+    # overrides``, whose six-value legacy state is exactly that shape).
+    entity: ChangeEntity | None = field(default=None, kw_only=True)
+    operation: ChangeOperation | None = field(default=None, kw_only=True)
+    # The one escape hatch for a *polymorphic* kind -- one a detector emits
+    # for more than one entity type, where no single declared ``entity`` can
+    # be right for every finding. ``EXPERIMENTAL_GRADUATED`` and
+    # ``EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT`` are emitted by
+    # ``diff_namespaces`` for both functions and types (Codex review, PR
+    # #1284): declaring either as ``TYPE`` excluded a graduated *function*
+    # from ``--view show=functions`` and serialized a wrong ``entity``.
+    #
+    # Names the ``Change`` attribute whose value spells the entity for this
+    # finding (a ``ChangeEntity`` value such as ``"function"``). Resolution
+    # stays a *single* registration -- the polymorphism is declared here,
+    # beside the fallback, not in a second table the reporter maintains.
+    # ``entity`` remains mandatory and is what a finding falls back to when
+    # the named field is absent or does not spell a known entity (a
+    # hand-built ``Change``), so the filter never loses a finding to an
+    # unresolvable dimension.
+    entity_from_field: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         # ``frozen=True`` only stops reassigning the *attribute*
@@ -356,14 +243,18 @@ class ChangeKindMeta:
         # two paths stay genuinely independent: asdict()'s field-level
         # copy stays a plain dict, while copy.deepcopy() of the whole
         # entry stays immutable.
-        new = ChangeKindMeta(
-            kind=self.kind,
-            default_verdict=self.default_verdict,
-            impact=self.impact,
-            is_addition=self.is_addition,
-            policy_overrides=dict(self.policy_overrides),
-            description_template=self.description_template,
-        )
+        #
+        # Built from ``fields(self)`` rather than a hand-written keyword
+        # list: the hand-written one silently dropped every newly added
+        # field, which is not hypothetical -- it lost ``entity_from_field``
+        # the moment that field was introduced, turning a polymorphic entry
+        # back into a statically-classified one on any deep copy (Codex
+        # review, PR #1284). ``policy_overrides`` is the one field that
+        # needs its own treatment, and it gets it by being passed as a
+        # plain dict for ``__post_init__`` to re-wrap.
+        values = {f.name: getattr(self, f.name) for f in fields(self)}
+        values["policy_overrides"] = dict(self.policy_overrides)
+        new = ChangeKindMeta(**values)
         memo[id(self)] = new
         return new
 
@@ -446,7 +337,35 @@ class ChangeKindMeta:
             values = dict(state)
         else:
             field_names = [f.name for f in fields(self)]
-            values = dict(zip(field_names, state, strict=True))
+            if len(state) > len(field_names):
+                raise ValueError(
+                    "ChangeKindMeta.__setstate__ got more values than this "
+                    "build has fields — the pickle was written by a newer "
+                    "abicheck"
+                )
+            # A *shorter* tuple is a pickle from a build with fewer fields
+            # (plan slice 7o added `entity`/`operation`): fill the trailing
+            # fields from their own declared defaults rather than refusing
+            # to load. Loading it is the honest outcome -- the catalog entry
+            # it restores is genuinely missing those two facts, and
+            # `_validate_entry` is what refuses such an entry when it
+            # actually reaches a registry.
+            values = dict(zip(field_names, state, strict=False))
+        # Applied to *both* state shapes, not just the tuple one. A legacy
+        # pre-slots pickle's own ``__dict__`` is equally missing every field
+        # added since it was written, and leaving those slots unset made
+        # `entity_for`/`operation_for`/`entity_from_field_for` raise
+        # AttributeError on the restored entry rather than reading a
+        # default (CodeRabbit review, PR #1284) -- the same shape as
+        # `__deepcopy__`'s own hand-written field list, and fixed the same
+        # way: derive from `fields(self)` so no field can be forgotten.
+        for field_def in fields(self):
+            if field_def.name in values:
+                continue
+            if field_def.default is not MISSING:
+                values[field_def.name] = field_def.default
+            elif field_def.default_factory is not MISSING:  # type: ignore[misc]
+                values[field_def.name] = field_def.default_factory()  # type: ignore[misc]
         overrides = values.get("policy_overrides")
         if not isinstance(overrides, _ImmutableDict):
             values["policy_overrides"] = _ImmutableDict(overrides or {})
@@ -559,7 +478,7 @@ def _validate_entry(e: ChangeKindMeta) -> None:
     defaults. This function enforces the latter three:
 
     * **Complete metadata** — every entry must carry non-empty ``impact``
-      text. ``description_template`` stays genuinely optional (a kind can
+      text, plus (plan slice 7o) a declared ``entity``/``operation``. ``description_template`` stays genuinely optional (a kind can
       keep a bespoke, per-call-site description — see ``ChangeKindMeta``'s
       own docstring), so only ``impact`` is required. This was the fourth
       property blocked on writing 48 real, individually-accurate one-line
@@ -584,6 +503,17 @@ def _validate_entry(e: ChangeKindMeta) -> None:
             f"{e.kind!r}: impact must be non-empty — D9's \"complete "
             f'metadata" catalog-validation property requires every entry '
             f"to carry human-readable impact text"
+        )
+    if e.entity is None or e.operation is None:
+        missing = [
+            name
+            for name, value in (("entity", e.entity), ("operation", e.operation))
+            if value is None
+        ]
+        raise ValueError(
+            f"{e.kind!r}: {' and '.join(missing)} must be declared — plan slice "
+            f"7o makes the display dimensions a property of the catalog entry, "
+            f"so a kind cannot be added without landing in the right dimension"
         )
     for policy, override in e.policy_overrides.items():
         if policy not in VALID_BASE_POLICIES:
@@ -758,6 +688,39 @@ class ChangeKindRegistry:
     def addition_kinds(self) -> frozenset[str]:
         """Return kind values flagged as additions (subset of COMPATIBLE)."""
         return frozenset(e.kind for e in self._entries.values() if e.is_addition)
+
+    def entity_for(self, kind_value: str) -> ChangeEntity | None:
+        """The declared display *entity* for a kind, or ``None`` if unknown.
+
+        ``None`` means "this registry has no entry for that kind" -- every
+        registered entry carries one (``_validate_entry`` refuses an entry
+        that does not). Callers rendering an unregistered kind (a test's
+        hand-built ``Change``) decide for themselves what an unknown
+        dimension means; the reporter's display filter treats it as
+        "matches no element token", which is what the superseded
+        name-prefix table did for an unrecognized name too.
+        """
+        e = self._entries.get(kind_value)
+        return e.entity if e is not None else None
+
+    def entity_from_field_for(self, kind_value: str) -> str | None:
+        """The ``Change`` attribute stating this kind's per-finding entity.
+
+        ``None`` for every kind whose declared :meth:`entity_for` is the
+        whole answer, which is all but the polymorphic handful -- see
+        ``ChangeKindMeta.entity_from_field``.
+        """
+        e = self._entries.get(kind_value)
+        return e.entity_from_field if e is not None else None
+
+    def operation_for(self, kind_value: str) -> ChangeOperation | None:
+        """The declared display *operation* for a kind, or ``None`` if unknown."""
+        e = self._entries.get(kind_value)
+        return e.operation if e is not None else None
+
+    def kinds_for_entity(self, entity: ChangeEntity) -> frozenset[str]:
+        """Every kind value declared under *entity*."""
+        return frozenset(e.kind for e in self._entries.values() if e.entity is entity)
 
     def policy_overrides_for(self, policy: str) -> dict[str, Verdict]:
         """Return {kind_value: overridden_verdict} for a given policy name."""

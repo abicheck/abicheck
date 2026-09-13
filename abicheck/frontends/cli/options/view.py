@@ -12,47 +12,55 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``compare --view`` -- ADR-068 D4/one-comparison-product.md Sec 4.1/Sec 6
-Phase 5: one repeatable rendering-selection option collapsing
-``--report-mode``, ``--show-only``, ``--demangle``/``--no-demangle``, and
-``--explain-patterns`` into a single concept, because all four are spellings
-of "which parts of the already-computed canonical result do I want
-rendered, and how" -- never a decision that changes the result itself.
+"""``compare --view`` -- the rendering *selection* option, rewritten by
+one-comparison-product.md plan slice 7o around what it still carries.
 
-Grammar (each ``--view TOKEN`` occurrence contributes one of):
+Phase 5 collapsed four flags into this one option; 7i/7k then ruled ``--view``
+a keep without looking inside it. Inside, it still carried six independent
+decisions. Three of them are gone, and none of them by deletion:
 
-* ``full`` / ``leaf`` / ``impact`` / ``root-cause`` -- report mode
-  (``--report-mode``'s exact former ``Choice`` values; last one given wins).
-* ``show=<tokens>`` -- the ``--show-only`` token vocabulary, unchanged
-  within one occurrence (severity/element/action, AND across dimensions, OR
-  within a dimension via comma); repeatable, and each ``show=`` occurrence is
-  its own AND-group, ORed against every other occurrence's group (a finding
-  is shown if it matches ANY occurrence's group) -- joined internally with
-  ``reporter_markdown.SHOW_ONLY_GROUP_SEP`` (``";"``), never comma: joining with comma
-  would instead AND two different-dimension groups together, or widen the OR
-  *within* one dimension for two same-dimension groups, either way losing
-  "match either group" (CodeRabbit/Codex review, PR #1154).
-* ``demangle`` / ``no-demangle`` -- the demangle tri-state (last one given
-  wins); omitted keeps the ``None`` "auto per format" default.
-* ``patterns`` -- render the pattern-verdict modulation ledger
-  (``--explain-patterns``'s old spelling). Modulation itself always runs
-  wherever idiom evidence exists (ADR-068 D4) -- this only controls whether
-  its evidence is explained, never whether it happened.
-* ``filtered`` -- render the scope/disposition ledger of findings excluded
-  from the verdict (``--show-filtered``'s old spelling). The ledger itself
-  is unconditional (ADR-067 S1) and always present in ``-o json=...``;
-  this only controls whether the markdown/text render echoes it.
-* ``suppressions`` -- render the suppression audit section
-  (``--audit-suppressions``'s old spelling). The audit is computed on every
-  run that was given ``--suppress`` and always present in
-  ``-o json=...``/sarif/junit/html; this only controls whether the
-  markdown/text/review render echoes it.
+* ``patterns``, ``filtered`` and ``suppressions`` gated *disclosure* of the
+  pattern-modulation ledger, the scope/reconciliation ledger, and the
+  ``--suppress`` audit. Each is now unconditional. That is ADR-067's
+  record-before-disposing accounting rule, not a display preference: an
+  accepted break, an exclusion or a suppressed finding may not be invisible
+  because a token was not typed, and "100 removals detected, 100 suppressed
+  by rule X" has to stay visible on a *passing* run.
+* ``demangle``/``no-demangle`` gated whether human output demangled C++
+  symbols. Demangling now always applies to a human format and never to a
+  machine one, because the reason to choose is gone:
+  :func:`~abicheck.demangle.demangle_text` keeps the exact mangled spelling
+  beside the readable name (``Foo::bar(int) [_ZN3Foo3barEi]``), and every
+  machine projection carries both names (``symbol`` +
+  ``demangled_symbol``).
 
-The last three are the Phase 5 residue of §4.1's AUTO rows: each used to be
-its own flag that gated *rendering* while the data behind it was already
-(or, for ``--surface-metrics``, has since become) unconditional analysis.
-``--surface-metrics`` needs no token at all -- its findings live in
-``result.changes`` and every projection already renders them.
+What is left is the one thing ``--view`` is *for* -- which parts of the
+already-computed canonical result to render, and in what shape:
+
+* ``full`` / ``impact`` / ``root-cause`` -- report mode (last one given
+  wins). ``leaf`` retired with a measurement rather than an argument: over
+  the 129 catalog library pairs that build here, ``leaf`` and ``root-cause``
+  exposed the identical finding set in all 93 cases that had findings, and
+  ``leaf``'s own headline section was empty in 40 of them. See the plan's 7o
+  section for the full table.
+* ``show=<tokens>`` -- the severity/element/action display filter.
+  Unchanged within one occurrence (AND across dimensions, OR within a
+  dimension via comma); repeatable, and each ``show=`` occurrence is its own
+  AND-group, ORed against every other occurrence's group -- joined
+  internally with ``reporter_markdown.SHOW_ONLY_GROUP_SEP`` (``";"``), never
+  comma: joining with comma would instead AND two different-dimension
+  groups together, or widen the OR *within* one dimension for two
+  same-dimension groups, either way losing "match either group"
+  (CodeRabbit/Codex review, PR #1154). Its three dimensions now resolve
+  through the change catalog's own declared ``ChangeEntity``/
+  ``ChangeOperation`` rather than through a second interpretation of a
+  ``ChangeKind``'s *name* -- which is also why the element vocabulary grew
+  ``build``, ``source`` and ``analysis``: the superseded name-prefix table
+  could not express those three dimensions at all, and mapped 238 of 407
+  kinds to no element whatsoever.
+
+The six retired tokens are usage errors (exit 64) with no hidden alias, and
+are registered in ``scripts/retired_surfaces.py``.
 
 This module is pure parsing over already-typed strings -- it makes no
 decision that touches ``compare_snapshots``/``checker.compare`` and holds no
@@ -62,32 +70,62 @@ business logic of its own, matching every other option-only module under
 
 from __future__ import annotations
 
-REPORT_MODES: tuple[str, ...] = ("full", "leaf", "impact", "root-cause")
+REPORT_MODES: tuple[str, ...] = ("full", "impact", "root-cause")
 
 _SHOW_PREFIX = "show="
 
+#: Retired ``--view`` tokens -> what replaced each. Every one is a usage
+#: error (exit 64) with no hidden alias; each message names the unconditional
+#: behaviour that supersedes it, so a user reading the error learns that the
+#: thing they asked for already happened.
+RETIRED_TOKENS: dict[str, str] = {
+    "demangle": (
+        "human output always demangles now, and keeps the exact mangled "
+        "symbol beside the readable name"
+    ),
+    "no-demangle": (
+        "the exact mangled symbol is always present -- in human output "
+        "beside the demangled name, and in every machine projection as "
+        "'symbol', with 'demangled_symbol' alongside it"
+    ),
+    "leaf": (
+        "use 'root-cause'. Measured over 129 real library pairs from the "
+        "catalog corpus (93 with findings): the two modes exposed the "
+        "*identical* finding set in every one of them, and 'leaf' rendered "
+        "an empty headline section in 40 of the 93 because it groups only "
+        "root-type changes -- so it never showed evidence 'root-cause' "
+        "lacked, and often showed less"
+    ),
+    "patterns": "the pattern-modulation ledger is always disclosed (ADR-067)",
+    "filtered": (
+        "the scope/reconciliation ledger of findings excluded from the "
+        "verdict is always disclosed (ADR-067)"
+    ),
+    "suppressions": (
+        "the --suppress audit is always disclosed when suppression was given (ADR-067)"
+    ),
+}
+
 
 def parse_view_tokens(tokens: tuple[str, ...]) -> dict[str, object]:
-    """Parse ``--view`` tokens into the four values the old flags produced.
+    """Parse ``--view`` tokens into the two values they still carry.
 
-    Returns a dict with keys ``report_mode`` (str), ``show_only``
-    (``str | None``), ``demangle`` (``bool | None``),
-    ``explain_patterns`` (bool), ``show_filtered`` (bool) and
-    ``audit_suppressions`` (bool) -- exactly the dest names
-    ``cli_compare_helpers.run_compare`` already expects, so a caller can
-    merge this straight into its kwargs.
+    Returns a dict with keys ``report_mode`` (str) and ``show_only``
+    (``str | None``) -- exactly the dest names
+    ``cli_compare_helpers.run_compare`` expects, so a caller can merge this
+    straight into its kwargs.
 
-    Raises ``ValueError`` on an unrecognized token or a malformed
-    ``show=`` filter (the same error ``ShowOnlyFilter.parse`` raises for
-    the old ``--show-only`` flag) -- callers translate that into a
-    ``click.BadParameter``/``click.UsageError`` as appropriate.
+    Raises ``ValueError`` on an unrecognized token or a malformed ``show=``
+    filter (the same error ``ShowOnlyFilter.parse`` raises); callers
+    translate that into a ``click.BadParameter``/``click.UsageError``.
+    A retired token (``demangle``, ``no-demangle``, ``patterns``,
+    ``filtered``, ``suppressions``) is rejected with a message naming what
+    replaced it, rather than with the generic unknown-token text -- the
+    behaviour it asked for still happens, it just no longer needs asking
+    for.
     """
     report_mode = "full"
     show_only_parts: list[str] = []
-    demangle: bool | None = None
-    explain_patterns = False
-    show_filtered = False
-    audit_suppressions = False
     for raw in tokens:
         token = raw.strip()
         if token in REPORT_MODES:
@@ -100,21 +138,14 @@ def parse_view_tokens(tokens: tuple[str, ...]) -> dict[str, object]:
                     "(e.g. --view show=breaking,functions)."
                 )
             show_only_parts.append(value)
-        elif token == "demangle":
-            demangle = True
-        elif token == "no-demangle":
-            demangle = False
-        elif token == "patterns":
-            explain_patterns = True
-        elif token == "filtered":
-            show_filtered = True
-        elif token == "suppressions":
-            audit_suppressions = True
+        elif token in RETIRED_TOKENS:
+            raise ValueError(
+                f"--view {token} was retired (plan slice 7o): {RETIRED_TOKENS[token]}"
+            )
         else:
             raise ValueError(
                 f"Unknown --view token: {raw!r}. Expected one of "
-                f"{', '.join(REPORT_MODES)}, 'show=<tokens>', 'demangle', "
-                "'no-demangle', 'patterns', 'filtered', or 'suppressions'."
+                f"{', '.join(REPORT_MODES)} or 'show=<tokens>'."
             )
 
     # Each `--view show=...` occurrence is joined with the reporter's own
@@ -129,15 +160,7 @@ def parse_view_tokens(tokens: tuple[str, ...]) -> dict[str, object]:
     if show_only is not None:
         # Reuse ShowOnlyFilter's own per-group validation so a bad token
         # inside any `show=...` occurrence is rejected with the identical
-        # message the old `--show-only` flag gave -- a lossless rename, not
-        # a new per-group grammar.
+        # message the old `--show-only` flag gave.
         parse_show_only_groups(show_only)
 
-    return {
-        "report_mode": report_mode,
-        "show_only": show_only,
-        "demangle": demangle,
-        "explain_patterns": explain_patterns,
-        "show_filtered": show_filtered,
-        "audit_suppressions": audit_suppressions,
-    }
+    return {"report_mode": report_mode, "show_only": show_only}

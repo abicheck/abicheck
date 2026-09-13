@@ -146,13 +146,17 @@ class TestJunitRootCauseMode:
         assert fail.get("rootCause") == "missing_symbol_v1"
 
     def test_other_report_modes_behave_like_full(self) -> None:
+        # Was ``leaf`` until plan slice 7o retired it; ``impact`` is now the
+        # mode that is neither ``full`` nor ``root-cause``. Migrating this
+        # one to ``root-cause`` like its siblings would have inverted the
+        # claim, since that mode legitimately sets ``rootCauseId``.
         c = Change(
             kind=ChangeKind.FUNC_REMOVED,
             symbol="foo",
             description="removed",
             caused_by_type="ns::detail::Impl",
         )
-        xml = to_junit_xml(_make_result([c]), report_mode="leaf")
+        xml = to_junit_xml(_make_result([c]), report_mode="impact")
         fail = _parse(xml).find(".//failure")
         assert fail is not None
         assert fail.get("rootCauseId") is None

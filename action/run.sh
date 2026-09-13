@@ -5654,7 +5654,7 @@ _can_reuse_primary_json() {
   # work and describing a separate, budget-metered run.
   # ADR-068 D4/Phase 5: --show-only is gone -- its equivalent is one of
   # --view's repeatable tokens (`--view show=...`), so only *that* token
-  # (never `--view leaf`/`--view demangle`/etc., which change no content)
+  # (never `--view root-cause`/`--view impact`, which change no content)
   # disqualifies reuse. Indexed, not a plain `for arg in` loop, since the
   # token-form `--view show=...` needs the *next* array element to see the
   # value; the inline `--view=show=...` form carries it in the same element.
@@ -5702,9 +5702,9 @@ _build_json_cmd() {
         # would hide gated breaks from the comment while the check still
         # fails red, so drop it (and its value) so the comment sees the
         # full change set the gate acted on. Every other --view token
-        # (leaf/impact/root-cause/demangle/no-demangle/patterns) changes
-        # no content, only how it's grouped/spelled/explained, so it is
-        # kept -- the loop below falls through to the default case for it.
+        # (impact/root-cause -- plan slice 7o retired the rest) changes
+        # no content, only how it's grouped, so it is kept -- the loop
+        # below falls through to the default case for it.
         if [[ "${CMD[$((i + 1))]:-}" == show=* ]]; then
           ((i++))  # drop the token and its value
         else

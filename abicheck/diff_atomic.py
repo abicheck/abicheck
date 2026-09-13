@@ -54,6 +54,7 @@ def _diff_atomic(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             make_change(
                 ChangeKind.ATOMIC_QUALIFIER_CHANGED,
                 symbol=ch.symbol,
+                entity_discriminator=ch.owner,
                 name=f"{ch.slot} of '{ch.symbol}'",
                 detail=direction,
                 old=ch.old_type,

@@ -673,8 +673,6 @@ def test_cli_compare_reconciles_without_any_flag():
             str(case / "v1.abi.json"),
             str(case / "v2.abi.json"),
             "--scope-public-headers",
-            "--view",
-            "filtered",
         ],
     )
     assert result.exit_code == 0, result.output

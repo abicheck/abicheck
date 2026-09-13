@@ -115,7 +115,7 @@ in those public headers via castxml. This is **best-effort**:
 
 Reachability-based public-surface filtering (keeping only the symbols and types reachable
 from the public API, with an auditable trail of what was filtered and why) is **on by
-default** (`--scope-public-headers`, add `--view filtered` to print the audit ledger;
+default** (`--scope-public-headers`; the audit ledger is always printed;
 opt out with `--no-scope-public-headers`). Findings about symbols/types not reachable from
 the public-header-declared exported API are recorded as *filtered* rather than reported, while
 internal-type *leaks* are never hidden. Source-header provenance (distinguishing a

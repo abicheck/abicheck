@@ -227,12 +227,11 @@ class TestHundredSuppressedRemovals:
         # Every Markdown mode, not only the digest: `--report-mode` is a
         # presentation choice, and D3's counts are not presentation.
         from abicheck.reporter_markdown import (
-            _to_markdown_leaf,
             _to_markdown_root_cause,
             to_markdown,
         )
 
-        for render in (to_markdown, _to_markdown_leaf, _to_markdown_root_cause):
+        for render in (to_markdown, _to_markdown_root_cause):
             text = render(result)
             assert "| Detected (raw) | 100 |" in text, render.__name__
             assert "| Effective (gating) | 0 |" in text, render.__name__

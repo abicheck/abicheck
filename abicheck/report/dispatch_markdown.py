@@ -63,6 +63,11 @@ def to_markdown(
     show_impact: bool = False,
     severity_config: SeverityConfig | None = None,
     show_recommendation: bool = False,
+    # Stays `False`: the CLI demangles *once*, at the `service_render`
+    # boundary, so flipping this default made the native path demangle twice
+    # and render `bar() [bar() [_Z3barv]]`. The two direct callers that
+    # genuinely needed it (`compat/cli.py`, `annotations_step_summary.py`)
+    # now pass it explicitly (Codex review, PR #1284).
     demangle: bool = False,
     contract_evaluation: bool = False,
     report_document: ReportDocument | None = None,
@@ -75,6 +80,13 @@ def to_markdown(
     ``leaf``/``root-cause`` alternate views ignore both, since those stay
     their own separate documents."""
 
+    # Every public rendering entry point shares one report-mode check
+    # (report_modes.py) -- see its docstring for why enforcing the ``leaf``
+    # retirement in `service_render` alone was not a retirement.
+    from .report_modes import normalize_report_mode
+
+    report_mode, show_impact = normalize_report_mode(report_mode, show_impact)
+
     # Human-facing only: optionally demangle Itanium C++ symbols in the rendered
     # output. Machine formats (JSON/SARIF/JUnit) keep the raw mangled symbols.
     def _out(text: str) -> str:
@@ -82,7 +94,11 @@ def to_markdown(
             return text
         from ..demangle import demangle_text
 
-        return demangle_text(text)
+        # `escape_table_pipes`: this document contains tables (the pattern-
+        # modulation ledger, the headline/severity tables), and a demangled
+        # operator name can carry a `|` into a row that was already built and
+        # correctly escaped (Codex review, PR #1284).
+        return demangle_text(text, escape_table_pipes=True)
 
     alternate = _markdown_alternate_rendering(
         result,
@@ -142,14 +158,6 @@ def _markdown_alternate_rendering(
     public spelling (``render_output(fmt="oneline")``, or ``to_stat``
     directly). Call the function you want.
     """
-    if report_mode == "leaf":
-        return _to_markdown_leaf(
-            result,
-            show_impact=show_impact,
-            show_only=show_only,
-            show_recommendation=show_recommendation,
-            severity_config=severity_config,
-        )
     if report_mode == "root-cause":
         return _to_markdown_root_cause(
             result,
@@ -160,39 +168,6 @@ def _markdown_alternate_rendering(
             contract_evaluation=contract_evaluation,
         )
     return None
-
-
-def _to_markdown_leaf(
-    result: DiffResult,
-    show_impact: bool = False,
-    show_only: str | None = None,
-    show_recommendation: bool = False,
-    *,
-    severity_config: SeverityConfig | None = None,
-) -> str:
-    """Leaf-change mode: root type changes with affected interface lists.
-
-    *severity_config*, when given, adds the same "Severity Configuration"
-    summary section the full-mode report has — without it, ``report_mode=
-    "leaf"`` returned before that section was ever built, so it silently had
-    no severity information even when a caller passed *severity_config*
-    through :func:`to_markdown`.
-
-    ADR-061 Phase 2 item 1: crosses the canonical ``ReportDocument`` boundary
-    via ``report/render_markdown_alternate.py``, the same fact/formatting
-    split JSON/SARIF/JUnit/``--stat``/HTML/full-mode markdown already use.
-    """
-    from .render_markdown_alternate import build_leaf_document, render_leaf_document
-
-    return render_leaf_document(
-        build_leaf_document(
-            result,
-            show_impact=show_impact,
-            show_only=show_only,
-            show_recommendation=show_recommendation,
-            severity_config=severity_config,
-        )
-    )
 
 
 def _to_markdown_root_cause(

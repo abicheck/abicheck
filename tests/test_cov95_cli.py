@@ -853,18 +853,13 @@ class TestCompareCommand:
         )
         assert result.exit_code == 0
 
-    def test_demangle_explicit_off_markdown(self, tmp_path: Path) -> None:
-        # Explicit --no-demangle overrides the markdown default (cli.py:1824).
+    def test_markdown_demangles_without_being_asked(self, tmp_path: Path) -> None:
+        # Plan slice 7o: there is no demangle toggle any more -- markdown
+        # is a human format, so it always demangles.
         snap = _snap()
         old_f = _write_snap(tmp_path / "old.json", snap)
         new_f = _write_snap(tmp_path / "new.json", snap)
-        result = _invoke(
-            "compare",
-            str(old_f),
-            str(new_f),
-            "--view",
-            "no-demangle",
-        )
+        result = _invoke("compare", str(old_f), str(new_f))
         assert result.exit_code == 0
 
     def test_sarif_format(self, tmp_path: Path) -> None:
@@ -2662,7 +2657,7 @@ class TestUsedByScoping:
         assert "## Root Causes (2)" in result.output
         # Markdown demangles by default -- the group's display root is the
         # demangled `bar()`, not the raw mangled `_Z3barv`.
-        assert "### `bar()` (2 finding" in result.output
+        assert "### `bar() [_Z3barv]` (2 finding" in result.output
         assert "ordinal retargeted" in result.output
         # Not duplicated in the flat appendix.
         assert "## Additional scoped-gate findings" not in result.output

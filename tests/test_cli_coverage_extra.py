@@ -409,8 +409,9 @@ class TestRenderOutputFormats:
         assert result.exit_code == 4  # breaking (struct size changed)
         assert "Impact Summary" in result.output or "impact" in result.output.lower()
 
-    def test_leaf_report_mode(self, tmp_path: Path) -> None:
-        """--report-mode leaf produces leaf-change view with type root changes."""
+    def test_root_cause_report_mode(self, tmp_path: Path) -> None:
+        """--view root-cause groups findings under the root type that caused
+        them (`leaf` retired in plan slice 7o)."""
         from abicheck.model import (
             AbiSnapshot,
             Function,
@@ -460,10 +461,10 @@ class TestRenderOutputFormats:
 
         runner = CliRunner()
         result = runner.invoke(
-            main, ["compare", str(old_f), str(new_f), "--view", "leaf"]
+            main, ["compare", str(old_f), str(new_f), "--view", "root-cause"]
         )
         assert result.exit_code == 4
-        assert "leaf-change view" in result.output or "Cfg" in result.output
+        assert "Cfg" in result.output
 
 
 # ---------------------------------------------------------------------------

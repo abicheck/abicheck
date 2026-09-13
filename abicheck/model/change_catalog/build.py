@@ -38,13 +38,15 @@ line-count reasons before this migration.
 
 from __future__ import annotations
 
-from .registry import ChangeKindMeta, Verdict
+from .registry import ChangeEntity, ChangeKindMeta, ChangeOperation, Verdict
 
 _B = Verdict.BREAKING
 _C = Verdict.COMPATIBLE
 _A = Verdict.API_BREAK
 _R = Verdict.COMPATIBLE_WITH_RISK
 _E = ChangeKindMeta
+_ENT = ChangeEntity
+_OP = ChangeOperation
 
 BUILD_ENTRIES: list[ChangeKindMeta] = [
     _E(
@@ -55,6 +57,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "--target/-mabi, sysroot). The artifact diff decides whether the "
         "shipped ABI actually broke; this flags the elevated risk and "
         "localizes the cause for review.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "behavioural_default_changed",
@@ -64,6 +68,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "execution backend, or the default policy. Source compiles "
         "and links unchanged; runtime behaviour silently differs. "
         "Read from the probe manifest's `defaults:` section.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "build_context_changed",
@@ -71,6 +77,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         impact="Non-ABI-relevant build metadata changed between versions (e.g. "
         "include-path ordering, output paths, or generator version). "
         "Informational quality signal; no ABI impact on its own.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "bundle_duplicate_provider",
@@ -80,6 +88,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "consumer resolves against depends on load order / symbol "
         "interposition, not a declared contract -- an ODR-style "
         "ownership ambiguity within one release.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "bundle_intra_dep_removed",
@@ -87,6 +97,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         impact="A sibling library in this bundle still imports a symbol that no "
         "library in the new bundle exports. Loading the consumer will fail "
         "with undefined symbol at runtime.",
+        entity=_ENT.BUILD,
+        operation=_OP.REMOVED,
     ),
     _E(
         "bundle_intra_dep_resolved_to_different_version",
@@ -95,6 +107,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "now resolves to a different version in the new bundle (gnu.version_r "
         "drift). Compatible at the linker level but the underlying ABI of "
         "that version may differ.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "bundle_intra_dep_signature_changed",
@@ -104,6 +118,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         'mangled name (typical of extern "C" or weak boundaries). The '
         "linker resolves the symbol but the calling convention is wrong; "
         "callers pass arguments with the old layout, callee reads the new.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "bundle_intra_dep_signature_unverified",
@@ -117,6 +133,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "the symbol. Whether ABI compatibility actually still holds "
         "is unconfirmed, not proven safe.",
         description_template="{name} calls a symbol {detail} still exports by name, but one or both sides lack type evidence to confirm the signature agrees.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "bundle_intra_type_changed",
@@ -125,12 +143,16 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "ABI of a sibling library, and its layout changed. The sibling's "
         "ABI looks unchanged on its own, but every cross-DSO call that "
         "passes the type by value or reads its fields is now miscompiled.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "bundle_library_added",
         _C,
         is_addition=True,
         impact="A new library appears in the bundle; existing consumers unaffected.",
+        entity=_ENT.BUILD,
+        operation=_OP.ADDED,
     ),
     _E(
         "support_promise_component_retired",
@@ -146,6 +168,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "contract policy that asks for it (--support-promise declared); "
         "never inferred from acquisition state alone.",
         description_template="{name} was shipped by the old release and is absent from the new release's proven-complete component inventory.",
+        entity=_ENT.BUILD,
+        operation=_OP.REMOVED,
     ),
     _E(
         "support_promise_component_introduced",
@@ -156,6 +180,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "complete OLD inventory (a partial old input cannot prove the "
         "component was absent). No existing consumer is affected.",
         description_template="{name} is shipped by the new release and is absent from the old release's proven-complete component inventory.",
+        entity=_ENT.BUILD,
+        operation=_OP.ADDED,
     ),
     _E(
         "bundle_library_removed",
@@ -163,6 +189,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         impact="A library present in the old bundle is absent in the new bundle "
         "and at least one of its exported symbols was consumed by a sibling. "
         "Loading any consumer fails with NEEDED-library-not-found.",
+        entity=_ENT.BUILD,
+        operation=_OP.REMOVED,
     ),
     _E(
         "bundle_manifest_entry_unsatisfied",
@@ -173,6 +201,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "all, or it matches but is provided by a library other than "
         "the one the manifest names as the expected provider. RISK, "
         "not BREAKING -- there is no diff to confirm a regression.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "bundle_manifest_instantiation_added",
@@ -180,6 +210,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         is_addition=True,
         impact="A symbol present in the new manifest is not in the old one; "
         "new instantiation now publicly promised.",
+        entity=_ENT.BUILD,
+        operation=_OP.ADDED,
     ),
     _E(
         "bundle_manifest_instantiation_removed",
@@ -188,6 +220,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "public ABI promise is not exported by any library in the new "
         "bundle. Consumers of the previously-promised template "
         "instantiation will fail to link or load.",
+        entity=_ENT.BUILD,
+        operation=_OP.REMOVED,
     ),
     _E(
         "bundle_provider_changed",
@@ -197,6 +231,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "still resolve transitively through the bundle's link graph, or "
         "may not — depends on whether the consumer's existing dependency "
         "chain reaches the new provider.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "bundle_unresolved_intra_dependency",
@@ -208,6 +244,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "is not diff-confirmed (there is no old side to compare against), "
         "so it is reported as a risk rather than a confirmed break — the "
         "symbol may be satisfied by a dependency outside the declared set.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "bundle_variant_coverage_regressed",
@@ -221,6 +259,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "variant can no longer be evaluated and needs to see the "
         "gap.",
         description_template="Build variant '{name}' present in the old release has no matching variant in the new release ({detail}).",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "compile_context_conflict",
@@ -236,6 +276,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "source-tooling risk, never an artifact-proven ABI break: scope the "
         "evidence to a single build target / link unit (or pass an explicit "
         "compile-DB filter) so one coherent context feeds the analysis.",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "cxx_standard_floor_raised",
@@ -247,6 +289,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "standards (e.g. std::result_of) may also disappear from "
         "the API surface.",
         description_template="C++ standard floor raised from {old} to {new}. Consumers still building with the old standard get a degraded or non-functional API surface.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "generated_file_dependency_unstable",
@@ -255,6 +299,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "(e.g. missing or unstable generator dependencies). Generated "
         "public declarations may differ from what was analyzed; rebuild "
         "determinism is not guaranteed.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "header_binary_context_mismatch",
@@ -269,6 +315,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "record is invisible to this analysis. Re-dump with matching "
         "compile context, or investigate the named record(s) directly "
         "(see the snapshot's dwarf_layout_coherence_mismatches).",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "header_build_context_mismatch",
@@ -280,6 +328,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "compile to (e.g. a macro-conditional field or a packing pragma is "
         "evaluated differently). Re-dump the headers with the build's "
         "compile_commands.json so the L2 surface reflects the real build.",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "header_parse_context_drift",
@@ -288,6 +338,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "defines, include paths) than the real build used. Header-derived "
         "API facts may be unreliable; align the parse context (e.g. via "
         "compile_commands.json) to restore confidence.",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "layer_coverage_asymmetric",
@@ -297,6 +349,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "comparison is scoped to the layers both sides share, so changes "
         "only the missing layers could prove are not reported. Re-scan "
         "the target with the same inputs to restore full coverage.",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "link_export_policy_changed",
@@ -306,6 +360,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "actually removes or alters exports, the artifact diff (L0) emits "
         "the corresponding BREAKING findings separately; this kind explains "
         "and localizes them and does not escalate on its own.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "macos_deployment_target_raised",
@@ -320,6 +376,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "command at load time), or exhibit undefined behavior calling "
         "into SDK symbols introduced after the promised floor.",
         description_template="macOS deployment target exceeded: binary requires {new}, declared target promises at most {old} (required by: {name})",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "musllinux_glibc_dependency_detected",
@@ -342,6 +400,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "manylinux-equivalent Docker images) rather than relinking a glibc "
         "build under the musllinux tag.",
         description_template="musllinux-tagged binary requires glibc: {new} (required by: {name})",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "numpy_abi_major_incompatible",
@@ -354,6 +414,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "the declared floor produces a hard import crash, not merely a "
         "missing API surface.",
         description_template="NumPy C-API target ({new}) requires NumPy >= 2.0, but declared requirement ({old}) still allows NumPy 1.x",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "numpy_capi_consumption_added",
@@ -368,6 +430,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "without numpy installed get an ImportError this diff never "
         "flagged.",
         description_template="Module now consumes the NumPy C-API: {detail}",
+        entity=_ENT.BUILD,
+        operation=_OP.ADDED,
     ),
     _E(
         "numpy_capi_consumption_removed",
@@ -376,6 +440,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "reduction; existing consumers with numpy installed are "
         "unaffected.",
         description_template="Module no longer consumes the NumPy C-API",
+        entity=_ENT.BUILD,
+        operation=_OP.REMOVED,
     ),
     _E(
         "numpy_metadata_understates_required_version",
@@ -387,6 +453,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "a NumPy C-API version mismatch at import time despite pip "
         "reporting a satisfied dependency.",
         description_template="Declared numpy requirement ({old}) understates the binary's own NumPy C-API target ({new})",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "numpy_target_floor_raised",
@@ -397,6 +465,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "than the previous build. Runtimes with the old, lower NumPy "
         "that worked before can now fail to import this module.",
         description_template="NumPy C-API target floor raised: {old} → {new}",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "runtime_floor_raised",
@@ -411,6 +481,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "relink artifact; a new API symbol means the code now genuinely "
         "depends on the newer runtime.",
         description_template="Runtime floor raised for {detail}: {old} → {new} (required by: {name})",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "stdlib_debug_mode_changed",
@@ -423,6 +495,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "value, or a function taking one across the boundary, is "
         "ABI-incompatible between a debug-mode build and a normal one. Build "
         "the library and its consumers with the matching setting.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "toolchain_version_changed",
@@ -430,6 +504,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         impact="The compiler, standard library, or sysroot/SDK changed between "
         "versions. Layout, mangling, and codegen can shift even with "
         "identical sources; review for ABI-affecting toolchain drift.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "wheel_closure_dependency_violation",
@@ -444,6 +520,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "regardless of whether the file itself was physically included; "
         "the binary fails to load with an unresolved-dependency error.",
         description_template="Vendored dependency unresolvable (no $ORIGIN-relative RPATH/RUNPATH): {new} (binary: {name})",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "wheel_rpath_not_portable",
@@ -457,6 +535,8 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "a wheel that skipped that repair step ships a search path that "
         "resolves nothing on a clean install.",
         description_template="RPATH/RUNPATH not $ORIGIN-relative: {new} (binary: {name})",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "wheel_tag_architecture_mismatch",
@@ -470,5 +550,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "mismatched build matrix leg, or a stale artifact reused under the "
         "wrong tag).",
         description_template="Wheel tag claims architecture {old}, binary is {new} (required by: {name})",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
 ]

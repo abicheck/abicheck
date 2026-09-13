@@ -58,6 +58,7 @@ from abicheck.reporter import (
     _finding_id,
     _suppress_dangling_correlation_notes,
     apply_show_only,
+    resolve_demangled_symbol,
 )
 from abicheck.reporter_markdown import (
     _root_cause_key_and_display,
@@ -273,12 +274,11 @@ def _change_detail_properties(change: Change) -> dict[str, Any]:
     # symbol_binding property for the full rationale) -- Codex review.
     if change.symbol_binding:
         props["symbolBinding"] = change.symbol_binding
-    # Human-readable demangling for an export-table-only (ELF_ONLY) removal
-    # (see reporter.py's identical demangled_symbol field for the full
-    # rationale, Codex review item 8) -- `symbol`/`old_value` stay the raw
-    # mangled spelling deliberately.
-    if change.demangled_symbol:
-        props["demangledSymbol"] = change.demangled_symbol
+    # Plan slice 7o: both names on every machine projection, not only on an
+    # ELF_ONLY finding that carries its own -- `symbol`/`old_value` stay raw
+    # (see `reporter.resolve_demangled_symbol` for the full rationale).
+    if demangled := resolve_demangled_symbol(change):
+        props["demangledSymbol"] = demangled
     return props
 
 
@@ -757,10 +757,26 @@ def to_sarif(
     instead of changing SARIF's one-result-per-finding structure -- unlike
     JSON/markdown's dedicated grouped rendering, this keeps every existing
     SARIF/code-scanning consumer working unchanged while letting a
-    root-cause-aware one group results by ``rootCauseId``. Any other value
-    (including ``"leaf"``) renders as ``full``, unchanged from before this
-    parameter existed.
+    root-cause-aware one group results by ``rootCauseId``. Any other
+    *supported* value renders as ``full``, unchanged from before this
+    parameter existed; a retired one (``"leaf"``) or an unknown one raises
+    ``ValidationError`` rather than silently rendering something else.
     """
+    # The one shared check every public rendering entry point applies.
+    from .report.report_modes import reject_unsupported_report_mode
+
+    reject_unsupported_report_mode(report_mode)
+
+    # One batched demangle before the per-finding loops below. This entry
+    # point never reaches `build_report_document`, so the shared prewarm
+    # there does not cover a direct `to_sarif()` caller -- without this, a
+    # host with no in-process `cxxfilt` forks one `c++filt` per distinct
+    # symbol while building `demangledSymbol` properties (Codex review, PR
+    # #1284).
+    from .reporter import prewarm_change_demangling
+
+    prewarm_change_demangling(result)
+
     tool_version = _tool_version()
     gate_decision = resolved_gate(envelope, result, severity_config)  # ADR-061 gap C
     disposition_audit_dict = disposition_audit_dict_reusing_document(
