@@ -255,9 +255,10 @@ jobs:
 ```
 
 The gate downloads the manifest as an artifact (not `actions/checkout`), so it
-gates against the exact target set the matrix was planned from. `--run-plan
-run-plan.json` is the equivalent for a `project plan`-driven workflow, and
-`--discovered-only` opts out of the coverage gate entirely. One of the three is
+gates against the exact target set the matrix was planned from. The same flag
+takes a `project plan` run-plan directly (`--manifest run-plan.json`) — the
+document's own schema says which shape it is — and `--discovered-only` opts
+out of the coverage gate entirely. One of the two is
 **required** — a bare
 `aggregate abi-reports/` is a usage error, because with no declared target set
 the gate cannot tell a missing required target from an absent one. `aggregate`

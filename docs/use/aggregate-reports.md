@@ -185,8 +185,11 @@ cannot tell a missing required target from an intentionally absent one):
 - `--manifest abi-targets.json` — `{"targets": [{"id": "linux-x86_64",
   "required": true}, ...]}`. Recommended: generate it once in the plan job
   and feed the same file to both the matrix and the gate.
-- `--run-plan run-plan.json` — a `project plan` run-plan, projected
-  internally into the same manifest shape.
+- `--manifest run-plan.json` — the same flag also takes a `project plan`
+  run-plan and projects it internally into the manifest shape. Which shape
+  a document is comes from its own content (a run-plan declares
+  `schema: abicheck.run-plan/vN`), never from its filename, so either
+  artifact can arrive under any name the CI job gives it.
 - `--discovered-only` — aggregate whatever reports are present with **no
   required-target coverage gate** (a missing target is simply not counted,
   never a coverage failure). This disables only the `coverage` axis — the
@@ -353,7 +356,7 @@ abicheck aggregate REPORTS_DIR \
 | Flag | Default | Notes |
 |---|:---:|---|
 | `--manifest PATH` | — | The single source of truth for the expected-target set; its own `gate` block sets the missing-required/unexpected-target policy. |
-| `--run-plan PATH` | — | Alternative to `--manifest`: a `project plan` run-plan.json, whose projected manifest can carry the same `gate` block. |
+| `--manifest PATH` (run-plan) | — | The same flag takes a `project plan` run-plan.json, recognized by its own `schema`; its projected manifest can carry the same `gate` block. |
 | `--discovered-only` | — | No required-target coverage gate (contract coverage still applies). |
 | `-o FORMAT=DESTINATION` | `text=-` | `text` \| `json`; `-` is stdout, repeatable. |
 

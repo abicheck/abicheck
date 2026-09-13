@@ -149,12 +149,6 @@ from .project_targets import (
     ProjectTargetsConfig,
     TargetSpec,
 )
-
-# _compose_gcc_options/_scheduling_fields_for_profile are re-exported into
-# this module's own namespace (not just used internally) -- see
-# run_plan_profile_fields.py's own module docstring for why this split
-# exists and why every pre-existing `from .run_plan import _compose_gcc_
-# options, ...` call site (this package's own tests included) still works.
 from .run_plan_profile_fields import (  # noqa: F401
     _compile_ast_frontend_for_profile,
     _compile_fields_for_profile,
@@ -166,28 +160,27 @@ from .run_plan_profile_fields import (  # noqa: F401
     _scheduling_fields_for_profile,
 )
 
-#: Schema discriminator stamped into every ``run-plan.json`` (mirrors
-#: ``BUILD_OUTPUT_SCHEMA``'s naming convention).
-RUN_PLAN_SCHEMA = "abicheck.run-plan/v1"
-
-#: Schema discriminator stamped instead of :data:`RUN_PLAN_SCHEMA` whenever a
-#: plan carries a ``gate`` block (CLI cleanup phase two, PR 2 continuation).
-#: Mirrors ``AGGREGATE_MANIFEST_VERSION``'s MAJOR-bump reasoning exactly: a
-#: plan generated with an explicit gate policy must declare a schema an old,
-#: pre-gate reader is guaranteed to reject, rather than one it silently
-#: accepts and misreads (Codex review, fresh evidence -- an earlier revision
-#: left every plan stamped ``v1`` regardless of whether ``gate`` was
-#: present, so an old ``RunPlan.from_dict()`` would ignore the unknown key
-#: and project a ``1.0`` aggregate manifest applying the hard-coded default
-#: policy instead of what the plan actually asked for, silently). A plan
-#: with no gate policy keeps the unchanged ``v1`` spelling -- this bump is
-#: additive-only, scoped to the one new capability, not a blanket
-#: version-everything policy.
-RUN_PLAN_SCHEMA_GATE = "abicheck.run-plan/v2"
-
-#: Highest ``vN`` suffix this reader understands, parsed from either schema
-#: constant above.
-_RUN_PLAN_SCHEMA_MAX_SUPPORTED = 2
+# _compose_gcc_options/_scheduling_fields_for_profile are re-exported into
+# this module's own namespace (not just used internally) -- see
+# run_plan_profile_fields.py's own module docstring for why this split
+# exists and why every pre-existing `from .run_plan import _compose_gcc_
+# options, ...` call site (this package's own tests included) still works.
+from .run_plan_schema import (  # noqa: F401
+    _RUN_PLAN_SCHEMA_MAX_SUPPORTED,
+    RUN_PLAN_SCHEMA,
+    RUN_PLAN_SCHEMA_GATE,
+    RUN_PLAN_SCHEMA_SKIPPED,
+    _run_plan_schema_version,
+)
+from .run_plan_skip import (  # noqa: F401
+    SKIP_CHECKS_DECLARED_NONE_RESOLVED,
+    SKIP_NO_CHECKS_DECLARED,
+    RunPlanSkip,
+    classify_empty_plan,
+    declared_check_count,
+    parse_skipped_block,
+    schema_for_plan,
+)
 
 #: ``kind`` discriminator for a :class:`RunPlanCheck` cell.
 RUN_PLAN_KIND_TARGET = "target"
@@ -196,21 +189,6 @@ RUN_PLAN_KIND_BUNDLE = "bundle"
 
 def _opt_str(value: Any, default: str = "") -> str:
     return str(value) if isinstance(value, str) and value else default
-
-
-def _run_plan_schema_version(schema: str) -> int | None:
-    """Parse the trailing ``vN`` off a ``run-plan.json`` ``schema`` string.
-
-    ``None`` for anything not of the ``"abicheck.run-plan/vN"`` shape --
-    callers treat that the same as "no version to check" (an unrecognized
-    schema string is a separate, pre-existing problem this function doesn't
-    try to diagnose).
-    """
-    prefix = "abicheck.run-plan/v"
-    if not schema.startswith(prefix):
-        return None
-    suffix = schema[len(prefix) :]
-    return int(suffix) if suffix.isdigit() else None
 
 
 def _parse_run_plan_gate(d: dict[str, Any]) -> tuple[str | None, str | None]:
@@ -553,7 +531,8 @@ class RunPlan:
     #: The aggregate fan-in's gate policy (CLI cleanup phase two, PR 2),
     #: carried on the plan so `to_aggregate_manifest()` can project it into
     #: the manifest's own `gate` block -- the same mechanism a hand-authored
-    #: `--manifest` uses, so `--run-plan`/`--manifest` never diverge in what
+    #: `--manifest` uses, so a run-plan and a hand-authored manifest never
+    #: diverge in what
     #: they can express. Raw, unvalidated strings here (validated once, at
     #: `ExpectedTargets.from_manifest_data()`, the same place a hand-authored
     #: manifest's `gate` block is validated) -- this module stays free of an
@@ -564,6 +543,11 @@ class RunPlan:
     #: in this dataclass.
     gate_missing_required: str | None = None
     gate_unexpected_target: str | None = None
+    #: Why this plan holds no checks, when it holds none (plan slice 7r).
+    #: ``None`` for every plan with at least one check -- and for a plan an
+    #: older abicheck generated, which is the one case a reader must not
+    #: read as "this skip was never explained".
+    skipped: RunPlanSkip | None = None
 
     def _validated_gate(self) -> tuple[str | None, str | None]:
         """Validate :attr:`gate_missing_required`/:attr:`gate_unexpected_target`
@@ -607,9 +591,14 @@ class RunPlan:
         # set, regardless of whatever self.schema was constructed with --
         # this is a discriminator an old reader must see, not a caller-
         # overridable label (see RUN_PLAN_SCHEMA_GATE's own docstring).
-        d: dict[str, Any] = {
-            "schema": RUN_PLAN_SCHEMA_GATE if has_gate else self.schema
-        }
+        schema = schema_for_plan(
+            self.schema,
+            gate_schema=RUN_PLAN_SCHEMA_GATE,
+            has_gate=has_gate,
+            skipped=self.skipped is not None,
+            check_count=len(self.checks),
+        )
+        d: dict[str, Any] = {"schema": schema}
         if self.project:
             d["project"] = self.project
         if self.head_sha:
@@ -621,6 +610,8 @@ class RunPlan:
             if gate_unexpected_target is not None:
                 gate["unexpected_target"] = gate_unexpected_target
             d["gate"] = gate
+        if self.skipped is not None:
+            d["skipped"] = self.skipped.to_dict()
         d["checks"] = [c.to_dict() for c in self.checks]
         return d
 
@@ -642,6 +633,7 @@ class RunPlan:
                 f"supports (max v{_RUN_PLAN_SCHEMA_MAX_SUPPORTED}); upgrade "
                 "abicheck"
             )
+        skipped = parse_skipped_block(d, schema=schema, version=version)
         gate_missing_required, gate_unexpected_target = _parse_run_plan_gate(d)
         if "gate" in d and (version is None or version < 2):
             from ..workflows.aggregate import AggregateError
@@ -659,6 +651,7 @@ class RunPlan:
             checks=checks,
             gate_missing_required=gate_missing_required,
             gate_unexpected_target=gate_unexpected_target,
+            skipped=skipped,
         )
 
 
@@ -1068,18 +1061,14 @@ def generate_run_plan(
                 "to be unique. Remove the duplicate checks[] entry, or give "
                 "it a distinct channel/depth/profile/id."
             )
-    if not checks and report.ok:
-        report.warnings.append(
-            "run-plan is empty -- no targets:/bundles: checks[] resolved to any "
-            "profile (nothing declared, or every profile is missing from "
-            "build_outputs)."
-        )
+    skipped = classify_empty_plan(config, report) if not checks else None
     plan = RunPlan(
         project=project,
         head_sha=head_sha,
         checks=checks,
         gate_missing_required=gate_missing_required,
         gate_unexpected_target=gate_unexpected_target,
+        skipped=skipped,
     )
     return plan, report
 
@@ -1111,7 +1100,8 @@ def to_aggregate_manifest(
         manifest["head_sha"] = resolved_head_sha
     # CLI cleanup phase two, PR 2: project the plan's own gate policy into
     # the manifest's `gate` block -- the same field `--manifest` reads,
-    # so `--run-plan`/`--manifest` express identical policy shapes.
+    # so a run-plan and a hand-authored manifest express identical policy
+    # shapes.
     # _validated_gate() rejects a bogus value the same way to_dict() does
     # (CodeRabbit review, fresh evidence) -- both persistence paths off one
     # RunPlan must agree on whether its gate fields are well-formed, not
