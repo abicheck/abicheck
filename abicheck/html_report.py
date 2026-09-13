@@ -175,6 +175,7 @@ def compute_full_change_rows(
                 correlated_change_kind=(
                     getattr(ch, "correlated_change_kind", None) or None
                 ),
+                library=getattr(ch, "library", None) or None,
             )
         )
     return tuple(rows)

@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING
 
 from ..checker_types import Change, DiffResult
 from ..policy.analysis_assurance_merge import merge_analysis_assurance
+from ..policy.disposition_merge import merge_disposition_ledgers
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -278,6 +279,8 @@ def _union_sorted(values: Sequence[object]) -> list[object]:
 #: * ``"all"``     -- booleans true only if true for every library.
 #: * ``"any"``     -- booleans true if true for any library.
 #: * ``"assurance_block"`` -- the ``analysis_assurance`` roll-up.
+#: * ``"ledger"``  -- the ADR-067 disposition ledger, concatenated with each
+#:   record stamped with its library (``policy.disposition_merge``).
 #: * ``"first"``   -- genuinely run-wide values, identical across libraries
 #:   because they come from the same descriptor/CLI invocation.
 #: * ``"drop"``    -- per-library objects with no defined release-level
@@ -355,7 +358,24 @@ _FIELD_POLICY: dict[str, str] = {
     "contract_conflicts": "drop",
     "use_case_impact": "drop",
     "evaluation_config": "drop",
-    "disposition_ledger": "drop",
+    # NOT dropped: a ledger is a list of observations, not a per-library
+    # scalar whose release-level meaning would have to be invented. Dropping
+    # it left the merged report rebuilding a ledger from the merged buckets
+    # -- totals recovered, but every rule, reason, reclassification and
+    # acknowledgment match lost, so a release whose policy demonstrably acted
+    # reported an empty policy trail (Codex review, ADR-067).
+    "disposition_ledger": "ledger",
+    # These three stay dropped, and for three different reasons rather than
+    # one blanket one:
+    #   `acknowledgments` is the *input* rule list a library was judged
+    #   against, not an output. Concatenating two libraries' rule sets would
+    #   present them as one release-level policy that was never written.
+    #   `suppression_audit` is attached by the CLI *after* the comparison
+    #   (`frontends/cli/compare_report.py`), so it is `None` on every result
+    #   reaching this merge -- there is nothing here to fold.
+    #   `unacknowledged_additions_review` is an evaluated gate result whose
+    #   release-level aggregate is a real design question (which of several
+    #   libraries' verdicts is the release's?), not a concatenation.
     "acknowledgments": "drop",
     "unacknowledged_additions_review": "drop",
     "suppression_audit": "drop",
@@ -497,6 +517,13 @@ def merge_results(results: Sequence[DiffResult], *, label: str) -> DiffResult:
             merged[f.name] = any(values)
         elif policy == "assurance_block":
             merged[f.name] = merge_analysis_assurance(values)  # type: ignore[arg-type]
+        elif policy == "ledger":
+            merged[f.name] = merge_disposition_ledgers(
+                [
+                    (str(getattr(r, "library", "") or ""), v)
+                    for r, v in zip(results, values)
+                ]
+            )
         elif policy == "drop":
             merged[f.name] = _field_default(f)
         else:  # pragma: no cover - guarded by test_merge_policy_values_are_known

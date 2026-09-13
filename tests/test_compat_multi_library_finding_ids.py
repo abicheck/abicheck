@@ -106,3 +106,91 @@ class TestFindingIdDistinguishesLibraries:
         assert prop["type"] == "string"
         assert "library" not in schema["$defs"]["change"].get("required", [])
         assert REPORT_SCHEMA_VERSION == "4.6"
+
+
+class TestLibraryAttributionReachesEveryProjection:
+    """JSON and itemized Markdown carried `library`; HTML and the compat XML
+    did not, so in the *default* report two paired DSOs' identical findings
+    were indistinguishable (Codex review).
+
+    Bug class: a per-finding field wired into some output projections and not
+    others. The tests below are one per projection rather than one shared
+    loop, since each renders the value its own way and a shared assertion
+    would hide which one regressed.
+    """
+
+    @staticmethod
+    def _changes() -> list[Change]:
+        return [
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol="shared_entry",
+                description="Function 'shared_entry' was removed",
+                library=lib,
+            )
+            for lib in ("liba.so", "libb.so")
+        ]
+
+    def test_html_names_both_libraries(self):
+        from abicheck.html_report import compute_full_change_rows
+        from abicheck.report.render_html import render_changes_table
+
+        rows = compute_full_change_rows(self._changes())
+        assert [r.library for r in rows] == ["liba.so", "libb.so"]
+        html = render_changes_table(rows)
+        assert "liba.so" in html
+        assert "libb.so" in html
+
+    def test_html_omits_the_row_entirely_for_a_scalar_comparison(self):
+        """The negative control: an unconditional row would add a stray,
+        empty 'Library:' line to every single-library report."""
+        from abicheck.html_report import compute_full_change_rows
+        from abicheck.report.render_html import render_changes_table
+
+        scalar = [
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol="s",
+                description="removed",
+            )
+        ]
+        rows = compute_full_change_rows(scalar)
+        assert rows[0].library is None
+        assert "Library:" not in render_changes_table(rows)
+
+    def test_compat_xml_problem_elements_name_their_library(self):
+        import xml.etree.ElementTree as ET
+
+        from abicheck.compat.xml_report import _add_problem_element
+
+        root = ET.Element("root")
+        for change in self._changes():
+            _add_problem_element(root, change)
+        libs = [p.get("library") for p in root.findall("problem")]
+        assert libs == ["liba.so", "libb.so"]
+
+    def test_compat_xml_omits_the_attribute_for_a_scalar_comparison(self):
+        import xml.etree.ElementTree as ET
+
+        from abicheck.compat.xml_report import _add_problem_element
+
+        root = ET.Element("root")
+        _add_problem_element(
+            root, Change(kind=ChangeKind.FUNC_REMOVED, symbol="s", description="x")
+        )
+        assert root.find("problem").get("library") is None
+
+    def test_compat_xml_symbol_lists_name_their_library(self):
+        """The element that needs it most: a bare <name> carries nothing else
+        to tell two DSOs' identical removals apart."""
+        import xml.etree.ElementTree as ET
+
+        from abicheck.compat.xml_report import _build_symbol_list
+
+        root = ET.Element("root")
+        _build_symbol_list(
+            root, "removed_symbols", self._changes(), frozenset({"func_removed"})
+        )
+        names = root.find("removed_symbols").findall("name")
+        assert [n.get("library") for n in names] == ["liba.so", "libb.so"]
+        assert {n.text for n in names} == {"shared_entry"}

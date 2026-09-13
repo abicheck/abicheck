@@ -153,6 +153,7 @@ class TestMergePolicyIsExhaustive:
             "any",
             "drop",
             "assurance_block",
+            "ledger",
         }
         unknown = {v for v in _FIELD_POLICY.values()} - known
         assert not unknown, f"unknown merge policies: {sorted(unknown)}"

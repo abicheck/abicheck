@@ -1134,6 +1134,23 @@ _SEVERITY_EMOJI = {
 }
 
 
+def _section_severity_level(
+    severity_config: SeverityConfig | None, category_attr: str
+) -> object | None:
+    """That section's own resolved severity level, or ``None`` when no
+    severity setting is in effect.
+
+    The value half of :func:`_section_severity_label`, which renders the
+    same lookup for a heading. Split out because the rollup needs to *act*
+    on the level (a gating section is never summarised) and parsing it back
+    out of a rendered label would be exactly the kind of second derivation
+    this codebase keeps getting bitten by.
+    """
+    if severity_config is None:
+        return None
+    return getattr(severity_config, category_attr, None)
+
+
 def _section_severity_label(
     severity_config: SeverityConfig | None, category_attr: str
 ) -> str:
@@ -1369,7 +1386,12 @@ def compute_severity_sections(
         ]
         sev_label = _section_severity_label(severity_config, "potential_breaking")
         if deployment_risk:
-            risk_items, risk_rollups = roll_up_large_kinds(deployment_risk)
+            risk_items, risk_rollups = roll_up_large_kinds(
+                deployment_risk,
+                severity_level=_section_severity_level(
+                    severity_config, "potential_breaking"
+                ),
+            )
             groups.append(
                 _rmd.ChangeGroup(
                     heading=f"## {_RISK_ICON} Deployment Risk Changes{sev_label}",
@@ -1384,7 +1406,12 @@ def compute_severity_sections(
                 )
             )
         if hygiene:
-            hygiene_items, hygiene_rollups = roll_up_large_kinds(hygiene)
+            hygiene_items, hygiene_rollups = roll_up_large_kinds(
+                hygiene,
+                severity_level=_section_severity_level(
+                    severity_config, "potential_breaking"
+                ),
+            )
             groups.append(
                 _rmd.ChangeGroup(
                     heading=f"## {_HYGIENE_ICON} Cross-Source Hygiene Findings{sev_label}",
@@ -1408,7 +1435,12 @@ def compute_severity_sections(
         additions_list = [c for c in compatible if c.kind in _ADDITION_KINDS]
         if quality:
             sev_label = _section_severity_label(severity_config, "quality_issues")
-            quality_items, quality_rollups = roll_up_large_kinds(quality)
+            quality_items, quality_rollups = roll_up_large_kinds(
+                quality,
+                severity_level=_section_severity_level(
+                    severity_config, "quality_issues"
+                ),
+            )
             groups.append(
                 _rmd.ChangeGroup(
                     heading=f"## {_QUALITY_ICON} Quality Issues{sev_label}",

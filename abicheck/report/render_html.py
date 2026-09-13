@@ -142,6 +142,12 @@ class ChangeRow:
     compatibility_decision: str | None
     contract_evidence_refs: tuple[str, ...]
     correlated_change_kind: str | None
+    #: Schema 4.6's per-finding `Change.library` -- the DSO a multi-library
+    #: `compat check` attributed this finding to, `None` for every scalar
+    #: comparison. Carried here because the default report is HTML: without
+    #: it two paired DSOs' otherwise-identical findings were indistinguishable
+    #: in the one projection most readers actually open (Codex review).
+    library: str | None = None
 
 
 def render_changes_table(rows: tuple[ChangeRow, ...], demangle: bool = True) -> str:
@@ -161,6 +167,14 @@ def render_changes_table(rows: tuple[ChangeRow, ...], demangle: bool = True) -> 
 
         # Build extended description with impact + affected + location
         desc_parts = [desc]
+        # First, not last: in a multi-library report the DSO is *which
+        # library this is about*, so a reader scanning two identical
+        # descriptions needs it before the detail, not after it.
+        if row.library:
+            desc_parts.append(
+                f"<div style='font-size:0.82em; color:#00695c; margin-top:2px;'>"
+                f"📚 Library: <code>{html.escape(row.library)}</code></div>"
+            )
         if row.impact:
             desc_parts.append(
                 f"<div style='font-size:0.85em; color:#666; margin-top:3px;'>"

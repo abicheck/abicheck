@@ -142,6 +142,14 @@ class DispositionRecord:
     #: diagnostic), and an audit that dropped the record entirely could not
     #: represent that real gate contribution.
     policy_overlay: bool = False
+    #: The DSO this record's finding was attributed to, set only when a
+    #: multi-library `compat check` merges several comparisons' ledgers into
+    #: one (`compat.multi_library`). `None` for every scalar comparison, and
+    #: appended at the true end per this module's field-placement convention.
+    #: Without it, merging two libraries' ledgers would conserve every rule
+    #: and reason but lose which library each applied to -- half of ADR-067's
+    #: "every disposition keeps its rule and reason".
+    library: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         entry: dict[str, object] = {
@@ -160,4 +168,6 @@ class DispositionRecord:
             entry["acknowledged_by"] = self.acknowledged_by
         if self.reason_code is not None:
             entry["reason_code"] = self.reason_code
+        if self.library is not None:
+            entry["library"] = self.library
         return entry

@@ -100,8 +100,29 @@ def render_kind_rollups(rollups: tuple[KindRollup, ...]) -> list[str]:
     return lines
 
 
+def section_is_gating(severity_level: object | None) -> bool:
+    """Whether a section at *severity_level* contributes to a non-zero exit.
+
+    ``error`` is the one level that gates (``severity.compute_exit_code``);
+    ``warning``/``info`` do not, and ``None`` means no severity setting is
+    in effect at all, which leaves the legacy verdict scheme where only the
+    breaking sections gate -- and those never reach the rollup.
+
+    Takes the level rather than a whole ``SeverityConfig`` so this module
+    stays a leaf: reading the level off the config is the caller's job, and
+    ``potential_breaking``/``quality_issues`` are not the only sections that
+    could ever become gating.
+    """
+    if severity_level is None:
+        return False
+    value = getattr(severity_level, "value", severity_level)
+    return str(value).lower() == "error"
+
+
 def roll_up_large_kinds(
     changes: list[Change],
+    *,
+    severity_level: object | None = None,
 ) -> tuple[list[Change], tuple[KindRollup, ...]]:
     """Split *changes* into (itemised, rolled-up-per-kind).
 
@@ -112,7 +133,19 @@ def roll_up_large_kinds(
     Applied only to non-gating sections. A breaking finding is never rolled
     up however many there are -- a reader approving or rejecting a release
     has to see each one, and a flood of them is itself the signal.
+
+    That "only non-gating" was enforced purely by *which sections called
+    this*, which was wrong the moment a severity setting made one of them
+    gate: under the strict preset ``potential_breaking``/``quality_issues``
+    resolve to ``error`` and drive the exit code, yet were still collapsed
+    to a count and five samples, so the Markdown report could not name every
+    finding that blocked the run (Codex review). *severity_level* is that
+    section's own resolved level; at ``error`` nothing is rolled up.
+    Defaulting to ``None`` keeps every call that has no severity setting --
+    and every existing caller -- behaving exactly as before.
     """
+    if section_is_gating(severity_level):
+        return list(changes), ()
     by_kind: dict[str, list[Change]] = {}
     for c in changes:
         by_kind.setdefault(getattr(c.kind, "value", str(c.kind)), []).append(c)

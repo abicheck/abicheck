@@ -177,3 +177,27 @@
   binary parser as "Unrecognised binary format", the header directory
   reached the header parser as `#include "<dir>"`. Both consumers now expand
   at the same boundary.
+- **The policy trail survives a multi-library merge.** `merge_results`
+  dropped every per-library `disposition_ledger`, so report generation
+  rebuilt one from the merged buckets: totals recovered, but every rule,
+  reason, reclassification and acknowledgment match lost, and a release whose
+  policy demonstrably acted reported an empty trail. The ledgers are
+  concatenated instead (`policy/disposition_merge.py`), each record stamped
+  with the DSO it came from, and deliberately not deduplicated across
+  libraries -- two DSOs suppressing the same symbol under the same rule are
+  two real dispositions. `acknowledgments`, `suppression_audit` and
+  `unacknowledged_additions_review` stay dropped, now for three stated
+  reasons rather than one blanket one.
+- **A gating report section is never rolled up.** "Applied only to non-gating
+  sections" was enforced by which sections called the rollup, which stopped
+  being true the moment a severity setting made one of them gate: under the
+  strict preset `potential_breaking`/`quality_issues` resolve to `error` and
+  drive the exit code, yet were still collapsed to a count and five samples,
+  so the Markdown report could not name every finding that blocked the run.
+  The rule now lives in the function that states it.
+- **Per-finding `library` reaches every report projection.** It was carried
+  by JSON and itemized Markdown but not by the default HTML report or the
+  compat XML's `<problem>`/`<name>` elements, so two paired DSOs' identical
+  findings were indistinguishable in the projection most readers open. Added
+  as a row and an attribute respectively, both omitted entirely for a scalar
+  comparison.

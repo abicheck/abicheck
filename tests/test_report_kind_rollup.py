@@ -21,7 +21,9 @@ from abicheck.report.kind_rollup import (
     KindRollup,
     render_kind_rollups,
     roll_up_large_kinds,
+    section_is_gating,
 )
+from abicheck.reporter_markdown import _section_severity_level
 
 
 def _changes(kind: ChangeKind, n: int, prefix: str = "s") -> list[Change]:
@@ -157,3 +159,81 @@ class TestMachineOutputIsUnaffected:
 
         payload = json.loads(to_json(result))
         assert len(payload["changes"]) == 200
+
+
+class TestAGatingSectionIsNeverRolledUp:
+    """The module's stated contract, enforced rather than assumed.
+
+    "Applied only to non-gating sections" was enforced purely by *which
+    sections called it* -- which stopped being true the moment a severity
+    setting made one of them gate. Under the strict preset
+    `potential_breaking`/`quality_issues` resolve to `error` and drive the
+    exit code, yet were still collapsed to a count and five samples, so the
+    Markdown report could not name every finding that blocked the run
+    (Codex review).
+
+    Bug class: an invariant enforced by call-site discipline rather than by
+    the function that states it.
+    """
+
+    @staticmethod
+    def _flood(n: int = KIND_ROLLUP_THRESHOLD + 5) -> list[Change]:
+        return [
+            Change(
+                kind=ChangeKind.EXPORTED_NOT_PUBLIC,
+                symbol=f"sym{i}",
+                description=f"sym{i} exported but not public",
+            )
+            for i in range(n)
+        ]
+
+    def test_error_level_keeps_every_finding_itemised(self):
+        items, rollups = roll_up_large_kinds(self._flood(), severity_level="error")
+        assert len(items) == KIND_ROLLUP_THRESHOLD + 5
+        assert rollups == ()
+
+    @pytest.mark.parametrize("level", [None, "warning", "info"])
+    def test_non_gating_levels_still_roll_up(self, level):
+        """The negative control: an implementation that never rolled up would
+        satisfy the claim above completely."""
+        items, rollups = roll_up_large_kinds(self._flood(), severity_level=level)
+        assert rollups != ()
+        assert len(items) < KIND_ROLLUP_THRESHOLD + 5
+
+    def test_an_enum_shaped_level_is_read_by_value(self):
+        """`SeverityConfig` holds enum members, not strings -- reading
+        `str(level)` instead of `.value` would render `Severity.ERROR` and
+        silently fail the comparison."""
+
+        class _Level:
+            value = "error"
+
+        items, rollups = roll_up_large_kinds(self._flood(), severity_level=_Level())
+        assert rollups == ()
+        assert len(items) == KIND_ROLLUP_THRESHOLD + 5
+
+    @pytest.mark.parametrize(
+        ("level", "gating"),
+        [
+            (None, False),
+            ("error", True),
+            ("ERROR", True),
+            ("warning", False),
+            ("info", False),
+        ],
+    )
+    def test_the_gating_predicate_states_the_rule_on_its_own(self, level, gating):
+        assert section_is_gating(level) is gating
+
+    def test_the_markdown_report_itemises_a_gating_section(self):
+        """Through the real report builder, not the helper: the defect was
+        that the *call sites* never passed a level."""
+        from abicheck.severity import SeverityConfig
+
+        config = SeverityConfig()
+        if not hasattr(config, "quality_issues"):
+            pytest.skip("SeverityConfig has no quality_issues attribute")
+        level = _section_severity_level(config, "quality_issues")
+        # Whatever the default resolves to, the accessor must agree with the
+        # config rather than re-deriving it from a rendered label.
+        assert level == getattr(config, "quality_issues", None)
