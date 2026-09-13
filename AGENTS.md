@@ -138,8 +138,15 @@ Imports point inward: `storage -> model`; `extract -> model, storage`;
 `compare -> model`; `policy -> model, compare`; `workflows -> model, storage,
 extract, compare, policy`; `report -> model, compare, policy, workflows`; and
 `frontends -> model, workflows, report`. New internal code imports canonical
-implementation modules, never legacy `cli`/`service` facades. Preserve only
-documented public paths through delegation-only facades. The executable
+implementation modules, never legacy `cli`/`service` facades. A
+delegation-only facade preserving a historical import path is **not** a
+durable outcome pre-1.0: twelve of them were deleted outright rather than
+kept (ADR-061's 2026-09-13 amendment), so retire the old path and name its
+owner in a changelog fragment instead of adding a re-export. The exception
+is a facade that exists for a real dependency-direction constraint rather
+than compatibility -- `checker_policy`/`contract_gating`/`reclassify`,
+which `model`-owned `checker_types.py` imports because `model` cannot
+depend on `policy`. The executable
 contract and temporary no-growth inventory live in `architecture/`; run
 `python scripts/check_architecture.py` for the focused gate. See
 [ADR-061](docs/contribute/adr/061-responsibility-package-architecture.md).
