@@ -84,7 +84,13 @@
   a recursive `<libs>` expansion -- is left unpaired rather than matched
   arbitrarily, so a run never compares one architecture against another. A
   library present on only one side is a coverage warning, never a removal, since a
-  `<libs>` list is a selection and not an inventory; and the narrowing
+  `<libs>` list is a selection and not an inventory. A multi-library
+  descriptor set against a single *stored snapshot* is refused rather than
+  answered from `libs[0]`: one snapshot is one library, and nothing in the
+  inputs says which entry it corresponds to. A descriptor's own
+  `<gcc_options>`/`<defines>`/`<include_paths>` are placed *before* any
+  `-gcc-options` given on the command line, so the explicit flag wins the
+  last-wins contest GCC actually runs. And the narrowing
   elements `<skip_headers>`, `<skip_including>`, `<skip_namespaces>`,
   `<skip_symbols>`, `<skip_types>`, `<skip_constants>` plus the compile
   elements `<include_paths>`, `<add_include_paths>`, `<defines>` and
@@ -106,7 +112,13 @@
   descriptor element anywhere able to rescue it. Cache-correct without any
   cache-key change: both the AST and whole-snapshot keys already hash the
   resolved header list, and a run with no pattern passes its list through
-  untouched, so no warm cache entry is invalidated.
+  untouched, so no warm cache entry is invalidated. The patterns a snapshot
+  was dumped under are recorded on it (`AbiSnapshot.excluded_header_patterns`,
+  schema v47) and disclosed as a coverage warning, so a narrowed surface is
+  never presented as a complete one -- and a stored baseline dumped under one
+  set of exclusions is refused against a differently-scoped candidate by the
+  existing ADR-050 `scope_fingerprint` check rather than silently reporting
+  the asymmetry as change.
 - **A note when a plain snapshot is large.** `--compression auto` infers the
   storage envelope from the output suffix, so a `.json` name stays
   uncompressed however large it grows -- correct, and undiscoverable at the
