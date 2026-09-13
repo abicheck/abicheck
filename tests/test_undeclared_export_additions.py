@@ -349,3 +349,73 @@ class TestUndeclaredDataExportsAreAdditionsToo:
         )
         symbols = [c.symbol for c in _diff_undeclared_exports(old, new)]
         assert symbols.count("mystery") == 1
+
+
+class TestANameThatAlreadyExistedIsNeverAnAddition:
+    """A symbol changing ELF type is a modification, not an addition.
+
+    The per-class subtraction could not see it: an export that keeps its name
+    and goes `STT_OBJECT` -> `STT_FUNC` is absent from the *function-only*
+    `old_exports`, so it read as newly gained and `func_added_elf_only` was
+    emitted alongside the `symbol_type_changed` that already describes the
+    real change (Codex review; reproduced on real binaries). That corrupts
+    the addition count and, through it, `-warn-newsym` and
+    `semver.recommend_release`'s MINOR bump.
+
+    Bug class: a set difference taken within one partition when the question
+    spans all of them.
+    """
+
+    @staticmethod
+    def _snapshot(*, exports, declared=()):
+        from abicheck.model import AbiSnapshot
+
+        elf = ElfMetadata(
+            machine="x86_64",
+            symbols=[
+                ElfSymbol(name=name, visibility="default", sym_type=sym_type)
+                for name, sym_type in exports
+            ],
+        )
+        snap = AbiSnapshot(library="libfoo.so", version="1", elf=elf)
+        snap.functions = list(declared)
+        return snap
+
+    def _kinds(self, old, new):
+        from abicheck.compare.undeclared_exports import _diff_undeclared_exports
+
+        return sorted(c.kind.value for c in _diff_undeclared_exports(old, new))
+
+    @pytest.mark.parametrize(
+        ("old_type", "new_type"),
+        [
+            ("object", "func"),
+            ("func", "object"),
+            ("tls", "func"),
+            ("func", "tls"),
+            ("ifunc", "object"),
+        ],
+    )
+    def test_no_addition_for_any_type_transition(self, old_type, new_type):
+        """Every direction, not just the reported one: the bug is symmetric
+        in the two symbol classes and a single example would foreclose one
+        half of it."""
+        old = self._snapshot(exports=[("shape_shifter", old_type)])
+        new = self._snapshot(exports=[("shape_shifter", new_type)])
+        assert self._kinds(old, new) == []
+
+    def test_a_genuinely_new_name_is_still_reported(self):
+        """The negative control: a detector that reported nothing would pass
+        every assertion above."""
+        old = self._snapshot(exports=[("kept", "func")])
+        new = self._snapshot(
+            exports=[("kept", "func"), ("brand_new", "func"), ("new_data", "object")]
+        )
+        assert self._kinds(old, new) == ["func_added_elf_only", "var_added_elf_only"]
+
+    def test_a_new_name_is_classified_by_its_new_side_type(self):
+        """NEW's own type still decides which kind a genuinely new name gets
+        -- the fix narrows what counts as new, not how new names classify."""
+        old = self._snapshot(exports=[("kept", "func")])
+        new = self._snapshot(exports=[("kept", "func"), ("fresh", "object")])
+        assert self._kinds(old, new) == ["var_added_elf_only"]

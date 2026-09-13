@@ -36,6 +36,7 @@ from ..checker import compare
 from ..dumper import dump
 from ..errors import ProfileMismatchError, ScopeMismatchError
 from ..html_report import write_html_report
+from ..model.header_exclusion_record import record_header_exclusions
 from ..reporter import to_json, to_markdown
 from ..serialization import save_snapshot
 from ..workflows.extraction import (
@@ -352,11 +353,12 @@ def compat_dump_cmd(
     # same last-wins ordering `_snapshot_from_compat_input` fixed and for the
     # same reason: a descriptor is the project's recorded default, not an
     # override of what the user explicitly asked for.
+    skip_for_dump = set(desc.skip_headers)
     headers_for_dump = _resolve_headers_from_list(
         None,
         None,
         desc.headers,
-        skip_headers=set(desc.skip_headers) or None,
+        skip_headers=skip_for_dump or None,
     )
     combined_gcc_options = " ".join(
         opt for opt in (_descriptor_compile_options(desc), gcc_options) if opt
@@ -377,6 +379,12 @@ def compat_dump_cmd(
             )
     except Exception as exc:  # noqa: BLE001
         _compat_fail("during dump", exc)
+
+    # Recorded for the same reason as `_snapshot_from_compat_input`'s own
+    # call: a snapshot that forgot the patterns it was narrowed under claims
+    # a complete surface, and is then compared against a full dump as though
+    # the missing declarations had been removed.
+    snap = record_header_exclusions(snap, sorted(skip_for_dump))
 
     # Override library name to match -lib flag
     from dataclasses import replace as _replace  # noqa: PLC0415
@@ -1231,6 +1239,16 @@ def _snapshot_from_compat_input(
             nostdinc=nostdinc,
             lang=lang,
         )
+    # `<skip_headers>`/`<skip_including>` (and `-skip-headers`) narrow the
+    # parsed surface exactly as `--exclude-header` does, so they are recorded
+    # the same way. Without this the comparability check that refuses an
+    # asymmetric pair saw two empty exclusion sets and let the comparison
+    # run: against a stored operand carrying no contract -- an older snapshot
+    # or an imported ABICC dump, where `scope_fingerprint` cannot refuse
+    # either -- declarations omitted from NEW came back as removals and a
+    # breaking verdict (Codex review). Sorted so the record does not depend
+    # on set iteration order.
+    snap = record_header_exclusions(snap, sorted(effective_skip))
     return grant_live_source_licence(snap), desc.version
 
 

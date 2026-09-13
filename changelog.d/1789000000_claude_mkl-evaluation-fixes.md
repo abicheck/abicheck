@@ -224,3 +224,21 @@
   "contains no shared libraries" and a mixed one compared part of the
   selected set without saying so. Deduplication is now by resolved target, so
   the chain still collapses to one entry.
+- **A symbol that changes ELF type is not an addition.** The undeclared-export
+  detector subtracted OLD's exports *within each symbol class*, so a name
+  going `STT_OBJECT` -> `STT_FUNC` was absent from the function-only old set
+  and read as newly gained: `func_added_elf_only` was emitted alongside the
+  `symbol_type_changed` that already described the real change, corrupting the
+  addition count and, through it, `-warn-newsym` and `recommend_release`'s
+  MINOR bump. Every name OLD exported is now subtracted first, in either
+  class; NEW's own type still decides which kind a genuinely new name gets.
+- **A descriptor's `<skip_headers>`/`<skip_including>` are recorded like
+  `--exclude-header`.** They narrow the parsed surface identically, but were
+  filtered without being recorded, so the comparability check saw two empty
+  exclusion sets. Against a stored operand carrying no contract -- an older
+  snapshot or an imported ABICC dump, where `scope_fingerprint` cannot refuse
+  either -- the comparison proceeded and declarations omitted from NEW came
+  back as removals with a breaking verdict. The recorder moved to
+  `model/header_exclusion_record.py` in the process: three layers produce a
+  narrowed snapshot, and `compat/cli.py` is a `frontends` module that may not
+  import `extract`.

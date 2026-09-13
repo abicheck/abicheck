@@ -415,7 +415,7 @@ class TestAStoredSnapshotKeepsItsOwnExclusions:
         """The negative control. Skipping the stamp for *everything* would
         satisfy both assertions above and silently undo the recording this
         field exists for."""
-        from abicheck.extract.header_exclusions import record_header_exclusions
+        from abicheck.model.header_exclusion_record import record_header_exclusions
         from abicheck.model.snapshot import AbiSnapshot
 
         fresh = AbiSnapshot(library="libfoo.so", version="1.0")
