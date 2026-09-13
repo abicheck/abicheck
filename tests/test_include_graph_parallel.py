@@ -621,6 +621,82 @@ class TestDeadlinesUnderParallelism:
         assert any("scan deadline exceeded" in d for d in extractor.diagnostics)
         assert not any("budget exhausted" in d for d in extractor.diagnostics)
 
+    def test_the_aggregate_budget_covers_planning_not_just_execution(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Slow planning eats the budget, as it did in the sequential loop.
+
+        Regression test for a defect found in review. Splitting the pass into
+        plan/run moved the clock's start *after* planning, so a build whose
+        units carry many or large response files -- real work in
+        ``depfile_args_from_argv`` -- got planning time plus the full budget,
+        and could launch probes after the original deadline had passed.
+
+        The fake clock advances only during planning, so every probe is already
+        past the deadline by the time the runner sees it: nothing may be
+        invoked, and the time-budget diagnostic must be the outcome.
+        """
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(igw.time, "monotonic", lambda: clock["t"])
+        monkeypatch.setattr(ig.time, "monotonic", lambda: clock["t"])
+
+        def slow_planning(
+            argv: list[str], *, directory: str | None = None
+        ) -> list[str]:
+            clock["t"] += 5.0  # expanding this unit's response files
+            return list(argv)
+
+        monkeypatch.setattr(ig, "depfile_args_from_argv", slow_planning)
+        compiler = _FakeCompiler(6)
+        monkeypatch.setattr(igw.deadline, "run_bounded", compiler)
+
+        extractor = ClangIncludeExtractor(jobs=4, aggregate_timeout_s=10.0)
+        build = BuildEvidence(
+            compile_units=[
+                CompileUnit(
+                    id=f"cu://{i}", source=f"u{i}.cpp", argv=["c++", f"u{i}.cpp"]
+                )
+                for i in range(6)
+            ]
+        )
+        out = extractor.extract_from_build(build)
+
+        assert compiler.calls == [], (
+            "planning already spent the whole budget, so no probe may run"
+        )
+        assert out == {}
+        assert any("time budget exhausted" in d for d in extractor.diagnostics)
+
+    def test_the_time_budget_diagnostic_counts_units_attempted_not_maps_returned(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ "stopped after N" means N compilers ran, not N depfiles came back.
+
+        Regression test for a defect found in review: the message counted
+        entries in the include map, so a run whose early probes all failed
+        could report "stopped after 0 compile units" having invoked the
+        compiler several times -- the sequential loop reported its own
+        ``attempted`` counter. Every probe here fails, so the two numbers are
+        maximally different.
+        """
+        clock = {"t": 500.0}
+        monkeypatch.setattr(igw.time, "monotonic", lambda: clock["t"])
+        monkeypatch.setattr(ig.time, "monotonic", lambda: clock["t"])
+
+        def failing_then_expired(cmd: list[str], **_k: object):
+            clock["t"] += 4.0
+            return subprocess.CompletedProcess(cmd, 1, "", "fatal error: nope")
+
+        monkeypatch.setattr(igw.deadline, "run_bounded", failing_then_expired)
+        extractor = ClangIncludeExtractor(jobs=1, aggregate_timeout_s=10.0)
+        out = extractor.extract_from_build(_build(6))
+
+        assert out == {}, "every probe failed, so the map stays empty"
+        exhausted = [d for d in extractor.diagnostics if "time budget exhausted" in d]
+        assert exhausted, extractor.diagnostics
+        assert "stopped after 0 compile units" not in exhausted[0]
+        assert "stopped after 3 compile units" in exhausted[0]
+
     def test_compile_unit_cap_is_planned_before_any_work(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

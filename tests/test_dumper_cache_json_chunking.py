@@ -44,6 +44,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.dumper_cache import (
+    _JSON_CHUNK_BYTE_LIMIT,
     _JSON_CHUNK_MAX_DEPTH,
     _JSON_CHUNK_NODE_LIMIT,
     _JSON_WRITE_BUFFER,
@@ -268,3 +269,64 @@ def test_non_ascii_survives_the_utf8_temp_file_round_trip(tmp_path: Path) -> Non
     raw = target.read_text(encoding="utf-8")
     assert raw == json.dumps(document)
     assert json.loads(raw) == document
+
+
+def _byte_heavy_ast(count: int, spelling_length: int) -> dict[str, object]:
+    """Few nodes, enormous strings -- the shape a node-count bound misses.
+
+    Models a real DPC++ AST full of long template-qualified spellings.
+    """
+    spelling = "ns::Template<" + "T" * spelling_length + ">"
+    return {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {"kind": "FunctionDecl", "name": f"f{i}", "type": {"qualType": spelling}}
+            for i in range(count)
+        ],
+    }
+
+
+def test_a_byte_heavy_subtree_is_split_even_though_its_node_count_is_small() -> None:
+    """Both bounds are checked, because neither implies the other.
+
+    Regression test for a defect found in review: the split was gated on node
+    count alone, so a document well under ``_JSON_CHUNK_NODE_LIMIT`` nodes but
+    carrying very long string values was treated as a small subtree and handed
+    to one ``json.dumps`` call -- reintroducing the second full-size encoded
+    copy this writer exists to avoid.
+
+    The fixture is deliberately small by count and large by bytes, and the
+    assertion observes the fragments rather than the bytes, since the output is
+    byte-identical either way.
+    """
+    document = _byte_heavy_ast(count=400, spelling_length=60_000)
+    assert not _subtree_exceeds(document, _JSON_CHUNK_NODE_LIMIT), (
+        "fixture must be small by node count, or it tests the other bound"
+    )
+    assert _subtree_exceeds(document, _JSON_CHUNK_NODE_LIMIT, _JSON_CHUNK_BYTE_LIMIT)
+
+    fragments: list[str] = []
+    _write_json_chunked(document, fragments.append)
+    assert "".join(fragments) == json.dumps(document)
+    encoded_size = sum(len(f) for f in fragments)
+    assert encoded_size > 2 * _JSON_CHUNK_BYTE_LIMIT, "fixture too small to bound"
+    assert max(len(f) for f in fragments) < 4 * _JSON_WRITE_BUFFER
+    assert len(fragments) > 8
+
+
+def test_the_byte_probe_is_opt_in_and_estimates_below_the_real_encoding() -> None:
+    """A negative byte limit checks node count alone; the estimate never overshoots.
+
+    Under-estimating is the safe direction for a bound that decides "small
+    enough to encode whole" only when it answers ``False`` -- an estimate above
+    the true size would split more than necessary, one below it never delegates
+    something too large.
+    """
+    document = _byte_heavy_ast(count=4, spelling_length=1_000)
+    assert not _subtree_exceeds(document, _JSON_CHUNK_NODE_LIMIT, -1)
+
+    real = len(json.dumps(document))
+    # The estimate is bracketed: it must exceed a limit just under the real
+    # encoded size, and must not exceed one comfortably above it.
+    assert _subtree_exceeds(document, _JSON_CHUNK_NODE_LIMIT, real // 2)
+    assert not _subtree_exceeds(document, _JSON_CHUNK_NODE_LIMIT, real * 2)

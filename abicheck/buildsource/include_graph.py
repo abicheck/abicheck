@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -443,6 +444,12 @@ class ClangIncludeExtractor:
         # extractor does.
         from .source_extractors._argv import unredact_home
 
+        # Started before planning, not inside the runner: expanding response
+        # files and sanitizing argv for many units is real work, and the
+        # sequential loop this replaced had its deadline running during it.
+        # Starting the clock after planning would hand a slow-to-plan build
+        # planning time *plus* the full budget (Codex review, PR #1275).
+        aggregate_deadline = time.monotonic() + self.aggregate_timeout_s
         planned: list[DepfileProbe] = []
         budget_exhausted = False
         for cu in build.compile_units:
@@ -476,7 +483,7 @@ class ClangIncludeExtractor:
             planned.append(DepfileProbe(unit_id=cu.id, cmd=cmd, cwd=cwd or None))
         outcomes = run_probes(
             planned,
-            aggregate_timeout_s=self.aggregate_timeout_s,
+            aggregate_deadline=aggregate_deadline,
             per_unit_timeout_s=self.per_unit_timeout_s,
             jobs=self.jobs,
             diagnostics=self.diagnostics,
@@ -484,6 +491,7 @@ class ClangIncludeExtractor:
 
         out: dict[str, list[str]] = {}
         failures = 0
+        attempted = 0
         time_budget_exhausted = False
         scan_deadline_exceeded = False
         for planned_unit, outcome in zip(planned, outcomes, strict=True):
@@ -494,6 +502,9 @@ class ClangIncludeExtractor:
                 # stop, reported from wherever the budget actually ran out.
                 time_budget_exhausted = True
                 break
+            # Counted here, after the not-started case above: every outcome
+            # below is a unit a compiler was actually invoked for.
+            attempted += 1
             if outcome.kind == "scan_deadline":
                 self.diagnostics.append(
                     f"scan deadline exceeded during clang -M include-map: {outcome.detail}"
@@ -534,7 +545,7 @@ class ClangIncludeExtractor:
         if time_budget_exhausted:
             self.diagnostics.append(
                 "clang -M include-map time budget exhausted: "
-                f"stopped after {len(out)} compile units"
+                f"stopped after {attempted} compile units"
             )
         elif budget_exhausted and not stopped_early:
             # Recorded here, not at planning time, so the diagnostics order is

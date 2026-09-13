@@ -249,15 +249,18 @@ def resolve_jobs(
 def run_probes(
     planned: list[DepfileProbe],
     *,
-    aggregate_timeout_s: float,
+    aggregate_deadline: float,
     per_unit_timeout_s: float,
     jobs: int | None = None,
     diagnostics: list[str] | None = None,
 ) -> list[ProbeOutcome]:
     """Run every planned unit, returning one outcome per unit in order.
 
-    The aggregate wall-clock budget (``aggregate_timeout_s``) starts here,
-    and each unit re-reads it as it starts -- so a unit that is still
+    *aggregate_deadline* is an absolute ``time.monotonic()`` instant supplied
+    by the caller, **not** a duration started here: the budget has to cover the
+    caller's own planning work too (response-file expansion and argv
+    sanitization over many units is not free), which starting the clock at this
+    boundary would silently exclude. Each unit re-reads it as it starts -- so a unit that is still
     queued when the budget runs out reports ``aggregate_expired`` without
     spawning anything, which is the sequential loop's "stop, don't start
     this one" decision expressed per unit instead of per iteration.
@@ -268,7 +271,6 @@ def run_probes(
     exact. Nothing *runs* that the sequential pass would not have started
     given the same elapsed time.
     """
-    aggregate_deadline = time.monotonic() + aggregate_timeout_s
     resolved_jobs = resolve_jobs(len(planned), jobs=jobs, diagnostics=diagnostics)
     slots = _PROBE_GATE
     if resolved_jobs <= 1:

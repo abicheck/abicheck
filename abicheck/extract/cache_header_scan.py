@@ -38,6 +38,29 @@ from ..header_utils import CACHE_HEADER_SUFFIXES
 __all__ = ["iter_cache_header_files"]
 
 
+def _path_suffix(name: str) -> str:
+    """``PurePath(name).suffix``, without building a path object.
+
+    Not ``os.path.splitext(name)[1]``, which is *not* the same function and
+    disagrees on real, legal filenames: ``splitext`` skips leading dots, so
+    ``"..h"``, ``"...h"`` and ``"..hpp"`` come back with no suffix at all,
+    while ``PurePath`` reports ``".h"``/``".hpp"``. Since the entry set here
+    *is* part of the cache key, that divergence silently dropped such a header
+    from both the AST and snapshot keys -- an edit to a transitively included
+    ``..h`` would then reuse stale cached evidence, which is the one direction
+    this walk must never err in (Codex review, PR #1275). They also disagree
+    on a trailing dot (``"a."``: ``splitext`` says ``"."``), harmless only
+    because ``"."`` is in no suffix set.
+
+    ``tests/test_cache_header_walk.py`` checks this against the real
+    ``PurePath(...).suffix`` over a generated name space rather than the three
+    names above, since the bug class is "two similar-looking stdlib functions
+    are not the same function", not those spellings.
+    """
+    i = name.rfind(".")
+    return name[i:] if 0 < i < len(name) - 1 else ""
+
+
 def _cache_header_rel_parts(directory: Path) -> list[tuple[str, ...]]:
     """Every matching entry under *directory*, as a tuple of relative path parts.
 
@@ -72,7 +95,7 @@ def _cache_header_rel_parts(directory: Path) -> list[tuple[str, ...]]:
     root = str(directory)
     stack: list[tuple[str, tuple[str, ...]]] = [(root, ())]
     found: list[tuple[str, ...]] = []
-    splitext = os.path.splitext
+    suffix_of = _path_suffix
     join = os.path.join
     while stack:
         base, rel = stack.pop()
@@ -97,7 +120,7 @@ def _cache_header_rel_parts(directory: Path) -> list[tuple[str, ...]]:
                 is_dir = False
             if is_dir:
                 stack.append((join(base, name), child_rel))
-            if splitext(name)[1].lower() in CACHE_HEADER_SUFFIXES:
+            if suffix_of(name).lower() in CACHE_HEADER_SUFFIXES:
                 found.append(child_rel)
     return found
 

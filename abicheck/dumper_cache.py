@@ -181,12 +181,19 @@ def _atomic_copy(src: Path, dst: Path) -> None:
 
 #: Subtree size, in *nodes* (containers + scalars), at or below which
 #: :func:`_write_json_chunked` hands a subtree to the one-shot C encoder
-#: whole instead of descending into it. Sizing note: this is the knob that
-#: bounds peak transient memory, so it is deliberately modest -- an AST node
-#: averages well under 100 encoded bytes, so 200k nodes is single-digit MiB
-#: of encoded string held at once, against the hundreds of MiB to multiple GB
-#: the tree itself occupies.
+#: whole instead of descending into it. Sizing note: this is one of the two
+#: knobs that bound peak transient memory, so it is deliberately modest.
 _JSON_CHUNK_NODE_LIMIT = 200_000
+
+#: The *other* bound, in estimated encoded bytes. A node count alone does not
+#: bound the encoded size of a subtree: a DPC++ AST full of long
+#: template-qualified spellings can hold well under
+#: :data:`_JSON_CHUNK_NODE_LIMIT` nodes and still encode to hundreds of MiB,
+#: which would be handed to a single ``json.dumps`` call and reintroduce
+#: exactly the second full-size copy this writer exists to avoid (Codex
+#: review, PR #1275). Both bounds are checked, so a subtree is delegated whole
+#: only when it is small in *both* dimensions.
+_JSON_CHUNK_BYTE_LIMIT = 8 << 20
 
 #: Hard cap on how deep :func:`_write_json_chunked` descends before it
 #: delegates a subtree whole regardless of size. Bounds this module's own
@@ -208,16 +215,31 @@ _JSON_CHUNK_MAX_DEPTH = 40
 _JSON_WRITE_BUFFER = 1 << 18
 
 
-def _subtree_exceeds(obj: object, limit: int) -> bool:
-    """Whether *obj* holds more than *limit* JSON nodes.
+def _subtree_exceeds(obj: object, limit: int, byte_limit: int = -1) -> bool:
+    """Whether *obj* is too big to encode in one piece, either way it can be.
 
-    Stops the moment the answer is known, so the probe costs O(*limit*)
-    regardless of how large the subtree really is -- that bound is what makes
-    it safe to call on the way down :func:`_write_json_chunked`'s descent
-    rather than measuring the whole tree up front.
+    Two independent bounds, because neither implies the other: more than
+    *limit* JSON nodes, or an estimated encoded size over *byte_limit* (pass a
+    negative value to check node count alone). A handful of nodes carrying very
+    long strings is small by count and large by bytes, and that is the shape
+    that made a node-only bound insufficient.
+
+    The byte figure is a *lower-bound estimate*, not the exact encoding:
+    strings contribute their own length plus quoting (escaping can only make
+    the real output longer, never shorter), everything else a small constant.
+    Under-estimating is the safe direction for a bound used to decide "small
+    enough to encode whole" only when it answers ``False``.
+
+    Stops the moment either answer is known, so the probe costs
+    O(min(size, limit)) regardless of how large the subtree really is -- that
+    bound is what makes it safe to call on the way down
+    :func:`_write_json_chunked`'s descent rather than measuring the whole tree
+    up front.
     """
     stack: list[object] = [obj]
     seen = 0
+    weight = 0
+    check_bytes = byte_limit >= 0
     while stack:
         cur = stack.pop()
         seen += 1
@@ -225,8 +247,17 @@ def _subtree_exceeds(obj: object, limit: int) -> bool:
             return True
         if type(cur) is dict:
             stack.extend(cur.values())
+            if check_bytes:
+                # Keys are encoded too; counted here rather than pushed, since
+                # a key is never itself descended into.
+                for key in cur:
+                    weight += len(key) + 4 if type(key) is str else 8
         elif type(cur) is list:
             stack.extend(cur)
+        elif check_bytes:
+            weight += len(cur) + 2 if type(cur) is str else 8
+        if check_bytes and weight > byte_limit:
+            return True
     return False
 
 
@@ -254,8 +285,16 @@ def _write_json_chunked(obj: object, write: Any, depth: int = 0) -> None:
     every subtree that is small enough to the one-shot C encoder whole.
     "Small enough" is decided by :func:`_subtree_exceeds`, not by depth
     alone, so a single enormous namespace subtree is still split rather than
-    encoded in one piece -- the peak transient string stays bounded by
-    :data:`_JSON_CHUNK_NODE_LIMIT` no matter how the tree is shaped.
+    encoded in one piece -- and by node count *and* estimated encoded bytes,
+    since a few nodes holding very long strings are small by one measure and
+    huge by the other. The peak transient string therefore stays bounded by
+    :data:`_JSON_CHUNK_BYTE_LIMIT` no matter how the tree is shaped.
+
+    One thing no bound here can split is a *single scalar*: a 100 MB string
+    value encodes as one fragment, because JSON has nowhere to break it. That
+    is inherent rather than overlooked -- the shapes this writer is for (an AST
+    of many modest nodes) never contain one, and a caller that did would have
+    the same peak with any encoder.
 
     Two shapes are deliberately delegated whole rather than descended into,
     both on the "never re-implement a coercion" principle: a ``dict``/``list``
@@ -283,7 +322,7 @@ def _write_json_chunked(obj: object, write: Any, depth: int = 0) -> None:
 
     def walk(node: object, depth: int) -> None:
         if depth < _JSON_CHUNK_MAX_DEPTH and _subtree_exceeds(
-            node, _JSON_CHUNK_NODE_LIMIT
+            node, _JSON_CHUNK_NODE_LIMIT, _JSON_CHUNK_BYTE_LIMIT
         ):
             if type(node) is dict:
                 if all(type(k) is str for k in node):

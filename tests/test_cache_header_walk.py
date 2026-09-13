@@ -33,14 +33,16 @@ suffix-named directories, dotfiles, case folding, unicode names.
 
 from __future__ import annotations
 
+import itertools
 import os
 import random
-from pathlib import Path
+from pathlib import Path, PurePath
 
 import pytest
 
 from abicheck.extract.cache_header_scan import (
     _cache_header_rel_parts,
+    _path_suffix,
     iter_cache_header_files,
 )
 from abicheck.header_utils import CACHE_HEADER_SUFFIXES
@@ -61,6 +63,8 @@ _NAMES = (
     "z.tcc",
     "z.txt",
     ".h",
+    "..h",
+    "...hpp",
     ".hidden.h",
     "w.",
     "dir.h",
@@ -184,3 +188,51 @@ def test_scan_half_returns_relative_parts(tmp_path: Path) -> None:
     (tmp_path / "a" / "x.h").write_text("x", encoding="utf-8")
     (tmp_path / "y.hpp").write_text("x", encoding="utf-8")
     assert set(_cache_header_rel_parts(tmp_path)) == {("a", "x.h"), ("y.hpp",)}
+
+
+def test_path_suffix_matches_purepath_over_a_generated_name_space() -> None:
+    """``_path_suffix`` is ``PurePath.suffix``, not ``os.path.splitext``.
+
+    The two look interchangeable and are not: ``splitext`` skips leading dots,
+    so it reports no suffix for ``"..h"``/``"...h"``/``"..hpp"`` where
+    ``PurePath`` reports ``".h"``/``".hpp"``. Because the entry set is part of
+    the cache key, the walk's first version silently dropped such a header from
+    both the AST and snapshot keys -- an edit to it would then reuse stale
+    cached evidence.
+
+    Enumerated exhaustively over a small dot-heavy alphabet rather than pinning
+    those three names, because the bug class is "two similar-looking stdlib
+    functions are not the same function": any name where they disagree is a
+    cache-key divergence, and only an enumeration finds the next one.
+    """
+    alphabet = ".hHp_0"
+    checked = 0
+    disagreeing: list[str] = []
+    for length in range(1, 6):
+        for letters in itertools.product(alphabet, repeat=length):
+            name = "".join(letters)
+            if name in (".", ".."):  # not legal directory entry names
+                continue
+            checked += 1
+            if _path_suffix(name) != PurePath(name).suffix:
+                disagreeing.append(name)
+    assert checked > 9000, "the enumeration must actually be exhaustive"
+    assert disagreeing == []
+    # Vacuity guard: the oracle really does distinguish these from splitext,
+    # so a helper that simply called splitext would have been caught above.
+    assert [os.path.splitext(n)[1] for n in ("..h", "...h", "..hpp")] == ["", "", ""]
+    assert [PurePath(n).suffix for n in ("..h", "...h", "..hpp")] == [
+        ".h",
+        ".h",
+        ".hpp",
+    ]
+
+
+def test_a_leading_dot_header_is_still_a_cache_key_entry(tmp_path: Path) -> None:
+    """The concrete regression: a ``..h`` file must be walked, like ``rglob``."""
+    (tmp_path / "..h").write_text("x", encoding="utf-8")
+    (tmp_path / "...hpp").write_text("x", encoding="utf-8")
+    (tmp_path / "plain.h").write_text("x", encoding="utf-8")
+    walked = iter_cache_header_files(tmp_path)
+    assert walked == _oracle(tmp_path)
+    assert {p.name for p in walked} == {"..h", "...hpp", "plain.h"}
