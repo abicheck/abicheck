@@ -256,6 +256,14 @@ def test_advanced_dwarf_detector_support_tracks_collected_evidence(advanced_name
 _NEEDS_GPP = pytest.mark.skipif(
     shutil.which("g++") is None, reason="needs g++ to build a real shared library"
 )
+#: The CLI case below passes ``--header``, which runs the **default** header-AST
+#: backend -- castxml. Guarding only on ``g++`` left it failing rather than
+#: skipping on a host that has a compiler but no castxml (Codex review), which
+#: tests/CLAUDE.md forbids for a test selected by the default lane.
+_NEEDS_CASTXML = pytest.mark.skipif(
+    shutil.which("castxml") is None,
+    reason="`compare --header` runs the default castxml header backend",
+)
 
 
 @_NEEDS_GPP
@@ -288,6 +296,7 @@ def test_real_library_l1_row_matches_its_actual_debug_info(
 
 
 @_NEEDS_GPP
+@_NEEDS_CASTXML
 @pytest.mark.parametrize("debug_flag,expect_present", [("-g0", False), ("-g", True)])
 def test_compare_json_layer_coverage_matches_actual_debug_info(
     tmp_path, debug_flag, expect_present

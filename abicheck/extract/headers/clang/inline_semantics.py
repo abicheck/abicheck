@@ -165,17 +165,35 @@ def is_effectively_inline(
     (``friend void f(const W&);``) keeps the negative answer, which is why
     *in_friend* alone is not the test -- the body is.
 
-    ``= delete``\\ d members are deliberately **not** matched: clang spells
-    them ``"explicitlyDeleted": true`` (not ``explicitlyDefaulted``), a
-    deleted function has no definition to inline, and every consumer of this
-    fact already handles ``is_deleted`` on its own axis.
+    ``= delete``\\ d functions *are* matched, at any scope -- see the
+    ``explicitlyDeleted`` branch below for the citation and for what excluding
+    them used to cost.
     """
     if node.get("inline"):
         return True
     if node.get("constexpr"):
         return True
+    # [dcl.fct.def.delete]/4: "A deleted function is implicitly an inline
+    # function." That holds wherever it is declared, so this is checked before
+    # the scope gate -- a namespace-scope `void f(int) = delete;` is inline
+    # too. Clang spells it `explicitlyDeleted` with no body and no `inline`
+    # key, so excluding it (as an earlier revision did, on the reasoning that
+    # a deleted function has no definition to inline) contradicted the
+    # language and made `diff_symbols._check_inline_transitions` emit a
+    # spurious FUNC_LOST_INLINE next to the real FUNC_DELETED whenever an
+    # inline function became `= delete`.
+    if node.get("explicitlyDeleted"):
+        return True
     if not encloses_class_scope(scope_path):
         return False
     if node.get("kind") not in _MEMBER_KINDS and not in_friend:
         return False
-    return _has_body(node) or node.get("explicitlyDefaulted") == "default"
+    # [dcl.fct.def.default]/5: a function explicitly defaulted on its *first*
+    # declaration is implicitly inline -- which is exactly the in-class case,
+    # since an out-of-line `W::W() = default;` is not a first declaration and
+    # is filtered by the scope gate above. Any `explicitlyDefaulted` value
+    # counts, not just "default": clang also spells it "deleted" when the
+    # defaulted definition resolves to deleted (e.g. a defaulted `operator==`
+    # whose base class has none), and that declaration was still defaulted on
+    # its first declaration.
+    return _has_body(node) or node.get("explicitlyDefaulted") is not None

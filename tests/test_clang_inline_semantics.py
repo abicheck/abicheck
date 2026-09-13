@@ -243,13 +243,39 @@ def test_free_function_with_a_body_is_not_implicitly_inline():
     assert is_effectively_inline(_node("FunctionDecl", body=True), _RECORD) is False
 
 
+@pytest.mark.parametrize("scope", [(), _NAMESPACE, _RECORD, _NESTED])
+@pytest.mark.parametrize("kind", ("FunctionDecl",) + _MEMBER_KINDS)
+def test_deleted_function_is_implicitly_inline_at_any_scope(kind, scope):
+    """[dcl.fct.def.delete]/4: "A deleted function is implicitly an inline
+    function." Checked at every scope, because unlike the in-class rules this
+    one does not depend on where the declaration sits -- a namespace-scope
+    `void f(int) = delete;` is inline too.
+
+    Excluding these (as an earlier revision did) made a plain
+    `inline void f();` turning into `void f() = delete;` emit a spurious
+    FUNC_LOST_INLINE beside the real FUNC_DELETED.
+    """
+    assert is_effectively_inline(_node(kind, explicitlyDeleted=True), scope) is True
+
+
 @pytest.mark.parametrize("kind", _MEMBER_KINDS)
-def test_deleted_member_is_not_treated_as_a_definition(kind):
-    """``= delete`` has no definition to inline, and clang spells it apart."""
-    assert is_effectively_inline(_node(kind, explicitlyDeleted=True), _RECORD) is False
+def test_defaulted_but_deleted_member_is_still_inline(kind):
+    """Clang spells `explicitlyDefaulted: "deleted"` for a defaulted definition
+    that resolves to deleted -- e.g. `bool operator==(const W&) const =
+    default;` in a class whose base has no `operator==`.
+
+    [dcl.fct.def.default]/5 makes a function defaulted on its *first*
+    declaration implicitly inline, and that declaration was defaulted there
+    regardless of what it resolved to, so any `explicitlyDefaulted` value
+    counts in class scope -- not just "default".
+    """
     assert (
         is_effectively_inline(_node(kind, explicitlyDefaulted="deleted"), _RECORD)
-        is False
+        is True
+    )
+    # Out of line it is not a first declaration, so the scope gate still wins.
+    assert (
+        is_effectively_inline(_node(kind, explicitlyDefaulted="deleted"), ()) is False
     )
 
 

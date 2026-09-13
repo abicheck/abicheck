@@ -29,14 +29,24 @@ def test_advanced_dwarf_detector_requires_both_sides() -> None:
 
 
 def test_advanced_dwarf_detector_enabled_when_both_have_metadata() -> None:
-    """Detector is enabled when both snapshots have dwarf_advanced."""
+    """Detector is enabled when both snapshots have advanced DWARF facts.
+
+    The fixtures carry a real fact, not a bare ``has_dwarf=True``: that flag is
+    overloaded -- the presence-only dump paths (``--depth binary``,
+    ``symbols_only``) set it from a section lookup while parsing none of the
+    payload this detector reads -- so the gate asks
+    ``model.advanced_facts_collected`` instead, and a flag-only fixture would
+    assert the detector runs over empty dicts.
+    """
     old = AbiSnapshot(
-        library="libx.so", version="1.0",
-        dwarf_advanced=AdvancedDwarfMetadata(has_dwarf=True),
+        library="libx.so",
+        version="1.0",
+        dwarf_advanced=AdvancedDwarfMetadata(has_dwarf=True, packed_structs={"S"}),
     )
     new = AbiSnapshot(
-        library="libx.so", version="2.0",
-        dwarf_advanced=AdvancedDwarfMetadata(has_dwarf=True),
+        library="libx.so",
+        version="2.0",
+        dwarf_advanced=AdvancedDwarfMetadata(has_dwarf=True, packed_structs={"S"}),
     )
     result = compare(old, new)
     adv = next(d for d in result.detector_results if d.name == "advanced_dwarf")
@@ -47,14 +57,16 @@ def test_advanced_dwarf_detector_enabled_when_both_have_metadata() -> None:
 def test_advanced_dwarf_detector_finds_calling_convention_change() -> None:
     """Detector reports CALLING_CONVENTION_CHANGED when CC differs."""
     old = AbiSnapshot(
-        library="libx.so", version="1.0",
+        library="libx.so",
+        version="1.0",
         dwarf_advanced=AdvancedDwarfMetadata(
             has_dwarf=True,
             calling_conventions={"_Z3foov": "normal"},
         ),
     )
     new = AbiSnapshot(
-        library="libx.so", version="2.0",
+        library="libx.so",
+        version="2.0",
         dwarf_advanced=AdvancedDwarfMetadata(
             has_dwarf=True,
             calling_conventions={"_Z3foov": "stdcall"},
@@ -67,7 +79,8 @@ def test_advanced_dwarf_detector_finds_calling_convention_change() -> None:
 def test_advanced_dwarf_detector_finds_packing_change() -> None:
     """Detector reports STRUCT_PACKING_CHANGED when packing status changes."""
     old = AbiSnapshot(
-        library="libx.so", version="1.0",
+        library="libx.so",
+        version="1.0",
         dwarf_advanced=AdvancedDwarfMetadata(
             has_dwarf=True,
             packed_structs=set(),
@@ -75,7 +88,8 @@ def test_advanced_dwarf_detector_finds_packing_change() -> None:
         ),
     )
     new = AbiSnapshot(
-        library="libx.so", version="2.0",
+        library="libx.so",
+        version="2.0",
         dwarf_advanced=AdvancedDwarfMetadata(
             has_dwarf=True,
             packed_structs={"MyStruct"},
