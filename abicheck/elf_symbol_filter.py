@@ -23,7 +23,7 @@ from typing import Any
 # Canonical stdlib/runtime RTTI prefixes (single source of truth in the
 # dependency-free name_classification leaf). Imported under the historical local
 # name; combined below with _STDLIB_PREFIXES to drop transitive runtime symbols.
-from .elf_metadata import SymbolType
+from .model.elf_facts import SymbolType
 from .name_classification import STDLIB_RTTI_PREFIXES as _STDLIB_RTTI_PREFIXES
 
 # ELF symbol types (STT_*) that represent a callable function surface and a

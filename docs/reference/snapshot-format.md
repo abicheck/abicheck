@@ -211,8 +211,13 @@ text is not the same scope under both — `include/foo.h` excludes
 `/pkg/include/foo.h` natively and keeps it through a descriptor — so
 recording the text alone let the comparability gate accept two snapshots
 covering different surfaces. Absent on a pre-v48 snapshot, which loads as
-`"glob"`: correct for every one of them, since the native path was the only
-producer that existed.
+`"unknown"` — **not** as `"glob"`: v47 already recorded a descriptor's
+*exact*-matched `<skip_headers>` alongside the native fnmatch ones, so
+assuming fnmatch for a mode-less snapshot would let a baseline holding
+`include/foo.h` compare clean against a native glob snapshot that excluded a
+different set of headers. An unrecorded rule is refused rather than guessed.
+A mode-less snapshot carrying no patterns is unaffected — there is nothing
+for a rule to have matched.
 
 (v47) `AbiSnapshot.excluded_header_patterns` persisted — the
 `--exclude-header PATTERN` values a snapshot was dumped under. The parsed

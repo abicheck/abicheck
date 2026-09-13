@@ -40,6 +40,14 @@ from typing import TYPE_CHECKING
 #: :func:`exclusions_are_symmetric`.
 GLOB_MATCHING = "glob"
 EXACT_MATCHING = "exact"
+#: A snapshot that recorded exclusion patterns *before* the rule was
+#: persisted (schema v47). Not a third rule -- the absence of the answer.
+#: Defaulting such a snapshot to ``glob`` was wrong: descriptor exclusions
+#: were already being recorded under v47, so a baseline holding
+#: ``include/foo.h`` matched *exactly* would have loaded as a glob and
+#: compared clean against a native glob snapshot that excluded a different
+#: set of headers (Codex review). Unprovable is not the same as native.
+UNKNOWN_MATCHING = "unknown"
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -128,4 +136,10 @@ def exclusions_are_symmetric(
     # snapshot with no patterns stays comparable with anything.
     if not old_patterns and not new_patterns:
         return True
+    # An unrecorded rule is not a rule. Two such snapshots are refused even
+    # when their patterns match, because "both were probably native" is a
+    # guess about how each was produced, and guessing is what the recorded
+    # mode exists to stop. Re-dumping either side under this build answers it.
+    if UNKNOWN_MATCHING in (old_matching, new_matching):
+        return False
     return old_matching == new_matching

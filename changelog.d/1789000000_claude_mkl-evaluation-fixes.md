@@ -288,11 +288,15 @@
   falsified -- recording the raw text for both rules, then dropping only
   metacharacter-bearing patterns, which is wrong for any pattern containing a
   path separator. Two sides are now comparable only if they narrowed by the
-  same patterns under the same rule. A pre-v48 snapshot loads as `"glob"`,
-  correct for every one of them since the native path was the only producer.
-  The cost is accepted deliberately: a descriptor and a native run naming a
-  bare `b.h` do achieve the same thing and are refused anyway, because
-  nothing in the patterns alone proves which pairs are equivalent.
+  same patterns under the same rule. A pre-v48 snapshot loads as `"unknown"`
+  -- not `"glob"`: v47 already recorded a descriptor's exact-matched skips, so
+  assuming fnmatch for a mode-less snapshot would let a baseline holding
+  `include/foo.h` compare clean against a native glob snapshot covering a
+  different set of headers. An unrecorded rule is refused rather than guessed;
+  a mode-less snapshot with no patterns is unaffected. The cost is accepted
+  deliberately: a descriptor and a native run naming a bare `b.h` do achieve
+  the same thing and are refused anyway, because nothing in the patterns alone
+  proves which pairs are equivalent.
 - **"Did this export exist before?" now asks about every symbol type.** The
   undeclared-export detector answered that question with a hand-listed subset
   of types three times over -- one class, then the union of two -- and the
