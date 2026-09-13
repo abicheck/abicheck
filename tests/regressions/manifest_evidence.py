@@ -510,11 +510,19 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # binary's own exported-symbol conclusions included, which a header
         # insertion cannot touch at all.
         fixed_by=(1274,),
-        seed_tests=("tests/test_comparability_gate_header_insertion.py",),
-        # The seed tests call `check_contracts_comparable`/`checker.compare`
-        # directly, never through Click or `abicheck.service`.
-        public_surfaces=(),
+        seed_tests=(
+            "tests/test_comparability_gate_header_insertion.py",
+            "tests/test_cli_compare_added_public_header_live.py",
+        ),
+        # The gate-level seed tests call `check_contracts_comparable`/
+        # `checker.compare` directly; the live sibling runs the reported
+        # `abicheck compare` command through Click over really-compiled
+        # binaries and real `--header old=<dir>`/`new=<dir>` operands, which
+        # is what covers the sorted `iter_directory_headers` expansion the
+        # bug was only ever reachable through (PR #1276).
+        public_surfaces=("cli",),
         axes={
+            "operand_kind": ("hand_built_contract", "live_binary_and_header_dir"),
             "insertion_position": ("first", "interior", "trailing"),
             "sequence_shape": (
                 "single-insertion",
