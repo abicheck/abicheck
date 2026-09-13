@@ -89,9 +89,7 @@ def _sh(value: Path | str) -> str:
     `bash <script>` boundary, for the same reason).
     """
     return shlex.quote(
-        value.as_posix()
-        if isinstance(value, Path) and os.name == "nt"
-        else str(value)
+        value.as_posix() if isinstance(value, Path) and os.name == "nt" else str(value)
     )
 
 
@@ -273,9 +271,7 @@ class TestTheProbeResolvesTheOperandNotTheSafeDirectory:
         _make_tar_mode(workdir / "operand", "w:gz")
 
         assert is_package(workdir / "operand")
-        assert _ask(
-            "operand", abicheck_available=True, cwd=safe_dir, workdir=workdir
-        )
+        assert _ask("operand", abicheck_available=True, cwd=safe_dir, workdir=workdir)
 
     def test_a_relative_non_package_still_answers_no(self, tmp_path: Path) -> None:
         """The control: anchoring must not make everything a package."""
@@ -349,7 +345,7 @@ class TestTheProbeAnchorsExactlyWhatTheSharedPredicateSays:
         stub.chmod(0o755)
         script = "\n".join(
             (
-                f'_RUNNING_ON_WINDOWS={"true" if on_windows else "false"}',
+                f"_RUNNING_ON_WINDOWS={'true' if on_windows else 'false'}",
                 "_PY_BIN_HAS_ABICHECK=true",
                 f"_PY_BIN={_sh(stub)}",
                 f"_PY_SAFE_DIR={_sh(workdir)}",
@@ -373,7 +369,7 @@ class TestTheProbeAnchorsExactlyWhatTheSharedPredicateSays:
         require_bash()
         script = "\n".join(
             (
-                f'_RUNNING_ON_WINDOWS={"true" if on_windows else "false"}',
+                f"_RUNNING_ON_WINDOWS={'true' if on_windows else 'false'}",
                 _named_function_source("_is_path_already_qualified"),
                 '_is_path_already_qualified "$1"',
             )
@@ -396,9 +392,7 @@ class TestTheProbeAnchorsExactlyWhatTheSharedPredicateSays:
             workdir = tmp_path / f"w{len(disagreements)}-{abs(hash(spelling))}"
             workdir.mkdir()
             qualified = self._predicate(spelling, on_windows=on_windows)
-            argv = self._probe_argv(
-                spelling, on_windows=on_windows, workdir=workdir
-            )
+            argv = self._probe_argv(spelling, on_windows=on_windows, workdir=workdir)
             anchored = argv != spelling
             if anchored is qualified:
                 disagreements[spelling] = (qualified, argv)
