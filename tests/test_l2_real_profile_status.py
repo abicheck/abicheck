@@ -28,10 +28,15 @@ from __future__ import annotations
 
 import dataclasses
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
-from _l2_real_profiles_support import materialize_operands, profiles
+from _l2_real_profiles_support import (
+    materialize_operands,
+    measurement_output,
+    profiles,
+)
 
 
 class TestReadinessIsNotAMeasurement:
@@ -167,7 +172,11 @@ class TestMeasuredRequiresACompletedMeasurement:
             ({"libraries": ()}, "measured nothing"),
             ({"wall_seconds": 0.0}, "not a timed window"),
             ({"wall_seconds": -1.0}, "not a timed window"),
-            ({"output_paths": (Path("/nonexistent/report.json"),)}, "do not exist"),
+            ({"output_paths": ()}, "names no output"),
+            (
+                {"output_paths": (Path("/nonexistent/report.json"),)},
+                "not existing files",
+            ),
             ({"libraries": ("not_a_library",)}, "unmeasurable"),
             ({"profile_id": "pvxs"}, "cannot promote the status"),
         ],
@@ -180,7 +189,9 @@ class TestMeasuredRequiresACompletedMeasurement:
             "profile_id": "svs",
             "libraries": ("svs_runtime",),
             "wall_seconds": 2.0,
-            "output_paths": (),
+            # A valid baseline in every field, so each parametrized case is the
+            # ONLY thing wrong with the result it builds.
+            "output_paths": (measurement_output(tmp_path),),
         }
         base.update(result_kwargs)
         with pytest.raises(ValueError, match=expected):
@@ -191,7 +202,9 @@ class TestMeasuredRequiresACompletedMeasurement:
         with pytest.raises(ValueError, match="only a ready profile"):
             profiles.promote_to_measured(
                 profiles.ProfileStatus("svs", status_name, reason="r"),
-                profiles.MeasurementResult("svs", ("svs_runtime",), 1.0),
+                profiles.MeasurementResult(
+                    "svs", ("svs_runtime",), 1.0, output_paths=(Path(__file__),)
+                ),
             )
 
     def test_a_partial_status_promotes_only_over_its_measurable_libraries(
@@ -216,6 +229,7 @@ class TestMeasuredRequiresACompletedMeasurement:
                 "onedal",
                 ("onedal_core", "onedal", "onedal_parameters"),
                 9.0,
+                output_paths=(measurement_output(tmp_path),),
             ),
         )
         assert promoted.status == "MEASURED"
@@ -224,7 +238,12 @@ class TestMeasuredRequiresACompletedMeasurement:
         with pytest.raises(ValueError, match="unmeasurable"):
             profiles.promote_to_measured(
                 partial,
-                profiles.MeasurementResult("onedal", ("onedal_dpc",), 9.0),
+                profiles.MeasurementResult(
+                    "onedal",
+                    ("onedal_dpc",),
+                    9.0,
+                    output_paths=(measurement_output(tmp_path),),
+                ),
             )
 
 
@@ -258,14 +277,70 @@ class TestSideAcquisitionIsDeclared:
         problems = profiles.validate_profile(bad)
         assert any("can never exist" in problem for problem in problems)
 
-    def test_the_script_refuses_to_silently_skip_a_supplied_side(self):
-        # A prebuilt side produces no build commands, so the script must say so
-        # and fail loudly if the distribution is absent -- an absent operand tree
-        # is the exact condition that used to read as a completed measurement.
+    @staticmethod
+    def _run_supplied_side_guard(tmp_path: Path) -> subprocess.CompletedProcess:
+        """Actually execute SVS's supplied-side guard against *tmp_path*.
+
+        Executed, not text-asserted. This repository has the scar for that
+        distinction (#705 asserted YAML text and #758 had to add the test that
+        ran the attack), and it matters here for the same reason: the first
+        version of this guard was `[ -d svs_old ]`, which *contains* every
+        string a text assertion would look for while passing for an empty
+        directory.
+        """
+        script = profiles.prepare_script(profiles.SVS)
+        guard = [
+            line
+            for line in script.splitlines()
+            if line.startswith("if [ ") or line.startswith("ROOT=")
+        ]
+        assert guard, "no guard was generated for the supplied side"
+        return subprocess.run(
+            ["bash", "-c", "set -u\n" + "\n".join(guard)],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_the_guard_rejects_an_absent_supplied_side(self, tmp_path):
+        result = self._run_supplied_side_guard(tmp_path)
+        assert result.returncode == 1, result.stdout
+        assert "missing old side" in result.stderr
+
+    def test_the_guard_rejects_an_empty_supplied_side_directory(self, tmp_path):
+        # The case `[ -d svs_old ]` accepted: the directory exists and holds
+        # nothing, so the script would build the candidate and exit 0 having
+        # never been given the baseline it claims to prepare.
+        (tmp_path / "svs_old").mkdir()
+        result = self._run_supplied_side_guard(tmp_path)
+        assert result.returncode == 1, result.stdout
+        assert "missing old side" in result.stderr
+
+    def test_the_guard_rejects_a_header_root_holding_no_header(self, tmp_path):
+        root = tmp_path / "svs_old"
+        (root / "lib").mkdir(parents=True)
+        (root / "lib/libsvs_runtime.so").write_bytes(b"\x7fELF")
+        (root / "include/svs/runtime").mkdir(parents=True)
+        (root / "include/svs/runtime/README.md").write_text("not a header")
+        result = self._run_supplied_side_guard(tmp_path)
+        assert result.returncode == 1, result.stdout
+        assert "header evidence" in result.stderr
+
+    def test_the_guard_accepts_a_complete_supplied_side(self, tmp_path):
+        # Vacuity guard: the guard must be satisfiable, or the three rejections
+        # above would pass against a guard that always fails.
+        root = tmp_path / "svs_old"
+        (root / "lib").mkdir(parents=True)
+        (root / "lib/libsvs_runtime.so").write_bytes(b"\x7fELF")
+        (root / "include/svs/runtime").mkdir(parents=True)
+        (root / "include/svs/runtime/api_defs.h").write_text("int x;")
+        result = self._run_supplied_side_guard(tmp_path)
+        assert result.returncode == 0, result.stderr
+
+    def test_the_script_states_that_the_side_is_supplied(self):
         script = profiles.prepare_script(profiles.SVS)
         assert "PREBUILT DISTRIBUTION" in script
-        assert 'if [ ! -d "$ROOT"/svs_old ]' in script
-        assert "exit 1" in script
 
     def test_a_built_side_installs_into_its_own_operand_root(self):
         # {root} is the operand tree `missing_inputs` and the comparison read;
@@ -309,7 +384,7 @@ class TestOperandChecksRespectTheContextSplit:
                 artifact = root / lib.artifact
                 artifact.parent.mkdir(parents=True, exist_ok=True)
                 artifact.write_bytes(b"\x7fELF")
-                for header in lib.public_headers:
+                for header in (*lib.public_headers, *lib.include_roots):
                     target = root / header
                     if target.suffix in profiles.HEADER_SUFFIXES:
                         target.parent.mkdir(parents=True, exist_ok=True)
@@ -510,12 +585,21 @@ class TestMeasurementCoversTheMeasurableSet:
         for subset in subsets:
             with pytest.raises(ValueError):
                 profiles.promote_to_measured(
-                    ready, profiles.MeasurementResult(profile.id, subset, 5.0)
+                    ready,
+                    profiles.MeasurementResult(
+                        profile.id,
+                        subset,
+                        5.0,
+                        output_paths=(measurement_output(tmp_path),),
+                    ),
                 )
         # Vacuity guard: the complete set really does promote, so the sweep
         # above is not passing because promotion is broken outright.
         promoted = profiles.promote_to_measured(
-            ready, profiles.MeasurementResult(profile.id, names, 5.0)
+            ready,
+            profiles.MeasurementResult(
+                profile.id, names, 5.0, output_paths=(measurement_output(tmp_path),)
+            ),
         )
         assert promoted.status == "MEASURED"
 
@@ -532,6 +616,7 @@ class TestMeasurementCoversTheMeasurableSet:
                 "onedal",
                 ("onedal_core", "onedal", "onedal_parameters"),
                 12.0,
+                output_paths=(measurement_output(tmp_path),),
                 omitted_libraries={
                     "onedal_dpc": "DPC++ build ran out of disk",
                     "onedal_parameters_dpc": "DPC++ build ran out of disk",
@@ -582,3 +667,125 @@ class TestMeasurementCoversTheMeasurableSet:
                     omitted_libraries={"not_a_library": "whatever"},
                 ),
             )
+
+
+class TestIncludeRootsAreRequiredInputs:
+    """A declared include root is an operand, not decoration.
+
+    `LibraryTarget.include_roots` names the directories the declared headers
+    need in order to parse. A prepared PVXS tree holding its binaries and its
+    public headers but missing `../epics-base/include` reported READY while
+    being unparseable (Codex review) -- readiness a first parse would
+    immediately refute, which is the same "declared but unchecked input" family
+    as the empty header root.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _tools_present(self, monkeypatch):
+        monkeypatch.setattr(profiles.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+        monkeypatch.setattr(profiles, "toolchain_identity", lambda p: {})
+
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
+    def test_every_declared_include_root_is_checked(self, tmp_path, profile_id):
+        """Exhaustive over each profile's own include roots, one at a time.
+
+        Removing each in turn from an otherwise complete tree: a resolver that
+        consulted only *some* of them would pass for the ones it skipped, which
+        is how `../epics-base/include` went unchecked while `src` looked
+        covered.
+        """
+        profile = profiles.PROFILES[profile_id]
+        complete = tmp_path / "complete"
+        materialize_operands(profile, complete)
+        assert (
+            profiles.resolve_status(
+                profile, prepared_root=complete, requested=True
+            ).status
+            == "READY"
+        ), "vacuity guard: the complete tree must be ready to begin with"
+        roots = sorted(
+            {root for lib in profile.l2_libraries for root in lib.include_roots}
+        )
+        assert roots, profile_id
+        for index, include_root in enumerate(roots):
+            tree = tmp_path / f"minus_root_{index}"
+            shutil.copytree(complete, tree, symlinks=True)
+            victim = profile.side_root(tree, "old") / include_root
+            shutil.rmtree(victim.resolve())
+            status = profiles.resolve_status(
+                profile, prepared_root=tree, requested=True
+            )
+            assert status.status == "BLOCKED", (include_root, status.reason)
+            assert any(
+                "include root" in entry or "public header" in entry
+                for entry in status.missing_inputs
+            ), (include_root, status.missing_inputs)
+
+    def test_a_relative_include_root_resolves_against_its_own_side(self, tmp_path):
+        # PVXS's `../epics-base/include` deliberately escapes the side tree --
+        # that is where the generated prepare script puts EPICS base. Checking
+        # it against the wrong base would either always pass or always fail.
+        materialize_operands(profiles.PVXS, tmp_path)
+        assert (tmp_path / "epics-base" / "include").is_dir()
+        assert (
+            profiles.resolve_status(
+                profiles.PVXS, prepared_root=tmp_path, requested=True
+            ).status
+            == "READY"
+        )
+
+
+class TestScenariosMustBeAnswerableByTheirOperands:
+    """A profile may not declare a scenario its own two sides cannot answer.
+
+    `svs_pr_base` declared `rebuild_equivalence` while building a merge base
+    against a PR head. A difference it found could be the source change or the
+    build, and that scenario's expectation ("investigate against the recorded
+    compiler, flags, dependencies") presumes the build is the only variable --
+    so the label made two causes indistinguishable (Codex review).
+    """
+
+    def test_the_pr_base_profile_declares_only_its_temporal_scenario(self):
+        assert profiles.SVS_PR_BASE.scenarios == ("temporal_pr_base",)
+
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
+    def test_no_shipped_profile_mixes_the_two_families(self, profile_id):
+        profile = profiles.PROFILES[profile_id]
+        temporal = [s for s in profile.scenarios if s in profiles.TEMPORAL_SCENARIOS]
+        same = [s for s in profile.scenarios if s in profiles.SAME_REVISION_SCENARIOS]
+        assert not (temporal and same), profile.scenarios
+
+    @pytest.mark.parametrize("scenario", sorted(profiles.SAME_REVISION_SCENARIOS))
+    def test_a_same_revision_scenario_on_differing_sides_is_rejected(self, scenario):
+        # Swept over the whole family rather than the one scenario that had the
+        # defect: each of these compares two acquisitions of one revision, and
+        # none of them can be answered by two different ones.
+        bad = dataclasses.replace(profiles.SVS_PR_BASE, scenarios=(scenario,))
+        problems = profiles.validate_profile(bad)
+        assert any("one revision" in problem for problem in problems), problems
+
+    @pytest.mark.parametrize("scenario", sorted(profiles.SAME_REVISION_SCENARIOS))
+    def test_a_same_revision_scenario_on_one_revision_is_accepted(self, scenario):
+        # Vacuity guard: the rule rejects the mismatch, not the whole family.
+        good = dataclasses.replace(
+            profiles.SVS_PR_BASE,
+            old_revision="7058e9605a54180aa64fbb7a81a82aa47f07eeff",
+            new_revision="7058e9605a54180aa64fbb7a81a82aa47f07eeff",
+            scenarios=(scenario,),
+        )
+        assert not any(
+            "one revision" in problem for problem in profiles.validate_profile(good)
+        )
+
+    @pytest.mark.parametrize("scenario", sorted(profiles.TEMPORAL_SCENARIOS))
+    def test_a_temporal_scenario_still_needs_two_revisions(self, scenario):
+        bad = dataclasses.replace(
+            profiles.SVS_PR_BASE,
+            old_revision="aaa",
+            new_revision="aaa",
+            scenarios=(scenario,),
+        )
+        assert any(
+            "two different revisions" in problem
+            for problem in profiles.validate_profile(bad)
+        )

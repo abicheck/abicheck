@@ -56,12 +56,29 @@ def materialize_operands(profile, prepared_root: Path) -> Path:
             artifact = root / lib.artifact
             artifact.parent.mkdir(parents=True, exist_ok=True)
             artifact.write_bytes(b"\x7fELF")
-            for header in lib.public_headers:
-                target = root / header
-                if target.suffix in (".h", ".hpp"):
+            # Include roots are operands too -- declared headers cannot parse
+            # without them -- so a fixture that omits them would not produce a
+            # tree the resolver considers ready.
+            for path in (*lib.public_headers, *lib.include_roots):
+                target = root / path
+                if target.suffix in profiles.HEADER_SUFFIXES:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text("/* header */")
                 else:
                     target.mkdir(parents=True, exist_ok=True)
                     (target / "api.h").write_text("/* header */")
     return prepared_root
+
+
+def measurement_output(tmp_path: Path, name: str = "report.json") -> Path:
+    """A real file on disk, for a promotion that must name validated output.
+
+    `promote_to_measured` refuses a result with no output: a library list and a
+    duration are not evidence that anything ran. Tests that promote therefore
+    need a real artifact, and creating one here keeps that requirement stated
+    in one place.
+    """
+    path = tmp_path / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}")
+    return path

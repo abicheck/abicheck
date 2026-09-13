@@ -154,6 +154,19 @@ SCENARIO_EXPECTATIONS: dict[str, str] = {
 #: require two different operands.
 TEMPORAL_SCENARIOS = ("temporal_release", "temporal_pr_base")
 
+#: Scenarios that compare two acquisitions of the SAME revision, and therefore
+#: require both sides to name one revision. A profile cannot declare one of
+#: these alongside a temporal scenario: its two sides are either the same
+#: revision or they are not. `svs_pr_base` declared `rebuild_equivalence` while
+#: building a merge base against a PR head, so a difference it found could be a
+#: source change or a build difference with no way to tell them apart -- a
+#: scenario claiming evidence its own operands cannot produce (Codex review).
+SAME_REVISION_SCENARIOS = (
+    "self_comparison",
+    "rebuild_equivalence",
+    "variant_comparison",
+)
+
 #: How one side's operands are obtained.
 SIDE_SOURCES = ("build_from_revision", "prebuilt_distribution")
 
@@ -485,12 +498,15 @@ SVS_PR_BASE = RealProfile(
     required_tools=("git", "cmake", "g++"),
     approx_build_minutes=90,
     approx_disk_gb=10,
-    # Both sides are built here, under one controlled build contract, so the
-    # rebuild-equivalence question is answerable from this profile's own
-    # artifacts -- and answering it means INVESTIGATING a difference against the
-    # recorded toolchain, not declaring it a false positive. See
-    # SCENARIO_EXPECTATIONS.
-    scenarios=("temporal_pr_base", "rebuild_equivalence"),
+    # ONE scenario, deliberately. This profile's two sides are two different
+    # revisions, so it cannot also answer `rebuild_equivalence`: a difference
+    # between a merge base and a PR head could be the source change or the
+    # build, and the scenario's own expectation ("investigate against the
+    # recorded compiler, flags, dependencies") presumes those are the only
+    # variable. Answering that question needs a same-revision profile, which
+    # this is not; `validate_profile` now rejects the combination outright
+    # rather than leaving it to a reader (Codex review).
+    scenarios=("temporal_pr_base",),
     notes=(
         "A smoke test, not the integration's gate: it compares PR #387's merge "
         "base against its head and therefore cannot expose an ABI change that "
@@ -498,6 +514,10 @@ SVS_PR_BASE = RealProfile(
         "comparison (profile `svs`) is the one that did.",
         "Both sides are built from source here, so each takes a full runtime "
         "build -- roughly twice the `svs` profile's cost.",
+        "It cannot answer the rebuild-equivalence question despite building "
+        "both sides itself: its two sides are different revisions, so a "
+        "difference could be the source change or the build. That needs a "
+        "same-revision profile, and none is declared today.",
     ),
 )
 
@@ -672,6 +692,17 @@ def validate_profile(profile: RealProfile) -> list[str]:
                 "detection comes to be read as a scanner defect (see "
                 "SCENARIO_EXPECTATIONS)"
             )
+        if (
+            scenario in SAME_REVISION_SCENARIOS
+            and profile.old_revision != profile.new_revision
+        ):
+            problems.append(
+                f"{profile.id}: scenario {scenario!r} compares two acquisitions of "
+                f"one revision, but this profile's sides are "
+                f"{profile.old_revision!r} and {profile.new_revision!r} -- a "
+                "difference it finds could be a source change or a build "
+                "difference, with no way to tell them apart"
+            )
     for side in ("old", "new"):
         source = profile.source_for_side(side)
         if source not in SIDE_SOURCES:
@@ -833,6 +864,20 @@ def missing_inputs(
                 if problem is not None:
                     missing.append(
                         f"{side}/{lib.name}: {header} (public header: {problem})"
+                    )
+            # An include root is not decoration: `LibraryTarget.include_roots`
+            # names the directories the declared headers need in order to
+            # parse. A PVXS tree holding its binaries and public headers but
+            # missing `../epics-base/include` read as READY while being
+            # unparseable (Codex review) -- readiness that a first parse would
+            # immediately refute. Relative roots resolve against the side's own
+            # tree, which is what makes `../epics-base/include` land where the
+            # generated prepare script actually puts it.
+            for include_root in lib.include_roots:
+                problem = header_evidence_missing(root / include_root)
+                if problem is not None:
+                    missing.append(
+                        f"{side}/{lib.name}: {include_root} (include root: {problem})"
                     )
     return missing
 
@@ -1152,7 +1197,12 @@ def promote_to_measured(
     * a result that leaves a measurable library neither measured nor explicitly
       omitted would republish a subset as the profile's whole scope;
     * a non-positive duration is not a timed window;
-    * an output path that does not exist is an unvalidated output.
+    * a result naming NO output has nothing to validate, so the existence
+      check below would pass vacuously and publish ``MEASURED`` on a library
+      list and a duration alone -- the completed-work-without-evidence state
+      this whole split exists to prevent (Codex and CodeRabbit review, which
+      found the same hole independently);
+    * an output path that is not an existing file is an unvalidated output.
 
     A ``PARTIAL`` status may be promoted, but only over the libraries it said
     were measurable -- promoting it over a blocked library would republish the
@@ -1223,11 +1273,17 @@ def promote_to_measured(
             f"{status.profile_id}: wall_seconds={result.wall_seconds!r} is not a "
             "timed window, so nothing was measured"
         )
-    absent = [str(path) for path in result.output_paths if not Path(path).exists()]
+    if not result.output_paths:
+        raise ValueError(
+            f"{status.profile_id}: the measurement names no output, so there is "
+            "nothing to validate -- MEASURED requires a result on disk, not a "
+            "library list and a duration"
+        )
+    absent = [str(path) for path in result.output_paths if not Path(path).is_file()]
     if absent:
         raise ValueError(
-            f"{status.profile_id}: measurement output(s) {absent} do not exist, "
-            "so the result is unvalidated"
+            f"{status.profile_id}: measurement output(s) {absent} are not existing "
+            "files, so the result is unvalidated"
         )
     return ProfileStatus(
         status.profile_id,
@@ -1249,6 +1305,41 @@ def promote_to_measured(
             "promoted_from": status.status,
         },
     )
+
+
+def _find_header_predicate() -> str:
+    """``find`` name tests matching :data:`HEADER_SUFFIXES`, as one OR chain."""
+    return " -o ".join(f"-name '*{suffix}'" for suffix in HEADER_SUFFIXES)
+
+
+def _supplied_side_operands(profile: RealProfile) -> list[tuple[str, str]]:
+    """Each operand a supplied side must carry, with the shell test it needs.
+
+    Derived from the profile's own declarations rather than restated, so a
+    profile whose artifact or header paths change cannot leave the generated
+    guard checking the old ones.
+    """
+    operands: list[tuple[str, str]] = []
+    for lib in profile.l2_libraries:
+        operands.append((lib.artifact, "file"))
+        for path in (*lib.public_headers, *lib.include_roots):
+            kind = "file" if Path(path).suffix in HEADER_SUFFIXES else "directory"
+            operands.append((path, kind))
+    # Stable and deduplicated: several libraries commonly share an include root.
+    seen: list[tuple[str, str]] = []
+    for operand in operands:
+        if operand not in seen:
+            seen.append(operand)
+    return seen
+
+
+def _supplied_side_header_roots(profile: RealProfile) -> list[str]:
+    """The directory operands whose *contents* must include a header file."""
+    roots: list[str] = []
+    for operand, kind in _supplied_side_operands(profile):
+        if kind == "directory" and operand not in roots:
+            roots.append(operand)
+    return roots
 
 
 def prepare_script(profile: RealProfile) -> str:
@@ -1321,6 +1412,13 @@ def prepare_script(profile: RealProfile) -> str:
             # A supplied side is not built, and the script must say so loudly
             # rather than silently produce nothing: an absent distribution is
             # the exact condition that used to read as a completed measurement.
+            #
+            # The guard checks the declared OPERANDS, not the directory. A
+            # `[ -d svs_old ]` test passed for an empty or stale directory, so
+            # the script went on to spend a full candidate build and exit 0
+            # having never been given the released baseline it claims to
+            # prepare (Codex review) -- the same container-existence mistake
+            # this module's status split exists to reject, in generated shell.
             lines.extend(
                 [
                     f"# {side} side: PREBUILT DISTRIBUTION ({revision}).",
@@ -1328,11 +1426,24 @@ def prepare_script(profile: RealProfile) -> str:
                     "that its lib/ and include/ trees sit directly under it.",
                     "# It is NOT rebuilt here: rebuilding a release measures "
                     "this host's toolchain, not the artifact consumers received.",
-                    f"if [ ! -d {side_root} ]; then echo 'missing {side} side: "
-                    f"extract the {profile.project} {revision} distribution into "
-                    f"{profile.id}_{side}' >&2; exit 1; fi",
                 ]
             )
+            for operand, kind in _supplied_side_operands(profile):
+                lines.append(
+                    f"if [ ! {'-f' if kind == 'file' else '-d'} "
+                    f"{side_root}/{operand} ]; then echo 'missing {side} side "
+                    f"{kind}: {profile.id}_{side}/{operand} -- extract the "
+                    f"{profile.project} {revision} distribution into "
+                    f"{profile.id}_{side}' >&2; exit 1; fi"
+                )
+            for header_root in _supplied_side_header_roots(profile):
+                lines.append(
+                    f'if [ -z "$(find {side_root}/{header_root} -type f '
+                    f"\\( {_find_header_predicate()} \\) -print -quit "
+                    f"2>/dev/null)\" ]; then echo 'missing {side} side header "
+                    f"evidence: {profile.id}_{side}/{header_root} holds no "
+                    f"header file' >&2; exit 1; fi"
+                )
             continue
         for command in commands:
             lines.append(
