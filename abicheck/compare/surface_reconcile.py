@@ -48,25 +48,30 @@ loses a population it had before.
 from __future__ import annotations
 
 from collections.abc import Callable, Container
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+from functools import wraps
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 
+from ..model import AbiSnapshot
 from .export_transition import surface_exit_is_evidence_gap
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from ..model import AbiSnapshot, Function, Variable
+    from ..model import Function, Variable
 
 __all__ = [
     "RECONCILED_FUNCTIONS",
     "RECONCILED_VARIABLES",
     "cached_reconciliation",
     "invalidate_reconciliation",
+    "releases_reconciliation",
     "reconcile_declaration_lists",
     "reconcile_surfaces",
     "store_reconciliation",
 ]
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 _Decl = TypeVar("_Decl", "Function", "Variable")
 #: The two sides of a *cross-kind* reconciliation, where one side's
 #: declaration is a ``Function`` and the other's is a ``Variable`` -- a
@@ -362,3 +367,36 @@ def invalidate_reconciliation(old: AbiSnapshot | None) -> None:
         return
     for slot in (RECONCILED_FUNCTIONS, RECONCILED_VARIABLES):
         old.__dict__.pop(slot, None)
+
+
+def releases_reconciliation(
+    fn: Callable[_P, _R],
+) -> Callable[_P, _R]:
+    """Wrap a comparison entry point so its per-pair memo dies with it.
+
+    :func:`cached_reconciliation` hangs the result on the OLD snapshot and
+    holds a strong reference to the NEW one, so a caller that keeps a
+    baseline alive kept the last candidate it was compared against alive too
+    -- and both reconciled declaration maps with it. For the typed API, where
+    a deep snapshot can be hundreds of MiB, that is a real leak rather than a
+    bookkeeping detail (Codex review, P2).
+
+    Clearing at the *start* of the next comparison, as an earlier revision
+    did, does not bound it: there may be no next comparison. This releases in
+    a ``finally``, so the memo's lifetime is the call's -- including when the
+    call raises -- which is what the memo's own docstring always claimed.
+
+    A weak reference to the candidate would not have been enough: the cached
+    maps hold that snapshot's *declarations*, so the memory stays reachable
+    even when the snapshot object itself does not.
+    """
+
+    @wraps(fn)
+    def _wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            old = args[0] if args else kwargs.get("old")
+            invalidate_reconciliation(old if isinstance(old, AbiSnapshot) else None)
+
+    return _wrapper
