@@ -221,6 +221,41 @@ def _bash_ansi_c_quote(value: str) -> str:
     return "$'" + "".join(out) + "'"
 
 
+def _isolated_interpreter_has_abicheck() -> bool:
+    """Can `_is_release_style_operand`'s own probe import abicheck?
+
+    That probe deliberately runs `cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN"
+    -c 'from abicheck.package import is_package'`, so it reaches an
+    *installed* abicheck only -- a bare checkout on `sys.path` via the CWD is
+    exactly what the isolation drops. When the import fails the probe cannot
+    answer, and `run.sh` falls back to its own suffix table by design, which
+    is documented degraded behaviour rather than a bug.
+
+    Reproduced with a pip-less venv: the same empty `.rpm` reads as
+    release-style `True` under an interpreter without abicheck and `False`
+    under one with it. So a test asserting the *content*-routed answer has to
+    establish that content routing is actually active first -- the harness
+    cannot supply it the way `_cli_introspection_prelude` supplies the three
+    introspection variables, because clearing `PYTHONPATH` and leaving the
+    CWD is the behaviour under test (Codex review, PR #1270, reproduced).
+    """
+    try:
+        result = subprocess.run(
+            [sys.executable, "-I", "-c", "from abicheck.package import is_package"],
+            capture_output=True,
+            text=True,
+            cwd=tempfile.gettempdir(),
+            env={
+                k: v
+                for k, v in os.environ.items()
+                if k not in ("PYTHONPATH", "PYTHONHOME")
+            },
+        )
+    except OSError:
+        return False
+    return result.returncode == 0
+
+
 def _run_predicate(call: str) -> bool:
     """Source the real helper functions and evaluate a boolean-returning call
     (e.g. an ``_is_release_style_operand "path"`` invocation), returning
@@ -471,6 +506,14 @@ class TestIsReleaseStyleOperand:
         f = _make_rpm(tmp_path / "libfoo.RPM")
         assert _run_predicate(f'_is_release_style_operand "{f}"')
 
+    @pytest.mark.skipif(
+        not _isolated_interpreter_has_abicheck(),
+        reason=(
+            "the content-routed probe cannot import abicheck under this "
+            "interpreter's isolation, so run.sh uses its documented suffix "
+            "fallback and an empty .rpm legitimately reads as release-style"
+        ),
+    )
     def test_package_suffix_alone_is_not_release_style(self, tmp_path) -> None:
         # The converse, and the reason the cases above had to change: a
         # zero-byte file wearing a package suffix must NOT read as a package,
