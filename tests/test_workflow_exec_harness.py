@@ -518,3 +518,116 @@ def test_run_step_contains_no_call_that_creates_the_workspace() -> None:
         "seeds fixtures there, and a fabricated empty one lets a step that "
         f"does not need them return a plausible answer. Found: {creations}"
     )
+
+
+class TestEveryStepGetsAPrivateTmpdir:
+    """Bug class ``harness.constructed_environment_drops_ambient_mitigation``.
+
+    ``run_step`` builds its environment from scratch, deliberately, so a
+    step cannot pass because the developer's shell exported something. The
+    cost of that is silent: a variable the *surrounding job* sets as a
+    mitigation is dropped on the floor, and the step runs under the exact
+    condition the job had just moved away from. That is not hypothetical --
+    `.github/workflows/ci.yml` points the unit-test job's ``TMPDIR`` at
+    ``$RUNNER_TEMP`` because something prunes ``/tmp`` on the hosted runners
+    mid-job, and `actions/check-target/action.yml`'s assurance-overlay step
+    still failed with ``cd: /tmp/tmp.XjdPkLm7IE: No such file or directory``
+    afterwards, because its own ``mktemp -d`` was still resolving against
+    ``/tmp``.
+
+    The invariant is stated over *arbitrary* step bodies rather than that
+    one step: whatever a step body asks the system for a temporary file, it
+    must land in a directory this harness owns, per step -- and a caller
+    that states its own ``TMPDIR`` must still win.
+    """
+
+    @staticmethod
+    def _tmpdir_probe() -> dict[str, str]:
+        return {
+            "run": (
+                'printf "tmpdir=%s\\n" "${TMPDIR:-<unset>}" >> "$GITHUB_OUTPUT"\n'
+                'd="$(mktemp -d)"\n'
+                'printf "made=%s\\n" "$d" >> "$GITHUB_OUTPUT"\n'
+                'f="$(mktemp)"\n'
+                'printf "file=%s\\n" "$f" >> "$GITHUB_OUTPUT"\n'
+            )
+        }
+
+    def test_tmpdir_is_a_harness_owned_per_step_directory(self, tmp_path: Path) -> None:
+        workspace = make_workspace(tmp_path)
+        result = run_step(self._tmpdir_probe(), workspace=workspace)
+
+        assert result.returncode == 0, result.stderr
+        tmpdir = Path(result.outputs["tmpdir"])
+        assert tmpdir.parent == workspace.parent, (
+            "a step's $TMPDIR must be a directory this harness allocated "
+            f"beside the workspace, not {tmpdir}"
+        )
+        # Outside the workspace and outside $RUNNER_TEMP, so `tree()` and the
+        # `$RUNNER_TEMP` assertions keep seeing only the step's own output.
+        assert workspace not in tmpdir.parents
+        for name in ("made", "file"):
+            created = Path(result.outputs[name])
+            assert tmpdir in created.parents, (
+                f"`mktemp` resolved {created} outside the step's own $TMPDIR"
+            )
+
+    def test_mktemp_does_not_resolve_against_the_shared_system_temp(
+        self, tmp_path: Path
+    ) -> None:
+        """The property that actually failed in CI, stated directly.
+
+        `/tmp` is the thing being escaped, so assert against it by identity
+        rather than trusting the allocation site above to keep being right:
+        a future refactor that points `$TMPDIR` back at the shared temp
+        would still satisfy "it is a directory somebody allocated".
+        """
+        import tempfile
+
+        workspace = make_workspace(tmp_path)
+        result = run_step(self._tmpdir_probe(), workspace=workspace)
+
+        assert result.returncode == 0, result.stderr
+        shared = {Path("/tmp"), Path(tempfile.gettempdir())}
+        for name in ("made", "file"):
+            created = Path(result.outputs[name])
+            assert created.parent not in shared, (
+                f"{name} landed directly in the shared system temp ({created})"
+            )
+
+    def test_two_steps_do_not_share_a_tmpdir(self, tmp_path: Path) -> None:
+        workspace = make_workspace(tmp_path)
+        first = run_step(self._tmpdir_probe(), workspace=workspace)
+        second = run_step(self._tmpdir_probe(), workspace=workspace)
+
+        assert first.returncode == 0, first.stderr
+        assert second.returncode == 0, second.stderr
+        assert first.outputs["tmpdir"] != second.outputs["tmpdir"]
+
+    def test_the_step_tmpdir_is_removed_afterwards(self, tmp_path: Path) -> None:
+        workspace = make_workspace(tmp_path)
+        result = run_step(self._tmpdir_probe(), workspace=workspace)
+
+        assert result.returncode == 0, result.stderr
+        assert not Path(result.outputs["tmpdir"]).exists()
+
+    @pytest.mark.parametrize("source", ["step-env", "caller-env"])
+    def test_an_explicit_tmpdir_still_wins(self, tmp_path: Path, source: str) -> None:
+        """Several tests set `TMPDIR` on purpose (a relative value, a value
+        nested under an input path) to exercise a script's own handling of
+        it. The harness default must not outrank either spelling."""
+        workspace = make_workspace(tmp_path)
+        chosen = tmp_path / "chosen_tmp"
+        chosen.mkdir()
+        step = dict(self._tmpdir_probe())
+        env = None
+        if source == "step-env":
+            step["env"] = {"TMPDIR": str(chosen)}
+        else:
+            env = {"TMPDIR": str(chosen)}
+
+        result = run_step(step, workspace=workspace, env=env)
+
+        assert result.returncode == 0, result.stderr
+        assert Path(result.outputs["tmpdir"]) == chosen
+        assert Path(result.outputs["made"]).parent == chosen

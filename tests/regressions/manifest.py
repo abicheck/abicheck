@@ -52,6 +52,7 @@ from .manifest_evidence import EVIDENCE_BUG_CLASSES
 from .manifest_guards import GUARD_BUG_CLASSES
 from .manifest_performance import PERFORMANCE_BUG_CLASSES
 from .manifest_report import REPORT_BUG_CLASSES
+from .manifest_test_harness import TEST_HARNESS_BUG_CLASSES
 from .manifest_tool_surface import TOOL_SURFACE_BUG_CLASSES
 
 __all__ = ["BUG_CLASSES", "BugClass", "KnownGap", "all_ids", "get"]
@@ -1471,6 +1472,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     + PERFORMANCE_BUG_CLASSES
     + GUARD_BUG_CLASSES
     + REPORT_BUG_CLASSES
+    + TEST_HARNESS_BUG_CLASSES
     + TOOL_SURFACE_BUG_CLASSES
 )
 
