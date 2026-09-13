@@ -83,6 +83,42 @@ def _release_md_coverage_warnings(
     return ["", "## ⚠️ Coverage Warnings", "", *entries] if entries else []
 
 
+def _release_md_pattern_modulations(
+    library_results: list[dict[str, object]],
+) -> list[str]:
+    """Which rule reclassified which finding, per library, in the artifact.
+
+    ADR-027 pattern modulation is a *reclassification*, which ADR-067 names
+    as a disposition — so a release whose breaking findings a rule demoted
+    may not render a compatible Markdown report that names neither the rule
+    nor the reason. The release fan-out carried this only as a private
+    ``_pattern_modulations_text`` key that its caller pops and writes to
+    stderr, so the requested artifact had nothing (Codex review, PR #1284);
+    a terminal log is not a report, and retiring ``--view patterns`` removed
+    the last way to ask for one.
+
+    Reuses the scalar path's row renderer rather than re-spelling the table,
+    so the two documents cannot disagree about a modulation's columns; only
+    the per-library heading is added here. Absent unless a rule fired, which
+    is every run with ADR-027's opt-in ``--pattern-verdicts`` off — i.e. the
+    default — so no existing release report changes.
+    """
+    from .pattern_modulations_markdown import render_pattern_modulations_from_mapping
+
+    out: list[str] = []
+    for lib in library_results:
+        # The renderer takes the modulation *list*, not the mapping holding
+        # it -- passing `lib` iterates the dict's keys, which are strings,
+        # and silently renders nothing (caught by verifying this path against
+        # a real `PatternModulation` rather than trusting the call).
+        rows = render_pattern_modulations_from_mapping(
+            lib.get("pattern_modulations"), include_heading=False
+        )
+        if rows:
+            out += ["", f"### `{lib['library']}`", *rows]
+    return ["", "## 🎚️ Pattern-Modulated Findings", *out] if out else []
+
+
 def _release_md_disposed_findings(
     library_results: list[dict[str, object]],
 ) -> list[str]:

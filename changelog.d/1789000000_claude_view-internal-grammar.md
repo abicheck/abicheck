@@ -206,3 +206,19 @@
   its entity per finding, because its detector pools tags from constants,
   global variables *and* enum members before emitting one kind -- so the fixed
   `type` was wrong for all three at once.
+
+- **A release artifact explains its own pattern modulations.** An ADR-027 rule
+  that demotes a breaking finding is a reclassification -- an ADR-067
+  disposition -- but the release fan-out kept the explanation in a private text
+  key its caller popped and wrote to stderr, so a requested JSON or Markdown
+  release could report a compatible result while naming neither the rule nor
+  the reason. The structured ledger now rides the same per-library blocks the
+  other three dispositions do, and the release Markdown renders it through the
+  scalar path's own row renderer so the two documents cannot disagree.
+
+- **Release schema 1.5.** Records the two ledgers added to each `libraries[]`
+  entry (`build_context_reconciled`, `pattern_modulations`), so a consumer can
+  version-check for them instead of finding 1.4 silently extended. Both follow
+  the existing "present only when active" convention, so a release produced
+  without them is byte-identical and a pre-1.5 consumer reads nothing
+  differently.

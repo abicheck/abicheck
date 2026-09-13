@@ -30,7 +30,9 @@ from typing import Any
 from .markdown_text import md_cell
 
 
-def render_pattern_modulations_from_mapping(d: Any) -> list[str]:
+def render_pattern_modulations_from_mapping(
+    d: Any, *, include_heading: bool = True
+) -> list[str]:
     """The ADR-027 pattern-verdict ledger, rendered into the human artifact.
 
     A pattern rule that demotes a breaking finding is a *disposition*, so
@@ -55,13 +57,23 @@ def render_pattern_modulations_from_mapping(d: Any) -> list[str]:
     rows = [m for m in d if isinstance(m, Mapping)]
     if not rows:
         return []
-    lines = [
-        "",
-        "## 🔁 Pattern-modulated findings",
-        "",
-        "A rule changed these findings' verdicts. Listed because an accepted "
-        "result may not hide why it was accepted.",
-        "",
+    # `include_heading=False` for a caller that already opened its own
+    # section and repeats this table per library (the release fan-out): the
+    # rows are shared so the two documents cannot disagree about a
+    # modulation's columns, while the surrounding structure is the caller's.
+    lines = (
+        [
+            "",
+            "## 🔁 Pattern-modulated findings",
+            "",
+            "A rule changed these findings' verdicts. Listed because an "
+            "accepted result may not hide why it was accepted.",
+            "",
+        ]
+        if include_heading
+        else [""]
+    )
+    lines += [
         "| Symbol | Rule | Reason |",
         "|---|---|---|",
     ]

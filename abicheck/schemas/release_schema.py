@@ -122,4 +122,27 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       active" convention 1.3's own blocks follow, which keeps every
 #:       release document produced without them byte-identical. A pre-1.4
 #:       consumer reads nothing differently.
-RELEASE_SCHEMA_VERSION = "1.4"
+#: - ``1.5`` adds the remaining two ADR-067 dispositions to each
+#:       ``libraries[]`` entry, so the release carries the same four a
+#:       single-pair ``compare`` report does rather than two of them:
+#:       ``build_context_reconciled`` (``count``/``changes[]``, each naming
+#:       its ADR-039 reconciliation reason) and ``pattern_modulations`` (the
+#:       ADR-027 ledger, each entry naming the ``rule_id`` that reclassified
+#:       the finding and why). Both are the *identical* blocks the scalar
+#:       report already carries, from the same builders
+#:       (``reporter.disposition_ledger_blocks``), so a consumer reads one
+#:       shape at either cardinality. Before this, a release whose entire
+#:       breaking set was cleared by reconciliation, or demoted by a pattern
+#:       rule, rendered a passing artifact naming neither the findings nor
+#:       the reasons -- reconciliation is the sharper case, because it needs
+#:       no settings at all (no suppression document, no
+#:       ``--scope-public-headers``), so the section was absent rather than
+#:       merely incomplete (Codex review, PR #1284). Both follow the same
+#:       "present only when active" convention as 1.3 and 1.4:
+#:       ``build_context_reconciled`` only when reconciliation cleared
+#:       something, ``pattern_modulations`` only when a rule fired (ADR-027
+#:       is opt-in and off by default), so every release document produced
+#:       without them is byte-identical. A pre-1.5 consumer reads nothing
+#:       differently; one that wants either block feature-detects the key or
+#:       requires >= 1.5.
+RELEASE_SCHEMA_VERSION = "1.5"

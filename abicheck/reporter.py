@@ -867,10 +867,11 @@ def disposition_ledger_blocks(result: DiffResult) -> dict[str, object]:
 
     ``suppression`` (what a rule hid, with the rule's own id/source/reason),
     ``surface_scope`` (what public-surface scoping demoted, with each
-    finding's exclusion reason) and ``build_context_reconciled`` (what
-    ADR-039 reconciliation cleared as a context-free header-parse artifact)
-    -- built by the very same functions the scalar ``compare`` JSON path
-    uses, so there is one shape, not a second release-flavoured copy of it.
+    finding's exclusion reason), ``build_context_reconciled`` (what ADR-039
+    reconciliation cleared as a context-free header-parse artifact) and
+    ``pattern_modulations`` (what an ADR-027 rule reclassified) -- built by
+    the very same functions the scalar ``compare`` JSON path uses, so there
+    is one shape, not a second release-flavoured copy of it.
 
     Exists because the release fan-out had none of them (Codex review,
     PR #1284). A directory/package ``compare`` captured the ledgers as *text*
@@ -913,6 +914,18 @@ def disposition_ledger_blocks(result: DiffResult) -> dict[str, object]:
     # self-gating -- `_add_reconciled` returns early when nothing was
     # cleared, so a library that reconciled nothing still adds no key.
     _add_reconciled(blocks, result)
+    # ADR-027 pattern modulation is a *reclassification*, which ADR-067 names
+    # as a disposition alongside suppression and scope exclusion -- so the
+    # same rule applies: a release whose every breaking finding a rule demoted
+    # may not render a compatible artifact that names neither the rule nor the
+    # reason. The release fan-out carried this only as a private
+    # `_pattern_modulations_text` key, which its caller pops and writes to
+    # stderr, so the requested JSON/Markdown had no structured block at all
+    # (Codex review, PR #1284). Same list the scalar JSON path emits under the
+    # same key, and self-gating: ADR-027 is opt-in (`--pattern-verdicts`, off
+    # by default), so this is absent from every run that did not ask for it.
+    if result.pattern_modulations:
+        blocks["pattern_modulations"] = result.pattern_modulations
     return blocks
 
 

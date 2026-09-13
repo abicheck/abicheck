@@ -2059,6 +2059,33 @@ mechanism* first and an option count second:
   the next reading; the invariant is only worth having if it is stated over
   inputs where both sides genuinely have something to say.
 
+  **Round 15 closed the disposition set.** Two findings, both real. The P1
+  completes the pattern round 14 began: ADR-027 pattern modulation is a
+  *reclassification*, which ADR-067 lists as a disposition next to suppression
+  and scope exclusion, and the release fan-out held it only in a private
+  `_pattern_modulations_text` key that its caller pops and writes to stderr --
+  so the requested artifact had no structured block at all. With this and
+  round 14's reconciliation ledger, the release now carries the same four
+  dispositions a single-pair `compare` report does rather than two of them,
+  from the same builders. The P2 is the bookkeeping that makes it usable: the
+  document still advertised release schema 1.4, whose history defines only the
+  1.4 additions, so a consumer could not version-check for either new ledger;
+  now 1.5, with both recorded and both following the established "present only
+  when active" rule that keeps existing releases byte-identical.
+
+  Two things this round is worth remembering for: the release Markdown reuses
+  the scalar path's row renderer rather than re-spelling the columns (which is
+  what stops the two documents drifting), and doing that surfaced a real bug in
+  the *wiring* rather than the logic -- the renderer takes the modulation list,
+  the wrapper passed the mapping containing it, and iterating a dict yields its
+  string keys, so the section silently rendered nothing. It was caught by
+  checking the rendered output against a real `PatternModulation` rather than
+  trusting the call, which is the same discipline the round-12 `rule_id`
+  incident established. The shared renderer gained an explicit
+  `include_heading` switch instead of the wrapper stripping its heading text,
+  and the test asserts both halves: one H2 in the release section, and the
+  scalar document keeping its own.
+
   The surviving parsing primitive gets the treatment AGENTS.md requires:
   `TestParseViewTokensProperties` (`tests/test_view_internal_grammar.py`)
   states `parse_view_tokens`'s contract as invariants — last mode wins under
