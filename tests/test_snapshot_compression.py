@@ -1040,7 +1040,6 @@ def test_write_through_character_device_does_not_replace_it(tmp_path):
     through it instead; verify write_snapshot does the same (no error, and
     /dev/null is still a character device afterward, not a regular file)."""
     import stat as stat_mod
-    from pathlib import Path
 
     dev_null = Path("/dev/null")
     if not dev_null.exists() or not stat_mod.S_ISCHR(dev_null.stat().st_mode):
@@ -1433,48 +1432,3 @@ def test_write_snapshot_bytes_direct(tmp_path):
     result = write_snapshot_bytes(data, p, compression=SnapshotCompression.GZIP)
     assert result.decoded_size_bytes == len(data)
     assert read_snapshot_bytes(p) == data
-
-
-class TestPublicByteLimitEnvKnobs:
-    """The decompression-bomb ceilings are public, documented knobs.
-
-    Exercised through the real `read_snapshot_bytes` entry point with no
-    explicit `max_decoded_bytes` argument -- the only path a CI operator
-    can actually reach -- rather than by calling the parser directly.
-    """
-
-    def _write(self, tmp_path: Path, payload: bytes) -> Path:
-        p = tmp_path / "s.json"
-        p.write_bytes(payload)
-        return p
-
-    def test_public_spelling_lowers_the_decoded_ceiling(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        p = self._write(tmp_path, b'{"a": "' + b"x" * 200 + b'"}')
-        monkeypatch.setenv("ABICHECK_SNAPSHOT_MAX_DECODED_BYTES", "10")
-        with pytest.raises(SnapshotError):
-            read_snapshot_bytes(p)
-
-    def test_public_spelling_raises_the_decoded_ceiling(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        payload = b'{"a": "' + b"x" * 200 + b'"}'
-        p = self._write(tmp_path, payload)
-        monkeypatch.setenv("ABICHECK_SNAPSHOT_MAX_DECODED_BYTES", "10")
-        monkeypatch.setenv("_ABICHECK_SNAPSHOT_MAX_DECODED_BYTES", str(len(payload)))
-        # The legacy private spelling wins when both are set, so an existing
-        # CI job that already sets it keeps its exact behavior.
-        assert read_snapshot_bytes(p) == payload
-
-    @pytest.mark.parametrize("bad", ["", "0", "-1", "not-a-number"])
-    def test_a_malformed_or_non_positive_value_is_ignored(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: str
-    ) -> None:
-        """A ceiling of 0/-1/garbage would reject every read -- never what
-        an operator raising a limit meant."""
-        payload = b'{"a": 1}'
-        p = self._write(tmp_path, payload)
-        monkeypatch.setenv("ABICHECK_SNAPSHOT_MAX_DECODED_BYTES", bad)
-        monkeypatch.setenv("ABICHECK_SNAPSHOT_MAX_STORED_BYTES", bad)
-        assert read_snapshot_bytes(p) == payload

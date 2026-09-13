@@ -108,6 +108,42 @@ class TestBuildConfigInput:
         run_sh = RUN_SH.read_text(encoding="utf-8")
         assert 'CMD+=(--config "$BUILD_CONFIG")' in run_sh
 
+    def test_a_hostile_value_is_never_executed_as_shell(self, tmp_path: Path) -> None:
+        """The attack, executed -- not the quoting asserted as text.
+
+        `build-config` is an operator-supplied string that reaches a
+        command line. Asserting that run.sh *spells* the expansion with
+        quotes proves nothing about what bash does with it (#705 was
+        text-asserted; #758 had to add the executing test). So this runs
+        the real script with a config path whose own filename carries a
+        command substitution and a command separator, and asserts the
+        side effect never happened.
+        """
+        # A real, readable file, so the run gets past the preflight check
+        # and the value actually reaches the dump command line. The name is
+        # shaped to make the injected command *well-formed* where the script
+        # builds its argv array -- closing the array append, running the
+        # payload, then reopening it so the script's own trailing `)` still
+        # parses. Verified by mutation: with the expansion changed to an
+        # `eval`, this test fails; a payload that merely looks hostile but
+        # leaves a syntax error passes either way and proves nothing.
+        hostile = tmp_path / "cfg); touch injected.txt; CMD+=("
+        hostile.write_text("{}\n", encoding="utf-8")
+        result, _ = _run_action(
+            {
+                "INPUT_LIBRARIES": json.dumps([{"name": "foo", "artifact": "a.so"}]),
+                "INPUT_BUILD_CONFIG": str(hostile),
+            },
+            tmp_path,
+        )
+        assert result.returncode != 0  # the artifact a.so does not exist
+        assert not (tmp_path / "injected.txt").exists(), (
+            "a ';'-separated command in the build-config value was executed"
+        )
+        assert "injected.txt" not in (result.stdout + result.stderr), (
+            "the payload reached a shell that tried to run it"
+        )
+
     def test_an_unreadable_path_fails_before_any_dump(self, tmp_path: Path) -> None:
         result, _ = _run_action(
             {
