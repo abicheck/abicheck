@@ -92,9 +92,10 @@ def _header_sequence_is_additive_reorder_free(
 ) -> bool:
     """Whether *new_value* (``profile_fields["header_sequence"]``, a
     json-encoded order-preserving-deduplicated header identity list) is
-    *old_value* with new entries INSERTED, never with an EXISTING header
-    reordered relative to another -- i.e. *old_value* is an (order-
-    preserving) subsequence of *new_value* -- AND every inserted entry is
+    *old_value* with new entries appended STRICTLY AFTER it, unchanged --
+    never with a new header inserted before or between existing ones, and
+    never with an EXISTING header reordered relative to another (Codex
+    review, PR #641 follow-up, seventh P1) -- AND every appended entry is
     itself in *scope_new_headers* (:func:`_scope_newly_added_headers`;
     Codex review, PR #641 follow-up, ninth P1): the appended sequence
     entries must correspond to headers genuinely new to the declared
@@ -102,40 +103,19 @@ def _header_sequence_is_additive_reorder_free(
     with an unrelated scope addition (see that function's own docstring for
     the concrete scenario this rules out).
 
-    Order preservation of the EXISTING headers is the invariant that
-    matters, and interior insertion of a genuinely new header does not
-    violate it. An earlier round of this function required every new entry
-    to land strictly AFTER the entire unchanged old sequence, reasoning
-    that the aggregate driver TU the dumper generates parses declared
-    headers sequentially, so a header inserted before another changes the
-    macro/pragma state that later one is parsed under. That reasoning is
-    real but it does not justify refusing to compare: it describes a
-    possible source of *extra findings*, which the pipeline records and
-    reports, whereas declining the carve-out produces no ABI verdict at all
-    for the single most common shape a versioned public-header inventory
-    takes. A `-H <dir>` header surface is expanded in SORTED order
-    (:func:`abicheck.header_utils.iter_directory_headers`), so adding one
-    public header -- ``pvxs/json.h`` to a directory that already declares
-    ``pvxs/data.h`` and ``pvxs/log.h`` -- lands the new entry in the MIDDLE
-    of the sequence essentially always. Under the trailing-only rule that
-    legitimate, purely additive release was reported as
-    ``ProfileMismatchError`` ("differing fields: header_sequence") and no
-    comparison ran, which is precisely the "a changed public-header set is
-    ABI/API input, not an incomparable extraction context" rule this gate
-    must not break.
-
-    So the shape accepted here is: *old_value* is an order-preserving
-    subsequence of *new_value*. Every existing header keeps its relative
-    position to every other existing header; only genuinely-new entries
-    (each independently corroborated against *scope_new_headers*) appear
-    between them. A REORDERING of two existing headers -- the extraction-
-    context change this field exists to catch -- still fails closed, since
-    it breaks the subsequence relation. So does a removal (an old entry
-    missing from the new sequence is not a subsequence match), and so does
-    any change to toolchain/ABI flags, language standard, target, or
-    include-resolution configuration, none of which this field or this
-    carve-out touches at all. Declines (like
-    :func:`abicheck.comparability._scope_field_is_additive_superset`)
+    Trailing-append is the only shape that's actually safe: the aggregate
+    driver TU the dumper generates parses declared headers sequentially, so
+    a new header's macros/pragmas can change how every header parsed AFTER
+    it resolves. Merely preserving the *relative* order of the existing
+    headers to each other (this function's original, insufficient check)
+    is not enough -- ``[a.h, c.h]`` -> ``[a.h, b.h, c.h]`` keeps ``a.h``
+    before ``c.h`` on both sides, but ``c.h`` is now parsed with ``b.h``'s
+    macros/pragmas already in effect, a genuinely different extraction
+    context that can produce a real, non-additive ABI difference despite
+    looking like a pure addition. Only requiring every new entry to land
+    strictly after the entire unchanged old sequence rules this out: the
+    old sequence's own internal parsing context never changes. Declines
+    (like :func:`abicheck.comparability._scope_field_is_additive_superset`)
     whenever either side is the ``<single-header>`` sentinel, since there
     is no real order to verify there.
 
@@ -164,28 +144,11 @@ def _header_sequence_is_additive_reorder_free(
         return False
     if len(new_list) < len(old_list):
         return False
-    if not _is_ordered_subsequence(old_list, new_list):
+    if new_list[: len(old_list)] != old_list:
         return False
     if scope_new_headers is None:
         return False
-    return (set(new_list) - set(old_list)) <= scope_new_headers
-
-
-def _is_ordered_subsequence(inner: list[str], outer: list[str]) -> bool:
-    """Whether every element of *inner* appears in *outer* in the same
-    relative order (a greedy left-to-right match, which is exact because
-    its caller rejects duplicate entries on either side first).
-
-    Kept as its own leaf primitive rather than inlined, per AGENTS.md's
-    "Primitive-level property tests": it states one contract independent of
-    any header/profile semantics (reflexivity, transitivity, rejection of
-    every non-trivial reversal, agreement with an independent
-    combinations-based oracle), so it is property-tested directly rather
-    than only through :func:`_header_sequence_is_additive_reorder_free`'s
-    domain wrapper.
-    """
-    it = iter(outer)
-    return all(entry in it for entry in inner)
+    return set(new_list[len(old_list) :]) <= scope_new_headers
 
 
 # The only profile_fields key the include-sequence-owned-growth carve-out
@@ -424,3 +387,93 @@ def _include_sequence_is_additive_owned_growth(
         # weakened this raises rather than silently skipping trailing slots.
         for old_slot, new_slot in zip(old_slots, new_slots, strict=True)
     )
+
+
+def _header_sequence_is_interior_insertion(
+    old_value: str | None, new_value: str | None, scope_new_headers: set[str] | None
+) -> bool:
+    """Whether *new_value* is *old_value* with genuinely-new headers INSERTED,
+    preserving every existing header's relative order -- the strictly weaker
+    shape :func:`_header_sequence_is_additive_reorder_free` deliberately
+    rejects.
+
+    Same guards as that function (both sides decodable, neither holding a
+    duplicate, neither collapsed to the ``<single-header>`` sentinel, every
+    extra entry itself a scope-confirmed newly-added header), with one
+    difference: the old sequence need only be an order-preserving
+    *subsequence* of the new one, not its exact prefix. ``[data.h, log.h]``
+    -> ``[data.h, json.h, log.h]`` is this shape; ``[a.h, b.h]`` ->
+    ``[b.h, a.h]`` is not, and neither is a growth whose extra entries the
+    declared *surface* never confirms as new.
+
+    **This is not a comparability waiver and must never be used as one.**
+    A trailing append proves every existing header's preprocessing context
+    is byte-for-byte what it was; an interior insertion proves only that no
+    existing header MOVED relative to another -- ``log.h`` is now parsed
+    with ``json.h``'s macros/pragmas already in effect, which can genuinely
+    change its AST. What this shape does establish is that the divergence is
+    a header ADDITION rather than a reordering or an unrelated compile-
+    context drift, which is what lets
+    ``comparability_profile._check_profile_fingerprint_comparable`` record it
+    as a bounded, dimension-scoped assurance reduction on a comparison that
+    still runs, instead of refusing to produce any verdict at all. See that
+    function's own ``fatal=False`` branch for the reasoning.
+
+    Returns False for a pure trailing append too (``new_list[:len(old)] ==
+    old_list``): that is the full-assurance waiver's own shape, already
+    handled upstream, and reporting it here as well would degrade a pair
+    that needs no degrading.
+    """
+    if old_value is None or new_value is None:
+        return False
+    old_list = _json_load_str_list(old_value)
+    new_list = _json_load_str_list(new_value)
+    if old_list is None or new_list is None:
+        return False
+    if len(old_list) != len(set(old_list)) or len(new_list) != len(set(new_list)):
+        return False
+    if len(old_list) == 1 and old_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
+        return False
+    if len(new_list) == 1 and new_list[0] in _SCOPE_SINGLE_ENTRY_SENTINELS:
+        return False
+    if len(new_list) <= len(old_list):
+        return False
+    if new_list[: len(old_list)] == old_list:
+        return False  # a pure trailing append: the full-assurance waiver's shape
+    if not set(old_list) <= set(new_list):
+        return False
+    # Order-preserving subsequence check: every old entry must still appear,
+    # in the same relative order, among the new entries.
+    it = iter(new_list)
+    if not all(entry in it for entry in old_list):
+        return False
+    if scope_new_headers is None:
+        return False
+    return (set(new_list) - set(old_list)) <= scope_new_headers
+
+
+def inserted_header_entries(old_value: str | None, new_value: str | None) -> list[str]:
+    """The ``header_sequence`` entries present in *new_value* and not in
+    *old_value*, in their new-side order.
+
+    What a caller should NAME when reporting an insertion (CodeRabbit
+    review, PR #1274). ``_scope_newly_added_headers`` answers a different
+    question -- every header newly added to the declared *surface* -- and
+    :func:`_header_sequence_is_interior_insertion` only requires the
+    sequence's own additions to be a SUBSET of that set. A header declared
+    public but never fed to the L2 frontend is in one and not the other, so
+    reporting the scope set would name a header that was not inserted
+    anywhere.
+
+    Empty when either side is absent or undecodable: a caller that has
+    already established the insertion shape should fall back to its own
+    wording rather than assert a list it cannot derive.
+    """
+    if old_value is None or new_value is None:
+        return []
+    old_list = _json_load_str_list(old_value)
+    new_list = _json_load_str_list(new_value)
+    if old_list is None or new_list is None:
+        return []
+    old_entries = set(old_list)
+    return [entry for entry in new_list if entry not in old_entries]

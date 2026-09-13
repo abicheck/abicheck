@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.checker import DiffResult, Verdict
@@ -472,3 +473,106 @@ class TestJsonReporterContractFields:
             "runtime": "unverified",
             "source": "trusted",
         }
+
+
+class TestRefusalReachesEverySecondaryOutput:
+    """Bug class: an operational refusal rendered only the PRIMARY output.
+
+    ``_report_run_aborted`` has accepted ``secondary_writes`` since PR #1178
+    and every other abort path forwards it -- the comparability-refusal
+    caller alone left it at the empty default. So ``compare -o review=r.md
+    -o json=r.json`` on a not-comparable pair wrote ``r.md`` and no
+    ``r.json`` at all, and a CI wrapper that expects that sidecar reported a
+    generic "missing comparison report" error (its own usage-error exit)
+    instead of the real outcome -- the refusal reason was lost precisely
+    where it was needed to diagnose the run.
+
+    The invariant is per-format and per-mismatch-kind, not "json works now":
+    EVERY requested output must describe the SAME outcome as the primary
+    one. Each secondary format is exercised against its own structural
+    oracle, since "the file exists" would also pass for a stale or empty
+    document.
+    """
+
+    def _refusing_run(self, tmp_path, monkeypatch, exc, targets):
+        old_p, new_p = _write_placeholder_inputs(tmp_path)
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
+        monkeypatch.setattr(
+            "abicheck.workflows.input_resolution.load_snapshot", lambda _: snap
+        )
+
+        def _raise(*_a, **_kw):
+            raise exc
+
+        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+        args = ["compare", str(old_p), str(new_p)]
+        for fmt, path in targets:
+            args += ["-o", f"{fmt}={path}"]
+        return CliRunner().invoke(main, args)
+
+    @staticmethod
+    def _asserts_json(text: str) -> None:
+        doc = json.loads(text)
+        assert doc["verdict"] is None
+        assert doc["reason"]["kind"] in ("scope_mismatch", "profile_mismatch")
+        assert doc["reason"]["message"]
+
+    @staticmethod
+    def _asserts_sarif(text: str) -> None:
+        doc = json.loads(text)
+        assert doc["runs"][0]["invocations"][0]["executionSuccessful"] is False
+
+    @staticmethod
+    def _asserts_junit(text: str) -> None:
+        assert "<error" in text
+
+    @staticmethod
+    def _asserts_text(text: str) -> None:
+        assert "the boom" in text
+
+    _ORACLES = {
+        "json": _asserts_json,
+        "sarif": _asserts_sarif,
+        "junit": _asserts_junit,
+        "markdown": _asserts_text,
+        "review": _asserts_text,
+        "html": _asserts_text,
+    }
+
+    @pytest.mark.parametrize("secondary_fmt", sorted(_ORACLES))
+    @pytest.mark.parametrize(
+        "exc",
+        [ScopeMismatchError("the boom"), ProfileMismatchError("the boom")],
+        ids=["scope", "profile"],
+    )
+    def test_every_secondary_format_describes_the_refusal(
+        self, tmp_path, monkeypatch, secondary_fmt, exc
+    ):
+        primary = tmp_path / "primary.md"
+        secondary = tmp_path / f"secondary.{secondary_fmt}"
+        result = self._refusing_run(
+            tmp_path,
+            monkeypatch,
+            exc,
+            [("review", primary), (secondary_fmt, secondary)],
+        )
+        assert result.exit_code == 16
+        assert primary.exists()
+        assert secondary.exists(), f"-o {secondary_fmt}= target was never written"
+        self._ORACLES[secondary_fmt].__func__(secondary.read_text(encoding="utf-8"))
+
+    def test_all_requested_outputs_are_written_together(self, tmp_path, monkeypatch):
+        """Several secondaries at once: the loop must not stop after the first
+        (the primary-only bug's nearest sibling)."""
+        targets = [
+            ("review", tmp_path / "a.md"),
+            ("json", tmp_path / "b.json"),
+            ("sarif", tmp_path / "c.sarif"),
+            ("junit", tmp_path / "d.xml"),
+        ]
+        result = self._refusing_run(
+            tmp_path, monkeypatch, ScopeMismatchError("the boom"), targets
+        )
+        assert result.exit_code == 16
+        missing = [str(p) for _f, p in targets if not p.exists()]
+        assert not missing

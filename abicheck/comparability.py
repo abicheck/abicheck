@@ -120,7 +120,7 @@ import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from .comparability_fields import (
     # The redundant `X as X` aliases are explicit re-exports, for import-path
@@ -830,11 +830,31 @@ class ComparabilityMismatch:
     pipeline's own per-finding assurance (rather than merely exposing it on
     the mismatch descriptor) is E-S2's own next slice, not this one -- see
     that plan section's own status note.
+
+    ``fatal`` (default ``True``) is what separates a mismatch that REFUSES
+    the comparison from one that merely BOUNDS it. A ``fatal=False``
+    descriptor is returned by :func:`check_contracts_comparable` in both
+    modes and never raised: the pair still gets a real verdict, and the
+    divergence is recorded as an assurance reduction on exactly the
+    ``dimensions`` named (``checker.compare`` carries it into
+    ``DiffResult.comparability_assurance`` and ``coverage_warnings``)
+    rather than disposed of as a refusal. Only a divergence whose SHAPE is
+    itself positive evidence about what changed may be non-fatal -- see
+    ``comparability_profile``'s declared-header-insertion branch, the only
+    producer today. This is the product rule "weaker evidence narrows
+    conclusions" applied literally: an ordinary public-header addition
+    lowers assurance on the declaration/layout axes, it does not make two
+    snapshots incomparable.
+
+    ``assurance: "none"`` stays reserved for a fatal mismatch forced
+    through with ``--diagnostic-comparison``; a non-fatal one never sets
+    it, because nothing was forced.
     """
 
     kind: str  # "scope" | "profile" | "dependency_scope"
     reason: str
     dimensions: frozenset[str] = frozenset()
+    fatal: bool = True
 
 
 def _check_dependency_scope_comparable(
@@ -1244,20 +1264,21 @@ def check_contracts_comparable(
     :func:`compute_extraction_contract`), so the exact same "pure addition"
     case would otherwise still raise ``ProfileMismatchError`` immediately
     after the scope carve-out waives it. A ``profile_fingerprint`` mismatch
-    confined to ``header_sequence`` does not raise when the old sequence is
-    an order-preserving *subsequence* of the new one (see
-    :func:`_header_sequence_is_additive_reorder_free`) — every existing
-    header keeps its relative position to every other existing header, and
-    only genuinely-new, independently corroborated entries appear among
-    them. Interior insertion is accepted deliberately: a ``-H <dir>``
-    header surface expands in sorted order, so adding one public header to
-    a versioned inventory lands it in the middle of the sequence virtually
-    always, and refusing that shape produced no ABI verdict at all for an
-    ordinary additive release (the ``libpvxs`` ``pvxs/json.h`` report). A
-    *reorder* of two existing headers, or a *removal*, breaks the
-    subsequence relation and still raises, same as any other profile drift
-    (toolchain/ABI flags, language standard, target, include-resolution
-    configuration) this carve-out doesn't cover. **Also requires
+    confined to ``header_sequence`` does not raise when the new sequence is
+    the old sequence, byte-for-byte unchanged, with new entries appended
+    STRICTLY AFTER it (see :func:`_header_sequence_is_additive_reorder_free`)
+    — proving every *existing* header's own preprocessing context (the
+    headers parsed before it) is identical to before, not merely that
+    existing headers keep their relative order to each other. A new header
+    inserted before or between existing ones (Codex review, PR #641
+    follow-up, seventh P1) still raises even though it superficially looks
+    additive, since it changes what an existing header downstream of the
+    insertion point is parsed after — the same "reorder of existing headers"
+    risk this carve-out was always meant to exclude, just reached via
+    insertion rather than a literal swap. A reorder of existing headers
+    entangled with growth (the same genuine profile-relevant risk) still
+    raises too, same as any other profile drift this carve-out doesn't
+    cover. **Also requires
     :func:`_scope_growth_corroborated` (Codex review, PR #641 follow-up,
     P1):** an additive-shaped ``header_sequence`` on its own is not
     sufficient — a header already declared identically on both sides via
@@ -1377,14 +1398,58 @@ def check_contracts_comparable(
         lambda: _check_scope_fingerprint_comparable(old.contract, new.contract),
         lambda: _check_profile_fingerprint_comparable(old, new),
     )
+    # A non-fatal descriptor (ComparabilityMismatch.fatal=False) is neither
+    # raised nor allowed to end the scan: it bounds the comparison instead of
+    # refusing it, so a genuinely fatal mismatch on a later axis must still
+    # win over it. Only the profile axis produces one today (and it is checked
+    # last), so this loop shape is future-proofing, not a live case.
+    bounded: ComparabilityMismatch | None = None
     for check in checks:
         mismatch = check()
         if mismatch is None:
             continue
+        if not mismatch.fatal:
+            if bounded is None:
+                bounded = mismatch
+            continue
         if diagnostic:
             return mismatch
         raise _MISMATCH_ERRORS[mismatch.kind](mismatch.reason)
-    return None
+    return bounded
+
+
+def comparability_outcome(
+    mismatch: ComparabilityMismatch | None,
+) -> tuple[Literal["none"] | None, dict[str, str] | None]:
+    """Both halves of what *mismatch* means for a ``DiffResult``, as one
+    call: :func:`forced_assurance` and :func:`dimension_assurance`.
+
+    One accessor rather than two so ``checker.compare`` -- which is at its
+    ``architecture/debt.yaml`` no-growth baseline -- asks this module one
+    question instead of importing and calling two pieces of it.
+    """
+    return forced_assurance(mismatch), dimension_assurance(mismatch)
+
+
+def forced_assurance(mismatch: ComparabilityMismatch | None) -> Literal["none"] | None:
+    """``DiffResult.assurance`` for a run that produced *mismatch*.
+
+    ``"none"`` means one specific thing: this result came from a refusal
+    FORCED through with ``--diagnostic-comparison``, so do not trust it.
+    Only a FATAL mismatch can produce that. A non-fatal one
+    (:attr:`ComparabilityMismatch.fatal` ``False``) bounds the comparison
+    rather than refusing it -- nothing was forced, so stamping ``"none"``
+    would misreport a bounded result as an override. Its reduction is
+    carried by :func:`dimension_assurance`'s per-dimension breakdown, by
+    ``coverage_warnings``, and by ``AnalysisAssurance.status`` reading
+    ``partial`` (``analysis_assurance_comparability.py``).
+
+    Lives here rather than inline in ``checker.compare`` (Codex review,
+    PR #1274): this is a fact about a ``ComparabilityMismatch``, which is
+    this module's own type, and it belongs beside the sibling that answers
+    the other half of the same question.
+    """
+    return "none" if mismatch is not None and mismatch.fatal else None
 
 
 def dimension_assurance(

@@ -17,7 +17,7 @@ import json
 # declared scope, not merely an additive-shaped sequence on its own.
 # _ANY_NEW_HEADERS is a permissive stand-in covering every header name used
 # across the shape-only test blocks in this family, so those tests keep
-# isolating the SHAPE logic (insertion/reorder/removal/owned-growth)
+# isolating the SHAPE logic (trailing-append/reorder/removal/owned-growth)
 # from the dedicated correspondence-check tests.
 _ANY_NEW_HEADERS = frozenset({"a.h", "b.h", "c.h"})
 

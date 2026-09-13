@@ -59,8 +59,10 @@ from .comparability_sequences import (
     _HEADER_SEQUENCE_FIELDS,
     _INCLUDE_SEQUENCE_FIELDS,
     _header_sequence_is_additive_reorder_free,
+    _header_sequence_is_interior_insertion,
     _include_sequence_is_additive_owned_growth,
     _scope_newly_added_headers,
+    inserted_header_entries,
 )
 from .model import AbiSnapshot, ExtractionContract, FactStatus
 
@@ -323,6 +325,134 @@ def _profile_mismatch_reason(
     return None
 
 
+#: The dimensions a declared-header INSERTION leaves unverified -- deliberately
+#: wider than ``_PROFILE_FIELD_DIMENSIONS["header_sequence"]``'s own
+#: ``{"declaration"}``. The hazard an insertion introduces is precisely a
+#: macro/pragma state change for every header parsed after the insertion point,
+#: which is the same hazard ``macro_ops``/``pass_through_flags`` carry, and both
+#: of those name ``{"declaration", "layout"}`` (a ``#pragma pack`` reaching a
+#: later header changes layout, not just which declarations exist). Naming the
+#: narrower set here would under-report the reduction this branch is granting.
+_HEADER_INSERTION_DIMENSIONS = frozenset({"declaration", "layout"})
+
+
+def _declared_header_insertion_mismatch(
+    old_contract: ExtractionContract,
+    new_contract: ExtractionContract,
+    unknown_differing: set[str],
+    differing: set[str],
+    unexplained: set[str],
+) -> ComparabilityMismatch | None:
+    """A NON-fatal (``fatal=False``) descriptor when the only thing still
+    unexplained is that new public headers were INSERTED into the declared
+    sequence rather than appended to its end -- otherwise ``None``, leaving
+    the caller's ordinary fatal mismatch in place.
+
+    Why this exists. ``header_sequence`` records declared-header ORDER
+    because the aggregate driver TU ``dumper.py`` generates parses declared
+    headers sequentially, so a header can change how every header after it
+    resolves. :func:`_header_sequence_is_additive_reorder_free` waives only a
+    strict trailing append, since that alone proves no existing header's
+    preprocessing context changed. That reasoning is sound for a
+    user-declared ``-H a.h -H b.h`` order -- and badly mis-fitted to a
+    directory-discovered one, where the order is an incidental product of
+    sorting the discovered set. Adding one public header named ``json.h``
+    to a project whose headers sort as ``data.h, log.h, ...`` lands it in
+    the MIDDLE, so the waiver declines and a plain, ordinary public-header
+    addition refuses the whole comparison: no verdict, no findings, no
+    evidence of an ABI problem either way. That is the wrong disposition
+    twice over -- it manufactures a refusal out of an addition, and it
+    discards every conclusion on axes the insertion cannot touch (the
+    binary's exported-symbol identity above all).
+
+    What this branch does instead. When the divergence is confined to the
+    declared-header/include sequences, the scope fingerprint independently
+    corroborates that the declared surface genuinely grew, and the new
+    sequence is the old one with exactly those newly-added headers inserted
+    order-preservingly (:func:`_header_sequence_is_interior_insertion`), the
+    comparison RUNS and the residual risk is recorded as an assurance
+    reduction scoped to :data:`_HEADER_INSERTION_DIMENSIONS`. Nothing is
+    hidden: the reason text reaches ``coverage_warnings`` and the per-
+    dimension breakdown reaches ``DiffResult.comparability_assurance``, so a
+    consumer that wants to treat reduced assurance as a failure still can.
+
+    What it deliberately does NOT do:
+
+    * It never fires when an existing header MOVED relative to another (a
+      real reorder), when the extra entries are not the very headers the
+      scope fingerprint confirms as new, when scope growth is uncorroborated,
+      or when any OTHER profile field (compiler, standard, macros, target)
+      is also unexplained -- each of those stays a hard refusal, unchanged.
+    * It never fires on an unrecognized differing field or on absent/
+      malformed ``profile_fields`` (``unknown_differing``/empty ``differing``
+      -- the fail-closed cases :func:`_profile_mismatch_reason` answers
+      first), where there is no verified shape to reason from at all.
+    * It does not weaken the trailing-append waiver: that shape returns
+      ``None`` from the insertion predicate and keeps FULL assurance, since
+      it changes no existing header's parse context.
+
+    The extraction-side fix this does not attempt: parsing each declared
+    header in an independently scoped TU would make declared order
+    non-load-bearing outright, and then even a reorder would be comparable
+    at full assurance. That is a dumper change with real cost (one TU per
+    header), tracked separately; this branch corrects the DISPOSITION of the
+    evidence abicheck already has.
+    """
+    if unknown_differing or not differing:
+        return None
+    if unexplained != _HEADER_SEQUENCE_FIELDS:
+        # EXACTLY `header_sequence`, not a subset of it plus `include_sequence`
+        # (Codex review, PR #1274, first P1). A *verified* additive
+        # include-sequence growth -- the one an inferred header-owning root
+        # produces alongside any header addition -- has already been removed
+        # from `unexplained` by `_unexplained_profile_fields`' own carve-out,
+        # so an include_sequence still sitting here is by construction one
+        # that carve-out REFUSED: a changed -I topology, e.g. two include
+        # roots swapped. Include-search order decides which dependency header
+        # a given `#include` resolves to, which is a different and unbounded
+        # hazard from the declared-header insertion this branch reasons about
+        # -- and nothing here corroborates it. An include_sequence-only
+        # divergence is likewise none of this branch's business: there is no
+        # declared-header insertion to reason about at all.
+        return None
+    if not _scope_growth_corroborated(old_contract, new_contract):
+        return None
+    scope_new_headers = _scope_newly_added_headers(
+        old_contract.scope_fields.get("headers"),
+        new_contract.scope_fields.get("headers"),
+    )
+    if not _header_sequence_is_interior_insertion(
+        old_contract.profile_fields.get("header_sequence"),
+        new_contract.profile_fields.get("header_sequence"),
+        scope_new_headers,
+    ):
+        return None
+    # The SEQUENCE's own additions, not `scope_new_headers` (CodeRabbit
+    # review, PR #1274): the predicate above only requires the former to be a
+    # subset of the latter, so a header declared public but never fed to the
+    # L2 frontend is in the scope set and in no insertion -- naming it here
+    # would report a header that was not inserted anywhere.
+    inserted = ", ".join(
+        inserted_header_entries(
+            old_contract.profile_fields.get("header_sequence"),
+            new_contract.profile_fields.get("header_sequence"),
+        )
+    )
+    return ComparabilityMismatch(
+        kind="profile",
+        reason=(
+            "new public header(s) were inserted into the declared header "
+            f"sequence rather than appended after it ({inserted}) — the "
+            "comparison was performed, but every existing header after an "
+            "insertion point was parsed with the new header's macros/pragmas "
+            "already in effect, so declaration- and layout-dimension "
+            "conclusions carry reduced assurance."
+        ),
+        dimensions=_HEADER_INSERTION_DIMENSIONS,
+        fatal=False,
+    )
+
+
 def _check_profile_fingerprint_comparable(
     old: AbiSnapshot, new: AbiSnapshot
 ) -> ComparabilityMismatch | None:
@@ -426,6 +556,11 @@ def _check_profile_fingerprint_comparable(
     reason = _profile_mismatch_reason(unknown_differing, differing, unexplained)
     if reason is None:
         return None
+    bounded = _declared_header_insertion_mismatch(
+        old_contract, new_contract, unknown_differing, differing, unexplained
+    )
+    if bounded is not None:
+        return bounded
     # Mirrors _profile_mismatch_reason's own three cases (Codex-review-style
     # fail-closed default first): an unrecognized differing field, or an
     # entirely empty `differing` (profile_fields absent/malformed), can never

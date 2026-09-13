@@ -119,6 +119,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from .analysis_assurance_comparability import (
+    bounded_comparability_notes,
+    is_comparability_bounded,
+)
 from .analysis_assurance_layout import (
     layout_unverified_detectors as _layout_unverified_detectors,
 )
@@ -1316,6 +1320,10 @@ def compute_analysis_assurance(
             ),
         )
 
+    # Bounded (non-fatal) comparability mismatch -- owner:
+    # `analysis_assurance_comparability.py` (Codex review, PR #1274).
+    notes.extend(bounded_comparability_notes(result.comparability_assurance))
+
     # -- depth --------------------------------------------------------------
     requested_depth = result.requested_depth
     effective_depth = result.effective_depth or (
@@ -1458,6 +1466,7 @@ def compute_analysis_assurance(
         or manifest_layer_incomplete
         or (export_accounting.unaccounted or 0) > 0
         or target_unresolved
+        or is_comparability_bounded(result.comparability_assurance)
     ):
         status = "partial"
     elif nothing_requested:

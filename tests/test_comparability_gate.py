@@ -393,7 +393,7 @@ def test_gate_header_sequence_carve_out_declines_when_a_side_is_single_header_se
 # own. _ANY_NEW_HEADERS (tests/_comparability_gate_helpers.py) is a
 # permissive stand-in covering every header name used in this whole
 # shape-only test block, so these tests keep isolating the SHAPE logic
-# (insertion/reorder/removal) -- see test_gate_*_correspondence_*
+# (trailing-append/reorder/removal) -- see test_gate_*_correspondence_*
 # further down for the dedicated correspondence-check tests.
 # ---------------------------------------------------------------------------
 
@@ -404,11 +404,24 @@ def test_header_sequence_additive_reorder_free_true_for_pure_append():
     assert _header_sequence_is_additive_reorder_free(old, new, _ANY_NEW_HEADERS)
 
 
-# The two order-preserving-INSERTION shapes (interior and leading) moved to
-# tests/test_comparability_header_inventory_growth.py, which owns that
-# invariant exhaustively against an independent oracle rather than as two
-# fixed examples -- see that module's docstring (bug class
-# `comparability.header_inventory_growth_is_not_profile_drift`).
+def test_header_sequence_additive_reorder_free_false_for_insertion_in_middle():
+    # Codex review, PR #641 follow-up (seventh P1): inserting b.h BETWEEN
+    # a.h and c.h keeps a.h/c.h's relative order to each other, but c.h is
+    # now parsed with b.h's macros/pragmas already in effect -- a genuinely
+    # different preprocessing context than before, even though the shape
+    # superficially looks like a pure addition. Only a strictly-trailing
+    # append (nothing inserted before or between existing headers) is safe.
+    old = json.dumps(["a.h", "c.h"])
+    new = json.dumps(["a.h", "b.h", "c.h"])  # b.h inserted between a.h and c.h
+    assert not _header_sequence_is_additive_reorder_free(old, new, _ANY_NEW_HEADERS)
+
+
+def test_header_sequence_additive_reorder_free_false_for_insertion_before_all():
+    # Same risk, at the front: b.h's preprocessing context changes even
+    # though it's still the same set/relative-order otherwise.
+    old = json.dumps(["b.h", "c.h"])
+    new = json.dumps(["a.h", "b.h", "c.h"])  # a.h inserted before everything
+    assert not _header_sequence_is_additive_reorder_free(old, new, _ANY_NEW_HEADERS)
 
 
 def test_header_sequence_additive_reorder_free_false_for_pure_reorder():
