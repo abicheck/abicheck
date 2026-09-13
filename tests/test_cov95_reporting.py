@@ -492,7 +492,7 @@ class TestReporterConfidenceSection:
 class TestPostProcessingHelpers:
     def test_safe_index_success_and_failure(self) -> None:
         # Lines 98-102: index OK True, exception → False.
-        from abicheck.post_processing import _safe_index
+        from abicheck.diff_filtering import _safe_index
 
         assert _safe_index(_snap()) is True
 

@@ -62,6 +62,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .checker_types import Change
+from .compare.surface_graph import _type_identifiers
 from .contract_relevance_types import (
     CONTRACT_REASON_CODES,
     NON_ENTITY_RELEVANCE,
@@ -92,7 +93,6 @@ from .surface import (
     SurfaceUnions,
     _hidden_friend_owner_effective_origin,
     _one_sided_key_origin,
-    _type_identifiers,
     classify_change_surface,
     surface_unions,
 )

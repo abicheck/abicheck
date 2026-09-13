@@ -1145,38 +1145,6 @@ def _typedef_target_is_indirect(
     )
 
 
-def _typenode_is_indirection_wrapper(name: str) -> bool:
-    """Return True if a *type node* on a leak path is itself a pointer/reference
-    or a smart-pointer wrapper type.
-
-    Stricter than :func:`_field_is_indirect`: it must NOT fire on a regular
-    record/function name that merely *contains* a wrapper-ish substring. A
-    public type named ``PimplHandle`` that embeds an internal type **by value**
-    is a real layout leak, not an indirection (Codex review) — so the loose
-    ``pimpl``/``unique_ptr`` substring match used for *field declared types* is
-    not applied to path labels. Only a raw ``*``/``&`` or a qualified
-    ``std::``/libstdc++ smart-pointer spelling counts.
-    """
-    # Top-level only (collapse template args): a wrapper node like
-    # ``std::__uniq_ptr_impl<...>`` is indirection, but ``std::array<int*, 4>``
-    # (a pointer in an unrelated arg) is not (Codex review).
-    no_targs = _strip_template_args(name)
-    if "*" in no_targs or "&" in no_targs:
-        return True
-    outer = _strip_decorators(no_targs)
-    return any(
-        marker in outer
-        for marker in (
-            "std::unique_ptr",
-            "std::shared_ptr",
-            "std::weak_ptr",
-            "__uniq_ptr",
-            "__shared_ptr",
-            "__weak_ptr",
-        )
-    )
-
-
 def _record_field_is_value_embedded(rec: RecordType, field_name: str) -> bool | None:
     """Check whether *field_name* in *rec* is embedded by value.
 
