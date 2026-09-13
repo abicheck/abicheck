@@ -224,9 +224,16 @@ def kind_modules() -> dict[str, str]:
     entry_re = re.compile(r'_E\(\s*"([a-z0-9_]+)"')
     out: dict[str, str] = {}
     for name in ("symbols", "types", "platform", "build", "source"):
-        path = CHANGE_CATALOG_DIR / f"{name}.py"
-        for kind in entry_re.findall(path.read_text(encoding="utf-8")):
-            out.setdefault(kind, name)
+        # A taxonomy whose entries outgrew ADR-061's 800-line ceiling is
+        # split into numbered `<name>_N.py` parts, with `<name>.py` left as
+        # the assembly point (the `kind_names_{1,2,3}.py` precedent). The
+        # owner reported here is the taxonomy, not the part file, so read
+        # the assembly module and every part it is split across.
+        paths = [CHANGE_CATALOG_DIR / f"{name}.py"]
+        paths += sorted(CHANGE_CATALOG_DIR.glob(f"{name}_[0-9]*.py"))
+        for path in paths:
+            for kind in entry_re.findall(path.read_text(encoding="utf-8")):
+                out.setdefault(kind, name)
     return out
 
 

@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
@@ -81,14 +82,21 @@ class TestDemangleTriState:
         request demangling), not the platform demangler itself."""
         import abicheck.demangle as _dem
 
-        monkeypatch.setattr(
-            _dem,
-            "demangle_text",
-            # Mirrors the real contract since plan slice 7o: a demangled
-            # name keeps its exact mangled spelling beside it, so human
-            # output stays copyable and no `no-demangle` toggle is needed.
-            lambda text: text.replace("_Z3foov", "foo() [_Z3foov]"),
+        # Mirrors the real contract since plan slice 7o: a demangled name
+        # keeps its exact mangled spelling beside it, so human output stays
+        # copyable and no `no-demangle` toggle is needed.
+        def _stub(text: str, *, escape_table_pipes: bool = False) -> str:
+            return text.replace("_Z3foov", "foo() [_Z3foov]")
+
+        # A stub whose signature drifts from the real one swallows the call
+        # as a TypeError inside the CLI runner and renders as empty output,
+        # which reads as "the format stopped demangling" rather than "the
+        # stub is stale" -- so bind the drift to an explicit failure here.
+        assert inspect.signature(_stub) == inspect.signature(_dem.demangle_text), (
+            "the demangler stub no longer mirrors abicheck.demangle.demangle_text; "
+            "update it so this test keeps exercising the real call contract"
         )
+        monkeypatch.setattr(_dem, "demangle_text", _stub)
 
     def test_markdown_demangles_by_default(self, tmp_path, monkeypatch):
         self._patch_demangler(monkeypatch)

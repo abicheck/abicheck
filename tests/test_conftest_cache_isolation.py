@@ -50,6 +50,18 @@ import pytest
 
 from abicheck import dumper_cache, snapshot_cache
 
+# Every assertion below about `0o077`, `0o755` or the sticky bit is a POSIX
+# mode claim. Windows has no such bits -- `stat().st_mode` reports a constant
+# `0o777` for any directory there -- so these tests cannot hold on the Windows
+# lanes and never described its behavior. The isolation guarantee they protect
+# (a private, test-owned cache directory) is itself the POSIX-permission half
+# of `_snapshot_cache_bucket`; the platform-neutral half (recovery, symlink
+# refusal, which levels are owned) stays unmarked and keeps running there.
+_posix_modes_only = pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX mode bits; Windows reports a constant 0o777 for directories",
+)
+
 # Every directory any test in this module was handed, in execution order.
 # Collected across tests on purpose: the invariant under test is about the
 # relationship *between* tests, which no single test can observe alone.
@@ -252,6 +264,7 @@ class TestRecoveryKeepsPytestsPrivacyGuarantees:
 
         return conftest._snapshot_cache_bucket(_FactoryStub(basetemp))
 
+    @_posix_modes_only
     def test_every_recreated_level_is_private(self, tmp_path: Path) -> None:
         """Not just the leaf: an open ancestor makes the leaf reachable."""
         root = tmp_path / "pytest-of-someone"
@@ -282,6 +295,7 @@ class TestRecoveryKeepsPytestsPrivacyGuarantees:
         with pytest.raises(OSError, match="owned by another user"):
             self._allocate(root / "pytest-0" / "popen-gw0")
 
+    @_posix_modes_only
     def test_a_loose_mode_on_an_existing_level_is_tightened(
         self, tmp_path: Path
     ) -> None:
@@ -291,6 +305,7 @@ class TestRecoveryKeepsPytestsPrivacyGuarantees:
         self._allocate(root / "pytest-0" / "popen-gw0")
         assert root.stat().st_mode & 0o077 == 0
 
+    @_posix_modes_only
     def test_the_umask_cannot_loosen_a_recreated_level(self, tmp_path: Path) -> None:
         """`mkdir`'s mode is umask-masked, so the chmod after it is load-bearing.
 
@@ -334,6 +349,7 @@ class TestValidationStopsAtPytestsOwnRoot:
         system.mkdir(mode=0o755)
         return system, system / "pytest-of-someone" / "pytest-0" / "popen-gw0"
 
+    @_posix_modes_only
     def test_a_system_ancestors_mode_is_left_alone(self, tmp_path: Path) -> None:
         """The destructive half: `/tmp` must keep its world-writable mode."""
         system, leaf = self._tree(tmp_path)
@@ -341,6 +357,7 @@ class TestValidationStopsAtPytestsOwnRoot:
         self._allocate(leaf)
         assert system.stat().st_mode == before
 
+    @_posix_modes_only
     def test_a_sticky_world_writable_ancestor_keeps_its_sticky_bit(
         self, tmp_path: Path
     ) -> None:
@@ -363,6 +380,7 @@ class TestValidationStopsAtPytestsOwnRoot:
         os.chown(system, 1, 1)
         assert self._allocate(leaf).is_dir()
 
+    @_posix_modes_only
     def test_the_pytest_root_itself_is_still_validated(self, tmp_path: Path) -> None:
         """The boundary is inclusive: the marker directory is pytest's, so ours."""
         system, leaf = self._tree(tmp_path)
@@ -371,6 +389,7 @@ class TestValidationStopsAtPytestsOwnRoot:
         self._allocate(leaf)
         assert root.stat().st_mode & 0o077 == 0
 
+    @_posix_modes_only
     def test_with_an_explicit_basetemp_only_that_directory_is_owned(self) -> None:
         """`--basetemp` has no marker; pytest creates just that one directory.
 

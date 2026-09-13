@@ -105,7 +105,11 @@ class TestFindingIdDistinguishesLibraries:
         prop = schema["$defs"]["change"]["properties"]["library"]
         assert prop["type"] == "string"
         assert "library" not in schema["$defs"]["change"].get("required", [])
-        assert REPORT_SCHEMA_VERSION == "4.6"
+        # The claim is that `library` is *declared*, not that the schema has
+        # stood still since it was added (it was 4.6 then; unrelated slices
+        # have advanced it since). Pin the floor, not the exact value, so an
+        # unrelated bump does not fail this test.
+        assert tuple(int(part) for part in REPORT_SCHEMA_VERSION.split(".")) >= (4, 6)
 
 
 class TestLibraryAttributionReachesEveryProjection:

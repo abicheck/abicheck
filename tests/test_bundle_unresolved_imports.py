@@ -488,6 +488,17 @@ class TestNewlyIntroducedUnresolvedImportsStayVisible:
         assert "fflush" not in DEFAULT_SYSTEM_SYMBOLS
 
 
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason=(
+        "same ELF-specific reproduction as the class above: it compiles two "
+        "shared objects with `gcc -shared -nostdlib` and reads DT_NEEDED back "
+        "with readelf. On the Windows lane that gcc is mingw, which targets "
+        "PE and fails the link outright; Mach-O has no DT_NEEDED either. This "
+        "class was missing the markers its sibling already carries."
+    ),
+)
 class TestZeroDtNeededBundleEndToEnd:
     """The reported defect against real compiled binaries, through the public
     ``compare`` workflow rather than the detector alone.

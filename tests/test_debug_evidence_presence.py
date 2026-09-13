@@ -50,6 +50,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 
 import pytest
 from click.testing import CliRunner
@@ -269,9 +270,22 @@ _NEEDS_CASTXML = pytest.mark.skipif(
     shutil.which("castxml") is None,
     reason="`compare --header` runs the default castxml header backend",
 )
+#: Both cases below assert on the ELF section name ``.debug_info`` in the raw
+#: bytes of what ``g++`` produced. A compiler being present does not make that
+#: container ELF: the Windows lane's ``g++`` is mingw and emits PE, the macOS
+#: one emits Mach-O, and neither carries a section by that name (macOS keeps
+#: DWARF in a companion ``.dSYM`` bundle entirely). So on those lanes the
+#: assertion tests the host's object format rather than the L1 coverage row it
+#: names. The row's own logic is covered platform-independently by the
+#: parametrized state grid above; this is the real-binary reproduction.
+_NEEDS_ELF = pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="asserts the ELF `.debug_info` section name in real compiler output",
+)
 
 
 @_NEEDS_GPP
+@_NEEDS_ELF
 @pytest.mark.parametrize("debug_flag,expect_evidence", [("-g0", False), ("-g", True)])
 def test_real_library_l1_row_matches_its_actual_debug_info(
     tmp_path, debug_flag, expect_evidence
@@ -303,6 +317,7 @@ def test_real_library_l1_row_matches_its_actual_debug_info(
 @_NEEDS_GPP
 @_NEEDS_CASTXML
 @pytest.mark.integration
+@_NEEDS_ELF
 @pytest.mark.parametrize("debug_flag,expect_present", [("-g0", False), ("-g", True)])
 def test_compare_json_layer_coverage_matches_actual_debug_info(
     tmp_path, debug_flag, expect_present

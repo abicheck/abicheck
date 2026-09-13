@@ -7,6 +7,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from _descriptor_paths import descriptor_absolute, descriptor_include_flag
 
 from abicheck.compat import CompatDescriptor, parse_descriptor
 from abicheck.html_report import generate_html_report
@@ -382,7 +383,10 @@ class TestDescriptorSkipAndCompileElements:
             "<gcc_options>-std=c++17</gcc_options>",
         )
         desc = parse_descriptor(d)
-        assert [str(p) for p in desc.include_paths] == ["/opt/inc", "/opt/inc2"]
+        assert [str(p) for p in desc.include_paths] == [
+            str(descriptor_absolute("/opt/inc")),
+            str(descriptor_absolute("/opt/inc2")),
+        ]
         assert desc.defines == ["MKL_ILP64"]
         assert desc.gcc_options == ["-std=c++17"]
 
@@ -397,7 +401,7 @@ class TestDescriptorSkipAndCompileElements:
             "<gcc_options>-std=c++17</gcc_options>",
         )
         opts = _descriptor_compile_options(parse_descriptor(d))
-        assert "-I/opt/inc" in opts
+        assert descriptor_include_flag("/opt/inc") in opts
         assert "-DMKL_ILP64" in opts
         # A define already written with its flag must not become `-D-DX`.
         assert "-DALREADY_PREFIXED" in opts

@@ -93,6 +93,20 @@ def _sh(value: Path | str) -> str:
     )
 
 
+# The probe branch shells a *Windows* `sys.executable` into an msys/git-bash
+# script, and the interpreter path and argv do not survive that boundary, so
+# `_PY_BIN` never runs and the probe answers "not a package" for everything.
+# That makes a probe-positive assertion fail outright and a probe-negative one
+# pass for the wrong reason -- so both are skipped rather than only the noisy
+# half. The composite Action itself runs on Linux runners; the fallback table,
+# which is what actually executes before abicheck is installed, stays covered
+# on every platform by the tests that pass `abicheck_available=False`.
+_probe_needs_a_posix_shell = pytest.mark.skipif(
+    os.name == "nt",
+    reason="the abicheck probe's interpreter path does not cross the msys bash boundary",
+)
+
+
 def _ask(
     path: Path | str,
     *,
@@ -145,6 +159,7 @@ def _shapes(tmp_path: Path) -> dict[str, Path]:
 class TestAgreementWithTheRealPredicate:
     """The whole point: one answer, from one place."""
 
+    @_probe_needs_a_posix_shell
     def test_every_package_shape_agrees_under_a_nonconventional_name(
         self, tmp_path: Path
     ) -> None:
@@ -157,6 +172,7 @@ class TestAgreementWithTheRealPredicate:
         # agreement above is not two predicates both answering False.
         assert all(cli for cli, _sh in disagreements.values()), disagreements
 
+    @_probe_needs_a_posix_shell
     def test_a_non_package_agrees_too(self, tmp_path: Path) -> None:
         """The negative control: agreement is not "say yes to everything"."""
         plain = tmp_path / "libfoo.so"
@@ -420,6 +436,7 @@ class TestThePreInstallFallback:
             path.write_bytes(b"\x00" * 32)
             assert _ask(path, abicheck_available=False, cwd=tmp_path), name
 
+    @_probe_needs_a_posix_shell
     def test_the_fallback_is_what_the_probe_improves_on(self, tmp_path: Path) -> None:
         """States the gap rather than hiding it: the table cannot see a
         content-routed package, which is exactly why the probe exists. If

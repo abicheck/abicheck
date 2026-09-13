@@ -1247,7 +1247,7 @@ def test_dwarf_qualified_flat_typedefs_keep_their_key_space():
 
     old = _elf_snapshot(functions=[_exported_func("use_alias")])
     old.typedefs = {"Alias": "int", "ns::Alias": "int"}
-    old.dwarf = DwarfMetadata()
+    old.dwarf = DwarfMetadata(has_dwarf=True)  # the content flag, not the object
 
     eid_global = entity_id_for_typedef((), "Alias")
     eid_ns = entity_id_for_typedef((Namespace("ns"),), "Alias")
