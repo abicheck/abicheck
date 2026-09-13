@@ -539,6 +539,91 @@ class TestTypeSpellingAndIntegerModelDetectors:
     """
 
     @staticmethod
+    def _param_snapshot(
+        decls: dict[str, tuple[str, str]], *, evidence: bool
+    ) -> AbiSnapshot:
+        """Functions differing in a *parameter* type, which moves the mangled
+        name with it -- `_Z1fPKc` -> `_Z1fPKDu` for `char *` -> `char8_t *`.
+
+        The realistic shape, and the one an exact-key reconciliation cannot
+        pair: the key it would look the peer up by is the thing that changed
+        (Codex review, P2). Keyed by declared name, which is what the second
+        tier resolves on.
+        """
+        return AbiSnapshot(
+            library="libgen.so",
+            version="1",
+            functions=[
+                Function(
+                    name=name,
+                    mangled=mangled,
+                    return_type="void",
+                    params=[Param(name="p", type=ptype)],
+                    visibility=Visibility.HIDDEN,
+                    in_public_contract_fact=_contract(evidence),
+                )
+                for name, (mangled, ptype) in decls.items()
+            ],
+            elf=ElfMetadata(
+                soname="libgen.so.1",
+                symbols=[ElfSymbol(name="_Z6anchorv", visibility="default")],
+            ),
+            from_headers=True,
+        )
+
+    @given(evidence_on_old=st.booleans(), count=st.integers(min_value=1, max_value=4))
+    @settings(deadline=None, max_examples=20)
+    def test_a_migration_that_moves_the_mangled_key_survives_the_gap(
+        self, evidence_on_old: bool, count: int
+    ) -> None:
+        """The mangled key is what the change moves, so the exact-key join
+        finds no peer and the finding is lost outright -- reported as a bare
+        removal or addition instead."""
+        old = self._param_snapshot(
+            {f"fn{i}": (f"_Z3fn{i}PKc", "char *") for i in range(count)},
+            evidence=evidence_on_old,
+        )
+        new = self._param_snapshot(
+            {f"fn{i}": (f"_Z3fn{i}PKDu", "char8_t *") for i in range(count)},
+            evidence=not evidence_on_old,
+        )
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.CHAR8T_MIGRATION in kinds, sorted(k.value for k in kinds)
+
+    @given(evidence_on_old=st.booleans())
+    @settings(deadline=None, max_examples=10)
+    def test_an_overload_set_is_not_paired_through_the_alias_tier(
+        self, evidence_on_old: bool
+    ) -> None:
+        """The second tier is ambiguity-safe: two declarations sharing a
+        name resolve to neither, so a reconciliation can never pair an
+        overload set onto one peer -- the same rule the mangled-key join
+        already applies in its own direction."""
+        old = self._param_snapshot(
+            {"fn": ("_Z2fnPKc", "char *")}, evidence=evidence_on_old
+        )
+        new = self._param_snapshot(
+            {"fn": ("_Z2fnPKDu", "char8_t *")}, evidence=not evidence_on_old
+        )
+        # A second overload of the same name on the evidence-poor side makes
+        # the alias ambiguous; nothing may be paired through it.
+        ambiguous = new if evidence_on_old else old
+        ambiguous.functions.append(
+            Function(
+                name="fn",
+                mangled="_Z2fni",
+                return_type="void",
+                params=[Param(name="p", type="int")],
+                visibility=Visibility.HIDDEN,
+                in_public_contract_fact=_contract(not evidence_on_old)
+                if ambiguous is new
+                else _contract(evidence_on_old),
+            )
+        )
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.CHAR8T_MIGRATION not in kinds, sorted(k.value for k in kinds)
+
+    @staticmethod
     def _snapshot(returns: dict[str, str], *, evidence: bool) -> AbiSnapshot:
         return AbiSnapshot(
             library="libgen.so",

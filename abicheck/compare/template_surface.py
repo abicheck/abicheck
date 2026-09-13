@@ -112,6 +112,11 @@ def reconciled_public_function_maps(
         old_all=old.functions,
         new_all=new.functions,
         key=key,
+        # The mangled key is exactly what a realistic change here moves, so
+        # the declared name is the second tier -- the same "single peer or
+        # nothing" rule the detectors' own demangled-name fallback applies to
+        # their leftovers.
+        alias_key=lambda f: f.name,
         old_exported=exported_symbol_names(
             getattr(old, "elf", None), FUNCTION_SYMBOL_TYPES
         ),

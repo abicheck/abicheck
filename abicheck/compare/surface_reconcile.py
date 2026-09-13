@@ -225,6 +225,7 @@ def reconcile_declaration_lists(
     old_all: Sequence[_Decl],
     new_all: Sequence[_Decl],
     key: Callable[[_Decl], str],
+    alias_key: Callable[[_Decl], str] | None = None,
     old_exported: Container[str] = frozenset(),
     new_exported: Container[str] = frozenset(),
 ) -> tuple[list[_Decl], list[_Decl]]:
@@ -242,6 +243,17 @@ def reconcile_declaration_lists(
     *key* is the caller's own match key; declarations sharing one are kept
     in first-seen order, and the returned lists preserve each input's order
     with any re-admitted declaration appended.
+
+    *alias_key* is the ambiguity-safe second tier, and it is what makes this
+    usable for a *mangled* key: the realistic change these detectors exist to
+    catch alters the mangling itself (``char *`` -> ``char8_t *`` on a
+    parameter takes ``_Z1fPKc`` to ``_Z1fPKDu``), so an exact-key lookup finds
+    no peer on the evidence-poor side and the finding is lost outright --
+    reported as a bare removal or addition instead (Codex review, P2). A
+    declaration is resolved through this tier only when exactly one peer
+    carries the same alias; "no candidate" and "several candidates" both
+    decline, so an overload set is never guessed at. Omit it for a key that
+    is already stable across the change.
     """
     old_map = _first_by_key(old_decls, key)
     new_map = _first_by_key(new_decls, key)
@@ -252,11 +264,37 @@ def reconcile_declaration_lists(
         new_all=_first_by_key(new_all, key),
         old_exported=old_exported,
         new_exported=new_exported,
+        resolve_in_old=_alias_resolver(old_all, alias_key),
+        resolve_in_new=_alias_resolver(new_all, alias_key),
     )
     return (
         _appended(old_decls, reconciled_old, old_map),
         _appended(new_decls, reconciled_new, new_map),
     )
+
+
+def _alias_resolver(
+    decls: Sequence[_Decl], alias_key: Callable[[_Decl], str] | None
+) -> _Resolver[_Decl] | None:
+    """Resolve a declaration to the single peer in *decls* sharing its alias.
+
+    Built lazily on first use, like the symbol join's own index: a pair with
+    no evidence-gap candidate at all must not pay to index both full maps.
+    """
+    if alias_key is None:
+        return None
+    index: list[dict[str, list[_Decl]]] = []
+
+    def _resolve(key: str, decl: _Decl) -> _Decl | None:
+        if not index:
+            by_alias: dict[str, list[_Decl]] = {}
+            for candidate in decls:
+                by_alias.setdefault(alias_key(candidate), []).append(candidate)
+            index.append(by_alias)
+        matches = index[0].get(alias_key(decl), ())
+        return matches[0] if len(matches) == 1 else None
+
+    return _resolve
 
 
 def _first_by_key(
