@@ -15,11 +15,12 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind, CrossSourceEvolution, Verdict
 from abicheck.checker_types import Change
-from abicheck.report.render_markdown import KindRollup, _render_kind_rollups
-from abicheck.reporter_markdown import (
+from abicheck.report.kind_rollup import (
     KIND_ROLLUP_SAMPLES,
     KIND_ROLLUP_THRESHOLD,
-    _roll_up_large_kinds,
+    KindRollup,
+    render_kind_rollups,
+    roll_up_large_kinds,
 )
 
 
@@ -29,7 +30,7 @@ def _changes(kind: ChangeKind, n: int, prefix: str = "s") -> list[Change]:
 
 class TestRollupSelection:
     def test_a_flood_is_rolled_up(self) -> None:
-        items, rollups = _roll_up_large_kinds(
+        items, rollups = roll_up_large_kinds(
             _changes(ChangeKind.EXPORTED_NOT_PUBLIC, 40_000)
         )
         assert items == []
@@ -40,7 +41,7 @@ class TestRollupSelection:
         -- a summarised finding is strictly less information than an itemised
         one, so it has to earn its place."""
         changes = _changes(ChangeKind.EXPORTED_NOT_PUBLIC, 3)
-        items, rollups = _roll_up_large_kinds(changes)
+        items, rollups = roll_up_large_kinds(changes)
         assert items == changes
         assert rollups == ()
 
@@ -55,7 +56,7 @@ class TestRollupSelection:
     def test_the_boundary_is_exact(self, count: int, rolled: bool) -> None:
         """Stated against the constant rather than a literal, so tuning the
         threshold does not silently make this test assert nothing."""
-        items, rollups = _roll_up_large_kinds(
+        items, rollups = roll_up_large_kinds(
             _changes(ChangeKind.EXPORTED_NOT_PUBLIC, count)
         )
         assert bool(rollups) is rolled
@@ -66,7 +67,7 @@ class TestRollupSelection:
         itemised next to the summary of the ones they are not."""
         flood = _changes(ChangeKind.EXPORTED_NOT_PUBLIC, 500, "flood")
         real = _changes(ChangeKind.UNVERSIONED_EXPORTED_SYMBOL, 2, "real")
-        items, rollups = _roll_up_large_kinds(flood + real)
+        items, rollups = roll_up_large_kinds(flood + real)
         assert [c.symbol for c in items] == ["real0", "real1"]
         assert [r.kind for r in rollups] == ["exported_not_public"]
 
@@ -81,29 +82,29 @@ class TestRollupSelection:
             ChangeKind.PRIVATE_HEADER_LEAK: 2,
         }
         changes = [c for k, n in groups.items() for c in _changes(k, n, k.value)]
-        items, rollups = _roll_up_large_kinds(changes)
+        items, rollups = roll_up_large_kinds(changes)
         assert len(items) + sum(r.count for r in rollups) == len(changes)
 
     def test_rollups_are_ordered_by_descending_count(self) -> None:
         changes = _changes(ChangeKind.EXPORTED_NOT_PUBLIC, 100, "a") + _changes(
             ChangeKind.UNVERSIONED_EXPORTED_SYMBOL, 300, "b"
         )
-        _items, rollups = _roll_up_large_kinds(changes)
+        _items, rollups = roll_up_large_kinds(changes)
         assert [r.count for r in rollups] == [300, 100]
 
     def test_samples_are_bounded(self) -> None:
-        _items, rollups = _roll_up_large_kinds(
+        _items, rollups = roll_up_large_kinds(
             _changes(ChangeKind.EXPORTED_NOT_PUBLIC, 1000)
         )
         assert len(rollups[0].sample_symbols) == KIND_ROLLUP_SAMPLES
 
     def test_empty_input(self) -> None:
-        assert _roll_up_large_kinds([]) == ([], ())
+        assert roll_up_large_kinds([]) == ([], ())
 
 
 class TestRollupRendering:
     def test_the_count_is_the_headline(self) -> None:
-        line = _render_kind_rollups(
+        line = render_kind_rollups(
             (
                 KindRollup(
                     kind="exported_not_public", count=39_956, sample_symbols=("a", "b")
@@ -117,19 +118,19 @@ class TestRollupRendering:
         assert "json" in line
 
     def test_the_remainder_count_is_correct(self) -> None:
-        line = _render_kind_rollups(
+        line = render_kind_rollups(
             (KindRollup(kind="k", count=10, sample_symbols=("a", "b", "c")),)
         )[0]
         assert "7 more" in line
 
     def test_no_remainder_clause_when_everything_is_shown(self) -> None:
-        line = _render_kind_rollups(
+        line = render_kind_rollups(
             (KindRollup(kind="k", count=2, sample_symbols=("a", "b")),)
         )[0]
         assert "more" not in line
 
     def test_nothing_renders_for_no_rollups(self) -> None:
-        assert _render_kind_rollups(()) == []
+        assert render_kind_rollups(()) == []
 
 
 class TestMachineOutputIsUnaffected:

@@ -46,6 +46,7 @@ from typing import Any
 
 from ..checker_types import Change
 from .disposition_audit import DispositionAudit, render_disposition_audit_lines
+from .kind_rollup import KindRollup, render_kind_rollups
 from .surface_changes import SurfaceChangeSection, render_surface_changes_lines
 
 
@@ -485,22 +486,6 @@ def render_library_files_section(
 
 
 @dataclass(frozen=True, slots=True)
-class KindRollup:
-    """One ``ChangeKind``'s findings, summarised instead of itemised.
-
-    A *presentation* value and nothing else -- the machine document still
-    carries every finding, exactly as it does under the release summary's own
-    display cap (``report/release_display_limits.py``). Holds only plain
-    values: deciding *whether* a kind rolls up is the ``compute_*`` half's
-    job (``reporter_markdown``), and this module formats what it is given.
-    """
-
-    kind: str
-    count: int
-    sample_symbols: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class ChangeGroup:
     heading: str
     changes: tuple[Change, ...]
@@ -516,28 +501,6 @@ class SeveritySectionsData:
     groups: tuple[ChangeGroup, ...]
 
 
-def _render_kind_rollups(rollups: tuple[KindRollup, ...]) -> list[str]:
-    """One line per rolled-up kind, naming the count and a few examples.
-
-    The count is the point: "39,956 findings of kind X" is the fact a reader
-    needs, and 39,956 individual lines actively hide it. A handful of symbols
-    is enough to recognise what the kind is picking up; the rest are one
-    ``-o json=...`` export away, which is where they have always been.
-    """
-    if not rollups:
-        return []
-    lines: list[str] = []
-    for r in rollups:
-        shown = ", ".join(f"`{s}`" for s in r.sample_symbols)
-        remaining = r.count - len(r.sample_symbols)
-        more = f", and {remaining:,} more" if remaining > 0 else ""
-        lines.append(
-            f"- **{r.kind}**: {r.count:,} findings — e.g. {shown}{more}. "
-            "Itemised in full in the machine-readable report (`-o json=...`)."
-        )
-    return lines
-
-
 def render_severity_sections(data: SeveritySectionsData) -> list[str]:
     lines: list[str] = []
     for group in data.groups:
@@ -548,7 +511,7 @@ def render_severity_sections(data: SeveritySectionsData) -> list[str]:
         fmt = _format_change_md_oneline if group.oneline else _format_change_md
         for c in group.changes:
             lines.append(fmt(c))
-        lines += _render_kind_rollups(group.rollups)
+        lines += render_kind_rollups(group.rollups)
         lines.append("")
     return lines
 

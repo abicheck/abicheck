@@ -49,11 +49,9 @@ from typing import TYPE_CHECKING
 
 from .bundle_detector_heuristics import (
     DEFAULT_SYSTEM_SYMBOLS,
-    _import_existed_in_old,
     _import_is_external,
     _looks_system_symbol,
     _strip_namespace_prefix,
-    extra_needed_all_system,
 )
 from .bundle_models import (
     PROMOTABLE_C_BOUNDARY_SIGNATURE_BREAK_KINDS,
@@ -71,6 +69,10 @@ from .checker_types import DiffResult
 from .elf_metadata import ElfSymbol, SymbolBinding
 from .model.change_catalog.kinds import ChangeKind
 from .policy.classification import Verdict, policy_kind_sets
+from .workflows.bundle_import_evidence import (
+    classify_unresolved_import,
+    extra_needed_all_system,
+)
 
 if TYPE_CHECKING:
     from .bundle_manifest import InstantiationManifest
@@ -175,7 +177,7 @@ def _detect_intra_dep_removed(
     ``sincos`` / ``MPI_Finalize`` imports -- none of which any MKL library
     ever exported, in either release -- fell through to the symbol-name
     allow-list and turned a compatible release into ``BREAKING`` / exit 4.
-    See :func:`~abicheck.bundle_detector_heuristics.extra_needed_all_system`
+    See :func:`~abicheck.workflows.bundle_import_evidence.extra_needed_all_system`
     for the other half of that bug, which the audit-mode sibling shared.
 
     Once the removal *is* confirmed, a consumer's import is still treated as
@@ -237,64 +239,20 @@ def _detect_intra_dep_removed(
             )
 
             if not ever_provided_in_bundle:
-                # No version-compatible sibling ever provided this symbol to
-                # this consumer, so *this release removed nothing* -- see the
-                # "`ever_provided_in_bundle` is a precondition" paragraph in
-                # the docstring above.
-                #
-                # Whether the import may then be *dropped* turns on a second
-                # question the removal precondition does not answer: did OLD
-                # carry this same import at all? If it did, whatever
-                # satisfied it in OLD (the host process's global namespace;
-                # an LD_PRELOAD; a dependency outside the bundle) is equally
-                # available in NEW and nothing observed here changed -- the
-                # evidence *for* externality is that the same unresolved
-                # import shipped before. A *newly introduced* import has no
-                # such history: nothing anywhere shows it was ever satisfied,
-                # so a vendor-symbol typo in a new library would otherwise
-                # leave a clean bundle result behind while failing at load
-                # time. Those stay listed as the RISK kind rather than being
-                # suppressed by outward-edge or symbol-name evidence that
-                # only ever spoke to whether *this release* changed anything.
-                existed_in_old = _import_existed_in_old(consumer, symbol, old)
-                if existed_in_old:
-                    if outward_edges_all_system:
-                        continue
-                    if symbol in DEFAULT_SYSTEM_SYMBOLS or _looks_system_symbol(symbol):
-                        continue
-                elif symbol in DEFAULT_SYSTEM_SYMBOLS or _looks_system_symbol(symbol):
-                    # A newly introduced import of a *recognised system*
-                    # symbol is the ordinary case of a new library calling
-                    # libc, not a typo -- the symbol name itself is the
-                    # evidence, and it does not depend on release history.
-                    continue
-                # Still unaccounted for -- but only ever a RISK, and under
-                # the kind that does not claim a diff-confirmed removal.
-                findings.append(
-                    BundleFinding(
-                        kind=ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY,
-                        symbol=symbol,
-                        description=(
-                            (
-                                f"{consumer.library} imports {symbol}, and no "
-                                f"library in the bundle exports it -- in the new "
-                                f"bundle or the old one. Not a regression of this "
-                                f"release: the import was already satisfied from "
-                                f"outside the bundle (or not at all) before it."
-                            )
-                            if existed_in_old
-                            else (
-                                f"{consumer.library} imports {symbol}, which is "
-                                f"new in this release and which no library in the "
-                                f"bundle exports. Nothing observed shows the import "
-                                f"was ever satisfied, so it must be provided from "
-                                f"outside the bundle at load time."
-                            )
-                        ),
-                        consumer_library=consumer.library,
-                        affected_libraries=[consumer.library],
-                    ),
+                # Nothing was removed (see the "`ever_provided_in_bundle` is
+                # a precondition" paragraph in the docstring above), so what
+                # remains is the separate question of whether this import is
+                # accounted for at all -- which `workflows.
+                # bundle_import_evidence` owns, together with the reason each answer rests
+                # on.
+                unresolved = classify_unresolved_import(
+                    consumer,
+                    symbol,
+                    old,
+                    outward_edges_all_system=outward_edges_all_system,
                 )
+                if unresolved is not None:
+                    findings.append(unresolved)
                 continue
 
             # A version-compatible sibling *did* provide this symbol to this
@@ -321,141 +279,6 @@ def _detect_intra_dep_removed(
                         f"{consumer.library} imports {symbol}, but no library in "
                         f"the new bundle exports it. Runtime load of "
                         f"{consumer.library} will fail with undefined symbol."
-                    ),
-                    consumer_library=consumer.library,
-                    affected_libraries=[consumer.library],
-                ),
-            )
-    return findings
-
-
-def _detect_unresolved_intra_dependency(
-    new: BundleSnapshot,
-    system_providers: set[str],
-) -> list[BundleFinding]:
-    """Audit-mode (no old side) sibling of :func:`_detect_intra_dep_removed`.
-
-    ADR-056 D2: ``scan --artifact-set`` has no per-library diff to read, so
-    this operates purely off the new-side resolution graph. Deliberately
-    **not** a call into :func:`_detect_intra_dep_removed`; differs in three
-    ways that matter for soundness here:
-
-    1. **Version-aware, reachability-constrained provider matching.**
-       ``providers_for(symbol)`` is name-only and set-wide.
-       ``ProviderEntry.version``/``ConsumerEntry.version`` are consulted so a
-       version mismatch (consumer needs ``foo@V2``, set only provides
-       ``foo@V1``) is not mistaken for a resolved import; when the precise
-       ``ConsumerEntry.version_soname`` is known, the match is pinned to
-       that exact provider library (GNU version *labels* are not globally
-       unique). Every candidate provider must additionally be reachable
-       from the consumer through :func:`_reachable_intra_libraries` — a
-       match on a library the consumer has no ``DT_NEEDED`` path to would
-       never actually be loaded together with the consumer.
-    2. **A narrower, explicitly-approximate suppression path for unversioned
-       imports.** Mirrors ``_detect_intra_dep_removed``'s allow-list union
-       and its non-empty guard (``extra_edges and all(...)``, never a bare
-       ``all([])``), but adds a requirement one-sided audit needs and the
-       diff-driven detector does not: the consumer must have **zero**
-       intra-bundle ``DT_NEEDED`` edges — a consumer still depending on an
-       intra-set library that simply stopped exporting the symbol has a
-       real, in-set candidate provider this coarse check cannot rule out.
-       Deliberately has **no** symbol-name-shape fallback
-       (``_looks_system_symbol``): ``.abicheck.yml``'s ``bundle.
-       system_providers:`` (CLI cleanup phase two, PR J; formerly
-       ``--bundle-system-providers``) exists specifically to cover a
-       legitimate, non-system-shaped custom export
-       (e.g. ``vendor_init``) that a shape heuristic would never match.
-    3. Emits ``ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY`` (not
-       ``BUNDLE_INTRA_DEP_REMOVED`` — that kind implies a diff-confirmed
-       removal, which this finding cannot claim) at
-       ``COMPATIBLE_WITH_RISK``, not ``BREAKING``: an audit has no old side
-       to confirm the symbol ever resolved.
-    """
-    findings: list[BundleFinding] = []
-    reachable_cache: dict[str, set[str]] = {}
-
-    def _reachable(lib: str) -> set[str]:
-        if lib not in reachable_cache:
-            reachable_cache[lib] = _reachable_intra_libraries(new, lib)
-        return reachable_cache[lib]
-
-    for symbol, consumers in new.resolution.consumers.items():
-        providers = new.resolution.providers_for(symbol)
-        for consumer in consumers:
-            if consumer.weak:
-                continue
-            consumer_meta = new.metadata.get(consumer.library)
-            if consumer_meta is None:
-                continue
-            reachable = _reachable(consumer.library)
-
-            if consumer.version:
-                if consumer.version_soname:
-                    # Same soname_to_name map _reachable_intra_libraries()
-                    # uses (Codex review) -- provider_library_for_soname()'s
-                    # independent heuristic has the identical
-                    # resolved-through-symlink gap, so a version_soname
-                    # naming a provider's real on-disk filename could fail
-                    # to resolve here even when that provider is genuinely
-                    # reachable.
-                    target_lib = new.resolution.soname_to_name.get(
-                        consumer.version_soname
-                    )
-                    resolved = target_lib is not None and target_lib in reachable
-                    resolved = resolved and any(
-                        p.library == target_lib and p.version == consumer.version
-                        for p in providers
-                    )
-                else:
-                    resolved = any(
-                        p.version == consumer.version and p.library in reachable
-                        for p in providers
-                    )
-            else:
-                # P2 regression (Codex review): an unversioned consumer
-                # reference can only be satisfied by an unversioned or
-                # default-version ("@@default") provider definition -- a
-                # provider that exports this symbol *only* as a non-default
-                # versioned definition ("foo@V1", not "foo@@V1") cannot
-                # satisfy it, even though the bare symbol name is reachable.
-                resolved = any(
-                    p.library in reachable and p.is_default for p in providers
-                )
-
-            if resolved:
-                continue
-            if _import_is_external(consumer, consumer_meta, new):
-                continue
-
-            if not consumer.version:
-                intra_edges = new.resolution.intra_needed.get(consumer.library, [])
-                extra_edges = new.resolution.extra_needed.get(consumer.library, [])
-                # `extra_edges and ...`: audit mode deliberately does *not*
-                # take the vacuous-true reading of the empty case that
-                # `extra_needed_all_system` supplies for its other caller.
-                # With no OLD side there is nothing to establish that a
-                # zero-DT_NEEDED consumer's import was ever satisfied at
-                # all, so it stays reported (at RISK) --
-                # `test_unversioned_zero_edges_not_suppressed`. The
-                # *coverage* rule is still shared, so a change to what
-                # counts as system-provided lands on both detectors.
-                if (
-                    not intra_edges
-                    and extra_edges
-                    and extra_needed_all_system(
-                        consumer.library, new.resolution, system_providers
-                    )
-                ):
-                    continue
-
-            findings.append(
-                BundleFinding(
-                    kind=ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY,
-                    symbol=symbol,
-                    description=(
-                        f"{consumer.library} imports {symbol}, but no provider "
-                        "was found for it in this artifact set (audit mode — "
-                        "no old side to confirm this ever resolved)."
                     ),
                     consumer_library=consumer.library,
                     affected_libraries=[consumer.library],

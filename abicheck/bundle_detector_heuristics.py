@@ -53,9 +53,7 @@ from .bundle_models import (
     BundleSnapshot,
     ConsumerEntry,
     ProviderEntry,
-    ResolutionGraph,
 )
-from .bundle_soname import soname_matches_providers
 from .elf_metadata import ElfMetadata
 from .model.change_catalog.kinds import ChangeKind
 
@@ -622,38 +620,6 @@ def _looks_system_version(version: str) -> bool:
     return any(version.startswith(prefix) for prefix in _SYSTEM_VERSION_PREFIXES)
 
 
-def _import_existed_in_old(
-    consumer: ConsumerEntry,
-    symbol: str,
-    old: BundleSnapshot,
-) -> bool:
-    """Did OLD carry this same (library, symbol, version) import?
-
-    The removal precondition ``ever_provided_in_bundle`` answers whether a
-    *bundle sibling* used to satisfy an import. This answers the separate,
-    weaker question its callers also need: whether the import *existed at
-    all* before this release.
-
-    The two are independent, and conflating them is how a newly introduced
-    unresolved import gets dropped. "The import shipped unresolved before"
-    is real evidence that something outside the bundle provides it -- the
-    release before this one loaded. A *new* import has no such history, so
-    outward ``DT_NEEDED`` edges (vacuously satisfied for a zero-``DT_NEEDED``
-    consumer) prove nothing about it, and suppressing it on that basis would
-    let a vendor-symbol typo in a new library produce a clean bundle result.
-
-    Matched on the library *and* the exact required symbol version: an import
-    that moved from ``sym@V1`` to ``sym@V2`` is a new requirement, and OLD
-    having loaded the former says nothing about the latter. Matching on the
-    symbol name alone would be the more permissive (finding-dropping)
-    direction, which is the wrong way to fail here.
-    """
-    return any(
-        entry.library == consumer.library and entry.version == consumer.version
-        for entry in old.resolution.consumers_of(symbol)
-    )
-
-
 def _import_is_external(
     consumer: ConsumerEntry,
     consumer_meta: ElfMetadata,
@@ -750,55 +716,3 @@ def _strip_namespace_prefix(name: str) -> str:
     if "::" in name:
         return name.rsplit("::", 1)[-1]
     return name
-
-
-def extra_needed_all_system(
-    consumer_library: str,
-    resolution: ResolutionGraph,
-    system_providers: set[str],
-) -> bool:
-    """Whether every DT_NEEDED edge of *consumer_library* that resolves
-    **outside** the bundle is covered by the system-provider allow-list.
-
-    The shared primitive behind both unresolved-import detectors'
-    "this import is satisfied from outside the bundle" suppression
-    (``bundle_detectors._detect_intra_dep_removed`` and its audit-mode
-    sibling ``_detect_unresolved_intra_dependency``). Extracted because
-    both hand-rolled it, and both hand-rolled the *same bug*.
-
-    **The empty case is vacuously true, and that is the whole point.** Both
-    call sites previously spelled this ``extra_edges and all(...)``. The
-    non-empty guard was added to avoid a bare ``all([])`` -- but it made
-    "declares no outward DT_NEEDED edge at all" (the strongest possible
-    evidence that nothing in this bundle satisfies the import: the library
-    declares no dependencies whatsoever, so the loader must resolve every
-    undefined symbol it has from the global namespace its *host process*
-    assembles) indistinguishable from "declares an outward edge that is not
-    on the allow-list" (real evidence against). Intel MKL is the case that
-    exposed it: every ``libmkl_*.so`` carries zero DT_NEEDED, so all 293 of
-    its ``fflush``/``sincos``/``MPI_Finalize`` imports fell through to the
-    symbol-name allow-list and were reported as *removed intra-bundle
-    dependencies* of a release that had removed nothing.
-
-    Note this answers only the **outward-edge** question. Neither caller may
-    use it alone: a symbol a *sibling* used to provide can be dropped by the
-    same refactor that left the consumer needing libc, and this function
-    cannot see that. ``_detect_intra_dep_removed`` pairs it with the OLD
-    side's own provider evidence; ``_detect_unresolved_intra_dependency``,
-    which has no OLD side, pairs it with a ``not intra_needed`` requirement.
-
-    And the two callers deliberately differ on the empty case, which is why
-    this function states it rather than deciding it for them. The diff-driven
-    detector takes the vacuous-true reading above, because it has separately
-    established that no sibling ever provided the symbol -- so there is
-    nothing this release could have removed. Audit mode keeps its own
-    ``extra_edges and ...`` requirement on top: with no OLD side, "this
-    consumer declares no dependencies" is not evidence that its import was
-    ever satisfied, so a zero-DT_NEEDED consumer's unresolved import stays
-    reported at ``COMPATIBLE_WITH_RISK``. Sharing the *coverage* rule while
-    each caller supplies its own emptiness policy is the point of the split.
-    """
-    extra = resolution.extra_needed.get(consumer_library, [])
-    return all(
-        soname_matches_providers(e, system_providers) or _looks_system(e) for e in extra
-    )

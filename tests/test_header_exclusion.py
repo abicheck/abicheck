@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.header_utils import apply_header_exclusions
+from abicheck.extract.header_exclusions import apply_header_exclusions
 from abicheck.serialization import load_snapshot
 from abicheck.workflows.input_resolution import _apply_header_exclusions_to_inputs
 

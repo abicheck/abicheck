@@ -423,7 +423,7 @@ def _apply_header_exclusions_to_inputs(
     A directory operand is expanded first, because a pattern naming one
     header cannot otherwise match anything inside a directory entry -- and a
     header directory is precisely the case ``--exclude-header`` exists for
-    (``header_utils.apply_header_exclusions`` explains why).
+    (``extract.header_exclusions.apply_header_exclusions`` explains why).
 
     Expansion happens **only** when at least one pattern was given, so a run
     without the flag passes its header list through untouched and behaves
@@ -444,7 +444,8 @@ def _apply_header_exclusions_to_inputs(
     """
     if not exclude_headers:
         return headers
-    from ..header_utils import apply_header_exclusions, iter_directory_headers
+    from ..extract.header_exclusions import apply_header_exclusions
+    from ..header_utils import iter_directory_headers
     from .extraction import PRUNED_HEADER_DIR_SEGMENTS
 
     expanded: list[Path] = []

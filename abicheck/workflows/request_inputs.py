@@ -102,7 +102,7 @@ class InputSpec:
     headers: tuple[Path, ...] = ()
     #: ``--exclude-header`` patterns (fnmatch-style) applied to *headers*
     #: after any directory operand is expanded. See
-    #: ``header_utils.apply_header_exclusions`` for the matching rule and for
+    #: ``extract.header_exclusions.apply_header_exclusions`` for the matching rule and for
     #: why a header-directory operand is all-or-nothing without this.
     #:
     #: Part of the extraction identity, not a display filter: it changes

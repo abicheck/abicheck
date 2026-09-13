@@ -449,8 +449,8 @@ class TestDescriptorSuppression:
     """The ``<skip_*>`` rules, once parsed, actually suppress."""
 
     def test_namespace_symbol_type_and_constant_rules_are_built(self) -> None:
-        from abicheck.compat.descriptor_expansion import build_descriptor_suppression
         from abicheck.compat.descriptor import CompatDescriptor
+        from abicheck.compat.descriptor_expansion import build_descriptor_suppression
 
         desc = CompatDescriptor(
             version="1",
@@ -474,8 +474,8 @@ class TestDescriptorSuppression:
         duplicated rule is not wrong, but it doubles every audit trail the
         disposition ledger renders for a release that declared its skips on
         both descriptors -- which is every release."""
-        from abicheck.compat.descriptor_expansion import build_descriptor_suppression
         from abicheck.compat.descriptor import CompatDescriptor
+        from abicheck.compat.descriptor_expansion import build_descriptor_suppression
 
         desc = CompatDescriptor(
             version="1", headers=[], libs=[], skip_namespaces=["detail"]
@@ -488,8 +488,8 @@ class TestDescriptorSuppression:
         """A descriptor with no skips must not attach an empty suppression
         list: `suppression_file_provided`-style disclosure elsewhere treats
         "rules were supplied" as a fact about the run."""
-        from abicheck.compat.descriptor_expansion import build_descriptor_suppression
         from abicheck.compat.descriptor import CompatDescriptor
+        from abicheck.compat.descriptor_expansion import build_descriptor_suppression
 
         assert (
             build_descriptor_suppression(
@@ -512,8 +512,8 @@ class TestDescriptorSuppression:
         """
         from abicheck.checker_policy import ChangeKind
         from abicheck.checker_types import Change
-        from abicheck.compat.descriptor_expansion import build_descriptor_suppression
         from abicheck.compat.descriptor import CompatDescriptor
+        from abicheck.compat.descriptor_expansion import build_descriptor_suppression
 
         sl = build_descriptor_suppression(
             [
@@ -541,8 +541,8 @@ class TestDescriptorSuppression:
         "skip this namespace"."""
         from abicheck.checker_policy import ChangeKind
         from abicheck.checker_types import Change
-        from abicheck.compat.descriptor_expansion import build_descriptor_suppression
         from abicheck.compat.descriptor import CompatDescriptor
+        from abicheck.compat.descriptor_expansion import build_descriptor_suppression
 
         sl = build_descriptor_suppression(
             [
