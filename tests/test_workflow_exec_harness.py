@@ -562,21 +562,32 @@ class TestAStepsOwnTemporaryFilesStayTestOwned:
         """Where `run_step` points `$TMPDIR`, constructed independently."""
         return workspace.parent / f"_step_tmp_{workspace.name}"
 
-    def test_the_step_is_given_a_test_owned_tmpdir(self, tmp_path: Path) -> None:
-        """Portable on every lane: the step echoes the value, we compare strings.
+    def test_the_steps_tmpdir_is_the_directory_we_gave_it(self, tmp_path: Path) -> None:
+        """Identity proved by a marker file, never by comparing path spellings.
 
-        `$TMPDIR` is compared as the *string* we set, never parsed as a path,
-        so the Windows MSYS-vs-native spelling question never arises.
+        Comparing `$TMPDIR` to the string that was set looks portable and is
+        not: Git Bash hands the value back in MSYS form (`/d/a/_temp/...`)
+        where it was set as `D:\\a\\_temp\\...`, so the equality fails on
+        Windows for a reason that has nothing to do with the contract. The
+        first version of this test did exactly that and went red on the
+        Windows lane -- the same path-spelling class Codex raised for
+        `mktemp`'s output, which I had guarded there and then reintroduced
+        here.
+
+        Writing a uniquely-named marker through bash and finding it at the
+        path Python built is spelling-independent: it proves the two names
+        denote one directory, which is the actual claim.
         """
 
         workspace = make_workspace(tmp_path)
-        result = run_step(
-            {"run": 'echo "tmpdir=$TMPDIR" >> "$GITHUB_OUTPUT"'}, workspace=workspace
-        )
+        marker = f"marker-{os.getpid()}"
+        result = run_step({"run": f': > "$TMPDIR/{marker}"'}, workspace=workspace)
 
         assert result.returncode == 0, result.stderr
-        (line,) = result.output_lines
-        assert line == f"tmpdir={self._scratch_dir(workspace)}", line
+        assert (self._scratch_dir(workspace) / marker).is_file(), (
+            "the step's own $TMPDIR is not the directory this harness created "
+            "for it, so its temporary files are landing somewhere untracked"
+        )
 
     def test_the_step_can_write_into_it(self, tmp_path: Path) -> None:
         """And it is a real directory -- checked at the path *we* built."""
