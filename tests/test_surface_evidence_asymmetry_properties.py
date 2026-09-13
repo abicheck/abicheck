@@ -40,6 +40,7 @@ import pytest
 from hypothesis import given, settings, strategies as st
 
 from abicheck.checker import compare
+from abicheck.extract.surface_fact_producers import header_ast_surface_facts
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.declarations import Function, Param, Variable, Visibility
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
@@ -277,6 +278,100 @@ class TestSurfaceEvidenceAsymmetry:
             f"the pair was split into a removal/addition: {kinds}"
         )
         assert ChangeKind.FUNC_LANGUAGE_LINKAGE_CHANGED in kinds
+
+    def test_a_sibling_modules_detector_sees_the_reconciled_pair(self) -> None:
+        """Not just this module's detectors (Codex review, P1).
+
+        `diff_types`'s overload and method-qualifier detectors rebuild the
+        old/new surfaces themselves, so routing only `diff_symbols` left them
+        on the unreconciled maps: an unchanged exported `foo()` beside a
+        promised-but-unexported `foo(int)` produced a false `OVERLOAD_ADDED`
+        when only one side carried the evidence. Asserted through
+        `compare()`, so it fails if any consumer is left behind.
+        """
+
+        # Both sides declare `foo()` and `foo(int)` and export only `foo()`,
+        # with the export recorded the way a real producer records it. The
+        # contract evidence is on NEW, so OLD's surface holds just the
+        # exported one -- one declaration under the group key against two on
+        # NEW, exactly the "gained an overload" shape the detector fires on.
+        def _side(evidence: bool) -> AbiSnapshot:
+            exported = Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="void",
+                params=[],
+                **header_ast_surface_facts(exported=True, producer="castxml"),
+            )
+            promised = Function(
+                name="foo",
+                mangled="_Z3fooi",
+                return_type="void",
+                params=[Param(name="n", type="int")],
+                visibility=Visibility.HIDDEN,
+                **header_ast_surface_facts(exported=False, producer="castxml"),
+            )
+            if evidence:
+                promised.in_public_contract_fact = Fact.present(
+                    True, producer="public_header"
+                )
+            return AbiSnapshot(
+                library="libgen.so",
+                version="1",
+                functions=[exported, promised],
+                elf=ElfMetadata(
+                    soname="libgen.so.1",
+                    symbols=[
+                        ElfSymbol(name=n, visibility="default")
+                        for n in ("_Z6anchorv", "_Z3foov")
+                    ],
+                ),
+                from_headers=True,
+            )
+
+        kinds = [c.kind for c in compare(_side(False), _side(True)).changes]
+        assert ChangeKind.OVERLOAD_ADDED not in kinds, kinds
+
+    @pytest.mark.parametrize("evidence_on_old", [True, False])
+    def test_an_overload_set_never_collapses_onto_one_alias_peer(
+        self, evidence_on_old: bool
+    ) -> None:
+        """Admission is one-to-one, or it does not happen.
+
+        The alias tier answers "the single peer carrying this name", which is
+        unique per *lookup* and says nothing about the reverse direction: an
+        overload set on the evidence-bearing side against one unexported
+        `extern "C"` declaration of that name resolves every overload key to
+        the same object. Admitting each would place one declaration under
+        every overload key, so the join compares every overload against it --
+        hiding genuine removals and inventing signature changes (Codex
+        review, P2).
+        """
+        overloads = _snapshot(["_Z3fooi", "_Z3food"], evidence=evidence_on_old)
+        for fn in overloads.functions:
+            fn.name = "foo"
+        single = _snapshot(["foo"], evidence=not evidence_on_old)
+        single.functions[0].name = "foo"
+        single.functions[0].is_extern_c = True
+        old, new = (overloads, single) if evidence_on_old else (single, overloads)
+        changes = compare(old, new).changes
+        # No declaration may be compared against a peer it reached only
+        # through a collapsed alias: the overloads have no counterpart, so a
+        # removal/addition is the honest answer and a signature comparison
+        # against the single `extern "C"` declaration is not. This holds in
+        # both directions -- it is what the one-to-one rule buys.
+        assert not [c for c in changes if c.kind is ChangeKind.FUNC_RETURN_CHANGED]
+        reported = {c.symbol for c in changes if c.kind in _SURFACE_EXIT_KINDS}
+        if evidence_on_old:
+            # The overloads carry the contract evidence, so they are in their
+            # own side's surface and their disappearance is reported.
+            assert {"_Z3fooi", "_Z3food"} <= reported, reported
+        else:
+            # The overloads carry no evidence and are hidden, so they are not
+            # in their side's surface at all and nothing reports them -- the
+            # pre-existing narrowing, unchanged by this PR and deliberately
+            # not widened by it.
+            assert reported == {"foo"}, reported
 
     @given(names=_names, variables=st.booleans())
     @settings(deadline=None, max_examples=40)

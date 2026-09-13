@@ -258,11 +258,16 @@ def _reconciled_function_surfaces(
 ) -> tuple[dict[str, Function], dict[str, Function]]:
     """Both sides' public function surfaces, evidence-gap-reconciled.
 
-    The one join every per-pair function detector in this module uses in
-    place of a bare ``_public_functions`` pair, so a declaration that left
-    one side's surface only because that run established less contract
-    evidence is visible to *all* of them rather than to whichever call site
-    happened to guard it -- see
+    The one join every per-pair function detector uses in place of a bare
+    ``_public_functions`` pair -- in this module *and* in the sibling diff
+    modules that build their own old/new surfaces (``diff_types``,
+    ``diff_templates``, ``diff_platform_templates``, ``diff_platform``), so a
+    declaration that left one side's surface only because that run
+    established less contract evidence is visible to all of them rather than
+    to whichever call site happened to guard it. Limiting this to one module
+    left `diff_types`'s own overload/qualifier detectors on the unreconciled
+    maps -- a false ``OVERLOAD_ADDED``, and an ``is_static`` change on a
+    surviving declaration reported by nothing (Codex review, P1). See
     :mod:`abicheck.compare.surface_reconcile`.
     """
     return reconcile_surfaces(

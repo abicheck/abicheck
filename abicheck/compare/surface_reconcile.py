@@ -129,6 +129,19 @@ def _admit(
     twice: the rule is symmetric, and two hand-mirrored copies are how the
     addition half of this very defect survived a round of review.
     """
+    # Collect first, admit second: a peer claimed by more than one source key
+    # is admitted for none of them. The alias tier answers "the single peer
+    # carrying this name", which is unique *per lookup* and says nothing about
+    # the reverse direction -- an overload set on the evidence-bearing side
+    # (`foo(int)`, `foo(double)`, ...) against one unexported `extern "C" foo`
+    # on the other resolves every overload key to that same declaration, and
+    # admitting each would put one object under every overload key: the join
+    # then compares every old overload against it, hiding genuine removals and
+    # inventing signature/linkage changes (Codex review, P2). One-to-one or
+    # not at all, which is the same ambiguity-safety the alias tier already
+    # applies in its own direction.
+    proposals: dict[str, _Decl] = {}
+    claims: dict[int, int] = {}
     for key in src.keys() - other.keys():
         peer = other_all.get(key)
         if peer is None and resolve is not None:
@@ -148,4 +161,8 @@ def _admit(
         if peer is not None and surface_exit_is_evidence_gap(
             src[key], peer, old_exported_symbols=exported, key=key
         ):
+            proposals[key] = peer
+            claims[id(peer)] = claims.get(id(peer), 0) + 1
+    for key, peer in proposals.items():
+        if claims[id(peer)] == 1:
             dst[key] = peer
