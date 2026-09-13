@@ -53,7 +53,11 @@
   counterpart of `func_removed_elf_only`. Deliberately one-directional: a
   *removal* asserted from export-table evidence alone, for a symbol the
   headers never promised, is exactly the unproven finding `vision.md`
-  forbids. The detector is skipped only when the *new* side is headerless,
+  forbids. The new kind is registered with every addition consumer --
+  `-warn-newsym`, `-strict`, the HTML/compat-XML added-symbol count and the
+  longitudinal lifecycle -- and `func_removed_elf_only`, which was missing
+  from the report classifier's own removal set all along, joins it. The
+  detector is skipped only when the *new* side is headerless,
   since that is the one shape in which the ordinary function diff already
   reports the addition; keying it off the old side as well lost the addition
   in a mixed-evidence comparison, where neither map contains it.
@@ -101,7 +105,11 @@
   `analysis_assurance` block is a release-wide roll-up to the weakest
   member's value on each judgement axis, not dropped: dropping it made every
   reporter omit the block and stopped `--require-complete-analysis` gating on
-  a member whose evidence was partial or failed.
+  a member whose evidence was partial or failed. Every finding in a
+  multi-library result names the library it came from (`library`, in JSON and
+  Markdown), so a removal is attributable and the same symbol removed from
+  two libraries stays two findings; the field is absent from every
+  single-library report, which are unchanged.
 - **`dump`/`compare --exclude-header PATTERN`** excludes headers matching an
   fnmatch-style pattern (bare name, full path, or glob) from the parsed
   surface. Without it a header *directory* operand is all-or-nothing: a
