@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -83,13 +84,114 @@ def _snapshot_cache_bucket(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
     Allocated once per process (each xdist worker has its own basetemp, so the
     key keeps a worker from ever reading another's entry).
+
+    **Self-healing, because this fixture is autouse.** The bucket's own
+    `is_dir()` check was not enough: if the worker's *basetemp* goes away, the
+    re-allocation below raises `FileNotFoundError` on the missing parent, and
+    since every test enters through this fixture, one transient deletion turns
+    into an error for every remaining test in that worker -- each reporting a
+    different freshly-generated bucket name, which is what made the real
+    failure so hard to read. That is not hypothetical: two Linux unit lanes
+    failed with 20,867 and 29,164 such errors (run 34729579282), and the same
+    signature appeared in a container where an unrelated process was pruning
+    `/tmp`. Recreating the parent makes the recovery independent of *what*
+    removed the tree, which is the only version of this fix that closes the
+    class: pytest's own retention policy, a tmp reaper, a sandbox cleanup and a
+    stray `rmtree` all present identically here.
     """
     basetemp = tmp_path_factory.getbasetemp()
     bucket = _SNAPSHOT_CACHE_BUCKETS.get(basetemp)
     if bucket is None or not bucket.is_dir():
+        _recreate_private_tree(basetemp)
         bucket = Path(tempfile.mkdtemp(prefix="snapshot-caches-", dir=basetemp))
         _SNAPSHOT_CACHE_BUCKETS[basetemp] = bucket
     return bucket
+
+
+def _recreate_private_tree(path: Path) -> None:
+    """Recreate *path* and any missing ancestor, with pytest's own guarantees.
+
+    A plain ``mkdir(parents=True, exist_ok=True)`` is the wrong tool here, and
+    not for style reasons (Codex review). These paths are *predictable*
+    (``/tmp/pytest-of-<user>/pytest-N/popen-gwM``) and sit on a temp root that
+    is shared between users on Unix, and pytest deliberately creates every
+    level ``0o700``, refuses a level that is a symlink, refuses one owned by
+    somebody else, and tightens a level whose group/other bits are set. Raw
+    ``parents=True`` would recreate the hierarchy with the process umask
+    (commonly world-traversable ``0o755``) and, through ``exist_ok``, silently
+    accept a directory or symlink that someone else planted in the window
+    between the deletion and this recovery. So the recovery reproduces pytest's
+    checks rather than discarding them: re-creating the tree must not be a
+    weaker act than creating it was.
+
+    Each level is created individually (no ``parents=True``) so the mode
+    applies to every one, and ``chmod`` follows the ``mkdir`` because ``mkdir``
+    masks its mode with the umask while ``chmod`` does not. An ancestor that
+    already exists is validated, never adjusted into place -- except for the
+    one fixup pytest also performs, clearing group/other bits on a directory we
+    own.
+
+    The uid and symlink checks are skipped where the platform cannot express
+    them (no ``os.getuid`` on Windows), exactly as pytest skips them. They also
+    apply only within pytest's own root -- see `_pytest_owned_levels`.
+    """
+    owned = _pytest_owned_levels(path)
+    # Anything ABOVE pytest's own root is the system's, not ours: create a
+    # missing level plainly and never validate or chmod it.
+    for level in reversed([p for p in path.parents if p not in owned]):
+        if not level.exists():
+            level.mkdir(exist_ok=True)
+    for level in owned:
+        # `exist_ok` for the race where a sibling worker creates the same
+        # level first -- that is cooperation, not the planted-path case the
+        # validation covers. An already-existing level is validated too: the
+        # planted path this guards against is one that exists when recovery
+        # runs.
+        level.mkdir(mode=0o700, exist_ok=True)
+        _require_private_dir(level)
+
+
+def _pytest_owned_levels(path: Path) -> list[Path]:
+    """*path* and the ancestors pytest itself owns, outermost first.
+
+    The boundary matters more than it looks, and getting it wrong is worse than
+    the bug this recovery fixes (Codex review). Validating *every* ancestor
+    walks into `/tmp` and `/`, which nobody running tests owns: on an ordinary
+    non-root runner the ownership check then raises on `/tmp` during the first
+    autouse allocation, so every test errors -- and running as root it is worse
+    than that, because the group/other fixup would strip `/tmp` down from its
+    usual `01777` and break the whole machine's shared temp directory.
+
+    pytest's own root is `<temproot>/pytest-of-<user>`; everything at or below
+    it is created, owned and privacy-checked by pytest, and that is exactly the
+    region this recovery may assert about. Found by name rather than by
+    comparing against `tempfile.gettempdir()`, because `PYTEST_DEBUG_TEMPROOT`,
+    a `TMPDIR` that changed mid-session, and a resolved symlink all move the
+    temp root without moving the marker.
+
+    With `--basetemp` there is no such marker: pytest creates exactly that one
+    directory (`mkdir(mode=0o700)`) and treats its parents as the caller's, so
+    the owned region is the path itself.
+    """
+    chain = [path, *path.parents]
+    for index, level in enumerate(chain):
+        if level.name.startswith("pytest-of-"):
+            return list(reversed(chain[: index + 1]))
+    return [path]
+
+
+def _require_private_dir(path: Path) -> None:
+    """Fail unless *path* is a real directory this user owns privately."""
+    follow = os.stat not in os.supports_follow_symlinks
+    info = path.stat(follow_symlinks=follow)
+    if stat.S_ISLNK(info.st_mode):
+        raise OSError(f"refusing to use {path}: it is a symbolic link")
+    uid = os.getuid() if hasattr(os, "getuid") else None
+    if uid is not None and info.st_uid != uid:
+        raise OSError(f"refusing to use {path}: it is owned by another user")
+    if uid is not None and (info.st_mode & 0o077):
+        chmod_follow = os.chmod not in os.supports_follow_symlinks
+        path.chmod(info.st_mode & ~0o077, follow_symlinks=chmod_follow)
 
 
 @pytest.fixture(autouse=True)

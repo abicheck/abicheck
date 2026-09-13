@@ -320,4 +320,75 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="test_infra.autouse_allocator_cannot_recover",
+        invariant=(
+            "A fixture every test enters must not convert a transient "
+            "failure of its own environment into a failure of the whole "
+            "session. Concretely, for an autouse allocator that creates a "
+            "directory under pytest's temp tree: the allocation must succeed "
+            "again after ANY part of the tree above it is removed -- the "
+            "allocated directory, its parent basetemp, or an ancestor -- "
+            "because the allocator cannot know, and must not depend on, what "
+            "removed it. The hazard is specific to being autouse: the first "
+            "deletion is transient, but with nothing recreating the tree "
+            "every subsequent test enters through the same failing path, so "
+            "one lost directory reads as tens of thousands of unrelated "
+            "errors. Recovery must also stay idempotent -- a version that "
+            "heals by allocating a fresh directory on every call silently "
+            "discards the per-process reuse the allocator exists for -- and it "
+            "must not be a WEAKER act than the original creation was: these "
+            "paths are predictable and sit on a temp root shared between "
+            "users, so every level it recreates carries the same private mode, "
+            "symlink refusal and ownership check the framework applied when it "
+            "created them, or the recovery is itself the vulnerability -- and no "
+            "level ABOVE the framework's own root, because asserting ownership "
+            "or repairing modes up to the filesystem root is strictly worse "
+            "than the original bug: it errors every test on a runner that does "
+            "not own the shared temp directory, and as root it would strip that "
+            "directory's world-writable mode for the whole machine."
+        ),
+        # Runs 34729579282: `unit-tests (ubuntu-latest, 3.12)` reported 2
+        # failed + 20,867 errors and 3.14 reported 29,164, every one of them
+        # `FileNotFoundError: .../popen-gwN/snapshot-caches-XXXXXXXX` out of
+        # the autouse `_isolate_snapshot_cache`. The bucket's own `is_dir()`
+        # check handled the bucket disappearing but not its PARENT, so once a
+        # worker's basetemp was gone `mkdtemp(dir=basetemp)` failed for the
+        # rest of the run -- each test reporting a different freshly-generated
+        # bucket name, which is what disguised one root cause as a flood of
+        # unrelated ones. The same signature appeared in a dev container where
+        # an unrelated process was pruning `/tmp`; that second environment is
+        # why the invariant is written about the tree vanishing rather than
+        # about any particular deleter.
+        fixed_by=(1270,),
+        seed_tests=("tests/test_conftest_cache_isolation.py",),
+        # The seed test inspects a pytest fixture's own allocator directly, so
+        # per this field's rule it claims no public surface.
+        public_surfaces=(),
+        axes={
+            "removed_level": ("bucket", "basetemp", "ancestor"),
+            "recovery": ("fresh_directory", "empty", "reused_when_intact"),
+            "privacy": ("mode_0700", "symlink_refused", "foreign_uid_refused"),
+            "hostile_environment": ("permissive_umask", "loose_existing_mode"),
+            "boundary": ("inside_pytest_root", "system_ancestor", "explicit_basetemp"),
+            "oracle": ("unfixed_allocator_reproduction",),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only this one allocator is repaired and pinned. Nothing "
+                    "sweeps conftest for other autouse fixtures that would "
+                    "fail the same way -- `_isolate_ast_memo` and the "
+                    "hypothesis profile hooks touch no filesystem today, so "
+                    "there is no second instance to fix, but a future autouse "
+                    "fixture that creates a directory would not be caught by "
+                    "any gate. The shape is also not mechanically detectable "
+                    "from a fixture's text: creating a directory under "
+                    "basetemp is not by itself a defect, only doing so without "
+                    "recovery is."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+        ),
+    ),
 )
