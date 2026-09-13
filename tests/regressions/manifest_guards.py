@@ -391,4 +391,52 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="status.container_existence_taken_for_completed_work",
+        invariant=(
+            "A status that asserts work was COMPLETED may never be "
+            "derived from the existence of the container that work "
+            "would happen in. A directory, an artifact root, a config "
+            "block, or a request object existing proves only that it "
+            "exists; the declared operands inside it must each be "
+            "checked, on every side a comparison needs, and the "
+            "completed-work status must be reachable only through the "
+            "result of the work itself -- a timed window with validated "
+            'output. Readiness ("this host could") and completion '
+            '("this host did") are two vocabulary entries, never one.'
+        ),
+        # `scripts/l2_real_profiles.py`'s `resolve_status` checked that
+        # `prepared_root` was a directory and then returned MEASURED. An
+        # EMPTY directory therefore resolved to "measured" -- no library
+        # on either side, no headers on either side, no comparison ever
+        # run, and no reason recorded. The repository's own test
+        # (`test_a_prepared_tree_with_tools_is_measurable`) enforced it:
+        # it passed an empty tmp_path, mocked tool availability, and
+        # asserted MEASURED under a name describing readiness.
+        fixed_by=(),
+        seed_tests=("tests/test_l2_real_profiles.py",),
+        axes={
+            "operand_side": ("historical", "candidate"),
+            "operand_kind": ("binary_artifact", "public_header"),
+            "container_state": (
+                "absent",
+                "empty",
+                "partially_populated",
+                "complete",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The generalized sweep is scoped to the L2 real-profile "
+                    "resolver: every declared operand is removed in turn "
+                    "from an otherwise complete tree, for every shipped "
+                    "profile. There is no repo-wide mechanical sweep for "
+                    "other status resolvers that answer a completed-work "
+                    "question from a container's existence."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+        ),
+    ),
 )

@@ -51,7 +51,25 @@ area got wrong or was at risk of getting wrong:
   comparison -- it is a different (and easier) measurement wearing the same
   name. Each profile names where each side's headers come from, and
   :func:`validate_profile` rejects a plan that sources both sides' headers from
-  one revision.
+  one revision. It must also be the baseline the integration actually declares:
+  SVS gates on its released v0.4.0 runtime distribution, so a PR-base comparison
+  is a separate profile (``SVS_PR_BASE``) and not a cheaper stand-in for it.
+* **Readiness is not a measurement.** :func:`resolve_status` answers only
+  whether a host *could* measure a profile, and its positive answers are
+  ``READY``/``PARTIAL``. It once returned ``MEASURED`` for any request whose
+  prepared root merely existed -- an empty directory, no library or headers on
+  either side, no comparison run. Declared operands are now checked
+  (:func:`missing_inputs`), and ``MEASURED`` is reachable only through
+  :func:`promote_to_measured`, which requires a completed timed run with
+  validated output.
+* **A scenario's findings mean what that scenario says they mean.** Every
+  declared scenario carries an expectation (``SCENARIO_EXPECTATIONS``). "Any
+  finding is a false positive by construction" is true of a literal
+  self-comparison and of nothing else: two independent builds under one contract
+  are to be investigated against the recorded toolchain, and two intentionally
+  different build variants differ in contract on purpose. Treating all three the
+  same risks reading correct detection of a build-induced ABI change as a
+  scanner defect -- or suppressing it to satisfy the wrong expectation.
 
 Pure stdlib; imported by the periodic harness and by its tests. Nothing here
 downloads or builds anything on import.
@@ -77,7 +95,67 @@ from pathlib import Path
 #: this constant would have rejected or dropped a valid partial result -- and the
 #: vocabulary test did not catch it, because its all-tools-missing setup reaches
 #: ``BLOCKED`` before the per-context branch runs at all (Codex review).
-STATUSES = ("MEASURED", "PARTIAL", "BLOCKED", "NOT_RUN")
+#:
+#: ``READY`` and ``MEASURED`` are likewise distinct, and the distinction is the
+#: whole point of :func:`resolve_status` vs :func:`promote_to_measured`.
+#: `resolve_status` answers a *readiness* question from preconditions alone --
+#: tools, pinned revisions, and the concrete operands present on disk -- and
+#: therefore can only ever return ``READY``. ``MEASURED`` is a claim that a timed
+#: operation actually ran and produced validated output, which no precondition
+#: check can establish. Collapsing the two let an EMPTY prepared directory report
+#: ``MEASURED``: the resolver checked that the directory existed and returned
+#: "measured" without a single artifact, header, or comparison behind it. That is
+#: the same class of dishonesty as publishing a synthetic number under a real
+#: project's name, which is what this module exists to prevent.
+STATUSES = ("MEASURED", "READY", "PARTIAL", "BLOCKED", "NOT_RUN")
+
+#: The scenario shapes a profile may declare, each with the expectation that
+#: applies to its findings. The expectation is part of the vocabulary because
+#: getting it wrong is how a harness comes to treat *correct* detection as a
+#: scanner defect: the SVS profile previously declared that any finding between
+#: two independent builds of one revision is "a false positive by construction",
+#: which is true only of a literal self-comparison. Two independent builds are
+#: not one artifact, and two deliberately different build variants are not even
+#: the same contract -- SVS's own PR artifacts make the point, with
+#: byte-identical runtime headers on the default and public-only builds and
+#: materially different exported-symbol sets.
+SCENARIO_EXPECTATIONS: dict[str, str] = {
+    "temporal_release": (
+        "released baseline vs candidate: the comparison the integration actually "
+        "gates on. Findings are real until shown otherwise and are judged against "
+        "the release's declared compatibility promise."
+    ),
+    "temporal_pr_base": (
+        "PR merge-base vs PR head: a useful additional smoke test, NOT a "
+        "substitute for the release-to-candidate comparison -- it cannot expose "
+        "an ABI change that entered the branch before the merge base."
+    ),
+    "self_comparison": (
+        "one artifact compared against itself: no introduced compatibility "
+        "regression may be reported. Persistent audit observations (unknowns, "
+        "assurance notes) are a separate, expected output and are not findings "
+        "against the change."
+    ),
+    "rebuild_equivalence": (
+        "two independent builds under a controlled, identical build contract: a "
+        "difference is to be INVESTIGATED against the recorded compiler, flags, "
+        "dependencies and artifact evidence -- not assumed to be a scanner "
+        "defect. Identical header text does not imply identical binary evidence."
+    ),
+    "variant_comparison": (
+        "two intentionally different build variants (e.g. default vs "
+        "public-only): their real contract differences are the subject of the "
+        "measurement. Findings are evaluated on their merits and are never "
+        "automatically labelled false positives."
+    ),
+}
+
+#: Scenarios that compare two different revisions/distributions, and therefore
+#: require two different operands.
+TEMPORAL_SCENARIOS = ("temporal_release", "temporal_pr_base")
+
+#: How one side's operands are obtained.
+SIDE_SOURCES = ("build_from_revision", "prebuilt_distribution")
 
 
 @dataclass(frozen=True)
@@ -120,10 +198,25 @@ class RealProfile:
     #: Run outside every timed window.
     prepare_commands: tuple[str, ...] = ()
     #: Shell commands run once PER SIDE, with ``{side}`` (``old``/``new``),
-    #: ``{revision}`` and ``{root}`` (that side's own tree) substituted. This is
-    #: what produces the two artifacts a temporal comparison needs -- a profile
-    #: with an empty list here can only ever build one side.
+    #: ``{revision}``, ``{root}`` (that side's own operand tree, in *distribution*
+    #: layout) and ``{src_root}`` (that side's checkout, when it is built from
+    #: source) substituted. This is what produces the two artifacts a temporal
+    #: comparison needs -- a profile with an empty list here can only ever build
+    #: one side, unless ``side_commands`` supplies the missing one.
     per_side_commands: tuple[str, ...] = ()
+    #: Per-side override of ``per_side_commands``, keyed by ``"old"``/``"new"``.
+    #: The two sides of a comparison are not always acquired the same way: a
+    #: released baseline is a *published distribution*, not a rebuild of a tag,
+    #: and an explicitly empty tuple here says "this side is supplied to the
+    #: harness, not built by it" (see ``side_sources``).
+    side_commands: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    #: How each side's operands are obtained, keyed by ``"old"``/``"new"``; see
+    #: ``SIDE_SOURCES``. Defaults to ``build_from_revision`` for an unlisted
+    #: side. A ``prebuilt_distribution`` side is the reason ``side_commands``
+    #: exists: re-building a release from its tag measures a rebuild, not the
+    #: artifact consumers actually got, and when the release and CI artifacts
+    #: already exist there is no reason to rebuild at all.
+    side_sources: dict[str, str] = field(default_factory=dict)
     #: Tools that must be present, by name on PATH, for ANY measurement of this
     #: profile. A tool only one header/compile context needs belongs in
     #: ``context_tools`` instead -- see that field for why the distinction is not
@@ -145,8 +238,13 @@ class RealProfile:
     #: Distribution packages needed beyond ``required_tools`` -- a header-only
     #: dependency has no binary on PATH, so tool presence cannot detect it.
     system_packages: tuple[str, ...] = ()
-    #: Scenario shapes this profile is meant to exercise.
-    scenarios: tuple[str, ...] = ("temporal",)
+    #: Scenario shapes this profile is meant to exercise, from
+    #: ``SCENARIO_EXPECTATIONS``. No default: a scenario carries the expectation
+    #: that applies to this profile's findings, and a default would let a profile
+    #: inherit an expectation nobody chose for it -- which is how SVS came to
+    #: declare that any finding between two independent builds is a false
+    #: positive by construction.
+    scenarios: tuple[str, ...] = ()
 
     @property
     def l2_libraries(self) -> tuple[LibraryTarget, ...]:
@@ -155,6 +253,35 @@ class RealProfile:
     @property
     def header_contexts(self) -> int:
         return len({lib.context for lib in self.l2_libraries})
+
+    def revision_for_side(self, side: str) -> str:
+        return self.old_revision if side == "old" else self.new_revision
+
+    def source_for_side(self, side: str) -> str:
+        """How *side*'s operands are obtained -- see ``SIDE_SOURCES``."""
+        return self.side_sources.get(side, "build_from_revision")
+
+    def commands_for_side(self, side: str) -> tuple[str, ...]:
+        """The commands that produce *side*'s operands.
+
+        ``side_commands`` wins over ``per_side_commands`` when it names the
+        side, *including* when it names it with an empty tuple -- that is the
+        explicit "supplied, not built here" statement a prebuilt distribution
+        side makes, and silently falling back to the shared build recipe would
+        turn it back into the rebuild it is meant to replace.
+        """
+        if side in self.side_commands:
+            return self.side_commands[side]
+        return self.per_side_commands
+
+    def side_root(self, prepared_root: Path, side: str) -> Path:
+        """Where *side*'s operands live under a prepared root.
+
+        One layout for both kinds of side, so a consumer never has to know which
+        it is looking at: ``prepare_script`` builds and installs into it, and an
+        operator supplying a published distribution extracts into the same place.
+        """
+        return prepared_root / f"{self.id}_{side}"
 
 
 ONEDAL = RealProfile(
@@ -232,7 +359,7 @@ ONEDAL = RealProfile(
     context_tools={"dpcpp": ("icpx",)},
     approx_build_minutes=120,
     approx_disk_gb=25,
-    scenarios=("temporal",),
+    scenarios=("temporal_pr_base",),
     notes=(
         "Five header-bearing libraries across two header/compile contexts (host "
         "and DPC++). With no declarative L2 bundle capability, measured as five "
@@ -244,47 +371,125 @@ ONEDAL = RealProfile(
     ),
 )
 
+#: The build recipe for one SVS runtime side, built from a git revision. The
+#: runtime is a **separate CMake project** under ``bindings/cpp`` -- the
+#: repository-root project does not add it as a subdirectory and declares no
+#: ``SVS_BUILD_SHARED`` option, so configuring the root with such an option
+#: builds no runtime library at all. Installed into that side's own prefix so
+#: both kinds of side present the same distribution layout (``lib/`` +
+#: ``include/svs/runtime/``) to the comparison.
+_SVS_BUILD_SIDE = (
+    "git -C svs.git worktree add --detach {src_root} {revision}",
+    "cmake -S {src_root}/bindings/cpp -B {src_root}/build "
+    "-DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX={root}",
+    "cmake --build {src_root}/build -j$(nproc)",
+    "cmake --install {src_root}/build",
+)
+
+#: The runtime library as a *distribution* consumer sees it. Paths are relative
+#: to a side's own distribution root, which is what both an installed build and
+#: an extracted published release produce.
+_SVS_RUNTIME_LIBRARY = LibraryTarget(
+    "svs_runtime",
+    "lib/libsvs_runtime.so",
+    # The installed runtime header directory -- deliberately not the whole
+    # include/ tree. SVS is largely header-only internally; scoping L2 to
+    # everything under include/ would measure the source tree rather than the
+    # runtime library's public contract. It is also NOT
+    # ``include/svs/lib/runtime.h``, which does not exist in any SVS
+    # distribution: bindings/cpp installs its PUBLIC_HEADER set into
+    # ``include/svs/runtime``.
+    public_headers=("include/svs/runtime",),
+    include_roots=("include",),
+    context="runtime",
+)
+
 SVS = RealProfile(
     id="svs",
     project="intel/ScalableVectorSearch",
     reference="https://github.com/intel/ScalableVectorSearch/pull/387",
     repository="https://github.com/intel/ScalableVectorSearch.git",
-    # Real, verified revisions: PR #387's head and its merge base with main.
-    old_revision="8052bd9f0f78b759cad2bc5168ab37c4f66f0670",
+    # The integration's OWN baseline: the released v0.4.0 runtime distribution,
+    # compared against PR #387's head. This is the comparison that exposed the
+    # real ABI change, and it is not interchangeable with the PR-base smoke test
+    # -- which is why that one is a separate profile (SVS_PR_BASE) rather than a
+    # second scenario on this one. ``old_revision`` names the release tag
+    # (75e30f222cf06bcc0625ed021d783cae2d75cfc5) purely as the identity of the
+    # baseline being consumed; this profile does not rebuild it.
+    old_revision="v0.4.0",
     new_revision="7058e9605a54180aa64fbb7a81a82aa47f07eeff",
-    libraries=(
-        LibraryTarget(
-            "svs_shared",
-            "lib/libsvs_shared.so",
-            # The *published runtime* headers only -- deliberately not the whole
-            # include/ tree. SVS is largely header-only internally; scoping L2
-            # to everything under include/ would measure the source tree rather
-            # than the runtime library's public contract.
-            public_headers=("include/svs/lib/runtime.h",),
-            include_roots=("include",),
-            context="runtime",
-        ),
+    libraries=(_SVS_RUNTIME_LIBRARY,),
+    prepare_commands=(
+        "git clone --filter=blob:none {repository} svs.git",
+        # PR #387's head is not on the default branch, so fetch it explicitly.
+        "git -C svs.git fetch origin 'refs/pull/387/head:pr387'",
     ),
-    prepare_commands=("git clone --filter=blob:none {repository} svs.git",),
-    per_side_commands=(
-        "git -C svs.git worktree add --detach {root} {revision}",
-        "cmake -S {root} -B {root}/build -DCMAKE_BUILD_TYPE=Release "
-        "-DSVS_BUILD_SHARED=ON",
-        "cmake --build {root}/build -j$(nproc)",
-    ),
+    per_side_commands=_SVS_BUILD_SIDE,
+    # The old side is CONSUMED, not rebuilt: the published v0.4.0 runtime
+    # distribution is the artifact consumers actually received, and rebuilding
+    # the tag would measure this host's toolchain instead. The operator extracts
+    # it into the side root; `missing_inputs` then fails loudly if it is absent,
+    # which is the whole reason an empty prepared tree can no longer read as a
+    # completed measurement.
+    side_commands={"old": ()},
+    side_sources={"old": "prebuilt_distribution"},
     required_tools=("git", "cmake", "g++"),
     approx_build_minutes=45,
     approx_disk_gb=6,
-    # Two distinct scenarios, kept separate on purpose: a temporal comparison
-    # (old revision vs new) answers "did this change break the ABI", while an
-    # equivalence comparison (two builds of the *same* revision) answers "is the
-    # analysis stable", and a single number cannot mean both.
-    scenarios=("temporal", "equivalence"),
+    scenarios=("temporal_release",),
     notes=(
-        "One runtime shared library with published runtime headers. Scope is the "
-        "published runtime headers, not the whole source/include tree.",
-        "The equivalence scenario compares two independent builds of one "
-        "revision: any finding there is a false positive by construction.",
+        "One runtime shared library (lib/libsvs_runtime.so) with its installed "
+        "public headers (include/svs/runtime). Scope is the published runtime "
+        "headers, not the whole source/include tree.",
+        "The runtime is a separate CMake project under bindings/cpp: "
+        "`project(svs_runtime VERSION 0.4.0)` defines the shared-library target "
+        "and installs PUBLIC_HEADER into include/svs/runtime. The repository-root "
+        "project does not add that subproject and declares no SVS_BUILD_SHARED "
+        "option, so a root-level configure produces no runtime library -- the "
+        "inputs this profile originally declared (lib/libsvs_shared.so, "
+        "include/svs/lib/runtime.h, a root build with -DSVS_BUILD_SHARED=ON) are "
+        "absent from every real distribution and could never have been measured.",
+        "The baseline is the RELEASED v0.4.0 runtime distribution, not the PR's "
+        "merge base. A PR-base comparison is a useful additional smoke test and "
+        "cannot replace this one; it lives in the separate SVS_PR_BASE profile.",
+        "The runtime is C++20 (CXX_STANDARD 20, CXX_EXTENSIONS OFF); an L2 "
+        "header parse of it must use the same dialect.",
+    ),
+)
+
+SVS_PR_BASE = RealProfile(
+    id="svs_pr_base",
+    project="intel/ScalableVectorSearch",
+    reference="https://github.com/intel/ScalableVectorSearch/pull/387",
+    repository="https://github.com/intel/ScalableVectorSearch.git",
+    # PR #387's merge base with main, and its head. Both real, verified
+    # revisions. Deliberately a SEPARATE profile from the release-to-candidate
+    # comparison above: the two answer different questions, and a single result
+    # cannot mean both.
+    old_revision="8052bd9f0f78b759cad2bc5168ab37c4f66f0670",
+    new_revision="7058e9605a54180aa64fbb7a81a82aa47f07eeff",
+    libraries=(_SVS_RUNTIME_LIBRARY,),
+    prepare_commands=(
+        "git clone --filter=blob:none {repository} svs.git",
+        "git -C svs.git fetch origin 'refs/pull/387/head:pr387'",
+    ),
+    per_side_commands=_SVS_BUILD_SIDE,
+    required_tools=("git", "cmake", "g++"),
+    approx_build_minutes=90,
+    approx_disk_gb=10,
+    # Both sides are built here, under one controlled build contract, so the
+    # rebuild-equivalence question is answerable from this profile's own
+    # artifacts -- and answering it means INVESTIGATING a difference against the
+    # recorded toolchain, not declaring it a false positive. See
+    # SCENARIO_EXPECTATIONS.
+    scenarios=("temporal_pr_base", "rebuild_equivalence"),
+    notes=(
+        "A smoke test, not the integration's gate: it compares PR #387's merge "
+        "base against its head and therefore cannot expose an ABI change that "
+        "entered the branch before that base. The release-to-candidate "
+        "comparison (profile `svs`) is the one that did.",
+        "Both sides are built from source here, so each takes a full runtime "
+        "build -- roughly twice the `svs` profile's cost.",
     ),
 )
 
@@ -347,7 +552,7 @@ PVXS = RealProfile(
     required_tools=("git", "make", "g++", "perl"),
     approx_build_minutes=30,
     approx_disk_gb=4,
-    scenarios=("temporal",),
+    scenarios=("temporal_pr_base",),
     notes=(
         "Two libraries with side-specific public/support/generated headers and "
         "two EPICS include roots -- the multi-context case at the smallest "
@@ -385,7 +590,7 @@ PVXS = RealProfile(
     ),
 )
 
-PROFILES: dict[str, RealProfile] = {p.id: p for p in (ONEDAL, SVS, PVXS)}
+PROFILES: dict[str, RealProfile] = {p.id: p for p in (ONEDAL, SVS, SVS_PR_BASE, PVXS)}
 
 
 #: A revision that is a placeholder rather than an immutable SHA. Rendered into
@@ -444,10 +649,50 @@ def validate_profile(profile: RealProfile) -> list[str]:
                     f"{profile.id}/{lib.name}: excluded from L2 scope yet names "
                     "public headers"
                 )
-    if "temporal" in profile.scenarios and profile.old_revision == profile.new_revision:
+    if (
+        any(scenario in TEMPORAL_SCENARIOS for scenario in profile.scenarios)
+        and profile.old_revision == profile.new_revision
+    ):
         problems.append(
             f"{profile.id}: a temporal scenario needs two different revisions"
         )
+    for scenario in profile.scenarios:
+        if scenario not in SCENARIO_EXPECTATIONS:
+            problems.append(
+                f"{profile.id}: scenario {scenario!r} states no expectation -- a "
+                "scenario whose findings have no declared meaning is how correct "
+                "detection comes to be read as a scanner defect (see "
+                "SCENARIO_EXPECTATIONS)"
+            )
+    for side in ("old", "new"):
+        source = profile.source_for_side(side)
+        if source not in SIDE_SOURCES:
+            problems.append(
+                f"{profile.id}: {side} side declares unknown source {source!r}"
+            )
+            continue
+        commands = profile.commands_for_side(side)
+        if source == "build_from_revision" and not commands:
+            problems.append(
+                f"{profile.id}: {side} side is built from a revision but no "
+                "commands produce it, so that side can never exist"
+            )
+        if source == "prebuilt_distribution" and commands:
+            problems.append(
+                f"{profile.id}: {side} side is declared a prebuilt distribution "
+                "yet carries build commands -- rebuilding a published artifact "
+                "measures the rebuild, not the artifact consumers received"
+            )
+    for side in profile.side_commands:
+        if side not in ("old", "new"):
+            problems.append(
+                f"{profile.id}: side_commands names {side!r}, which is not a side"
+            )
+    for side in profile.side_sources:
+        if side not in ("old", "new"):
+            problems.append(
+                f"{profile.id}: side_sources names {side!r}, which is not a side"
+            )
     for side, revision in (
         ("old", profile.old_revision),
         ("new", profile.new_revision),
@@ -458,6 +703,11 @@ def validate_profile(profile: RealProfile) -> list[str]:
                 "usable revision -- prepare_script() would render it into a command "
                 "the shell cannot even parse, while this profile still read as valid"
             )
+    if not profile.scenarios:
+        problems.append(
+            f"{profile.id}: declares no scenario, so its findings carry no "
+            "stated expectation (see SCENARIO_EXPECTATIONS)"
+        )
     if not profile.l2_libraries:
         problems.append(f"{profile.id}: no library is in L2 scope")
     if not profile.required_tools:
@@ -506,6 +756,36 @@ def digest_tree(root: Path, patterns: tuple[str, ...] = ("*.h", "*.hpp")) -> str
         h.update(path.read_bytes())
         h.update(b"\0")
     return f"sha256:{h.hexdigest()}"
+
+
+def missing_inputs(profile: RealProfile, prepared_root: Path) -> list[str]:
+    """Concrete operands this profile needs that are absent under *prepared_root*.
+
+    The gap this closes: readiness used to be answered by ``prepared_root`` being
+    a directory, full stop. An EMPTY directory therefore satisfied it -- no
+    library on either side, no headers on either side, no comparison -- and the
+    resolver reported the profile as measured. Existence of a directory is not
+    evidence of anything; the operands are.
+
+    Both sides are checked, and both halves of each library's L2 input: the
+    binary artifact and every declared public header (a file or a header root
+    directory). A missing historical side is exactly as disqualifying as a
+    missing candidate one -- a comparison needs both.
+    """
+    missing: list[str] = []
+    for side in ("old", "new"):
+        root = profile.side_root(prepared_root, side)
+        if not root.is_dir():
+            missing.append(f"{side}: {root} (no operand tree for this side)")
+            continue
+        for lib in profile.l2_libraries:
+            artifact = root / lib.artifact
+            if not artifact.is_file():
+                missing.append(f"{side}/{lib.name}: {lib.artifact} (library)")
+            for header in lib.public_headers:
+                if not (root / header).exists():
+                    missing.append(f"{side}/{lib.name}: {header} (public header)")
+    return missing
 
 
 def missing_tools(profile: RealProfile) -> list[str]:
@@ -592,6 +872,13 @@ class ProfileStatus:
     #: measure, and what each blocked context is missing. Empty otherwise.
     measurable_libraries: list[str] = field(default_factory=list)
     blocked_libraries: dict[str, list[str]] = field(default_factory=dict)
+    #: Operands the profile needs that are not present on disk -- see
+    #: :func:`missing_inputs`. Non-empty only for a ``BLOCKED`` status.
+    missing_inputs: list[str] = field(default_factory=list)
+    #: Under ``MEASURED`` only: what was actually measured. A ``MEASURED``
+    #: status with no measurement behind it is unconstructible -- see
+    #: :func:`promote_to_measured`.
+    measurement: dict[str, object] | None = None
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -599,9 +886,11 @@ class ProfileStatus:
             "status": self.status,
             "reason": self.reason,
             "missing_tools": self.missing_tools,
+            "missing_inputs": self.missing_inputs,
             "toolchain": self.toolchain,
             "measurable_libraries": self.measurable_libraries,
             "blocked_libraries": self.blocked_libraries,
+            "measurement": self.measurement,
         }
 
 
@@ -662,9 +951,18 @@ def _partial_status(profile: RealProfile) -> ProfileStatus | None:
 def resolve_status(
     profile: RealProfile, *, prepared_root: Path | None, requested: bool
 ) -> ProfileStatus:
-    """Decide whether *profile* can be measured here, and say why if not.
+    """Decide whether *profile* is READY to be measured here, and say why if not.
 
-    Never returns a substitute. The outcomes are measure it, ``PARTIAL`` (some
+    This answers a **readiness** question only, and so its positive outcomes are
+    ``READY`` and ``PARTIAL`` -- never ``MEASURED``. It returned ``MEASURED``
+    once, for any request whose ``prepared_root`` merely *existed*: an empty
+    directory, with neither side's library, neither side's headers, and no
+    comparison ever run, resolved to "measured" with no reason recorded. A
+    status asserting that a timed operation completed cannot be derived from
+    preconditions; :func:`promote_to_measured` is the only way to reach it, and
+    it requires the completed measurement itself.
+
+    Never returns a substitute. The outcomes are ``READY``, ``PARTIAL`` (some
     header/compile contexts are unbuildable here and others are -- see
     :func:`_partial_status`), ``BLOCKED`` with a reason, or ``NOT_RUN`` because
     nobody asked; and the reason text is the deliverable for the negative ones,
@@ -725,10 +1023,124 @@ def resolve_status(
             ),
             toolchain=toolchain_identity(profile),
         )
+    absent_inputs = missing_inputs(profile, prepared_root)
+    if absent_inputs:
+        # Checked before the per-context split for the same reason the prepared
+        # tree is: a host missing the operands themselves is blocked on them,
+        # whatever its compilers can build.
+        return ProfileStatus(
+            profile.id,
+            "BLOCKED",
+            reason=(
+                f"{len(absent_inputs)} declared operand(s) are absent under "
+                f"{prepared_root}: a prepared directory is not evidence that "
+                "either side's library or headers exist"
+            ),
+            toolchain=toolchain_identity(profile),
+            missing_inputs=absent_inputs,
+        )
     partial = _partial_status(profile)
     if partial is not None:
         return partial
-    return ProfileStatus(profile.id, "MEASURED", toolchain=toolchain_identity(profile))
+    return ProfileStatus(
+        profile.id,
+        "READY",
+        reason=(
+            "preconditions satisfied: tools, pinned revisions and both sides' "
+            "operands are present. Nothing has been measured yet"
+        ),
+        toolchain=toolchain_identity(profile),
+        measurable_libraries=[lib.name for lib in profile.l2_libraries],
+    )
+
+
+@dataclass(frozen=True)
+class MeasurementResult:
+    """The output of one completed, timed measurement of a profile."""
+
+    profile_id: str
+    #: The in-scope libraries this measurement actually covered.
+    libraries: tuple[str, ...]
+    #: Wall-clock duration of the timed window. Must be positive: a measurement
+    #: that took no time did not happen.
+    wall_seconds: float
+    #: Files the measurement produced (reports, receipts). Each must exist.
+    output_paths: tuple[Path, ...] = ()
+    #: Free-text detail carried into the status for a reader.
+    detail: str | None = None
+
+
+def promote_to_measured(
+    status: ProfileStatus, result: MeasurementResult
+) -> ProfileStatus:
+    """Turn a ``READY``/``PARTIAL`` status into ``MEASURED``, given the result.
+
+    The one route to ``MEASURED``, and it is deliberately impossible to take
+    without a completed measurement in hand. Every rejection here corresponds to
+    a way the old resolver could publish the word without one:
+
+    * a status that was never ready (``BLOCKED``/``NOT_RUN``) cannot become
+      measured by assertion;
+    * a result covering no library measured nothing;
+    * a non-positive duration is not a timed window;
+    * an output path that does not exist is an unvalidated output.
+
+    A ``PARTIAL`` status may be promoted, but only over the libraries it said
+    were measurable -- promoting it over a blocked library would republish the
+    coverage gap ``PARTIAL`` exists to expose.
+    """
+    if status.status not in ("READY", "PARTIAL"):
+        raise ValueError(
+            f"{status.profile_id}: cannot promote a {status.status} status to "
+            "MEASURED -- only a ready profile can have been measured"
+        )
+    if result.profile_id != status.profile_id:
+        raise ValueError(
+            f"measurement for {result.profile_id!r} cannot promote the status of "
+            f"{status.profile_id!r}"
+        )
+    if not result.libraries:
+        raise ValueError(
+            f"{status.profile_id}: a measurement covering no library measured "
+            "nothing; MEASURED would be a claim about an empty run"
+        )
+    if status.measurable_libraries:
+        unexpected = sorted(set(result.libraries) - set(status.measurable_libraries))
+        if unexpected:
+            raise ValueError(
+                f"{status.profile_id}: measurement claims librar(ies) "
+                f"{unexpected} that this host reported unmeasurable"
+            )
+    if not result.wall_seconds > 0:
+        raise ValueError(
+            f"{status.profile_id}: wall_seconds={result.wall_seconds!r} is not a "
+            "timed window, so nothing was measured"
+        )
+    absent = [str(path) for path in result.output_paths if not Path(path).exists()]
+    if absent:
+        raise ValueError(
+            f"{status.profile_id}: measurement output(s) {absent} do not exist, "
+            "so the result is unvalidated"
+        )
+    return ProfileStatus(
+        status.profile_id,
+        "MEASURED",
+        reason=result.detail
+        or (
+            f"measured {len(result.libraries)} librar(ies) in "
+            f"{result.wall_seconds:.1f}s"
+        ),
+        missing_tools=list(status.missing_tools),
+        toolchain=dict(status.toolchain),
+        measurable_libraries=list(result.libraries),
+        blocked_libraries=dict(status.blocked_libraries),
+        measurement={
+            "libraries": list(result.libraries),
+            "wall_seconds": result.wall_seconds,
+            "outputs": [str(path) for path in result.output_paths],
+            "promoted_from": status.status,
+        },
+    )
 
 
 def prepare_script(profile: RealProfile) -> str:
@@ -756,14 +1168,20 @@ def prepare_script(profile: RealProfile) -> str:
             f"{profile.id}: refusing to render a prepare script with placeholder "
             "revisions -- it would emit commands the shell cannot parse"
         )
+    built_sides = ", ".join(
+        side
+        for side in ("old", "new")
+        if profile.source_for_side(side) == "build_from_revision"
+    )
     lines = [
         "#!/usr/bin/env bash",
         "# Generated from scripts/l2_real_profiles.py -- do not hand-edit.",
         f"# Profile: {profile.id} ({profile.project})",
         f"# Reference: {profile.reference}",
         f"# Approx cost: {profile.approx_build_minutes} build-minutes, "
-        f"{profile.approx_disk_gb}GB disk "
-        f"(for BOTH revisions -- a temporal comparison needs two builds).",
+        f"{profile.approx_disk_gb}GB disk (covering the "
+        f"{built_sides if built_sides else 'no'} side(s) built here -- a temporal "
+        "comparison needs two operands, whether built or supplied).",
         "# Everything here is SETUP: it is excluded from every measured window.",
         "set -euo pipefail",
         'ROOT="$(pwd)"',
@@ -789,7 +1207,26 @@ def prepare_script(profile: RealProfile) -> str:
         ("old", profile.old_revision),
         ("new", profile.new_revision),
     ):
-        for command in profile.per_side_commands:
+        side_root = f'"$ROOT"/{profile.id}_{side}'
+        commands = profile.commands_for_side(side)
+        if profile.source_for_side(side) == "prebuilt_distribution":
+            # A supplied side is not built, and the script must say so loudly
+            # rather than silently produce nothing: an absent distribution is
+            # the exact condition that used to read as a completed measurement.
+            lines.extend(
+                [
+                    f"# {side} side: PREBUILT DISTRIBUTION ({revision}).",
+                    f"# Extract the published distribution into {side_root} so "
+                    "that its lib/ and include/ trees sit directly under it.",
+                    "# It is NOT rebuilt here: rebuilding a release measures "
+                    "this host's toolchain, not the artifact consumers received.",
+                    f"if [ ! -d {side_root} ]; then echo 'missing {side} side: "
+                    f"extract the {profile.project} {revision} distribution into "
+                    f"{profile.id}_{side}' >&2; exit 1; fi",
+                ]
+            )
+            continue
+        for command in commands:
             lines.append(
                 '( cd "$ROOT" && '
                 + command.format(
@@ -804,7 +1241,11 @@ def prepare_script(profile: RealProfile) -> str:
                     # `$ROOT/<root>` and fails. The subshell isolation added
                     # earlier is what exposed this: before it, the leaked cwd
                     # happened to mask it.
-                    root=f'"$ROOT"/{profile.id}_{side}',
+                    root=side_root,
+                    # The side's own checkout, kept distinct from its
+                    # distribution root: a profile that installs into the
+                    # operand tree must not also check out over it.
+                    src_root=f"{side_root}_src",
                 )
                 + " )"
             )
@@ -828,7 +1269,17 @@ if __name__ == "__main__":  # pragma: no cover - a reporting convenience
                     if not lib.in_l2_scope
                 },
                 "header_contexts": entry.header_contexts,
-                "scenarios": list(entry.scenarios),
+                "scenarios": {
+                    scenario: SCENARIO_EXPECTATIONS.get(scenario)
+                    for scenario in entry.scenarios
+                },
+                "sides": {
+                    side: {
+                        "revision": entry.revision_for_side(side),
+                        "source": entry.source_for_side(side),
+                    }
+                    for side in ("old", "new")
+                },
                 "validation": validate_profile(entry),
                 "status": resolve_status(
                     entry, prepared_root=None, requested=True
