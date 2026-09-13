@@ -273,7 +273,7 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # header_sequence`, no verdict, and no findings on ANY axis — the
         # binary's own exported-symbol conclusions included, which a header
         # insertion cannot touch at all.
-        fixed_by=(1273,),
+        fixed_by=(1274,),
         seed_tests=("tests/test_comparability_gate_header_insertion.py",),
         # The seed tests call `check_contracts_comparable`/`checker.compare`
         # directly, never through Click or `abicheck.service`.

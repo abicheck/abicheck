@@ -378,7 +378,7 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
         # so the wrapper consuming that sidecar reported its own
         # "missing comparison reports" usage error and the real reason was
         # lost exactly where it was needed.
-        fixed_by=(1178, 1273),
+        fixed_by=(1178, 1274),
         seed_tests=("tests/test_cli_comparability_gate.py",),
         public_surfaces=("cli",),
         axes={
