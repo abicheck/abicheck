@@ -130,7 +130,8 @@ def test_compare_one_library_stamps_contract_coverage_failure_count(
         return CompareResult(diff=result, old_snapshot=old_snap, new_snapshot=new_snap)
 
     monkeypatch.setattr(
-        "abicheck.cli_compare_release_pairwise._run_compare_pair", _fake_run_compare_pair
+        "abicheck.cli_compare_release_pairwise._run_compare_pair",
+        _fake_run_compare_pair,
     )
     entry = _compare_one_library(
         "libfoo.so",
@@ -180,11 +181,14 @@ def test_compare_one_library_stamps_coverage_warnings_onto_the_entry(
             changes=[],
             verdict=Verdict.COMPATIBLE,
         )
-        result.coverage_warnings = ["old and new binaries are byte-identical (sha256 abc...)"]
+        result.coverage_warnings = [
+            "old and new binaries are byte-identical (sha256 abc...)"
+        ]
         return CompareResult(diff=result, old_snapshot=old_snap, new_snapshot=new_snap)
 
     monkeypatch.setattr(
-        "abicheck.cli_compare_release_pairwise._run_compare_pair", _fake_run_compare_pair
+        "abicheck.cli_compare_release_pairwise._run_compare_pair",
+        _fake_run_compare_pair,
     )
     entry = _compare_one_library(
         "libfoo.so",
@@ -234,7 +238,8 @@ def test_compare_one_library_omits_coverage_warnings_key_when_none(
         return CompareResult(diff=result, old_snapshot=old_snap, new_snapshot=new_snap)
 
     monkeypatch.setattr(
-        "abicheck.cli_compare_release_pairwise._run_compare_pair", _fake_run_compare_pair
+        "abicheck.cli_compare_release_pairwise._run_compare_pair",
+        _fake_run_compare_pair,
     )
     entry = _compare_one_library(
         "libfoo.so",
@@ -269,7 +274,9 @@ def test_release_markdown_renders_the_per_library_coverage_warnings() -> None:
         {
             "library": "liba.so",
             "verdict": "NO_CHANGE",
-            "coverage_warnings": ["old and new binaries are byte-identical (sha256 abc...)"],
+            "coverage_warnings": [
+                "old and new binaries are byte-identical (sha256 abc...)"
+            ],
         },
         {"library": "libb.so", "verdict": "NO_CHANGE"},
     ]
@@ -297,7 +304,9 @@ def test_release_json_carries_the_per_library_coverage_warnings_through() -> Non
         {
             "library": "liba.so",
             "verdict": "NO_CHANGE",
-            "coverage_warnings": ["old and new binaries are byte-identical (sha256 abc...)"],
+            "coverage_warnings": [
+                "old and new binaries are byte-identical (sha256 abc...)"
+            ],
         },
     ]
     out = _format_release_json(
@@ -350,7 +359,8 @@ def test_compare_one_library_stashes_old_snapshot_only_when_requested(
         return CompareResult(diff=result, old_snapshot=old_snap, new_snapshot=new_snap)
 
     monkeypatch.setattr(
-        "abicheck.cli_compare_release_pairwise._run_compare_pair", _fake_run_compare_pair
+        "abicheck.cli_compare_release_pairwise._run_compare_pair",
+        _fake_run_compare_pair,
     )
     common = (
         {"libfoo.so": old_path},

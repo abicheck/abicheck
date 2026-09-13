@@ -109,13 +109,20 @@ _RELEASE_VERDICT_ORDER: dict[str, int] = {
 }
 
 
-def _release_global_verdict(bundle_result: BundleDiffResult | None, matrix_result: DiffResult | None) -> str:
+def _release_global_verdict(
+    bundle_result: BundleDiffResult | None, matrix_result: DiffResult | None
+) -> str:
     """Release-global (bundle/probe-matrix) verdict alone -- unlike
     ``worst_verdict``'s own fold of it, never masked by an unrelated
     library's ``ERROR``/``not_comparable`` (Codex review, fresh evidence)."""
     worst = "NO_CHANGE"
-    for v in (bundle_result.bundle_verdict.value if bundle_result else None, matrix_result.verdict.value if matrix_result else None):
-        if v is not None and _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(worst, 0):
+    for v in (
+        bundle_result.bundle_verdict.value if bundle_result else None,
+        matrix_result.verdict.value if matrix_result else None,
+    ):
+        if v is not None and _RELEASE_VERDICT_ORDER.get(
+            v, 0
+        ) > _RELEASE_VERDICT_ORDER.get(worst, 0):
             worst = v
     return worst
 
@@ -183,12 +190,6 @@ def _release_completed_compatibility_verdict(
     return worst
 
 
-
-
-
-
-
-
 def _resolve_bundle_manifest(
     manifest_path: Path | None,
     old_root: Path | None,
@@ -237,7 +238,9 @@ def _resolve_bundle_manifest(
 
     all_roots = ((old_root, old_variant), (new_root, new_variant))
     roots = all_roots[:1] if old_side_only else all_roots
-    candidates: list[tuple[Path, str | None]] = [(r, v) for r, v in roots if r is not None]
+    candidates: list[tuple[Path, str | None]] = [
+        (r, v) for r, v in roots if r is not None
+    ]
     if not candidates:
         maps = (old_map,) if old_side_only else (old_map, new_map)
         candidates = [(p, None) for m in maps for p in m.values()]
@@ -409,14 +412,15 @@ def _extract_if_package(
 
     try:
         return extract_if_package(
-            input_path, debug_pkg, devel_pkg, make_temp_dir, is_package, detect_extractor
+            input_path,
+            debug_pkg,
+            devel_pkg,
+            make_temp_dir,
+            is_package,
+            detect_extractor,
         )
     except ReleaseOperandContentError as exc:
         raise click.ClickException(str(exc)) from exc
-
-
-
-
 
 
 def reject_bundle_facts_out_collision(
@@ -601,7 +605,9 @@ def write_bundle_facts_out(
         if resolved_manifest is not None:
             manifest = resolved_manifest
         else:
-            manifest = load_manifest(manifest_path) if manifest_path is not None else None
+            manifest = (
+                load_manifest(manifest_path) if manifest_path is not None else None
+            )
 
         # Canonicalize DiffResult.library the way old_map's keys were derived,
         # not by basename against old_map's *values* -- a stored operand's value
@@ -648,7 +654,9 @@ def _collect_bundle_result(
     worst_verdict: str,
     manifest_path: Path | None,
     bundle_system_providers: tuple[str, ...],
-    bundle_cohorts: tuple[str, ...] = (), policy: str = "strict_abi", policy_file: PolicyFile | None = None,
+    bundle_cohorts: tuple[str, ...] = (),
+    policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
     old_root: Path | None = None,
     new_root: Path | None = None,
     old_variant: str | None = None,
@@ -707,7 +715,9 @@ def _collect_bundle_result(
     if bundle_result is not None:
         bundle_result.policy_file = policy_file  # G38 Phase 16
         bv = bundle_result.bundle_verdict.value
-        if _RELEASE_VERDICT_ORDER.get(bv, 0) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
+        if _RELEASE_VERDICT_ORDER.get(bv, 0) > _RELEASE_VERDICT_ORDER.get(
+            worst_verdict, 0
+        ):
             worst_verdict = bv
     return bundle_result, worst_verdict
 
@@ -802,7 +812,12 @@ def _fold_release_global_severity(
         bundle_changes = [f.to_change() for f in bundle_result.bundle_findings]
         worst = max(
             worst,
-            compute_exit_code(bundle_changes, config, policy=bundle_result.policy, policy_file=bundle_result.policy_file),
+            compute_exit_code(
+                bundle_changes,
+                config,
+                policy=bundle_result.policy,
+                policy_file=bundle_result.policy_file,
+            ),
         )
     if matrix_result is not None and matrix_result.changes:
         worst = max(
@@ -917,12 +932,17 @@ def _format_release_summary(
     new_map: dict[str, Path],
     warning_msgs: list[str],
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] | None = None,
-    bundle_result: BundleDiffResult | None = None, matrix_result: DiffResult | None = None,
-    severity_config: SeverityConfig | None = None, severity_exit_code: int | None = None,
-    contract_coverage_exit_contribution: int = 0, contract_coverage_failure_count: int = 0,
+    bundle_result: BundleDiffResult | None = None,
+    matrix_result: DiffResult | None = None,
+    severity_config: SeverityConfig | None = None,
+    severity_exit_code: int | None = None,
+    contract_coverage_exit_contribution: int = 0,
+    contract_coverage_failure_count: int = 0,
     fail_on_removed: bool = False,
-    policy: str = DEFAULT_POLICY_PROFILE, policy_file_path: Path | None = None,
-    suppress: Path | None = None, pack_application: PackApplication | None = None,
+    policy: str = DEFAULT_POLICY_PROFILE,
+    policy_file_path: Path | None = None,
+    suppress: Path | None = None,
+    pack_application: PackApplication | None = None,
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
     assurance_terms: ReleaseAssuranceTerms | None = None,
@@ -986,21 +1006,36 @@ def _format_release_summary(
         )
     if fmt == "junit":
         return _format_release_junit(
-            diff_pairs, matrix_result, library_results, severity_config=severity_config,
-            scope_terms=scope_terms, show_only=show_only,
+            diff_pairs,
+            matrix_result,
+            library_results,
+            severity_config=severity_config,
+            scope_terms=scope_terms,
+            show_only=show_only,
             env_matrix_source_sha256=env_matrix_source_sha256,
         )
     if fmt == "json":
         return _format_release_json(
-            worst_verdict, old_dir, new_dir, library_results, removed_keys, added_keys,
-            old_map, new_map, warning_msgs, bundle_result, matrix_result,
+            worst_verdict,
+            old_dir,
+            new_dir,
+            library_results,
+            removed_keys,
+            added_keys,
+            old_map,
+            new_map,
+            warning_msgs,
+            bundle_result,
+            matrix_result,
             severity_config=severity_config,
             severity_exit_code=severity_exit_code,
             contract_coverage_exit_contribution=contract_coverage_exit_contribution,
             contract_coverage_failure_count=contract_coverage_failure_count,
             fail_on_removed=fail_on_removed,
-            policy=policy, policy_file_path=policy_file_path,
-            suppress=suppress, pack_application=pack_application,
+            policy=policy,
+            policy_file_path=policy_file_path,
+            suppress=suppress,
+            pack_application=pack_application,
             scope_public_headers=scope_public_headers,
             scope_terms=scope_terms,
             assurance_terms=assurance_terms,
@@ -1009,8 +1044,16 @@ def _format_release_summary(
             require_complete_analysis=require_complete_analysis,
         )
     md = _format_release_markdown(
-        worst_verdict, old_dir, new_dir, library_results, removed_keys, added_keys,
-        old_map, new_map, bundle_result, matrix_result,
+        worst_verdict,
+        old_dir,
+        new_dir,
+        library_results,
+        removed_keys,
+        added_keys,
+        old_map,
+        new_map,
+        bundle_result,
+        matrix_result,
         scope_section=scope_terms.section if scope_terms is not None else None,
         severity_config=severity_config,
         show_only=show_only,
@@ -1230,10 +1273,13 @@ def _format_release_json(
     matrix_result: DiffResult | None,
     severity_config: SeverityConfig | None = None,
     severity_exit_code: int | None = None,
-    contract_coverage_exit_contribution: int = 0, contract_coverage_failure_count: int = 0,
+    contract_coverage_exit_contribution: int = 0,
+    contract_coverage_failure_count: int = 0,
     fail_on_removed: bool = False,
-    policy: str = DEFAULT_POLICY_PROFILE, policy_file_path: Path | None = None,
-    suppress: Path | None = None, pack_application: PackApplication | None = None,
+    policy: str = DEFAULT_POLICY_PROFILE,
+    policy_file_path: Path | None = None,
+    suppress: Path | None = None,
+    pack_application: PackApplication | None = None,
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
     assurance_terms: ReleaseAssuranceTerms | None = None,
@@ -1283,12 +1329,22 @@ def _format_release_json(
     ]
     from .report.not_comparable import run_outcome_dict_for_release
     from .workflows.release_scope import release_global_ran, unmatched_names
-    terms = scope_terms if scope_terms is not None else comparison_scope_terms(resolve_scope_decision(None, None))
+
+    terms = (
+        scope_terms
+        if scope_terms is not None
+        else comparison_scope_terms(resolve_scope_decision(None, None))
+    )
     # ADR-071, already decided by the caller; a direct unit-test/legacy call
     # falls back to an empty, setting-off decision (contributes `0`, emits no
     # section) -- the same default `scope_terms` uses just above.
-    a_terms = assurance_terms if assurance_terms is not None else release_assurance_terms(
-        resolve_release_assurance_decision((), require_complete=False))
+    a_terms = (
+        assurance_terms
+        if assurance_terms is not None
+        else release_assurance_terms(
+            resolve_release_assurance_decision((), require_complete=False)
+        )
+    )
     release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
     # The release's own assurance gate (`assurance.require_complete`),
     # threaded into *every* decision a reader sees, not just the process
@@ -1299,8 +1355,13 @@ def _format_release_json(
     # disagreement `_exit_compare_release` exists to make impossible
     # (Codex review, PR #1238, P1).
     exit_dict = resolve_release_exit_decision_for_report(
-        worst_verdict, fail_on_removed, removed_keys, severity_exit_code,
-        contract_coverage_exit_contribution, library_results, release_global_verdict,
+        worst_verdict,
+        fail_on_removed,
+        removed_keys,
+        severity_exit_code,
+        contract_coverage_exit_contribution,
+        library_results,
+        release_global_verdict,
         incomplete_scope_contribution=terms.decision.incomplete_scope_exit_contribution,
         no_comparison_completed_contribution=terms.decision.no_comparison_completed_exit_contribution,
         require_complete_analysis=require_complete_analysis,
@@ -1326,7 +1387,9 @@ def _format_release_json(
             _release_completed_compatibility_verdict(
                 library_results,
                 release_global_verdict,
-                release_global_ran=release_global_ran(bundle_result, matrix_result, record),
+                release_global_ran=release_global_ran(
+                    bundle_result, matrix_result, record
+                ),
             ),
             exit_dict,
             scope=terms.completeness,
@@ -1348,10 +1411,13 @@ def _format_release_json(
         # contradiction check (this same PR) fails closed on, turning a
         # legitimate --fail-on-removed-library escalation into an
         # unavailable target for aggregate rather than preserving it.
-        removed_lib_contribution = exit_dict.get("removed_required_library_contribution")
+        removed_lib_contribution = exit_dict.get(
+            "removed_required_library_contribution"
+        )
         escalated_exit_code = (
             max(severity_exit_code or 0, 4)
-            if isinstance(removed_lib_contribution, int) and removed_lib_contribution != 0
+            if isinstance(removed_lib_contribution, int)
+            and removed_lib_contribution != 0
             else severity_exit_code
         )
         summary["severity"] = {
@@ -1505,9 +1571,13 @@ def _format_release_json(
     )
 
     digest, fields = _release_summary_effective_config_block(
-        severity_config, policy=policy, policy_file_path=policy_file_path,
-        suppress=suppress, pack_application=pack_application,
-        scope_public_headers=scope_public_headers, on_incomplete_scope=terms.policy,
+        severity_config,
+        policy=policy,
+        policy_file_path=policy_file_path,
+        suppress=suppress,
+        pack_application=pack_application,
+        scope_public_headers=scope_public_headers,
+        on_incomplete_scope=terms.policy,
         fail_on_removed_library=fail_on_removed,
         env_matrix_source_sha256=env_matrix_source_sha256,
         # ADR-071: the receipt must name the gate that produced this report.
@@ -1650,7 +1720,9 @@ def _format_release_markdown(
     verdict_cell = f"{_VERDICT_EMOJI.get(worst_verdict, '?')} `{worst_verdict}`"
     if scope_section is not None and scope_section.get("no_comparison_completed"):
         verdict_cell = "🛑 no comparison completed"
-    elif scope_section is not None and scope_section.get("completeness") == "incomplete":
+    elif (
+        scope_section is not None and scope_section.get("completeness") == "incomplete"
+    ):
         verdict_cell += " (compared members only — scope incompletely checked)"
     lines: list[str] = [
         "# ABI Release Comparison",

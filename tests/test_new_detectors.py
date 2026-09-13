@@ -11,6 +11,7 @@ Covers:
 - func_ref_qual_changed (inline in _check_function_signature)
 - func_language_linkage_changed (inline in _check_function_signature)
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, compare
@@ -24,26 +25,58 @@ from abicheck.model import (
 )
 
 
-def _snap(version="1.0", functions=None, variables=None, types=None,
-          enums=None, typedefs=None, elf=None, from_headers=False):
+def _snap(
+    version="1.0",
+    functions=None,
+    variables=None,
+    types=None,
+    enums=None,
+    typedefs=None,
+    elf=None,
+    from_headers=False,
+):
     return AbiSnapshot(
-        library="libtest.so.1", version=version,
-        functions=functions or [], variables=variables or [],
-        types=types or [], enums=enums or [],
-        typedefs=typedefs or {}, elf=elf, from_headers=from_headers,
+        library="libtest.so.1",
+        version=version,
+        functions=functions or [],
+        variables=variables or [],
+        types=types or [],
+        enums=enums or [],
+        typedefs=typedefs or {},
+        elf=elf,
+        from_headers=from_headers,
     )
 
 
 def _pub_func(name, mangled, ret="void", params=None, **kwargs):
-    return Function(name=name, mangled=mangled, return_type=ret,
-                    params=params or [], visibility=Visibility.PUBLIC, **kwargs)
+    return Function(
+        name=name,
+        mangled=mangled,
+        return_type=ret,
+        params=params or [],
+        visibility=Visibility.PUBLIC,
+        **kwargs,
+    )
 
 
-def _elf_sym(name, sym_type=SymbolType.FUNC, size=0, visibility="default",
-             binding=SymbolBinding.GLOBAL, version="", is_default=True):
-    return ElfSymbol(name=name, sym_type=sym_type, size=size,
-                     visibility=visibility, binding=binding,
-                     version=version, is_default=is_default)
+def _elf_sym(
+    name,
+    sym_type=SymbolType.FUNC,
+    size=0,
+    visibility="default",
+    binding=SymbolBinding.GLOBAL,
+    version="",
+    is_default=True,
+):
+    return ElfSymbol(
+        name=name,
+        sym_type=sym_type,
+        size=size,
+        visibility=visibility,
+        binding=binding,
+        version=version,
+        is_default=is_default,
+    )
 
 
 def _has_kind(result, kind):
@@ -56,158 +89,239 @@ def _changes_of_kind(result, kind):
 
 # ── TLS_VAR_SIZE_CHANGED ─────────────────────────────────────────────────────
 
+
 class TestTlsChecks:
     def test_tls_size_change_detected(self):
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("tls_var", sym_type=SymbolType.TLS, size=4),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("tls_var", sym_type=SymbolType.TLS, size=8),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("tls_var", sym_type=SymbolType.TLS, size=4),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("tls_var", sym_type=SymbolType.TLS, size=8),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert _has_kind(r, ChangeKind.TLS_VAR_SIZE_CHANGED)
 
     def test_tls_same_size_no_change(self):
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("tls_var", sym_type=SymbolType.TLS, size=4),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("tls_var", sym_type=SymbolType.TLS, size=4),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("tls_var", sym_type=SymbolType.TLS, size=4),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("tls_var", sym_type=SymbolType.TLS, size=4),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert not _has_kind(r, ChangeKind.TLS_VAR_SIZE_CHANGED)
 
     def test_tls_zero_size_ignored(self):
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("tls_var", sym_type=SymbolType.TLS, size=0),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("tls_var", sym_type=SymbolType.TLS, size=8),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("tls_var", sym_type=SymbolType.TLS, size=0),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("tls_var", sym_type=SymbolType.TLS, size=8),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert not _has_kind(r, ChangeKind.TLS_VAR_SIZE_CHANGED)
 
     def test_non_tls_not_reported(self):
         """Non-TLS symbols should not trigger TLS_VAR_SIZE_CHANGED."""
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("data_var", sym_type=SymbolType.OBJECT, size=4),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("data_var", sym_type=SymbolType.OBJECT, size=8),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("data_var", sym_type=SymbolType.OBJECT, size=4),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("data_var", sym_type=SymbolType.OBJECT, size=8),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert not _has_kind(r, ChangeKind.TLS_VAR_SIZE_CHANGED)
 
 
 # ── PROTECTED_VISIBILITY_CHANGED ──────────────────────────────────────────────
 
+
 class TestProtectedVisibility:
     def test_data_default_to_protected(self):
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("global_data", sym_type=SymbolType.OBJECT, visibility="default"),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("global_data", sym_type=SymbolType.OBJECT, visibility="protected"),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "global_data", sym_type=SymbolType.OBJECT, visibility="default"
+                ),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "global_data", sym_type=SymbolType.OBJECT, visibility="protected"
+                ),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert _has_kind(r, ChangeKind.PROTECTED_VISIBILITY_CHANGED)
 
     def test_data_protected_to_default(self):
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("global_data", sym_type=SymbolType.OBJECT, visibility="protected"),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("global_data", sym_type=SymbolType.OBJECT, visibility="default"),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "global_data", sym_type=SymbolType.OBJECT, visibility="protected"
+                ),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "global_data", sym_type=SymbolType.OBJECT, visibility="default"
+                ),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert _has_kind(r, ChangeKind.PROTECTED_VISIBILITY_CHANGED)
 
     def test_func_not_reported(self):
         """Function DEFAULT↔PROTECTED is handled by FUNC_VISIBILITY_PROTECTED_CHANGED."""
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("func_sym", sym_type=SymbolType.FUNC, visibility="default"),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("func_sym", sym_type=SymbolType.FUNC, visibility="protected"),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("func_sym", sym_type=SymbolType.FUNC, visibility="default"),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("func_sym", sym_type=SymbolType.FUNC, visibility="protected"),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert not _has_kind(r, ChangeKind.PROTECTED_VISIBILITY_CHANGED)
 
     def test_tls_not_reported(self):
         """TLS symbols don't use copy relocations — DEFAULT↔PROTECTED is benign."""
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("tls_sym", sym_type=SymbolType.TLS, visibility="default"),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("tls_sym", sym_type=SymbolType.TLS, visibility="protected"),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("tls_sym", sym_type=SymbolType.TLS, visibility="default"),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("tls_sym", sym_type=SymbolType.TLS, visibility="protected"),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert not _has_kind(r, ChangeKind.PROTECTED_VISIBILITY_CHANGED)
 
     def test_ifunc_not_reported(self):
         """IFUNC symbols should not trigger PROTECTED_VISIBILITY_CHANGED."""
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("ifunc_sym", sym_type=SymbolType.IFUNC, visibility="default"),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("ifunc_sym", sym_type=SymbolType.IFUNC, visibility="protected"),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("ifunc_sym", sym_type=SymbolType.IFUNC, visibility="default"),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "ifunc_sym", sym_type=SymbolType.IFUNC, visibility="protected"
+                ),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert not _has_kind(r, ChangeKind.PROTECTED_VISIBILITY_CHANGED)
 
     def test_common_default_to_protected(self):
         """COMMON data symbols should also trigger PROTECTED_VISIBILITY_CHANGED."""
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("common_sym", sym_type=SymbolType.COMMON, visibility="default"),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("common_sym", sym_type=SymbolType.COMMON, visibility="protected"),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "common_sym", sym_type=SymbolType.COMMON, visibility="default"
+                ),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "common_sym", sym_type=SymbolType.COMMON, visibility="protected"
+                ),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert _has_kind(r, ChangeKind.PROTECTED_VISIBILITY_CHANGED)
 
     def test_common_protected_to_default(self):
         """COMMON data symbols: protected→default should also trigger."""
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("common_sym", sym_type=SymbolType.COMMON, visibility="protected"),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("common_sym", sym_type=SymbolType.COMMON, visibility="default"),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "common_sym", sym_type=SymbolType.COMMON, visibility="protected"
+                ),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "common_sym", sym_type=SymbolType.COMMON, visibility="default"
+                ),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert _has_kind(r, ChangeKind.PROTECTED_VISIBILITY_CHANGED)
 
     def test_same_visibility_no_change(self):
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("global_data", sym_type=SymbolType.OBJECT, visibility="default"),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("global_data", sym_type=SymbolType.OBJECT, visibility="default"),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "global_data", sym_type=SymbolType.OBJECT, visibility="default"
+                ),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "global_data", sym_type=SymbolType.OBJECT, visibility="default"
+                ),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert not _has_kind(r, ChangeKind.PROTECTED_VISIBILITY_CHANGED)
 
 
 # ── SYMBOL_VERSION_ALIAS_CHANGED ──────────────────────────────────────────────
 
+
 class TestSymbolVersionAlias:
     def test_default_version_changed(self):
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("foo", version="VER_1.0", is_default=True),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("foo", version="VER_2.0", is_default=True),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("foo", version="VER_1.0", is_default=True),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("foo", version="VER_2.0", is_default=True),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert _has_kind(r, ChangeKind.SYMBOL_VERSION_ALIAS_CHANGED)
 
     def test_same_version_no_change(self):
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("foo", version="VER_1.0", is_default=True),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("foo", version="VER_1.0", is_default=True),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("foo", version="VER_1.0", is_default=True),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("foo", version="VER_1.0", is_default=True),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert not _has_kind(r, ChangeKind.SYMBOL_VERSION_ALIAS_CHANGED)
 
@@ -224,52 +338,65 @@ class TestSymbolVersionAlias:
         When is_default goes True→False the symbol loses its default designation
         but the version string hasn't changed to a different value.
         """
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("foo", version="VER_1.0", is_default=True),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("foo", version="VER_1.0", is_default=False),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("foo", version="VER_1.0", is_default=True),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("foo", version="VER_1.0", is_default=False),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert not _has_kind(r, ChangeKind.SYMBOL_VERSION_ALIAS_CHANGED)
 
     def test_unversioned_is_default_flip_no_change(self):
         """Non-versioned symbols flipping is_default → no change."""
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("foo", version="", is_default=False),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("foo", version="", is_default=True),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("foo", version="", is_default=False),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("foo", version="", is_default=True),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert not _has_kind(r, ChangeKind.SYMBOL_VERSION_ALIAS_CHANGED)
 
 
 # ── GLIBCXX_DUAL_ABI_FLIP_DETECTED ───────────────────────────────────────────
 
+
 class TestGlibcxxDualAbi:
     def _make_cxx11_funcs(self, prefix, count, vis=Visibility.PUBLIC):
         """Generate functions with __cxx11 in mangled name."""
         funcs = []
         for i in range(count):
-            funcs.append(Function(
-                name=f"{prefix}::std::__cxx11::basic_string::func{i}",
-                mangled=f"_ZN{prefix}std__cxx11_func{i}Ev",
-                return_type="void",
-                visibility=vis,
-            ))
+            funcs.append(
+                Function(
+                    name=f"{prefix}::std::__cxx11::basic_string::func{i}",
+                    mangled=f"_ZN{prefix}std__cxx11_func{i}Ev",
+                    return_type="void",
+                    visibility=vis,
+                )
+            )
         return funcs
 
     def _make_legacy_funcs(self, prefix, count, vis=Visibility.PUBLIC):
         """Generate functions without __cxx11 marker (legacy ABI)."""
         funcs = []
         for i in range(count):
-            funcs.append(Function(
-                name=f"{prefix}::std::basic_string::func{i}",
-                mangled=f"_ZN{prefix}std_func{i}Ev",
-                return_type="void",
-                visibility=vis,
-            ))
+            funcs.append(
+                Function(
+                    name=f"{prefix}::std::basic_string::func{i}",
+                    mangled=f"_ZN{prefix}std_func{i}Ev",
+                    return_type="void",
+                    visibility=vis,
+                )
+            )
         return funcs
 
     def test_cxx11_to_legacy_detected(self):
@@ -315,15 +442,14 @@ class TestGlibcxxDualAbi:
 
 # ── INLINE_NAMESPACE_MOVED ────────────────────────────────────────────────────
 
+
 class TestInlineNamespace:
     def test_v1_to_v2_move_detected(self):
         old_funcs = [
-            _pub_func(f"ns::v1::func{i}", f"_ZN2ns2v1func{i}Ev")
-            for i in range(5)
+            _pub_func(f"ns::v1::func{i}", f"_ZN2ns2v1func{i}Ev") for i in range(5)
         ]
         new_funcs = [
-            _pub_func(f"ns::v2::func{i}", f"_ZN2ns2v2func{i}Ev")
-            for i in range(5)
+            _pub_func(f"ns::v2::func{i}", f"_ZN2ns2v2func{i}Ev") for i in range(5)
         ]
         r = compare(_snap(functions=old_funcs), _snap(functions=new_funcs))
         assert _has_kind(r, ChangeKind.INLINE_NAMESPACE_MOVED)
@@ -338,19 +464,19 @@ class TestInlineNamespace:
     def test_no_namespace_version_no_detection(self):
         """Functions without versioned namespaces should not trigger."""
         old_funcs = [_pub_func(f"ns::func{i}", f"_ZN2nsfunc{i}Ev") for i in range(5)]
-        new_funcs = [_pub_func(f"other::func{i}", f"_ZN5otherfunc{i}Ev") for i in range(5)]
+        new_funcs = [
+            _pub_func(f"other::func{i}", f"_ZN5otherfunc{i}Ev") for i in range(5)
+        ]
         r = compare(_snap(functions=old_funcs), _snap(functions=new_funcs))
         assert not _has_kind(r, ChangeKind.INLINE_NAMESPACE_MOVED)
 
     def test_regex_does_not_match_v_in_identifier(self):
         """v1 inside an identifier (not a namespace) should NOT match."""
         old_funcs = [
-            _pub_func(f"convert_v1_data{i}", f"_Zconvert_v1_data{i}v")
-            for i in range(5)
+            _pub_func(f"convert_v1_data{i}", f"_Zconvert_v1_data{i}v") for i in range(5)
         ]
         new_funcs = [
-            _pub_func(f"convert_v2_data{i}", f"_Zconvert_v2_data{i}v")
-            for i in range(5)
+            _pub_func(f"convert_v2_data{i}", f"_Zconvert_v2_data{i}v") for i in range(5)
         ]
         r = compare(_snap(functions=old_funcs), _snap(functions=new_funcs))
         assert not _has_kind(r, ChangeKind.INLINE_NAMESPACE_MOVED)
@@ -358,12 +484,10 @@ class TestInlineNamespace:
     def test_libcxx_1_to_2_move_detected(self):
         """libc++ inline namespace ::__1:: → ::__2:: should be detected."""
         old_funcs = [
-            _pub_func(f"std::__1::func{i}", f"_ZNSt3__1func{i}Ev")
-            for i in range(5)
+            _pub_func(f"std::__1::func{i}", f"_ZNSt3__1func{i}Ev") for i in range(5)
         ]
         new_funcs = [
-            _pub_func(f"std::__2::func{i}", f"_ZNSt3__2func{i}Ev")
-            for i in range(5)
+            _pub_func(f"std::__2::func{i}", f"_ZNSt3__2func{i}Ev") for i in range(5)
         ]
         r = compare(_snap(functions=old_funcs), _snap(functions=new_funcs))
         assert _has_kind(r, ChangeKind.INLINE_NAMESPACE_MOVED)
@@ -371,12 +495,10 @@ class TestInlineNamespace:
     def test_unversioned_to_versioned_move_detected(self):
         """Unversioned → versioned namespace move should be detected."""
         old_funcs = [
-            _pub_func(f"ns::func{i}", f"_ZN2nsfunc{i}Ev_old")
-            for i in range(5)
+            _pub_func(f"ns::func{i}", f"_ZN2nsfunc{i}Ev_old") for i in range(5)
         ]
         new_funcs = [
-            _pub_func(f"ns::v2::func{i}", f"_ZN2ns2v2func{i}Ev_new")
-            for i in range(5)
+            _pub_func(f"ns::v2::func{i}", f"_ZN2ns2v2func{i}Ev_new") for i in range(5)
         ]
         r = compare(_snap(functions=old_funcs), _snap(functions=new_funcs))
         assert _has_kind(r, ChangeKind.INLINE_NAMESPACE_MOVED)
@@ -384,15 +506,20 @@ class TestInlineNamespace:
 
 # ── VTABLE_SYMBOL_IDENTITY_CHANGED ────────────────────────────────────────────
 
+
 class TestVtableIdentity:
     def test_cross_prefix_not_identity_change(self):
         """_ZTV→_ZTS for same type is NOT an identity change (different RTTI artefacts)."""
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("_ZTV5MyObj", sym_type=SymbolType.OBJECT, size=24),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("_ZTS5MyObj", sym_type=SymbolType.OBJECT, size=16),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("_ZTV5MyObj", sym_type=SymbolType.OBJECT, size=24),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("_ZTS5MyObj", sym_type=SymbolType.OBJECT, size=16),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         # Different prefixes → not same RTTI artefact
         assert not _has_kind(r, ChangeKind.VTABLE_SYMBOL_IDENTITY_CHANGED)
@@ -403,70 +530,125 @@ class TestVtableIdentity:
         Simulates version-script change: _ZTV5MyObj present in both old and new
         but with different versions (handled via common_rtti path).
         """
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("_ZTV5MyObj", sym_type=SymbolType.OBJECT, version="VER_1", is_default=True),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("_ZTV5MyObj", sym_type=SymbolType.OBJECT, version="VER_2", is_default=True),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "_ZTV5MyObj",
+                    sym_type=SymbolType.OBJECT,
+                    version="VER_1",
+                    is_default=True,
+                ),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "_ZTV5MyObj",
+                    sym_type=SymbolType.OBJECT,
+                    version="VER_2",
+                    is_default=True,
+                ),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert _has_kind(r, ChangeKind.VTABLE_SYMBOL_IDENTITY_CHANGED)
 
     def test_rtti_visibility_change(self):
         """RTTI symbol visibility change for existing symbols."""
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("_ZTV5MyObj", sym_type=SymbolType.OBJECT, visibility="default"),
-            _elf_sym("_ZTI5MyObj", sym_type=SymbolType.OBJECT, visibility="default"),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("_ZTV5MyObj", sym_type=SymbolType.OBJECT, visibility="protected"),
-            _elf_sym("_ZTI5MyObj", sym_type=SymbolType.OBJECT, visibility="protected"),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "_ZTV5MyObj", sym_type=SymbolType.OBJECT, visibility="default"
+                ),
+                _elf_sym(
+                    "_ZTI5MyObj", sym_type=SymbolType.OBJECT, visibility="default"
+                ),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "_ZTV5MyObj", sym_type=SymbolType.OBJECT, visibility="protected"
+                ),
+                _elf_sym(
+                    "_ZTI5MyObj", sym_type=SymbolType.OBJECT, visibility="protected"
+                ),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert _has_kind(r, ChangeKind.VTABLE_SYMBOL_IDENTITY_CHANGED)
 
     def test_no_rtti_no_change(self):
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("regular_func", sym_type=SymbolType.FUNC),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("regular_func", sym_type=SymbolType.FUNC),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("regular_func", sym_type=SymbolType.FUNC),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym("regular_func", sym_type=SymbolType.FUNC),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert not _has_kind(r, ChangeKind.VTABLE_SYMBOL_IDENTITY_CHANGED)
 
     def test_same_rtti_no_change(self):
         """Identical RTTI symbols should not trigger."""
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("_ZTV5MyObj", sym_type=SymbolType.OBJECT, visibility="default",
-                     version="VER_1", is_default=True),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("_ZTV5MyObj", sym_type=SymbolType.OBJECT, visibility="default",
-                     version="VER_1", is_default=True),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "_ZTV5MyObj",
+                    sym_type=SymbolType.OBJECT,
+                    visibility="default",
+                    version="VER_1",
+                    is_default=True,
+                ),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "_ZTV5MyObj",
+                    sym_type=SymbolType.OBJECT,
+                    visibility="default",
+                    version="VER_1",
+                    is_default=True,
+                ),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert not _has_kind(r, ChangeKind.VTABLE_SYMBOL_IDENTITY_CHANGED)
 
     def test_transitive_stdlib_rtti_is_filtered(self):
         """Weak stdlib RTTI churn from dependencies is not this DSO's ABI."""
-        old_elf = ElfMetadata(symbols=[
-            _elf_sym("_ZTVSt9exception", sym_type=SymbolType.OBJECT, version="VER_1"),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            _elf_sym("_ZTVSt9exception", sym_type=SymbolType.OBJECT, version="VER_2"),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "_ZTVSt9exception", sym_type=SymbolType.OBJECT, version="VER_1"
+                ),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                _elf_sym(
+                    "_ZTVSt9exception", sym_type=SymbolType.OBJECT, version="VER_2"
+                ),
+            ]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert not _has_kind(r, ChangeKind.VTABLE_SYMBOL_IDENTITY_CHANGED)
 
 
 # ── ABI_SURFACE_EXPLOSION ────────────────────────────────────────────────────
 
+
 class TestAbiSurface:
     def _make_elf(self, count):
-        return ElfMetadata(symbols=[
-            _elf_sym(f"sym_{i}", sym_type=SymbolType.FUNC) for i in range(count)
-        ])
+        return ElfMetadata(
+            symbols=[
+                _elf_sym(f"sym_{i}", sym_type=SymbolType.FUNC) for i in range(count)
+            ]
+        )
 
     def test_surface_doubled(self):
         """2x+ growth with 50+ delta → detected."""
@@ -495,6 +677,7 @@ class TestAbiSurface:
 
 
 # ── FUNC_REF_QUAL_CHANGED ────────────────────────────────────────────────────
+
 
 class TestFuncRefQualChanged:
     def test_ref_qualifier_added(self):
@@ -536,10 +719,10 @@ class TestFuncRefQualChanged:
 
 # ── TYPE_BECAME_FINAL / TYPE_LOST_FINAL ──────────────────────────────────────
 
+
 def _rec(name, *, is_final, size_bits=64):
     # class with a field so it is a concrete record (not opaque).
-    return RecordType(name=name, kind="class", size_bits=size_bits,
-                      is_final=is_final)
+    return RecordType(name=name, kind="class", size_bits=size_bits, is_final=is_final)
 
 
 class TestTypeFinalityChanged:
@@ -548,23 +731,29 @@ class TestTypeFinalityChanged:
     # separate, pre-existing behaviour; the example fixtures exercise the
     # reachable-from-a-public-function path end to end).
     def test_class_became_final(self):
-        r = compare(_snap(types=[_rec("Widget", is_final=False)]),
-                    _snap(types=[_rec("Widget", is_final=True)]),
-                    scope_to_public_surface=False)
+        r = compare(
+            _snap(types=[_rec("Widget", is_final=False)]),
+            _snap(types=[_rec("Widget", is_final=True)]),
+            scope_to_public_surface=False,
+        )
         assert _has_kind(r, ChangeKind.TYPE_BECAME_FINAL)
         assert not _has_kind(r, ChangeKind.TYPE_LOST_FINAL)
 
     def test_class_lost_final(self):
-        r = compare(_snap(types=[_rec("Widget", is_final=True)]),
-                    _snap(types=[_rec("Widget", is_final=False)]),
-                    scope_to_public_surface=False)
+        r = compare(
+            _snap(types=[_rec("Widget", is_final=True)]),
+            _snap(types=[_rec("Widget", is_final=False)]),
+            scope_to_public_surface=False,
+        )
         assert _has_kind(r, ChangeKind.TYPE_LOST_FINAL)
         assert not _has_kind(r, ChangeKind.TYPE_BECAME_FINAL)
 
     def test_same_finality_no_change(self):
-        r = compare(_snap(types=[_rec("Widget", is_final=True)]),
-                    _snap(types=[_rec("Widget", is_final=True)]),
-                    scope_to_public_surface=False)
+        r = compare(
+            _snap(types=[_rec("Widget", is_final=True)]),
+            _snap(types=[_rec("Widget", is_final=True)]),
+            scope_to_public_surface=False,
+        )
         assert not _has_kind(r, ChangeKind.TYPE_BECAME_FINAL)
         assert not _has_kind(r, ChangeKind.TYPE_LOST_FINAL)
 
@@ -572,20 +761,27 @@ class TestTypeFinalityChanged:
         # None on either side (DWARF/symbols-only mode, or older snapshot) must
         # never produce a finding — avoids false positives on a tier downgrade.
         for old_f, new_f in ((None, True), (False, None), (None, None)):
-            r = compare(_snap(types=[_rec("Widget", is_final=old_f)]),
-                        _snap(types=[_rec("Widget", is_final=new_f)]),
-                        scope_to_public_surface=False)
+            r = compare(
+                _snap(types=[_rec("Widget", is_final=old_f)]),
+                _snap(types=[_rec("Widget", is_final=new_f)]),
+                scope_to_public_surface=False,
+            )
             assert not _has_kind(r, ChangeKind.TYPE_BECAME_FINAL)
             assert not _has_kind(r, ChangeKind.TYPE_LOST_FINAL)
 
 
 # ── PARAM_DEFAULT_VALUE_* (default-argument values) ──────────────────────────
 
+
 def _func_with_default(default):
-    return _pub_func("f", "_Z1fii", params=[
-        Param(name="x", type="int"),
-        Param(name="y", type="int", default=default),
-    ])
+    return _pub_func(
+        "f",
+        "_Z1fii",
+        params=[
+            Param(name="x", type="int"),
+            Param(name="y", type="int", default=default),
+        ],
+    )
 
 
 def _hsnap(**kw):
@@ -596,33 +792,43 @@ def _hsnap(**kw):
 
 class TestParamDefaultValue:
     def test_default_removed_is_api_break(self):
-        r = compare(_hsnap(functions=[_func_with_default("1")]),
-                    _hsnap(functions=[_func_with_default(None)]))
+        r = compare(
+            _hsnap(functions=[_func_with_default("1")]),
+            _hsnap(functions=[_func_with_default(None)]),
+        )
         assert _has_kind(r, ChangeKind.PARAM_DEFAULT_VALUE_REMOVED)
 
     def test_default_value_changed(self):
-        r = compare(_hsnap(functions=[_func_with_default("1")]),
-                    _hsnap(functions=[_func_with_default("2")]))
+        r = compare(
+            _hsnap(functions=[_func_with_default("1")]),
+            _hsnap(functions=[_func_with_default("2")]),
+        )
         assert _has_kind(r, ChangeKind.PARAM_DEFAULT_VALUE_CHANGED)
 
     def test_same_default_no_change(self):
-        r = compare(_hsnap(functions=[_func_with_default("1")]),
-                    _hsnap(functions=[_func_with_default("1")]))
+        r = compare(
+            _hsnap(functions=[_func_with_default("1")]),
+            _hsnap(functions=[_func_with_default("1")]),
+        )
         assert not _has_kind(r, ChangeKind.PARAM_DEFAULT_VALUE_CHANGED)
         assert not _has_kind(r, ChangeKind.PARAM_DEFAULT_VALUE_REMOVED)
 
     def test_adding_default_is_not_a_break(self):
         # Adding a default is source-compatible; no removal/changed finding.
-        r = compare(_hsnap(functions=[_func_with_default(None)]),
-                    _hsnap(functions=[_func_with_default("1")]))
+        r = compare(
+            _hsnap(functions=[_func_with_default(None)]),
+            _hsnap(functions=[_func_with_default("1")]),
+        )
         assert not _has_kind(r, ChangeKind.PARAM_DEFAULT_VALUE_REMOVED)
         assert not _has_kind(r, ChangeKind.PARAM_DEFAULT_VALUE_CHANGED)
 
     def test_skipped_when_one_side_lacks_headers(self):
         # Mixed-tier: baseline has headers, candidate is DWARF/symbols-only.
         # The bare None default on the headerless side must NOT read as removed.
-        r = compare(_hsnap(functions=[_func_with_default("1")]),
-                    _snap(functions=[_func_with_default(None)], from_headers=False))
+        r = compare(
+            _hsnap(functions=[_func_with_default("1")]),
+            _snap(functions=[_func_with_default(None)], from_headers=False),
+        )
         assert not _has_kind(r, ChangeKind.PARAM_DEFAULT_VALUE_REMOVED)
 
     def test_skipped_when_header_provenance_only_inferred(self):
@@ -638,35 +844,40 @@ class TestParamDefaultValue:
 
 # ── CONSTANT_* (const / constexpr header constant values) ─────────────────────
 
+
 class TestHeaderConstants:
     def test_constant_value_changed(self):
         # constants survive public-surface scoping (default on) because they are
         # extracted only from provided public headers — see surface._NEVER_FILTER.
-        r = compare(_snap_with_constants({"kLimit": "100"}),
-                    _snap_with_constants({"kLimit": "200"}))
+        r = compare(
+            _snap_with_constants({"kLimit": "100"}),
+            _snap_with_constants({"kLimit": "200"}),
+        )
         assert _has_kind(r, ChangeKind.CONSTANT_CHANGED)
 
     def test_constant_removed(self):
-        r = compare(_snap_with_constants({"kLimit": "100"}),
-                    _snap_with_constants({}))
+        r = compare(_snap_with_constants({"kLimit": "100"}), _snap_with_constants({}))
         assert _has_kind(r, ChangeKind.CONSTANT_REMOVED)
 
     def test_constant_added_is_compatible(self):
-        r = compare(_snap_with_constants({}),
-                    _snap_with_constants({"kNew": "1"}))
+        r = compare(_snap_with_constants({}), _snap_with_constants({"kNew": "1"}))
         assert _has_kind(r, ChangeKind.CONSTANT_ADDED)
 
     def test_same_constant_no_change(self):
-        r = compare(_snap_with_constants({"kLimit": "100"}),
-                    _snap_with_constants({"kLimit": "100"}))
+        r = compare(
+            _snap_with_constants({"kLimit": "100"}),
+            _snap_with_constants({"kLimit": "100"}),
+        )
         assert not _has_kind(r, ChangeKind.CONSTANT_CHANGED)
         assert not _has_kind(r, ChangeKind.CONSTANT_REMOVED)
 
     def test_skipped_when_one_side_lacks_headers(self):
         # Mixed-tier: a header baseline vs a DWARF/symbols-only candidate (empty
         # constants because unavailable, not removed) must not report removals.
-        r = compare(_snap_with_constants({"kLimit": "100"}),
-                    _snap_with_constants({}, from_headers=False))
+        r = compare(
+            _snap_with_constants({"kLimit": "100"}),
+            _snap_with_constants({}, from_headers=False),
+        )
         assert not _has_kind(r, ChangeKind.CONSTANT_REMOVED)
 
     def test_versioned_inline_namespace_spellings_double_report_is_accepted(self):
@@ -686,14 +897,18 @@ class TestHeaderConstants:
         # rather than a heuristic merge that traded a display annoyance for
         # a correctness risk.
         r = compare(
-            _snap_with_constants({
-                "detail::v1::cpu_feature_map": "1",
-                "detail::cpu_feature_map": "1",
-            }),
-            _snap_with_constants({
-                "detail::v1::cpu_feature_map": "2",
-                "detail::cpu_feature_map": "2",
-            }),
+            _snap_with_constants(
+                {
+                    "detail::v1::cpu_feature_map": "1",
+                    "detail::cpu_feature_map": "1",
+                }
+            ),
+            _snap_with_constants(
+                {
+                    "detail::v1::cpu_feature_map": "2",
+                    "detail::cpu_feature_map": "2",
+                }
+            ),
         )
         assert len(_changes_of_kind(r, ChangeKind.CONSTANT_CHANGED)) == 2
 
@@ -719,6 +934,7 @@ def _snap_with_constants(constants, from_headers=True):
 
 
 # ── FUNC_LANGUAGE_LINKAGE_CHANGED ─────────────────────────────────────────────
+
 
 class TestFuncLanguageLinkageChanged:
     def test_linkage_changed_same_mangled(self):
@@ -757,10 +973,13 @@ class TestFuncLanguageLinkageChanged:
 
 # ── INTEGER_MODEL_CHANGED (LP64 ↔ ILP64) ─────────────────────────────────────
 
+
 class TestIntegerModelChanged:
     def _int_func(self, name, ret, ptypes):
         return Function(
-            name=name, mangled="_Z" + name, return_type=ret,
+            name=name,
+            mangled="_Z" + name,
+            return_type=ret,
             params=[Param(name=f"a{i}", type=t) for i, t in enumerate(ptypes)],
             visibility=Visibility.PUBLIC,
         )
@@ -800,7 +1019,9 @@ class TestIntegerModelChanged:
 
     def test_signedness_only_not_detected(self):
         old = [self._int_func(f"fn{i}", "int", ["int"]) for i in range(6)]
-        new = [self._int_func(f"fn{i}", "unsigned int", ["unsigned int"]) for i in range(6)]
+        new = [
+            self._int_func(f"fn{i}", "unsigned int", ["unsigned int"]) for i in range(6)
+        ]
         r = compare(_snap(functions=old), _snap(functions=new))
         assert not _has_kind(r, ChangeKind.INTEGER_MODEL_CHANGED)
 
@@ -828,9 +1049,12 @@ class TestIntegerModelChanged:
 
 # ── char8t / _BitInt / _Atomic / abi_tag spelling detectors ──────────────────
 
+
 def _spell_func(name, ret="void", ptypes=None):
     return Function(
-        name=name, mangled="_Z" + name, return_type=ret,
+        name=name,
+        mangled="_Z" + name,
+        return_type=ret,
         params=[Param(name=f"a{i}", type=t) for i, t in enumerate(ptypes or [])],
         visibility=Visibility.PUBLIC,
     )
@@ -860,12 +1084,24 @@ class TestChar8tMigration:
         # Realistic: char->char8_t changes the mangled name (PKc->PKDu) so the
         # symbols don't share a key. The demangled-name fallback must still pair
         # them and surface the migration (Codex review P2).
-        old = [Function(name="f", mangled="_Z1fPKc", return_type="void",
-                        params=[Param(name="s", type="char *")],
-                        visibility=Visibility.PUBLIC)]
-        new = [Function(name="f", mangled="_Z1fPKDu", return_type="void",
-                        params=[Param(name="s", type="char8_t *")],
-                        visibility=Visibility.PUBLIC)]
+        old = [
+            Function(
+                name="f",
+                mangled="_Z1fPKc",
+                return_type="void",
+                params=[Param(name="s", type="char *")],
+                visibility=Visibility.PUBLIC,
+            )
+        ]
+        new = [
+            Function(
+                name="f",
+                mangled="_Z1fPKDu",
+                return_type="void",
+                params=[Param(name="s", type="char8_t *")],
+                visibility=Visibility.PUBLIC,
+            )
+        ]
         r = compare(_snap(functions=old), _snap(functions=new))
         assert _has_kind(r, ChangeKind.CHAR8T_MIGRATION)
 
@@ -958,9 +1194,7 @@ class TestAbiTagChanged:
         assert not _has_kind(r, ChangeKind.ABI_TAG_CHANGED)
 
     def test_suppressed_under_mass_dual_abi_flip(self):
-        old = [
-            _pub_func(f"f{i}", f"_ZN3foo{i}B5cxx11Ev") for i in range(8)
-        ]
+        old = [_pub_func(f"f{i}", f"_ZN3foo{i}B5cxx11Ev") for i in range(8)]
         new = [_pub_func(f"f{i}", f"_ZN3foo{i}Ev") for i in range(8)]
         r = compare(_snap(functions=old), _snap(functions=new))
         assert _has_kind(r, ChangeKind.GLIBCXX_DUAL_ABI_FLIP_DETECTED)

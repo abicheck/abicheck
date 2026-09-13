@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Tests for CLI commands: abicheck deps / abicheck stack-check."""
+
 from __future__ import annotations
 
 import json
@@ -91,13 +92,16 @@ class TestDepsCommand:
 
     def test_deps_output_file(self, runner, real_binary, tmp_path):
         outfile = tmp_path / "deps.json"
-        result = runner.invoke(main, [
-            "deps",
-            "tree",
-            str(real_binary),
-            "-o",
-            f"json={outfile}",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "deps",
+                "tree",
+                str(real_binary),
+                "-o",
+                f"json={outfile}",
+            ],
+        )
         assert result.exit_code == 0
         assert outfile.exists()
         data = json.loads(outfile.read_text())
@@ -128,6 +132,7 @@ class TestStackCheckCommand:
 # ---------------------------------------------------------------------------
 # --follow-deps flag on dump and compare
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def real_lib():
@@ -184,9 +189,16 @@ class TestDumpFollowDeps:
 
     def test_dump_follow_deps_to_file(self, runner, real_lib, tmp_path):
         outfile = tmp_path / "snap.json"
-        result = runner.invoke(main, [
-            "dump", str(real_lib), "--follow-deps", "-o", str(outfile),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "dump",
+                str(real_lib),
+                "--follow-deps",
+                "-o",
+                str(outfile),
+            ],
+        )
         assert result.exit_code == 0
         from abicheck.serialization import load_snapshot_document
 
@@ -196,12 +208,20 @@ class TestDumpFollowDeps:
     def test_dump_follow_deps_roundtrip(self, runner, real_lib, tmp_path):
         """Dump with --follow-deps, load snapshot, verify dep info survives."""
         outfile = tmp_path / "snap.json"
-        result = runner.invoke(main, [
-            "dump", str(real_lib), "--follow-deps", "-o", str(outfile),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "dump",
+                str(real_lib),
+                "--follow-deps",
+                "-o",
+                str(outfile),
+            ],
+        )
         assert result.exit_code == 0
 
         from abicheck.serialization import load_snapshot
+
         snap = load_snapshot(outfile)
         assert snap.dependency_info is not None
         assert len(snap.dependency_info.nodes) >= 1
@@ -219,14 +239,17 @@ def _extract_json(output: str) -> dict:
 
 class TestCompareFollowDeps:
     def test_compare_follow_deps_json(self, runner, real_lib):
-        result = runner.invoke(main, [
-            "compare",
-            str(real_lib),
-            str(real_lib),
-            "--follow-deps",
-            "-o",
-            "json=-",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(real_lib),
+                str(real_lib),
+                "--follow-deps",
+                "-o",
+                "json=-",
+            ],
+        )
         assert result.exit_code == 0
         data = _extract_json(result.output)
         assert "old_dependency_info" in data
@@ -234,16 +257,27 @@ class TestCompareFollowDeps:
         assert data["old_dependency_info"]["bindings_summary"]["resolved_ok"] > 0
 
     def test_compare_follow_deps_markdown(self, runner, real_lib):
-        result = runner.invoke(main, [
-            "compare", str(real_lib), str(real_lib), "--follow-deps",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(real_lib),
+                str(real_lib),
+                "--follow-deps",
+            ],
+        )
         assert result.exit_code == 0
         assert "Dependency Analysis" in result.output
         assert "resolved_ok" in result.output
 
     def test_compare_without_follow_deps_no_dep_section(self, runner, real_lib):
-        result = runner.invoke(main, [
-            "compare", str(real_lib), str(real_lib),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(real_lib),
+                str(real_lib),
+            ],
+        )
         assert result.exit_code == 0
         assert "Dependency Analysis" not in result.output

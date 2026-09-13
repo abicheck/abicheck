@@ -296,7 +296,9 @@ def _match_target_against_index(
         # unversioned/bare-name promise (Codex review, security P1, PR H)
         # -- see _build_demangled_index()'s identical guard for the
         # pattern/template branch below and its docstring for why.
-        providers = [p for p in snapshot.resolution.providers_for(target) if p.is_default]
+        providers = [
+            p for p in snapshot.resolution.providers_for(target) if p.is_default
+        ]
         return ([target] if providers else []), providers
 
     from . import deadline

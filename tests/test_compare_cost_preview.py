@@ -37,41 +37,76 @@ from abicheck.workflows.compare_cost_preview import (
 class TestResolveCompareEstimateLevel:
     def test_explicit_depth_wins_over_everything(self, tmp_path: Path) -> None:
         assert _resolve_compare_estimate_level(
-            "build", "s5", tmp_path, tmp_path, None, None,
+            "build",
+            "s5",
+            tmp_path,
+            tmp_path,
+            None,
+            None,
         ) == (SourceMethod.S1, EvidenceDepth.BUILD)
 
     def test_explicit_depth_binary_has_no_source_method(self) -> None:
         assert _resolve_compare_estimate_level(
-            "binary", None, None, None, None, None,
+            "binary",
+            None,
+            None,
+            None,
+            None,
+            None,
         ) == (SourceMethod.S0, EvidenceDepth.BINARY)
 
     def test_source_method_config_wins_over_sources_inference(
         self, tmp_path: Path
     ) -> None:
         assert _resolve_compare_estimate_level(
-            None, "s1", tmp_path, None, None, None,
+            None,
+            "s1",
+            tmp_path,
+            None,
+            None,
+            None,
         ) == (SourceMethod.S1, EvidenceDepth.BUILD)
 
     def test_source_method_auto_prices_the_headers_only_floor(self) -> None:
         # compare has no PR change seed for `auto` to score a risk-driven
         # escalation against (unlike `scan --mode auto`).
         assert _resolve_compare_estimate_level(
-            None, "auto", None, None, None, None,
+            None,
+            "auto",
+            None,
+            None,
+            None,
+            None,
         ) == (SourceMethod.S0, EvidenceDepth.HEADERS)
 
     def test_sources_given_infers_source_depth(self, tmp_path: Path) -> None:
         assert _resolve_compare_estimate_level(
-            None, None, tmp_path, None, None, None,
+            None,
+            None,
+            tmp_path,
+            None,
+            None,
+            None,
         ) == (SourceMethod.S5, EvidenceDepth.SOURCE)
 
     def test_build_info_given_infers_build_depth(self, tmp_path: Path) -> None:
         assert _resolve_compare_estimate_level(
-            None, None, None, None, tmp_path, None,
+            None,
+            None,
+            None,
+            None,
+            tmp_path,
+            None,
         ) == (SourceMethod.S1, EvidenceDepth.BUILD)
 
     def test_nothing_given_prices_the_headers_only_floor(self) -> None:
         assert _resolve_compare_estimate_level(
-            None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         ) == (SourceMethod.S0, EvidenceDepth.HEADERS)
 
 
@@ -82,12 +117,18 @@ class TestEstimateCompareDryRunCost:
         old.write_bytes(b"\x7fELF" + b"\x00" * 60)
         new.write_bytes(b"\x7fELF" + b"\x00" * 60)
         estimates, error = estimate_compare_dry_run_cost(
-            old_input=old, new_input=new,
-            depth="binary", source_method=None,
-            headers=(), includes=(),
-            old_headers_only=(), new_headers_only=(),
-            old_sources=None, new_sources=None,
-            old_build_info=None, new_build_info=None,
+            old_input=old,
+            new_input=new,
+            depth="binary",
+            source_method=None,
+            headers=(),
+            includes=(),
+            old_headers_only=(),
+            new_headers_only=(),
+            old_sources=None,
+            new_sources=None,
+            old_build_info=None,
+            new_build_info=None,
         )
         assert error is None
         assert estimates is not None
@@ -107,12 +148,18 @@ class TestEstimateCompareDryRunCost:
         new.write_bytes(b"\x7fELF" + b"\x00" * 60)
         missing_header = tmp_path / "does-not-exist.h"
         estimates, error = estimate_compare_dry_run_cost(
-            old_input=old, new_input=new,
-            depth="headers", source_method=None,
-            headers=(missing_header,), includes=(),
-            old_headers_only=(), new_headers_only=(),
-            old_sources=None, new_sources=None,
-            old_build_info=None, new_build_info=None,
+            old_input=old,
+            new_input=new,
+            depth="headers",
+            source_method=None,
+            headers=(missing_header,),
+            includes=(),
+            old_headers_only=(),
+            new_headers_only=(),
+            old_sources=None,
+            new_sources=None,
+            old_build_info=None,
+            new_build_info=None,
         )
         assert estimates is None
         assert error is not None
@@ -132,12 +179,18 @@ class TestAddCompareCostPreviewSection:
         old.write_bytes(b"\x7fELF" + b"\x00" * 60)
         new.write_bytes(b"\x7fELF" + b"\x00" * 60)
         estimates, error = estimate_compare_dry_run_cost(
-            old_input=old, new_input=new,
-            depth="binary", source_method=None,
-            headers=(), includes=(),
-            old_headers_only=(), new_headers_only=(),
-            old_sources=None, new_sources=None,
-            old_build_info=None, new_build_info=None,
+            old_input=old,
+            new_input=new,
+            depth="binary",
+            source_method=None,
+            headers=(),
+            includes=(),
+            old_headers_only=(),
+            new_headers_only=(),
+            old_sources=None,
+            new_sources=None,
+            old_build_info=None,
+            new_build_info=None,
         )
         assert error is None
         result = DryRunResult(command="compare")

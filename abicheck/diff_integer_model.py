@@ -22,6 +22,7 @@ large fraction of public integer parameters/returns at once. This is detected
 as a single high-level diagnostic, mirroring the libstdc++ dual-ABI flip
 detector in ``diff_platform``.
 """
+
 from __future__ import annotations
 
 from .checker_types import Change
@@ -168,7 +169,9 @@ def _diff_integer_model(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     new_map = {f.mangled: f for f in new.functions if in_public_surface(f)}
 
     flips, total, up, down = _scan_function_integer_flips(old_map, new_map, is_llp64)
-    typedef_flips, typedef_up, typedef_down = _scan_typedef_integer_flips(old, new, is_llp64)
+    typedef_flips, typedef_up, typedef_down = _scan_typedef_integer_flips(
+        old, new, is_llp64
+    )
     up += typedef_up
     down += typedef_down
 
@@ -181,10 +184,12 @@ def _diff_integer_model(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     direction = _integer_model_direction(up, down)
     detail = _integer_model_detail(flips, total, typedef_flips)
 
-    return [make_change(
-        ChangeKind.INTEGER_MODEL_CHANGED,
-        symbol="__integer_model",
-        detail=detail,
-        new=direction,
-        old_value=f"{down} narrowing / {up} widening transitions",
-    )]
+    return [
+        make_change(
+            ChangeKind.INTEGER_MODEL_CHANGED,
+            symbol="__integer_model",
+            detail=detail,
+            new=direction,
+            old_value=f"{down} narrowing / {up} widening transitions",
+        )
+    ]

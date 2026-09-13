@@ -63,7 +63,8 @@ class TestNoImportlibWorkaround:
         source = inspect.getsource(reclassify_module)
         tree = ast.parse(source)
         imports_importlib = any(
-            isinstance(node, ast.Import) and any(a.name == "importlib" for a in node.names)
+            isinstance(node, ast.Import)
+            and any(a.name == "importlib" for a in node.names)
             for node in ast.walk(tree)
         )
         assert not imports_importlib

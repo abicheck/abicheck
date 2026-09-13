@@ -25,6 +25,7 @@ at runtime rather than a single library's own declaration diff:
   (``appcompat.py`` / ``diff_platform.py``)
 * the -fshort-wchar data-model flag (``dwarf_advanced.py``)
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -44,9 +45,15 @@ from abicheck.stack_checker import StackVerdict, _compute_abi_risk
 
 def _elf_snap(elf: ElfMetadata) -> AbiSnapshot:
     return AbiSnapshot(
-        library="libtest.so.1", version="1.0",
-        functions=[], variables=[], types=[], enums=[], typedefs={},
-        elf=elf, elf_only_mode=True,
+        library="libtest.so.1",
+        version="1.0",
+        functions=[],
+        variables=[],
+        types=[],
+        enums=[],
+        typedefs={},
+        elf=elf,
+        elf_only_mode=True,
     )
 
 
@@ -57,8 +64,13 @@ def _elf(**kwargs) -> ElfMetadata:
 
 def _pe_snap(pe: PeMetadata) -> AbiSnapshot:
     return AbiSnapshot(
-        library="foo.dll", version="1.0",
-        functions=[], variables=[], types=[], enums=[], typedefs={},
+        library="foo.dll",
+        version="1.0",
+        functions=[],
+        variables=[],
+        types=[],
+        enums=[],
+        typedefs={},
         pe=pe,
     )
 
@@ -68,6 +80,7 @@ def _kinds(result) -> set[ChangeKind]:
 
 
 # ── needed_order_changed ─────────────────────────────────────────────────────
+
 
 class TestNeededOrderChanged:
     def test_reorder_with_same_set_flags(self):
@@ -92,6 +105,7 @@ class TestNeededOrderChanged:
 
 
 # ── symbolic_binding_mode_changed / text_relocation_* ────────────────────────
+
 
 class TestSymbolicAndTextrel:
     def test_symbolic_introduced(self):
@@ -137,47 +151,66 @@ class TestSymbolicAndTextrel:
 
 # ── wchar_model_changed ──────────────────────────────────────────────────────
 
+
 class TestWcharModelChanged:
     def _dwarf_snap(self, meta: AdvancedDwarfMetadata) -> AbiSnapshot:
         return AbiSnapshot(
-            library="libtest.so.1", version="1.0",
-            functions=[], variables=[], types=[], enums=[], typedefs={},
+            library="libtest.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            enums=[],
+            typedefs={},
             dwarf_advanced=meta,
         )
 
     def test_short_wchar_introduced(self):
-        old = AdvancedDwarfMetadata(has_dwarf=True, toolchain=ToolchainInfo(producer_string="GNU C++"))
+        old = AdvancedDwarfMetadata(
+            has_dwarf=True, toolchain=ToolchainInfo(producer_string="GNU C++")
+        )
         new = AdvancedDwarfMetadata(
             has_dwarf=True,
-            toolchain=ToolchainInfo(producer_string="GNU C++", wchar_flags={"-fshort-wchar"}),
+            toolchain=ToolchainInfo(
+                producer_string="GNU C++", wchar_flags={"-fshort-wchar"}
+            ),
         )
         r = compare(self._dwarf_snap(old), self._dwarf_snap(new))
         assert ChangeKind.WCHAR_MODEL_CHANGED in _kinds(r)
 
     def test_unchanged_not_flagged(self):
-        old = AdvancedDwarfMetadata(has_dwarf=True, toolchain=ToolchainInfo(wchar_flags={"-fshort-wchar"}))
-        new = AdvancedDwarfMetadata(has_dwarf=True, toolchain=ToolchainInfo(wchar_flags={"-fshort-wchar"}))
+        old = AdvancedDwarfMetadata(
+            has_dwarf=True, toolchain=ToolchainInfo(wchar_flags={"-fshort-wchar"})
+        )
+        new = AdvancedDwarfMetadata(
+            has_dwarf=True, toolchain=ToolchainInfo(wchar_flags={"-fshort-wchar"})
+        )
         r = compare(self._dwarf_snap(old), self._dwarf_snap(new))
         assert ChangeKind.WCHAR_MODEL_CHANGED not in _kinds(r)
 
     def test_no_dwarf_skips_detector(self):
         old = AdvancedDwarfMetadata(has_dwarf=False)
-        new = AdvancedDwarfMetadata(has_dwarf=True, toolchain=ToolchainInfo(wchar_flags={"-fshort-wchar"}))
+        new = AdvancedDwarfMetadata(
+            has_dwarf=True, toolchain=ToolchainInfo(wchar_flags={"-fshort-wchar"})
+        )
         r = compare(self._dwarf_snap(old), self._dwarf_snap(new))
         assert ChangeKind.WCHAR_MODEL_CHANGED not in _kinds(r)
 
 
 # ── pe_import_load_mode_changed ──────────────────────────────────────────────
 
+
 class TestPeImportLoadModeChanged:
     def test_eager_to_delay(self):
         old = PeMetadata(
             machine="IMAGE_FILE_MACHINE_AMD64",
-            imports={"KERNELBASE.dll": ["Foo"]}, delay_imports={},
+            imports={"KERNELBASE.dll": ["Foo"]},
+            delay_imports={},
         )
         new = PeMetadata(
             machine="IMAGE_FILE_MACHINE_AMD64",
-            imports={}, delay_imports={"KERNELBASE.dll": ["Foo"]},
+            imports={},
+            delay_imports={"KERNELBASE.dll": ["Foo"]},
         )
         r = compare(_pe_snap(old), _pe_snap(new))
         assert ChangeKind.PE_IMPORT_LOAD_MODE_CHANGED in _kinds(r)
@@ -185,11 +218,13 @@ class TestPeImportLoadModeChanged:
     def test_delay_to_eager(self):
         old = PeMetadata(
             machine="IMAGE_FILE_MACHINE_AMD64",
-            imports={}, delay_imports={"KERNELBASE.dll": ["Foo"]},
+            imports={},
+            delay_imports={"KERNELBASE.dll": ["Foo"]},
         )
         new = PeMetadata(
             machine="IMAGE_FILE_MACHINE_AMD64",
-            imports={"KERNELBASE.dll": ["Foo"]}, delay_imports={},
+            imports={"KERNELBASE.dll": ["Foo"]},
+            delay_imports={},
         )
         r = compare(_pe_snap(old), _pe_snap(new))
         assert ChangeKind.PE_IMPORT_LOAD_MODE_CHANGED in _kinds(r)
@@ -197,24 +232,33 @@ class TestPeImportLoadModeChanged:
     def test_unchanged_import_mode_not_flagged(self):
         old = PeMetadata(
             machine="IMAGE_FILE_MACHINE_AMD64",
-            imports={"KERNELBASE.dll": ["Foo"]}, delay_imports={},
+            imports={"KERNELBASE.dll": ["Foo"]},
+            delay_imports={},
         )
         new = PeMetadata(
             machine="IMAGE_FILE_MACHINE_AMD64",
-            imports={"KERNELBASE.dll": ["Foo"]}, delay_imports={},
+            imports={"KERNELBASE.dll": ["Foo"]},
+            delay_imports={},
         )
         r = compare(_pe_snap(old), _pe_snap(new))
         assert ChangeKind.PE_IMPORT_LOAD_MODE_CHANGED not in _kinds(r)
 
     def test_legacy_snapshot_delay_imports_none_skipped(self):
-        old = PeMetadata(machine="IMAGE_FILE_MACHINE_AMD64", imports={"KERNELBASE.dll": ["Foo"]})
-        new = PeMetadata(machine="IMAGE_FILE_MACHINE_AMD64", imports={}, delay_imports={"KERNELBASE.dll": ["Foo"]})
+        old = PeMetadata(
+            machine="IMAGE_FILE_MACHINE_AMD64", imports={"KERNELBASE.dll": ["Foo"]}
+        )
+        new = PeMetadata(
+            machine="IMAGE_FILE_MACHINE_AMD64",
+            imports={},
+            delay_imports={"KERNELBASE.dll": ["Foo"]},
+        )
         assert old.delay_imports is None
         r = compare(_pe_snap(old), _pe_snap(new))
         assert ChangeKind.PE_IMPORT_LOAD_MODE_CHANGED not in _kinds(r)
 
 
 # ── pe_ordinal_retargeted ────────────────────────────────────────────────────
+
 
 class _FakePeMeta:
     def __init__(self, exports):
@@ -223,14 +267,18 @@ class _FakePeMeta:
 
 class TestPeOrdinalRetargeted:
     def test_ordinal_retargeted_to_different_function(self):
-        with patch("abicheck.appcompat._detect_app_format", return_value="pe"), \
-             patch("abicheck.pe_metadata.parse_pe_metadata") as mock_parse:
+        with (
+            patch("abicheck.appcompat._detect_app_format", return_value="pe"),
+            patch("abicheck.pe_metadata.parse_pe_metadata") as mock_parse,
+        ):
             mock_parse.side_effect = [
                 _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
                 _FakePeMeta([PeExport(name="Bar", ordinal=17)]),
             ]
             reqs = AppRequirements(undefined_symbols={"ordinal:17"})
-            resolved, retargeted, names = _check_pe_ordinal_imports(Path("old.dll"), Path("new.dll"), reqs)
+            resolved, retargeted, names = _check_pe_ordinal_imports(
+                Path("old.dll"), Path("new.dll"), reqs
+            )
 
         assert resolved == {"ordinal:17"}
         assert len(retargeted) == 1
@@ -238,28 +286,36 @@ class TestPeOrdinalRetargeted:
         assert names == {"Foo", "Bar"}
 
     def test_ordinal_unchanged_resolved_no_retarget(self):
-        with patch("abicheck.appcompat._detect_app_format", return_value="pe"), \
-             patch("abicheck.pe_metadata.parse_pe_metadata") as mock_parse:
+        with (
+            patch("abicheck.appcompat._detect_app_format", return_value="pe"),
+            patch("abicheck.pe_metadata.parse_pe_metadata") as mock_parse,
+        ):
             mock_parse.side_effect = [
                 _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
                 _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
             ]
             reqs = AppRequirements(undefined_symbols={"ordinal:17"})
-            resolved, retargeted, names = _check_pe_ordinal_imports(Path("old.dll"), Path("new.dll"), reqs)
+            resolved, retargeted, names = _check_pe_ordinal_imports(
+                Path("old.dll"), Path("new.dll"), reqs
+            )
 
         assert resolved == {"ordinal:17"}
         assert retargeted == []
         assert names == {"Foo"}
 
     def test_ordinal_dropped_stays_unresolved(self):
-        with patch("abicheck.appcompat._detect_app_format", return_value="pe"), \
-             patch("abicheck.pe_metadata.parse_pe_metadata") as mock_parse:
+        with (
+            patch("abicheck.appcompat._detect_app_format", return_value="pe"),
+            patch("abicheck.pe_metadata.parse_pe_metadata") as mock_parse,
+        ):
             mock_parse.side_effect = [
                 _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
                 _FakePeMeta([]),
             ]
             reqs = AppRequirements(undefined_symbols={"ordinal:17"})
-            resolved, retargeted, names = _check_pe_ordinal_imports(Path("old.dll"), Path("new.dll"), reqs)
+            resolved, retargeted, names = _check_pe_ordinal_imports(
+                Path("old.dll"), Path("new.dll"), reqs
+            )
 
         assert resolved == set()
         assert retargeted == []
@@ -267,7 +323,9 @@ class TestPeOrdinalRetargeted:
 
     def test_no_ordinal_requirements_short_circuits(self):
         reqs = AppRequirements(undefined_symbols={"NamedFunc"})
-        resolved, retargeted, names = _check_pe_ordinal_imports(Path("old.dll"), Path("new.dll"), reqs)
+        resolved, retargeted, names = _check_pe_ordinal_imports(
+            Path("old.dll"), Path("new.dll"), reqs
+        )
         assert resolved == set()
         assert retargeted == []
         assert names == set()
@@ -279,25 +337,41 @@ class TestPeOrdinalRetargeted:
         """
         from abicheck.appcompat import check_appcompat
 
-        with patch("abicheck.appcompat._detect_app_format", return_value="pe"), \
-             patch("abicheck.appcompat.parse_app_requirements") as mock_parse_app, \
-             patch("abicheck.appcompat._get_lib_soname", return_value="foo.dll"), \
-             patch("abicheck.appcompat._get_new_lib_exports", return_value=set()), \
-             patch("abicheck.appcompat._missing_app_versions", return_value=[]), \
-             patch("abicheck.pe_metadata.parse_pe_metadata") as mock_parse_pe, \
-             patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="pe"), \
-             patch("abicheck.service_dump_native.run_dump") as mock_run_dump, \
-             patch("abicheck.workflows.compare_policy.compare_snapshots") as mock_compare:
-            mock_parse_app.return_value = AppRequirements(undefined_symbols={"ordinal:17"})
+        with (
+            patch("abicheck.appcompat._detect_app_format", return_value="pe"),
+            patch("abicheck.appcompat.parse_app_requirements") as mock_parse_app,
+            patch("abicheck.appcompat._get_lib_soname", return_value="foo.dll"),
+            patch("abicheck.appcompat._get_new_lib_exports", return_value=set()),
+            patch("abicheck.appcompat._missing_app_versions", return_value=[]),
+            patch("abicheck.pe_metadata.parse_pe_metadata") as mock_parse_pe,
+            patch(
+                "abicheck.workflows.input_resolution.detect_binary_format",
+                return_value="pe",
+            ),
+            patch("abicheck.service_dump_native.run_dump") as mock_run_dump,
+            patch(
+                "abicheck.workflows.compare_policy.compare_snapshots"
+            ) as mock_compare,
+        ):
+            mock_parse_app.return_value = AppRequirements(
+                undefined_symbols={"ordinal:17"}
+            )
             mock_parse_pe.side_effect = [
                 _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
                 _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
             ]
             mock_run_dump.side_effect = [object(), object()]
-            change = Change(kind=ChangeKind.FUNC_PARAMS_CHANGED, symbol="Foo", description="params changed")
+            change = Change(
+                kind=ChangeKind.FUNC_PARAMS_CHANGED,
+                symbol="Foo",
+                description="params changed",
+            )
             mock_compare.return_value = DiffResult(
-                old_version="old", new_version="new", library="foo.dll",
-                changes=[change], verdict=Verdict.BREAKING,
+                old_version="old",
+                new_version="new",
+                library="foo.dll",
+                changes=[change],
+                verdict=Verdict.BREAKING,
             )
 
             result = check_appcompat(Path("app.exe"), Path("old.dll"), Path("new.dll"))
@@ -308,68 +382,133 @@ class TestPeOrdinalRetargeted:
 
 # ── Runtime symbol-binding rebound ───────────────────────────────────────────
 
+
 def _node(path: str, soname: str) -> ResolvedDSO:
     return ResolvedDSO(
-        path=Path(path), soname=soname, needed=[], rpath="", runpath="",
-        resolution_reason="root", depth=0,
+        path=Path(path),
+        soname=soname,
+        needed=[],
+        rpath="",
+        runpath="",
+        resolution_reason="root",
+        depth=0,
     )
 
 
 class TestRuntimeBindingDiff:
     def test_provider_changed_across_environments(self):
-        base_graph = DependencyGraph(root="/app", nodes={
-            "/base/app": _node("/base/app", "app"),
-            "/base/liba.so": _node("/base/liba.so", "liba.so.1"),
-        })
-        cand_graph = DependencyGraph(root="/app", nodes={
-            "/cand/app": _node("/cand/app", "app"),
-            "/cand/libb.so": _node("/cand/libb.so", "libb.so.1"),
-        })
+        base_graph = DependencyGraph(
+            root="/app",
+            nodes={
+                "/base/app": _node("/base/app", "app"),
+                "/base/liba.so": _node("/base/liba.so", "liba.so.1"),
+            },
+        )
+        cand_graph = DependencyGraph(
+            root="/app",
+            nodes={
+                "/cand/app": _node("/cand/app", "app"),
+                "/cand/libb.so": _node("/cand/libb.so", "libb.so.1"),
+            },
+        )
         base_bindings = [
-            SymbolBinding(consumer="/base/app", symbol="process", version="",
-                          provider="/base/liba.so", status=BindingStatus.RESOLVED_OK, explanation=""),
+            SymbolBinding(
+                consumer="/base/app",
+                symbol="process",
+                version="",
+                provider="/base/liba.so",
+                status=BindingStatus.RESOLVED_OK,
+                explanation="",
+            ),
         ]
         cand_bindings = [
-            SymbolBinding(consumer="/cand/app", symbol="process", version="",
-                          provider="/cand/libb.so", status=BindingStatus.RESOLVED_OK, explanation=""),
+            SymbolBinding(
+                consumer="/cand/app",
+                symbol="process",
+                version="",
+                provider="/cand/libb.so",
+                status=BindingStatus.RESOLVED_OK,
+                explanation="",
+            ),
         ]
-        changes = diff_runtime_bindings(base_graph, cand_graph, base_bindings, cand_bindings)
+        changes = diff_runtime_bindings(
+            base_graph, cand_graph, base_bindings, cand_bindings
+        )
         assert len(changes) == 1
         assert changes[0].kind == ChangeKind.RUNTIME_SYMBOL_PROVIDER_CHANGED
         assert changes[0].old_value == "liba.so.1"
         assert changes[0].new_value == "libb.so.1"
 
     def test_same_provider_not_flagged(self):
-        base_graph = DependencyGraph(root="/app", nodes={
-            "/base/app": _node("/base/app", "app"),
-            "/base/liba.so": _node("/base/liba.so", "liba.so.1"),
-        })
-        cand_graph = DependencyGraph(root="/app", nodes={
-            "/cand/app": _node("/cand/app", "app"),
-            "/cand/liba.so": _node("/cand/liba.so", "liba.so.1"),
-        })
-        binding = SymbolBinding(consumer="/base/app", symbol="process", version="",
-                                 provider="/base/liba.so", status=BindingStatus.RESOLVED_OK, explanation="")
-        cand_binding = SymbolBinding(consumer="/cand/app", symbol="process", version="",
-                                      provider="/cand/liba.so", status=BindingStatus.RESOLVED_OK, explanation="")
-        changes = diff_runtime_bindings(base_graph, cand_graph, [binding], [cand_binding])
+        base_graph = DependencyGraph(
+            root="/app",
+            nodes={
+                "/base/app": _node("/base/app", "app"),
+                "/base/liba.so": _node("/base/liba.so", "liba.so.1"),
+            },
+        )
+        cand_graph = DependencyGraph(
+            root="/app",
+            nodes={
+                "/cand/app": _node("/cand/app", "app"),
+                "/cand/liba.so": _node("/cand/liba.so", "liba.so.1"),
+            },
+        )
+        binding = SymbolBinding(
+            consumer="/base/app",
+            symbol="process",
+            version="",
+            provider="/base/liba.so",
+            status=BindingStatus.RESOLVED_OK,
+            explanation="",
+        )
+        cand_binding = SymbolBinding(
+            consumer="/cand/app",
+            symbol="process",
+            version="",
+            provider="/cand/liba.so",
+            status=BindingStatus.RESOLVED_OK,
+            explanation="",
+        )
+        changes = diff_runtime_bindings(
+            base_graph, cand_graph, [binding], [cand_binding]
+        )
         assert changes == []
 
     def test_weak_resolution_changed(self):
-        base_graph = DependencyGraph(root="/app", nodes={"/base/app": _node("/base/app", "app")})
-        cand_graph = DependencyGraph(root="/app", nodes={
-            "/cand/app": _node("/cand/app", "app"),
-            "/cand/libb.so": _node("/cand/libb.so", "libb.so.1"),
-        })
+        base_graph = DependencyGraph(
+            root="/app", nodes={"/base/app": _node("/base/app", "app")}
+        )
+        cand_graph = DependencyGraph(
+            root="/app",
+            nodes={
+                "/cand/app": _node("/cand/app", "app"),
+                "/cand/libb.so": _node("/cand/libb.so", "libb.so.1"),
+            },
+        )
         base_bindings = [
-            SymbolBinding(consumer="/base/app", symbol="opt_feature", version="",
-                          provider=None, status=BindingStatus.WEAK_UNRESOLVED, explanation=""),
+            SymbolBinding(
+                consumer="/base/app",
+                symbol="opt_feature",
+                version="",
+                provider=None,
+                status=BindingStatus.WEAK_UNRESOLVED,
+                explanation="",
+            ),
         ]
         cand_bindings = [
-            SymbolBinding(consumer="/cand/app", symbol="opt_feature", version="",
-                          provider="/cand/libb.so", status=BindingStatus.RESOLVED_OK, explanation=""),
+            SymbolBinding(
+                consumer="/cand/app",
+                symbol="opt_feature",
+                version="",
+                provider="/cand/libb.so",
+                status=BindingStatus.RESOLVED_OK,
+                explanation="",
+            ),
         ]
-        changes = diff_runtime_bindings(base_graph, cand_graph, base_bindings, cand_bindings)
+        changes = diff_runtime_bindings(
+            base_graph, cand_graph, base_bindings, cand_bindings
+        )
         assert len(changes) == 1
         assert changes[0].kind == ChangeKind.RUNTIME_WEAK_RESOLUTION_CHANGED
 
@@ -377,17 +516,35 @@ class TestRuntimeBindingDiff:
         # A binding whose consumer doesn't exist in the other environment
         # (a DSO added/removed) must not be compared — that's a different,
         # already-covered event.
-        base_graph = DependencyGraph(root="/app", nodes={"/base/app": _node("/base/app", "app")})
-        cand_graph = DependencyGraph(root="/app", nodes={"/cand/app2": _node("/cand/app2", "app2")})
+        base_graph = DependencyGraph(
+            root="/app", nodes={"/base/app": _node("/base/app", "app")}
+        )
+        cand_graph = DependencyGraph(
+            root="/app", nodes={"/cand/app2": _node("/cand/app2", "app2")}
+        )
         base_bindings = [
-            SymbolBinding(consumer="/base/app", symbol="process", version="",
-                          provider=None, status=BindingStatus.MISSING, explanation=""),
+            SymbolBinding(
+                consumer="/base/app",
+                symbol="process",
+                version="",
+                provider=None,
+                status=BindingStatus.MISSING,
+                explanation="",
+            ),
         ]
         cand_bindings = [
-            SymbolBinding(consumer="/cand/app2", symbol="process", version="",
-                          provider=None, status=BindingStatus.MISSING, explanation=""),
+            SymbolBinding(
+                consumer="/cand/app2",
+                symbol="process",
+                version="",
+                provider=None,
+                status=BindingStatus.MISSING,
+                explanation="",
+            ),
         ]
-        changes = diff_runtime_bindings(base_graph, cand_graph, base_bindings, cand_bindings)
+        changes = diff_runtime_bindings(
+            base_graph, cand_graph, base_bindings, cand_bindings
+        )
         assert changes == []
 
 
@@ -397,7 +554,8 @@ class TestComputeAbiRiskWithBindingChanges:
 
         change = Change(
             kind=ChangeKind.RUNTIME_SYMBOL_PROVIDER_CHANGED,
-            symbol="process", description="moved provider",
+            symbol="process",
+            description="moved provider",
         )
         assert _compute_abi_risk([], [change]) == StackVerdict.WARN
 

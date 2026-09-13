@@ -143,8 +143,11 @@ def _reset_dated_overlays(records: list[DispositionRecord]) -> list[DispositionR
     """
     return [
         replace(
-            r, reclassified_by=None,
-            verdict_class=None if r.disposition is Disposition.SUPPRESSED else r.verdict_class,
+            r,
+            reclassified_by=None,
+            verdict_class=None
+            if r.disposition is Disposition.SUPPRESSED
+            else r.verdict_class,
         )
         for r in records
     ]

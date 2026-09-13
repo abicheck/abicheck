@@ -167,7 +167,4 @@ class TestAnalysisAssuranceStaysFlat:
     def test_analysis_assurance_has_not_moved_under_policy(self) -> None:
         import importlib.util
 
-        assert (
-            importlib.util.find_spec("abicheck.policy.analysis_assurance")
-            is None
-        )
+        assert importlib.util.find_spec("abicheck.policy.analysis_assurance") is None

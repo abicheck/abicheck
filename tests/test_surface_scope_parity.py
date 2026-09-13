@@ -29,6 +29,7 @@ Requires ``abidiff`` (libabigail), ``gcc``, and ``castxml``; marked
 version-sensitive, so an abidiff *error* exit (bit 0) skips rather than fails —
 we only assert parity when abidiff actually produced a verdict.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -48,8 +49,16 @@ _BIT_ERROR = 1
 def _compile(src: str, out: Path, *, include: Path | None = None) -> None:
     src_file = out.with_suffix(".c")
     src_file.write_text(textwrap.dedent(src).strip() + "\n", encoding="utf-8")
-    cmd = ["gcc", "-shared", "-fPIC", "-g", "-fvisibility=default",
-           "-o", str(out), str(src_file)]
+    cmd = [
+        "gcc",
+        "-shared",
+        "-fPIC",
+        "-g",
+        "-fvisibility=default",
+        "-o",
+        str(out),
+        str(src_file),
+    ]
     if include is not None:
         cmd += ["-I", str(include)]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -60,10 +69,19 @@ def _compile(src: str, out: Path, *, include: Path | None = None) -> None:
 def _abidiff_headers(old: Path, new: Path, hdr_dir: Path) -> str:
     """abidiff scoped to *hdr_dir*; returns the verdict, or skips on tool error."""
     r = subprocess.run(
-        ["abidiff", "--no-show-locs",
-         "--headers-dir1", str(hdr_dir), "--headers-dir2", str(hdr_dir),
-         str(old), str(new)],
-        capture_output=True, text=True, timeout=30,
+        [
+            "abidiff",
+            "--no-show-locs",
+            "--headers-dir1",
+            str(hdr_dir),
+            "--headers-dir2",
+            str(hdr_dir),
+            str(old),
+            str(new),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     if r.returncode & _BIT_ERROR:
         pytest.skip(f"abidiff errored (header-scoping unsupported?): {r.stderr[:200]}")
@@ -76,8 +94,12 @@ def _abicheck_scoped(old: Path, new: Path, pub_header: Path) -> str:
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        old_snap = dump(old, headers=[pub_header], version="v1", compiler="cc", lang="C")
-        new_snap = dump(new, headers=[pub_header], version="v2", compiler="cc", lang="C")
+        old_snap = dump(
+            old, headers=[pub_header], version="v1", compiler="cc", lang="C"
+        )
+        new_snap = dump(
+            new, headers=[pub_header], version="v2", compiler="cc", lang="C"
+        )
     result = compare(old_snap, new_snap, scope_to_public_surface=True)
     return result.verdict.value
 
@@ -109,7 +131,9 @@ def test_internal_type_change_scoped_out_by_both(tmp_path: Path) -> None:
 
     inc = tmp_path / "include"
     inc.mkdir()
-    (inc / "api.h").write_text("#ifndef API_H\n#define API_H\nint compute(int x);\n#endif\n")
+    (inc / "api.h").write_text(
+        "#ifndef API_H\n#define API_H\nint compute(int x);\n#endif\n"
+    )
 
     # struct Cache lives only in the .c (outside public headers) and is touched
     # solely by a static helper — neither tool should treat it as public.
@@ -181,10 +205,19 @@ def test_public_type_change_breaking_for_both(tmp_path: Path) -> None:
     ac = compare(old_snap, new_snap, scope_to_public_surface=True).verdict.value
 
     r = subprocess.run(
-        ["abidiff", "--no-show-locs",
-         "--headers-dir1", str(inc1), "--headers-dir2", str(inc2),
-         str(v1), str(v2)],
-        capture_output=True, text=True, timeout=30,
+        [
+            "abidiff",
+            "--no-show-locs",
+            "--headers-dir1",
+            str(inc1),
+            "--headers-dir2",
+            str(inc2),
+            str(v1),
+            str(v2),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     if r.returncode & _BIT_ERROR:
         pytest.skip(f"abidiff errored: {r.stderr[:200]}")

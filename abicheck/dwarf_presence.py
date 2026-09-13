@@ -21,7 +21,9 @@ from pathlib import Path
 from .model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
 
 
-def cheap_dwarf_presence_metadata(so_path: Path) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
+def cheap_dwarf_presence_metadata(
+    so_path: Path,
+) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
     """Return empty DWARF metadata objects carrying only cheap presence.
 
     ``scan --depth binary`` needs to report whether debug info exists, but must
@@ -36,7 +38,9 @@ def cheap_dwarf_presence_metadata(so_path: Path) -> tuple[DwarfMetadata, Advance
             has_dwarf = has_real_dwarf_info(ELFFile(f))
     except Exception:  # noqa: BLE001 - debug presence is advisory here
         has_dwarf = False
-    return DwarfMetadata(has_dwarf=has_dwarf), AdvancedDwarfMetadata(has_dwarf=has_dwarf)
+    return DwarfMetadata(has_dwarf=has_dwarf), AdvancedDwarfMetadata(
+        has_dwarf=has_dwarf
+    )
 
 
 def cheap_debug_presence_metadata(
@@ -69,7 +73,9 @@ def cheap_debug_presence_metadata(
     return dwarf_meta, dwarf_adv
 
 
-def _section_presence_metadata(present: bool) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
+def _section_presence_metadata(
+    present: bool,
+) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
     return DwarfMetadata(has_dwarf=present), AdvancedDwarfMetadata(has_dwarf=present)
 
 

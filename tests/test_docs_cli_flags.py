@@ -117,9 +117,7 @@ def test_docs_contain_abicheck_examples() -> None:
 
 
 @pytest.mark.parametrize("name,cmd,line,flags", _abicheck_invocations())
-def test_doc_cli_flags_exist(
-    name: str, cmd: str, line: str, flags: list[str]
-) -> None:
+def test_doc_cli_flags_exist(name: str, cmd: str, line: str, flags: list[str]) -> None:
     """Every flag in a documented ``abicheck`` example is a real option."""
     valid = _command_options(_COMMANDS[cmd])
     unknown = [f for f in flags if f not in valid]

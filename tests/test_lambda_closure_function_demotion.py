@@ -58,7 +58,9 @@ def _fn(mangled: str, ptype: str, name: str = "process") -> Function:
 
 
 def _elf(*names: str) -> ElfMetadata:
-    return ElfMetadata(symbols=[ElfSymbol(name=n, sym_type=SymbolType.FUNC) for n in names])
+    return ElfMetadata(
+        symbols=[ElfSymbol(name=n, sym_type=SymbolType.FUNC) for n in names]
+    )
 
 
 def _snap(version: str, fn: Function, elf: ElfMetadata | None) -> AbiSnapshot:
@@ -194,7 +196,7 @@ class TestSyntheticCtorDtorKeysDemotedWhenTemplateNeverExported:
     def test_synthetic_dtor_key_is_demoted_when_template_never_exported(self) -> None:
         from abicheck.checker_types import Change
 
-        symbol = f"~raii_guard<{_OLD_PARAM[len('raii_guard'):]}"  # "~raii_guard<(lambda:...)>"
+        symbol = f"~raii_guard<{_OLD_PARAM[len('raii_guard') :]}"  # "~raii_guard<(lambda:...)>"
         change = Change(
             kind=ChangeKind.FUNC_REMOVED,
             symbol=symbol,
@@ -266,7 +268,7 @@ class TestSyntheticCtorDtorKeysNotDemotedWhenTemplateIsExported:
     ) -> None:
         from abicheck.checker_types import Change
 
-        symbol = f"~raii_guard<{_OLD_PARAM[len('raii_guard'):]}"
+        symbol = f"~raii_guard<{_OLD_PARAM[len('raii_guard') :]}"
         change = Change(
             kind=ChangeKind.FUNC_REMOVED,
             symbol=symbol,
@@ -425,9 +427,7 @@ class TestSyntheticCtorDtorTemplateBaseNamePrimitive:
             synthetic_ctor_dtor_template_base_name,
         )
 
-        assert (
-            synthetic_ctor_dtor_template_base_name("~ns::PlainClass") == "PlainClass"
-        )
+        assert synthetic_ctor_dtor_template_base_name("~ns::PlainClass") == "PlainClass"
 
     def test_nested_template_brackets_stop_at_the_outermost_open_bracket(
         self,
@@ -437,8 +437,7 @@ class TestSyntheticCtorDtorTemplateBaseNamePrimitive:
         )
 
         assert (
-            synthetic_ctor_dtor_template_base_name("~Wrapper<Inner<int>>")
-            == "Wrapper"
+            synthetic_ctor_dtor_template_base_name("~Wrapper<Inner<int>>") == "Wrapper"
         )
 
 

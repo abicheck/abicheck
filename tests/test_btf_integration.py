@@ -23,6 +23,7 @@ struct-layout break through ``compare`` on native binaries.
 Requires Linux + a GCC new enough to support ``-gbtf`` (GCC 12+); skipped
 otherwise.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -63,10 +64,14 @@ def _btf_snapshot(so: Path, version: str) -> AbiSnapshot:
 @pytest.mark.integration
 def test_real_btf_struct_growth_is_breaking() -> None:
     """A struct that grows a field across builds is BREAKING via the BTF path."""
-    v1 = "struct task_state { int f0; int f1; };\n" \
-         "struct task_state *use(struct task_state *p) { return p; }\n"
-    v2 = "struct task_state { int f0; int f1; int f2; };\n" \
-         "struct task_state *use(struct task_state *p) { return p; }\n"
+    v1 = (
+        "struct task_state { int f0; int f1; };\n"
+        "struct task_state *use(struct task_state *p) { return p; }\n"
+    )
+    v2 = (
+        "struct task_state { int f0; int f1; int f2; };\n"
+        "struct task_state *use(struct task_state *p) { return p; }\n"
+    )
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         old = _btf_snapshot(_compile_btf_so(v1, "libbtf_v1.so", tmp), "1")
@@ -79,8 +84,10 @@ def test_real_btf_struct_growth_is_breaking() -> None:
 
 @pytest.mark.integration
 def test_real_btf_identical_is_not_breaking() -> None:
-    src = "struct task_state { int f0; int f1; };\n" \
-          "struct task_state *use(struct task_state *p) { return p; }\n"
+    src = (
+        "struct task_state { int f0; int f1; };\n"
+        "struct task_state *use(struct task_state *p) { return p; }\n"
+    )
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         old = _btf_snapshot(_compile_btf_so(src, "libbtf_a.so", tmp), "1")

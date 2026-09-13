@@ -21,6 +21,7 @@ exported-object alignment, undefined-symbol (import) set, and global
 allocator-replacement detection. All tests use synthetic ``ElfMetadata`` —
 no real binaries required.
 """
+
 from __future__ import annotations
 
 import struct
@@ -109,11 +110,14 @@ def _common(name: str, alignment: int = 0) -> ElfSymbol:
     )
 
 
-def _imp(name: str, binding: SymbolBinding = SymbolBinding.GLOBAL, version: str = "") -> ElfImport:
+def _imp(
+    name: str, binding: SymbolBinding = SymbolBinding.GLOBAL, version: str = ""
+) -> ElfImport:
     return ElfImport(name=name, binding=binding, version=version)
 
 
 # ── EI_DATA endianness ───────────────────────────────────────────────────────
+
 
 class TestEndianness:
     def test_flip_is_breaking(self):
@@ -132,6 +136,7 @@ class TestEndianness:
 
 # ── PT_INTERP ────────────────────────────────────────────────────────────────
 
+
 class TestInterpreter:
     def test_changed(self):
         old = _elf(interpreter="/lib64/ld-linux-x86-64.so.2")
@@ -141,11 +146,14 @@ class TestInterpreter:
 
     def test_absent_side_skipped(self):
         # Shared libraries usually carry no PT_INTERP; absence is not a change.
-        r = compare(_snap(_elf(interpreter="")), _snap(_elf(interpreter="/lib64/ld.so")))
+        r = compare(
+            _snap(_elf(interpreter="")), _snap(_elf(interpreter="/lib64/ld.so"))
+        )
         assert ChangeKind.INTERPRETER_CHANGED not in _kinds(r)
 
 
 # ── BIND_NOW ─────────────────────────────────────────────────────────────────
+
 
 class TestBindNow:
     def test_disabled_with_stable_relro(self):
@@ -169,20 +177,25 @@ class TestBindNow:
 
 # ── DT_FLAGS_1 loading flags ─────────────────────────────────────────────────
 
+
 class TestDynamicLoadingFlags:
     def test_nodelete_dropped(self):
         old = _elf(dynamic_flags=frozenset({"NODELETE"}))
         new = _elf(dynamic_flags=frozenset())
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.DYNAMIC_LOADING_FLAGS_CHANGED in _kinds(r)
-        change = next(c for c in r.changes if c.kind == ChangeKind.DYNAMIC_LOADING_FLAGS_CHANGED)
+        change = next(
+            c for c in r.changes if c.kind == ChangeKind.DYNAMIC_LOADING_FLAGS_CHANGED
+        )
         assert "-NODELETE" in change.description
 
     def test_noopen_gained(self):
         old = _elf(dynamic_flags=frozenset())
         new = _elf(dynamic_flags=frozenset({"NOOPEN"}))
         r = compare(_snap(old), _snap(new))
-        change = next(c for c in r.changes if c.kind == ChangeKind.DYNAMIC_LOADING_FLAGS_CHANGED)
+        change = next(
+            c for c in r.changes if c.kind == ChangeKind.DYNAMIC_LOADING_FLAGS_CHANGED
+        )
         assert "+NOOPEN" in change.description
 
     def test_legacy_uncaptured_side_skipped(self):
@@ -199,6 +212,7 @@ class TestDynamicLoadingFlags:
 
 # ── init/fini presence ───────────────────────────────────────────────────────
 
+
 class TestInitFini:
     def test_init_gained(self):
         r = compare(_snap(_elf(has_init=False)), _snap(_elf(has_init=True)))
@@ -214,6 +228,7 @@ class TestInitFini:
 
 
 # ── NT_GNU_ABI_TAG kernel floor ──────────────────────────────────────────────
+
 
 class TestKernelFloor:
     def test_raised(self):
@@ -293,9 +308,7 @@ class TestParseAbiTag:
         assert meta.min_kernel_version == ""
 
     def test_missing_section_is_noop(self):
-        elf = SimpleNamespace(
-            little_endian=True, get_section_by_name=lambda name: None
-        )
+        elf = SimpleNamespace(little_endian=True, get_section_by_name=lambda name: None)
         meta = ElfMetadata()
         _parse_abi_tag(elf, meta, Path("lib.so"))
         assert meta.min_kernel_version == ""
@@ -337,6 +350,7 @@ class TestParseDynamicFlags:
 
 
 # ── GNU_PROPERTY_X86_ISA_1_NEEDED baseline ───────────────────────────────────
+
 
 class TestX86IsaBaseline:
     def test_raised(self):
@@ -392,6 +406,7 @@ class TestX86IsaBaseline:
 
 # ── Exported-object alignment ────────────────────────────────────────────────
 
+
 class TestObjectAlignmentReduced:
     def test_reduced(self):
         # `_snap(old)` with no declared-alignment argument is already the
@@ -441,13 +456,19 @@ class TestObjectAlignmentReduced:
     # must not fire — mirroring the _ZT* exemption in the size detector. One
     # representative of each of the four prefixes, plus the smallest possible
     # bare-prefix name, to pin the check to the prefix rather than a full mangling.
-    @pytest.mark.parametrize("rtti", [
-        "_ZTVN4pvxs6server6OpBaseE",              # vtable
-        "_ZTIN4pvxs4impl6evbase3PvtE",            # typeinfo
-        "_ZTSN4pvxs6client12SubscriptionE",       # typeinfo name
-        "_ZTTN4pvxs3fooE",                        # VTT
-        "_ZTV1A", "_ZTI1A", "_ZTS1A", "_ZTT1A",   # minimal manglings
-    ])
+    @pytest.mark.parametrize(
+        "rtti",
+        [
+            "_ZTVN4pvxs6server6OpBaseE",  # vtable
+            "_ZTIN4pvxs4impl6evbase3PvtE",  # typeinfo
+            "_ZTSN4pvxs6client12SubscriptionE",  # typeinfo name
+            "_ZTTN4pvxs3fooE",  # VTT
+            "_ZTV1A",
+            "_ZTI1A",
+            "_ZTS1A",
+            "_ZTT1A",  # minimal manglings
+        ],
+    )
     def test_rtti_symbols_are_exempt(self, rtti):
         old = _elf(symbols=[_obj(rtti, alignment=2048)])
         new = _elf(symbols=[_obj(rtti, alignment=32)])
@@ -599,11 +620,16 @@ class TestObjectAlignmentReduced:
         # An RTTI object and a real object both drop alignment in the same diff.
         # The RTTI one is suppressed while the real one still fires — the exemption
         # must not blanket-suppress the whole finding kind for the comparison.
-        old = _elf(symbols=[_obj("_ZTV1A", alignment=2048), _obj("g_real", alignment=64)])
+        old = _elf(
+            symbols=[_obj("_ZTV1A", alignment=2048), _obj("g_real", alignment=64)]
+        )
         new = _elf(symbols=[_obj("_ZTV1A", alignment=32), _obj("g_real", alignment=8)])
         r = compare(_snap(old), _snap(new))
-        hits = [c for c in r.changes
-                if c.kind == ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED]
+        hits = [
+            c
+            for c in r.changes
+            if c.kind == ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED
+        ]
         assert len(hits) == 1
         assert (hits[0].symbol or hits[0].name) == "g_real"
 
@@ -619,8 +645,14 @@ class TestObjectAlignmentReduced:
         # TLS data participates in the ABI like OBJECT/COMMON; a real (non-RTTI)
         # TLS symbol's alignment drop is a hazard and must fire.
         def _tls(name, alignment):
-            return ElfSymbol(name=name, binding=SymbolBinding.GLOBAL,
-                             sym_type=SymbolType.TLS, size=8, value_alignment=alignment)
+            return ElfSymbol(
+                name=name,
+                binding=SymbolBinding.GLOBAL,
+                sym_type=SymbolType.TLS,
+                size=8,
+                value_alignment=alignment,
+            )
+
         old = _elf(symbols=[_tls("tls_buf", alignment=64)])
         new = _elf(symbols=[_tls("tls_buf", alignment=8)])
         r = compare(_snap(old), _snap(new))
@@ -670,7 +702,6 @@ class TestObjectAlignmentReduced:
         )
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(r)
 
-
         # ... and the mirror image, so the test cannot pass by only ever
         # checking whichever side the implementation happens to test first.
         r = compare(_snap(old), _snap(new, [_var("g_table", 64)]))
@@ -690,13 +721,18 @@ class TestObjectAlignmentReduced:
 
 # ── Undefined-symbol (import) surface ────────────────────────────────────────
 
+
 class TestImportSet:
     def test_added_import(self):
         old = _elf(imports=[_imp("memcpy")])
-        new = _elf(imports=[_imp("memcpy"), _imp("pthread_create", version="GLIBC_2.34")])
+        new = _elf(
+            imports=[_imp("memcpy"), _imp("pthread_create", version="GLIBC_2.34")]
+        )
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.IMPORTED_SYMBOL_ADDED in _kinds(r)
-        change = next(c for c in r.changes if c.kind == ChangeKind.IMPORTED_SYMBOL_ADDED)
+        change = next(
+            c for c in r.changes if c.kind == ChangeKind.IMPORTED_SYMBOL_ADDED
+        )
         assert "pthread_create" in change.description
         assert "GLIBC_2.34" in change.description
 
@@ -709,7 +745,9 @@ class TestImportSet:
 
     def test_weak_import_added_is_skipped(self):
         old = _elf(imports=[_imp("memcpy")])
-        new = _elf(imports=[_imp("memcpy"), _imp("optional_fn", binding=SymbolBinding.WEAK)])
+        new = _elf(
+            imports=[_imp("memcpy"), _imp("optional_fn", binding=SymbolBinding.WEAK)]
+        )
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.IMPORTED_SYMBOL_ADDED not in _kinds(r)
 
@@ -720,7 +758,9 @@ class TestImportSet:
         new = _elf(imports=[_imp("optional_fn", binding=SymbolBinding.GLOBAL)])
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.IMPORTED_SYMBOL_ADDED in _kinds(r)
-        change = next(c for c in r.changes if c.kind == ChangeKind.IMPORTED_SYMBOL_ADDED)
+        change = next(
+            c for c in r.changes if c.kind == ChangeKind.IMPORTED_SYMBOL_ADDED
+        )
         assert "weak" in change.description
 
     def test_strong_to_weak_import_not_flagged(self):
@@ -756,6 +796,7 @@ class TestImportSet:
 
 
 # ── Global allocator replacement ─────────────────────────────────────────────
+
 
 class TestAllocatorReplacement:
     def test_added(self):
@@ -797,9 +838,7 @@ class TestAllocatorReplacement:
         # Placement new/delete (operator new(size,void*) / delete(void*,void*))
         # do not replace the global allocator — adding them is not a finding.
         old = _elf(symbols=[_func("api_fn")])
-        new = _elf(
-            symbols=[_func("api_fn"), _func("_ZnwmPv"), _func("_ZdlPvS_")]
-        )
+        new = _elf(symbols=[_func("api_fn"), _func("_ZnwmPv"), _func("_ZdlPvS_")])
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.ALLOCATOR_REPLACEMENT_ADDED not in _kinds(r)
 

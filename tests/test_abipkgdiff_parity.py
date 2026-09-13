@@ -84,7 +84,9 @@ def _make_tar_package(lib: Path, pkg: Path) -> None:
 def _run_abipkgdiff(old_pkg: Path, new_pkg: Path) -> str:
     r = subprocess.run(
         ["abipkgdiff", str(old_pkg), str(new_pkg)],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     return decode_exit_code(r.returncode, zero_verdict="COMPATIBLE")
 

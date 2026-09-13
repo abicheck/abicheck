@@ -124,7 +124,9 @@ def test_cache_directories_do_not_accumulate_in_pytest_basetemp(
 
     # And basetemp itself carries no per-test cache entry at all, however many
     # tests have run before this one.
-    assert [p.name for p in basetemp.iterdir() if p.name.startswith("snapshot_cache-")] == []
+    assert [
+        p.name for p in basetemp.iterdir() if p.name.startswith("snapshot_cache-")
+    ] == []
 
     # The bucket is shared, the directories in it are not: this occurrence's
     # directory is distinct from every earlier one even though they are

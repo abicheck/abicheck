@@ -24,6 +24,7 @@ function parameter types, and struct/class/union field types — and yields the
 old/new spelling pairs that differ, so each specialised detector only has to
 recognise its own token.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -119,18 +120,30 @@ def _match_record_fields(
 ) -> Iterator[TypeSlotChange]:
     """Yield field-spelling changes for record types present in both snapshots."""
     excl = stdlib_namespaces_excluded(old, new)
-    old_types = {t.name: t for t in old.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)}
-    new_types = {t.name: t for t in new.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)}
+    old_types = {
+        t.name: t
+        for t in old.types
+        if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
+    }
+    new_types = {
+        t.name: t
+        for t in new.types
+        if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
+    }
     for name in set(old_types) & set(new_types):
         nt = new_types[name]
         new_fields = {f.name: f for f in nt.fields}
         for ofield in old_types[name].fields:
             nfield = new_fields.get(ofield.name)
             if nfield is not None and _spelling_differ(ofield.type, nfield.type):
-                yield TypeSlotChange(name, f"field '{ofield.name}'", ofield.type, nfield.type)
+                yield TypeSlotChange(
+                    name, f"field '{ofield.name}'", ofield.type, nfield.type
+                )
 
 
-def iter_type_slot_changes(old: AbiSnapshot, new: AbiSnapshot) -> Iterator[TypeSlotChange]:
+def iter_type_slot_changes(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> Iterator[TypeSlotChange]:
     """Yield every public function/field type slot whose spelling changed.
 
     Matching is by mangled name (functions) and type name (records); only slots

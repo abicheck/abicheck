@@ -5,6 +5,7 @@ Focuses on negative end-to-end scenarios requested in the coverage plan:
 - missing exported symbols across versions
 - broken header parsing via castxml
 """
+
 from __future__ import annotations
 
 import shutil
@@ -16,7 +17,9 @@ import pytest
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(sys.platform != "linux", reason="ELF/castxml tests require Linux"),
+    pytest.mark.skipif(
+        sys.platform != "linux", reason="ELF/castxml tests require Linux"
+    ),
 ]
 
 
@@ -92,7 +95,9 @@ def test_compare_detects_missing_exported_symbol_end_to_end(tmp_path: Path) -> N
     d2 = _run_abicheck(["dump", str(new_so), "-H", str(header), "-o", str(new_snap)])
     assert d2.returncode == 0, d2.stderr
 
-    cmp_res = _run_abicheck(["compare", str(old_snap), str(new_snap), "-o", "markdown=-"])
+    cmp_res = _run_abicheck(
+        ["compare", str(old_snap), str(new_snap), "-o", "markdown=-"]
+    )
 
     assert cmp_res.returncode == 4
     # api_fn present in header but absent from new .dynsym → FUNC_VISIBILITY_CHANGED

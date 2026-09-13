@@ -19,7 +19,9 @@ def test_looks_like_perl_dump_detects_var1_with_whitespace() -> None:
     assert not looks_like_perl_dump("<?xml version='1.0'?><ABI_dump_1.0/>")
 
 
-def test_snapshot_from_abicc_dict_maps_functions_variables_and_types(tmp_path: Path) -> None:
+def test_snapshot_from_abicc_dict_maps_functions_variables_and_types(
+    tmp_path: Path,
+) -> None:
     data = {
         "LibraryName": "libdemo",
         "LibraryVersion": "2.0",
@@ -130,5 +132,3 @@ def test_is_abicc_perl_dump_file_false_for_regular_xml(tmp_path: Path) -> None:
     p = tmp_path / "desc.xml"
     p.write_text("<descriptor/>", encoding="utf-8")
     assert not is_abicc_perl_dump_file(p)
-
-

@@ -47,43 +47,64 @@ _R = Verdict.COMPATIBLE_WITH_RISK
 _E = ChangeKindMeta
 
 BUILD_ENTRIES: list[ChangeKindMeta] = [
-    _E("abi_relevant_build_flag_changed", _R,
-       impact="An ABI-affecting compiler/build option changed (e.g. -std, "
-              "-fabi-version, _GLIBCXX_USE_CXX11_ABI, -fvisibility, -fpack-struct, "
-              "--target/-mabi, sysroot). The artifact diff decides whether the "
-              "shipped ABI actually broke; this flags the elevated risk and "
-              "localizes the cause for review."),
-    _E("behavioural_default_changed", _R,
-       impact="A documented default value changed without altering any "
-              "signature — e.g. the default device selector, the default "
-              "execution backend, or the default policy. Source compiles "
-              "and links unchanged; runtime behaviour silently differs. "
-              "Read from the probe manifest's `defaults:` section."),
-    _E("build_context_changed", _C,
-       impact="Non-ABI-relevant build metadata changed between versions (e.g. "
-              "include-path ordering, output paths, or generator version). "
-              "Informational quality signal; no ABI impact on its own."),
-    _E("bundle_duplicate_provider", _R,
-       impact="The same default-visibility symbol name is exported by 2+ "
-              "libraries in one --artifact-set audit. Which library a "
-              "consumer resolves against depends on load order / symbol "
-              "interposition, not a declared contract -- an ODR-style "
-              "ownership ambiguity within one release."),
-    _E("bundle_intra_dep_removed", _B,
-       impact="A sibling library in this bundle still imports a symbol that no "
-              "library in the new bundle exports. Loading the consumer will fail "
-              "with undefined symbol at runtime."),
-    _E("bundle_intra_dep_resolved_to_different_version", _R,
-       impact="A sibling import that previously resolved to one symbol version "
-              "now resolves to a different version in the new bundle (gnu.version_r "
-              "drift). Compatible at the linker level but the underlying ABI of "
-              "that version may differ."),
-    _E("bundle_intra_dep_signature_changed", _B,
-       impact="A sibling library imports a symbol whose provider changed its "
-              "DWARF signature (parameters or return type) while keeping the same "
-              "mangled name (typical of extern \"C\" or weak boundaries). The "
-              "linker resolves the symbol but the calling convention is wrong; "
-              "callers pass arguments with the old layout, callee reads the new."),
+    _E(
+        "abi_relevant_build_flag_changed",
+        _R,
+        impact="An ABI-affecting compiler/build option changed (e.g. -std, "
+        "-fabi-version, _GLIBCXX_USE_CXX11_ABI, -fvisibility, -fpack-struct, "
+        "--target/-mabi, sysroot). The artifact diff decides whether the "
+        "shipped ABI actually broke; this flags the elevated risk and "
+        "localizes the cause for review.",
+    ),
+    _E(
+        "behavioural_default_changed",
+        _R,
+        impact="A documented default value changed without altering any "
+        "signature — e.g. the default device selector, the default "
+        "execution backend, or the default policy. Source compiles "
+        "and links unchanged; runtime behaviour silently differs. "
+        "Read from the probe manifest's `defaults:` section.",
+    ),
+    _E(
+        "build_context_changed",
+        _C,
+        impact="Non-ABI-relevant build metadata changed between versions (e.g. "
+        "include-path ordering, output paths, or generator version). "
+        "Informational quality signal; no ABI impact on its own.",
+    ),
+    _E(
+        "bundle_duplicate_provider",
+        _R,
+        impact="The same default-visibility symbol name is exported by 2+ "
+        "libraries in one --artifact-set audit. Which library a "
+        "consumer resolves against depends on load order / symbol "
+        "interposition, not a declared contract -- an ODR-style "
+        "ownership ambiguity within one release.",
+    ),
+    _E(
+        "bundle_intra_dep_removed",
+        _B,
+        impact="A sibling library in this bundle still imports a symbol that no "
+        "library in the new bundle exports. Loading the consumer will fail "
+        "with undefined symbol at runtime.",
+    ),
+    _E(
+        "bundle_intra_dep_resolved_to_different_version",
+        _R,
+        impact="A sibling import that previously resolved to one symbol version "
+        "now resolves to a different version in the new bundle (gnu.version_r "
+        "drift). Compatible at the linker level but the underlying ABI of "
+        "that version may differ.",
+    ),
+    _E(
+        "bundle_intra_dep_signature_changed",
+        _B,
+        impact="A sibling library imports a symbol whose provider changed its "
+        "DWARF signature (parameters or return type) while keeping the same "
+        'mangled name (typical of extern "C" or weak boundaries). The '
+        "linker resolves the symbol but the calling convention is wrong; "
+        "callers pass arguments with the old layout, callee reads the new.",
+    ),
     _E(
         "bundle_intra_dep_signature_unverified",
         _R,
@@ -97,64 +118,97 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "is unconfirmed, not proven safe.",
         description_template="{name} calls a symbol {detail} still exports by name, but one or both sides lack type evidence to confirm the signature agrees.",
     ),
-    _E("bundle_intra_type_changed", _B,
-       impact="A type defined in one library of this bundle is used in the public "
-              "ABI of a sibling library, and its layout changed. The sibling's "
-              "ABI looks unchanged on its own, but every cross-DSO call that "
-              "passes the type by value or reads its fields is now miscompiled."),
-    _E("bundle_library_added", _C, is_addition=True,
-       impact="A new library appears in the bundle; existing consumers unaffected."),
-    _E("support_promise_component_retired", _B,
-       impact="ADR-065 D1/S3: the release stopped shipping a component it used "
-              "to ship, and the NEW side's inventory is PROVEN complete, so "
-              "this is evidence of a retired promise rather than a member a "
-              "partial input happened not to supply. Every consumer that links "
-              "the component fails to load, whether or not a sibling in this "
-              "same release consumed it -- which is what distinguishes this "
-              "from bundle_library_removed, whose detection deliberately fires "
-              "only for an intra-bundle consumer. Emitted only under the "
-              "contract policy that asks for it (--support-promise declared); "
-              "never inferred from acquisition state alone.",
-       description_template="{name} was shipped by the old release and is absent from the new release's proven-complete component inventory."),
-    _E("support_promise_component_introduced", _C, is_addition=True,
-       impact="ADR-065 D1/S3: the symmetric rule -- the release now ships a "
-              "component it did not before, established against a PROVEN-"
-              "complete OLD inventory (a partial old input cannot prove the "
-              "component was absent). No existing consumer is affected.",
-       description_template="{name} is shipped by the new release and is absent from the old release's proven-complete component inventory."),
-    _E("bundle_library_removed", _B,
-       impact="A library present in the old bundle is absent in the new bundle "
-              "and at least one of its exported symbols was consumed by a sibling. "
-              "Loading any consumer fails with NEEDED-library-not-found."),
-    _E("bundle_manifest_entry_unsatisfied", _R,
-       impact="Audit-mode (scan --artifact-set --manifest, no old side): an "
-              "opt-in ownership manifest entry is unsatisfied by this "
-              "declared set -- either no exported symbol matches it at "
-              "all, or it matches but is provided by a library other than "
-              "the one the manifest names as the expected provider. RISK, "
-              "not BREAKING -- there is no diff to confirm a regression."),
-    _E("bundle_manifest_instantiation_added", _C, is_addition=True,
-       impact="A symbol present in the new manifest is not in the old one; "
-              "new instantiation now publicly promised."),
-    _E("bundle_manifest_instantiation_removed", _B,
-       impact="A symbol listed in the supplied --instantiation-manifest as a "
-              "public ABI promise is not exported by any library in the new "
-              "bundle. Consumers of the previously-promised template "
-              "instantiation will fail to link or load."),
-    _E("bundle_provider_changed", _R,
-       impact="A symbol moved from one library in this bundle to another. "
-              "Downstream binaries that had DT_NEEDED on the old provider may "
-              "still resolve transitively through the bundle's link graph, or "
-              "may not — depends on whether the consumer's existing dependency "
-              "chain reaches the new provider."),
-    _E("bundle_unresolved_intra_dependency", _R,
-       impact="Audit-mode (scan --artifact-set, no old side): a library in this "
-              "artifact set imports a symbol that no library in the set exports, "
-              "and the import is not covered by the declared or built-in "
-              "system-provider allow-list. Unlike bundle_intra_dep_removed this "
-              "is not diff-confirmed (there is no old side to compare against), "
-              "so it is reported as a risk rather than a confirmed break — the "
-              "symbol may be satisfied by a dependency outside the declared set."),
+    _E(
+        "bundle_intra_type_changed",
+        _B,
+        impact="A type defined in one library of this bundle is used in the public "
+        "ABI of a sibling library, and its layout changed. The sibling's "
+        "ABI looks unchanged on its own, but every cross-DSO call that "
+        "passes the type by value or reads its fields is now miscompiled.",
+    ),
+    _E(
+        "bundle_library_added",
+        _C,
+        is_addition=True,
+        impact="A new library appears in the bundle; existing consumers unaffected.",
+    ),
+    _E(
+        "support_promise_component_retired",
+        _B,
+        impact="ADR-065 D1/S3: the release stopped shipping a component it used "
+        "to ship, and the NEW side's inventory is PROVEN complete, so "
+        "this is evidence of a retired promise rather than a member a "
+        "partial input happened not to supply. Every consumer that links "
+        "the component fails to load, whether or not a sibling in this "
+        "same release consumed it -- which is what distinguishes this "
+        "from bundle_library_removed, whose detection deliberately fires "
+        "only for an intra-bundle consumer. Emitted only under the "
+        "contract policy that asks for it (--support-promise declared); "
+        "never inferred from acquisition state alone.",
+        description_template="{name} was shipped by the old release and is absent from the new release's proven-complete component inventory.",
+    ),
+    _E(
+        "support_promise_component_introduced",
+        _C,
+        is_addition=True,
+        impact="ADR-065 D1/S3: the symmetric rule -- the release now ships a "
+        "component it did not before, established against a PROVEN-"
+        "complete OLD inventory (a partial old input cannot prove the "
+        "component was absent). No existing consumer is affected.",
+        description_template="{name} is shipped by the new release and is absent from the old release's proven-complete component inventory.",
+    ),
+    _E(
+        "bundle_library_removed",
+        _B,
+        impact="A library present in the old bundle is absent in the new bundle "
+        "and at least one of its exported symbols was consumed by a sibling. "
+        "Loading any consumer fails with NEEDED-library-not-found.",
+    ),
+    _E(
+        "bundle_manifest_entry_unsatisfied",
+        _R,
+        impact="Audit-mode (scan --artifact-set --manifest, no old side): an "
+        "opt-in ownership manifest entry is unsatisfied by this "
+        "declared set -- either no exported symbol matches it at "
+        "all, or it matches but is provided by a library other than "
+        "the one the manifest names as the expected provider. RISK, "
+        "not BREAKING -- there is no diff to confirm a regression.",
+    ),
+    _E(
+        "bundle_manifest_instantiation_added",
+        _C,
+        is_addition=True,
+        impact="A symbol present in the new manifest is not in the old one; "
+        "new instantiation now publicly promised.",
+    ),
+    _E(
+        "bundle_manifest_instantiation_removed",
+        _B,
+        impact="A symbol listed in the supplied --instantiation-manifest as a "
+        "public ABI promise is not exported by any library in the new "
+        "bundle. Consumers of the previously-promised template "
+        "instantiation will fail to link or load.",
+    ),
+    _E(
+        "bundle_provider_changed",
+        _R,
+        impact="A symbol moved from one library in this bundle to another. "
+        "Downstream binaries that had DT_NEEDED on the old provider may "
+        "still resolve transitively through the bundle's link graph, or "
+        "may not — depends on whether the consumer's existing dependency "
+        "chain reaches the new provider.",
+    ),
+    _E(
+        "bundle_unresolved_intra_dependency",
+        _R,
+        impact="Audit-mode (scan --artifact-set, no old side): a library in this "
+        "artifact set imports a symbol that no library in the set exports, "
+        "and the import is not covered by the declared or built-in "
+        "system-provider allow-list. Unlike bundle_intra_dep_removed this "
+        "is not diff-confirmed (there is no old side to compare against), "
+        "so it is reported as a risk rather than a confirmed break — the "
+        "symbol may be satisfied by a dependency outside the declared set.",
+    ),
     _E(
         "bundle_variant_coverage_regressed",
         _R,
@@ -183,19 +237,25 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "evidence to a single build target / link unit (or pass an explicit "
         "compile-DB filter) so one coherent context feeds the analysis.",
     ),
-    _E("cxx_standard_floor_raised", _A,
-       impact="The library's minimum required C++ standard increased "
-              "between releases (e.g. C++17 → C++20). Consumers still "
-              "building with the old standard no longer get a working "
-              "header set; standard-library facilities removed in newer "
-              "standards (e.g. std::result_of) may also disappear from "
-              "the API surface.",
-       description_template="C++ standard floor raised from {old} to {new}. Consumers still building with the old standard get a degraded or non-functional API surface."),
-    _E("generated_file_dependency_unstable", _R,
-       impact="The build graph indicates a generated-file dependency risk "
-              "(e.g. missing or unstable generator dependencies). Generated "
-              "public declarations may differ from what was analyzed; rebuild "
-              "determinism is not guaranteed."),
+    _E(
+        "cxx_standard_floor_raised",
+        _A,
+        impact="The library's minimum required C++ standard increased "
+        "between releases (e.g. C++17 → C++20). Consumers still "
+        "building with the old standard no longer get a working "
+        "header set; standard-library facilities removed in newer "
+        "standards (e.g. std::result_of) may also disappear from "
+        "the API surface.",
+        description_template="C++ standard floor raised from {old} to {new}. Consumers still building with the old standard get a degraded or non-functional API surface.",
+    ),
+    _E(
+        "generated_file_dependency_unstable",
+        _R,
+        impact="The build graph indicates a generated-file dependency risk "
+        "(e.g. missing or unstable generator dependencies). Generated "
+        "public declarations may differ from what was analyzed; rebuild "
+        "determinism is not guaranteed.",
+    ),
     _E(
         "header_binary_context_mismatch",
         _R,
@@ -210,31 +270,43 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "compile context, or investigate the named record(s) directly "
         "(see the snapshot's dwarf_layout_coherence_mismatches).",
     ),
-    _E("header_build_context_mismatch", _A,
-       impact="The public headers were parsed without the build's ABI-relevant "
-              "context (the L3 build evidence records ABI-affecting flags/macros, but "
-              "the header AST was captured context-free). The declared API surface may "
-              "therefore not match what the shipped translation units actually "
-              "compile to (e.g. a macro-conditional field or a packing pragma is "
-              "evaluated differently). Re-dump the headers with the build's "
-              "compile_commands.json so the L2 surface reflects the real build."),
-    _E("header_parse_context_drift", _R,
-       impact="The public-header AST was parsed under a different context (flags, "
-              "defines, include paths) than the real build used. Header-derived "
-              "API facts may be unreliable; align the parse context (e.g. via "
-              "compile_commands.json) to restore confidence."),
-    _E("layer_coverage_asymmetric", _R,
-       impact="The base snapshot was analyzed with evidence layers the target "
-              "lacks (e.g. debug info, build context, or source ABI). The "
-              "comparison is scoped to the layers both sides share, so changes "
-              "only the missing layers could prove are not reported. Re-scan "
-              "the target with the same inputs to restore full coverage."),
-    _E("link_export_policy_changed", _R,
-       impact="The export policy changed — version script, export map, or .def "
-              "file. The set of exported symbols may have shifted. When this "
-              "actually removes or alters exports, the artifact diff (L0) emits "
-              "the corresponding BREAKING findings separately; this kind explains "
-              "and localizes them and does not escalate on its own."),
+    _E(
+        "header_build_context_mismatch",
+        _A,
+        impact="The public headers were parsed without the build's ABI-relevant "
+        "context (the L3 build evidence records ABI-affecting flags/macros, but "
+        "the header AST was captured context-free). The declared API surface may "
+        "therefore not match what the shipped translation units actually "
+        "compile to (e.g. a macro-conditional field or a packing pragma is "
+        "evaluated differently). Re-dump the headers with the build's "
+        "compile_commands.json so the L2 surface reflects the real build.",
+    ),
+    _E(
+        "header_parse_context_drift",
+        _R,
+        impact="The public-header AST was parsed under a different context (flags, "
+        "defines, include paths) than the real build used. Header-derived "
+        "API facts may be unreliable; align the parse context (e.g. via "
+        "compile_commands.json) to restore confidence.",
+    ),
+    _E(
+        "layer_coverage_asymmetric",
+        _R,
+        impact="The base snapshot was analyzed with evidence layers the target "
+        "lacks (e.g. debug info, build context, or source ABI). The "
+        "comparison is scoped to the layers both sides share, so changes "
+        "only the missing layers could prove are not reported. Re-scan "
+        "the target with the same inputs to restore full coverage.",
+    ),
+    _E(
+        "link_export_policy_changed",
+        _R,
+        impact="The export policy changed — version script, export map, or .def "
+        "file. The set of exported symbols may have shifted. When this "
+        "actually removes or alters exports, the artifact diff (L0) emits "
+        "the corresponding BREAKING findings separately; this kind explains "
+        "and localizes them and does not escalate on its own.",
+    ),
     _E(
         "macos_deployment_target_raised",
         _R,
@@ -326,30 +398,39 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "that worked before can now fail to import this module.",
         description_template="NumPy C-API target floor raised: {old} → {new}",
     ),
-    _E("runtime_floor_raised", _R,
-       impact="The maximum symbol version this binary requires from a provider "
-              "library rose (e.g. GLIBC_2.28 → GLIBC_2.34). The binary is "
-              "interface-identical for existing consumers but no longer loads on "
-              "runtimes older than the new floor — a deployment-envelope change, "
-              "typically caused by rebuilding/relinking on a newer distro or "
-              "sysroot rather than by a source change. Check the listed symbols: "
-              "a floor pulled up only by symbols like __libc_start_main is a pure "
-              "relink artifact; a new API symbol means the code now genuinely "
-              "depends on the newer runtime.",
-       description_template="Runtime floor raised for {detail}: {old} → {new} (required by: {name})"),
-    _E("stdlib_debug_mode_changed", _R,
-       impact="A standard-library debug/hardening mode was toggled between builds "
-              "(_GLIBCXX_DEBUG / _GLIBCXX_ASSERTIONS for libstdc++, "
-              "_ITERATOR_DEBUG_LEVEL for the MSVC STL). These modes change the "
-              "layout and size of std:: containers (extra debug members / iterator "
-              "bookkeeping), so any public type embedding a std:: container by "
-              "value, or a function taking one across the boundary, is "
-              "ABI-incompatible between a debug-mode build and a normal one. Build "
-              "the library and its consumers with the matching setting."),
-    _E("toolchain_version_changed", _R,
-       impact="The compiler, standard library, or sysroot/SDK changed between "
-              "versions. Layout, mangling, and codegen can shift even with "
-              "identical sources; review for ABI-affecting toolchain drift."),
+    _E(
+        "runtime_floor_raised",
+        _R,
+        impact="The maximum symbol version this binary requires from a provider "
+        "library rose (e.g. GLIBC_2.28 → GLIBC_2.34). The binary is "
+        "interface-identical for existing consumers but no longer loads on "
+        "runtimes older than the new floor — a deployment-envelope change, "
+        "typically caused by rebuilding/relinking on a newer distro or "
+        "sysroot rather than by a source change. Check the listed symbols: "
+        "a floor pulled up only by symbols like __libc_start_main is a pure "
+        "relink artifact; a new API symbol means the code now genuinely "
+        "depends on the newer runtime.",
+        description_template="Runtime floor raised for {detail}: {old} → {new} (required by: {name})",
+    ),
+    _E(
+        "stdlib_debug_mode_changed",
+        _R,
+        impact="A standard-library debug/hardening mode was toggled between builds "
+        "(_GLIBCXX_DEBUG / _GLIBCXX_ASSERTIONS for libstdc++, "
+        "_ITERATOR_DEBUG_LEVEL for the MSVC STL). These modes change the "
+        "layout and size of std:: containers (extra debug members / iterator "
+        "bookkeeping), so any public type embedding a std:: container by "
+        "value, or a function taking one across the boundary, is "
+        "ABI-incompatible between a debug-mode build and a normal one. Build "
+        "the library and its consumers with the matching setting.",
+    ),
+    _E(
+        "toolchain_version_changed",
+        _R,
+        impact="The compiler, standard library, or sysroot/SDK changed between "
+        "versions. Layout, mangling, and codegen can shift even with "
+        "identical sources; review for ABI-affecting toolchain drift.",
+    ),
     _E(
         "wheel_closure_dependency_violation",
         _B,

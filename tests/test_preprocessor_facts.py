@@ -486,7 +486,6 @@ def test_run_passes_compile_unit_directory_as_cwd(monkeypatch) -> None:
     assert "-Iinclude" in captured["context"]
 
 
-
 def test_capture_macros_argv_is_output_flag_sanitized(monkeypatch) -> None:
     # The `clang -E -dM` macro pass must route the recorded compile argv through
     # the #426-hardened depfile sanitizer, so output-producing instrumentation

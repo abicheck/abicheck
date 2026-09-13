@@ -249,9 +249,9 @@ def reject_absurd_central_directory(f: Any, path: Path, *, max_entries: int) -> 
         if locator_start >= 0:
             f.seek(locator_start)
             locator = f.read(_ZIP64_EOCD_LOCATOR_SIZE)
-        has_locator = len(
-            locator
-        ) == _ZIP64_EOCD_LOCATOR_SIZE and locator.startswith(_ZIP64_EOCD_LOCATOR_SIG)
+        has_locator = len(locator) == _ZIP64_EOCD_LOCATOR_SIZE and locator.startswith(
+            _ZIP64_EOCD_LOCATOR_SIG
+        )
 
         if not has_locator:
             if is_zip64_sentinel:

@@ -1,4 +1,5 @@
 """Unit tests for Sprint 3 DWARF-aware layout diff."""
+
 from __future__ import annotations
 
 import subprocess
@@ -19,6 +20,7 @@ from abicheck.dwarf_metadata import (
 from abicheck.model import AbiSnapshot
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _snap(dwarf: DwarfMetadata | None) -> AbiSnapshot:
     snap = AbiSnapshot(library="libtest.so", version="v1")
@@ -59,6 +61,7 @@ def _enum(name: str, byte_size: int, members: dict[str, int] | None = None) -> E
 
 # ── no-DWARF graceful degradation ────────────────────────────────────────────
 
+
 def test_no_dwarf_both_produces_no_changes() -> None:
     """If neither snapshot has DWARF, no DWARF changes produced."""
     old = _snap(None)
@@ -88,7 +91,7 @@ def test_no_dwarf_old_produces_no_changes() -> None:
 def test_stripped_new_emits_dwarf_info_missing() -> None:
     """old.has_dwarf=True, new.has_dwarf=False → DWARF_INFO_MISSING diagnostic, not silent COMPATIBLE."""
     old = _snap(_meta(structs={"Foo": _struct("Foo", 16)}))
-    new_meta = DwarfMetadata(has_dwarf=False)   # stripped binary
+    new_meta = DwarfMetadata(has_dwarf=False)  # stripped binary
     new = _snap(new_meta)
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
@@ -98,6 +101,7 @@ def test_stripped_new_emits_dwarf_info_missing() -> None:
 
 
 # ── struct size ───────────────────────────────────────────────────────────────
+
 
 def test_struct_size_changed() -> None:
     old = _snap(_meta(structs={"Foo": _struct("Foo", 16)}))
@@ -118,16 +122,25 @@ def test_struct_size_unchanged_no_change() -> None:
 
 # ── field offset ──────────────────────────────────────────────────────────────
 
+
 def test_field_offset_changed() -> None:
-    old_s = _struct("Foo", 16, fields=[
-        _field("x", "int", offset=0, size=4),
-        _field("y", "int", offset=4, size=4),
-    ])
+    old_s = _struct(
+        "Foo",
+        16,
+        fields=[
+            _field("x", "int", offset=0, size=4),
+            _field("y", "int", offset=4, size=4),
+        ],
+    )
     # padding inserted before y → offset shifts
-    new_s = _struct("Foo", 24, fields=[
-        _field("x", "int", offset=0, size=4),
-        _field("y", "int", offset=8, size=4),
-    ])
+    new_s = _struct(
+        "Foo",
+        24,
+        fields=[
+            _field("x", "int", offset=0, size=4),
+            _field("y", "int", offset=8, size=4),
+        ],
+    )
     old = _snap(_meta(structs={"Foo": old_s}))
     new = _snap(_meta(structs={"Foo": new_s}))
     result = compare(old, new)
@@ -138,14 +151,23 @@ def test_field_offset_changed() -> None:
 
 # ── field removed ─────────────────────────────────────────────────────────────
 
+
 def test_field_removed() -> None:
-    old_s = _struct("Foo", 16, fields=[
-        _field("x", "int", 0, 4),
-        _field("secret", "int", 4, 4),
-    ])
-    new_s = _struct("Foo", 8, fields=[
-        _field("x", "int", 0, 4),
-    ])
+    old_s = _struct(
+        "Foo",
+        16,
+        fields=[
+            _field("x", "int", 0, 4),
+            _field("secret", "int", 4, 4),
+        ],
+    )
+    new_s = _struct(
+        "Foo",
+        8,
+        fields=[
+            _field("x", "int", 0, 4),
+        ],
+    )
     old = _snap(_meta(structs={"Foo": old_s}))
     new = _snap(_meta(structs={"Foo": new_s}))
     result = compare(old, new)
@@ -155,6 +177,7 @@ def test_field_removed() -> None:
 
 
 # ── field type size changed ───────────────────────────────────────────────────
+
 
 def test_stdlib_struct_layout_filtered_in_dwarf_only_mode() -> None:
     """std::/__gnu_cxx::/anonymous types leaked into DWARF (no header model)
@@ -168,50 +191,74 @@ def test_stdlib_struct_layout_filtered_in_dwarf_only_mode() -> None:
     """
     leaked = {
         "std::__cxx11::basic_string<char>": _struct(
-            "std::__cxx11::basic_string<char>", 32, fields=[
+            "std::__cxx11::basic_string<char>",
+            32,
+            fields=[
                 _field("npos", "unsigned long", 0, 8),
                 _field("_M_p", "char*", 8, 8),
-            ]),
+            ],
+        ),
         "std::integral_constant<bool, false>": _struct(
-            "std::integral_constant<bool, false>", 1, fields=[_field("value", "bool", 0, 1)]),
+            "std::integral_constant<bool, false>",
+            1,
+            fields=[_field("value", "bool", 0, 1)],
+        ),
         "__gnu_cxx::__ops::_Iter_less_iter": _struct(
-            "__gnu_cxx::__ops::_Iter_less_iter", 8, fields=[_field("_M_x", "int", 0, 4)]),
+            "__gnu_cxx::__ops::_Iter_less_iter", 8, fields=[_field("_M_x", "int", 0, 4)]
+        ),
     }
     # New side drops fields from every leaked std:: type (toolchain DWARF churn).
     leaked_new = {
         "std::__cxx11::basic_string<char>": _struct(
-            "std::__cxx11::basic_string<char>", 32, fields=[_field("_M_p", "char*", 8, 8)]),
+            "std::__cxx11::basic_string<char>",
+            32,
+            fields=[_field("_M_p", "char*", 8, 8)],
+        ),
         "std::integral_constant<bool, false>": _struct(
-            "std::integral_constant<bool, false>", 1, fields=[]),
+            "std::integral_constant<bool, false>", 1, fields=[]
+        ),
         "__gnu_cxx::__ops::_Iter_less_iter": _struct(
-            "__gnu_cxx::__ops::_Iter_less_iter", 8, fields=[]),
+            "__gnu_cxx::__ops::_Iter_less_iter", 8, fields=[]
+        ),
     }
     old = _snap(_meta(structs=leaked))
     new = _snap(_meta(structs=leaked_new))
     result = compare(old, new)
     offenders = [
-        c for c in result.changes
-        if c.kind in {
+        c
+        for c in result.changes
+        if c.kind
+        in {
             ChangeKind.STRUCT_FIELD_REMOVED,
             ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
             ChangeKind.STRUCT_SIZE_CHANGED,
         }
         and c.symbol.startswith(("std::", "__gnu_cxx::"))
     ]
-    assert offenders == [], f"std:: layout changes leaked as findings: {[c.symbol for c in offenders]}"
+    assert offenders == [], (
+        f"std:: layout changes leaked as findings: {[c.symbol for c in offenders]}"
+    )
     assert result.verdict in (Verdict.COMPATIBLE, Verdict.NO_CHANGE)
 
 
 def test_stdlib_struct_layout_kept_when_target_is_cxx_runtime() -> None:
     """When the inspected DSO *is* the C++ runtime, std:: layout IS its own ABI
     surface and must still be diffed (the filter must not hide real breaks)."""
-    old_s = _struct("std::__cxx11::basic_string<char>", 32, fields=[
-        _field("npos", "unsigned long", 0, 8),
-        _field("_M_p", "char*", 8, 8),
-    ])
-    new_s = _struct("std::__cxx11::basic_string<char>", 32, fields=[
-        _field("_M_p", "char*", 8, 8),
-    ])
+    old_s = _struct(
+        "std::__cxx11::basic_string<char>",
+        32,
+        fields=[
+            _field("npos", "unsigned long", 0, 8),
+            _field("_M_p", "char*", 8, 8),
+        ],
+    )
+    new_s = _struct(
+        "std::__cxx11::basic_string<char>",
+        32,
+        fields=[
+            _field("_M_p", "char*", 8, 8),
+        ],
+    )
     old = AbiSnapshot(library="libstdc++.so.6", version="v1")
     new = AbiSnapshot(library="libstdc++.so.6", version="v2")
     old.dwarf = _meta(structs={"std::__cxx11::basic_string<char>": old_s})  # type: ignore[attr-defined]
@@ -228,21 +275,34 @@ def test_anonymous_dwarf_types_filtered_even_for_cxx_runtime() -> None:
     just with std:: preserved)."""
     old = AbiSnapshot(library="libstdc++.so.6", version="v1")
     new = AbiSnapshot(library="libstdc++.so.6", version="v2")
-    old.dwarf = _meta(structs={  # type: ignore[attr-defined]
-        "std::vector<int>": _struct("std::vector<int>", 24, fields=[_field("_M_start", "int*", 0, 8)]),
-        "<lambda(int)>": _struct("<lambda(int)>", 8, fields=[_field("__captured", "int", 0, 4)]),
-    })
-    new.dwarf = _meta(structs={  # type: ignore[attr-defined]
-        # std:: kept and unchanged; the lambda closure type "lost" its field.
-        "std::vector<int>": _struct("std::vector<int>", 24, fields=[_field("_M_start", "int*", 0, 8)]),
-        "<lambda(int)>": _struct("<lambda(int)>", 8, fields=[]),
-    })
+    old.dwarf = _meta(
+        structs={  # type: ignore[attr-defined]
+            "std::vector<int>": _struct(
+                "std::vector<int>", 24, fields=[_field("_M_start", "int*", 0, 8)]
+            ),
+            "<lambda(int)>": _struct(
+                "<lambda(int)>", 8, fields=[_field("__captured", "int", 0, 4)]
+            ),
+        }
+    )
+    new.dwarf = _meta(
+        structs={  # type: ignore[attr-defined]
+            # std:: kept and unchanged; the lambda closure type "lost" its field.
+            "std::vector<int>": _struct(
+                "std::vector<int>", 24, fields=[_field("_M_start", "int*", 0, 8)]
+            ),
+            "<lambda(int)>": _struct("<lambda(int)>", 8, fields=[]),
+        }
+    )
     result = compare(old, new)
     offenders = [
-        c for c in result.changes
+        c
+        for c in result.changes
         if c.kind == ChangeKind.STRUCT_FIELD_REMOVED and "lambda" in c.symbol
     ]
-    assert offenders == [], f"anonymous/lambda DWARF churn must be filtered for runtimes too: {[c.symbol for c in offenders]}"
+    assert offenders == [], (
+        f"anonymous/lambda DWARF churn must be filtered for runtimes too: {[c.symbol for c in offenders]}"
+    )
 
 
 def test_field_type_size_changed() -> None:
@@ -270,6 +330,7 @@ def test_field_type_name_changed_same_size() -> None:
 
 # ── struct alignment ──────────────────────────────────────────────────────────
 
+
 def test_struct_alignment_changed() -> None:
     old_s = _struct("Vec", 16, alignment=4)
     new_s = _struct("Vec", 16, alignment=8)
@@ -282,6 +343,7 @@ def test_struct_alignment_changed() -> None:
 
 
 # ── enum underlying size ──────────────────────────────────────────────────────
+
 
 def test_enum_underlying_size_changed() -> None:
     old = _snap(_meta(enums={"Color": _enum("Color", byte_size=1)}))
@@ -297,18 +359,25 @@ def test_enum_underlying_size_unchanged_no_change() -> None:
     old = _snap(_meta(enums={"Status": e}))
     new = _snap(_meta(enums={"Status": e}))
     result = compare(old, new)
-    assert not any(c.kind == ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED for c in result.changes)
+    assert not any(
+        c.kind == ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED for c in result.changes
+    )
 
 
 # ── enum member removed ───────────────────────────────────────────────────────
 
+
 def test_enum_member_removed() -> None:
-    old = _snap(_meta(enums={
-        "Flags": _enum("Flags", 4, members={"A": 1, "B": 2, "C": 4})
-    }))
-    new = _snap(_meta(enums={
-        "Flags": _enum("Flags", 4, members={"A": 1, "C": 4})  # B removed
-    }))
+    old = _snap(
+        _meta(enums={"Flags": _enum("Flags", 4, members={"A": 1, "B": 2, "C": 4})})
+    )
+    new = _snap(
+        _meta(
+            enums={
+                "Flags": _enum("Flags", 4, members={"A": 1, "C": 4})  # B removed
+            }
+        )
+    )
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
     assert ChangeKind.ENUM_MEMBER_REMOVED in kinds
@@ -317,9 +386,14 @@ def test_enum_member_removed() -> None:
 
 # ── enum member value changed ─────────────────────────────────────────────────
 
+
 def test_enum_member_value_changed() -> None:
-    old = _snap(_meta(enums={"Code": _enum("Code", 4, members={"OK": 0, "FAIL": 1, "LAST": 2})}))
-    new = _snap(_meta(enums={"Code": _enum("Code", 4, members={"OK": 0, "FAIL": 3, "LAST": 2})}))
+    old = _snap(
+        _meta(enums={"Code": _enum("Code", 4, members={"OK": 0, "FAIL": 1, "LAST": 2})})
+    )
+    new = _snap(
+        _meta(enums={"Code": _enum("Code", 4, members={"OK": 0, "FAIL": 3, "LAST": 2})})
+    )
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
     assert ChangeKind.ENUM_MEMBER_VALUE_CHANGED in kinds
@@ -336,6 +410,7 @@ def test_enum_negative_member_value() -> None:
 
 
 # ── union ─────────────────────────────────────────────────────────────────────
+
 
 def test_union_size_changed() -> None:
     old = _snap(_meta(structs={"U": _struct("U", 4, is_union=True)}))
@@ -359,19 +434,28 @@ def test_union_field_offset_always_zero() -> None:
 
 # ── mid-struct insert ─────────────────────────────────────────────────────────
 
+
 def test_field_inserted_mid_struct_shifts_offsets() -> None:
     """Inserting a field between existing fields shifts later fields — detected via offsets."""
-    old_s = _struct("S", 12, fields=[
-        _field("a", "int", 0, 4),
-        _field("b", "int", 4, 4),
-        _field("c", "int", 8, 4),
-    ])
-    new_s = _struct("S", 16, fields=[
-        _field("a", "int", 0, 4),
-        _field("pad", "int", 4, 4),   # new field inserted
-        _field("b", "int", 8, 4),     # b shifted
-        _field("c", "int", 12, 4),    # c shifted
-    ])
+    old_s = _struct(
+        "S",
+        12,
+        fields=[
+            _field("a", "int", 0, 4),
+            _field("b", "int", 4, 4),
+            _field("c", "int", 8, 4),
+        ],
+    )
+    new_s = _struct(
+        "S",
+        16,
+        fields=[
+            _field("a", "int", 0, 4),
+            _field("pad", "int", 4, 4),  # new field inserted
+            _field("b", "int", 8, 4),  # b shifted
+            _field("c", "int", 12, 4),  # c shifted
+        ],
+    )
     old = _snap(_meta(structs={"S": old_s}))
     new = _snap(_meta(structs={"S": new_s}))
     result = compare(old, new)
@@ -384,15 +468,20 @@ def test_field_inserted_mid_struct_shifts_offsets() -> None:
 
 # ── end-to-end AbiSnapshot pipeline ──────────────────────────────────────────
 
+
 def test_full_snapshot_pipeline_dwarf_only() -> None:
     """Full AbiSnapshot with dwarf field set — verifies compare() integration path."""
     from abicheck.model import AbiSnapshot
 
     old_snap = AbiSnapshot(library="libfoo.so", version="1.0")
-    old_snap.dwarf = _meta(structs={"Ctx": _struct("Ctx", 8, fields=[_field("n", "int", 0, 4)])})  # type: ignore[attr-defined]
+    old_snap.dwarf = _meta(
+        structs={"Ctx": _struct("Ctx", 8, fields=[_field("n", "int", 0, 4)])}
+    )  # type: ignore[attr-defined]
 
     new_snap = AbiSnapshot(library="libfoo.so", version="2.0")
-    new_snap.dwarf = _meta(structs={"Ctx": _struct("Ctx", 16, fields=[_field("n", "long", 0, 8)])})  # type: ignore[attr-defined]
+    new_snap.dwarf = _meta(
+        structs={"Ctx": _struct("Ctx", 16, fields=[_field("n", "long", 0, 8)])}
+    )  # type: ignore[attr-defined]
 
     result = compare(old_snap, new_snap)
     kinds = {c.kind for c in result.changes}
@@ -401,6 +490,7 @@ def test_full_snapshot_pipeline_dwarf_only() -> None:
 
 
 # ── integration: real .so with -g ─────────────────────────────────────────────
+
 
 @pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "linux", reason="ELF/DWARF tests require Linux")
@@ -415,7 +505,8 @@ def test_parse_dwarf_real_so() -> None:
         so = Path(td) / "libtest.so"
         result = subprocess.run(
             ["gcc", "-g", "-shared", "-fPIC", "-o", str(so), "-x", "c", "-"],
-            input=src.encode(), capture_output=True,
+            input=src.encode(),
+            capture_output=True,
         )
         if result.returncode != 0:
             pytest.skip(f"gcc failed: {result.stderr.decode()[:200]}")
@@ -447,8 +538,19 @@ def test_parse_dwarf_struct_size_regression() -> None:
     with tempfile.TemporaryDirectory() as td:
         for src, name in [(src_v1, "v1.so"), (src_v2, "v2.so")]:
             r = subprocess.run(
-                ["gcc", "-g", "-shared", "-fPIC", "-o", str(Path(td) / name), "-x", "c", "-"],
-                input=src.encode(), capture_output=True,
+                [
+                    "gcc",
+                    "-g",
+                    "-shared",
+                    "-fPIC",
+                    "-o",
+                    str(Path(td) / name),
+                    "-x",
+                    "c",
+                    "-",
+                ],
+                input=src.encode(),
+                capture_output=True,
             )
             if r.returncode != 0:
                 pytest.skip(f"gcc failed: {r.stderr.decode()[:200]}")

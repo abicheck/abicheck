@@ -30,6 +30,7 @@ Two test modules consume this:
 
 Every mapping here was verified against the live detectors before being asserted.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -74,47 +75,86 @@ def _api(tag: int, ret: str = "void", params: tuple[str, ...] = ()) -> Function:
 
 def _m_func_param_changed(tag: int):
     def mk(ptype: str) -> dict:
-        return {"functions": [
-            Function(name=f"tgt_{tag}", mangled=f"_Z5tgt_{tag}i", return_type="void",
-                     params=[Param(name="a", type=ptype)], visibility=Visibility.PUBLIC)]}
+        return {
+            "functions": [
+                Function(
+                    name=f"tgt_{tag}",
+                    mangled=f"_Z5tgt_{tag}i",
+                    return_type="void",
+                    params=[Param(name="a", type=ptype)],
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
+        }
 
     return mk("int"), mk("long long"), ChangeKind.FUNC_PARAMS_CHANGED, True
 
 
 def _m_func_return_changed(tag: int):
-    base = dict(name=f"tgt_{tag}", mangled=f"_Z5tgt_{tag}v", params=[],
-                visibility=Visibility.PUBLIC)
-    return ({"functions": [Function(return_type="int", **base)]},
-            {"functions": [Function(return_type="long long", **base)]},
-            ChangeKind.FUNC_RETURN_CHANGED, True)
+    base = dict(
+        name=f"tgt_{tag}",
+        mangled=f"_Z5tgt_{tag}v",
+        params=[],
+        visibility=Visibility.PUBLIC,
+    )
+    return (
+        {"functions": [Function(return_type="int", **base)]},
+        {"functions": [Function(return_type="long long", **base)]},
+        ChangeKind.FUNC_RETURN_CHANGED,
+        True,
+    )
 
 
 def _m_func_removed(tag: int):
-    fn = Function(name=f"tgt_{tag}", mangled=f"_Z5tgt_{tag}v", return_type="void",
-                  visibility=Visibility.PUBLIC)
+    fn = Function(
+        name=f"tgt_{tag}",
+        mangled=f"_Z5tgt_{tag}v",
+        return_type="void",
+        visibility=Visibility.PUBLIC,
+    )
     return {"functions": [fn]}, {"functions": []}, ChangeKind.FUNC_REMOVED, True
 
 
 def _m_func_added(tag: int):
-    fn = Function(name=f"tgt_{tag}", mangled=f"_Z5tgt_{tag}v", return_type="void",
-                  visibility=Visibility.PUBLIC)
+    fn = Function(
+        name=f"tgt_{tag}",
+        mangled=f"_Z5tgt_{tag}v",
+        return_type="void",
+        visibility=Visibility.PUBLIC,
+    )
     return {"functions": []}, {"functions": [fn]}, ChangeKind.FUNC_ADDED, False
 
 
 def _m_noexcept_added(tag: int):
-    base = dict(name=f"tgt_{tag}", mangled=f"_Z5tgt_{tag}v", return_type="void",
-                visibility=Visibility.PUBLIC)
-    return ({"functions": [Function(is_noexcept=False, **base)]},
-            {"functions": [Function(is_noexcept=True, **base)]},
-            ChangeKind.FUNC_NOEXCEPT_ADDED, False)
+    base = dict(
+        name=f"tgt_{tag}",
+        mangled=f"_Z5tgt_{tag}v",
+        return_type="void",
+        visibility=Visibility.PUBLIC,
+    )
+    return (
+        {"functions": [Function(is_noexcept=False, **base)]},
+        {"functions": [Function(is_noexcept=True, **base)]},
+        ChangeKind.FUNC_NOEXCEPT_ADDED,
+        False,
+    )
 
 
 def _m_struct_size_changed(tag: int):
     name = f"Tgt{tag}"
     api = _api(tag, ret=f"{name} *")
-    return ({"functions": [api], "types": [RecordType(name=name, kind="struct", size_bits=64)]},
-            {"functions": [api], "types": [RecordType(name=name, kind="struct", size_bits=128)]},
-            ChangeKind.TYPE_SIZE_CHANGED, True)
+    return (
+        {
+            "functions": [api],
+            "types": [RecordType(name=name, kind="struct", size_bits=64)],
+        },
+        {
+            "functions": [api],
+            "types": [RecordType(name=name, kind="struct", size_bits=128)],
+        },
+        ChangeKind.TYPE_SIZE_CHANGED,
+        True,
+    )
 
 
 def _m_field_type_changed(tag: int):
@@ -122,12 +162,19 @@ def _m_field_type_changed(tag: int):
     api = _api(tag, ret=f"{name} *")
 
     def mk(ftype: str) -> RecordType:
-        return RecordType(name=name, kind="struct", size_bits=64,
-                          fields=[TypeField(name="x", type=ftype)])
+        return RecordType(
+            name=name,
+            kind="struct",
+            size_bits=64,
+            fields=[TypeField(name="x", type=ftype)],
+        )
 
-    return ({"functions": [api], "types": [mk("int")]},
-            {"functions": [api], "types": [mk("double")]},
-            ChangeKind.TYPE_FIELD_TYPE_CHANGED, True)
+    return (
+        {"functions": [api], "types": [mk("int")]},
+        {"functions": [api], "types": [mk("double")]},
+        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        True,
+    )
 
 
 def _m_enum_value_changed(tag: int):
@@ -135,33 +182,64 @@ def _m_enum_value_changed(tag: int):
     api = _api(tag, params=(name,))
 
     def mk(v: int) -> EnumType:
-        return EnumType(name=name,
-                        members=[EnumMember(name="A", value=0), EnumMember(name="B", value=v)],
-                        underlying_type="int")
+        return EnumType(
+            name=name,
+            members=[EnumMember(name="A", value=0), EnumMember(name="B", value=v)],
+            underlying_type="int",
+        )
 
-    return ({"functions": [api], "enums": [mk(1)]},
-            {"functions": [api], "enums": [mk(2)]},
-            ChangeKind.ENUM_MEMBER_VALUE_CHANGED, True)
+    return (
+        {"functions": [api], "enums": [mk(1)]},
+        {"functions": [api], "enums": [mk(2)]},
+        ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+        True,
+    )
 
 
 def _m_enum_member_added(tag: int):
     name = f"Tgt{tag}"
     api = _api(tag, params=(name,))
-    return ({"functions": [api], "enums": [EnumType(name=name,
-                members=[EnumMember(name="A", value=0)], underlying_type="int")]},
-            {"functions": [api], "enums": [EnumType(name=name,
-                members=[EnumMember(name="A", value=0), EnumMember(name="B", value=1)],
-                underlying_type="int")]},
-            ChangeKind.ENUM_MEMBER_ADDED, False)
+    return (
+        {
+            "functions": [api],
+            "enums": [
+                EnumType(
+                    name=name,
+                    members=[EnumMember(name="A", value=0)],
+                    underlying_type="int",
+                )
+            ],
+        },
+        {
+            "functions": [api],
+            "enums": [
+                EnumType(
+                    name=name,
+                    members=[
+                        EnumMember(name="A", value=0),
+                        EnumMember(name="B", value=1),
+                    ],
+                    underlying_type="int",
+                )
+            ],
+        },
+        ChangeKind.ENUM_MEMBER_ADDED,
+        False,
+    )
 
 
 def _m_var_removed(tag: int):
-    v = Variable(name=f"tgt_{tag}", mangled=f"_ZV5tgt_{tag}", type="int",
-                 visibility=Visibility.PUBLIC)
+    v = Variable(
+        name=f"tgt_{tag}",
+        mangled=f"_ZV5tgt_{tag}",
+        type="int",
+        visibility=Visibility.PUBLIC,
+    )
     return {"variables": [v]}, {"variables": []}, ChangeKind.VAR_REMOVED, True
 
 
 # --- C++ vtable / inheritance edits (real ABI breaks the flat C cases miss) ---
+
 
 def _m_vtable_method_added(tag: int):
     name = f"Tgt{tag}"
@@ -170,9 +248,12 @@ def _m_vtable_method_added(tag: int):
     def cls(vtable: list[str]) -> RecordType:
         return RecordType(name=name, kind="class", size_bits=64, vtable=vtable)
 
-    return ({"functions": [api], "types": [cls(["foo()"])]},
-            {"functions": [api], "types": [cls(["foo()", "bar()"])]},
-            ChangeKind.TYPE_VTABLE_CHANGED, True)
+    return (
+        {"functions": [api], "types": [cls(["foo()"])]},
+        {"functions": [api], "types": [cls(["foo()", "bar()"])]},
+        ChangeKind.TYPE_VTABLE_CHANGED,
+        True,
+    )
 
 
 def _m_base_class_added(tag: int):
@@ -181,27 +262,49 @@ def _m_base_class_added(tag: int):
     base_t = RecordType(name=base, kind="class", size_bits=8)  # present both sides
 
     def cls(bases: list[str]) -> RecordType:
-        return RecordType(name=name, kind="class", size_bits=64, vtable=["foo()"], bases=bases)
+        return RecordType(
+            name=name, kind="class", size_bits=64, vtable=["foo()"], bases=bases
+        )
 
-    return ({"functions": [api], "types": [cls([]), base_t]},
-            {"functions": [api], "types": [cls([base]), base_t]},
-            ChangeKind.TYPE_BASE_CHANGED, True)
+    return (
+        {"functions": [api], "types": [cls([]), base_t]},
+        {"functions": [api], "types": [cls([base]), base_t]},
+        ChangeKind.TYPE_BASE_CHANGED,
+        True,
+    )
 
 
 def _m_method_became_virtual(tag: int):
-    base = dict(name=f"C{tag}::foo", mangled=f"_ZN1C{tag}3fooEv", return_type="void",
-                visibility=Visibility.PUBLIC, access=AccessLevel.PUBLIC)
-    return ({"functions": [Function(is_virtual=False, **base)]},
-            {"functions": [Function(is_virtual=True, **base)]},
-            ChangeKind.FUNC_VIRTUAL_ADDED, True)
+    base = dict(
+        name=f"C{tag}::foo",
+        mangled=f"_ZN1C{tag}3fooEv",
+        return_type="void",
+        visibility=Visibility.PUBLIC,
+        access=AccessLevel.PUBLIC,
+    )
+    return (
+        {"functions": [Function(is_virtual=False, **base)]},
+        {"functions": [Function(is_virtual=True, **base)]},
+        ChangeKind.FUNC_VIRTUAL_ADDED,
+        True,
+    )
 
 
 def _m_method_became_pure(tag: int):
-    base = dict(name=f"C{tag}::foo", mangled=f"_ZN1C{tag}3fooEv", return_type="void",
-                visibility=Visibility.PUBLIC, access=AccessLevel.PUBLIC, is_virtual=True)
-    return ({"functions": [Function(is_pure_virtual=False, **base)]},
-            {"functions": [Function(is_pure_virtual=True, **base)]},
-            ChangeKind.FUNC_VIRTUAL_BECAME_PURE, True)
+    base = dict(
+        name=f"C{tag}::foo",
+        mangled=f"_ZN1C{tag}3fooEv",
+        return_type="void",
+        visibility=Visibility.PUBLIC,
+        access=AccessLevel.PUBLIC,
+        is_virtual=True,
+    )
+    return (
+        {"functions": [Function(is_pure_virtual=False, **base)]},
+        {"functions": [Function(is_pure_virtual=True, **base)]},
+        ChangeKind.FUNC_VIRTUAL_BECAME_PURE,
+        True,
+    )
 
 
 def _m_virtual_method_added(tag: int):
@@ -216,13 +319,28 @@ def _m_virtual_method_added(tag: int):
     cls = RecordType(
         name=cls_name, kind="class", size_bits=64, vtable=[], bases=[], virtual_bases=[]
     )
-    keep = Function(name=f"{cls_name}::foo", mangled=f"_ZN{n}{cls_name}3fooEv", return_type="void",
-                    visibility=Visibility.PUBLIC, access=AccessLevel.PUBLIC, is_virtual=True)
-    new = Function(name=f"{cls_name}::bar", mangled=f"_ZN{n}{cls_name}3barEv", return_type="void",
-                   visibility=Visibility.PUBLIC, access=AccessLevel.PUBLIC, is_virtual=True)
-    return ({"functions": [keep], "types": [cls]},
-            {"functions": [keep, new], "types": [cls]},
-            ChangeKind.VIRTUAL_METHOD_ADDED, True)
+    keep = Function(
+        name=f"{cls_name}::foo",
+        mangled=f"_ZN{n}{cls_name}3fooEv",
+        return_type="void",
+        visibility=Visibility.PUBLIC,
+        access=AccessLevel.PUBLIC,
+        is_virtual=True,
+    )
+    new = Function(
+        name=f"{cls_name}::bar",
+        mangled=f"_ZN{n}{cls_name}3barEv",
+        return_type="void",
+        visibility=Visibility.PUBLIC,
+        access=AccessLevel.PUBLIC,
+        is_virtual=True,
+    )
+    return (
+        {"functions": [keep], "types": [cls]},
+        {"functions": [keep, new], "types": [cls]},
+        ChangeKind.VIRTUAL_METHOD_ADDED,
+        True,
+    )
 
 
 def _m_overload_added(tag: int):
@@ -233,12 +351,26 @@ def _m_overload_added(tag: int):
     symmetry does not hold; see ASYMMETRIC below."""
     base = f"ov{tag}"
     n = len(base)  # Itanium source-name length prefix (valid for multi-digit tags)
-    f1 = Function(name=base, mangled=f"_Z{n}{base}i", return_type="void",
-                  params=[Param(name="a", type="int")], visibility=Visibility.PUBLIC)
-    f2 = Function(name=base, mangled=f"_Z{n}{base}d", return_type="void",
-                  params=[Param(name="a", type="double")], visibility=Visibility.PUBLIC)
-    return ({"functions": [f1]}, {"functions": [f1, f2]},
-            ChangeKind.OVERLOAD_ADDED, False)
+    f1 = Function(
+        name=base,
+        mangled=f"_Z{n}{base}i",
+        return_type="void",
+        params=[Param(name="a", type="int")],
+        visibility=Visibility.PUBLIC,
+    )
+    f2 = Function(
+        name=base,
+        mangled=f"_Z{n}{base}d",
+        return_type="void",
+        params=[Param(name="a", type="double")],
+        visibility=Visibility.PUBLIC,
+    )
+    return (
+        {"functions": [f1]},
+        {"functions": [f1, f2]},
+        ChangeKind.OVERLOAD_ADDED,
+        False,
+    )
 
 
 def _m_stack_canary_removed(tag: int):

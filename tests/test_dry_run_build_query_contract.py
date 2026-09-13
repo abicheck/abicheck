@@ -43,7 +43,9 @@ class TestDumpDryRunBuildQueryTrust:
 
     def _write_config(self, sources: Path, *, compile_db: str | None = None) -> Path:
         cfg = sources / ".abicheck.yml"
-        body = "build:\n  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n"
+        body = (
+            "build:\n  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n"
+        )
         if compile_db:
             body += f"  compile_db: {compile_db}\n"
         cfg.write_text(body, encoding="utf-8")
@@ -96,8 +98,14 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", "--sources", str(tmp_path), "-H", str(header),
-                "--config", str(cfg), "--dry-run",
+                "dump",
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -134,8 +142,14 @@ class TestDumpDryRunBuildQueryTrust:
         header.write_text("int foo(int x);\n", encoding="utf-8")
         cfg = self._write_config(tmp_path)
         args = [
-            "dump", "--sources", str(tmp_path), "-H", str(header),
-            "--config", str(cfg), "--dry-run",
+            "dump",
+            "--sources",
+            str(tmp_path),
+            "-H",
+            str(header),
+            "--config",
+            str(cfg),
+            "--dry-run",
         ]
         runner = CliRunner()
         first = runner.invoke(main, args)
@@ -163,8 +177,16 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", "--sources", str(tmp_path), "-H", str(header),
-                "--build-info", str(db), "--config", str(cfg), "--dry-run",
+                "dump",
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--build-info",
+                str(db),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -188,8 +210,16 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(tmp_path),
-                "-H", str(header), "--config", str(cfg), "--depth", "binary",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--depth",
+                "binary",
                 "--dry-run",
             ],
         )
@@ -212,8 +242,16 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(tmp_path),
-                "-H", str(header), "--config", str(cfg), "--depth", "headers",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--depth",
+                "headers",
                 "--dry-run",
             ],
         )
@@ -247,8 +285,15 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(tmp_path),
-                "-H", str(header), "--config", str(cfg), "--dry-run",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -281,9 +326,17 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(tmp_path),
-                "--build-info", str(build_dir),
-                "-H", str(header), "--config", str(cfg), "--dry-run",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(tmp_path),
+                "--build-info",
+                str(build_dir),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -319,9 +372,15 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "-H", str(header),
-                "--build-info", str(pack_dir),
-                "--config", str(cfg), "--dry-run",
+                "dump",
+                str(so_path),
+                "-H",
+                str(header),
+                "--build-info",
+                str(pack_dir),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -358,9 +417,17 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(tmp_path),
-                "-H", str(header), "--build-info", str(pack_dir),
-                "--config", str(cfg), "--dry-run",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--build-info",
+                str(pack_dir),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -389,14 +456,24 @@ class TestDumpDryRunBuildQueryTrust:
         cfg = self._write_config(tmp_path)
         malformed_src_pack = tmp_path / "srcpack"
         malformed_src_pack.mkdir()
-        (malformed_src_pack / "manifest.json").write_text("not json{{{", encoding="utf-8")
+        (malformed_src_pack / "manifest.json").write_text(
+            "not json{{{", encoding="utf-8"
+        )
 
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(malformed_src_pack),
-                "--build-info", str(build_dir),
-                "-H", str(header), "--config", str(cfg), "--dry-run",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(malformed_src_pack),
+                "--build-info",
+                str(build_dir),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 1, result.output
@@ -404,7 +481,9 @@ class TestDumpDryRunBuildQueryTrust:
         assert "will run (trusted -- explicit --config)" in result.output
         assert "argv:" in result.output
         assert "blocker:" in result.output
-        assert "build-source embedding re-attempts this same load later" in result.output
+        assert (
+            "build-source embedding re-attempts this same load later" in result.output
+        )
         # A dry run never actually executes the query.
         assert not (build_dir / "compile_commands.json").exists()
 
@@ -429,14 +508,22 @@ class TestDumpDryRunBuildQueryTrust:
         cfg = self._write_config(tmp_path)
         malformed_src_pack = tmp_path / "srcpack"
         malformed_src_pack.mkdir()
-        (malformed_src_pack / "manifest.json").write_text("not json{{{", encoding="utf-8")
+        (malformed_src_pack / "manifest.json").write_text(
+            "not json{{{", encoding="utf-8"
+        )
 
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(malformed_src_pack),
-                "--build-info", str(build_dir),
-                "--config", str(cfg), "--dry-run",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(malformed_src_pack),
+                "--build-info",
+                str(build_dir),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 1, result.output
@@ -476,14 +563,23 @@ class TestDumpDryRunBuildQueryTrust:
         src_pack = tmp_path / "srcpack"
         src_pack.mkdir()
         pack_io.write(BuildSourcePack(root=src_pack))
-        (src_pack / ".abicheck.yml").write_text("build: [not, a, mapping\n", encoding="utf-8")
+        (src_pack / ".abicheck.yml").write_text(
+            "build: [not, a, mapping\n", encoding="utf-8"
+        )
 
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(src_pack),
-                "--build-info", str(build_dir), "-H", str(header),
-                "--depth", "headers",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(src_pack),
+                "--build-info",
+                str(build_dir),
+                "-H",
+                str(header),
+                "--depth",
+                "headers",
                 "--dry-run",
             ],
         )
@@ -527,8 +623,14 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(src_pack),
-                "-H", str(header), "--depth", "headers",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(src_pack),
+                "-H",
+                str(header),
+                "--depth",
+                "headers",
                 "--dry-run",
             ],
         )
@@ -549,7 +651,8 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path),
+                "dump",
+                str(so_path),
                 "--dry-run",
             ],
         )
@@ -586,9 +689,17 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(tmp_path),
-                "-H", str(header), "--build-info", str(pack_dir),
-                "--config", str(cfg), "--dry-run",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--build-info",
+                str(pack_dir),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -615,9 +726,17 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(tmp_path),
-                "-H", str(header), "--build-info", str(pack_dir),
-                "--config", str(cfg), "--dry-run",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--build-info",
+                str(pack_dir),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -639,16 +758,26 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(tmp_path),
-                "-H", str(header), "--build-info", str(aquery),
-                "--config", str(cfg), "--dry-run",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--build-info",
+                str(aquery),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
         assert "will NOT run" in result.output
         assert "pre-captured Bazel aquery/cquery jsonproto" in result.output
 
-    def test_sources_pack_with_compile_units_takes_precedence(self, tmp_path: Path) -> None:
+    def test_sources_pack_with_compile_units_takes_precedence(
+        self, tmp_path: Path
+    ) -> None:
         # Codex review: a --sources tree that is itself a pack folds into
         # base_build the same way a --build-info pack does, but only when
         # no --build-info was also given.
@@ -670,8 +799,12 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(src_pack),
-                "-H", str(header),
+                "dump",
+                str(so_path),
+                "--sources",
+                str(src_pack),
+                "-H",
+                str(header),
                 "--dry-run",
             ],
         )
@@ -702,8 +835,14 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(src_pack),
-                "-H", str(header), "--config", str(cfg),
+                "dump",
+                str(so_path),
+                "--sources",
+                str(src_pack),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
                 "--dry-run",
             ],
         )
@@ -724,8 +863,15 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(tmp_path),
-                "-H", str(header), "--config", str(cfg), "--dry-run",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -750,7 +896,10 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--build-info", str(pack_dir),
+                "dump",
+                str(so_path),
+                "--build-info",
+                str(pack_dir),
                 "--dry-run",
             ],
         )
@@ -775,7 +924,10 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--build-info", str(pack_dir),
+                "dump",
+                str(so_path),
+                "--build-info",
+                str(pack_dir),
                 "--dry-run",
             ],
         )
@@ -797,15 +949,21 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(src_pack),
-                "-H", str(header),
+                "dump",
+                str(so_path),
+                "--sources",
+                str(src_pack),
+                "-H",
+                str(header),
                 "--dry-run",
             ],
         )
         assert result.exit_code == 1, result.output
         assert "Exit code: 1" in result.output
 
-    def test_malformed_auto_discovered_config_blocks_dry_run(self, tmp_path: Path) -> None:
+    def test_malformed_auto_discovered_config_blocks_dry_run(
+        self, tmp_path: Path
+    ) -> None:
         # CodeRabbit/Codex review: the real (non-dry) run raises
         # click.UsageError (exit 64) for a malformed .abicheck.yml, but only
         # once `embed_build_source` reaches its own stricter load -- which
@@ -817,11 +975,17 @@ class TestDumpDryRunBuildQueryTrust:
         # click.UsageError, not a DryRunResult blocker.
         header = tmp_path / "api.h"
         header.write_text("int foo(int x);\n", encoding="utf-8")
-        (tmp_path / ".abicheck.yml").write_text("build: [not, a, mapping\n", encoding="utf-8")
+        (tmp_path / ".abicheck.yml").write_text(
+            "build: [not, a, mapping\n", encoding="utf-8"
+        )
         result = CliRunner().invoke(
             main,
             [
-                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "dump",
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
                 "--dry-run",
             ],
         )
@@ -842,19 +1006,28 @@ class TestDumpDryRunBuildQueryTrust:
         # UsageError for a combination the real run accepts.
         header = tmp_path / "api.h"
         header.write_text("int foo(int x);\n", encoding="utf-8")
-        (tmp_path / ".abicheck.yml").write_text("build: [not, a, mapping\n", encoding="utf-8")
+        (tmp_path / ".abicheck.yml").write_text(
+            "build: [not, a, mapping\n", encoding="utf-8"
+        )
         result = CliRunner().invoke(
             main,
             [
-                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "dump",
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
                 "--dry-run",
-                "--depth", "headers",
+                "--depth",
+                "headers",
             ],
         )
         assert result.exit_code == 0, result.output
         assert "will NOT run" in result.output
 
-    def test_explicit_malformed_config_always_raises_usage_error(self, tmp_path: Path) -> None:
+    def test_explicit_malformed_config_always_raises_usage_error(
+        self, tmp_path: Path
+    ) -> None:
         # CodeRabbit/Codex review, fresh evidence, verified end-to-end
         # against the real CLI: an *explicit* --config is validated
         # unconditionally by `cli_options.merge_compile_config` regardless
@@ -867,14 +1040,21 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--config", str(cfg), "--dry-run",
-                "--depth", "binary",
+                "dump",
+                str(so_path),
+                "--config",
+                str(cfg),
+                "--dry-run",
+                "--depth",
+                "binary",
             ],
         )
         assert result.exit_code == 64, result.output
         assert "cannot parse build config" in result.output
 
-    def test_malformed_pack_under_depth_headers_degrades_silently(self, tmp_path: Path) -> None:
+    def test_malformed_pack_under_depth_headers_degrades_silently(
+        self, tmp_path: Path
+    ) -> None:
         # Codex review, fresh evidence, verified end-to-end against a real
         # compiled library: under `--depth headers`, a malformed --sources
         # pack is never reached by embed_build_source's own raising load
@@ -895,9 +1075,15 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(src_pack),
-                "-H", str(header),
-                "--dry-run", "--depth", "headers",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(src_pack),
+                "-H",
+                str(header),
+                "--dry-run",
+                "--depth",
+                "headers",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -925,9 +1111,15 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--build-info", str(bi_pack),
-                "-H", str(header),
-                "--dry-run", "--depth", "headers",
+                "dump",
+                str(so_path),
+                "--build-info",
+                str(bi_pack),
+                "-H",
+                str(header),
+                "--dry-run",
+                "--depth",
+                "headers",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -964,10 +1156,19 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(src_pack),
-                "--build-info", str(build_info_dir), "-H", str(header),
-                "--config", str(cfg),
-                "--dry-run", "--depth", "headers",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(src_pack),
+                "--build-info",
+                str(build_info_dir),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--dry-run",
+                "--depth",
+                "headers",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -991,7 +1192,10 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(src_pack),
+                "dump",
+                str(so_path),
+                "--sources",
+                str(src_pack),
                 "--dry-run",
             ],
         )
@@ -1010,8 +1214,14 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", "--sources", str(tmp_path), "-H", str(header),
-                "--config", str(cfg), "--dry-run",
+                "dump",
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -1040,8 +1250,12 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--build-info", str(compile_db),
-                "--sources", str(src_pack),
+                "dump",
+                str(so_path),
+                "--build-info",
+                str(compile_db),
+                "--sources",
+                str(src_pack),
                 "--dry-run",
             ],
         )
@@ -1075,8 +1289,12 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(pe_path), "--dump-manifest", str(manifest_path),
-                "--sources", str(tmp_path),
+                "dump",
+                str(pe_path),
+                "--dump-manifest",
+                str(manifest_path),
+                "--sources",
+                str(tmp_path),
                 "--dry-run",
             ],
         )
@@ -1101,13 +1319,21 @@ class TestDumpDryRunBuildQueryTrust:
         compile_db.write_text("[]", encoding="utf-8")
         header = tmp_path / "api.h"
         header.write_text("int foo(int x);\n", encoding="utf-8")
-        (tmp_path / ".abicheck.yml").write_text("build: [not, a, mapping\n", encoding="utf-8")
+        (tmp_path / ".abicheck.yml").write_text(
+            "build: [not, a, mapping\n", encoding="utf-8"
+        )
 
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--build-info", str(compile_db),
-                "--sources", str(tmp_path), "-H", str(header),
+                "dump",
+                str(so_path),
+                "--build-info",
+                str(compile_db),
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
                 "--dry-run",
             ],
         )
@@ -1139,8 +1365,12 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--build-info", str(bi_pack),
-                "--sources", str(src_pack),
+                "dump",
+                str(so_path),
+                "--build-info",
+                str(bi_pack),
+                "--sources",
+                str(src_pack),
                 "--dry-run",
             ],
         )
@@ -1171,14 +1401,22 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(src_pack),
-                "-H", str(header), "--config", str(cfg),
+                "dump",
+                str(so_path),
+                "--sources",
+                str(src_pack),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
                 "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
         assert "will run" in result.output
-        assert "resulting compile-DB path: out/compile_commands.json" not in result.output
+        assert (
+            "resulting compile-DB path: out/compile_commands.json" not in result.output
+        )
         assert "no --sources tree to resolve it against" in result.output
 
     def test_explicit_config_query_reachable_via_headers_only_pack_input(
@@ -1209,15 +1447,24 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--build-info", str(bi_pack),
-                "-H", str(header), "--config", str(cfg), "--dry-run",
+                "dump",
+                str(so_path),
+                "--build-info",
+                str(bi_pack),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
         assert "will run (trusted -- explicit --config)" in result.output
         assert "build.query: (none configured)" not in result.output
 
-    def test_source_only_dump_headers_do_not_reach_l2_seed(self, tmp_path: Path) -> None:
+    def test_source_only_dump_headers_do_not_reach_l2_seed(
+        self, tmp_path: Path
+    ) -> None:
         # Codex review, fresh evidence, verified end-to-end against the real
         # CLI: with no SO_PATH, dump_cmd dispatches to dump_source_only()
         # (the parallel-baseline flow), which never calls
@@ -1232,8 +1479,13 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", "--sources", str(tmp_path), "-H", str(header),
-                "--depth", "headers",
+                "dump",
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--depth",
+                "headers",
                 "--dry-run",
             ],
         )
@@ -1272,8 +1524,13 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(src_pack),
-                "-H", str(header), "--dry-run",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(src_pack),
+                "-H",
+                str(header),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -1308,12 +1565,21 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", "--sources", str(tmp_path), "-H", str(header),
-                "--config", str(cfg), "--dry-run",
+                "dump",
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
-        assert "resulting compile-DB path (provisional, pre-query snapshot):" in result.output
+        assert (
+            "resulting compile-DB path (provisional, pre-query snapshot):"
+            in result.output
+        )
         assert "can select a different file than this one" in result.output
 
     def test_glob_compile_db_hint_resolves_to_existing_match(
@@ -1335,12 +1601,21 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", "--sources", str(tmp_path), "-H", str(header),
-                "--config", str(cfg), "--dry-run",
+                "dump",
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
-        assert f"resulting compile-DB path (provisional, pre-query snapshot): {existing_db}" in result.output
+        assert (
+            f"resulting compile-DB path (provisional, pre-query snapshot): {existing_db}"
+            in result.output
+        )
         assert "build/*/compile_commands.json" in result.output  # pattern noted too
         assert (
             "resulting compile-DB path: build/*/compile_commands.json"
@@ -1359,8 +1634,14 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", "--sources", str(tmp_path), "-H", str(header),
-                "--config", str(cfg), "--dry-run",
+                "dump",
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -1392,12 +1673,21 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", "--sources", str(tmp_path), "-H", str(header),
-                "--config", str(cfg), "--dry-run",
+                "dump",
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
-        assert f"resulting compile-DB path (provisional, pre-query snapshot): {existing_db}" in result.output
+        assert (
+            f"resulting compile-DB path (provisional, pre-query snapshot): {existing_db}"
+            in result.output
+        )
         assert (
             "resulting compile-DB path: build/compile_commands.json"
             not in result.output
@@ -1421,12 +1711,21 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", "--sources", str(tmp_path), "-H", str(header),
-                "--config", str(cfg), "--dry-run",
+                "dump",
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
-        assert "resulting compile-DB path (provisional, pre-query snapshot):" in result.output
+        assert (
+            "resulting compile-DB path (provisional, pre-query snapshot):"
+            in result.output
+        )
         assert "can select a different path or none at all" in result.output
 
     def test_no_compile_db_hint_still_resolves_conventional_compile_db(
@@ -1446,12 +1745,21 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", "--sources", str(tmp_path), "-H", str(header),
-                "--config", str(cfg), "--dry-run",
+                "dump",
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
-        assert f"resulting compile-DB path (provisional, pre-query snapshot): {existing_db}" in result.output
+        assert (
+            f"resulting compile-DB path (provisional, pre-query snapshot): {existing_db}"
+            in result.output
+        )
         assert (
             "resulting compile-DB path: (build.compile_db not configured -- "
             "the query's own default output location)"
@@ -1468,8 +1776,14 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", "--sources", str(tmp_path), "-H", str(header),
-                "--config", str(cfg), "--dry-run",
+                "dump",
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -1500,14 +1814,23 @@ class TestDumpDryRunBuildQueryTrust:
         result = CliRunner().invoke(
             main,
             [
-                "dump", "--sources", str(tmp_path), "-H", str(header),
-                "--config", str(cfg), "--dry-run",
+                "dump",
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
+                "--config",
+                str(cfg),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 1, result.output
         assert "NotImplementedError" in result.output
         assert "an absolute path" in result.output
-        assert "blocker: build.compile_db is configured as an absolute path" in result.output
+        assert (
+            "blocker: build.compile_db is configured as an absolute path"
+            in result.output
+        )
 
     def test_malformed_config_inside_sources_pack_degrades_silently_despite_raw_build_info(
         self, tmp_path: Path
@@ -1534,15 +1857,24 @@ class TestDumpDryRunBuildQueryTrust:
         src_pack = tmp_path / "srcpack"
         src_pack.mkdir()
         pack_io.write(BuildSourcePack(root=src_pack))
-        (src_pack / ".abicheck.yml").write_text("build: [unterminated\n", encoding="utf-8")
+        (src_pack / ".abicheck.yml").write_text(
+            "build: [unterminated\n", encoding="utf-8"
+        )
         build_info = tmp_path / "not_a_compile_db.txt"
         build_info.write_text("not a compile database\n", encoding="utf-8")
 
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path), "--sources", str(src_pack),
-                "--build-info", str(build_info), "-H", str(header), "--dry-run",
+                "dump",
+                str(so_path),
+                "--sources",
+                str(src_pack),
+                "--build-info",
+                str(build_info),
+                "-H",
+                str(header),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -1578,7 +1910,9 @@ class TestDumpDryRunBuildQueryTrust:
         src_pack = tmp_path / "srcpack"
         src_pack.mkdir()
         pack_io.write(BuildSourcePack(root=src_pack))
-        (src_pack / ".abicheck.yml").write_text("build: [unterminated\n", encoding="utf-8")
+        (src_pack / ".abicheck.yml").write_text(
+            "build: [unterminated\n", encoding="utf-8"
+        )
 
         result = CliRunner().invoke(
             main,
@@ -1627,7 +1961,9 @@ class TestDumpDryRunBuildQueryTrust:
         src_pack = tmp_path / "srcpack"
         src_pack.mkdir()
         pack_io.write(BuildSourcePack(root=src_pack))
-        (src_pack / ".abicheck.yml").write_text("build: [unterminated\n", encoding="utf-8")
+        (src_pack / ".abicheck.yml").write_text(
+            "build: [unterminated\n", encoding="utf-8"
+        )
         build_info = tmp_path / "emptybuilddir"
         build_info.mkdir()
         cfg = self._explicit_config(tmp_path, "echo hi")

@@ -73,9 +73,18 @@ def test_older_top_level_exit_block_is_backfilled() -> None:
 
 
 def test_older_nested_scan_exit_block_is_backfilled() -> None:
-    old_exit = {"code": 2, "reasons": ["compatibility_gate"], "compatibility_contribution": 2}
+    old_exit = {
+        "code": 2,
+        "reasons": ["compatibility_gate"],
+        "compatibility_contribution": 2,
+    }
     diff = {"verdict": "API_BREAK", "exit": old_exit}
-    report = {"scan_schema_version": "1.21", "exit_code": 2, "verdict": "API_BREAK", "diff": diff}
+    report = {
+        "scan_schema_version": "1.21",
+        "exit_code": 2,
+        "verdict": "API_BREAK",
+        "diff": diff,
+    }
     out = _augment(report)
     for field in _ADR_064_EXIT_FIELDS:
         assert out["diff"]["exit"][field] == 0
@@ -120,7 +129,11 @@ def test_a_report_already_on_the_current_schema_is_left_alone() -> None:
         "crosscheck_promotion_contribution": 0,
         **dict.fromkeys(_ADR_064_EXIT_FIELDS, 0),
     }
-    report = {"report_schema_version": "2.47", "verdict": "NO_CHANGE", "exit": dict(full_exit)}
+    report = {
+        "report_schema_version": "2.47",
+        "verdict": "NO_CHANGE",
+        "exit": dict(full_exit),
+    }
     out = _augment(report)
     assert out["exit"] == full_exit
 
@@ -137,7 +150,12 @@ def test_pre_1_22_not_comparable_scan_diff_gets_a_synthesized_exit_block() -> No
     exactly what `scan_engine.py` itself now persists for this outcome.
     """
     diff = {"reason": "scope drift"}
-    report = {"scan_schema_version": "1.21", "exit_code": 6, "verdict": "NOT_COMPARABLE", "diff": diff}
+    report = {
+        "scan_schema_version": "1.21",
+        "exit_code": 6,
+        "verdict": "NOT_COMPARABLE",
+        "diff": diff,
+    }
     out = _augment(report)
     exit_block = out["diff"]["exit"]
     assert exit_block["code"] == 6

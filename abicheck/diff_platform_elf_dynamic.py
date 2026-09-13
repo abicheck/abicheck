@@ -216,10 +216,17 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
     # When the path value is unchanged, the flip *replaces* the two individual
     # value-change findings (they would just re-describe the flip as
     # "path→''" + "''→path" noise); when the value changed too, both report.
-    rpath_type_flip = (bool(old_elf.rpath) and not old_elf.runpath
-                       and bool(new_elf.runpath) and not new_elf.rpath) or (
-                      bool(old_elf.runpath) and not old_elf.rpath
-                       and bool(new_elf.rpath) and not new_elf.runpath)
+    rpath_type_flip = (
+        bool(old_elf.rpath)
+        and not old_elf.runpath
+        and bool(new_elf.runpath)
+        and not new_elf.rpath
+    ) or (
+        bool(old_elf.runpath)
+        and not old_elf.rpath
+        and bool(new_elf.rpath)
+        and not new_elf.runpath
+    )
     pure_type_flip = rpath_type_flip and (
         (old_elf.rpath or old_elf.runpath) == (new_elf.rpath or new_elf.runpath)
     )
@@ -270,7 +277,8 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
             make_change(
                 ChangeKind.EXECUTABLE_STACK,
                 symbol="PT_GNU_STACK",
-                old_value="RW", new_value="RWE",
+                old_value="RW",
+                new_value="RWE",
                 evidence_provenance=("both:l0:elf_program_headers",),
             )
         )
@@ -281,7 +289,8 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
             make_change(
                 ChangeKind.EXECUTABLE_STACK_REMOVED,
                 symbol="PT_GNU_STACK",
-                old_value="RWE", new_value="RW",
+                old_value="RWE",
+                new_value="RW",
                 evidence_provenance=("both:l0:elf_program_headers",),
             )
         )
@@ -659,12 +668,14 @@ def _diff_abi_flags(old_elf: Any, new_elf: Any, machine: str) -> list[Change]:
 #: transition is benign and must not be flagged (it routinely rides along with a
 #: compatible change like adding an ifunc). Genuinely different OS ABIs
 #: (FreeBSD, Solaris, …) still report.
-_BENIGN_OSABI = frozenset({
-    "ELFOSABI_SYSV",
-    "ELFOSABI_NONE",
-    "ELFOSABI_GNU",
-    "ELFOSABI_LINUX",
-})
+_BENIGN_OSABI = frozenset(
+    {
+        "ELFOSABI_SYSV",
+        "ELFOSABI_NONE",
+        "ELFOSABI_GNU",
+        "ELFOSABI_LINUX",
+    }
+)
 
 
 def _both_captured_elf_identity(old_elf: Any, new_elf: Any) -> bool:
@@ -757,8 +768,16 @@ def _diff_gnu_property(old_elf: Any, new_elf: Any) -> list[Change]:
 
     changes: list[Change] = []
     for feats, weakened, improved in (
-        (_CET_FEATURES, ChangeKind.CET_PROTECTION_WEAKENED, ChangeKind.CET_PROTECTION_IMPROVED),
-        (_BRANCH_FEATURES, ChangeKind.BRANCH_PROTECTION_WEAKENED, ChangeKind.BRANCH_PROTECTION_IMPROVED),
+        (
+            _CET_FEATURES,
+            ChangeKind.CET_PROTECTION_WEAKENED,
+            ChangeKind.CET_PROTECTION_IMPROVED,
+        ),
+        (
+            _BRANCH_FEATURES,
+            ChangeKind.BRANCH_PROTECTION_WEAKENED,
+            ChangeKind.BRANCH_PROTECTION_IMPROVED,
+        ),
     ):
         old_f = old_props & feats
         new_f = new_props & feats
@@ -834,8 +853,12 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
             make_change(
                 ChangeKind.RELRO_WEAKENED,
                 symbol="GNU_RELRO",
-                old=old_relro, new=new_relro,
-                evidence_provenance=("both:l0:elf_dynamic", "both:l0:elf_program_headers"),
+                old=old_relro,
+                new=new_relro,
+                evidence_provenance=(
+                    "both:l0:elf_dynamic",
+                    "both:l0:elf_program_headers",
+                ),
             )
         )
 
@@ -844,7 +867,8 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
             make_change(
                 ChangeKind.PIE_DISABLED,
                 symbol="DF_1_PIE",
-                old_value="PIE", new_value="no-PIE",
+                old_value="PIE",
+                new_value="no-PIE",
                 evidence_provenance=("both:l0:elf_dynamic", "both:l0:elf_header"),
             )
         )
@@ -856,7 +880,8 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
             make_change(
                 ChangeKind.STACK_CANARY_REMOVED,
                 symbol="__stack_chk_fail",
-                old_value="canary", new_value="none",
+                old_value="canary",
+                new_value="none",
                 evidence_provenance=("both:l0:elf_symtab",),
             )
         )
@@ -868,7 +893,8 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
             make_change(
                 ChangeKind.FORTIFY_SOURCE_WEAKENED,
                 symbol="_FORTIFY_SOURCE",
-                old_value="fortified", new_value="none",
+                old_value="fortified",
+                new_value="none",
                 evidence_provenance=("both:l0:elf_symtab",),
             )
         )
@@ -880,7 +906,8 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
             make_change(
                 ChangeKind.WRITABLE_EXECUTABLE_SEGMENT,
                 symbol="PT_LOAD",
-                old_value="W^X", new_value="W+X",
+                old_value="W^X",
+                new_value="W+X",
                 evidence_provenance=("both:l0:elf_program_headers",),
             )
         )

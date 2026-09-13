@@ -702,7 +702,9 @@ class TestInferredEvidenceProjection:
         # output://{basename}.
         evidence = BuildEvidence(
             compile_units=[
-                CompileUnit(id="cu://src/foo.cpp", source="src/foo.cpp", output="src/foo.o"),
+                CompileUnit(
+                    id="cu://src/foo.cpp", source="src/foo.cpp", output="src/foo.o"
+                ),
             ],
             link_units=[
                 LinkUnit(
@@ -765,7 +767,9 @@ class TestInferredEvidenceProjection:
         )
         evidence = BuildEvidence(
             compile_units=[
-                CompileUnit(id="cu://src/foo.cpp", source="src/foo.cpp", output="src/foo.o"),
+                CompileUnit(
+                    id="cu://src/foo.cpp", source="src/foo.cpp", output="src/foo.o"
+                ),
             ],
             link_units=[
                 LinkUnit(
@@ -800,7 +804,9 @@ class TestInferredEvidenceProjection:
         report = validate_build_output(root)
         assert report.ok, report.errors
 
-    def test_shared_pack_across_two_inferred_targets_passes(self, tmp_path: Path) -> None:
+    def test_shared_pack_across_two_inferred_targets_passes(
+        self, tmp_path: Path
+    ) -> None:
         """The defining case 'declared' rejects outright: two targets
         pointing at the SAME physical evidence.path, both 'inferred' — must
         pass, since automatically splitting one build-wide pack is the
@@ -849,7 +855,9 @@ class TestInferredEvidenceProjection:
         report = validate_build_output(root)
         assert report.ok, report.errors
 
-    def test_inferred_projection_attributing_to_nothing_fails(self, tmp_path: Path) -> None:
+    def test_inferred_projection_attributing_to_nothing_fails(
+        self, tmp_path: Path
+    ) -> None:
         root = tmp_path / "abicheck-build"
         root.mkdir()
         digest = _binary(root, "artifacts/lib/libbaz.so")
@@ -857,7 +865,9 @@ class TestInferredEvidenceProjection:
         (pack_dir / "source_facts").mkdir(parents=True)
         (pack_dir / "manifest.json").write_text(json.dumps({"kind": "abicheck_inputs"}))
         (pack_dir / "source_facts" / "tu0.jsonl").write_text(
-            json.dumps({"tu_id": "cu://src/unrelated.cpp", "source": "src/unrelated.cpp"})
+            json.dumps(
+                {"tu_id": "cu://src/unrelated.cpp", "source": "src/unrelated.cpp"}
+            )
             + "\n"
         )
         _write_attribution(root, "evidence/attribution.json", self._evidence())
@@ -973,7 +983,9 @@ class TestInferredEvidenceProjection:
             "evidence.path" in e and "absolute or escapes" in e for e in report.errors
         )
 
-    def test_inferred_evidence_path_not_a_pack_is_rejected(self, tmp_path: Path) -> None:
+    def test_inferred_evidence_path_not_a_pack_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
         root = tmp_path / "abicheck-build"
         root.mkdir()
         digest = _binary(root, "artifacts/lib/libfoo.so")

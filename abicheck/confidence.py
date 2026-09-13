@@ -98,11 +98,7 @@ def _detect_evidence_tiers(
         (
             has_old
             and (
-                old.functions
-                or old.types
-                or old.enums
-                or old.typedefs
-                or old.variables
+                old.functions or old.types or old.enums or old.typedefs or old.variables
             )
         )
         or new.functions

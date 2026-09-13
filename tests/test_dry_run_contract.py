@@ -46,7 +46,9 @@ def _write_snapshot(path: Path, version: str = "1.0") -> None:
         version=version,
         functions=[
             Function(
-                name="f", mangled="_Zf", return_type="void",
+                name="f",
+                mangled="_Zf",
+                return_type="void",
                 visibility=Visibility.PUBLIC,
             )
         ],
@@ -120,18 +122,29 @@ class TestDumpDryRun:
         header.write_text("void f(void);\n", encoding="utf-8")
         db = tmp_path / "compile_commands.json"
         db.write_text(
-            json.dumps([{
-                "directory": str(tmp_path),
-                "command": f"cc -c {header} -o f.o",
-                "file": str(header),
-            }]),
+            json.dumps(
+                [
+                    {
+                        "directory": str(tmp_path),
+                        "command": f"cc -c {header} -o f.o",
+                        "file": str(header),
+                    }
+                ]
+            ),
             encoding="utf-8",
         )
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(snap), "--dry-run", "--depth", "build",
-                "-H", str(header), "--build-info", str(db),
+                "dump",
+                str(snap),
+                "--dry-run",
+                "--depth",
+                "build",
+                "-H",
+                str(header),
+                "--build-info",
+                str(db),
             ],
         )
         assert result.exit_code == 0, result.output
@@ -153,18 +166,29 @@ class TestDumpDryRun:
         header.write_text("void f(void);\n", encoding="utf-8")
         db = tmp_path / "compile_commands.json"
         db.write_text(
-            json.dumps([{
-                "directory": str(tmp_path),
-                "command": f"cc -c {header} -o f.o",
-                "file": str(header),
-            }]),
+            json.dumps(
+                [
+                    {
+                        "directory": str(tmp_path),
+                        "command": f"cc -c {header} -o f.o",
+                        "file": str(header),
+                    }
+                ]
+            ),
             encoding="utf-8",
         )
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(snap), "--dry-run", "--depth", "build",
-                "-H", str(header), "--build-info", str(db),
+                "dump",
+                str(snap),
+                "--dry-run",
+                "--depth",
+                "build",
+                "-H",
+                str(header),
+                "--build-info",
+                str(db),
             ],
         )
         assert result.exit_code == 0, result.output
@@ -236,8 +260,15 @@ class TestDumpDryRun:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(snap), "--dry-run", "--depth", "build",
-                "-H", str(header), "--build-info", str(db),
+                "dump",
+                str(snap),
+                "--dry-run",
+                "--depth",
+                "build",
+                "-H",
+                str(header),
+                "--build-info",
+                str(db),
             ],
         )
         assert result.exit_code == 1, result.output
@@ -285,9 +316,7 @@ class TestDumpDryRun:
         # A directory operand resolves through its own compile_commands.json.
         assert compile_db_from_build_info(tmp_path, (header,)) == db
 
-    def test_a_filter_that_would_scope_only_l2_is_refused(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_filter_that_would_scope_only_l2_is_refused(self, tmp_path: Path) -> None:
         """--compile-db-filter parameterizes the header parse only, and L3
         collection reads the same database through an adapter with no filter
         of its own -- so a monorepo database would embed build facts for
@@ -315,16 +344,27 @@ class TestDumpDryRun:
         header.write_text("void f(void);\n", encoding="utf-8")
         db = tmp_path / "compile_commands.json"
         db.write_text(
-            json.dumps([{
-                "directory": str(tmp_path),
-                "command": f"cc -c {header} -o f.o",
-                "file": str(header),
-            }]),
+            json.dumps(
+                [
+                    {
+                        "directory": str(tmp_path),
+                        "command": f"cc -c {header} -o f.o",
+                        "file": str(header),
+                    }
+                ]
+            ),
             encoding="utf-8",
         )
         args = [
-            "dump", str(so), "--dry-run", "-H", str(header),
-            "--build-info", str(db), "--depth", "build",
+            "dump",
+            str(so),
+            "--dry-run",
+            "-H",
+            str(header),
+            "--build-info",
+            str(db),
+            "--depth",
+            "build",
         ]
         # one-comparison-product.md Phase 7i: the filter is a project-config
         # key now (`build.compile_db_filter`), not a CLI flag -- the refusal
@@ -333,7 +373,9 @@ class TestDumpDryRun:
         cfg.write_text("build:\n  compile_db_filter: 'src/**'\n", encoding="utf-8")
         refused = CliRunner().invoke(main, [*args, "--config", str(cfg)])
         assert refused.exit_code == 64, refused.output
-        assert "build.compile_db_filter scopes the L2 header parse only" in refused.output
+        assert (
+            "build.compile_db_filter scopes the L2 header parse only" in refused.output
+        )
         # Without the filter the identical invocation is accepted, so the
         # refusal is scoped to the combination and not to --build-info.
         allowed = CliRunner().invoke(main, args)
@@ -367,7 +409,9 @@ class TestDumpDryRun:
         (nested / "compile_commands.json").write_text("{}", encoding="utf-8")
         assert compile_db_from_build_info(nested, (header,)) is None
 
-    def test_debug_format_against_pe_binary_is_usage_error(self, tmp_path: Path) -> None:
+    def test_debug_format_against_pe_binary_is_usage_error(
+        self, tmp_path: Path
+    ) -> None:
         # debug.format (Phase 7c: --debug-format is gone from dump's CLI --
         # config-only now, same removal as the legacy --dwarf/--btf/--ctf
         # flags before it) is only meaningful for ELF; the real run raises
@@ -406,8 +450,15 @@ class TestDumpDryRun:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(snap), "--dry-run", "--depth", "source",
-                "-H", str(header), "--build-info", str(db),
+                "dump",
+                str(snap),
+                "--dry-run",
+                "--depth",
+                "source",
+                "-H",
+                str(header),
+                "--build-info",
+                str(db),
             ],
         )
         assert result.exit_code == 1, result.output
@@ -441,8 +492,13 @@ class TestDumpDryRun:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(snap), "--dry-run", "--depth", "source",
-                "--build-info", str(pack_dir),
+                "dump",
+                str(snap),
+                "--dry-run",
+                "--depth",
+                "source",
+                "--build-info",
+                str(pack_dir),
             ],
         )
         assert result.exit_code == 0, result.output
@@ -469,8 +525,13 @@ class TestDumpDryRun:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(snap), "--dry-run", "--depth", "source",
-                "--build-info", str(inputs_dir),
+                "dump",
+                str(snap),
+                "--dry-run",
+                "--depth",
+                "source",
+                "--build-info",
+                str(inputs_dir),
             ],
         )
         assert result.exit_code == 0, result.output
@@ -500,8 +561,13 @@ class TestDumpDryRun:
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(snap), "--dry-run", "--depth", "source",
-                "--build-info", str(pack_dir),
+                "dump",
+                str(snap),
+                "--dry-run",
+                "--depth",
+                "source",
+                "--build-info",
+                str(pack_dir),
             ],
         )
         assert result.exit_code == 0, result.output
@@ -535,7 +601,9 @@ class TestCompareDryRun:
         assert _CONTRACT_FOOTER in first.output
         assert "Command: compare" in first.output
 
-    def test_reports_effective_depth_not_just_raw_requested(self, tmp_path: Path) -> None:
+    def test_reports_effective_depth_not_just_raw_requested(
+        self, tmp_path: Path
+    ) -> None:
         # Regression (CLI-audit P1/P2): a dry run must report the *effective*
         # depth the real run will use, not just echo back the raw --depth
         # string. With no --depth given but a raw --sources tree, the real
@@ -551,8 +619,12 @@ class TestCompareDryRun:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old), str(new), "--dry-run",
-                "--sources", "old=" + str(tree),
+                "compare",
+                str(old),
+                str(new),
+                "--dry-run",
+                "--sources",
+                "old=" + str(tree),
             ],
         )
         assert result.exit_code == 0
@@ -583,10 +655,16 @@ class TestCompareDryRun:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old), str(new), "--dry-run",
-                "--sources", "old=" + str(source_tree_with_compile_db),
-                "--sources", "new=" + str(source_tree_with_compile_db),
-                "--depth", "source",
+                "compare",
+                str(old),
+                str(new),
+                "--dry-run",
+                "--sources",
+                "old=" + str(source_tree_with_compile_db),
+                "--sources",
+                "new=" + str(source_tree_with_compile_db),
+                "--depth",
+                "source",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -704,8 +782,14 @@ class TestDepsCompareDryRun:
         old_root.mkdir()
         new_root.mkdir()
         args = [
-            "deps", "compare", "usr/bin/myapp",
-            "--old-root", str(old_root), "--new-root", str(new_root), "--dry-run",
+            "deps",
+            "compare",
+            "usr/bin/myapp",
+            "--old-root",
+            str(old_root),
+            "--new-root",
+            str(new_root),
+            "--dry-run",
         ]
         runner = CliRunner()
         first = runner.invoke(main, args)
@@ -715,7 +799,9 @@ class TestDepsCompareDryRun:
         assert _CONTRACT_FOOTER in first.output
         assert "Command: deps compare" in first.output
 
-    def test_same_root_is_a_usage_error_even_under_dry_run(self, tmp_path: Path) -> None:
+    def test_same_root_is_a_usage_error_even_under_dry_run(
+        self, tmp_path: Path
+    ) -> None:
         # The no-op-comparison guard fires before the dry-run branch — a dry
         # run still catches a plainly-useless invocation (exit 64, not a
         # silent "would compare nothing" report).
@@ -724,8 +810,14 @@ class TestDepsCompareDryRun:
         result = CliRunner().invoke(
             main,
             [
-                "deps", "compare", "usr/bin/myapp",
-                "--old-root", str(root), "--new-root", str(root), "--dry-run",
+                "deps",
+                "compare",
+                "usr/bin/myapp",
+                "--old-root",
+                str(root),
+                "--new-root",
+                str(root),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 64
@@ -745,8 +837,13 @@ class TestDepsCompareDryRun:
         result = CliRunner().invoke(
             main,
             [
-                "deps", "compare", str(rel),
-                "--old-root", str(old_root), "--new-root", str(new_root),
+                "deps",
+                "compare",
+                str(rel),
+                "--old-root",
+                str(old_root),
+                "--new-root",
+                str(new_root),
                 "--dry-run",
             ],
         )
@@ -769,8 +866,13 @@ class TestDepsCompareDryRun:
         result = CliRunner().invoke(
             main,
             [
-                "deps", "compare", "/usr/bin/myapp",
-                "--old-root", str(old_root), "--new-root", str(new_root),
+                "deps",
+                "compare",
+                "/usr/bin/myapp",
+                "--old-root",
+                str(old_root),
+                "--new-root",
+                str(new_root),
                 "--dry-run",
             ],
         )

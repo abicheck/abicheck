@@ -13,6 +13,7 @@ Three test dimensions beyond basic verdict parity (test_abicc_parity.py):
 
 Requires: abi-compliance-checker, gcc/g++, castxml.
 """
+
 from __future__ import annotations
 
 import json
@@ -33,6 +34,7 @@ from abicheck.compat.cli import _apply_strict, _filter_source_only
 # Shared helpers
 # ---------------------------------------------------------------------------
 
+
 def _require_tool(name: str) -> None:
     if shutil.which(name) is None:
         pytest.skip(f"{name} not found in PATH")
@@ -43,8 +45,16 @@ def _compile_so(src: str, out: Path, lang: str) -> None:
     src_file = out.with_suffix(ext)
     src_file.write_text(textwrap.dedent(src).strip(), encoding="utf-8")
     compiler = "gcc" if lang == "c" else "g++"
-    cmd = [compiler, "-shared", "-fPIC", "-g", "-fvisibility=default",
-           "-o", str(out), str(src_file)]
+    cmd = [
+        compiler,
+        "-shared",
+        "-fPIC",
+        "-g",
+        "-fvisibility=default",
+        "-o",
+        str(out),
+        str(src_file),
+    ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     if r.returncode != 0:
         pytest.fail(f"Compilation failed: {r.stderr[:200]}")
@@ -81,10 +91,14 @@ def _run_abicc_raw(
         report_path = old_desc.parent / "abicc_report.html"
     cmd = [
         "abi-compliance-checker",
-        "-lib", "libtest",
-        "-old", str(old_desc),
-        "-new", str(new_desc),
-        "-report-path", str(report_path),
+        "-lib",
+        "libtest",
+        "-old",
+        str(old_desc),
+        "-new",
+        str(new_desc),
+        "-report-path",
+        str(report_path),
     ]
     if extra_args:
         cmd.extend(extra_args)
@@ -155,27 +169,33 @@ def _run_abicheck_compat(
 ) -> subprocess.CompletedProcess[str]:
     """Run abicheck compat as a subprocess (for exit-code testing)."""
     import sys
+
     cmd = [
-        sys.executable, "-m", "abicheck.cli",
+        sys.executable,
+        "-m",
+        "abicheck.cli",
         "compat",
-        "-lib", "libtest",
-        "-old", str(old_desc),
-        "-new", str(new_desc),
-        "-report-format", fmt,
+        "-lib",
+        "libtest",
+        "-old",
+        str(old_desc),
+        "-new",
+        str(new_desc),
+        "-report-format",
+        fmt,
     ]
     if report_path:
         cmd.extend(["-report-path", str(report_path)])
     if extra_args:
         cmd.extend(extra_args)
     env = {**os.environ, "ABICHECK_ALLOW_AST_FALLBACK": "1"}
-    return subprocess.run(
-        cmd, capture_output=True, text=True, timeout=60, env=env
-    )
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env)
 
 
 # ============================================================================
 # 1. CLI COMPATIBILITY TESTS
 # ============================================================================
+
 
 @pytest.mark.abicc
 class TestCliCompatibility:
@@ -186,6 +206,7 @@ class TestCliCompatibility:
     def test_abicc_accepts_strict_flag(self, tmp_path):
         """abicheck compat must accept -strict flag (ABICC compatibility)."""
         from click.testing import CliRunner
+
         runner = CliRunner()
         # Check that abicheck compat --help mentions -strict / -s
         result = runner.invoke(main, ["compat", "check", "--help"])
@@ -197,19 +218,34 @@ class TestCliCompatibility:
     def test_abicheck_compat_accepts_all_abicc_flags(self):
         """abicheck compat --help lists all ABICC-equivalent flags."""
         from click.testing import CliRunner
+
         runner = CliRunner()
         result = runner.invoke(main, ["compat", "check", "--help"])
         assert result.exit_code == 0
 
         required_flags = [
-            "-lib", "-old", "-new", "-d1", "-d2",
-            "-report-path", "-report-format",
-            "-s", "-strict",
-            "-source", "-src", "-api",
-            "-binary", "-bin", "-abi",
-            "-v1", "-vnum1", "-v2", "-vnum2",
+            "-lib",
+            "-old",
+            "-new",
+            "-d1",
+            "-d2",
+            "-report-path",
+            "-report-format",
+            "-s",
+            "-strict",
+            "-source",
+            "-src",
+            "-api",
+            "-binary",
+            "-bin",
+            "-abi",
+            "-v1",
+            "-vnum1",
+            "-v2",
+            "-vnum2",
             "-stdout",
-            "-skip-symbols", "-skip-types",
+            "-skip-symbols",
+            "-skip-types",
             "-headers-only",
             "-show-retval",
             "-title",
@@ -229,17 +265,25 @@ class TestCliCompatibility:
         src = "int add(int a, int b) { return a + b; }"
         hdr = "int add(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src, src, hdr, hdr,
+            tmp_path,
+            src,
+            src,
+            hdr,
+            hdr,
         )
 
         abicc_r = _run_abicc_raw(v1_desc, v2_desc)
         abicheck_rpt = tmp_path / "abicheck_report.json"
         abicheck_r = _run_abicheck_compat(
-            v1_desc, v2_desc, report_path=abicheck_rpt,
+            v1_desc,
+            v2_desc,
+            report_path=abicheck_rpt,
         )
 
         assert abicc_r.returncode == 0, f"ABICC expected rc=0, got {abicc_r.returncode}"
-        assert abicheck_r.returncode == 0, f"abicheck expected rc=0, got {abicheck_r.returncode}"
+        assert abicheck_r.returncode == 0, (
+            f"abicheck expected rc=0, got {abicheck_r.returncode}"
+        )
 
     def test_exit_code_1_breaking_parity(self, tmp_path):
         """Both tools exit 1 for breaking changes (function removed)."""
@@ -251,17 +295,25 @@ class TestCliCompatibility:
         hdr_v1 = "int add(int a, int b);\nint sub(int a, int b);"
         hdr_v2 = "int add(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         abicc_r = _run_abicc_raw(v1_desc, v2_desc)
         abicheck_rpt = tmp_path / "abicheck_report.json"
         abicheck_r = _run_abicheck_compat(
-            v1_desc, v2_desc, report_path=abicheck_rpt,
+            v1_desc,
+            v2_desc,
+            report_path=abicheck_rpt,
         )
 
         assert abicc_r.returncode == 1, f"ABICC expected rc=1, got {abicc_r.returncode}"
-        assert abicheck_r.returncode == 1, f"abicheck expected rc=1, got {abicheck_r.returncode}"
+        assert abicheck_r.returncode == 1, (
+            f"abicheck expected rc=1, got {abicheck_r.returncode}"
+        )
 
     def test_exit_code_0_addition_only_parity(self, tmp_path):
         """Both tools exit 0 for compatible additions (new function)."""
@@ -273,17 +325,25 @@ class TestCliCompatibility:
         hdr_v1 = "int add(int a, int b);"
         hdr_v2 = "int add(int a, int b);\nint mul(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         abicc_r = _run_abicc_raw(v1_desc, v2_desc)
         abicheck_rpt = tmp_path / "abicheck_report.json"
         abicheck_r = _run_abicheck_compat(
-            v1_desc, v2_desc, report_path=abicheck_rpt,
+            v1_desc,
+            v2_desc,
+            report_path=abicheck_rpt,
         )
 
         assert abicc_r.returncode == 0, f"ABICC expected rc=0, got {abicc_r.returncode}"
-        assert abicheck_r.returncode == 0, f"abicheck expected rc=0, got {abicheck_r.returncode}"
+        assert abicheck_r.returncode == 0, (
+            f"abicheck expected rc=0, got {abicheck_r.returncode}"
+        )
 
     # ── Descriptor format parity ──────────────────────────────────────────
 
@@ -294,7 +354,11 @@ class TestCliCompatibility:
         src = "int add(int a, int b) { return a + b; }"
         hdr = "int add(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src, src, hdr, hdr,
+            tmp_path,
+            src,
+            src,
+            hdr,
+            hdr,
         )
 
         # Verify descriptor is valid ABICC XML
@@ -304,9 +368,13 @@ class TestCliCompatibility:
 
         abicheck_rpt = tmp_path / "abicheck_report.json"
         r = _run_abicheck_compat(
-            v1_desc, v2_desc, report_path=abicheck_rpt,
+            v1_desc,
+            v2_desc,
+            report_path=abicheck_rpt,
         )
-        assert r.returncode == 0, f"abicheck rejected valid ABICC descriptor: {r.stderr}"
+        assert r.returncode == 0, (
+            f"abicheck rejected valid ABICC descriptor: {r.stderr}"
+        )
 
     def test_version_override_flags_v1_v2(self, tmp_path):
         """Both tools accept version override flags."""
@@ -316,18 +384,24 @@ class TestCliCompatibility:
         src = "int add(int a, int b) { return a + b; }"
         hdr = "int add(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src, src, hdr, hdr,
+            tmp_path,
+            src,
+            src,
+            hdr,
+            hdr,
         )
 
         # ABICC uses -v1 / -v2 to override version labels
         abicc_r = _run_abicc_raw(
-            v1_desc, v2_desc,
+            v1_desc,
+            v2_desc,
             extra_args=["-v1", "10.0", "-v2", "20.0"],
         )
         # abicheck uses -v1 / -v2
         abicheck_rpt = tmp_path / "abicheck_report.json"
         abicheck_r = _run_abicheck_compat(
-            v1_desc, v2_desc,
+            v1_desc,
+            v2_desc,
             extra_args=["-v1", "10.0", "-v2", "20.0"],
             report_path=abicheck_rpt,
         )
@@ -347,6 +421,7 @@ class TestCliCompatibility:
 # 2. OUTPUT FORMAT PARITY TESTS
 # ============================================================================
 
+
 @pytest.mark.abicc
 class TestOutputFormatParity:
     """Compare report structure and content between the two tools."""
@@ -361,7 +436,11 @@ class TestOutputFormatParity:
         hdr_v1 = "int add(int a, int b);\nint sub(int a, int b);"
         hdr_v2 = "int add(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         # ABICC report
@@ -379,8 +458,7 @@ class TestOutputFormatParity:
         abicc_removed = int(abicc_meta.get("removed", "0"))
         # abicheck removed count from changes
         abicheck_removed = sum(
-            1 for c in abicheck_data["changes"]
-            if "removed" in c["kind"]
+            1 for c in abicheck_data["changes"] if "removed" in c["kind"]
         )
 
         # Both should detect exactly 1 removal (sub was removed)
@@ -400,7 +478,11 @@ class TestOutputFormatParity:
         hdr_v1 = "int add(int a, int b);\nint sub(int a, int b);"
         hdr_v2 = "int add(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         abicc_report = tmp_path / "abicc_report.html"
@@ -416,8 +498,7 @@ class TestOutputFormatParity:
         abicheck_verdict = abicheck_data["verdict"]
 
         assert abicc_verdict, (
-            f"ABICC report metadata missing or empty verdict "
-            f"(metadata={abicc_meta!r})"
+            f"ABICC report metadata missing or empty verdict (metadata={abicc_meta!r})"
         )
 
         if abicc_verdict == "incompatible":
@@ -443,7 +524,11 @@ class TestOutputFormatParity:
         hdr_v1 = "int add(int a, int b);\nint sub(int a, int b);"
         hdr_v2 = "int add(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         abicheck_report = tmp_path / "abicheck_report.json"
@@ -494,12 +579,19 @@ class TestOutputFormatParity:
         hdr_v1 = "int add(int a, int b);\nint sub(int a, int b);"
         hdr_v2 = "int add(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         abicheck_report = tmp_path / "abicheck_report.html"
         _run_abicheck_compat(
-            v1_desc, v2_desc, report_path=abicheck_report, fmt="html",
+            v1_desc,
+            v2_desc,
+            report_path=abicheck_report,
+            fmt="html",
         )
 
         html_text = abicheck_report.read_text(encoding="utf-8")
@@ -507,7 +599,9 @@ class TestOutputFormatParity:
         # ABICC-equivalent structure
         assert "Verdict" in html_text, "Missing verdict section"
         assert "Binary Compatibility" in html_text, "Missing BC% metric"
-        assert "Change Summary" in html_text or "Summary" in html_text, "Missing summary"
+        assert "Change Summary" in html_text or "Summary" in html_text, (
+            "Missing summary"
+        )
         assert "Removed" in html_text, "Missing removed section"
 
     def test_report_html_parity_structure(self, tmp_path):
@@ -520,7 +614,11 @@ class TestOutputFormatParity:
         hdr_v1 = "int add(int a, int b);\nint sub(int a, int b);"
         hdr_v2 = "int add(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         # ABICC report
@@ -530,11 +628,20 @@ class TestOutputFormatParity:
         # abicheck report
         abicheck_report = tmp_path / "abicheck_report.html"
         _run_abicheck_compat(
-            v1_desc, v2_desc, report_path=abicheck_report, fmt="html",
+            v1_desc,
+            v2_desc,
+            report_path=abicheck_report,
+            fmt="html",
         )
 
-        abicc_html = abicc_report.read_text(encoding="utf-8") if abicc_report.exists() else ""
-        abicheck_html = abicheck_report.read_text(encoding="utf-8") if abicheck_report.exists() else ""
+        abicc_html = (
+            abicc_report.read_text(encoding="utf-8") if abicc_report.exists() else ""
+        )
+        abicheck_html = (
+            abicheck_report.read_text(encoding="utf-8")
+            if abicheck_report.exists()
+            else ""
+        )
 
         # Both should be valid HTML
         assert "<html" in abicc_html.lower(), "ABICC didn't produce HTML"
@@ -553,12 +660,19 @@ class TestOutputFormatParity:
         hdr_v1 = "int add(int a, int b);\nint sub(int a, int b);"
         hdr_v2 = "int add(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         abicheck_report = tmp_path / "abicheck_report.md"
         _run_abicheck_compat(
-            v1_desc, v2_desc, report_path=abicheck_report, fmt="md",
+            v1_desc,
+            v2_desc,
+            report_path=abicheck_report,
+            fmt="md",
         )
 
         md_text = abicheck_report.read_text(encoding="utf-8")
@@ -577,12 +691,17 @@ class TestOutputFormatParity:
         src = "int add(int a, int b) { return a + b; }"
         hdr = "int add(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src, src, hdr, hdr,
+            tmp_path,
+            src,
+            src,
+            hdr,
+            hdr,
         )
 
         abicheck_report = tmp_path / "abicheck_report.json"
         r = _run_abicheck_compat(
-            v1_desc, v2_desc,
+            v1_desc,
+            v2_desc,
             report_path=abicheck_report,
             extra_args=["-stdout"],
         )
@@ -597,6 +716,7 @@ class TestOutputFormatParity:
 # ============================================================================
 # 3. STRICT MODE PARITY TESTS
 # ============================================================================
+
 
 @pytest.mark.abicc
 class TestStrictModeParity:
@@ -614,19 +734,28 @@ class TestStrictModeParity:
         src = "int add(int a, int b) { return a + b; }"
         hdr = "int add(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src, src, hdr, hdr,
+            tmp_path,
+            src,
+            src,
+            hdr,
+            hdr,
         )
 
         abicc_r = _run_abicc_raw(v1_desc, v2_desc, extra_args=["-strict"])
         abicheck_rpt = tmp_path / "abicheck_report.json"
         abicheck_r = _run_abicheck_compat(
-            v1_desc, v2_desc,
+            v1_desc,
+            v2_desc,
             report_path=abicheck_rpt,
             extra_args=["-s"],
         )
 
-        assert abicc_r.returncode == 0, f"ABICC strict + no_change: rc={abicc_r.returncode}"
-        assert abicheck_r.returncode == 0, f"abicheck strict + no_change: rc={abicheck_r.returncode}"
+        assert abicc_r.returncode == 0, (
+            f"ABICC strict + no_change: rc={abicc_r.returncode}"
+        )
+        assert abicheck_r.returncode == 0, (
+            f"abicheck strict + no_change: rc={abicheck_r.returncode}"
+        )
 
     def test_strict_addition_exit_code_parity(self, tmp_path):
         """Strict mode with additions: both tools promote to error.
@@ -642,13 +771,18 @@ class TestStrictModeParity:
         hdr_v1 = "int add(int a, int b);"
         hdr_v2 = "int add(int a, int b);\nint mul(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         abicc_r = _run_abicc_raw(v1_desc, v2_desc, extra_args=["-strict"])
         abicheck_rpt = tmp_path / "abicheck_report.json"
         abicheck_r = _run_abicheck_compat(
-            v1_desc, v2_desc,
+            v1_desc,
+            v2_desc,
             report_path=abicheck_rpt,
             extra_args=["-s"],
         )
@@ -668,19 +802,28 @@ class TestStrictModeParity:
         hdr_v1 = "int add(int a, int b);\nint sub(int a, int b);"
         hdr_v2 = "int add(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         abicc_r = _run_abicc_raw(v1_desc, v2_desc, extra_args=["-strict"])
         abicheck_rpt = tmp_path / "abicheck_report.json"
         abicheck_r = _run_abicheck_compat(
-            v1_desc, v2_desc,
+            v1_desc,
+            v2_desc,
             report_path=abicheck_rpt,
             extra_args=["-s"],
         )
 
-        assert abicc_r.returncode == 1, f"ABICC strict + breaking: rc={abicc_r.returncode}"
-        assert abicheck_r.returncode == 1, f"abicheck strict + breaking: rc={abicheck_r.returncode}"
+        assert abicc_r.returncode == 1, (
+            f"ABICC strict + breaking: rc={abicc_r.returncode}"
+        )
+        assert abicheck_r.returncode == 1, (
+            f"abicheck strict + breaking: rc={abicheck_r.returncode}"
+        )
 
     @pytest.mark.xfail(
         reason=(
@@ -709,12 +852,17 @@ class TestStrictModeParity:
         hdr_v1 = "int add(int a, int b);"
         hdr_v2 = "int add(int a, int b);\nint mul(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         abicheck_rpt = tmp_path / "abicheck_report.json"
         _run_abicheck_compat(
-            v1_desc, v2_desc,
+            v1_desc,
+            v2_desc,
             report_path=abicheck_rpt,
             extra_args=["-s"],
         )
@@ -738,7 +886,8 @@ STRICT_PARITY_CASES: list[tuple[str, str, str, str, str, str, int]] = [
         "int x(void) { return 1; }",
         "int x(void);",
         "int x(void);",
-        "c", 0,
+        "c",
+        0,
     ),
     (
         "strict_addition",
@@ -747,7 +896,8 @@ STRICT_PARITY_CASES: list[tuple[str, str, str, str, str, str, int]] = [
         "int x(void);",
         "int x(void);\nint y(void);",
         # ABICC 2.3 keeps additions compatible even in -strict mode.
-        "c", 0,
+        "c",
+        0,
     ),
     (
         "strict_removal",
@@ -755,7 +905,8 @@ STRICT_PARITY_CASES: list[tuple[str, str, str, str, str, str, int]] = [
         "int x(void) { return 1; }",
         "int x(void);\nint y(void);",
         "int x(void);",
-        "c", 1,
+        "c",
+        1,
     ),
     (
         "strict_return_type",
@@ -763,7 +914,8 @@ STRICT_PARITY_CASES: list[tuple[str, str, str, str, str, str, int]] = [
         "long get(void) { return 42; }",
         "int  get(void);",
         "long get(void);",
-        "c", 1,
+        "c",
+        1,
     ),
     (
         "strict_param_type",
@@ -771,7 +923,8 @@ STRICT_PARITY_CASES: list[tuple[str, str, str, str, str, str, int]] = [
         "void set(long x) { (void)x; }",
         "void set(int  x);",
         "void set(long x);",
-        "c", 1,
+        "c",
+        1,
     ),
     (
         "strict_enum_value",
@@ -779,7 +932,8 @@ STRICT_PARITY_CASES: list[tuple[str, str, str, str, str, str, int]] = [
         "typedef enum { A=0, B=10 } E;\nE get_e(void) { return A; }",
         "typedef enum { A=0, B=1 } E;\nE get_e(void);",
         "typedef enum { A=0, B=10 } E;\nE get_e(void);",
-        "c", 1,
+        "c",
+        1,
     ),
 ]
 
@@ -792,8 +946,10 @@ STRICT_PARITY_CASES: list[tuple[str, str, str, str, str, str, int]] = [
 )
 def test_strict_case_level_parity(
     name: str,
-    src_v1: str, src_v2: str,
-    hdr_v1: str, hdr_v2: str,
+    src_v1: str,
+    src_v2: str,
+    hdr_v1: str,
+    hdr_v2: str,
     lang: str,
     expected_exit: int,
     tmp_path: Path,
@@ -804,13 +960,20 @@ def test_strict_case_level_parity(
     _require_tool("gcc" if lang == "c" else "g++")
 
     _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-        tmp_path, src_v1, src_v2, hdr_v1, hdr_v2, lang=lang, name=name,
+        tmp_path,
+        src_v1,
+        src_v2,
+        hdr_v1,
+        hdr_v2,
+        lang=lang,
+        name=name,
     )
 
     abicc_r = _run_abicc_raw(v1_desc, v2_desc, extra_args=["-strict"])
     abicheck_rpt = tmp_path / f"{name}_report.json"
     abicheck_r = _run_abicheck_compat(
-        v1_desc, v2_desc,
+        v1_desc,
+        v2_desc,
         report_path=abicheck_rpt,
         extra_args=["-s"],
     )
@@ -834,20 +997,29 @@ def test_strict_case_level_parity(
 # 5. SOURCE-MODE PARITY TESTS
 # ============================================================================
 
+
 class TestSourceModeUnit:
     """Unit tests for source mode filtering (no external tools required)."""
 
     def test_source_mode_ignores_elf_only_changes(self):
         """_filter_source_only removes binary-only changes."""
         changes = [
-            Change(kind=ChangeKind.SONAME_CHANGED, symbol="libtest.so",
-                   description="soname changed"),
-            Change(kind=ChangeKind.FUNC_PARAMS_CHANGED, symbol="foo",
-                   description="param type changed"),
+            Change(
+                kind=ChangeKind.SONAME_CHANGED,
+                symbol="libtest.so",
+                description="soname changed",
+            ),
+            Change(
+                kind=ChangeKind.FUNC_PARAMS_CHANGED,
+                symbol="foo",
+                description="param type changed",
+            ),
         ]
         result = DiffResult(
-            old_version="1.0", new_version="2.0",
-            library="libtest.so", changes=changes,
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so",
+            changes=changes,
             verdict=Verdict.BREAKING,
         )
         filtered = _filter_source_only(result)
@@ -871,15 +1043,22 @@ class TestSourceModeParity:
         hdr_v1 = "int  get(void);"
         hdr_v2 = "long get(void);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         abicc_r = _run_abicc_raw(
-            v1_desc, v2_desc, extra_args=["-source"],
+            v1_desc,
+            v2_desc,
+            extra_args=["-source"],
         )
         abicheck_rpt = tmp_path / "abicheck_report.json"
         abicheck_r = _run_abicheck_compat(
-            v1_desc, v2_desc,
+            v1_desc,
+            v2_desc,
             report_path=abicheck_rpt,
             extra_args=["-source"],
         )
@@ -897,13 +1076,18 @@ class TestSourceModeParity:
         src = "int add(int a, int b) { return a + b; }"
         hdr = "int add(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src, src, hdr, hdr,
+            tmp_path,
+            src,
+            src,
+            hdr,
+            hdr,
         )
 
         abicc_r = _run_abicc_raw(v1_desc, v2_desc, extra_args=["-source"])
         abicheck_rpt = tmp_path / "abicheck_report.json"
         abicheck_r = _run_abicheck_compat(
-            v1_desc, v2_desc,
+            v1_desc,
+            v2_desc,
             report_path=abicheck_rpt,
             extra_args=["-source"],
         )
@@ -915,6 +1099,7 @@ class TestSourceModeParity:
 # ============================================================================
 # 6. COMPREHENSIVE STRICT-MODE CASE DETECTION LEVEL
 # ============================================================================
+
 
 @pytest.mark.abicc
 class TestStrictCompactCaseLevel:
@@ -931,7 +1116,11 @@ class TestStrictCompactCaseLevel:
         hdr_v1 = "int a(void);\nint b(void);"
         hdr_v2 = "int a(void);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         # ABICC
@@ -945,8 +1134,7 @@ class TestStrictCompactCaseLevel:
         _run_abicheck_compat(v1_desc, v2_desc, report_path=abicheck_report)
         data = json.loads(abicheck_report.read_text(encoding="utf-8"))
         abicheck_removed = sum(
-            1 for c in data["changes"]
-            if c["kind"] == "func_removed"
+            1 for c in data["changes"] if c["kind"] == "func_removed"
         )
 
         # Both should detect exactly 1 removal
@@ -967,7 +1155,11 @@ class TestStrictCompactCaseLevel:
         hdr_v1 = "int a(void);\nint b(void);\nint c(void);"
         hdr_v2 = "int a(void);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         # ABICC
@@ -981,8 +1173,7 @@ class TestStrictCompactCaseLevel:
         _run_abicheck_compat(v1_desc, v2_desc, report_path=abicheck_report)
         data = json.loads(abicheck_report.read_text(encoding="utf-8"))
         abicheck_removed = sum(
-            1 for c in data["changes"]
-            if c["kind"] == "func_removed"
+            1 for c in data["changes"] if c["kind"] == "func_removed"
         )
 
         # Both should detect 2 removals (b and c)
@@ -1003,7 +1194,11 @@ class TestStrictCompactCaseLevel:
         hdr_v1 = "int a(void);"
         hdr_v2 = "int a(void);\nint b(void);\nint c(void);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         # ABICC
@@ -1016,10 +1211,7 @@ class TestStrictCompactCaseLevel:
         abicheck_report = tmp_path / "abicheck_report.json"
         _run_abicheck_compat(v1_desc, v2_desc, report_path=abicheck_report)
         data = json.loads(abicheck_report.read_text(encoding="utf-8"))
-        abicheck_added = sum(
-            1 for c in data["changes"]
-            if c["kind"] == "func_added"
-        )
+        abicheck_added = sum(1 for c in data["changes"] if c["kind"] == "func_added")
 
         # Both should detect 2 additions (b and c)
         assert abicc_added == 2, f"ABICC: {abicc_added} added"
@@ -1035,7 +1227,11 @@ class TestStrictCompactCaseLevel:
         hdr_v1 = "int  get(void);"
         hdr_v2 = "long get(void);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         # ABICC
@@ -1053,12 +1249,16 @@ class TestStrictCompactCaseLevel:
         assert abicheck_r.returncode == 1
 
         # abicheck should have a func_return_changed change
-        return_changes = [c for c in data["changes"] if c["kind"] == "func_return_changed"]
+        return_changes = [
+            c for c in data["changes"] if c["kind"] == "func_return_changed"
+        ]
         assert len(return_changes) >= 1, "abicheck didn't detect return type change"
 
         # ABICC should report affected > 0
         abicc_affected = int(abicc_meta.get("affected", "0"))
-        assert abicc_affected >= 1, f"ABICC didn't detect the change: affected={abicc_affected}"
+        assert abicc_affected >= 1, (
+            f"ABICC didn't detect the change: affected={abicc_affected}"
+        )
 
     def test_param_type_change_detected_by_both(self, tmp_path):
         """Parameter type change: both detect as breaking."""
@@ -1070,7 +1270,11 @@ class TestStrictCompactCaseLevel:
         hdr_v1 = "void process(int  x);"
         hdr_v2 = "void process(long x);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         abicc_r = _run_abicc_raw(v1_desc, v2_desc)
@@ -1098,12 +1302,20 @@ class TestStrictCompactCaseLevel:
         _require_tool("abi-compliance-checker")
         _require_tool("castxml")
 
-        src_v1 = "typedef enum { A=0, B=1, C=2 } MyEnum;\nMyEnum get_e(void) { return A; }"
-        src_v2 = "typedef enum { A=0, B=5, C=2 } MyEnum;\nMyEnum get_e(void) { return A; }"
+        src_v1 = (
+            "typedef enum { A=0, B=1, C=2 } MyEnum;\nMyEnum get_e(void) { return A; }"
+        )
+        src_v2 = (
+            "typedef enum { A=0, B=5, C=2 } MyEnum;\nMyEnum get_e(void) { return A; }"
+        )
         hdr_v1 = "typedef enum { A=0, B=1, C=2 } MyEnum;\nMyEnum get_e(void);"
         hdr_v2 = "typedef enum { A=0, B=5, C=2 } MyEnum;\nMyEnum get_e(void);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         abicc_r = _run_abicc_raw(v1_desc, v2_desc)
@@ -1123,6 +1335,7 @@ class TestStrictCompactCaseLevel:
 # 7. SKIP-SYMBOLS / SKIP-TYPES PARITY
 # ============================================================================
 
+
 @pytest.mark.abicc
 class TestSkipFilterParity:
     """Both tools should agree on verdict when skip-symbols filters are applied."""
@@ -1137,7 +1350,11 @@ class TestSkipFilterParity:
         hdr_v1 = "int add(int a, int b);\nint sub(int a, int b);"
         hdr_v2 = "int add(int a, int b);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         # Create skip file with "sub"
@@ -1146,14 +1363,16 @@ class TestSkipFilterParity:
 
         # ABICC with -skip-symbols
         abicc_r = _run_abicc_raw(
-            v1_desc, v2_desc,
+            v1_desc,
+            v2_desc,
             extra_args=["-skip-symbols", str(skip_file)],
         )
 
         # abicheck with -skip-symbols
         abicheck_rpt = tmp_path / "abicheck_report.json"
         abicheck_r = _run_abicheck_compat(
-            v1_desc, v2_desc,
+            v1_desc,
+            v2_desc,
             report_path=abicheck_rpt,
             extra_args=["-skip-symbols", str(skip_file)],
         )
@@ -1180,7 +1399,11 @@ class TestSkipFilterParity:
         hdr_v1 = "int a(void);\nint b(void);\nint c(void);"
         hdr_v2 = "int a(void);"
         _, _, v1_desc, v2_desc, _, _ = _build_test_libs(
-            tmp_path, src_v1, src_v2, hdr_v1, hdr_v2,
+            tmp_path,
+            src_v1,
+            src_v2,
+            hdr_v1,
+            hdr_v2,
         )
 
         # Skip only "b", "c" is still removed
@@ -1188,12 +1411,14 @@ class TestSkipFilterParity:
         skip_file.write_text("b\n", encoding="utf-8")
 
         abicc_r = _run_abicc_raw(
-            v1_desc, v2_desc,
+            v1_desc,
+            v2_desc,
             extra_args=["-skip-symbols", str(skip_file)],
         )
         abicheck_rpt = tmp_path / "abicheck_report.json"
         abicheck_r = _run_abicheck_compat(
-            v1_desc, v2_desc,
+            v1_desc,
+            v2_desc,
             report_path=abicheck_rpt,
             extra_args=["-skip-symbols", str(skip_file)],
         )
@@ -1207,19 +1432,23 @@ class TestSkipFilterParity:
 # 8. UNIT TESTS: STRICT VERDICT PROMOTION LOGIC
 # ============================================================================
 
+
 class TestStrictVerdictPromotion:
     """Unit tests for strict-mode verdict promotion logic (no external tools).
 
     Uses the production _apply_strict() function to verify promotion semantics.
     """
 
-    def _result(self, verdict: Verdict, kinds: list[ChangeKind] | None = None) -> DiffResult:
+    def _result(
+        self, verdict: Verdict, kinds: list[ChangeKind] | None = None
+    ) -> DiffResult:
         changes = [
             Change(kind=k, symbol=f"_sym_{i}", description=k.value)
             for i, k in enumerate(kinds or [])
         ]
         return DiffResult(
-            old_version="1.0", new_version="2.0",
+            old_version="1.0",
+            new_version="2.0",
             library="libtest.so.1",
             changes=changes,
             verdict=verdict,

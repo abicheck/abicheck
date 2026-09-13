@@ -117,6 +117,5 @@ def evidence_contract_error_entries(
             ),
         }
         for entry in library_results
-        if isinstance(entry, dict)
-        and entry.get("evidence_contract_error_contribution")
+        if isinstance(entry, dict) and entry.get("evidence_contract_error_contribution")
     ]

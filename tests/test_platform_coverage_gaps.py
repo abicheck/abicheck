@@ -21,6 +21,7 @@ Covers gaps in:
   - pe_metadata.py (lines 116-117, 144-148, 173-175, 180-199)
   - binder.py (lines 83, 101, 131-136, 159, 255-261, 272, 286, 309-312)
 """
+
 from __future__ import annotations
 
 import os
@@ -464,7 +465,12 @@ class TestMachoExportTrieBudgets:
         leaf2 = b"\x01\x00\x00"
         root_prefix = b"\x00\x02a\x00"
         first_off = len(root_prefix) + 1 + len(b"b\x00") + 1
-        root = root_prefix + self._uleb(first_off) + b"b\x00" + self._uleb(first_off + len(leaf1))
+        root = (
+            root_prefix
+            + self._uleb(first_off)
+            + b"b\x00"
+            + self._uleb(first_off + len(leaf1))
+        )
 
         with pytest.raises(ValueError, match="child-entry budget"):
             _walk_export_trie(root + leaf1 + leaf2)
@@ -576,8 +582,13 @@ class TestParseMachoSymbolTableFailure:
         mock_macho = MagicMock()
         mock_macho.headers = [mock_header]
 
-        with patch("abicheck.macho_metadata.MachO", return_value=mock_macho), \
-             patch("abicheck.macho_metadata.SymbolTable", side_effect=Exception("no symtab")):
+        with (
+            patch("abicheck.macho_metadata.MachO", return_value=mock_macho),
+            patch(
+                "abicheck.macho_metadata.SymbolTable",
+                side_effect=Exception("no symtab"),
+            ),
+        ):
             result = parse_macho_metadata(dylib_path)
 
         assert result.cpu_type  # should be populated
@@ -610,7 +621,7 @@ class TestParseMachoWeakSymbols:
         # n_type must have N_EXT set AND (n_type & N_TYPE) != N_UNDF (0)
         # N_SECT = 0xe (defined in a section), N_EXT = 0x1
         # So use 0xf = N_EXT | 0xe (defined external)
-        defined_ext = N_EXT | 0xe  # 0xf: external, defined in section
+        defined_ext = N_EXT | 0xE  # 0xf: external, defined in section
 
         nlist_normal = MagicMock()
         nlist_normal.n_type = defined_ext
@@ -626,8 +637,10 @@ class TestParseMachoWeakSymbols:
             (nlist_weak, b"_weak_func"),
         ]
 
-        with patch("abicheck.macho_metadata.MachO", return_value=mock_macho), \
-             patch("abicheck.macho_metadata.SymbolTable", return_value=mock_symtab):
+        with (
+            patch("abicheck.macho_metadata.MachO", return_value=mock_macho),
+            patch("abicheck.macho_metadata.SymbolTable", return_value=mock_symtab),
+        ):
             result = parse_macho_metadata(dylib_path)
 
         names = {e.name for e in result.exports}
@@ -685,10 +698,15 @@ class TestPdbMetadataPhaseExceptions:
         pdb_path.write_bytes(b"fake")
         mock_pdb = self._make_mock_pdb()
 
-        with patch("abicheck.pdb_metadata.parse_pdb", return_value=mock_pdb), \
-             patch("abicheck.pdb_metadata._extract_struct_layouts", side_effect=RuntimeError("boom")), \
-             patch("abicheck.pdb_metadata._extract_enums"), \
-             patch("abicheck.pdb_metadata._extract_toolchain_info"):
+        with (
+            patch("abicheck.pdb_metadata.parse_pdb", return_value=mock_pdb),
+            patch(
+                "abicheck.pdb_metadata._extract_struct_layouts",
+                side_effect=RuntimeError("boom"),
+            ),
+            patch("abicheck.pdb_metadata._extract_enums"),
+            patch("abicheck.pdb_metadata._extract_toolchain_info"),
+        ):
             meta, adv = parse_pdb_debug_info(pdb_path)
         assert meta.has_dwarf
 
@@ -698,10 +716,14 @@ class TestPdbMetadataPhaseExceptions:
         pdb_path.write_bytes(b"fake")
         mock_pdb = self._make_mock_pdb()
 
-        with patch("abicheck.pdb_metadata.parse_pdb", return_value=mock_pdb), \
-             patch("abicheck.pdb_metadata._extract_struct_layouts"), \
-             patch("abicheck.pdb_metadata._extract_enums", side_effect=RuntimeError("boom")), \
-             patch("abicheck.pdb_metadata._extract_toolchain_info"):
+        with (
+            patch("abicheck.pdb_metadata.parse_pdb", return_value=mock_pdb),
+            patch("abicheck.pdb_metadata._extract_struct_layouts"),
+            patch(
+                "abicheck.pdb_metadata._extract_enums", side_effect=RuntimeError("boom")
+            ),
+            patch("abicheck.pdb_metadata._extract_toolchain_info"),
+        ):
             meta, adv = parse_pdb_debug_info(pdb_path)
         assert meta.has_dwarf
 
@@ -711,10 +733,15 @@ class TestPdbMetadataPhaseExceptions:
         pdb_path.write_bytes(b"fake")
         mock_pdb = self._make_mock_pdb()
 
-        with patch("abicheck.pdb_metadata.parse_pdb", return_value=mock_pdb), \
-             patch("abicheck.pdb_metadata._extract_struct_layouts"), \
-             patch("abicheck.pdb_metadata._extract_enums"), \
-             patch("abicheck.pdb_metadata._extract_toolchain_info", side_effect=RuntimeError("boom")):
+        with (
+            patch("abicheck.pdb_metadata.parse_pdb", return_value=mock_pdb),
+            patch("abicheck.pdb_metadata._extract_struct_layouts"),
+            patch("abicheck.pdb_metadata._extract_enums"),
+            patch(
+                "abicheck.pdb_metadata._extract_toolchain_info",
+                side_effect=RuntimeError("boom"),
+            ),
+        ):
             meta, adv = parse_pdb_debug_info(pdb_path)
         assert meta.has_dwarf
 
@@ -1012,8 +1039,10 @@ class TestPeMetadataNoExports:
         # No VS_FIXEDFILEINFO
         del mock_pe.VS_FIXEDFILEINFO
 
-        with patch("abicheck.pe_metadata.pefile.PE", return_value=mock_pe), \
-             patch("abicheck.pe_metadata.os.fstat") as mock_fstat:
+        with (
+            patch("abicheck.pe_metadata.pefile.PE", return_value=mock_pe),
+            patch("abicheck.pe_metadata.os.fstat") as mock_fstat,
+        ):
             mock_stat = MagicMock()
             mock_stat.st_mode = stat.S_IFREG | 0o644
             mock_fstat.return_value = mock_stat
@@ -1049,8 +1078,10 @@ class TestPeMetadataOrdinalOnlyExports:
         mock_pe.DIRECTORY_ENTRY_IMPORT = [mock_import]
         del mock_pe.VS_FIXEDFILEINFO
 
-        with patch("abicheck.pe_metadata.pefile.PE", return_value=mock_pe), \
-             patch("abicheck.pe_metadata.os.fstat") as mock_fstat:
+        with (
+            patch("abicheck.pe_metadata.pefile.PE", return_value=mock_pe),
+            patch("abicheck.pe_metadata.os.fstat") as mock_fstat,
+        ):
             mock_stat = MagicMock()
             mock_stat.st_mode = stat.S_IFREG | 0o644
             mock_fstat.return_value = mock_stat
@@ -1081,8 +1112,10 @@ class TestPeMetadataVersionResource:
         del mock_pe.DIRECTORY_ENTRY_IMPORT
         mock_pe.VS_FIXEDFILEINFO = [mock_finfo]
 
-        with patch("abicheck.pe_metadata.pefile.PE", return_value=mock_pe), \
-             patch("abicheck.pe_metadata.os.fstat") as mock_fstat:
+        with (
+            patch("abicheck.pe_metadata.pefile.PE", return_value=mock_pe),
+            patch("abicheck.pe_metadata.os.fstat") as mock_fstat,
+        ):
             mock_stat = MagicMock()
             mock_stat.st_mode = stat.S_IFREG | 0o644
             mock_fstat.return_value = mock_stat
@@ -1137,11 +1170,15 @@ def _make_graph(
     return graph
 
 
-def _sym(name: str, version: str = "", is_default: bool = True, vis: str = "default") -> ElfSymbol:
+def _sym(
+    name: str, version: str = "", is_default: bool = True, vis: str = "default"
+) -> ElfSymbol:
     return ElfSymbol(name=name, version=version, is_default=is_default, visibility=vis)
 
 
-def _imp(name: str, version: str = "", binding: ElfSymbolBinding = ElfSymbolBinding.GLOBAL) -> ElfImport:
+def _imp(
+    name: str, version: str = "", binding: ElfSymbolBinding = ElfSymbolBinding.GLOBAL
+) -> ElfImport:
     return ElfImport(name=name, version=version, binding=binding)
 
 
@@ -1264,7 +1301,11 @@ class TestBinderNoVersionRequired:
         graph = _make_graph(
             {
                 "/app": (["libfoo.so"], [], [_imp("func")]),
-                "/lib/libfoo.so": ([], [_sym("func", version="FOO_1", is_default=True)], []),
+                "/lib/libfoo.so": (
+                    [],
+                    [_sym("func", version="FOO_1", is_default=True)],
+                    [],
+                ),
             },
             edges=[("/app", "/lib/libfoo.so")],
         )

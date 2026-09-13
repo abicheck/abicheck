@@ -20,6 +20,7 @@ Finding A — extern-C fallback must use a multimap and NOT mis-pair a
 Finding B — _detect_newly_deleted_functions must NOT emit FUNC_DELETED for
   hidden/internal (non-ABI-visible) functions.
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
@@ -29,6 +30,7 @@ from abicheck.model import AbiSnapshot, Function, Visibility
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _snap(
     functions: list[Function] | None = None,
@@ -56,6 +58,7 @@ def _kinds(result: object) -> set[ChangeKind]:
 # ---------------------------------------------------------------------------
 # Finding A — multimap extern-C fallback
 # ---------------------------------------------------------------------------
+
 
 class TestExternCFallbackMultimap:
     """Extern-C name fallback must NOT mis-pair when a same-named C++ sibling exists."""
@@ -154,6 +157,7 @@ class TestExternCFallbackMultimap:
 # Finding C — ELF export gate accepts C-linkage symbol names
 # ---------------------------------------------------------------------------
 
+
 class TestCLinkageExportGate:
     """Public CastXML functions must survive ELF filtering when ELF has C names."""
 
@@ -180,6 +184,7 @@ class TestCLinkageExportGate:
 # Finding B — visibility gate in _detect_newly_deleted_functions
 # ---------------------------------------------------------------------------
 
+
 class TestNewlyDeletedVisibilityGate:
     """_detect_newly_deleted_functions must not report HIDDEN/internal functions."""
 
@@ -189,9 +194,15 @@ class TestNewlyDeletedVisibilityGate:
         Hidden functions are not part of the public ABI surface; callers cannot
         reference them, so a = delete marker on them cannot be an ABI break.
         """
-        f_old = _func("internal_helper", "_Z15internal_helperv", visibility=Visibility.HIDDEN)
-        f_new = _func("internal_helper", "_Z15internal_helperv",
-                       visibility=Visibility.HIDDEN, is_deleted=True)
+        f_old = _func(
+            "internal_helper", "_Z15internal_helperv", visibility=Visibility.HIDDEN
+        )
+        f_new = _func(
+            "internal_helper",
+            "_Z15internal_helperv",
+            visibility=Visibility.HIDDEN,
+            is_deleted=True,
+        )
 
         r = compare(_snap(functions=[f_old]), _snap(functions=[f_new]))
         kinds = _kinds(r)
@@ -204,7 +215,9 @@ class TestNewlyDeletedVisibilityGate:
     def test_public_deleted_function_still_emits_func_deleted(self) -> None:
         """Regression guard: a PUBLIC function gaining = delete MUST emit FUNC_DELETED."""
         f_old = _func("api_fn", "_Z5api_fnv", visibility=Visibility.PUBLIC)
-        f_new = _func("api_fn", "_Z5api_fnv", visibility=Visibility.PUBLIC, is_deleted=True)
+        f_new = _func(
+            "api_fn", "_Z5api_fnv", visibility=Visibility.PUBLIC, is_deleted=True
+        )
 
         r = compare(_snap(functions=[f_old]), _snap(functions=[f_new]))
 
@@ -214,7 +227,9 @@ class TestNewlyDeletedVisibilityGate:
     def test_elf_only_deleted_function_emits_func_deleted(self) -> None:
         """ELF_ONLY visibility is part of the public ABI surface; = delete must be reported."""
         f_old = _func("elf_fn", "_Z6elf_fnv", visibility=Visibility.ELF_ONLY)
-        f_new = _func("elf_fn", "_Z6elf_fnv", visibility=Visibility.ELF_ONLY, is_deleted=True)
+        f_new = _func(
+            "elf_fn", "_Z6elf_fnv", visibility=Visibility.ELF_ONLY, is_deleted=True
+        )
 
         r = compare(_snap(functions=[f_old]), _snap(functions=[f_new]))
 

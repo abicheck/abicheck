@@ -710,9 +710,7 @@ class TestDimensionSix:
             },
         )
         assert result.status == "fail"
-        assert any(
-            "consumer_verdict" in r and "safer" in r for r in result.reasons
-        )
+        assert any("consumer_verdict" in r and "safer" in r for r in result.reasons)
 
     def test_a_consumer_verdict_matching_truth_but_not_the_cited_report_fails(
         self, tmp_path

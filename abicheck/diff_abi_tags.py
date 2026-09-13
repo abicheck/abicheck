@@ -25,6 +25,7 @@ This is the per-symbol analogue of the libstdc++ dual-ABI mass-flip diagnostic
 (``glibcxx_dual_abi_flip_detected``). When that mass flip already fired we stay
 quiet to avoid duplicate noise.
 """
+
 from __future__ import annotations
 
 import re
@@ -133,15 +134,17 @@ def _diff_abi_tags(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             parts.append("gained " + ", ".join(f"[abi:{t}]" for t in gained))
         if lost:
             parts.append("lost " + ", ".join(f"[abi:{t}]" for t in lost))
-        changes.append(make_change(
-            ChangeKind.ABI_TAG_CHANGED,
-            symbol=old_map[r].name,
-            name=old_map[r].name,
-            detail="; ".join(parts),
-            old=r,
-            new=a,
-            old_value=", ".join(sorted(old_tags)) or "(none)",
-            new_value=", ".join(sorted(new_tags)) or "(none)",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.ABI_TAG_CHANGED,
+                symbol=old_map[r].name,
+                name=old_map[r].name,
+                detail="; ".join(parts),
+                old=r,
+                new=a,
+                old_value=", ".join(sorted(old_tags)) or "(none)",
+                new_value=", ".join(sorted(new_tags)) or "(none)",
+            )
+        )
 
     return changes

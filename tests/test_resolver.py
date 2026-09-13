@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Tests for abicheck.resolver — transitive ELF dependency resolution."""
+
 from __future__ import annotations
 
 import sys
@@ -58,10 +59,13 @@ class TestSearchLibrary:
         (dir1 / "libfoo.so.1").write_bytes(b"first")
         (dir2 / "libfoo.so.1").write_bytes(b"second")
 
-        result = _search_library("libfoo.so.1", [
-            (str(dir1), "rpath"),
-            (str(dir2), "default"),
-        ])
+        result = _search_library(
+            "libfoo.so.1",
+            [
+                (str(dir1), "rpath"),
+                (str(dir2), "default"),
+            ],
+        )
         assert result is not None
         assert result[1] == "rpath"
 

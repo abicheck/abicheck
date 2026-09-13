@@ -19,6 +19,7 @@ width N is part of the type. Changing N — or changing a field/param type to or
 from ``_BitInt(N)`` — changes the storage size and the calling-convention
 treatment, so old code reads/writes the value with the wrong width.
 """
+
 from __future__ import annotations
 
 import re
@@ -61,12 +62,14 @@ def _diff_bit_int(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             detail = f"type was _BitInt({old_w})"
         else:
             detail = f"_BitInt width changed {old_w} → {new_w}"
-        changes.append(make_change(
-            ChangeKind.BIT_INT_WIDTH_CHANGED,
-            symbol=ch.symbol,
-            name=f"{ch.slot} of '{ch.symbol}'",
-            detail=detail,
-            old=ch.old_type,
-            new=ch.new_type,
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.BIT_INT_WIDTH_CHANGED,
+                symbol=ch.symbol,
+                name=f"{ch.slot} of '{ch.symbol}'",
+                detail=detail,
+                old=ch.old_type,
+                new=ch.new_type,
+            )
+        )
     return changes

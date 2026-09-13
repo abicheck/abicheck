@@ -14,6 +14,7 @@ Usage:
   pytest tests/test_golden_root_cause.py
   pytest tests/test_golden_root_cause.py --update-goldens
 """
+
 from __future__ import annotations
 
 import difflib

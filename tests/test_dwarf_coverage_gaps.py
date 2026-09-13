@@ -7,6 +7,7 @@ Covers:
   502, 521, 527-528, 535, 558, 601, 612-613, 748-770, 785-793
 - dwarf_snapshot.py (missing attribute fallback paths)
 """
+
 from __future__ import annotations
 
 import stat
@@ -27,6 +28,7 @@ from abicheck.dwarf_utils import (
 # ---------------------------------------------------------------------------
 # Mock helpers
 # ---------------------------------------------------------------------------
+
 
 class MockAttr:
     """Simulate a pyelftools AttributeValue."""
@@ -80,6 +82,7 @@ class MockCU:
 # ===========================================================================
 # dwarf_utils tests
 # ===========================================================================
+
 
 class TestAttrStr:
     """attr_str: bytes value, None value, missing attribute."""
@@ -155,9 +158,7 @@ class TestResolveDieRef:
         """DW_FORM_ref_addr: value is section-absolute offset."""
         target = MockDIE(tag="DW_TAG_base_type", offset=100)
         cu = MockCU(cu_offset=50, die_map={100: target})
-        die = MockDIE(attributes={
-            "DW_AT_type": MockAttr(100, form="DW_FORM_ref_addr")
-        })
+        die = MockDIE(attributes={"DW_AT_type": MockAttr(100, form="DW_FORM_ref_addr")})
         result = resolve_die_ref(die, "DW_AT_type", cu)
         assert result is target
 
@@ -165,27 +166,21 @@ class TestResolveDieRef:
         """DW_FORM_ref4: value is CU-relative, need to add cu_offset."""
         target = MockDIE(tag="DW_TAG_pointer_type", offset=150)
         cu = MockCU(cu_offset=100, die_map={150: target})
-        die = MockDIE(attributes={
-            "DW_AT_type": MockAttr(50, form="DW_FORM_ref4")
-        })
+        die = MockDIE(attributes={"DW_AT_type": MockAttr(50, form="DW_FORM_ref4")})
         result = resolve_die_ref(die, "DW_AT_type", cu)
         assert result is target
 
     def test_cu_relative_ref1(self):
         target = MockDIE(tag="DW_TAG_base_type", offset=30)
         cu = MockCU(cu_offset=20, die_map={30: target})
-        die = MockDIE(attributes={
-            "DW_AT_type": MockAttr(10, form="DW_FORM_ref1")
-        })
+        die = MockDIE(attributes={"DW_AT_type": MockAttr(10, form="DW_FORM_ref1")})
         result = resolve_die_ref(die, "DW_AT_type", cu)
         assert result is target
 
     def test_cu_relative_ref_udata(self):
         target = MockDIE(tag="DW_TAG_typedef", offset=80)
         cu = MockCU(cu_offset=30, die_map={80: target})
-        die = MockDIE(attributes={
-            "DW_AT_type": MockAttr(50, form="DW_FORM_ref_udata")
-        })
+        die = MockDIE(attributes={"DW_AT_type": MockAttr(50, form="DW_FORM_ref_udata")})
         result = resolve_die_ref(die, "DW_AT_type", cu)
         assert result is target
 
@@ -200,9 +195,7 @@ class TestResolveTypeDie:
 
     def test_resolve_die_ref_raises(self):
         """Lines 85-86: when resolve_die_ref raises, return None."""
-        die = MockDIE(attributes={
-            "DW_AT_type": MockAttr(9999, form="DW_FORM_ref4")
-        })
+        die = MockDIE(attributes={"DW_AT_type": MockAttr(9999, form="DW_FORM_ref4")})
         cu = MockCU(cu_offset=0)
         # Make get_DIE_from_refaddr raise
         cu.get_DIE_from_refaddr = MagicMock(side_effect=KeyError("bad ref"))
@@ -212,9 +205,7 @@ class TestResolveTypeDie:
     def test_resolve_succeeds(self):
         target = MockDIE(tag="DW_TAG_base_type", offset=50)
         cu = MockCU(cu_offset=0, die_map={50: target})
-        die = MockDIE(attributes={
-            "DW_AT_type": MockAttr(50, form="DW_FORM_ref4")
-        })
+        die = MockDIE(attributes={"DW_AT_type": MockAttr(50, form="DW_FORM_ref4")})
         result = resolve_type_die(die, cu)
         assert result is target
 
@@ -222,6 +213,7 @@ class TestResolveTypeDie:
 # ===========================================================================
 # dwarf_unified tests
 # ===========================================================================
+
 
 class TestParseUnified:
     """dwarf_unified.parse_dwarf edge cases."""
@@ -343,8 +335,14 @@ class TestParseUnified:
         with (
             patch("abicheck.dwarf_unified.os.fstat", return_value=fake_stat),
             patch("abicheck.dwarf_unified.ELFFile", return_value=mock_elf),
-            patch("abicheck.dwarf_unified._meta_process_cu", side_effect=lambda cu, meta, tc: None),
-            patch("abicheck.dwarf_unified._adv_process_cu", side_effect=lambda cu, adv: None),
+            patch(
+                "abicheck.dwarf_unified._meta_process_cu",
+                side_effect=lambda cu, meta, tc: None,
+            ),
+            patch(
+                "abicheck.dwarf_unified._adv_process_cu",
+                side_effect=lambda cu, adv: None,
+            ),
         ):
             _meta, adv = parse_dwarf(fake_path)
 
@@ -423,6 +421,7 @@ class TestParseUnified:
 # ===========================================================================
 # dwarf_advanced tests
 # ===========================================================================
+
 
 class TestParseAdvancedDwarf:
     """parse_advanced_dwarf edge cases (standalone function)."""
@@ -920,9 +919,11 @@ class TestDecodeMemberLocation:
         # DW_OP_constu 8 + DW_OP_constu 4 + DW_OP_plus => 12
         die = MockDIE(
             tag="DW_TAG_member",
-            attributes={"DW_AT_data_member_location": MockAttr(
-                [(0x10, 8), (0x10, 4), (0x22, 0)]
-            )},
+            attributes={
+                "DW_AT_data_member_location": MockAttr(
+                    [(0x10, 8), (0x10, 4), (0x22, 0)]
+                )
+            },
         )
         assert _decode_member_location(die) == 12
 
@@ -982,7 +983,9 @@ class TestUnwrapQualifiers:
             if i < 12:
                 dies[offset] = MockDIE(
                     tag="DW_TAG_typedef",
-                    attributes={"DW_AT_type": MockAttr(next_offset, form="DW_FORM_ref4")},
+                    attributes={
+                        "DW_AT_type": MockAttr(next_offset, form="DW_FORM_ref4")
+                    },
                     offset=offset,
                 )
             else:
@@ -1235,20 +1238,24 @@ class TestRegName:
 
     def test_x86_reg(self):
         from abicheck.dwarf_advanced import _reg_name
+
         assert _reg_name(5, "x86") == "ebp"
 
     def test_aarch64_reg(self):
         from abicheck.dwarf_advanced import _reg_name
+
         assert _reg_name(31, "aarch64") == "sp"
 
     def test_unknown_arch(self):
         from abicheck.dwarf_advanced import _reg_name
+
         assert _reg_name(99, "mips") == "reg99"
 
 
 # ===========================================================================
 # dwarf_snapshot tests
 # ===========================================================================
+
 
 class TestDwarfSnapshotFallbacks:
     """dwarf_snapshot.py: uncovered branches for missing attributes, fallback paths."""
@@ -1271,7 +1278,10 @@ class TestDwarfSnapshotFallbacks:
         from abicheck.dwarf_snapshot import show_data_sources
 
         result = show_data_sources(
-            Path("test.so"), None, None, has_headers=False,
+            Path("test.so"),
+            None,
+            None,
+            has_headers=False,
         )
         assert "not available" in result
         assert "Symbols-only" in result
@@ -1288,7 +1298,10 @@ class TestDwarfSnapshotFallbacks:
         elf_meta = self._make_elf_meta()
 
         result = show_data_sources(
-            Path("test.so"), elf_meta, dwarf_meta, has_headers=False,
+            Path("test.so"),
+            elf_meta,
+            dwarf_meta,
+            has_headers=False,
         )
         assert "DWARF-only" in result
         assert "DWARF" in result
@@ -1298,7 +1311,10 @@ class TestDwarfSnapshotFallbacks:
         from abicheck.dwarf_snapshot import show_data_sources
 
         result = show_data_sources(
-            Path("test.so"), self._make_elf_meta(), None, has_headers=True,
+            Path("test.so"),
+            self._make_elf_meta(),
+            None,
+            has_headers=True,
         )
         assert "Headers mode" in result
 
@@ -1531,11 +1547,17 @@ class TestDwarfSnapshotFallbacks:
         )
         float_type = MockDIE(
             tag="DW_TAG_base_type",
-            attributes={"DW_AT_name": MockAttr("float"), "DW_AT_byte_size": MockAttr(4)},
+            attributes={
+                "DW_AT_name": MockAttr("float"),
+                "DW_AT_byte_size": MockAttr(4),
+            },
         )
         inner_i = MockDIE(
             tag="DW_TAG_member",
-            attributes={"DW_AT_name": MockAttr("i"), "DW_AT_type": MockAttr(10, form="DW_FORM_ref4")},
+            attributes={
+                "DW_AT_name": MockAttr("i"),
+                "DW_AT_type": MockAttr(10, form="DW_FORM_ref4"),
+            },
         )
         inner_f = MockDIE(
             tag="DW_TAG_member",
@@ -1549,7 +1571,9 @@ class TestDwarfSnapshotFallbacks:
         # must be skipped rather than mistaken for a field.
         nested_decl = MockDIE(tag="DW_TAG_structure_type", attributes={})
         anon_union = MockDIE(
-            tag="DW_TAG_union_type", attributes={}, children=[nested_decl, inner_i, inner_f]
+            tag="DW_TAG_union_type",
+            attributes={},
+            children=[nested_decl, inner_i, inner_f],
         )
         outer_member = MockDIE(
             tag="DW_TAG_member",
@@ -1589,7 +1613,10 @@ class TestDwarfSnapshotFallbacks:
         # real DWARF for an anonymous union's members.
         inner_j = MockDIE(
             tag="DW_TAG_member",
-            attributes={"DW_AT_name": MockAttr("j"), "DW_AT_type": MockAttr(10, form="DW_FORM_ref4")},
+            attributes={
+                "DW_AT_name": MockAttr("j"),
+                "DW_AT_type": MockAttr(10, form="DW_FORM_ref4"),
+            },
         )
         anon_union = MockDIE(tag="DW_TAG_union_type", attributes={}, children=[inner_j])
         outer_member = MockDIE(
@@ -1625,7 +1652,10 @@ class TestDwarfSnapshotFallbacks:
         )
         inner_k = MockDIE(
             tag="DW_TAG_member",
-            attributes={"DW_AT_name": MockAttr("k"), "DW_AT_type": MockAttr(10, form="DW_FORM_ref4")},
+            attributes={
+                "DW_AT_name": MockAttr("k"),
+                "DW_AT_type": MockAttr(10, form="DW_FORM_ref4"),
+            },
         )
         anon_union = MockDIE(tag="DW_TAG_union_type", attributes={}, children=[inner_k])
         outer_member = MockDIE(
@@ -1673,8 +1703,13 @@ class TestDwarfSnapshotFallbacks:
         from abicheck.dwarf_snapshot import _default_member_access_for_tag
         from abicheck.model import AccessLevel
 
-        assert _default_member_access_for_tag("DW_TAG_class_type") == AccessLevel.PRIVATE
-        assert _default_member_access_for_tag("DW_TAG_structure_type") == AccessLevel.PUBLIC
+        assert (
+            _default_member_access_for_tag("DW_TAG_class_type") == AccessLevel.PRIVATE
+        )
+        assert (
+            _default_member_access_for_tag("DW_TAG_structure_type")
+            == AccessLevel.PUBLIC
+        )
         assert _default_member_access_for_tag("DW_TAG_union_type") == AccessLevel.PUBLIC
 
     def test_process_record_type_named_class_field_absent_access_is_private(self):
@@ -1744,7 +1779,8 @@ class TestDwarfSnapshotFallbacks:
         builder = _DwarfSnapshotBuilder(Path("test.so"), elf_meta)
 
         inner_i = MockDIE(
-            tag="DW_TAG_member", attributes={"DW_AT_name": MockAttr("i")},
+            tag="DW_TAG_member",
+            attributes={"DW_AT_name": MockAttr("i")},
         )
         named_union = MockDIE(
             tag="DW_TAG_union_type",
@@ -1774,11 +1810,17 @@ class TestDwarfSnapshotFallbacks:
         )
         inner_x = MockDIE(
             tag="DW_TAG_member",
-            attributes={"DW_AT_name": MockAttr("x"), "DW_AT_type": MockAttr(10, form="DW_FORM_ref4")},
+            attributes={
+                "DW_AT_name": MockAttr("x"),
+                "DW_AT_type": MockAttr(10, form="DW_FORM_ref4"),
+            },
         )
-        anon_struct = MockDIE(tag="DW_TAG_structure_type", attributes={}, children=[inner_x])
+        anon_struct = MockDIE(
+            tag="DW_TAG_structure_type", attributes={}, children=[inner_x]
+        )
         outer_member = MockDIE(
-            tag="DW_TAG_member", attributes={"DW_AT_type": MockAttr(20, form="DW_FORM_ref4")},
+            tag="DW_TAG_member",
+            attributes={"DW_AT_type": MockAttr(20, form="DW_FORM_ref4")},
         )
         cu = MockCU(cu_offset=0, die_map={10: int_type, 20: anon_struct})
 
@@ -2068,12 +2110,18 @@ class TestAggregateHasUnalignedMemberNested:
     """_aggregate_has_unaligned_member carries the parent offset into nested aggregates."""
 
     def _double(self) -> MockDIE:
-        return MockDIE(tag="DW_TAG_base_type",
-                       attributes={"DW_AT_byte_size": MockAttr(8)}, offset=100)
+        return MockDIE(
+            tag="DW_TAG_base_type",
+            attributes={"DW_AT_byte_size": MockAttr(8)},
+            offset=100,
+        )
 
     def _char(self) -> MockDIE:
-        return MockDIE(tag="DW_TAG_base_type",
-                       attributes={"DW_AT_byte_size": MockAttr(1)}, offset=108)
+        return MockDIE(
+            tag="DW_TAG_base_type",
+            attributes={"DW_AT_byte_size": MockAttr(1)},
+            offset=108,
+        )
 
     def _inner(self) -> MockDIE:
         # struct Inner { double d; }  — d at offset 0 within Inner
@@ -2085,14 +2133,19 @@ class TestAggregateHasUnalignedMemberNested:
             },
             offset=210,
         )
-        return MockDIE(tag="DW_TAG_structure_type",
-                       attributes={"DW_AT_byte_size": MockAttr(8)},
-                       offset=200, children=[member_d])
+        return MockDIE(
+            tag="DW_TAG_structure_type",
+            attributes={"DW_AT_byte_size": MockAttr(8)},
+            offset=200,
+            children=[member_d],
+        )
 
     def _wrapper(self, struct_offset: int) -> MockDIE:
         # A DIE whose DW_AT_type is the (return) aggregate.
-        return MockDIE(tag="DW_TAG_subprogram",
-                       attributes={"DW_AT_type": MockAttr(struct_offset, form="DW_FORM_ref4")})
+        return MockDIE(
+            tag="DW_TAG_subprogram",
+            attributes={"DW_AT_type": MockAttr(struct_offset, form="DW_FORM_ref4")},
+        )
 
     def test_packed_outer_misaligns_nested_double(self):
         from abicheck.dwarf_advanced import _aggregate_has_unaligned_member
@@ -2115,11 +2168,21 @@ class TestAggregateHasUnalignedMemberNested:
             },
             offset=310,
         )
-        outer = MockDIE(tag="DW_TAG_structure_type",
-                        attributes={"DW_AT_byte_size": MockAttr(9)},
-                        offset=320, children=[member_c, member_i])
-        cu = MockCU(cu_offset=0, die_map={100: self._double(), 108: self._char(),
-                                          200: self._inner(), 320: outer})
+        outer = MockDIE(
+            tag="DW_TAG_structure_type",
+            attributes={"DW_AT_byte_size": MockAttr(9)},
+            offset=320,
+            children=[member_c, member_i],
+        )
+        cu = MockCU(
+            cu_offset=0,
+            die_map={
+                100: self._double(),
+                108: self._char(),
+                200: self._inner(),
+                320: outer,
+            },
+        )
         assert _aggregate_has_unaligned_member(self._wrapper(320), cu) is True
 
     def test_aligned_outer_with_nested_aggregate_is_not_unaligned(self):
@@ -2142,16 +2205,29 @@ class TestAggregateHasUnalignedMemberNested:
             },
             offset=340,
         )
-        outer = MockDIE(tag="DW_TAG_structure_type",
-                        attributes={"DW_AT_byte_size": MockAttr(16)},
-                        offset=350, children=[member_i, member_c])
-        cu = MockCU(cu_offset=0, die_map={100: self._double(), 108: self._char(),
-                                          200: self._inner(), 350: outer})
+        outer = MockDIE(
+            tag="DW_TAG_structure_type",
+            attributes={"DW_AT_byte_size": MockAttr(16)},
+            offset=350,
+            children=[member_i, member_c],
+        )
+        cu = MockCU(
+            cu_offset=0,
+            die_map={
+                100: self._double(),
+                108: self._char(),
+                200: self._inner(),
+                350: outer,
+            },
+        )
         assert _aggregate_has_unaligned_member(self._wrapper(350), cu) is False
 
     def _int(self) -> MockDIE:
-        return MockDIE(tag="DW_TAG_base_type",
-                       attributes={"DW_AT_byte_size": MockAttr(4)}, offset=120)
+        return MockDIE(
+            tag="DW_TAG_base_type",
+            attributes={"DW_AT_byte_size": MockAttr(4)},
+            offset=120,
+        )
 
     def test_packed_outer_misaligns_array_element(self):
         from abicheck.dwarf_advanced import _aggregate_has_unaligned_member
@@ -2179,11 +2255,16 @@ class TestAggregateHasUnalignedMemberNested:
             },
             offset=420,
         )
-        outer = MockDIE(tag="DW_TAG_structure_type",
-                        attributes={"DW_AT_byte_size": MockAttr(5)},
-                        offset=430, children=[member_c, member_a])
-        cu = MockCU(cu_offset=0, die_map={108: self._char(), 120: self._int(),
-                                          400: int_array, 430: outer})
+        outer = MockDIE(
+            tag="DW_TAG_structure_type",
+            attributes={"DW_AT_byte_size": MockAttr(5)},
+            offset=430,
+            children=[member_c, member_a],
+        )
+        cu = MockCU(
+            cu_offset=0,
+            die_map={108: self._char(), 120: self._int(), 400: int_array, 430: outer},
+        )
         assert _aggregate_has_unaligned_member(self._wrapper(430), cu) is True
 
     def test_aligned_array_element_is_not_unaligned(self):
@@ -2211,11 +2292,16 @@ class TestAggregateHasUnalignedMemberNested:
             },
             offset=460,
         )
-        outer = MockDIE(tag="DW_TAG_structure_type",
-                        attributes={"DW_AT_byte_size": MockAttr(12)},
-                        offset=470, children=[member_a, member_c])
-        cu = MockCU(cu_offset=0, die_map={108: self._char(), 120: self._int(),
-                                          440: int_array, 470: outer})
+        outer = MockDIE(
+            tag="DW_TAG_structure_type",
+            attributes={"DW_AT_byte_size": MockAttr(12)},
+            offset=470,
+            children=[member_a, member_c],
+        )
+        cu = MockCU(
+            cu_offset=0,
+            die_map={108: self._char(), 120: self._int(), 440: int_array, 470: outer},
+        )
         assert _aggregate_has_unaligned_member(self._wrapper(470), cu) is False
 
     def test_dw_at_alignment_override_misaligned(self):
@@ -2244,17 +2330,23 @@ class TestAggregateHasUnalignedMemberNested:
             },
             offset=520,
         )
-        outer = MockDIE(tag="DW_TAG_structure_type",
-                        attributes={"DW_AT_byte_size": MockAttr(9)},
-                        offset=530, children=[member_c, member_x])
+        outer = MockDIE(
+            tag="DW_TAG_structure_type",
+            attributes={"DW_AT_byte_size": MockAttr(9)},
+            offset=530,
+            children=[member_c, member_x],
+        )
         cu = MockCU(cu_offset=0, die_map={108: self._char(), 500: over, 530: outer})
         assert _aggregate_has_unaligned_member(self._wrapper(530), cu) is True
 
     def test_pointer_return_type_is_not_aggregate(self):
         from abicheck.dwarf_advanced import _aggregate_has_unaligned_member
 
-        ptr = MockDIE(tag="DW_TAG_pointer_type",
-                      attributes={"DW_AT_byte_size": MockAttr(8)}, offset=600)
+        ptr = MockDIE(
+            tag="DW_TAG_pointer_type",
+            attributes={"DW_AT_byte_size": MockAttr(8)},
+            offset=600,
+        )
         cu = MockCU(cu_offset=0, die_map={600: ptr})
         assert _aggregate_has_unaligned_member(self._wrapper(600), cu) is False
 

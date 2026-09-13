@@ -1598,7 +1598,9 @@ class TestStageBinary:
         manifest = build_manifest_module.build_manifest(tmp_path, "", "", entries, None)
         artifact = manifest["artifacts"][0]
         assert artifact["binary"] == "binaries/libfoo"
-        assert artifact["binary_sha256"] == hashlib.sha256(b"fake-elf-bytes").hexdigest()
+        assert (
+            artifact["binary_sha256"] == hashlib.sha256(b"fake-elf-bytes").hexdigest()
+        )
 
     def test_non_staged_entry_has_no_binary_fields(self, tmp_path: Path) -> None:
         _write_snapshot(tmp_path / "libfoo.abicheck.json", library="libfoo")

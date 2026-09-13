@@ -18,7 +18,9 @@ def test_compat_accepts_real_abicc_abi_dump(tmp_path: Path) -> None:
     dump = tmp_path / "ABI.dump"
 
     hdr.write_text("int foo(int x);\n", encoding="utf-8")
-    src.write_text("#include \"libx.h\"\nint foo(int x) { return x + 1; }\n", encoding="utf-8")
+    src.write_text(
+        '#include "libx.h"\nint foo(int x) { return x + 1; }\n', encoding="utf-8"
+    )
 
     subprocess.run(
         [

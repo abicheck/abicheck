@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Tests for SYCL PI detector (diff_sycl.py)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -98,6 +99,7 @@ def _make_sycl(
 # PI version diff
 # ---------------------------------------------------------------------------
 
+
 class TestDiffPiVersion:
     def test_no_change(self):
         old = _make_sycl(pi_version="1.2")
@@ -123,6 +125,7 @@ class TestDiffPiVersion:
 # Plugin inventory diff
 # ---------------------------------------------------------------------------
 
+
 class TestDiffPlugins:
     def test_no_change(self):
         p = _make_plugin()
@@ -140,7 +143,9 @@ class TestDiffPlugins:
         assert "cuda" in changes[0].symbol
 
     def test_plugin_added(self):
-        p = _make_plugin(name="opencl", library="libpi_opencl.so", backend_type="opencl")
+        p = _make_plugin(
+            name="opencl", library="libpi_opencl.so", backend_type="opencl"
+        )
         old = _make_sycl(plugins=[_make_plugin()])
         new = _make_sycl(plugins=[_make_plugin(), p])
         changes = _diff_plugins(old, new)
@@ -153,6 +158,7 @@ class TestDiffPlugins:
 # Plugin entry point diff
 # ---------------------------------------------------------------------------
 
+
 class TestDiffPluginEntrypoints:
     def test_no_change(self):
         p = _make_plugin()
@@ -161,18 +167,24 @@ class TestDiffPluginEntrypoints:
         assert _diff_plugin_entrypoints(old, new) == []
 
     def test_entrypoint_removed(self):
-        old_p = _make_plugin(entry_points=["piPluginInit", "piPlatformsGet", "piDevicesGet"])
+        old_p = _make_plugin(
+            entry_points=["piPluginInit", "piPlatformsGet", "piDevicesGet"]
+        )
         new_p = _make_plugin(entry_points=["piPluginInit", "piPlatformsGet"])
         old = _make_sycl(plugins=[old_p])
         new = _make_sycl(plugins=[new_p])
         changes = _diff_plugin_entrypoints(old, new)
-        removed = [c for c in changes if c.kind == ChangeKind.SYCL_PI_ENTRYPOINT_REMOVED]
+        removed = [
+            c for c in changes if c.kind == ChangeKind.SYCL_PI_ENTRYPOINT_REMOVED
+        ]
         assert len(removed) == 1
         assert "piDevicesGet" in removed[0].old_value
 
     def test_entrypoint_added(self):
         old_p = _make_plugin(entry_points=["piPluginInit", "piPlatformsGet"])
-        new_p = _make_plugin(entry_points=["piPluginInit", "piPlatformsGet", "piextUSMAlloc"])
+        new_p = _make_plugin(
+            entry_points=["piPluginInit", "piPlatformsGet", "piextUSMAlloc"]
+        )
         old = _make_sycl(plugins=[old_p])
         new = _make_sycl(plugins=[new_p])
         changes = _diff_plugin_entrypoints(old, new)
@@ -193,6 +205,7 @@ class TestDiffPluginEntrypoints:
 # Search path diff
 # ---------------------------------------------------------------------------
 
+
 class TestDiffPluginSearchPaths:
     def test_no_change(self):
         old = _make_sycl(plugin_search_paths=["/usr/lib/sycl"])
@@ -210,6 +223,7 @@ class TestDiffPluginSearchPaths:
 # ---------------------------------------------------------------------------
 # Runtime version diff
 # ---------------------------------------------------------------------------
+
 
 class TestDiffRuntimeVersion:
     def test_no_change(self):
@@ -233,6 +247,7 @@ class TestDiffRuntimeVersion:
 # ---------------------------------------------------------------------------
 # Backend driver requirement diff
 # ---------------------------------------------------------------------------
+
 
 class TestDiffBackendDriverReqs:
     def test_no_change(self):
@@ -262,6 +277,7 @@ class TestDiffBackendDriverReqs:
 # Full detector integration (via AbiSnapshot)
 # ---------------------------------------------------------------------------
 
+
 class TestDiffSyclDetector:
     def test_skipped_when_no_sycl_metadata(self):
         """Detector is skipped when sycl metadata is absent."""
@@ -274,31 +290,41 @@ class TestDiffSyclDetector:
     def test_full_diff_with_sycl(self):
         """Full diff with SYCL metadata detects multiple change types."""
         old_plugins = [
-            _make_plugin(name="level_zero", entry_points=["piPluginInit", "piPlatformsGet", "piDevicesGet"]),
+            _make_plugin(
+                name="level_zero",
+                entry_points=["piPluginInit", "piPlatformsGet", "piDevicesGet"],
+            ),
             _make_plugin(name="cuda", library="libpi_cuda.so", backend_type="cuda"),
         ]
         new_plugins = [
-            _make_plugin(name="level_zero", entry_points=["piPluginInit", "piPlatformsGet"]),
-            _make_plugin(name="opencl", library="libpi_opencl.so", backend_type="opencl"),
+            _make_plugin(
+                name="level_zero", entry_points=["piPluginInit", "piPlatformsGet"]
+            ),
+            _make_plugin(
+                name="opencl", library="libpi_opencl.so", backend_type="opencl"
+            ),
         ]
         old = AbiSnapshot(
-            library="libsycl.so", version="1.0",
+            library="libsycl.so",
+            version="1.0",
             sycl=_make_sycl(plugins=old_plugins),
         )
         new = AbiSnapshot(
-            library="libsycl.so", version="2.0",
+            library="libsycl.so",
+            version="2.0",
             sycl=_make_sycl(plugins=new_plugins),
         )
         changes = _diff_sycl(old, new)
         kinds = {c.kind for c in changes}
-        assert ChangeKind.SYCL_PLUGIN_REMOVED in kinds      # cuda removed
-        assert ChangeKind.SYCL_PLUGIN_ADDED in kinds         # opencl added
+        assert ChangeKind.SYCL_PLUGIN_REMOVED in kinds  # cuda removed
+        assert ChangeKind.SYCL_PLUGIN_ADDED in kinds  # opencl added
         assert ChangeKind.SYCL_PI_ENTRYPOINT_REMOVED in kinds  # piDevicesGet removed
 
 
 # ---------------------------------------------------------------------------
 # Implementation change diff
 # ---------------------------------------------------------------------------
+
 
 class TestDiffImplementation:
     def test_no_change(self):
@@ -325,6 +351,7 @@ class TestDiffImplementation:
 # Serialization round-trip
 # ---------------------------------------------------------------------------
 
+
 class TestSyclSerialization:
     def test_snapshot_roundtrip_with_sycl(self):
         """SyclMetadata survives snapshot serialization round-trip."""
@@ -336,7 +363,8 @@ class TestSyclSerialization:
             min_driver_version="1.3.0",
         )
         snap = AbiSnapshot(
-            library="libsycl.so", version="2025.2.0",
+            library="libsycl.so",
+            version="2025.2.0",
             sycl=_make_sycl(
                 pi_version="1.2",
                 plugins=[plugin],
@@ -353,7 +381,9 @@ class TestSyclSerialization:
         assert len(restored.sycl.plugins) == 1
         assert restored.sycl.plugins[0].name == "level_zero"
         assert restored.sycl.plugins[0].entry_points == [
-            "piPluginInit", "piPlatformsGet", "piDevicesGet",
+            "piPluginInit",
+            "piPlatformsGet",
+            "piDevicesGet",
         ]
         assert restored.sycl.plugins[0].min_driver_version == "1.3.0"
         assert restored.sycl.plugin_search_paths == ["/usr/lib/sycl", "/opt/intel/lib"]
@@ -371,6 +401,7 @@ class TestSyclSerialization:
 # ---------------------------------------------------------------------------
 # Environment matrix
 # ---------------------------------------------------------------------------
+
 
 class TestEnvironmentMatrix:
     def test_from_dict_valid(self):
@@ -430,6 +461,7 @@ class TestEnvironmentMatrix:
 # UR (Unified Runtime) plugin support
 # ---------------------------------------------------------------------------
 
+
 class TestURPluginDetection:
     """Test that UR plugins are detected and diffed correctly."""
 
@@ -446,7 +478,9 @@ class TestURPluginDetection:
 
     def test_ur_plugin_addition(self):
         """Adding a new UR adapter is compatible."""
-        new_p = _make_ur_plugin(name="cuda", library="libur_adapter_cuda.so", backend_type="cuda")
+        new_p = _make_ur_plugin(
+            name="cuda", library="libur_adapter_cuda.so", backend_type="cuda"
+        )
         old = _make_sycl(plugins=[])
         new = _make_sycl(plugins=[new_p])
         changes = _diff_plugins(old, new)
@@ -455,12 +489,16 @@ class TestURPluginDetection:
 
     def test_ur_entrypoint_removed(self):
         """Removing a UR entry point is breaking."""
-        old_p = _make_ur_plugin(entry_points=["urAdapterGet", "urPlatformGet", "urDeviceGet"])
+        old_p = _make_ur_plugin(
+            entry_points=["urAdapterGet", "urPlatformGet", "urDeviceGet"]
+        )
         new_p = _make_ur_plugin(entry_points=["urAdapterGet", "urPlatformGet"])
         old = _make_sycl(plugins=[old_p])
         new = _make_sycl(plugins=[new_p])
         changes = _diff_plugin_entrypoints(old, new)
-        removed = [c for c in changes if c.kind == ChangeKind.SYCL_PI_ENTRYPOINT_REMOVED]
+        removed = [
+            c for c in changes if c.kind == ChangeKind.SYCL_PI_ENTRYPOINT_REMOVED
+        ]
         assert len(removed) == 1
         assert "urDeviceGet" in removed[0].description
         assert "UR" in removed[0].description  # mentions UR, not PI
@@ -468,7 +506,9 @@ class TestURPluginDetection:
     def test_ur_entrypoint_added(self):
         """Adding a UR entry point is compatible."""
         old_p = _make_ur_plugin(entry_points=["urAdapterGet", "urPlatformGet"])
-        new_p = _make_ur_plugin(entry_points=["urAdapterGet", "urPlatformGet", "urDeviceGet"])
+        new_p = _make_ur_plugin(
+            entry_points=["urAdapterGet", "urPlatformGet", "urDeviceGet"]
+        )
         old = _make_sycl(plugins=[old_p])
         new = _make_sycl(plugins=[new_p])
         changes = _diff_plugin_entrypoints(old, new)
@@ -478,12 +518,16 @@ class TestURPluginDetection:
 
     def test_mixed_pi_and_ur_plugins(self):
         """Distribution can ship both PI and UR plugins simultaneously."""
-        pi_plugin = _make_plugin(name="opencl", library="libpi_opencl.so", backend_type="opencl")
+        pi_plugin = _make_plugin(
+            name="opencl", library="libpi_opencl.so", backend_type="opencl"
+        )
         ur_plugin = _make_ur_plugin(name="level_zero")
         old = _make_sycl(plugins=[pi_plugin, ur_plugin])
 
         # New version drops PI opencl, keeps UR level_zero, adds UR cuda
-        ur_cuda = _make_ur_plugin(name="cuda", library="libur_adapter_cuda.so", backend_type="cuda")
+        ur_cuda = _make_ur_plugin(
+            name="cuda", library="libur_adapter_cuda.so", backend_type="cuda"
+        )
         new = _make_sycl(plugins=[ur_plugin, ur_cuda])
 
         changes = _diff_plugins(old, new)
@@ -513,7 +557,8 @@ class TestURPluginDetection:
             entry_points=["urAdapterGet", "urPlatformGet", "urDeviceGet"],
         )
         snap = AbiSnapshot(
-            library="libsycl.so", version="2026.1.0",
+            library="libsycl.so",
+            version="2026.1.0",
             sycl=_make_sycl(plugins=[ur_plugin]),
         )
         d = snapshot_to_dict(snap)
@@ -528,23 +573,32 @@ class TestURPluginDetection:
     def test_full_detector_with_ur(self):
         """Full SYCL detector works end-to-end with UR plugins."""
         old_plugins = [
-            _make_ur_plugin(name="level_zero", entry_points=["urAdapterGet", "urPlatformGet", "urDeviceGet"]),
-            _make_ur_plugin(name="cuda", library="libur_adapter_cuda.so", backend_type="cuda"),
+            _make_ur_plugin(
+                name="level_zero",
+                entry_points=["urAdapterGet", "urPlatformGet", "urDeviceGet"],
+            ),
+            _make_ur_plugin(
+                name="cuda", library="libur_adapter_cuda.so", backend_type="cuda"
+            ),
         ]
         new_plugins = [
-            _make_ur_plugin(name="level_zero", entry_points=["urAdapterGet", "urPlatformGet"]),
+            _make_ur_plugin(
+                name="level_zero", entry_points=["urAdapterGet", "urPlatformGet"]
+            ),
         ]
         old = AbiSnapshot(
-            library="libsycl.so", version="1.0",
+            library="libsycl.so",
+            version="1.0",
             sycl=_make_sycl(plugins=old_plugins),
         )
         new = AbiSnapshot(
-            library="libsycl.so", version="2.0",
+            library="libsycl.so",
+            version="2.0",
             sycl=_make_sycl(plugins=new_plugins),
         )
         changes = _diff_sycl(old, new)
         kinds = {c.kind for c in changes}
-        assert ChangeKind.SYCL_PLUGIN_REMOVED in kinds        # cuda removed
+        assert ChangeKind.SYCL_PLUGIN_REMOVED in kinds  # cuda removed
         assert ChangeKind.SYCL_PI_ENTRYPOINT_REMOVED in kinds  # urDeviceGet removed
 
 
@@ -553,28 +607,53 @@ class TestURVersionDetection:
 
     def test_basic_ur_version(self):
         from abicheck.sycl_metadata import _detect_ur_version_from_symbols
-        assert _detect_ur_version_from_symbols(["urAdapterGet", "urPlatformGet"]) == "0.7"
+
+        assert (
+            _detect_ur_version_from_symbols(["urAdapterGet", "urPlatformGet"]) == "0.7"
+        )
 
     def test_ur_with_command_buffer(self):
         from abicheck.sycl_metadata import _detect_ur_version_from_symbols
-        assert _detect_ur_version_from_symbols([
-            "urAdapterGet", "urCommandBufferCreate",
-        ]) == "0.8"
+
+        assert (
+            _detect_ur_version_from_symbols(
+                [
+                    "urAdapterGet",
+                    "urCommandBufferCreate",
+                ]
+            )
+            == "0.8"
+        )
 
     def test_ur_with_virtual_mem(self):
         from abicheck.sycl_metadata import _detect_ur_version_from_symbols
-        assert _detect_ur_version_from_symbols([
-            "urAdapterGet", "urVirtualMemMap",
-        ]) == "0.9"
+
+        assert (
+            _detect_ur_version_from_symbols(
+                [
+                    "urAdapterGet",
+                    "urVirtualMemMap",
+                ]
+            )
+            == "0.9"
+        )
 
     def test_ur_with_bindless(self):
         from abicheck.sycl_metadata import _detect_ur_version_from_symbols
-        assert _detect_ur_version_from_symbols([
-            "urAdapterGet", "urBindlessImagesCreate",
-        ]) == "0.10"
+
+        assert (
+            _detect_ur_version_from_symbols(
+                [
+                    "urAdapterGet",
+                    "urBindlessImagesCreate",
+                ]
+            )
+            == "0.10"
+        )
 
     def test_empty_symbols(self):
         from abicheck.sycl_metadata import _detect_ur_version_from_symbols
+
         assert _detect_ur_version_from_symbols([]) == ""
 
 
@@ -582,69 +661,96 @@ class TestURVersionDetection:
 # sycl_metadata.py coverage: extraction, detection, discovery
 # ---------------------------------------------------------------------------
 
+
 class TestSyclMetadataExtraction:
     """Coverage tests for sycl_metadata.py functions."""
 
     def test_detect_sycl_implementation_dpcpp(self, tmp_path):
         from abicheck.sycl_metadata import _detect_sycl_implementation
+
         (tmp_path / "libsycl.so").touch()
         assert _detect_sycl_implementation(tmp_path) == "dpcpp"
 
     def test_detect_sycl_implementation_dpcpp_versioned(self, tmp_path):
         from abicheck.sycl_metadata import _detect_sycl_implementation
+
         (tmp_path / "libsycl.so.7").touch()
         assert _detect_sycl_implementation(tmp_path) == "dpcpp"
 
     def test_detect_sycl_implementation_adaptivecpp(self, tmp_path):
         from abicheck.sycl_metadata import _detect_sycl_implementation
+
         (tmp_path / "libacpp-rt.so").touch()
         assert _detect_sycl_implementation(tmp_path) == "adaptivecpp"
 
     def test_detect_sycl_implementation_adaptivecpp_versioned(self, tmp_path):
         from abicheck.sycl_metadata import _detect_sycl_implementation
+
         (tmp_path / "libacpp-rt.so.1.2").touch()
         assert _detect_sycl_implementation(tmp_path) == "adaptivecpp"
 
     def test_detect_sycl_implementation_hipsycl(self, tmp_path):
         from abicheck.sycl_metadata import _detect_sycl_implementation
+
         (tmp_path / "libhipsycl-rt.so.0").touch()
         assert _detect_sycl_implementation(tmp_path) == "adaptivecpp"
 
     def test_detect_sycl_implementation_none(self, tmp_path):
         from abicheck.sycl_metadata import _detect_sycl_implementation
+
         assert _detect_sycl_implementation(tmp_path) == ""
 
     def test_detect_backend_type_known(self):
         from abicheck.sycl_metadata import _detect_backend_type
+
         assert _detect_backend_type("level_zero") == "level_zero"
         assert _detect_backend_type("cuda") == "cuda"
 
     def test_detect_backend_type_unknown(self):
         from abicheck.sycl_metadata import _detect_backend_type
+
         assert _detect_backend_type("exotic") == "exotic"
 
     def test_detect_pi_version_1_0(self):
         from abicheck.sycl_metadata import _detect_pi_version_from_symbols
+
         assert _detect_pi_version_from_symbols(["piPluginInit"]) == "1.0"
 
     def test_detect_pi_version_1_1(self):
         from abicheck.sycl_metadata import _detect_pi_version_from_symbols
-        assert _detect_pi_version_from_symbols([
-            "piPluginInit", "piextDeviceSelectBinary",
-        ]) == "1.1"
+
+        assert (
+            _detect_pi_version_from_symbols(
+                [
+                    "piPluginInit",
+                    "piextDeviceSelectBinary",
+                ]
+            )
+            == "1.1"
+        )
 
     def test_detect_pi_version_1_2(self):
         from abicheck.sycl_metadata import _detect_pi_version_from_symbols
-        assert _detect_pi_version_from_symbols([
-            "piPluginInit", "piextUSMAlloc", "piextQueueCreate",
-        ]) == "1.2"
+
+        assert (
+            _detect_pi_version_from_symbols(
+                [
+                    "piPluginInit",
+                    "piextUSMAlloc",
+                    "piextQueueCreate",
+                ]
+            )
+            == "1.2"
+        )
 
     def test_detect_pi_version_empty(self):
         from abicheck.sycl_metadata import _detect_pi_version_from_symbols
+
         assert _detect_pi_version_from_symbols([]) == ""
 
     def test_is_plugin_candidate(self):
         from abicheck.sycl_metadata import _is_plugin_candidate
+
         assert _is_plugin_candidate("libpi_level_zero.so") is True
         assert _is_plugin_candidate("libur_adapter_cuda.so") is True
         assert _is_plugin_candidate("libfoo.so") is False
@@ -652,16 +758,19 @@ class TestSyclMetadataExtraction:
 
     def test_parse_sycl_plugin_not_a_plugin(self, tmp_path):
         from abicheck.sycl_metadata import parse_sycl_plugin
+
         p = tmp_path / "libfoo.so"
         p.touch()
         assert parse_sycl_plugin(p) is None
 
     def test_parse_sycl_metadata_no_sycl(self, tmp_path):
         from abicheck.sycl_metadata import parse_sycl_metadata
+
         assert parse_sycl_metadata(tmp_path) is None
 
     def test_parse_sycl_metadata_dpcpp_no_plugins(self, tmp_path):
         from abicheck.sycl_metadata import parse_sycl_metadata
+
         (tmp_path / "libsycl.so").touch()
         meta = parse_sycl_metadata(tmp_path)
         assert meta is not None
@@ -671,11 +780,13 @@ class TestSyclMetadataExtraction:
 
     def test_discover_sycl_plugins_nonexistent_dir(self):
         from abicheck.sycl_metadata import discover_sycl_plugins
+
         result = discover_sycl_plugins([Path("/nonexistent/dir")])
         assert result == []
 
     def test_discover_sycl_plugins_skips_directories(self, tmp_path):
         from abicheck.sycl_metadata import discover_sycl_plugins
+
         (tmp_path / "libpi_fake.so").mkdir()  # directory, not file
         result = discover_sycl_plugins([tmp_path])
         assert result == []
@@ -683,6 +794,7 @@ class TestSyclMetadataExtraction:
     def test_discover_sycl_plugins_deduplicates(self, tmp_path):
         """Same plugin in multiple search paths is only returned once."""
         from abicheck.sycl_metadata import discover_sycl_plugins
+
         d1 = tmp_path / "d1"
         d2 = tmp_path / "d2"
         d1.mkdir()
@@ -697,6 +809,7 @@ class TestSyclMetadataExtraction:
     def test_extract_plugin_symbols_not_regular_file(self, tmp_path):
         """FIFO/device should be rejected after fstat."""
         from abicheck.sycl_metadata import _PI_SYMBOL_RE, _extract_plugin_symbols
+
         # Can't easily create a FIFO in all environments, but we can test
         # that a directory fails gracefully
         d = tmp_path / "fake.so"
@@ -709,6 +822,7 @@ class TestSyclMetadataExtraction:
     def test_extract_plugin_symbols_invalid_elf(self, tmp_path):
         """Invalid ELF should return empty list."""
         from abicheck.sycl_metadata import _PI_SYMBOL_RE, _extract_plugin_symbols
+
         p = tmp_path / "bad.so"
         p.write_bytes(b"not an ELF file at all")
         result = _extract_plugin_symbols(p, _PI_SYMBOL_RE)
@@ -716,12 +830,14 @@ class TestSyclMetadataExtraction:
 
     def test_default_plugin_search_paths_empty(self, monkeypatch):
         from abicheck.sycl_metadata import _default_plugin_search_paths
+
         monkeypatch.delenv("SYCL_PI_PLUGINS_DIR", raising=False)
         monkeypatch.delenv("SYCL_UR_ADAPTERS_DIR", raising=False)
         assert _default_plugin_search_paths() == []
 
     def test_default_plugin_search_paths_with_env(self, monkeypatch):
         from abicheck.sycl_metadata import _default_plugin_search_paths
+
         monkeypatch.setenv("SYCL_PI_PLUGINS_DIR", "/opt/pi")
         monkeypatch.setenv("SYCL_UR_ADAPTERS_DIR", "/opt/ur")
         paths = _default_plugin_search_paths()
@@ -730,6 +846,7 @@ class TestSyclMetadataExtraction:
 
     def test_parse_sycl_metadata_with_sycl_subdir(self, tmp_path):
         from abicheck.sycl_metadata import parse_sycl_metadata
+
         (tmp_path / "libsycl.so").touch()
         sycl_subdir = tmp_path / "sycl"
         sycl_subdir.mkdir()
@@ -742,10 +859,12 @@ class TestSyclMetadataExtraction:
 # service.py: auto-attach coverage
 # ---------------------------------------------------------------------------
 
+
 class TestServiceSyclAutoAttach:
     def test_try_attach_sycl_no_sycl(self, tmp_path):
         from abicheck.model import AbiSnapshot
         from abicheck.service import _try_attach_sycl_metadata
+
         snap = AbiSnapshot(library="libfoo.so", version="1.0")
         lib = tmp_path / "libfoo.so"
         lib.touch()
@@ -755,6 +874,7 @@ class TestServiceSyclAutoAttach:
     def test_try_attach_sycl_dpcpp(self, tmp_path):
         from abicheck.model import AbiSnapshot
         from abicheck.service import _try_attach_sycl_metadata
+
         (tmp_path / "libsycl.so").touch()
         snap = AbiSnapshot(library="libsycl.so", version="1.0")
         lib = tmp_path / "libsycl.so"
@@ -772,6 +892,7 @@ class TestServiceSyclAutoAttach:
 
         # Patch the module-level function that the lazy import will resolve
         import abicheck.sycl_metadata
+
         monkeypatch.setattr(abicheck.sycl_metadata, "parse_sycl_metadata", boom)
         snap = AbiSnapshot(library="libsycl.so", version="1.0")
         lib = tmp_path / "libsycl.so"
@@ -784,34 +905,41 @@ class TestServiceSyclAutoAttach:
 # environment_matrix.py: validation coverage
 # ---------------------------------------------------------------------------
 
+
 class TestEnvironmentMatrixValidation:
     def test_bad_sycl_backends_type(self):
         from abicheck.environment_matrix import EnvironmentMatrix
+
         with pytest.raises(ValueError, match="sycl.backends.*must be a list"):
             EnvironmentMatrix.from_dict({"sycl": {"backends": "level_zero"}})
 
     def test_bad_gpu_architectures_type(self):
         from abicheck.environment_matrix import EnvironmentMatrix
+
         with pytest.raises(ValueError, match="cuda.gpu_architectures.*must be a list"):
             EnvironmentMatrix.from_dict({"cuda": {"gpu_architectures": "sm_80"}})
 
     def test_bad_require_ptx_type(self):
         from abicheck.environment_matrix import EnvironmentMatrix
+
         with pytest.raises(ValueError, match="cuda.require_ptx.*must be a bool"):
             EnvironmentMatrix.from_dict({"cuda": {"require_ptx": "yes"}})
 
     def test_bad_driver_range_type(self):
         from abicheck.environment_matrix import EnvironmentMatrix
+
         with pytest.raises(ValueError, match="cuda.driver_range.*must be a 2-element"):
             EnvironmentMatrix.from_dict({"cuda": {"driver_range": "525.0"}})
 
     def test_bad_sycl_not_dict(self):
         from abicheck.environment_matrix import EnvironmentMatrix
+
         with pytest.raises(ValueError, match="'sycl' must be a dict"):
             EnvironmentMatrix.from_dict({"sycl": "dpcpp"})
 
     def test_bad_cuda_not_dict(self):
         from abicheck.environment_matrix import EnvironmentMatrix
+
         with pytest.raises(ValueError, match="'cuda' must be a dict"):
             EnvironmentMatrix.from_dict({"cuda": [1, 2]})
 
@@ -827,6 +955,7 @@ class TestEnvironmentMatrixValidation:
         `abicheck/environment_matrix.py`.
         """
         from abicheck.environment_matrix import EnvironmentMatrix
+
         with pytest.raises(ValueError, match="sycl.backends.*must be strings"):
             EnvironmentMatrix.from_dict({"sycl": {"backends": [123]}})
 
@@ -834,6 +963,7 @@ class TestEnvironmentMatrixValidation:
 # ---------------------------------------------------------------------------
 # Plugin keying: PI and UR with same backend name
 # ---------------------------------------------------------------------------
+
 
 class TestPluginKeyingPiAndUr:
     """PI and UR plugins with the same backend name are distinct."""
@@ -875,11 +1005,13 @@ class TestPluginKeyingPiAndUr:
     def test_entrypoints_compared_within_same_interface(self):
         """Entry point comparison uses (interface_type, name) key."""
         old_pi = _make_plugin(
-            name="level_zero", interface_type="pi",
+            name="level_zero",
+            interface_type="pi",
             entry_points=["piPluginInit", "piPlatformsGet", "piDevicesGet"],
         )
         new_pi = _make_plugin(
-            name="level_zero", interface_type="pi",
+            name="level_zero",
+            interface_type="pi",
             entry_points=["piPluginInit", "piPlatformsGet"],
         )
         ur = _make_ur_plugin(name="level_zero")

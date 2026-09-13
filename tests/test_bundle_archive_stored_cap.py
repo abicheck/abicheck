@@ -96,7 +96,9 @@ class TestBundleArchiveReadBlobStoredCapIndependentOfDecodedBudget:
         still rejected, even with no skippable-frame padding at all."""
         path = tmp_path / "bundle.archive.zip"
         payload = os.urandom(500)
-        h = self._write_archive_with_skippable_prefix(path, skippable_size=0, payload=payload)
+        h = self._write_archive_with_skippable_prefix(
+            path, skippable_size=0, payload=payload
+        )
         with BundleArchiveReader.open(path) as reader:
             with pytest.raises(SnapshotError, match="safety limit"):
                 reader.read_blob(h, max_decoded_bytes=100)
@@ -110,9 +112,13 @@ class TestBundleArchiveReadBlobStoredCapIndependentOfDecodedBudget:
         2 GiB default so this test needn't allocate gigabytes."""
         import abicheck.storage.bundle_archive as bundle_archive_module
 
-        monkeypatch.setattr(bundle_archive_module, "DEFAULT_MAX_STORED_BLOB_BYTES", 4096)
+        monkeypatch.setattr(
+            bundle_archive_module, "DEFAULT_MAX_STORED_BLOB_BYTES", 4096
+        )
         path = tmp_path / "bundle.archive.zip"
-        h = self._write_archive_with_skippable_prefix(path, skippable_size=8192, payload=b"{}")
+        h = self._write_archive_with_skippable_prefix(
+            path, skippable_size=8192, payload=b"{}"
+        )
         with BundleArchiveReader.open(path) as reader:
             with pytest.raises(SnapshotError, match="safety limit"):
                 reader.read_blob(h, max_decoded_bytes=100)

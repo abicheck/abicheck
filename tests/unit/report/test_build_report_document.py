@@ -59,6 +59,7 @@ def _import_attr(dotted: str) -> object:
     module_name, _, attr = dotted.rpartition(".")
     return getattr(importlib.import_module(module_name), attr)
 
+
 _BREAKING = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
 _ADDITION = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
 _QUALITY = Change(ChangeKind.VISIBILITY_LEAK, "_Z3barv", "visibility leak")
@@ -161,9 +162,7 @@ class TestSarifReusesSharedDocument:
         without_doc = to_sarif(result)
         expected = compute_disposition_audit(result, None).to_dict()
 
-        assert (
-            with_doc["runs"][0]["properties"]["dispositionAudit"] == expected
-        )
+        assert with_doc["runs"][0]["properties"]["dispositionAudit"] == expected
         assert (
             with_doc["runs"][0]["properties"]["dispositionAudit"]
             == without_doc["runs"][0]["properties"]["dispositionAudit"]
@@ -391,7 +390,10 @@ class TestRendererOrderIndependence:
         result: DiffResult, old: AbiSnapshot, new: AbiSnapshot, **options: object
     ) -> ReportEnvelope:
         return build_report_envelope(
-            result, old, new, options=RenderOptions(**options)  # type: ignore[arg-type]
+            result,
+            old,
+            new,
+            options=RenderOptions(**options),  # type: ignore[arg-type]
         )
 
     @staticmethod
@@ -471,7 +473,11 @@ class TestRendererOrderIndependence:
 
         for fmt in self._FORMATS:
             assert render_envelope(fmt, envelope) == render_output(
-                fmt, result, old, new, **options  # type: ignore[arg-type]
+                fmt,
+                result,
+                old,
+                new,
+                **options,  # type: ignore[arg-type]
             ), f"{fmt!r} disagrees between render_output and render_envelope"
 
     def test_no_projection_re_runs_policy_or_gate_resolution(self) -> None:
@@ -496,7 +502,9 @@ class TestRendererOrderIndependence:
             after = {t: s.call_count for t, s in spies.items()}
 
         assert build_calls["abicheck.report.build.build_report_document"] == 1
-        assert build_calls["abicheck.policy.gate_decision.gate_decision_for_result"] == 1
+        assert (
+            build_calls["abicheck.policy.gate_decision.gate_decision_for_result"] == 1
+        )
         for target in self._DECISION_SITES:
             assert after[target] == build_calls[target], (
                 f"{target} ran again while projecting an already-completed "
@@ -776,9 +784,7 @@ class TestRendererOrderIndependence:
         # `abicheck.policy.severity`'s origin function, which `abicheck.
         # severity` already copied a static reference to at its own import
         # time (patching the origin wouldn't touch that copy).
-        with mock.patch(
-            "abicheck.severity.compute_exit_code"
-        ) as compute_exit_code_spy:
+        with mock.patch("abicheck.severity.compute_exit_code") as compute_exit_code_spy:
             digest = render_envelope("review", envelope)
 
         compute_exit_code_spy.assert_not_called()
@@ -1118,7 +1124,9 @@ class TestRendererOrderIndependence:
         """
         removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
         policy_file = PolicyFile(
-            reclassify=[ReclassifyRule(to_verdict=Verdict.COMPATIBLE, symbol="_Z3foov")],
+            reclassify=[
+                ReclassifyRule(to_verdict=Verdict.COMPATIBLE, symbol="_Z3foov")
+            ],
         )
         result = DiffResult(
             old_version="1.0",
@@ -1339,9 +1347,10 @@ class TestRendererOrderIndependence:
         # `build_report_document`'s own helpers (via `policy.selectors.date`)
         # resolves *after* it -- the two mocks stand in for the same wall
         # clock read a moment apart, not two different clocks.
-        with mock.patch("abicheck.report.build.date") as fake_build_date, mock.patch(
-            "abicheck.policy.selectors.date"
-        ) as fake_selectors_date:
+        with (
+            mock.patch("abicheck.report.build.date") as fake_build_date,
+            mock.patch("abicheck.policy.selectors.date") as fake_selectors_date,
+        ):
             fake_build_date.today.return_value = captured_today
             fake_selectors_date.today.return_value = captured_today + timedelta(days=2)
             envelope = build_report_envelope(
@@ -1394,9 +1403,10 @@ class TestRendererOrderIndependence:
         )
         old, new = _snapshot("1.0"), _snapshot("2.0")
 
-        with mock.patch("abicheck.report.build.date") as fake_build_date, mock.patch(
-            "abicheck.policy.selectors.date"
-        ) as fake_selectors_date:
+        with (
+            mock.patch("abicheck.report.build.date") as fake_build_date,
+            mock.patch("abicheck.policy.selectors.date") as fake_selectors_date,
+        ):
             fake_build_date.today.return_value = captured_today
             fake_selectors_date.today.return_value = captured_today + timedelta(days=2)
             envelope = build_report_envelope(

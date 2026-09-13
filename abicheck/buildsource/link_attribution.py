@@ -49,6 +49,7 @@ never assume it is safe to include.
 Pure: reads only the in-memory :class:`BuildEvidence` already collected by an
 adapter; never touches the filesystem or a subprocess.
 """
+
 from __future__ import annotations
 
 from pathlib import PurePosixPath
@@ -145,7 +146,9 @@ def _attribute_via_target_graph(evidence: BuildEvidence) -> dict[str, set[str]]:
                 continue
             sources.update(dep.source_files)
             stack.extend(dep.dependencies)
-        identity = target.id if target.id.startswith("target://") else f"target://{target.id}"
+        identity = (
+            target.id if target.id.startswith("target://") else f"target://{target.id}"
+        )
         for src in sources:
             if not src:
                 continue
@@ -155,7 +158,9 @@ def _attribute_via_target_graph(evidence: BuildEvidence) -> dict[str, set[str]]:
 
 def _attribute_via_link_units(evidence: BuildEvidence) -> dict[str, set[str]]:
     output_to_source = {
-        normalize_source_path(cu.output): cu.source for cu in evidence.compile_units if cu.output
+        normalize_source_path(cu.output): cu.source
+        for cu in evidence.compile_units
+        if cu.output
     }
     link_by_output = {
         normalize_source_path(lu.output): lu for lu in evidence.link_units if lu.output

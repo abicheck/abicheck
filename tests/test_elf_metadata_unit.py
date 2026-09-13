@@ -5,6 +5,7 @@ These tests exercise _parse, _parse_dynamic, _parse_version_def,
 _parse_version_need, _parse_dynsym, and parse_elf_metadata edge cases
 without needing a real ELF binary or gcc.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,6 +29,7 @@ from abicheck.elf_metadata import (
 
 # ── ElfMetadata.symbol_map ───────────────────────────────────────────────
 
+
 class TestElfMetadataSymbolMap:
     def test_symbol_map_returns_name_to_symbol(self):
         s1 = ElfSymbol(name="foo")
@@ -43,6 +45,7 @@ class TestElfMetadataSymbolMap:
 
 
 # ── parse_elf_metadata error paths ──────────────────────────────────────
+
 
 class TestParseElfMetadataEdgeCases:
     def test_nonexistent_file_returns_empty(self):
@@ -67,6 +70,7 @@ class TestParseElfMetadataEdgeCases:
 
 # ── _parse_dynamic ──────────────────────────────────────────────────────
 
+
 class TestParseDynamic:
     def _make_tag(self, d_tag: str, **kwargs):
         tag = MagicMock()
@@ -79,7 +83,9 @@ class TestParseDynamic:
     def test_soname(self):
         meta = ElfMetadata()
         section = MagicMock()
-        section.iter_tags.return_value = [self._make_tag("DT_SONAME", soname="libfoo.so.1")]
+        section.iter_tags.return_value = [
+            self._make_tag("DT_SONAME", soname="libfoo.so.1")
+        ]
         _parse_dynamic(section, meta)
         assert meta.soname == "libfoo.so.1"
 
@@ -103,7 +109,9 @@ class TestParseDynamic:
     def test_runpath(self):
         meta = ElfMetadata()
         section = MagicMock()
-        section.iter_tags.return_value = [self._make_tag("DT_RUNPATH", runpath="$ORIGIN")]
+        section.iter_tags.return_value = [
+            self._make_tag("DT_RUNPATH", runpath="$ORIGIN")
+        ]
         _parse_dynamic(section, meta)
         assert meta.runpath == "$ORIGIN"
 
@@ -148,6 +156,7 @@ class TestParseDynamic:
 
 # ── _parse_gnu_property (G23-A2) ──────────────────────────────────────────
 
+
 class TestParseGnuProperty:
     def _note_section_with(self, n_type, descdata: bytes):
         section = MagicMock()
@@ -156,12 +165,15 @@ class TestParseGnuProperty:
 
     # x86 X86_FEATURE_1_AND property with IBT|SHSTK bits set (little-endian):
     # pr_type=0xC0000002, pr_datasz=4, data=0x00000003, pad to 8.
-    _IBT_SHSTK_DESC = b"\x02\x00\x00\xc0\x04\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00"
+    _IBT_SHSTK_DESC = (
+        b"\x02\x00\x00\xc0\x04\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00"
+    )
 
     def test_string_note_type_is_accepted(self):
         # Regression: pyelftools reports n_type as the *string*
         # "NT_GNU_PROPERTY_TYPE_0", not the numeric 5. The parser must not skip it.
         from abicheck.elf_metadata import _parse_gnu_property
+
         meta = ElfMetadata()
         elf = MagicMock()
         elf.little_endian = True
@@ -173,15 +185,19 @@ class TestParseGnuProperty:
 
     def test_numeric_note_type_is_accepted(self):
         from abicheck.elf_metadata import _parse_gnu_property
+
         meta = ElfMetadata()
         elf = MagicMock()
         elf.little_endian = True
-        elf.get_section_by_name.return_value = self._note_section_with(5, self._IBT_SHSTK_DESC)
+        elf.get_section_by_name.return_value = self._note_section_with(
+            5, self._IBT_SHSTK_DESC
+        )
         _parse_gnu_property(elf, meta, Path("x.so"))
         assert meta.gnu_properties == frozenset({"IBT", "SHSTK"})
 
     def test_missing_section_is_empty(self):
         from abicheck.elf_metadata import _parse_gnu_property
+
         meta = ElfMetadata()
         elf = MagicMock()
         elf.get_section_by_name.return_value = None
@@ -194,17 +210,21 @@ class TestParseGnuProperty:
         import struct
 
         from abicheck.elf_metadata import _decode_gnu_property_desc, _parse_raw_notes
+
         # ELF note: namesz=4, descsz=16, n_type=5, name="GNU\0", desc=property array.
         desc = struct.pack("<III", 0xC0000002, 4, 0x3) + b"\x00\x00\x00\x00"
         note = struct.pack("<III", 4, len(desc), 5) + b"GNU\x00" + desc
         descs = list(_parse_raw_notes(note, True))
         assert len(descs) == 1
-        assert _decode_gnu_property_desc(descs[0], True, 8) == frozenset({"IBT", "SHSTK"})
+        assert _decode_gnu_property_desc(descs[0], True, 8) == frozenset(
+            {"IBT", "SHSTK"}
+        )
 
     def test_raw_note_segment_parser_skips_non_gnu(self):
         import struct
 
         from abicheck.elf_metadata import _parse_raw_notes
+
         # A non-GNU note (name "XYZ") must be ignored.
         desc = struct.pack("<III", 0xC0000002, 4, 0x3) + b"\x00\x00\x00\x00"
         note = struct.pack("<III", 4, len(desc), 5) + b"XYZ\x00" + desc
@@ -218,30 +238,39 @@ class TestParseGnuProperty:
         import struct
 
         from abicheck.elf_metadata import _decode_gnu_property_desc
+
         # Property 1: some other pr_type (0xC0008000), datasz=4, data=0 → 12 bytes.
         desc = struct.pack("<III", 0xC0008000, 4, 0)
         # Property 2: X86_FEATURE_1_AND (0xC0000002), datasz=4, bits=IBT|SHSTK(3).
         desc += struct.pack("<III", 0xC0000002, 4, 0x3)
         # 8-byte alignment would skip the second property; 4-byte finds it.
-        assert _decode_gnu_property_desc(desc, True, align=4) == frozenset({"IBT", "SHSTK"})
-        assert _decode_gnu_property_desc(desc, True, align=8) != frozenset({"IBT", "SHSTK"})
+        assert _decode_gnu_property_desc(desc, True, align=4) == frozenset(
+            {"IBT", "SHSTK"}
+        )
+        assert _decode_gnu_property_desc(desc, True, align=8) != frozenset(
+            {"IBT", "SHSTK"}
+        )
 
 
 # ── _decode_abi_flags (G23-A3) ────────────────────────────────────────────
 
+
 class TestDecodeAbiFlags:
     def test_arm_hard_float_and_eabi(self):
         from abicheck.elf_metadata import _decode_abi_flags
+
         # EF_ARM_ABI_FLOAT_HARD (0x400) | EABI version 5 (5 << 24).
         flags = _decode_abi_flags("EM_ARM", 0x400 | (5 << 24))
         assert flags == frozenset({"float-hard", "eabi5"})
 
     def test_arm_soft_float(self):
         from abicheck.elf_metadata import _decode_abi_flags
+
         assert _decode_abi_flags("EM_ARM", 0x200) == frozenset({"float-soft"})
 
     def test_riscv_compressed_is_not_an_abi_flag(self):
         from abicheck.elf_metadata import _decode_abi_flags
+
         # RVC (0x1, compressed instructions) is an ISA-encoding choice, not a
         # calling-convention/ABI selector, so it must NOT contribute a token:
         # float-abi double (0x4) with or without RVC decodes identically.
@@ -250,16 +279,21 @@ class TestDecodeAbiFlags:
 
     def test_riscv_soft_float_and_rve(self):
         from abicheck.elf_metadata import _decode_abi_flags
+
         # RVE (0x8) halves the integer register file and changes the calling
         # convention, so it IS ABI-selecting and contributes a token.
-        assert _decode_abi_flags("EM_RISCV", 0x0 | 0x8) == frozenset({"float-soft", "rve"})
+        assert _decode_abi_flags("EM_RISCV", 0x0 | 0x8) == frozenset(
+            {"float-soft", "rve"}
+        )
 
     def test_mips_abi_bits(self):
         from abicheck.elf_metadata import _decode_abi_flags
+
         assert _decode_abi_flags("EM_MIPS", 0x1000) == frozenset({"mips-abi-0x1000"})
 
     def test_unknown_arch_is_empty(self):
         from abicheck.elf_metadata import _decode_abi_flags
+
         # PPC64's ABI version lives in e_flags but is not decoded → empty set
         # (the raw e_flags fallback in the diff handles it).
         assert _decode_abi_flags("EM_PPC64", 0x2) == frozenset()
@@ -267,9 +301,11 @@ class TestDecodeAbiFlags:
 
 # ── _read_identity (G23-A3) ───────────────────────────────────────────────
 
+
 class TestReadIdentity:
     def test_reads_header_fields(self):
         from abicheck.elf_metadata import _read_identity
+
         meta = ElfMetadata()
         elf = MagicMock()
         elf.elfclass = 64
@@ -286,6 +322,7 @@ class TestReadIdentity:
 
     def test_parse_failure_is_swallowed(self):
         from abicheck.elf_metadata import _read_identity
+
         meta = ElfMetadata()
         elf = MagicMock()
         elf.__getitem__.side_effect = KeyError("e_machine")
@@ -295,17 +332,26 @@ class TestReadIdentity:
 
 # ── _iter_gnu_property_descs segment fallback (G23-A2) ────────────────────
 
+
 class TestGnuPropertySegmentFallback:
-    _IBT_SHSTK_DESC = b"\x02\x00\x00\xc0\x04\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00"
+    _IBT_SHSTK_DESC = (
+        b"\x02\x00\x00\xc0\x04\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00"
+    )
 
     def _note_bytes(self):
         import struct
-        return struct.pack("<III", 4, len(self._IBT_SHSTK_DESC), 5) + b"GNU\x00" + self._IBT_SHSTK_DESC
+
+        return (
+            struct.pack("<III", 4, len(self._IBT_SHSTK_DESC), 5)
+            + b"GNU\x00"
+            + self._IBT_SHSTK_DESC
+        )
 
     def test_falls_back_to_pt_gnu_property_segment(self):
         # Section headers stripped → no .note.gnu.property section, but the
         # loadable PT_GNU_PROPERTY segment still carries the note.
         from abicheck.elf_metadata import _parse_gnu_property
+
         meta = ElfMetadata()
         elf = MagicMock()
         elf.elfclass = 64
@@ -320,6 +366,7 @@ class TestGnuPropertySegmentFallback:
 
     def test_no_segment_and_no_section_is_empty(self):
         from abicheck.elf_metadata import _parse_gnu_property
+
         meta = ElfMetadata()
         elf = MagicMock()
         elf.elfclass = 64
@@ -331,44 +378,53 @@ class TestGnuPropertySegmentFallback:
 
 # ── _finalize_hardening ──────────────────────────────────────────────────
 
+
 class TestFinalizeHardening:
     def test_relro_full_requires_bind_now(self):
         from abicheck.elf_metadata import _finalize_hardening
+
         meta = ElfMetadata(bind_now=True)
         _finalize_hardening(meta, has_relro_segment=True, is_et_dyn=True)
         assert meta.relro == "full"
 
     def test_relro_partial_without_bind_now(self):
         from abicheck.elf_metadata import _finalize_hardening
+
         meta = ElfMetadata(bind_now=False)
         _finalize_hardening(meta, has_relro_segment=True, is_et_dyn=True)
         assert meta.relro == "partial"
 
     def test_relro_none_without_segment(self):
         from abicheck.elf_metadata import _finalize_hardening
+
         meta = ElfMetadata(bind_now=True)
         _finalize_hardening(meta, has_relro_segment=False, is_et_dyn=True)
         assert meta.relro == "none"
 
     def test_pie_gated_on_et_dyn(self):
         from abicheck.elf_metadata import _finalize_hardening
+
         meta = ElfMetadata(is_pie=True)  # DF_1_PIE was set
         _finalize_hardening(meta, has_relro_segment=False, is_et_dyn=False)
         assert meta.is_pie is False
 
     def test_canary_and_fortify_from_imports(self):
         from abicheck.elf_metadata import ElfImport, _finalize_hardening
-        meta = ElfMetadata(imports=[
-            ElfImport(name="__stack_chk_fail"),
-            ElfImport(name="__memcpy_chk"),
-            ElfImport(name="malloc"),
-        ])
+
+        meta = ElfMetadata(
+            imports=[
+                ElfImport(name="__stack_chk_fail"),
+                ElfImport(name="__memcpy_chk"),
+                ElfImport(name="malloc"),
+            ]
+        )
         _finalize_hardening(meta, has_relro_segment=False, is_et_dyn=True)
         assert meta.has_stack_canary is True
         assert meta.has_fortify_source is True
 
 
 # ── _parse_version_def ──────────────────────────────────────────────────
+
 
 class TestParseVersionDef:
     def _verdef(self, flags: int = 0):
@@ -425,6 +481,7 @@ class TestParseVersionDef:
 
 # ── _parse_version_need ─────────────────────────────────────────────────
 
+
 class TestParseVersionNeed:
     def test_version_needs_collected(self):
         meta = ElfMetadata()
@@ -478,10 +535,17 @@ class TestParseVersionNeed:
 
 # ── _parse_dynsym ──────────────────────────────────────────────────────
 
+
 class TestParseDynsym:
-    def _make_sym(self, name: str, shndx=1,  # 1 = normal .text section, not SHN_ABS
-                  bind="STB_GLOBAL", typ="STT_FUNC",
-                  vis="STV_DEFAULT", size=16):
+    def _make_sym(
+        self,
+        name: str,
+        shndx=1,  # 1 = normal .text section, not SHN_ABS
+        bind="STB_GLOBAL",
+        typ="STT_FUNC",
+        vis="STV_DEFAULT",
+        size=16,
+    ):
         sym = MagicMock()
         sym.name = name
         sym.entry.st_shndx = shndx
@@ -516,7 +580,9 @@ class TestParseDynsym:
         meta = ElfMetadata()
         section = MagicMock()
         section.name = ".dynsym"
-        section.iter_symbols.return_value = [self._make_sym("local_fn", bind="STB_LOCAL")]
+        section.iter_symbols.return_value = [
+            self._make_sym("local_fn", bind="STB_LOCAL")
+        ]
         _parse_dynsym(section, meta)
         assert meta.symbols == []
 
@@ -524,7 +590,9 @@ class TestParseDynsym:
         meta = ElfMetadata()
         section = MagicMock()
         section.name = ".dynsym"
-        section.iter_symbols.return_value = [self._make_sym("hidden_fn", vis="STV_HIDDEN")]
+        section.iter_symbols.return_value = [
+            self._make_sym("hidden_fn", vis="STV_HIDDEN")
+        ]
         _parse_dynsym(section, meta)
         assert meta.symbols == []
 
@@ -532,7 +600,9 @@ class TestParseDynsym:
         meta = ElfMetadata()
         section = MagicMock()
         section.name = ".dynsym"
-        section.iter_symbols.return_value = [self._make_sym("internal_fn", vis="STV_INTERNAL")]
+        section.iter_symbols.return_value = [
+            self._make_sym("internal_fn", vis="STV_INTERNAL")
+        ]
         _parse_dynsym(section, meta)
         assert meta.symbols == []
 
@@ -548,7 +618,9 @@ class TestParseDynsym:
         meta = ElfMetadata()
         section = MagicMock()
         section.name = ".dynsym"
-        section.iter_symbols.return_value = [self._make_sym("global_var", typ="STT_OBJECT")]
+        section.iter_symbols.return_value = [
+            self._make_sym("global_var", typ="STT_OBJECT")
+        ]
         _parse_dynsym(section, meta)
         assert meta.symbols[0].sym_type == SymbolType.OBJECT
 
@@ -564,7 +636,9 @@ class TestParseDynsym:
         meta = ElfMetadata()
         section = MagicMock()
         section.name = ".dynsym"
-        section.iter_symbols.return_value = [self._make_sym("ifunc_fn", typ="STT_GNU_IFUNC")]
+        section.iter_symbols.return_value = [
+            self._make_sym("ifunc_fn", typ="STT_GNU_IFUNC")
+        ]
         _parse_dynsym(section, meta)
         assert meta.symbols[0].sym_type == SymbolType.IFUNC
 
@@ -572,7 +646,9 @@ class TestParseDynsym:
         meta = ElfMetadata()
         section = MagicMock()
         section.name = ".dynsym"
-        section.iter_symbols.return_value = [self._make_sym("common_sym", typ="STT_COMMON")]
+        section.iter_symbols.return_value = [
+            self._make_sym("common_sym", typ="STT_COMMON")
+        ]
         _parse_dynsym(section, meta)
         assert meta.symbols[0].sym_type == SymbolType.COMMON
 
@@ -580,7 +656,9 @@ class TestParseDynsym:
         meta = ElfMetadata()
         section = MagicMock()
         section.name = ".dynsym"
-        section.iter_symbols.return_value = [self._make_sym("notype_sym", typ="STT_NOTYPE")]
+        section.iter_symbols.return_value = [
+            self._make_sym("notype_sym", typ="STT_NOTYPE")
+        ]
         _parse_dynsym(section, meta)
         assert meta.symbols[0].sym_type == SymbolType.NOTYPE
 
@@ -588,7 +666,9 @@ class TestParseDynsym:
         meta = ElfMetadata()
         section = MagicMock()
         section.name = ".dynsym"
-        section.iter_symbols.return_value = [self._make_sym("exotic", bind="STB_EXOTIC")]
+        section.iter_symbols.return_value = [
+            self._make_sym("exotic", bind="STB_EXOTIC")
+        ]
         _parse_dynsym(section, meta)
         assert meta.symbols[0].binding == SymbolBinding.OTHER
 
@@ -598,7 +678,9 @@ class TestParseDynsym:
         meta = ElfMetadata()
         section = MagicMock()
         section.name = ".dynsym"
-        section.iter_symbols.return_value = [self._make_sym("inst", bind="STB_GNU_UNIQUE")]
+        section.iter_symbols.return_value = [
+            self._make_sym("inst", bind="STB_GNU_UNIQUE")
+        ]
         _parse_dynsym(section, meta)
         assert meta.symbols[0].binding == SymbolBinding.UNIQUE
 
@@ -606,7 +688,9 @@ class TestParseDynsym:
         meta = ElfMetadata()
         section = MagicMock()
         section.name = ".dynsym"
-        section.iter_symbols.return_value = [self._make_sym("exotic", typ="STT_UNKNOWN")]
+        section.iter_symbols.return_value = [
+            self._make_sym("exotic", typ="STT_UNKNOWN")
+        ]
         _parse_dynsym(section, meta)
         assert meta.symbols[0].sym_type == SymbolType.OTHER
 
@@ -614,13 +698,16 @@ class TestParseDynsym:
         meta = ElfMetadata()
         section = MagicMock()
         section.name = ".dynsym"
-        section.iter_symbols.return_value = [self._make_sym("prot_fn", vis="STV_PROTECTED")]
+        section.iter_symbols.return_value = [
+            self._make_sym("prot_fn", vis="STV_PROTECTED")
+        ]
         _parse_dynsym(section, meta)
         assert len(meta.symbols) == 1
         assert meta.symbols[0].visibility == "protected"
 
 
 # ── _parse (full section dispatch) ──────────────────────────────────────
+
 
 class TestParseFull:
     def test_dispatches_to_all_section_types(self):
@@ -630,7 +717,9 @@ class TestParseFull:
         from elftools.elf.sections import SymbolTableSection
 
         dyn = MagicMock(spec=DynamicSection)
-        dyn.iter_tags.return_value = [MagicMock(entry=MagicMock(d_tag="DT_SONAME"), soname="lib.so")]
+        dyn.iter_tags.return_value = [
+            MagicMock(entry=MagicMock(d_tag="DT_SONAME"), soname="lib.so")
+        ]
 
         verdef_aux = MagicMock()
         verdef_aux.name = "VER_DEF_1"
@@ -742,6 +831,7 @@ class TestParseFull:
 
 
 # ── Constant correctness ────────────────────────────────────────────────
+
 
 class TestConstants:
     def test_binding_map_completeness(self):

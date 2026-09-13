@@ -177,7 +177,9 @@ def compute_stack_report_mapping(result: StackCheckResult) -> dict[str, object]:
                         sc_dict["findings_truncated"] = True
                 conf = getattr(diff, "confidence", None)
                 if conf is not None:
-                    sc_dict["confidence"] = conf.value if hasattr(conf, "value") else str(conf)
+                    sc_dict["confidence"] = (
+                        conf.value if hasattr(conf, "value") else str(conf)
+                    )
                 tiers = getattr(diff, "evidence_tiers", []) or []
                 if tiers:
                     sc_dict["evidence_tiers"] = list(tiers)

@@ -118,7 +118,9 @@ class TestShim:
         run = tmp_path / "run"
         dest = run / "captured" / "0.outputs"
         dest.mkdir(parents=True)
-        snaps = shim._snapshot_outputs(["compare", "-o", "markdown=r.json"], cwd, dest, run)
+        snaps = shim._snapshot_outputs(
+            ["compare", "-o", "markdown=r.json"], cwd, dest, run
+        )
         assert (run / snaps[0]["path"]).is_file()
 
     def test_a_missing_output_is_recorded_as_absent(self, tmp_path):
@@ -162,9 +164,7 @@ class TestRunnerTreatment:
         assert not runner.is_inside_repo(tmp_path / "runs")
 
     def test_a_baseline_arm_that_can_see_a_skill_is_not_evidence(self):
-        problem = runner.check_treatment(
-            "baseline", SCENARIO_BREAKING, ["other-skill"]
-        )
+        problem = runner.check_treatment("baseline", SCENARIO_BREAKING, ["other-skill"])
         assert problem and "baseline arm could see" in problem
 
     def test_a_skill_arm_seeing_extra_skills_is_not_evidence(self):
@@ -504,7 +504,9 @@ class TestWorkspaceIsolation:
         """The corpus itself, not a synthetic stand-in: three of the eight
         leaked before this — one naming the tool and the exact change kinds it
         reports."""
-        pack = json.loads((EVAL_DIR / "skill-eval-pack.json").read_text(encoding="utf-8"))
+        pack = json.loads(
+            (EVAL_DIR / "skill-eval-pack.json").read_text(encoding="utf-8")
+        )
         ready = {s: e for s, e in pack["scenarios"].items() if e["status"] == "ready"}
         assert ready, "the pack lists no ready scenario to check"
         for sid, entry in ready.items():

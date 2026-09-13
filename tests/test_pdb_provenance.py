@@ -7,6 +7,7 @@ that are testable on Linux without MSVC: the IPI ``LF_UDT_SRC_LINE`` parser,
 the ``DwarfMetadata`` ``decl_file`` field, and the ``DwarfMetadata`` → model
 type bridge that lets PDB-derived types reach public-surface resolution.
 """
+
 from __future__ import annotations
 
 import struct
@@ -52,9 +53,7 @@ def _build_ipi_stream(records: list[tuple[int, bytes]]) -> bytes:
         pad = (4 - (len(rec_bytes) % 4)) % 4
         rec_bytes += b"\x00" * pad
         rec_data += rec_bytes
-    header = struct.pack(
-        "<IIIII", 20040203, 56, ti_begin, ti_end, len(rec_data)
-    )
+    header = struct.pack("<IIIII", 20040203, 56, ti_begin, ti_end, len(rec_data))
     header += b"\x00" * (56 - len(header))
     return header + rec_data
 
@@ -99,9 +98,7 @@ class TestExtractUdtSourceFiles:
     def test_unresolvable_string_id_skipped(self) -> None:
         # src id 0x1999 has no LF_STRING_ID record → entry dropped, not crash.
         ipi = parse_tpi_stream(
-            _build_ipi_stream(
-                [(LF_UDT_SRC_LINE, _udt_src_line(0x2000, 0x1999, 1))]
-            )
+            _build_ipi_stream([(LF_UDT_SRC_LINE, _udt_src_line(0x2000, 0x1999, 1))])
         )
         assert extract_udt_source_files(ipi) == {}
 
@@ -111,7 +108,10 @@ class TestExtractUdtSourceFiles:
         tpi = parse_tpi_stream(
             _build_tpi_stream(
                 [
-                    (LF_FIELDLIST, _make_lf_fieldlist([_make_lf_member(0, 0x74, 0, "x")])),
+                    (
+                        LF_FIELDLIST,
+                        _make_lf_fieldlist([_make_lf_member(0, 0x74, 0, "x")]),
+                    ),
                     (LF_STRUCTURE, _make_lf_structure(1, 0, 0x1000, 4, "Vec3")),
                 ]
             )
@@ -218,8 +218,14 @@ class TestModelBridge:
             alignment=4,
             is_union=False,
             fields=[
-                FieldInfo(name="a", type_name="unsigned int", byte_offset=0,
-                          byte_size=4, bit_offset=0, bit_size=1),
+                FieldInfo(
+                    name="a",
+                    type_name="unsigned int",
+                    byte_offset=0,
+                    byte_size=4,
+                    bit_offset=0,
+                    bit_size=1,
+                ),
             ],
         )
         meta.structs["U"] = StructLayout(name="U", byte_size=8, is_union=True)
@@ -319,9 +325,16 @@ class TestHeaderScopeFallback:
         # no PUBLIC-visibility symbols → _has_matched_public_surface is False.
         def _unmatched(*a, **k):
             return AbiSnapshot(
-                library="lib.dll", version="1",
-                functions=[Function(name="f", mangled="f", return_type="int",
-                                    visibility=Visibility.HIDDEN)],
+                library="lib.dll",
+                version="1",
+                functions=[
+                    Function(
+                        name="f",
+                        mangled="f",
+                        return_type="int",
+                        visibility=Visibility.HIDDEN,
+                    )
+                ],
             )
 
         monkeypatch.setattr(dumper, "_dump_pe", _unmatched)
@@ -343,9 +356,16 @@ class TestHeaderScopeFallback:
 
         def _matched(*a, **k):
             return AbiSnapshot(
-                library="lib.dll", version="1",
-                functions=[Function(name="f", mangled="f", return_type="int",
-                                    visibility=Visibility.PUBLIC)],
+                library="lib.dll",
+                version="1",
+                functions=[
+                    Function(
+                        name="f",
+                        mangled="f",
+                        return_type="int",
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
             )
 
         monkeypatch.setattr(dumper, "_dump_pe", _matched)
@@ -365,7 +385,7 @@ class TestParsePdbEndToEnd:
             (LF_STRUCTURE, _make_lf_structure(1, 0, 0x1000, 4, "Vec3")),  # ti 0x1001
         ]
         ipi = [
-            (LF_STRING_ID, _string_id("include/vec.h")),                 # ti 0x1000
+            (LF_STRING_ID, _string_id("include/vec.h")),  # ti 0x1000
             (LF_UDT_SRC_LINE, _udt_src_line(0x1001, 0x1000, 9)),
         ]
         pdb = tmp_path / "e2e.pdb"
@@ -400,7 +420,8 @@ class TestParsePdbEndToEnd:
         assert out.types[0].origin == ScopeOrigin.PUBLIC_HEADER
         # No public set → no-op (origin stays UNKNOWN).
         snap2 = AbiSnapshot(
-            library="lib.dll", version="1",
+            library="lib.dll",
+            version="1",
             types=model_types_from_dwarf_metadata(meta)[0],
         )
         out2 = _apply_native_provenance(snap2, None, None)
@@ -449,7 +470,9 @@ class TestParsePdbEndToEnd:
         )
         records, enums = model_types_from_dwarf_metadata(meta)
         snap = AbiSnapshot(library="lib.dll", version="1", types=records, enums=enums)
-        apply_provenance(snap, public_headers=["include/api.h"], public_header_dirs=None)
+        apply_provenance(
+            snap, public_headers=["include/api.h"], public_header_dirs=None
+        )
         by_name = {t.name: t for t in snap.types}
         assert by_name["PublicType"].origin == ScopeOrigin.PUBLIC_HEADER
         assert by_name["PrivateType"].origin == ScopeOrigin.PRIVATE_HEADER
@@ -474,9 +497,7 @@ class TestDumpPeFallbackBuildsPdbTypes:
             machine="AMD64",
             exports=[_t.SimpleNamespace(name="Api", ordinal=1)],
         )
-        monkeypatch.setattr(
-            "abicheck.pe_metadata.parse_pe_metadata", lambda p: fake_pe
-        )
+        monkeypatch.setattr("abicheck.pe_metadata.parse_pe_metadata", lambda p: fake_pe)
         # PDB debug info with a public-header type.
         meta = DwarfMetadata(has_dwarf=True)
         meta.structs["Widget"] = StructLayout(

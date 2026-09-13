@@ -111,8 +111,6 @@ _TARGET_VERSION_RE = re.compile(
 )
 
 
-
-
 def extract_numpy_capi_surface(binary_path: Path) -> NumPyCapiSurface | None:
     """Scan *binary_path* for NumPy C-API consumption evidence (G26).
 

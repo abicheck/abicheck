@@ -9,6 +9,7 @@ Detection is keyed on the vector-ABI flags carried in DWARF DW_AT_producer, so
 these tests exercise both the producer parser and the diff, plus the policy
 partition, without needing a compiler.
 """
+
 from __future__ import annotations
 
 from abicheck.change_registry import REGISTRY, Verdict
@@ -36,8 +37,12 @@ def _snap(vector_abi_flags: set[str]) -> AbiSnapshot:
         library="lib.so",
         version="1.0",
         functions=[
-            Function(name="foo", mangled="foo", return_type="void",
-                     visibility=Visibility.PUBLIC),
+            Function(
+                name="foo",
+                mangled="foo",
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+            ),
         ],
         dwarf_advanced=meta,
     )
@@ -106,8 +111,11 @@ class TestVectorAbiChanged:
     def test_old_new_values_populated(self) -> None:
         old = _snap({"-vecabi=legacy"})
         new = _snap({"-vecabi=cmdtarget"})
-        change = next(c for c in compare(old, new).changes
-                      if c.kind == ChangeKind.VECTOR_ABI_CHANGED)
+        change = next(
+            c
+            for c in compare(old, new).changes
+            if c.kind == ChangeKind.VECTOR_ABI_CHANGED
+        )
         assert change.old_value == "-vecabi=legacy"
         assert change.new_value == "-vecabi=cmdtarget"
 
@@ -140,10 +148,12 @@ class TestVectorAbiBinaryOnly:
 
     def test_in_compat_binary_only_kinds(self) -> None:
         from abicheck.compat.cli import _BINARY_ONLY_KINDS
+
         assert ChangeKind.VECTOR_ABI_CHANGED in _BINARY_ONLY_KINDS
 
     def test_in_report_binary_only_kinds(self) -> None:
         from abicheck.report_classifications import BINARY_ONLY_KINDS
+
         assert "vector_abi_changed" in BINARY_ONLY_KINDS
 
 
@@ -153,12 +163,16 @@ class TestVectorAbiSerializationRoundTrip:
 
     def test_round_trip_preserves_vector_abi_flags(self) -> None:
         from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+
         snap = _snap({"-mveclibabi=svml"})
         restored = snapshot_from_dict(snapshot_to_dict(snap))
-        assert restored.dwarf_advanced.toolchain.vector_abi_flags == {"-mveclibabi=svml"}
+        assert restored.dwarf_advanced.toolchain.vector_abi_flags == {
+            "-mveclibabi=svml"
+        }
 
     def test_round_trip_still_detects_change(self) -> None:
         from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+
         old = snapshot_from_dict(snapshot_to_dict(_snap(set())))
         new = snapshot_from_dict(snapshot_to_dict(_snap({"-vecabi=cmdtarget"})))
         kinds = {c.kind for c in compare(old, new).changes}

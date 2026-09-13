@@ -19,6 +19,7 @@ Gap note: the "reachability" model (only types reachable from function args)
 is intentionally NOT implemented — all public header types are captured.
 See abi-dumper #31 for context on tools that missed this case.
 """
+
 from __future__ import annotations
 
 from xml.etree.ElementTree import Element, SubElement
@@ -126,12 +127,20 @@ class TestOrphanStruct:
         from abicheck.checker import ChangeKind, Verdict, compare
         from abicheck.model import AbiSnapshot, RecordType
 
-        old = AbiSnapshot(library="lib.so", version="1.0", types=[
-            RecordType(name="Orphan", kind="struct", size_bits=32),
-        ])
-        new = AbiSnapshot(library="lib.so", version="2.0", types=[
-            RecordType(name="Orphan", kind="struct", size_bits=64),
-        ])
+        old = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            types=[
+                RecordType(name="Orphan", kind="struct", size_bits=32),
+            ],
+        )
+        new = AbiSnapshot(
+            library="lib.so",
+            version="2.0",
+            types=[
+                RecordType(name="Orphan", kind="struct", size_bits=64),
+            ],
+        )
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
         assert ChangeKind.TYPE_SIZE_CHANGED in kinds
@@ -142,9 +151,13 @@ class TestOrphanStruct:
         from abicheck.checker import ChangeKind, Verdict, compare
         from abicheck.model import AbiSnapshot, RecordType
 
-        old = AbiSnapshot(library="lib.so", version="1.0", types=[
-            RecordType(name="Orphan", kind="struct", size_bits=32),
-        ])
+        old = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            types=[
+                RecordType(name="Orphan", kind="struct", size_bits=32),
+            ],
+        )
         new = AbiSnapshot(library="lib.so", version="2.0", types=[])
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}

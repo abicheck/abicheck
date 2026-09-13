@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Detector contracts used by checker orchestration."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

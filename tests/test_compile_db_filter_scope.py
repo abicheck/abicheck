@@ -387,7 +387,14 @@ class TestDumpCliHonorsTheFilterInTheFold:
         return so_path, header, compile_db
 
     @staticmethod
-    def _dump(so_path: Path, header: Path, compile_db: Path, out: Path, *extra: str, db_filter: str | None = None):
+    def _dump(
+        so_path: Path,
+        header: Path,
+        compile_db: Path,
+        out: Path,
+        *extra: str,
+        db_filter: str | None = None,
+    ):
         from click.testing import CliRunner
 
         from abicheck.cli import main
@@ -672,7 +679,10 @@ class TestScopeGuardCoversSourcesOnlyAutoDiscovery:
             tmp_path
         )
         cfg = tmp_path / ".abicheck.yml"
-        cfg.write_text("compile:\n  frontend: clang\nbuild:\n  compile_db_filter: 'a.cpp'\n", encoding="utf-8")
+        cfg.write_text(
+            "compile:\n  frontend: clang\nbuild:\n  compile_db_filter: 'a.cpp'\n",
+            encoding="utf-8",
+        )
         result = CliRunner().invoke(
             main,
             [
@@ -806,7 +816,10 @@ class TestScopeGuardCoversNestedBuildInfoDatabases:
 
         so_path, header, build_info = self._project_with_nested_build_info(tmp_path)
         cfg = tmp_path / "nested-build-info.abicheck.yml"
-        cfg.write_text("compile:\n  frontend: clang\nbuild:\n  compile_db_filter: 'a.cpp'\n", encoding="utf-8")
+        cfg.write_text(
+            "compile:\n  frontend: clang\nbuild:\n  compile_db_filter: 'a.cpp'\n",
+            encoding="utf-8",
+        )
         result = CliRunner().invoke(
             main,
             [

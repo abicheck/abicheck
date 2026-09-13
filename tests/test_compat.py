@@ -1,4 +1,5 @@
 """Tests for Sprint 5: ABICC compat layer (descriptor parser + HTML report)."""
+
 from __future__ import annotations
 
 import re
@@ -14,6 +15,7 @@ from abicheck.html_report import generate_html_report
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _write_xml(tmp_path: Path, content: str, name: str = "desc.xml") -> Path:
     p = tmp_path / name
     p.write_text(textwrap.dedent(content).strip(), encoding="utf-8")
@@ -23,17 +25,28 @@ def _write_xml(tmp_path: Path, content: str, name: str = "desc.xml") -> Path:
 def _make_fake_result(verdict: str = "COMPATIBLE", breaking: int = 0) -> object:
     """Minimal stand-in for CompareResult (avoids importing checker)."""
     from types import SimpleNamespace
-    summary = {"breaking": breaking, "compatible_additions": 0,
-               "total_changes": breaking, "source_breaks": 0}
+
+    summary = {
+        "breaking": breaking,
+        "compatible_additions": 0,
+        "total_changes": breaking,
+        "source_breaks": 0,
+    }
     changes = []
     v = SimpleNamespace(value=verdict)
-    return SimpleNamespace(verdict=v, summary=summary, changes=changes,
-                           suppressed_count=0, suppression_file_provided=False)
+    return SimpleNamespace(
+        verdict=v,
+        summary=summary,
+        changes=changes,
+        suppressed_count=0,
+        suppression_file_provided=False,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Descriptor parsing
 # ---------------------------------------------------------------------------
+
 
 def test_parse_descriptor_basic(tmp_path: Path) -> None:
     xml = """
@@ -65,7 +78,10 @@ def test_parse_descriptor_multiple_headers(tmp_path: Path) -> None:
     """
     desc = parse_descriptor(_write_xml(tmp_path, xml))
     assert len(desc.headers) == 2
-    assert any(re.fullmatch(r"([A-Za-z]:)?/usr/include/foo/detail", h.as_posix()) for h in desc.headers)
+    assert any(
+        re.fullmatch(r"([A-Za-z]:)?/usr/include/foo/detail", h.as_posix())
+        for h in desc.headers
+    )
 
 
 def test_parse_descriptor_multiple_libs(tmp_path: Path) -> None:
@@ -156,9 +172,12 @@ def test_parse_descriptor_invalid_xml_raises(tmp_path: Path) -> None:
 # HTML report generation
 # ---------------------------------------------------------------------------
 
+
 def test_html_report_contains_verdict() -> None:
     result = _make_fake_result(verdict="BREAKING", breaking=3)
-    html = generate_html_report(result, lib_name="libtest", old_version="1.0", new_version="2.0")
+    html = generate_html_report(
+        result, lib_name="libtest", old_version="1.0", new_version="2.0"
+    )
     assert "BREAKING" in html
     assert "libtest" in html
 
@@ -178,7 +197,9 @@ def test_html_report_bc_percent_shown() -> None:
 
 def test_html_report_bc_percent_breaking() -> None:
     result = _make_fake_result(verdict="BREAKING", breaking=2)
-    html = generate_html_report(result, lib_name="lib", old_version="1", new_version="2")
+    html = generate_html_report(
+        result, lib_name="lib", old_version="1", new_version="2"
+    )
     assert "0.0%" in html
 
 
@@ -191,8 +212,9 @@ def test_html_report_is_valid_html() -> None:
 
 def test_html_report_versions_in_title(tmp_path: Path) -> None:
     result = _make_fake_result(verdict="COMPATIBLE")
-    html_out = generate_html_report(result, lib_name="libfoo",
-                                    old_version="2025.0", new_version="2025.3")
+    html_out = generate_html_report(
+        result, lib_name="libfoo", old_version="2025.0", new_version="2025.3"
+    )
     assert "2025.0" in html_out
     assert "2025.3" in html_out
     assert "libfoo" in html_out
@@ -208,6 +230,7 @@ def test_html_report_xss_escape() -> None:
 
 def test_write_html_report_creates_dirs(tmp_path: Path) -> None:
     from abicheck.html_report import write_html_report
+
     result = _make_fake_result()
     out = tmp_path / "deep" / "nested" / "report.html"
     write_html_report(result, out)

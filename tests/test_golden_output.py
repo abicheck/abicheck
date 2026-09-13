@@ -10,6 +10,7 @@ Usage:
   # Update golden files after intentional output changes:
   pytest tests/test_golden_output.py --update-goldens
 """
+
 from __future__ import annotations
 
 import difflib
@@ -40,6 +41,7 @@ GOLDEN_DIR = TESTS_DIR / "golden"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _snap(ver: str = "1.0", funcs=None, types=None, enums=None) -> AbiSnapshot:
     s = AbiSnapshot(library="libfoo.so", version=ver)
     s.functions = funcs or []
@@ -49,7 +51,9 @@ def _snap(ver: str = "1.0", funcs=None, types=None, enums=None) -> AbiSnapshot:
 
 
 def _fn(name: str, mangled: str, ret: str = "int") -> Function:
-    return Function(name=name, mangled=mangled, return_type=ret, visibility=Visibility.PUBLIC)
+    return Function(
+        name=name, mangled=mangled, return_type=ret, visibility=Visibility.PUBLIC
+    )
 
 
 def _run_golden(
@@ -94,6 +98,7 @@ def _run_golden(
 # Golden test cases
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.golden
 def test_golden_no_change(update_goldens: bool) -> None:
     """Identical snapshots → NO_CHANGE output is stable."""
@@ -105,7 +110,9 @@ def test_golden_no_change(update_goldens: bool) -> None:
 @pytest.mark.golden
 def test_golden_func_removed(update_goldens: bool) -> None:
     """Public function removal → BREAKING output is stable."""
-    old = _snap(ver="1.0", funcs=[_fn("compute", "_Z7computei"), _fn("helper", "_Z6helperi")])
+    old = _snap(
+        ver="1.0", funcs=[_fn("compute", "_Z7computei"), _fn("helper", "_Z6helperi")]
+    )
     new = _snap(ver="2.0", funcs=[_fn("compute", "_Z7computei")])
     _run_golden("func_removed", old, new, update_goldens)
 
@@ -113,28 +120,64 @@ def test_golden_func_removed(update_goldens: bool) -> None:
 @pytest.mark.golden
 def test_golden_struct_size_change(update_goldens: bool) -> None:
     """Struct with new field → BREAKING size-change output is stable."""
-    old = _snap(ver="1.0", types=[RecordType(
-        name="Point", kind="struct", size_bits=64,
-        fields=[TypeField("x", "int", 0), TypeField("y", "int", 32)],
-    )])
-    new = _snap(ver="2.0", types=[RecordType(
-        name="Point", kind="struct", size_bits=96,
-        fields=[TypeField("x", "int", 0), TypeField("y", "int", 32), TypeField("z", "int", 64)],
-    )])
+    old = _snap(
+        ver="1.0",
+        types=[
+            RecordType(
+                name="Point",
+                kind="struct",
+                size_bits=64,
+                fields=[TypeField("x", "int", 0), TypeField("y", "int", 32)],
+            )
+        ],
+    )
+    new = _snap(
+        ver="2.0",
+        types=[
+            RecordType(
+                name="Point",
+                kind="struct",
+                size_bits=96,
+                fields=[
+                    TypeField("x", "int", 0),
+                    TypeField("y", "int", 32),
+                    TypeField("z", "int", 64),
+                ],
+            )
+        ],
+    )
     _run_golden("struct_size_change", old, new, update_goldens)
 
 
 @pytest.mark.golden
 def test_golden_enum_change(update_goldens: bool) -> None:
     """Enum member value change → BREAKING output is stable."""
-    old = _snap(ver="1.0", enums=[EnumType(
-        name="Color",
-        members=[EnumMember("RED", 0), EnumMember("GREEN", 1), EnumMember("BLUE", 2)],
-    )])
-    new = _snap(ver="2.0", enums=[EnumType(
-        name="Color",
-        members=[EnumMember("RED", 0), EnumMember("GREEN", 5), EnumMember("BLUE", 2)],
-    )])
+    old = _snap(
+        ver="1.0",
+        enums=[
+            EnumType(
+                name="Color",
+                members=[
+                    EnumMember("RED", 0),
+                    EnumMember("GREEN", 1),
+                    EnumMember("BLUE", 2),
+                ],
+            )
+        ],
+    )
+    new = _snap(
+        ver="2.0",
+        enums=[
+            EnumType(
+                name="Color",
+                members=[
+                    EnumMember("RED", 0),
+                    EnumMember("GREEN", 5),
+                    EnumMember("BLUE", 2),
+                ],
+            )
+        ],
+    )
     _run_golden("enum_change", old, new, update_goldens)
 
 
@@ -142,7 +185,9 @@ def test_golden_enum_change(update_goldens: bool) -> None:
 def test_golden_compatible_addition(update_goldens: bool) -> None:
     """New public function → COMPATIBLE output is stable."""
     old = _snap(ver="1.0", funcs=[_fn("compute", "_Z7computei")])
-    new = _snap(ver="2.0", funcs=[_fn("compute", "_Z7computei"), _fn("helper", "_Z6helperi")])
+    new = _snap(
+        ver="2.0", funcs=[_fn("compute", "_Z7computei"), _fn("helper", "_Z6helperi")]
+    )
     _run_golden("compatible_addition", old, new, update_goldens)
 
 

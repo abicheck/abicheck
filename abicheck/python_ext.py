@@ -85,8 +85,6 @@ def _is_cpython_dll(name: str) -> bool:
     return bool(_CPYTHON_DLL_RE.match(name))
 
 
-
-
 def _iter_exported_names(snap: AbiSnapshot) -> list[str]:
     """All exported symbol names across whichever binary metadata is present.
 
@@ -129,7 +127,9 @@ def _collect_cpython_imports(snap: AbiSnapshot) -> list[str]:
     names: list[str] = []
     if snap.elf is not None:
         names.extend(
-            i.name for i in snap.elf.imports if i.name and stable_abi.is_cpython_symbol(i.name)
+            i.name
+            for i in snap.elf.imports
+            if i.name and stable_abi.is_cpython_symbol(i.name)
         )
     if snap.macho is not None:
         names.extend(
@@ -140,9 +140,7 @@ def _collect_cpython_imports(snap: AbiSnapshot) -> list[str]:
     if snap.pe is not None:
         for dll_name, funcs in snap.pe.imports.items():
             if _is_cpython_dll(dll_name):
-                names.extend(
-                    f for f in funcs if f and stable_abi.is_cpython_symbol(f)
-                )
+                names.extend(f for f in funcs if f and stable_abi.is_cpython_symbol(f))
     return sorted(set(names))
 
 
@@ -332,5 +330,3 @@ def detect_python_extension_from_binary(path: Path) -> PythonExtMetadata | None:
     else:
         return None
     return detect_python_extension(snap)
-
-

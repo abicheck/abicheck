@@ -6,6 +6,7 @@ to surface crashes, assertion errors, and unexpected exceptions.
 Hypothesis is an optional dependency; the entire module is skipped if
 it is not installed.
 """
+
 from __future__ import annotations
 
 import re
@@ -167,6 +168,7 @@ def test_suppression_pattern_fuzz(pattern: str) -> None:
         s = Suppression(symbol_pattern=pattern)
         # If it compiled, verify it can actually attempt matching without crashing
         from abicheck.checker import Change
+
         dummy_change = Change(
             kind=ChangeKind.FUNC_REMOVED,
             symbol="test_symbol",
@@ -230,11 +232,16 @@ def test_reporter_handles_arbitrary_changes(
 
 # _detect_binary_format lives in cli.py, which has heavy deps.  We
 # replicate the core logic inline to avoid pulling that module in.
-_MACHO_MAGICS = frozenset({
-    b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
-    b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
-    b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
-})
+_MACHO_MAGICS = frozenset(
+    {
+        b"\xfe\xed\xfa\xce",
+        b"\xce\xfa\xed\xfe",
+        b"\xfe\xed\xfa\xcf",
+        b"\xcf\xfa\xed\xfe",
+        b"\xca\xfe\xba\xbe",
+        b"\xbe\xba\xfe\xca",
+    }
+)
 
 
 def _detect_binary_format_standalone(path: Path) -> str | None:
@@ -302,5 +309,6 @@ def test_policy_file_yaml_fuzz(content: str) -> None:
         except Exception as exc:
             # yaml.YAMLError and its subclasses are acceptable
             import yaml
+
             if not isinstance(exc, yaml.YAMLError):
                 raise  # Unexpected exception type — re-raise to fail the test

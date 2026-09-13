@@ -18,6 +18,7 @@ Split from ``abicheck/compat/cli.py`` to keep that module under the
 AI-readiness file-size soft cap. The exit-code contract is documented in
 ``abicheck/compat/CLAUDE.md`` and the project-level ``CLAUDE.md``.
 """
+
 from __future__ import annotations
 
 import errno
@@ -107,7 +108,9 @@ def _classify_compat_error_exit_code(exc: BaseException, *, context: str = "") -
 def _classify_fs_error(exc: BaseException, ctx: str, tool_missing: bool) -> int | None:
     """Classify filesystem/OS-level failures, or return None if not matched."""
     if isinstance(exc, FileNotFoundError):
-        return 3 if tool_missing or _missing_filename_looks_like_command(exc, ctx) else 4
+        return (
+            3 if tool_missing or _missing_filename_looks_like_command(exc, ctx) else 4
+        )
     if isinstance(exc, PermissionError):
         return 4
     if not isinstance(exc, OSError):
@@ -148,7 +151,11 @@ def _looks_like_missing_path_message(msg: str) -> bool:
     """Return True when message indicates missing command/path."""
     return any(
         token in msg
-        for token in ("not found in path", "command not found", "no such file or directory")
+        for token in (
+            "not found in path",
+            "command not found",
+            "no such file or directory",
+        )
     )
 
 

@@ -8,6 +8,7 @@ Covers:
   - Version script missing detection
   - Integration with checker.compare()
 """
+
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind, Verdict
@@ -27,7 +28,10 @@ from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolT
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _sym(name: str, version: str = "", binding: SymbolBinding = SymbolBinding.GLOBAL) -> ElfSymbol:
+
+def _sym(
+    name: str, version: str = "", binding: SymbolBinding = SymbolBinding.GLOBAL
+) -> ElfSymbol:
     return ElfSymbol(
         name=name,
         binding=binding,
@@ -59,6 +63,7 @@ def _compatible_change(symbol: str = "bar") -> Change:
 # ===========================================================================
 # Version node removal
 # ===========================================================================
+
 
 class TestVersionNodeRemoved:
     def test_removed_version_node(self):
@@ -124,7 +129,9 @@ class TestVersionNodeRemoved:
             symbols=[_sym("c", "LIBFOO_3.0")],
         )
         changes = detect_version_node_changes(old, new)
-        removed = [c for c in changes if c.kind == ChangeKind.SYMBOL_VERSION_NODE_REMOVED]
+        removed = [
+            c for c in changes if c.kind == ChangeKind.SYMBOL_VERSION_NODE_REMOVED
+        ]
         assert len(removed) == 2
         removed_nodes = {c.symbol for c in removed}
         assert removed_nodes == {"LIBFOO_1.0", "LIBFOO_2.0"}
@@ -143,7 +150,9 @@ class TestVersionNodeRemoved:
         # Should show only 5 names and a "+3 more" suffix
         assert "(+3 more)" in desc
         # Count comma-separated names before the suffix
-        sym_list_part = desc.split("Symbols previously under this node: ")[1].split(".")[0]
+        sym_list_part = desc.split("Symbols previously under this node: ")[1].split(
+            "."
+        )[0]
         # Remove the (+3 more) part to count names
         names_part = sym_list_part.split(" (+")[0]
         assert names_part.count(",") == 4  # 5 names = 4 commas
@@ -164,6 +173,7 @@ class TestVersionNodeRemoved:
 # ===========================================================================
 # Symbol migration between version nodes
 # ===========================================================================
+
 
 class TestSymbolMovedVersionNode:
     def test_symbol_moved_between_nodes(self):
@@ -226,6 +236,7 @@ class TestSymbolMovedVersionNode:
 # Version node map internals
 # ===========================================================================
 
+
 class TestBuildVersionNodeMap:
     def test_symbol_version_not_in_defined_is_excluded(self):
         """A symbol with version tag NOT in versions_defined is excluded from node map."""
@@ -245,6 +256,7 @@ class TestBuildVersionNodeMap:
 # ===========================================================================
 # SONAME bump recommendation
 # ===========================================================================
+
 
 class TestSonameBumpRecommended:
     def test_breaking_changes_no_soname_bump(self):
@@ -302,7 +314,11 @@ class TestSonameBumpRecommended:
         """Mixed breaking + compatible changes still triggers recommendation."""
         old_elf = ElfMetadata(soname="libfoo.so.1")
         new_elf = ElfMetadata(soname="libfoo.so.1")
-        changes = [_breaking_change("rm1"), _compatible_change("add1"), _breaking_change("rm2")]
+        changes = [
+            _breaking_change("rm1"),
+            _compatible_change("add1"),
+            _breaking_change("rm2"),
+        ]
 
         result = check_soname_bump_policy(changes, old_elf, new_elf)
         assert len(result) == 1
@@ -379,6 +395,7 @@ class TestSonameBumpRecommended:
 # SONAME bump unnecessary
 # ===========================================================================
 
+
 class TestSonameBumpUnnecessary:
     def test_soname_bumped_no_breaking(self):
         """SONAME bumped but no breaking changes -> SONAME_BUMP_UNNECESSARY."""
@@ -433,6 +450,7 @@ class TestSonameBumpUnnecessary:
 # ===========================================================================
 # Version script missing
 # ===========================================================================
+
 
 class TestVersionScriptMissing:
     def test_both_missing_version_script_is_preexisting(self):
@@ -525,31 +543,38 @@ class TestVersionScriptMissing:
 # ChangeKind classification checks
 # ===========================================================================
 
+
 class TestChangeKindClassification:
     def test_symbol_version_node_removed_is_breaking(self):
         from abicheck.checker_policy import BREAKING_KINDS
+
         assert ChangeKind.SYMBOL_VERSION_NODE_REMOVED in BREAKING_KINDS
 
     def test_symbol_moved_version_node_is_risk(self):
         from abicheck.checker_policy import RISK_KINDS
+
         assert ChangeKind.SYMBOL_MOVED_VERSION_NODE in RISK_KINDS
 
     def test_soname_bump_recommended_is_compatible(self):
         from abicheck.checker_policy import COMPATIBLE_KINDS
+
         assert ChangeKind.SONAME_BUMP_RECOMMENDED in COMPATIBLE_KINDS
 
     def test_soname_bump_unnecessary_is_compatible(self):
         from abicheck.checker_policy import COMPATIBLE_KINDS
+
         assert ChangeKind.SONAME_BUMP_UNNECESSARY in COMPATIBLE_KINDS
 
     def test_version_script_missing_is_compatible(self):
         from abicheck.checker_policy import COMPATIBLE_KINDS
+
         assert ChangeKind.VERSION_SCRIPT_MISSING in COMPATIBLE_KINDS
 
 
 # ===========================================================================
 # Cross-detector deduplication
 # ===========================================================================
+
 
 class TestDeduplication:
     def test_version_node_removed_deduplicates_defined_removed(self):
@@ -600,6 +625,7 @@ class TestDeduplication:
 # Integration: checker.compare() picks up version policy changes
 # ===========================================================================
 
+
 class TestCheckerIntegration:
     def test_compare_detects_version_node_removal(self):
         """Full pipeline: version node removal is detected and deduplicated."""
@@ -631,6 +657,7 @@ class TestCheckerIntegration:
             ),
         )
         from abicheck.checker import compare
+
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
         # The more specific SYMBOL_VERSION_NODE_REMOVED should win dedup
@@ -646,9 +673,13 @@ class TestCheckerIntegration:
             library="libfoo.so.1",
             version="1.0",
             functions=[
-                Function(name="removed_func", mangled="removed_func",
-                         return_type="void", params=[],
-                         visibility=Visibility.PUBLIC),
+                Function(
+                    name="removed_func",
+                    mangled="removed_func",
+                    return_type="void",
+                    params=[],
+                    visibility=Visibility.PUBLIC,
+                ),
             ],
             variables=[],
             types=[],
@@ -669,6 +700,7 @@ class TestCheckerIntegration:
             ),
         )
         from abicheck.checker import compare
+
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
         # The function removal is breaking; soname unchanged -> recommendation
@@ -837,13 +869,15 @@ class TestCheckerIntegration:
             functions=[],
             elf=ElfMetadata(soname="libfoo.so.1", symbols=[]),
         )
-        suppression = SuppressionList([
-            Suppression(
-                symbol="DT_SONAME",
-                change_kind=ChangeKind.SONAME_BUMP_RECOMMENDED.value,
-                reason="tracked separately",
-            )
-        ])
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    symbol="DT_SONAME",
+                    change_kind=ChangeKind.SONAME_BUMP_RECOMMENDED.value,
+                    reason="tracked separately",
+                )
+            ]
+        )
 
         result = compare(old, new, suppression=suppression)
         kinds = {c.kind for c in result.changes}
@@ -883,6 +917,7 @@ class TestCheckerIntegration:
             ),
         )
         from abicheck.checker import compare
+
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
         assert ChangeKind.VERSION_SCRIPT_MISSING in kinds

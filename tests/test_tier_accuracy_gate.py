@@ -75,14 +75,20 @@ def test_monotonicity_arms_only_on_correct_not_over_call():
     # expected=risk(1): L0 over-calls (2), L1 under-calls (0) — an over→under
     # swing is two distinct errors, NOT a hidden correctly-caught break.
     over_then_under = Traj(
-        "over_then_under", "x", 1, Tier.L3,
+        "over_then_under",
+        "x",
+        1,
+        Tier.L3,
         {Tier.L0: 2, Tier.L1: 0, Tier.L2: 1, Tier.L3: 1},
     )
     assert tier_gate.under_call_monotonicity_violations([over_then_under]) == []
     # expected=breaking(2): L0 correct (2), L1 under (0) — a real break the tier
     # caught, then hidden. This IS an authority-rule violation.
     correct_then_under = Traj(
-        "correct_then_under", "x", 2, Tier.L3,
+        "correct_then_under",
+        "x",
+        2,
+        Tier.L3,
         {Tier.L0: 2, Tier.L1: 0, Tier.L2: 2, Tier.L3: 2},
     )
     assert tier_gate.under_call_monotonicity_violations([correct_then_under]) == [
@@ -97,9 +103,9 @@ def test_lower_levels_are_demonstrably_insufficient(trajectories):
     assert l0["under"] >= 1, "corpus must contain L0-insufficiency (FN) examples"
     # ...and at least one break needs more than debug info — only headers or
     # build context resolve it (an under-call surviving past L1).
-    assert any(
-        t.outcome(Tier.L1) == "under" for t in trajectories
-    ), "corpus must contain a break L1 still cannot see"
+    assert any(t.outcome(Tier.L1) == "under" for t in trajectories), (
+        "corpus must contain a break L1 still cannot see"
+    )
 
 
 def test_each_higher_level_reduces_false_positives(trajectories):
@@ -170,8 +176,15 @@ def test_l0_projection_degrades_variables_to_bare_symbols():
         version="1",
         from_headers=True,
         variables=[
-            Variable(name="g", mangled="g", type="int", is_const=True, value="5",
-                     visibility=Visibility.PUBLIC, origin=ScopeOrigin.PUBLIC_HEADER)
+            Variable(
+                name="g",
+                mangled="g",
+                type="int",
+                is_const=True,
+                value="5",
+                visibility=Visibility.PUBLIC,
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )
         ],
     )
     l0 = tier_gate.project(snap, Tier.L0)

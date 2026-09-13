@@ -24,6 +24,7 @@ hand-written YAML strings: ``sys.executable`` on Windows is a backslash path
 (``C:\\...\\python.exe``) that a double-quoted YAML scalar would reject as an
 invalid escape, so the emitter must do the quoting.
 """
+
 from __future__ import annotations
 
 import json
@@ -86,13 +87,18 @@ def _tool_manifest_dict(name="fake-tool", action="inspect"):
         "allowed_actions": [action],
         "commands": {
             "collect": [
-                sys.executable, "-c", _write_be_script(),
+                sys.executable,
+                "-c",
+                _write_be_script(),
                 "{normalized_dir}/build_evidence.json",
             ]
         },
         "outputs": {
             "normalized": [
-                {"kind": "build_evidence", "path": f"normalized/{name}/build_evidence.json"}
+                {
+                    "kind": "build_evidence",
+                    "path": f"normalized/{name}/build_evidence.json",
+                }
             ]
         },
     }
@@ -121,18 +127,24 @@ def test_parse_actions_set():
 def test_resolve_intersects_ceiling_with_run_permitted():
     declared = {CollectionAction.INSPECT, CollectionAction.RUN_BUILD}
     run_permitted = {CollectionAction.INSPECT, CollectionAction.QUERY_BUILD_SYSTEM}
-    assert resolve_allowed_actions(declared, run_permitted) == {CollectionAction.INSPECT}
+    assert resolve_allowed_actions(declared, run_permitted) == {
+        CollectionAction.INSPECT
+    }
 
 
 def test_resolve_always_strips_network():
     declared = {CollectionAction.INSPECT, CollectionAction.NETWORK}
     run_permitted = {CollectionAction.INSPECT, CollectionAction.NETWORK}
-    assert CollectionAction.NETWORK not in resolve_allowed_actions(declared, run_permitted)
+    assert CollectionAction.NETWORK not in resolve_allowed_actions(
+        declared, run_permitted
+    )
 
 
 def test_require_action_raises_when_denied():
     with pytest.raises(ActionNotPermittedError, match="run_build"):
-        require_action(CollectionAction.RUN_BUILD, {CollectionAction.INSPECT}, extractor="x")
+        require_action(
+            CollectionAction.RUN_BUILD, {CollectionAction.INSPECT}, extractor="x"
+        )
     require_action(CollectionAction.INSPECT, {CollectionAction.INSPECT})  # no raise
 
 
@@ -156,7 +168,9 @@ def test_context_defaults_to_inspect_only_and_permissive():
 def test_raw_artifact_to_dict():
     from pathlib import Path
 
-    art = RawArtifact(kind="raw", path=Path("/p/x"), content_hash="sha256:1", command="t")
+    art = RawArtifact(
+        kind="raw", path=Path("/p/x"), content_hash="sha256:1", command="t"
+    )
     d = art.to_dict()
     assert d["kind"] == "raw"
     assert d["path"].endswith("x")
@@ -193,7 +207,9 @@ def test_capabilities_from_none():
 
 def test_capabilities_implied_actions():
     caps = ExtractorCapabilities(
-        requires_build_execution=True, requires_compiler_execution=True, requires_network=True
+        requires_build_execution=True,
+        requires_compiler_execution=True,
+        requires_network=True,
     )
     assert caps.implied_actions() == {
         CollectionAction.RUN_BUILD,
@@ -207,10 +223,14 @@ def test_capabilities_implied_actions():
 
 def test_extractor_record_ledger_roundtrip():
     rec = ExtractorRecord(
-        name="cmake-file-api", version="4.3.3", status="ok",
+        name="cmake-file-api",
+        version="4.3.3",
+        status="ok",
         command="cmake-file-api-reader --reply build",
-        command_hash="sha256:abc", capabilities=["compile_db", "target_graph"],
-        started_at="2026-01-01T00:00:00+00:00", finished_at="2026-01-01T00:00:01+00:00",
+        command_hash="sha256:abc",
+        capabilities=["compile_db", "target_graph"],
+        started_at="2026-01-01T00:00:00+00:00",
+        finished_at="2026-01-01T00:00:01+00:00",
         diagnostics=["note"],
     )
     d = rec.to_dict()
@@ -239,9 +259,20 @@ def _valid_manifest_dict():
         "version_command": ["abicheck-cmake-extractor", "--version"],
         "commands": {
             "collect": ["my-extractor", "collect", "--output", "{raw_dir}"],
-            "normalize": ["my-extractor", "normalize", "--raw", "{raw_dir}", "--out", "{normalized_dir}"],
+            "normalize": [
+                "my-extractor",
+                "normalize",
+                "--raw",
+                "{raw_dir}",
+                "--out",
+                "{normalized_dir}",
+            ],
         },
-        "outputs": {"normalized": [{"kind": "build_evidence", "path": "build/build_evidence.json"}]},
+        "outputs": {
+            "normalized": [
+                {"kind": "build_evidence", "path": "build/build_evidence.json"}
+            ]
+        },
     }
 
 
@@ -249,7 +280,10 @@ def test_load_valid_manifest(tmp_path):
     m = load_extractor_manifest(_dump(tmp_path, _valid_manifest_dict()))
     assert m.name == "abicheck-cmake-extractor"
     assert m.capabilities.compile_db is True
-    assert m.allowed_actions == {CollectionAction.INSPECT, CollectionAction.QUERY_BUILD_SYSTEM}
+    assert m.allowed_actions == {
+        CollectionAction.INSPECT,
+        CollectionAction.QUERY_BUILD_SYSTEM,
+    }
     assert m.outputs[0].kind == "build_evidence"
     assert m.required_actions() >= {CollectionAction.INSPECT}
 
@@ -327,7 +361,11 @@ def test_manifest_empty_command_rejected(tmp_path):
 
 
 def test_manifest_unknown_action_rejected(tmp_path):
-    data = {"name": "x", "allowed_actions": ["inspect", "hack"], "commands": {"collect": ["x"]}}
+    data = {
+        "name": "x",
+        "allowed_actions": ["inspect", "hack"],
+        "commands": {"collect": ["x"]},
+    }
     with pytest.raises(ManifestError, match="unknown collection action"):
         load_extractor_manifest(_dump(tmp_path, data))
 
@@ -355,7 +393,11 @@ def test_manifest_capability_action_inconsistency(tmp_path):
 
 
 def test_manifest_network_action_rejected(tmp_path):
-    data = {"name": "x", "allowed_actions": ["inspect", "network"], "commands": {"collect": ["x"]}}
+    data = {
+        "name": "x",
+        "allowed_actions": ["inspect", "network"],
+        "commands": {"collect": ["x"]},
+    }
     with pytest.raises(ManifestError, match="'network' action is always denied"):
         load_extractor_manifest(_dump(tmp_path, data))
 
@@ -390,7 +432,9 @@ def test_manifest_capabilities_bad_shape_is_manifest_error(tmp_path):
     # A non-mapping/non-list capabilities must raise ManifestError (caught by the
     # CLI), not an uncaught AttributeError from .get on the wrong type (Codex P2).
     data = {"name": "x", "capabilities": "compile_db", "commands": {"collect": ["x"]}}
-    with pytest.raises(ManifestError, match="'capabilities' must be a mapping or a list"):
+    with pytest.raises(
+        ManifestError, match="'capabilities' must be a mapping or a list"
+    ):
         load_extractor_manifest(_dump(tmp_path, data))
 
 
@@ -401,7 +445,11 @@ def test_manifest_capabilities_list_non_string_rejected(tmp_path):
 
 
 def test_manifest_version_command_must_be_list(tmp_path):
-    data = {"name": "x", "version_command": "x --version", "commands": {"collect": ["x"]}}
+    data = {
+        "name": "x",
+        "version_command": "x --version",
+        "commands": {"collect": ["x"]},
+    }
     with pytest.raises(ManifestError, match="'version_command' must be a list"):
         load_extractor_manifest(_dump(tmp_path, data))
 
@@ -413,7 +461,11 @@ def test_manifest_outputs_bad_type(tmp_path):
 
 
 def test_manifest_output_missing_fields(tmp_path):
-    data = {"name": "x", "commands": {"collect": ["x"]}, "outputs": [{"kind": "build_evidence"}]}
+    data = {
+        "name": "x",
+        "commands": {"collect": ["x"]},
+        "outputs": [{"kind": "build_evidence"}],
+    }
     with pytest.raises(ManifestError, match="needs a 'kind' and 'path'"):
         load_extractor_manifest(_dump(tmp_path, data))
 
@@ -422,7 +474,9 @@ def test_manifest_invalid_schema_version(tmp_path):
     # A non-integer schema_version must be a ManifestError, not an uncaught
     # ValueError that aborts collection (Codex P2).
     data = {
-        "name": "x", "schema_version": "abc", "commands": {"collect": ["x"]},
+        "name": "x",
+        "schema_version": "abc",
+        "commands": {"collect": ["x"]},
         "outputs": [{"kind": "build_evidence", "path": "build/be.json"}],
     }
     with pytest.raises(ManifestError, match="'schema_version' must be an integer"):
@@ -433,7 +487,9 @@ def test_manifest_requires_outputs(tmp_path):
     # An extractor with no declared outputs would run and validate nothing, so a
     # missing/empty outputs block is rejected at load (Codex P2).
     with pytest.raises(ManifestError, match="must declare at least one output"):
-        load_extractor_manifest(_dump(tmp_path, {"name": "x", "commands": {"collect": ["x"]}}))
+        load_extractor_manifest(
+            _dump(tmp_path, {"name": "x", "commands": {"collect": ["x"]}})
+        )
 
 
 def test_audit_mode_keeps_full_stderr(tmp_path):
@@ -469,7 +525,12 @@ def test_manifest_non_list_output_group_rejected(tmp_path):
     data = {
         "name": "x",
         "commands": {"collect": ["x"]},
-        "outputs": {"normalized": {"kind": "build_evidence", "path": "build/build_evidence.json"}},
+        "outputs": {
+            "normalized": {
+                "kind": "build_evidence",
+                "path": "build/build_evidence.json",
+            }
+        },
     }
     with pytest.raises(ManifestError, match="must be a list"):
         load_extractor_manifest(_dump(tmp_path, data))
@@ -481,7 +542,11 @@ def test_external_extractor_clears_stale_output(tmp_path):
     data = {
         "name": "no-write",
         "commands": {"collect": [sys.executable, "-c", "pass"]},
-        "outputs": {"normalized": [{"kind": "build_evidence", "path": "build/build_evidence.json"}]},
+        "outputs": {
+            "normalized": [
+                {"kind": "build_evidence", "path": "build/build_evidence.json"}
+            ]
+        },
     }
     manifest = load_extractor_manifest(_dump(tmp_path, data))
     pack_root = tmp_path / "pack"
@@ -513,7 +578,11 @@ def test_manifest_rejects_unsafe_output_paths(tmp_path, bad_path):
 
 
 def test_render_command_substitutes():
-    assert render_command(["t", "--out", "{raw_dir}/x"], {"raw_dir": "/p/raw"}) == ["t", "--out", "/p/raw/x"]
+    assert render_command(["t", "--out", "{raw_dir}/x"], {"raw_dir": "/p/raw"}) == [
+        "t",
+        "--out",
+        "/p/raw/x",
+    ]
 
 
 def test_render_command_missing_value_raises():
@@ -525,7 +594,9 @@ def test_render_command_missing_value_raises():
 
 
 def test_extractor_properties_and_discover(tmp_path):
-    manifest = load_extractor_manifest(_dump(tmp_path, _tool_manifest_dict(action="query_build_system")))
+    manifest = load_extractor_manifest(
+        _dump(tmp_path, _tool_manifest_dict(action="query_build_system"))
+    )
     ext = ExternalCliExtractor(manifest)
     assert ext.name == "fake-tool"
     assert ext.version == "9.9"
@@ -586,7 +657,9 @@ def test_external_extractor_end_to_end(tmp_path):
     assert record.command_hash.startswith("sha256:")
     assert "compile_db" in record.capabilities
     assert record.started_at and record.finished_at
-    out = json.loads((pack_root / "normalized" / "fake-tool" / "build_evidence.json").read_text())
+    out = json.loads(
+        (pack_root / "normalized" / "fake-tool" / "build_evidence.json").read_text()
+    )
     assert out["compile_units"][0]["source"] == "a.cpp"
 
 
@@ -603,9 +676,21 @@ def test_external_extractor_with_separate_normalize_command(tmp_path):
         "allowed_actions": ["inspect"],
         "commands": {
             "collect": [sys.executable, "-c", raw_script, "{raw_dir}/raw.bin"],
-            "normalize": [sys.executable, "-c", _write_be_script(), "{normalized_dir}/build_evidence.json"],
+            "normalize": [
+                sys.executable,
+                "-c",
+                _write_be_script(),
+                "{normalized_dir}/build_evidence.json",
+            ],
         },
-        "outputs": {"normalized": [{"kind": "build_evidence", "path": "normalized/two-phase/build_evidence.json"}]},
+        "outputs": {
+            "normalized": [
+                {
+                    "kind": "build_evidence",
+                    "path": "normalized/two-phase/build_evidence.json",
+                }
+            ]
+        },
     }
     manifest = load_extractor_manifest(_dump(tmp_path, data))
     pack_root = tmp_path / "pack"
@@ -620,7 +705,10 @@ def test_ledger_command_redacts_split_secret(tmp_path):
     # A secret passed as a split ``-D KEY=secret`` form must be redacted in the
     # ledger's command field (argv-aware redaction, not per-token).
     data = _tool_manifest_dict(name="sekret")
-    data["commands"]["collect"] = data["commands"]["collect"] + ["-D", "API_KEY=supersecret"]
+    data["commands"]["collect"] = data["commands"]["collect"] + [
+        "-D",
+        "API_KEY=supersecret",
+    ]
     manifest = load_extractor_manifest(_dump(tmp_path, data))
     pack_root = tmp_path / "pack"
     pack_root.mkdir()
@@ -646,7 +734,14 @@ def test_substitutions_are_absolute(tmp_path):
         binary_paths=[Path("rel/libfoo.so")],
     )
     sub = ext._substitutions(ctx, Path("relpack"))
-    for key in ("raw_dir", "normalized_dir", "build_dir", "source_root", "compile_db", "binary"):
+    for key in (
+        "raw_dir",
+        "normalized_dir",
+        "build_dir",
+        "source_root",
+        "compile_db",
+        "binary",
+    ):
         assert os.path.isabs(sub[key]), f"{key} should be absolute: {sub[key]}"
 
 
@@ -668,16 +763,31 @@ def test_normalize_receives_context_placeholders(tmp_path):
         "name": "two-ctx",
         "commands": {
             "collect": [sys.executable, "-c", raw_script, "{raw_dir}/r.bin"],
-            "normalize": [sys.executable, "-c", norm_script, "{source_root}", "{normalized_dir}/build_evidence.json"],
+            "normalize": [
+                sys.executable,
+                "-c",
+                norm_script,
+                "{source_root}",
+                "{normalized_dir}/build_evidence.json",
+            ],
         },
-        "outputs": {"normalized": [{"kind": "build_evidence", "path": "normalized/two-ctx/build_evidence.json"}]},
+        "outputs": {
+            "normalized": [
+                {
+                    "kind": "build_evidence",
+                    "path": "normalized/two-ctx/build_evidence.json",
+                }
+            ]
+        },
     }
     manifest = load_extractor_manifest(_dump(tmp_path, data))
     pack_root = tmp_path / "pack"
     pack_root.mkdir()
     src = tmp_path / "src"
     src.mkdir()
-    _norm, record = run_external_extractor(manifest, CollectionContext(source_root=src), pack_root)
+    _norm, record = run_external_extractor(
+        manifest, CollectionContext(source_root=src), pack_root
+    )
     assert record.status == "ok", record.diagnostics
 
 
@@ -693,9 +803,19 @@ def test_normalize_missing_placeholder_is_failed(tmp_path):
         "name": "two-ctx2",
         "commands": {
             "collect": [sys.executable, "-c", raw_script, "{raw_dir}/r.bin"],
-            "normalize": [sys.executable, "-c", "pass", "{source_root}", "{normalized_dir}/x.json"],
+            "normalize": [
+                sys.executable,
+                "-c",
+                "pass",
+                "{source_root}",
+                "{normalized_dir}/x.json",
+            ],
         },
-        "outputs": {"normalized": [{"kind": "build_evidence", "path": "normalized/two-ctx2/x.json"}]},
+        "outputs": {
+            "normalized": [
+                {"kind": "build_evidence", "path": "normalized/two-ctx2/x.json"}
+            ]
+        },
     }
     manifest = load_extractor_manifest(_dump(tmp_path, data))
     pack_root = tmp_path / "pack"
@@ -708,7 +828,9 @@ def test_normalize_missing_placeholder_is_failed(tmp_path):
 def test_external_extractor_blocked_by_action_ceiling(tmp_path):
     # discover() gates a ceiling violation into a 'skipped' record (D4/D9) rather
     # than raising, so the run is never invoked and no output is produced.
-    manifest = load_extractor_manifest(_dump(tmp_path, _tool_manifest_dict(action="query_build_system")))
+    manifest = load_extractor_manifest(
+        _dump(tmp_path, _tool_manifest_dict(action="query_build_system"))
+    )
     pack_root = tmp_path / "pack"
     pack_root.mkdir()
     ctx = CollectionContext(allowed_actions={CollectionAction.INSPECT})
@@ -719,9 +841,16 @@ def test_external_extractor_blocked_by_action_ceiling(tmp_path):
 
 
 def test_discover_gates_on_action_ceiling(tmp_path):
-    manifest = load_extractor_manifest(_dump(tmp_path, _tool_manifest_dict(action="query_build_system")))
+    manifest = load_extractor_manifest(
+        _dump(tmp_path, _tool_manifest_dict(action="query_build_system"))
+    )
     ext = ExternalCliExtractor(manifest)
-    assert ext.discover(CollectionContext(allowed_actions={CollectionAction.INSPECT})).can_run is False
+    assert (
+        ext.discover(
+            CollectionContext(allowed_actions={CollectionAction.INSPECT})
+        ).can_run
+        is False
+    )
     permitted = {CollectionAction.INSPECT, CollectionAction.QUERY_BUILD_SYSTEM}
     assert ext.discover(CollectionContext(allowed_actions=permitted)).can_run is True
 
@@ -757,7 +886,11 @@ def test_external_extractor_records_nonzero_exit(tmp_path):
     data = {
         "name": "broken-tool",
         "commands": {"collect": [sys.executable, "-c", "import sys; sys.exit(3)"]},
-        "outputs": {"normalized": [{"kind": "build_evidence", "path": "build/build_evidence.json"}]},
+        "outputs": {
+            "normalized": [
+                {"kind": "build_evidence", "path": "build/build_evidence.json"}
+            ]
+        },
     }
     manifest = load_extractor_manifest(_dump(tmp_path, data))
     pack_root = tmp_path / "pack"
@@ -773,7 +906,11 @@ def test_external_extractor_missing_binary_is_failed_not_crash(tmp_path):
     data = {
         "name": "ghost-tool",
         "commands": {"collect": ["definitely-not-a-real-binary-xyz", "--go"]},
-        "outputs": {"normalized": [{"kind": "build_evidence", "path": "build/build_evidence.json"}]},
+        "outputs": {
+            "normalized": [
+                {"kind": "build_evidence", "path": "build/build_evidence.json"}
+            ]
+        },
     }
     manifest = load_extractor_manifest(_dump(tmp_path, data))
     pack_root = tmp_path / "pack"
@@ -789,7 +926,11 @@ def test_external_extractor_validation_failure(tmp_path):
     data = {
         "name": "no-output",
         "commands": {"collect": [sys.executable, "-c", "pass"]},
-        "outputs": {"normalized": [{"kind": "build_evidence", "path": "build/build_evidence.json"}]},
+        "outputs": {
+            "normalized": [
+                {"kind": "build_evidence", "path": "build/build_evidence.json"}
+            ]
+        },
     }
     manifest = load_extractor_manifest(_dump(tmp_path, data))
     pack_root = tmp_path / "pack"
@@ -805,7 +946,11 @@ def test_external_extractor_missing_input_is_failed_not_crash(tmp_path):
     data = {
         "name": "needs-build-dir",
         "commands": {"collect": [sys.executable, "-c", "pass", "{build_dir}"]},
-        "outputs": {"normalized": [{"kind": "build_evidence", "path": "build/build_evidence.json"}]},
+        "outputs": {
+            "normalized": [
+                {"kind": "build_evidence", "path": "build/build_evidence.json"}
+            ]
+        },
     }
     manifest = load_extractor_manifest(_dump(tmp_path, data))
     pack_root = tmp_path / "pack"
@@ -900,21 +1045,35 @@ def test_cli_registers_external_extractor_and_folds_build_evidence(tmp_path):
     # Build evidence was folded into the L3 merge, both in-memory and on disk.
     assert merged.compile_units
     data = json.loads((out / "manifest.json").read_text())
-    assert next(e for e in data["extractors"] if e["name"] == "cli-fake")["status"] == "ok"
-    assert json.loads((out / "build" / "build_evidence.json").read_text())["compile_units"]
+    assert (
+        next(e for e in data["extractors"] if e["name"] == "cli-fake")["status"] == "ok"
+    )
+    assert json.loads((out / "build" / "build_evidence.json").read_text())[
+        "compile_units"
+    ]
 
 
 def test_cli_action_ceiling_skips_in_permissive_mode(tmp_path):
-    manifest = _dump(tmp_path, _tool_manifest_dict(name="cli-fake", action="query_build_system"), name="q.yaml")
+    manifest = _dump(
+        tmp_path,
+        _tool_manifest_dict(name="cli-fake", action="query_build_system"),
+        name="q.yaml",
+    )
     out = tmp_path / "pack"
     # permissive: skipped, not fatal (no exception raised)
-    _pack, _merged, extractors = _run_collect(tmp_path, manifests=(manifest,), output=out)
+    _pack, _merged, extractors = _run_collect(
+        tmp_path, manifests=(manifest,), output=out
+    )
     rec = next(e for e in extractors if e.name == "cli-fake")
     assert rec.status == "skipped"
 
 
 def test_cli_action_ceiling_allowed_with_flag(tmp_path):
-    manifest = _dump(tmp_path, _tool_manifest_dict(name="cli-fake", action="query_build_system"), name="q2.yaml")
+    manifest = _dump(
+        tmp_path,
+        _tool_manifest_dict(name="cli-fake", action="query_build_system"),
+        name="q2.yaml",
+    )
     out = tmp_path / "pack"
     _pack, _merged, extractors = _run_collect(
         tmp_path, manifests=(manifest,), output=out, allow_build_query=True
@@ -936,12 +1095,18 @@ def test_cli_permissive_continues_on_failed_extractor(tmp_path):
     data = {
         "name": "cli-fail",
         "commands": {"collect": [sys.executable, "-c", "import sys; sys.exit(5)"]},
-        "outputs": {"normalized": [{"kind": "build_evidence", "path": "build/build_evidence.json"}]},
+        "outputs": {
+            "normalized": [
+                {"kind": "build_evidence", "path": "build/build_evidence.json"}
+            ]
+        },
     }
     manifest = _dump(tmp_path, data, name="fail.yaml")
     out = tmp_path / "pack"
     # permissive: failure is non-fatal (no exception raised)
-    _pack, _merged, extractors = _run_collect(tmp_path, manifests=(manifest,), output=out)
+    _pack, _merged, extractors = _run_collect(
+        tmp_path, manifests=(manifest,), output=out
+    )
     rec = next(e for e in extractors if e.name == "cli-fail")
     assert rec.status == "failed"
 
@@ -956,12 +1121,28 @@ def test_cli_malformed_build_evidence_is_failed_not_crash(tmp_path):
     )
     data = {
         "name": "cli-malformed",
-        "commands": {"collect": [sys.executable, "-c", bad_be, "{normalized_dir}/build_evidence.json"]},
-        "outputs": {"normalized": [{"kind": "build_evidence", "path": "normalized/cli-malformed/build_evidence.json"}]},
+        "commands": {
+            "collect": [
+                sys.executable,
+                "-c",
+                bad_be,
+                "{normalized_dir}/build_evidence.json",
+            ]
+        },
+        "outputs": {
+            "normalized": [
+                {
+                    "kind": "build_evidence",
+                    "path": "normalized/cli-malformed/build_evidence.json",
+                }
+            ]
+        },
     }
     manifest = _dump(tmp_path, data, name="malformed.yaml")
     out = tmp_path / "pack"
-    _pack, _merged, extractors = _run_collect(tmp_path, manifests=(manifest,), output=out)
+    _pack, _merged, extractors = _run_collect(
+        tmp_path, manifests=(manifest,), output=out
+    )
     rec = next(e for e in extractors if e.name == "cli-malformed")
     assert rec.status == "failed"
 
@@ -982,8 +1163,11 @@ def test_cli_malformed_later_output_merges_nothing(tmp_path):
         "name": "cli-multi",
         "commands": {
             "collect": [
-                sys.executable, "-c", script,
-                "{normalized_dir}/good.json", "{normalized_dir}/bad.json",
+                sys.executable,
+                "-c",
+                script,
+                "{normalized_dir}/good.json",
+                "{normalized_dir}/bad.json",
             ]
         },
         "outputs": {
@@ -995,7 +1179,9 @@ def test_cli_malformed_later_output_merges_nothing(tmp_path):
     }
     manifest = _dump(tmp_path, data, name="multi.yaml")
     out = tmp_path / "pack"
-    _pack, merged, extractors = _run_collect(tmp_path, manifests=(manifest,), output=out)
+    _pack, merged, extractors = _run_collect(
+        tmp_path, manifests=(manifest,), output=out
+    )
     rec = next(e for e in extractors if e.name == "cli-multi")
     assert rec.status == "failed"
     # The good output's evidence must not have leaked into the merged L3 facts.
@@ -1013,12 +1199,28 @@ def test_cli_non_object_build_evidence_is_failed_not_crash(tmp_path):
     )
     data = {
         "name": "cli-nonobj",
-        "commands": {"collect": [sys.executable, "-c", bad, "{normalized_dir}/build_evidence.json"]},
-        "outputs": {"normalized": [{"kind": "build_evidence", "path": "normalized/cli-nonobj/build_evidence.json"}]},
+        "commands": {
+            "collect": [
+                sys.executable,
+                "-c",
+                bad,
+                "{normalized_dir}/build_evidence.json",
+            ]
+        },
+        "outputs": {
+            "normalized": [
+                {
+                    "kind": "build_evidence",
+                    "path": "normalized/cli-nonobj/build_evidence.json",
+                }
+            ]
+        },
     }
     manifest = _dump(tmp_path, data, name="nonobj.yaml")
     out = tmp_path / "pack"
-    _pack, _merged, extractors = _run_collect(tmp_path, manifests=(manifest,), output=out)
+    _pack, _merged, extractors = _run_collect(
+        tmp_path, manifests=(manifest,), output=out
+    )
     rec = next(e for e in extractors if e.name == "cli-nonobj")
     assert rec.status == "failed"
 
@@ -1035,11 +1237,21 @@ def test_cli_source_root_placeholder_supplied(tmp_path):
         "name": "cli-srcroot",
         "commands": {
             "collect": [
-                sys.executable, "-c", script, "{source_root}",
+                sys.executable,
+                "-c",
+                script,
+                "{source_root}",
                 "{normalized_dir}/build_evidence.json",
             ]
         },
-        "outputs": {"normalized": [{"kind": "build_evidence", "path": "normalized/cli-srcroot/build_evidence.json"}]},
+        "outputs": {
+            "normalized": [
+                {
+                    "kind": "build_evidence",
+                    "path": "normalized/cli-srcroot/build_evidence.json",
+                }
+            ]
+        },
     }
     manifest = _dump(tmp_path, data, name="srcroot.yaml")
     src = tmp_path / "src"
@@ -1065,8 +1277,22 @@ def test_cli_failed_extractor_does_not_pollute_pack_artifacts(tmp_path):
     )
     data = {
         "name": "polluter",
-        "commands": {"collect": [sys.executable, "-c", bad, "{normalized_dir}/build_evidence.json"]},
-        "outputs": {"normalized": [{"kind": "build_evidence", "path": "normalized/polluter/build_evidence.json"}]},
+        "commands": {
+            "collect": [
+                sys.executable,
+                "-c",
+                bad,
+                "{normalized_dir}/build_evidence.json",
+            ]
+        },
+        "outputs": {
+            "normalized": [
+                {
+                    "kind": "build_evidence",
+                    "path": "normalized/polluter/build_evidence.json",
+                }
+            ]
+        },
     }
     manifest = _dump(tmp_path, data, name="poll.yaml")
     out = tmp_path / "pack"
@@ -1092,13 +1318,19 @@ def test_cli_unsupported_output_kind_is_failed(tmp_path):
     )
     data = {
         "name": "cli-l4",
-        "commands": {"collect": [sys.executable, "-c", script, "{normalized_dir}/sa.json"]},
-        "outputs": {"normalized": [{"kind": "source_abi", "path": "normalized/cli-l4/sa.json"}]},
+        "commands": {
+            "collect": [sys.executable, "-c", script, "{normalized_dir}/sa.json"]
+        },
+        "outputs": {
+            "normalized": [{"kind": "source_abi", "path": "normalized/cli-l4/sa.json"}]
+        },
     }
     manifest = _dump(tmp_path, data, name="l4.yaml")
     out = tmp_path / "pack"
     # permissive: recorded, not fatal (no exception raised)
-    _pack, _merged, extractors = _run_collect(tmp_path, manifests=(manifest,), output=out)
+    _pack, _merged, extractors = _run_collect(
+        tmp_path, manifests=(manifest,), output=out
+    )
     rec = next(e for e in extractors if e.name == "cli-l4")
     assert rec.status == "failed"
     assert "source_abi" in rec.detail
@@ -1116,9 +1348,21 @@ def test_ledger_command_covers_collect_and_normalize(tmp_path):
         "name": "ledger-2",
         "commands": {
             "collect": [sys.executable, "-c", raw_script, "{raw_dir}/r.bin"],
-            "normalize": [sys.executable, "-c", _write_be_script(), "{normalized_dir}/build_evidence.json"],
+            "normalize": [
+                sys.executable,
+                "-c",
+                _write_be_script(),
+                "{normalized_dir}/build_evidence.json",
+            ],
         },
-        "outputs": {"normalized": [{"kind": "build_evidence", "path": "normalized/ledger-2/build_evidence.json"}]},
+        "outputs": {
+            "normalized": [
+                {
+                    "kind": "build_evidence",
+                    "path": "normalized/ledger-2/build_evidence.json",
+                }
+            ]
+        },
     }
     manifest = load_extractor_manifest(_dump(tmp_path, data))
     pack_root = tmp_path / "pack"
@@ -1133,10 +1377,16 @@ def test_cli_strict_mode_fails_on_skipped_extractor(tmp_path):
     # strict mode the requested evidence is absent, so the run must fail (Codex P2).
     import click
 
-    manifest = _dump(tmp_path, _tool_manifest_dict(name="cli-gated", action="query_build_system"), name="gated.yaml")
+    manifest = _dump(
+        tmp_path,
+        _tool_manifest_dict(name="cli-gated", action="query_build_system"),
+        name="gated.yaml",
+    )
     out = tmp_path / "pack"
     with pytest.raises(click.ClickException, match="strict collection mode") as excinfo:
-        _run_collect(tmp_path, manifests=(manifest,), output=out, collection_mode="strict")
+        _run_collect(
+            tmp_path, manifests=(manifest,), output=out, collection_mode="strict"
+        )
     # `_enforce_strict_mode` is only reached (and only raises) *after* the pack
     # has already been written by `_run_collect` — the original CLI's ordering
     # (`pack_io.write(pack)` before `_enforce_strict_mode`) meant a strict failure never
@@ -1153,11 +1403,17 @@ def test_cli_strict_mode_fails_on_broken_extractor(tmp_path):
     data = {
         "name": "cli-broken",
         "commands": {"collect": [sys.executable, "-c", "import sys; sys.exit(2)"]},
-        "outputs": {"normalized": [{"kind": "build_evidence", "path": "build/build_evidence.json"}]},
+        "outputs": {
+            "normalized": [
+                {"kind": "build_evidence", "path": "build/build_evidence.json"}
+            ]
+        },
     }
     manifest = _dump(tmp_path, data, name="broken-cli.yaml")
     out = tmp_path / "pack"
     with pytest.raises(click.ClickException, match="strict collection mode") as excinfo:
-        _run_collect(tmp_path, manifests=(manifest,), output=out, collection_mode="strict")
+        _run_collect(
+            tmp_path, manifests=(manifest,), output=out, collection_mode="strict"
+        )
     assert (out / "manifest.json").is_file()
     assert "cli-broken" in str(excinfo.value)

@@ -332,8 +332,12 @@ class TestBundleArchiveWriterAtomicity:
             h = writer.put_blob(b'{"a": 1}')
             writer.write_manifest({"library_blobs": {"a.so": h}})
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="hard links behave differently on Windows")
-    def test_rejects_a_hard_linked_destination_before_any_write(self, tmp_path: Path) -> None:
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="hard links behave differently on Windows"
+    )
+    def test_rejects_a_hard_linked_destination_before_any_write(
+        self, tmp_path: Path
+    ) -> None:
         """Replacing just this one directory entry would silently
         desynchronize every other hard link from it, leaving them pointing
         at stale content while this call reports success (Codex review)."""
@@ -369,7 +373,9 @@ class TestBundleArchiveWriterAtomicity:
         assert list(tmp_path.glob("*.tmp-*")) == []
 
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file mode semantics")
-    def test_preserves_the_existing_destinations_file_mode(self, tmp_path: Path) -> None:
+    def test_preserves_the_existing_destinations_file_mode(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "bundle.archive.zip"
         with BundleArchiveWriter(path) as writer:
             h = writer.put_blob(b'{"a": 1}')
@@ -401,7 +407,9 @@ class TestBundleArchiveWriterAtomicity:
         def _clearing_fchown(fd: int, uid: int, gid: int) -> None:
             real_fchown(fd, uid, gid)
             current = stat.S_IMODE(os.fstat(fd).st_mode)
-            real_fchmod(fd, current & 0o777)  # simulate the kernel clearing setuid/setgid
+            real_fchmod(
+                fd, current & 0o777
+            )  # simulate the kernel clearing setuid/setgid
 
         monkeypatch.setattr(os, "fchown", _clearing_fchown)
 
@@ -522,7 +530,9 @@ class TestBundleArchiveReaderRejectsNonStoredMembers:
     deliberately -- ZIP_DEFLATED could expand to an arbitrary in-memory
     allocation before read_blob's zstd guard ever runs (Codex)."""
 
-    def test_read_manifest_rejects_a_deflated_manifest_member(self, tmp_path: Path) -> None:
+    def test_read_manifest_rejects_a_deflated_manifest_member(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "bundle.archive.zip"
         with zipfile.ZipFile(path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
             zf.writestr(MANIFEST_MEMBER, json.dumps({"library_blobs": {}}))
@@ -558,7 +568,10 @@ class TestBundleArchiveReaderRejectsNonStoredMembers:
             with pytest.raises(SnapshotError, match="safety limit"):
                 reader._read_stored_member(MANIFEST_MEMBER, max_bytes=1024)
             # Unbounded (large enough) read still succeeds for the same member.
-            assert reader._read_stored_member(MANIFEST_MEMBER, max_bytes=4096) == b"x" * 2048
+            assert (
+                reader._read_stored_member(MANIFEST_MEMBER, max_bytes=4096)
+                == b"x" * 2048
+            )
 
     def test_read_blob_rejects_a_stored_member_exceeding_max_decoded_bytes(
         self, tmp_path: Path
@@ -601,7 +614,9 @@ class TestBundleArchiveDeterminism:
         self._write(second)
         assert first.read_bytes() == second.read_bytes()
 
-    def test_member_timestamps_are_pinned_to_the_zip_epoch(self, tmp_path: Path) -> None:
+    def test_member_timestamps_are_pinned_to_the_zip_epoch(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "bundle.archive.zip"
         self._write(path)
         with zipfile.ZipFile(path) as zf:
@@ -671,7 +686,9 @@ class TestBundleArchiveReaderWrapsThirdPartyExceptions:
         with pytest.raises(SnapshotError, match="not a valid bundle archive"):
             BundleArchiveReader.open(path)
 
-    def test_a_non_zstd_blob_payload_raises_snapshot_error(self, tmp_path: Path) -> None:
+    def test_a_non_zstd_blob_payload_raises_snapshot_error(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "bundle.archive.zip"
         with BundleArchiveWriter(path) as writer:
             h = writer.put_blob(b'{"a": 1}')
@@ -731,7 +748,9 @@ class TestBundleArchiveReaderWrapsThirdPartyExceptions:
             with pytest.raises(SnapshotError, match="unsupported general-purpose flag"):
                 reader.read_blob(h)
 
-    def test_a_crc_mismatched_member_raises_snapshot_error(self, tmp_path: Path) -> None:
+    def test_a_crc_mismatched_member_raises_snapshot_error(
+        self, tmp_path: Path
+    ) -> None:
         """ZipExtFile's CRC-32 mismatch raises raw BadZipFile -- must be
         wrapped as SnapshotError like every other failure (Codex)."""
         import struct
@@ -1043,7 +1062,9 @@ class TestSniffDetectsAPrefixedArchive:
             if fp is not None:
                 fp.close()
 
-    def test_load_bundle_facts_default_auto_format_opens_it(self, tmp_path: Path) -> None:
+    def test_load_bundle_facts_default_auto_format_opens_it(
+        self, tmp_path: Path
+    ) -> None:
         """The real regression this guards against: `load_bundle_facts()`'s
         documented default (`format="auto"`) must succeed on a path the
         identical call with `format="archive"` already opens fine."""
@@ -1053,7 +1074,9 @@ class TestSniffDetectsAPrefixedArchive:
         facts = load_bundle_facts(path)  # format="auto" default
         assert facts.per_library_snapshots == {}
 
-    def test_a_genuine_json_file_is_still_classified_as_json(self, tmp_path: Path) -> None:
+    def test_a_genuine_json_file_is_still_classified_as_json(
+        self, tmp_path: Path
+    ) -> None:
         """Positive control: an ordinary JSON file, with no EOCD signature
         anywhere in its tail, must still classify as "json" -- the
         tail-scan fallback only widens what's *also* recognized as an
@@ -1099,13 +1122,18 @@ class TestSniffSkipsTailScanForRecognizedCompressionEnvelopes:
         si = b"AB"
         eocd_offset_in_file = len(header_prefix) + 2 + len(si) + 2
         comment_len = len(tail_after_header)
-        eocd = struct.pack(
-            "<IHHHHIIH", 0x06054B50, 0, 0, 0, 0, 0, 0, comment_len
-        )
+        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 0, 0, 0, comment_len)
         subfield = si + struct.pack("<H", len(eocd)) + eocd
-        data = header_prefix + struct.pack("<H", len(subfield)) + subfield + tail_after_header
+        data = (
+            header_prefix
+            + struct.pack("<H", len(subfield))
+            + subfield
+            + tail_after_header
+        )
         assert b"PK\x05\x06" in data  # premise: the coincidental match exists
-        assert eocd_offset_in_file + 22 + comment_len == len(data)  # premise: structurally "valid"
+        assert eocd_offset_in_file + 22 + comment_len == len(
+            data
+        )  # premise: structurally "valid"
         return data
 
     def test_looks_like_zip_from_tail_would_be_fooled_by_this_construction(

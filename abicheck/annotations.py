@@ -66,8 +66,7 @@ def _escape_annotation_value(value: str) -> str:
     in property values and messages.
     """
     return (
-        value
-        .replace("%", "%25")
+        value.replace("%", "%25")
         .replace("\r", "%0D")
         .replace("\n", "%0A")
         .replace(":", "%3A")
@@ -80,12 +79,7 @@ def _escape_annotation_data(data: str) -> str:
 
     The message (data portion after `::`) only needs newline escaping.
     """
-    return (
-        data
-        .replace("%", "%25")
-        .replace("\r", "%0D")
-        .replace("\n", "%0A")
-    )
+    return data.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
 def _truncate_message(message: str, max_length: int = _MAX_MESSAGE_LENGTH) -> str:
@@ -182,7 +176,11 @@ def _category_for_change_severity(
     from .severity import classify_effective_change
 
     return classify_effective_change(
-        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
+        change,
+        policy=policy,
+        kind_sets=kind_sets,
+        policy_file=policy_file,
+        today=today,
     )
 
 
@@ -429,12 +427,17 @@ def _collect_annotations_detailed(
             )
             continue
         category = _category_for_change_severity(
-            change, kind_sets,
-            policy=diff_result.policy, policy_file=diff_result.policy_file, today=today,
+            change,
+            kind_sets,
+            policy=diff_result.policy,
+            policy_file=diff_result.policy_file,
+            today=today,
         )
         if severity_config is not None:
             level = _annotation_level_for_category(
-                category, severity_config, annotate_additions,
+                category,
+                severity_config,
+                annotate_additions,
             )
         else:
             level = _legacy_level_for_category(category, annotate_additions)
@@ -442,11 +445,18 @@ def _collect_annotations_detailed(
             continue
 
         title = _title_for_change(
-            change.kind, breaking_set, api_break_set, risk_set, compatible_set,
+            change.kind,
+            breaking_set,
+            api_break_set,
+            risk_set,
+            compatible_set,
             category=category,
             effective_verdict=effective_verdict_for_change(
-                change, policy=diff_result.policy, kind_sets=kind_sets,
-                policy_file=diff_result.policy_file, today=today,
+                change,
+                policy=diff_result.policy,
+                kind_sets=kind_sets,
+                policy_file=diff_result.policy_file,
+                today=today,
             ),
         )
         line = _format_annotation(level, change, title, change.description)
@@ -506,7 +516,10 @@ def _collect_annotations_detailed(
             for label in getattr(diff_result, "scoped_missing_labels", ()) or ():
                 finding = missing_contract_finding(kind, label)
                 line = _format_annotation(
-                    missing_level, finding, title, finding.description,
+                    missing_level,
+                    finding,
+                    title,
+                    finding.description,
                 )
                 annotations.append(
                     (
@@ -595,7 +608,10 @@ def annotation_report_entries(
     it. ``always_visible`` is always True for ``error``/``warning``.
     """
     detailed = _collect_annotations_detailed(
-        diff_result, annotate_additions=True, severity_config=severity_config, today=today,
+        diff_result,
+        annotate_additions=True,
+        severity_config=severity_config,
+        today=today,
     )
     return [
         {
@@ -603,9 +619,7 @@ def annotation_report_entries(
             "annotation": line,
             "always_visible": always_visible,
         }
-        for sort_key, line, always_visible in sorted(
-            detailed, key=lambda item: item[0]
-        )
+        for sort_key, line, always_visible in sorted(detailed, key=lambda item: item[0])
     ]
 
 

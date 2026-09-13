@@ -40,9 +40,13 @@ def _dump(record_size: int = 8) -> dict:
         "source_file": "include/foo.h",
         "record_types": [
             {
-                "name": "Foo", "size": record_size, "linker_set_key": "_ZTI3Foo",
+                "name": "Foo",
+                "size": record_size,
+                "linker_set_key": "_ZTI3Foo",
                 "source_file": "include/foo.h",
-                "fields": [{"field_name": "a", "referenced_type": "int", "field_offset": 0}],
+                "fields": [
+                    {"field_name": "a", "referenced_type": "int", "field_offset": 0}
+                ],
             }
         ],
         "enum_types": [
@@ -50,8 +54,10 @@ def _dump(record_size: int = 8) -> dict:
         ],
         "functions": [
             {
-                "function_name": "foo", "linker_set_key": "_Z3foov",
-                "return_type": "void", "parameters": [{"referenced_type": "int"}],
+                "function_name": "foo",
+                "linker_set_key": "_Z3foov",
+                "return_type": "void",
+                "parameters": [{"referenced_type": "int"}],
             }
         ],
         "global_vars": [{"name": "g", "linker_set_key": "g", "referenced_type": "int"}],
@@ -61,8 +67,13 @@ def _dump(record_size: int = 8) -> dict:
 def test_parse_routes_entities_to_buckets() -> None:
     tu = parse_android_dump(_dump(), target_id="target://libfoo")
     assert tu.extractor["name"] == "android-header-abi"
-    assert {(e.qualified_name, e.kind) for e in tu.types} == {("Foo", "record"), ("E", "enum")}
-    assert [(e.qualified_name, e.mangled_name) for e in tu.functions] == [("foo", "_Z3foov")]
+    assert {(e.qualified_name, e.kind) for e in tu.types} == {
+        ("Foo", "record"),
+        ("E", "enum"),
+    }
+    assert [(e.qualified_name, e.mangled_name) for e in tu.functions] == [
+        ("foo", "_Z3foov")
+    ]
     assert [e.qualified_name for e in tu.variables] == ["g"]
     # Android emits no inline/template bodies or macros (clang's job, phase 5).
     assert tu.inline_bodies == [] and tu.templates == [] and tu.macros == []

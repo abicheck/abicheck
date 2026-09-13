@@ -19,6 +19,7 @@ G3 status: CLOSED (2026-03-08).
 
 Requires: abidiff (libabigail-tools), gcc/g++, castxml.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -51,7 +52,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "int add(int a, int b) { return a + b; }",
         "int add(int a, int b);\nint sub(int a, int b);",
         "int add(int a, int b);",
-        "c", "BREAKING", "BREAKING", "parity",
+        "c",
+        "BREAKING",
+        "BREAKING",
+        "parity",
     ),
     (
         "fn_added",
@@ -59,7 +63,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "int add(int a, int b) { return a + b; }\nint mul(int a, int b) { return a*b; }",
         "int add(int a, int b);",
         "int add(int a, int b);\nint mul(int a, int b);",
-        "c", "COMPATIBLE", "COMPATIBLE", "parity",
+        "c",
+        "COMPATIBLE",
+        "COMPATIBLE",
+        "parity",
     ),
     # ELF-only fallback: hdr=None explicitly guards the headers=[] code path.
     (
@@ -68,7 +75,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "int add(int a, int b) { return a + b; }",
         None,
         None,
-        "c", "NO_CHANGE", "NO_CHANGE", "parity",
+        "c",
+        "NO_CHANGE",
+        "NO_CHANGE",
+        "parity",
     ),
     (
         "visibility_hidden",
@@ -80,7 +90,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         '__attribute__((visibility("default"))) int api();',
         '__attribute__((visibility("hidden")))  int helper();\n'
         '__attribute__((visibility("default"))) int api();',
-        "c", "BREAKING", "BREAKING", "parity",
+        "c",
+        "BREAKING",
+        "BREAKING",
+        "parity",
     ),
     # ── G3 CLOSED: vtable_reorder — both tools agree ──────────────────────
     (
@@ -99,7 +112,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "Base* make();",
         "struct Base { virtual int bar(); virtual int foo(); virtual ~Base(); };\n"
         "Base* make();",
-        "cpp", "BREAKING", "BREAKING", "parity",
+        "cpp",
+        "BREAKING",
+        "BREAKING",
+        "parity",
     ),
     # ── G3 CLOSED: return_type — abicheck correct, abidiff conservative ───
     # abidiff without --headers-dir sees only sub-type drift → COMPATIBLE.
@@ -110,7 +126,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "long get_val(void) { return 42; }",
         "int  get_val(void);",
         "long get_val(void);",
-        "c", "BREAKING", "COMPATIBLE", "correct",
+        "c",
+        "BREAKING",
+        "COMPATIBLE",
+        "correct",
     ),
     # ── G3 CLOSED: param_type — same reasoning as return_type ────────────
     (
@@ -119,7 +138,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "void set_val(long x) {}",
         "void set_val(int  x);",
         "void set_val(long x);",
-        "c", "BREAKING", "COMPATIBLE", "correct",
+        "c",
+        "BREAKING",
+        "COMPATIBLE",
+        "correct",
     ),
     # ── Intentional divergence: struct_size ──────────────────────────────
     # abicheck BREAKING (correct). abidiff COMPATIBLE without --headers-dir.
@@ -131,7 +153,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "Point make_point(int x) { Point p = {x, 0}; return p; }",
         "typedef struct { int x; } Point;\nPoint make_point(int x);",
         "typedef struct { int x; int y; } Point;\nPoint make_point(int x);",
-        "c", "BREAKING", "COMPATIBLE", "divergence",
+        "c",
+        "BREAKING",
+        "COMPATIBLE",
+        "divergence",
     ),
     # ── Intentional divergence: enum_value (abicheck more conservative) ──
     (
@@ -142,7 +167,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "Color get_color(void) { return RED; }",
         "typedef enum { RED=0, GREEN=1, BLUE=2 } Color;\nColor get_color(void);",
         "typedef enum { RED=0, GREEN=10, BLUE=2 } Color;\nColor get_color(void);",
-        "c", "BREAKING", "COMPATIBLE", "divergence",
+        "c",
+        "BREAKING",
+        "COMPATIBLE",
+        "divergence",
     ),
 ]
 
@@ -155,13 +183,22 @@ _DIVERGE = [c for c in PARITY_CASES if c[8] == "divergence"]
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _compile_so(src: str, out: Path, lang: str) -> None:
     ext = ".c" if lang == "c" else ".cpp"
     src_file = out.with_suffix(ext)
     src_file.write_text(textwrap.dedent(src).strip(), encoding="utf-8")
     compiler = "gcc" if lang == "c" else "g++"
-    cmd = [compiler, "-shared", "-fPIC", "-g", "-fvisibility=default",
-           "-o", str(out), str(src_file)]
+    cmd = [
+        compiler,
+        "-shared",
+        "-fPIC",
+        "-g",
+        "-fvisibility=default",
+        "-o",
+        str(out),
+        str(src_file),
+    ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     if r.returncode != 0:
         pytest.skip(f"Compilation failed: {r.stderr[:200]}")
@@ -220,15 +257,21 @@ def _run_abidiff(old: Path, new: Path) -> str:
     """
     r = subprocess.run(
         ["abidiff", "--no-show-locs", str(old), str(new)],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     return decode_exit_code(r.returncode, zero_verdict="NO_CHANGE")
 
 
 def _setup(
-    name: str, src_v1: str, src_v2: str,
-    hdr_v1: str | None, hdr_v2: str | None,
-    lang: str, tmp_path: Path,
+    name: str,
+    src_v1: str,
+    src_v2: str,
+    hdr_v1: str | None,
+    hdr_v2: str | None,
+    lang: str,
+    tmp_path: Path,
 ) -> tuple[str, str]:
     """Compile .so files, run both tools, return (ac, ab)."""
     _require_tool("abidiff")
@@ -250,15 +293,24 @@ def _setup(
 # Test classes
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.libabigail
 @pytest.mark.parametrize(
     "name,src_v1,src_v2,hdr_v1,hdr_v2,lang,abicheck_exp,abidiff_exp,_",
-    _CONFIRMED, ids=[c[0] for c in _CONFIRMED],
+    _CONFIRMED,
+    ids=[c[0] for c in _CONFIRMED],
 )
 def test_confirmed_parity(
-    name: str, src_v1: str, src_v2: str,
-    hdr_v1: str | None, hdr_v2: str | None, lang: str,
-    abicheck_exp: str, abidiff_exp: str, _: str, tmp_path: Path,
+    name: str,
+    src_v1: str,
+    src_v2: str,
+    hdr_v1: str | None,
+    hdr_v2: str | None,
+    lang: str,
+    abicheck_exp: str,
+    abidiff_exp: str,
+    _: str,
+    tmp_path: Path,
 ) -> None:
     """Both tools must agree on verdict — full parity enforced."""
     ac, ab = _setup(name, src_v1, src_v2, hdr_v1, hdr_v2, lang, tmp_path)
@@ -270,12 +322,20 @@ def test_confirmed_parity(
 @pytest.mark.libabigail
 @pytest.mark.parametrize(
     "name,src_v1,src_v2,hdr_v1,hdr_v2,lang,abicheck_exp,abidiff_exp,_",
-    _CORRECT, ids=[c[0] for c in _CORRECT],
+    _CORRECT,
+    ids=[c[0] for c in _CORRECT],
 )
 def test_abicheck_correct(
-    name: str, src_v1: str, src_v2: str,
-    hdr_v1: str | None, hdr_v2: str | None, lang: str,
-    abicheck_exp: str, abidiff_exp: str, _: str, tmp_path: Path,
+    name: str,
+    src_v1: str,
+    src_v2: str,
+    hdr_v1: str | None,
+    hdr_v2: str | None,
+    lang: str,
+    abicheck_exp: str,
+    abidiff_exp: str,
+    _: str,
+    tmp_path: Path,
 ) -> None:
     """G3 closed cases: abicheck detects the ABI break; abidiff is conservative.
 
@@ -298,12 +358,20 @@ def test_abicheck_correct(
 @pytest.mark.libabigail
 @pytest.mark.parametrize(
     "name,src_v1,src_v2,hdr_v1,hdr_v2,lang,abicheck_exp,abidiff_exp,_",
-    _DIVERGE, ids=[c[0] for c in _DIVERGE],
+    _DIVERGE,
+    ids=[c[0] for c in _DIVERGE],
 )
 def test_known_divergence(
-    name: str, src_v1: str, src_v2: str,
-    hdr_v1: str | None, hdr_v2: str | None, lang: str,
-    abicheck_exp: str, abidiff_exp: str, _: str, tmp_path: Path,
+    name: str,
+    src_v1: str,
+    src_v2: str,
+    hdr_v1: str | None,
+    hdr_v2: str | None,
+    lang: str,
+    abicheck_exp: str,
+    abidiff_exp: str,
+    _: str,
+    tmp_path: Path,
 ) -> None:
     """Intentional stable divergences. Fails if pattern changes unexpectedly."""
     ac, ab = _setup(name, src_v1, src_v2, hdr_v1, hdr_v2, lang, tmp_path)
@@ -315,10 +383,8 @@ def test_known_divergence(
         )
 
     assert ac == abicheck_exp, (
-        f"abicheck changed unexpectedly on '{name}': "
-        f"expected {abicheck_exp}, got {ac}"
+        f"abicheck changed unexpectedly on '{name}': expected {abicheck_exp}, got {ac}"
     )
     assert ab == abidiff_exp, (
-        f"abidiff changed unexpectedly on '{name}': "
-        f"expected {abidiff_exp}, got {ab}"
+        f"abidiff changed unexpectedly on '{name}': expected {abidiff_exp}, got {ab}"
     )

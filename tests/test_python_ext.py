@@ -1169,8 +1169,12 @@ def test_multiple_pyinit_exports_pick_deterministic_module() -> None:
     the identical binary when more than one `PyInit_*` export is present."""
     elf = ElfMetadata()
     elf.symbols = [
-        ElfSymbol(name="PyInit_zzz", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC),
-        ElfSymbol(name="PyInit_aaa", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC),
+        ElfSymbol(
+            name="PyInit_zzz", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC
+        ),
+        ElfSymbol(
+            name="PyInit_aaa", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC
+        ),
     ]
     snap = AbiSnapshot(library="multi.so", version="1", elf=elf, source_path="multi.so")
     results = {detect_python_extension(snap).module_name for _ in range(5)}

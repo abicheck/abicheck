@@ -375,8 +375,8 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             compare_policy_mod,
             "compare_snapshots",
-            lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: _diff(
-                "libcore.so", verdict=Verdict.NO_CHANGE
+            lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: (
+                _diff("libcore.so", verdict=Verdict.NO_CHANGE)
             ),
         )
 
@@ -492,7 +492,9 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
             captured["policy_file"] = policy_file
             return _diff("libcore.so", verdict=Verdict.NO_CHANGE)
 
-        monkeypatch.setattr(compare_policy_mod, "compare_snapshots", _fake_compare_snapshots)
+        monkeypatch.setattr(
+            compare_policy_mod, "compare_snapshots", _fake_compare_snapshots
+        )
 
         # Omitted: unchanged behavior, None reaches the per-library call.
         compare_release_against_bundle_facts(facts_path, new_dir)
@@ -548,7 +550,9 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
             captured["suppress"] = suppress
             return _diff("libcore.so", verdict=Verdict.NO_CHANGE)
 
-        monkeypatch.setattr(compare_policy_mod, "compare_snapshots", _fake_compare_snapshots)
+        monkeypatch.setattr(
+            compare_policy_mod, "compare_snapshots", _fake_compare_snapshots
+        )
 
         # Omitted: unchanged behavior, None reaches the per-library call.
         compare_release_against_bundle_facts(facts_path, new_dir)
@@ -597,8 +601,8 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             compare_policy_mod,
             "compare_snapshots",
-            lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: _diff(
-                "libcore.so", verdict=Verdict.NO_CHANGE
+            lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: (
+                _diff("libcore.so", verdict=Verdict.NO_CHANGE)
             ),
         )
 
@@ -746,8 +750,8 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             compare_policy_mod,
             "compare_snapshots",
-            lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: _diff(
-                "libcore.so", verdict=Verdict.NO_CHANGE
+            lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: (
+                _diff("libcore.so", verdict=Verdict.NO_CHANGE)
             ),
         )
 
@@ -794,8 +798,8 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             compare_policy_mod,
             "compare_snapshots",
-            lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: _diff(
-                "libcore.so", verdict=Verdict.NO_CHANGE
+            lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: (
+                _diff("libcore.so", verdict=Verdict.NO_CHANGE)
             ),
         )
 
@@ -860,8 +864,8 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             compare_policy_mod,
             "compare_snapshots",
-            lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: _diff(
-                new.library, verdict=Verdict.NO_CHANGE
+            lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: (
+                _diff(new.library, verdict=Verdict.NO_CHANGE)
             ),
         )
 
@@ -949,7 +953,9 @@ class TestSurfaceMetricsReachesLiveBundleFactsDriver:
             seen_kwargs.append(dict(kwargs))
             return real_compare_snapshots(old, new, *args, **kwargs)
 
-        monkeypatch.setattr(compare_policy_mod, "compare_snapshots", _spy_compare_snapshots)
+        monkeypatch.setattr(
+            compare_policy_mod, "compare_snapshots", _spy_compare_snapshots
+        )
 
         compare_release_against_bundle_facts(facts_path, new_dir)
 
@@ -972,13 +978,17 @@ class TestSurfaceMetricsReachesLiveBundleFactsDriver:
             elf=_meta(soname="libcore.so", exports=["core_fn"]),
             functions=[
                 Function(
-                    name="core_fn", mangled="core_fn", return_type="int",
+                    name="core_fn",
+                    mangled="core_fn",
+                    return_type="int",
                     visibility=Visibility.PUBLIC,
                 )
             ],
         )
         facts_path = tmp_path / "old.bundlefacts.json"
-        save_bundle_facts(capture_bundle_facts({"libcore.so": old_snapshot}), facts_path)
+        save_bundle_facts(
+            capture_bundle_facts({"libcore.so": old_snapshot}), facts_path
+        )
 
         new_dir = tmp_path / "new"
         new_dir.mkdir()
@@ -999,11 +1009,15 @@ class TestSurfaceMetricsReachesLiveBundleFactsDriver:
                 elf=_meta(soname="libcore.so", exports=["core_fn", "new_fn"]),
                 functions=[
                     Function(
-                        name="core_fn", mangled="core_fn", return_type="int",
+                        name="core_fn",
+                        mangled="core_fn",
+                        return_type="int",
                         visibility=Visibility.PUBLIC,
                     ),
                     Function(
-                        name="new_fn", mangled="new_fn", return_type="int",
+                        name="new_fn",
+                        mangled="new_fn",
+                        return_type="int",
                         visibility=Visibility.PUBLIC,
                     ),
                 ],
@@ -1143,7 +1157,11 @@ class TestCompareReleaseAgainstBundleFactsEnvMatrix:
             symbols=[ElfSymbol(name="core_fn", visibility="default")],
         )
         facts = capture_bundle_facts(
-            {"libcore.so": AbiSnapshot(library="libcore.so", version="old", elf=old_elf)}
+            {
+                "libcore.so": AbiSnapshot(
+                    library="libcore.so", version="old", elf=old_elf
+                )
+            }
         )
         facts_path = tmp_path / "old.bundlefacts.json"
         save_bundle_facts(facts, facts_path)

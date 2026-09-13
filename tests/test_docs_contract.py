@@ -1805,5 +1805,3 @@ def test_a_backlink_inside_an_indented_example_is_not_navigable(
     page = tmp_path / "frag.md"
     page.write_text(body, encoding="utf-8")
     assert dc._page_links_to(page, "learn/owner.md") is counts
-
-

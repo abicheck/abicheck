@@ -700,7 +700,9 @@ class TestUnitTestsPerPlatformTimeout:
     @staticmethod
     def _unit_tests_job() -> dict[str, Any]:
         yaml = pytest.importorskip("yaml")
-        data = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+        data = yaml.safe_load(
+            (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        )
         return dict(data["jobs"]["unit-tests"])
 
     @classmethod

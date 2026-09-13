@@ -1,4 +1,5 @@
 """Additional unit tests for abicheck.package — RPM extraction, zstd tar, build-ID resolution."""
+
 from __future__ import annotations
 
 import subprocess
@@ -27,11 +28,15 @@ class TestRpmExtractionTimeout:
 
     @patch("shutil.which", side_effect=lambda cmd: f"/usr/bin/{cmd}")
     @patch("subprocess.Popen")
-    def test_cpio_communicate_timeout_kills_both(self, mock_popen, _mock_which, tmp_path):
+    def test_cpio_communicate_timeout_kills_both(
+        self, mock_popen, _mock_which, tmp_path
+    ):
         rpm2cpio_proc = MagicMock()
         rpm2cpio_proc.stdout = MagicMock()
         cpio_proc = MagicMock()
-        cpio_proc.communicate.side_effect = subprocess.TimeoutExpired(cmd="cpio", timeout=120)
+        cpio_proc.communicate.side_effect = subprocess.TimeoutExpired(
+            cmd="cpio", timeout=120
+        )
 
         mock_popen.side_effect = [rpm2cpio_proc, cpio_proc]
 
@@ -98,7 +103,9 @@ class TestRpmExtractionFailures:
 
         mock_popen.side_effect = [rpm2cpio_proc, cpio_proc]
 
-        with pytest.raises(RuntimeError, match="cpio extraction failed: cpio: bad magic"):
+        with pytest.raises(
+            RuntimeError, match="cpio extraction failed: cpio: bad magic"
+        ):
             RpmExtractor._rpm_extract(tmp_path / "pkg.rpm", tmp_path)
 
 
@@ -180,6 +187,7 @@ class TestZstTarSecurityChecks:
             class FakeReader:
                 def __enter__(self_):
                     return stream
+
                 def __exit__(self_, *args):
                     pass
 
@@ -296,7 +304,9 @@ class TestZstNotAvailable:
 
 def _import_blocker(blocked_name: str):
     """Return an __import__ side_effect that blocks one module."""
-    real_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+    real_import = (
+        __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+    )
 
     def _blocker(name, *args, **kwargs):
         if name == blocked_name:

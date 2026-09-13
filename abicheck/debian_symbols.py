@@ -32,6 +32,7 @@ Limitations:
   - ``(regex)`` and ``(symver)`` pattern-matching tags are not evaluated.
   - ``(arch=...)`` tags are parsed but not filtered (no ``--arch`` option yet).
 """
+
 from __future__ import annotations
 
 import logging
@@ -59,9 +60,10 @@ _TAG_RE = re.compile(r"^\(([^)]+)\)")
 @dataclass
 class DebianSymbolEntry:
     """One symbol line in a Debian symbols file."""
-    name: str               # symbol name (mangled or demangled with quotes)
-    version_node: str       # "Base" or a version node like "LIBFOO_1.0"
-    min_version: str        # minimum package version where this symbol appeared
+
+    name: str  # symbol name (mangled or demangled with quotes)
+    version_node: str  # "Base" or a version node like "LIBFOO_1.0"
+    min_version: str  # minimum package version where this symbol appeared
     # Raw tag groups exactly as parsed, e.g. [["c++", "optional"], ["arch=amd64"]].
     # Each inner list is one parenthesised group; pipe-separated values stay together.
     tag_groups: list[list[str]] = field(default_factory=list)
@@ -85,9 +87,7 @@ class DebianSymbolEntry:
         Preserves the original tag grouping so that ``(c++|optional)``
         round-trips correctly instead of being split into ``(c++)(optional)``.
         """
-        tag_prefix = "".join(
-            "(" + "|".join(group) + ")" for group in self.tag_groups
-        )
+        tag_prefix = "".join("(" + "|".join(group) + ")" for group in self.tag_groups)
         if self.is_cpp:
             return f'{tag_prefix}"{self.name}@{self.version_node}" {self.min_version}'
         return f"{tag_prefix}{self.name}@{self.version_node} {self.min_version}"
@@ -96,9 +96,10 @@ class DebianSymbolEntry:
 @dataclass
 class DebianSymbolsFile:
     """Parsed Debian symbols file."""
-    library: str            # SONAME, e.g. "libfoo.so.1"
-    package: str            # package name, e.g. "libfoo1"
-    min_version: str        # #MINVER# or a version string
+
+    library: str  # SONAME, e.g. "libfoo.so.1"
+    package: str  # package name, e.g. "libfoo1"
+    min_version: str  # #MINVER# or a version string
     symbols: list[DebianSymbolEntry] = field(default_factory=list)
 
     def format(self) -> str:
@@ -112,6 +113,7 @@ class DebianSymbolsFile:
 @dataclass
 class ValidationResult:
     """Result of validating a symbols file against a binary."""
+
     library: str
     missing: list[DebianSymbolEntry] = field(default_factory=list)
     new_symbols: list[str] = field(default_factory=list)  # "name@version_node"
@@ -125,6 +127,7 @@ class ValidationResult:
 @dataclass
 class SymbolsDiff:
     """Diff between two Debian symbols files."""
+
     added: list[DebianSymbolEntry] = field(default_factory=list)
     removed: list[DebianSymbolEntry] = field(default_factory=list)
     version_changed: list[tuple[DebianSymbolEntry, DebianSymbolEntry]] = field(
@@ -135,6 +138,7 @@ class SymbolsDiff:
 # ---------------------------------------------------------------------------
 # Parsing
 # ---------------------------------------------------------------------------
+
 
 def parse_symbols_file(text: str) -> DebianSymbolsFile:
     """Parse a Debian symbols file from its text content.
@@ -189,7 +193,7 @@ def _parse_symbol_line(line: str, lineno: int) -> DebianSymbolEntry | None:
         tag_content = m.group(1)
         group = [t.strip() for t in tag_content.split("|")]
         tag_groups.append(group)
-        rest = rest[m.end():]
+        rest = rest[m.end() :]
 
     flat_tags = [t for g in tag_groups for t in g]
     is_cpp = "c++" in flat_tags
@@ -207,14 +211,14 @@ def _parse_symbol_line(line: str, lineno: int) -> DebianSymbolEntry | None:
             _log.warning("Line %d: unterminated quote: %s", lineno, line)
             return None
         quoted = rest[1:end_quote]
-        remainder = rest[end_quote + 1:].strip()
+        remainder = rest[end_quote + 1 :].strip()
         # quoted = "foo::bar()@Base"
         at_idx = quoted.rfind("@")
         if at_idx == -1:
             _log.warning("Line %d: missing @version in quoted symbol: %s", lineno, line)
             return None
         name = quoted[:at_idx]
-        version_node = quoted[at_idx + 1:]
+        version_node = quoted[at_idx + 1 :]
         min_version = remainder if remainder else ""
     else:
         # Non-C++ form: mangled_name@VersionNode min_version
@@ -228,7 +232,7 @@ def _parse_symbol_line(line: str, lineno: int) -> DebianSymbolEntry | None:
             _log.warning("Line %d: missing @version: %s", lineno, line)
             return None
         name = sym_ver[:at_idx]
-        version_node = sym_ver[at_idx + 1:]
+        version_node = sym_ver[at_idx + 1 :]
 
     return DebianSymbolEntry(
         name=name,
@@ -265,6 +269,7 @@ def load_symbols_file(path: Path) -> DebianSymbolsFile:
 # ---------------------------------------------------------------------------
 # Generation
 # ---------------------------------------------------------------------------
+
 
 def _symbol_version_node(sym: ElfSymbol) -> str:
     """Determine the version node for a symbol.
@@ -323,12 +328,14 @@ def generate_symbols_file(
                 tag_groups.append(["c++"])
                 name = demangled
 
-        result.symbols.append(DebianSymbolEntry(
-            name=name,
-            version_node=ver_node,
-            min_version=version,
-            tag_groups=tag_groups,
-        ))
+        result.symbols.append(
+            DebianSymbolEntry(
+                name=name,
+                version_node=ver_node,
+                min_version=version,
+                tag_groups=tag_groups,
+            )
+        )
 
     return result
 
@@ -369,7 +376,7 @@ def _soname_to_package(soname: str) -> str:
         return base
 
     lib_base = base[:so_idx]
-    version_part = base[so_idx + 3:]  # ".1" or ".2.3" or ""
+    version_part = base[so_idx + 3 :]  # ".1" or ".2.3" or ""
 
     if version_part.startswith("."):
         # Extract major version number
@@ -385,6 +392,7 @@ def _soname_to_package(soname: str) -> str:
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
+
 
 def validate_symbols(
     elf_meta: ElfMetadata,
@@ -434,7 +442,9 @@ def validate_symbols(
             _try_match(entry, binary_syms, demangled_to_mangled, matched_binary_keys)
             continue
 
-        if not _try_match(entry, binary_syms, demangled_to_mangled, matched_binary_keys):
+        if not _try_match(
+            entry, binary_syms, demangled_to_mangled, matched_binary_keys
+        ):
             result.missing.append(entry)
 
     # Find new symbols (in binary but not in symbols file)
@@ -515,6 +525,7 @@ def format_validation_report(result: ValidationResult) -> str:
 # Diff
 # ---------------------------------------------------------------------------
 
+
 def diff_symbols_files(
     old: DebianSymbolsFile,
     new: DebianSymbolsFile,
@@ -532,9 +543,7 @@ def diff_symbols_files(
     def _key(entry: DebianSymbolEntry) -> str:
         # Include tags so (arch=amd64)foo@Base and (arch=arm64)foo@Base
         # are tracked as distinct entries.
-        tag_str = "".join(
-            "(" + "|".join(g) + ")" for g in entry.tag_groups
-        )
+        tag_str = "".join("(" + "|".join(g) + ")" for g in entry.tag_groups)
         return f"{tag_str}{entry.name}@{entry.version_node}"
 
     old_by_key: dict[str, DebianSymbolEntry] = {}

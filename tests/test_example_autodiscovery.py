@@ -20,6 +20,7 @@ compilation otherwise.
 
 Marked `@pytest.mark.integration` — requires a C/C++ compiler + castxml in PATH.
 """
+
 from __future__ import annotations
 
 import os
@@ -60,7 +61,9 @@ def _current_platform() -> str:
         return "windows"
     return sys.platform
 
+
 CURRENT_PLATFORM = _current_platform()
+
 
 def _current_architecture() -> str:
     """Return a normalized architecture tag for ground_truth.json."""
@@ -71,7 +74,9 @@ def _current_architecture() -> str:
         return "aarch64"
     return machine
 
+
 CURRENT_ARCHITECTURE = _current_architecture()
+
 
 def _shared_lib_suffix() -> str:
     """Return the shared library file extension for the current platform."""
@@ -80,6 +85,7 @@ def _shared_lib_suffix() -> str:
     if sys.platform == "win32":
         return ".dll"
     return ".so"
+
 
 SHARED_LIB_SUFFIX = _shared_lib_suffix()
 
@@ -100,9 +106,7 @@ PLATFORMS: dict[str, list[str]] = {
 }
 # known_gap: case_name → xfail reason (sourced from ground_truth.json)
 KNOWN_GAPS: dict[str, str] = {
-    k: v["known_gap"]
-    for k, v in _gt_data["verdicts"].items()
-    if "known_gap" in v
+    k: v["known_gap"] for k, v in _gt_data["verdicts"].items() if "known_gap" in v
 }
 # known_gap_toolchains: case_name → toolchain families the gap applies to.
 # When set, the gap only xfails under those producers; on any other producer a
@@ -162,8 +166,7 @@ SCOPE_PUBLIC_HEADERS: dict[str, bool] = {
 # ADR-027 pattern-aware verdicts enabled (opt-in analysis mode); the case's
 # expected verdict depends on an idiom/anti-pattern finding.
 PATTERN_VERDICTS: dict[str, bool] = {
-    k: bool(v.get("pattern_analysis", False))
-    for k, v in _gt_data["verdicts"].items()
+    k: bool(v.get("pattern_analysis", False)) for k, v in _gt_data["verdicts"].items()
 }
 # build_info: cases that ship per-side compile_commands.json and assert an L3
 # build-evidence finding (a runtime-model flip). This pipeline validates via the
@@ -368,12 +371,30 @@ def _compile_shared(src: Path, out: Path) -> None:
         # MSVC
         args = [compiler, "/LD", "/Zi", "/Fe:" + str(out), str(src)]
     elif sys.platform == "darwin":
-        args = [compiler, "-dynamiclib", "-g", "-Og", "-fvisibility=default",
-                "-install_name", "@rpath/lib.dylib",
-                "-o", str(out), str(src)]
+        args = [
+            compiler,
+            "-dynamiclib",
+            "-g",
+            "-Og",
+            "-fvisibility=default",
+            "-install_name",
+            "@rpath/lib.dylib",
+            "-o",
+            str(out),
+            str(src),
+        ]
     else:
-        args = [compiler, "-shared", "-fPIC", "-g", "-Og", "-fvisibility=default",
-                "-o", str(out), str(src)]
+        args = [
+            compiler,
+            "-shared",
+            "-fPIC",
+            "-g",
+            "-Og",
+            "-fvisibility=default",
+            "-o",
+            str(out),
+            str(src),
+        ]
 
     r = subprocess.run(args, capture_output=True, text=True)
     if r.returncode != 0:
@@ -410,9 +431,17 @@ def _build_with_cmake(
     # the project root and each case directory.
     if not already_configured:
         r = subprocess.run(
-            [cmake, "-S", str(example_catalog.CATALOG_DIR), "-B", str(build_dir),
-             "-DCMAKE_BUILD_TYPE=Debug"],
-            capture_output=True, text=True, timeout=60,
+            [
+                cmake,
+                "-S",
+                str(example_catalog.CATALOG_DIR),
+                "-B",
+                str(build_dir),
+                "-DCMAKE_BUILD_TYPE=Debug",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         if r.returncode != 0:
             pytest.fail(
@@ -426,19 +455,33 @@ def _build_with_cmake(
     # .ninja_log, CMakeCache reads) which can be flaky on Windows/NTFS.
     v1_target = f"{case_name}_v1"
     v2_target = f"{case_name}_v2"
-    build_cmd = [cmake, "--build", str(build_dir), "--target", v1_target,
-                 v2_target, "--config", "Debug"]
+    build_cmd = [
+        cmake,
+        "--build",
+        str(build_dir),
+        "--target",
+        v1_target,
+        v2_target,
+        "--config",
+        "Debug",
+    ]
 
     is_xdist = os.environ.get("PYTEST_XDIST_WORKER") is not None
     if is_xdist and already_configured and _filelock is not None:
         lock_path = build_dir.parent / "cmake_build.lock"
         with _filelock.FileLock(str(lock_path), timeout=300):
             r = subprocess.run(
-                build_cmd, capture_output=True, text=True, timeout=120,
+                build_cmd,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
     else:
         r = subprocess.run(
-            build_cmd, capture_output=True, text=True, timeout=120,
+            build_cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
     if r.returncode != 0:
         pytest.fail(
@@ -554,6 +597,7 @@ def _collect_cases() -> list[tuple[str, str | None]]:
 
 _ALL_CASES = _collect_cases()
 
+
 # ---------------------------------------------------------------------------
 # Parametrized integration test
 # ---------------------------------------------------------------------------
@@ -575,7 +619,9 @@ def _build_via_cmake(
 
     if shared_cmake_build_dir is not None:
         return _build_with_cmake(
-            case_dir, shared_cmake_build_dir, already_configured=True,
+            case_dir,
+            shared_cmake_build_dir,
+            already_configured=True,
         )
     build_dir = tmp_path / "cmake_build"
     return _build_with_cmake(case_dir, build_dir)
@@ -591,8 +637,14 @@ def _build_direct_or_skip(
     """Compile directly, or skip if CMakeLists.txt needs special flags."""
     if (case_dir / "CMakeLists.txt").exists():
         cmake_text = (case_dir / "CMakeLists.txt").read_text()
-        _special = ("FORCE_INCLUDE", "LINK_OPTIONS", "COMPILE_OPTIONS",
-                    "fvisibility", "version-script", "soname")
+        _special = (
+            "FORCE_INCLUDE",
+            "LINK_OPTIONS",
+            "COMPILE_OPTIONS",
+            "fvisibility",
+            "version-script",
+            "soname",
+        )
         if any(tok in cmake_text for tok in _special):
             pytest.skip(
                 f"{case_name} requires cmake (CMakeLists.txt has special "
@@ -685,13 +737,14 @@ def _assert_verdict(
     """Assert that the verdict matches, handling known gaps as xfail."""
     if case_name in KNOWN_GAPS and _gap_applies(case_name, is_cpp):
         allowed_verdicts = KNOWN_GAP_OBSERVED.get(case_name)
-        if got != expected_verdict and (allowed_verdicts is None or got in allowed_verdicts):
+        if got != expected_verdict and (
+            allowed_verdicts is None or got in allowed_verdicts
+        ):
             pytest.xfail(KNOWN_GAPS[case_name])
 
     assert got == expected_verdict, (
         f"{case_name}: expected={expected_verdict!r}, got={got!r}\n"
-        f"Changes:\n" +
-        "\n".join(f"  {c.kind.value}: {c.description}" for c in changes)
+        f"Changes:\n" + "\n".join(f"  {c.kind.value}: {c.description}" for c in changes)
     )
 
 
@@ -745,6 +798,7 @@ def test_example_pipeline(
     feature = REQUIRES_FEATURE.get(case_name)
     if feature is not None:
         from tests.feature_probe import compiler_supports
+
         if not compiler_supports(feature):
             pytest.skip(
                 f"{case_name} requires compiler feature {feature!r} which the "
@@ -757,20 +811,30 @@ def test_example_pipeline(
     v1_src, v2_src, v1_hdr, v2_hdr = _find_sources(case_dir)
 
     v1_lib, v2_lib = _build_libs_for_case(
-        case_name, case_dir, tmp_path, shared_cmake_build_dir, v1_src, v2_src,
+        case_name,
+        case_dir,
+        tmp_path,
+        shared_cmake_build_dir,
+        v1_src,
+        v2_src,
     )
 
     headers_v1 = _header_list(v1_hdr)
     headers_v2 = _header_list(v2_hdr)
 
     got, changes = _dump_and_compare(
-        case_name, v1_lib, v2_lib, headers_v1, headers_v2,
+        case_name,
+        v1_lib,
+        v2_lib,
+        headers_v1,
+        headers_v2,
         scope_to_public_surface=SCOPE_PUBLIC_HEADERS.get(case_name, False),
         pattern_verdicts=PATTERN_VERDICTS.get(case_name, False),
     )
 
-    _assert_verdict(case_name, expected_verdict, got, changes,
-                    is_cpp=v1_src.suffix in (".cpp",))
+    _assert_verdict(
+        case_name, expected_verdict, got, changes, is_cpp=v1_src.suffix in (".cpp",)
+    )
 
 
 # ---------------------------------------------------------------------------

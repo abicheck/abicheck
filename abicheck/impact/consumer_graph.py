@@ -416,7 +416,9 @@ def explain_required_symbols(
         # direct and the walk would never run — the exact
         # internal-exported-dispatcher case this join exists for.
         direct_entries = sorted(
-            d for d in decl_ids if _node_visibility(node_by_id.get(d)) in PUBLIC_VISIBILITIES
+            d
+            for d in decl_ids
+            if _node_visibility(node_by_id.get(d)) in PUBLIC_VISIBILITIES
         )
         if direct_entries:
             out[symbol] = ConsumerImpactPath(

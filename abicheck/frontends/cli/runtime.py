@@ -156,7 +156,10 @@ def _stamp_provenance(
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
-                capture_output=True, text=True, timeout=5, check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
             )
             if result.returncode == 0:
                 snap.git_commit = result.stdout.strip()
@@ -307,12 +310,15 @@ def _resolve_debug_artifact(
 
 
 def _validate_show_only(
-    ctx: click.Context, param: click.Parameter, value: str | None,
+    ctx: click.Context,
+    param: click.Parameter,
+    value: str | None,
 ) -> str | None:
     """Eagerly validate --show-only tokens so invalid ones surface early."""
     if value is None:
         return None
     from ...reporter import ShowOnlyFilter
+
     try:
         ShowOnlyFilter.parse(value)
     except ValueError as exc:
@@ -321,7 +327,9 @@ def _validate_show_only(
 
 
 def _validate_view(
-    ctx: click.Context, param: click.Parameter, value: tuple[str, ...],
+    ctx: click.Context,
+    param: click.Parameter,
+    value: tuple[str, ...],
 ) -> tuple[str, ...]:
     """Eagerly validate ``--view`` tokens (ADR-068 D4/Phase 5) so an
     unrecognized token or a malformed ``show=...`` filter surfaces before
@@ -375,10 +383,16 @@ def _render_output(
     pass removed.
     """
     from ...service import render_output
+
     return render_output(
-        fmt, result, old, new,
-        follow_deps=follow_deps, show_only=show_only,
-        report_mode=report_mode, show_impact=show_impact,
+        fmt,
+        result,
+        old,
+        new,
+        follow_deps=follow_deps,
+        show_only=show_only,
+        report_mode=report_mode,
+        show_impact=show_impact,
         severity_config=severity_config,
         demangle=demangle,
         contract_evaluation=contract_evaluation,
@@ -388,7 +402,8 @@ def _render_output(
 
 
 def _load_probe_matrix_changes(
-    probe_matrix_old: Path | None, probe_matrix_new: Path | None,
+    probe_matrix_old: Path | None,
+    probe_matrix_new: Path | None,
 ) -> list[Change] | None:
     """Load build-config matrix snapshots and return diff_matrix() findings.
 
@@ -418,16 +433,16 @@ def _load_probe_matrix_changes(
 def _warn_all_suppressed(result: DiffResult) -> None:
     """Warn if a suppression file swallowed all changes."""
     total_changes = len(result.changes) + result.suppressed_count
-    if result.suppression_file_provided and total_changes > 0 and len(result.changes) == 0:
+    if (
+        result.suppression_file_provided
+        and total_changes > 0
+        and len(result.changes) == 0
+    ):
         click.echo(
             "Warning: all ABI changes were suppressed by the suppression file. "
             "Verify your suppression rules are not too broad.",
             err=True,
         )
-
-
-
-
 
 
 def _write_or_echo(output: Path | None, text: str) -> None:
@@ -439,9 +454,7 @@ def _write_or_echo(output: Path | None, text: str) -> None:
         click.echo(text)
 
 
-def emit_export_set(
-    exports: ExportSet, render: Callable[[str], str]
-) -> None:
+def emit_export_set(exports: ExportSet, render: Callable[[str], str]) -> None:
     """Write every document export in *exports*, rendering each format once.
 
     Plan slice 7m's emit half. Two properties are structural here rather
@@ -470,7 +483,8 @@ def emit_export_set(
 
 def _announce_exit_scheme(
     scheme: str,
-    *, fmt: str = "markdown",
+    *,
+    fmt: str = "markdown",
 ) -> None:
     """Announce (on stderr) which exit-code scheme the compare command uses.
 
@@ -507,9 +521,13 @@ def _announce_exit_scheme(
 
 
 def _exit_with_severity_or_verdict(
-    result: DiffResult, sev_config: SeverityConfig | None, scheme: str,
-    fmt: str | None = None, secondary_fmts: Sequence[str] = (),
-    *, require_complete_analysis: bool = False,
+    result: DiffResult,
+    sev_config: SeverityConfig | None,
+    scheme: str,
+    fmt: str | None = None,
+    secondary_fmts: Sequence[str] = (),
+    *,
+    require_complete_analysis: bool = False,
 ) -> None:
     """Exit with the appropriate code for the resolved exit-code scheme.
 
@@ -540,12 +558,16 @@ def _exit_with_severity_or_verdict(
     )
 
     decision = resolve_compare_exit_decision_with_abort_axes(
-        result, sev_config, scheme,
+        result,
+        sev_config,
+        scheme,
         require_complete_analysis=require_complete_analysis,
     )
     announce_coverage_floor(
-        result, base_exit=decision.compatibility_contribution,
-        fmt=fmt, secondary_fmts=secondary_fmts,
+        result,
+        base_exit=decision.compatibility_contribution,
+        fmt=fmt,
+        secondary_fmts=secondary_fmts,
     )
     # The pre-assurance exit is what the diagnostic's own wording describes
     # ("floored to"/"contributes, below the compatibility axis's own exit"),
@@ -553,7 +575,8 @@ def _exit_with_severity_or_verdict(
     # `decision.code` (which, when assurance is the winning axis, would be
     # self-referential).
     pre_assurance_exit = max(
-        decision.compatibility_contribution, decision.contract_coverage_contribution,
+        decision.compatibility_contribution,
+        decision.contract_coverage_contribution,
     )
     diagnostic = assurance_floor_diagnostic(
         result, require_complete=require_complete_analysis, base_exit=pre_assurance_exit
@@ -575,9 +598,12 @@ def _exit_with_severity_or_verdict(
 
 
 def _log_one_side_debug(
-    label: str, binary: Path, droots: list[Path],
+    label: str,
+    binary: Path,
+    droots: list[Path],
     *,
-    debuginfod: bool, debuginfod_url: str | None,
+    debuginfod: bool,
+    debuginfod_url: str | None,
 ) -> None:
     """Resolve and log debug info for a single binary side, if applicable."""
     if _detect_binary_format(binary) is None or not (droots or debuginfod):
@@ -595,31 +621,44 @@ def _log_one_side_debug(
 
 
 def _log_debug_resolution(
-    old_input: Path, new_input: Path,
-    resolved_old_debug: list[Path], resolved_new_debug: list[Path],
+    old_input: Path,
+    new_input: Path,
+    resolved_old_debug: list[Path],
+    resolved_new_debug: list[Path],
     *,
-    debuginfod: bool, debuginfod_url: str | None,
+    debuginfod: bool,
+    debuginfod_url: str | None,
 ) -> None:
     """Resolve and log per-side debug info (debug roots / debuginfod), if any."""
     if not (resolved_old_debug or resolved_new_debug or debuginfod):
         return
     _log_one_side_debug(
-        "old", old_input, resolved_old_debug,
-        debuginfod=debuginfod, debuginfod_url=debuginfod_url,
+        "old",
+        old_input,
+        resolved_old_debug,
+        debuginfod=debuginfod,
+        debuginfod_url=debuginfod_url,
     )
     _log_one_side_debug(
-        "new", new_input, resolved_new_debug,
-        debuginfod=debuginfod, debuginfod_url=debuginfod_url,
+        "new",
+        new_input,
+        resolved_new_debug,
+        debuginfod=debuginfod,
+        debuginfod_url=debuginfod_url,
     )
 
 
 def _finalize_compare_result(
-    result: DiffResult, metadata_old_input: Path, metadata_new_input: Path,
+    result: DiffResult,
+    metadata_old_input: Path,
+    metadata_new_input: Path,
     *,
-    show_redundant: bool, show_filtered: bool,
+    show_redundant: bool,
+    show_filtered: bool,
     severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
-    old_snapshot: AbiSnapshot | None = None, new_snapshot: AbiSnapshot | None = None,
+    old_snapshot: AbiSnapshot | None = None,
+    new_snapshot: AbiSnapshot | None = None,
 ) -> None:
     """Attach metadata and emit redundancy/filter/suppression output.
 
@@ -655,15 +694,23 @@ def _finalize_compare_result(
     from ...workflows.extraction import resolve_linker_script_chain
     from ...workflows.gate import note_if_same_binary_compared
 
-    def _hashable_path(p: Path) -> Path:  # a text snapshot/manifest can coincidentally match the INPUT()/GROUP() probe -- skip linker-script resolution for it (Codex review)
-        return p if _sniff_text_format(p) in ("json", "perl", "symvers") else resolve_linker_script_chain(p)
+    def _hashable_path(
+        p: Path,
+    ) -> Path:  # a text snapshot/manifest can coincidentally match the INPUT()/GROUP() probe -- skip linker-script resolution for it (Codex review)
+        return (
+            p
+            if _sniff_text_format(p) in ("json", "perl", "symvers")
+            else resolve_linker_script_chain(p)
+        )
 
     result.old_metadata = _collect_metadata(_hashable_path(metadata_old_input))
     result.new_metadata = _collect_metadata(_hashable_path(metadata_new_input))
     old_digest = new_digest = None
     if (
-        result.old_metadata is None and result.new_metadata is None
-        and old_snapshot is not None and new_snapshot is not None
+        result.old_metadata is None
+        and result.new_metadata is None
+        and old_snapshot is not None
+        and new_snapshot is not None
     ):
         from ...workflows.gate import snapshot_identity_digest
 

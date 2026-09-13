@@ -30,6 +30,7 @@ This module fills that gap: given the resolved dependency graphs and
 ``stack_checker.check_stack``), it reports the symbols whose *effective*
 runtime provider or weak-resolution status changed.
 """
+
 from __future__ import annotations
 
 from .binder import BindingStatus, SymbolBinding

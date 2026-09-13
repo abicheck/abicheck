@@ -1285,9 +1285,7 @@ def test_partially_dependent_default_is_conservatively_not_substituted() -> None
     assert types["D"].vtable == []
 
 
-def test_fully_defaulted_specialization_still_indexes_as_empty_angle_brackets() -> (
-    None
-):
+def test_fully_defaulted_specialization_still_indexes_as_empty_angle_brackets() -> None:
     """Codex review, fresh evidence (P1): when EVERY template argument
     equals its own default, popping them all left ``args`` empty and the
     whole specialization returned ``None`` (unresolvable) -- but clang

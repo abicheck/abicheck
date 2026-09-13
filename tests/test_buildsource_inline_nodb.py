@@ -47,8 +47,9 @@ def test_compile_db_present_does_not_warn(tmp_path, capsys):
     src = tmp_path / "foo.c"
     src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
     (tmp_path / "compile_commands.json").write_text(
-        json.dumps([{"directory": str(tmp_path), "file": str(src),
-                     "command": f"cc -c {src}"}]),
+        json.dumps(
+            [{"directory": str(tmp_path), "file": str(src), "command": f"cc -c {src}"}]
+        ),
         encoding="utf-8",
     )
     snap = AbiSnapshot(library="l", version="1")
@@ -78,12 +79,23 @@ def test_derive_l2_include_dirs_from_compile_db(tmp_path):
     # Use the `arguments` array form (not `command`) so paths are never shell-split
     # — a Windows `C:\...` path in a `command` string would be mangled by shlex.
     (tmp_path / "compile_commands.json").write_text(
-        json.dumps([{
-            "directory": str(tmp_path),
-            "file": str(src),
-            "arguments": ["cc", f"-I{inc}", "-isystem", str(sysinc),
-                          f"-I{missing}", "-c", str(src)],
-        }]),
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "arguments": [
+                        "cc",
+                        f"-I{inc}",
+                        "-isystem",
+                        str(sysinc),
+                        f"-I{missing}",
+                        "-c",
+                        str(src),
+                    ],
+                }
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -156,14 +168,25 @@ def test_derive_l2_include_dirs_surfaces_argv_only_include_flags(tmp_path):
     src = tmp_path / "foo.c"
     src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
     (tmp_path / "compile_commands.json").write_text(
-        json.dumps([{
-            "directory": str(tmp_path),
-            "file": str(src),
-            # -iquote / -idirafter are NOT captured into include_paths by the
-            # adapter; they live only in argv.
-            "arguments": ["cc", "-iquote", str(qdir), "-idirafter", str(ddir),
-                          "-c", str(src)],
-        }]),
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    # -iquote / -idirafter are NOT captured into include_paths by the
+                    # adapter; they live only in argv.
+                    "arguments": [
+                        "cc",
+                        "-iquote",
+                        str(qdir),
+                        "-idirafter",
+                        str(ddir),
+                        "-c",
+                        str(src),
+                    ],
+                }
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -191,17 +214,22 @@ def test_derive_l2_include_dirs_argv_dir_relative_to_compile_unit(tmp_path):
     src = tmp_path / "foo.c"
     src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
     (builddir / "compile_commands.json").write_text(
-        json.dumps([{
-            "directory": str(builddir),
-            "file": str(src),
-            # `../deps/include` is relative to `directory`, argv-only.
-            "arguments": ["cc", "-iquote", "../deps/include", "-c", str(src)],
-        }]),
+        json.dumps(
+            [
+                {
+                    "directory": str(builddir),
+                    "file": str(src),
+                    # `../deps/include` is relative to `directory`, argv-only.
+                    "arguments": ["cc", "-iquote", "../deps/include", "-c", str(src)],
+                }
+            ]
+        ),
         encoding="utf-8",
     )
 
     dirs, cleanups = derive_l2_include_dirs(
-        build_info=None, sources=tmp_path,
+        build_info=None,
+        sources=tmp_path,
         build_compile_db="build/compile_commands.json",
     )
     for fn in cleanups:
@@ -233,8 +261,15 @@ def test_derive_l2_include_dirs_honors_config_compile_db(tmp_path):
     dbdir = tmp_path / "out"
     dbdir.mkdir()
     (dbdir / "compile_commands.json").write_text(
-        json.dumps([{"directory": str(tmp_path), "file": str(src),
-                     "arguments": ["cc", f"-I{inc}", "-c", str(src)]}]),
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "arguments": ["cc", f"-I{inc}", "-c", str(src)],
+                }
+            ]
+        ),
         encoding="utf-8",
     )
     cfg = tmp_path / ".abicheck.yml"
@@ -271,11 +306,15 @@ def test_derive_l2_include_dirs_expands_redacted_home_paths(tmp_path):
         # `arguments` array (not `command`) so a Windows `C:\...` home path is not
         # shell-split; the absolute home path is what the adapter redacts to ~/...
         (tmp_path / "compile_commands.json").write_text(
-            json.dumps([{
-                "directory": str(tmp_path),
-                "file": str(src),
-                "arguments": ["cc", f"-I{inc}", "-c", str(src)],
-            }]),
+            json.dumps(
+                [
+                    {
+                        "directory": str(tmp_path),
+                        "file": str(src),
+                        "arguments": ["cc", f"-I{inc}", "-c", str(src)],
+                    }
+                ]
+            ),
             encoding="utf-8",
         )
         dirs, _ = derive_l2_include_dirs(build_info=None, sources=tmp_path)
@@ -405,8 +444,15 @@ def test_derive_l2_include_dirs_raw_build_info_wins_over_sources_pack(tmp_path):
     bidir = tmp_path / "bd"
     bidir.mkdir()
     (bidir / "compile_commands.json").write_text(
-        json.dumps([{"directory": str(tmp_path), "file": str(src),
-                     "arguments": ["cc", f"-I{bi_inc}", "-c", str(src)]}]),
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "arguments": ["cc", f"-I{bi_inc}", "-c", str(src)],
+                }
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -423,7 +469,7 @@ def test_derive_l2_include_dirs_raw_build_info_wins_over_sources_pack(tmp_path):
     dirs, cleanups = derive_l2_include_dirs(build_info=bidir, sources=src_dir)
     for fn in cleanups:
         fn()
-    assert str(bi_inc) in dirs        # raw --build-info wins L3
+    assert str(bi_inc) in dirs  # raw --build-info wins L3
     assert str(stale_inc) not in dirs  # reused source pack does not override it
 
 
@@ -506,8 +552,12 @@ def test_seed_l2_includes_threads_l2_only_gate(tmp_path, monkeypatch):
     monkeypatch.setattr(bq, "run_inferred_build_query", boom)
 
     incs, pending = seed_l2_includes(
-        headers=[tmp_path / "h.h"], includes=[], sources=tmp_path,
-        build_info=None, build_config=None, defer_cleanup=None,
+        headers=[tmp_path / "h.h"],
+        includes=[],
+        sources=tmp_path,
+        build_info=None,
+        build_config=None,
+        defer_cleanup=None,
         allow_inferred_build_query=False,
     )
     assert incs == []
@@ -522,11 +572,15 @@ def test_seed_l2_includes_noop_when_gcc_options_supply_includes(tmp_path):
 
     _compile_db_tree(tmp_path)
     incs, pending = seed_l2_includes(
-        headers=[tmp_path / "h.h"], includes=[], sources=tmp_path,
-        build_info=None, build_config=None, defer_cleanup=None,
+        headers=[tmp_path / "h.h"],
+        includes=[],
+        sources=tmp_path,
+        build_info=None,
+        build_config=None,
+        defer_cleanup=None,
         gcc_options=f"-I {tmp_path / 'sdk'}",
     )
-    assert incs == []       # no-op: user's -I via --gcc-options wins
+    assert incs == []  # no-op: user's -I via --gcc-options wins
     assert pending == []
 
 
@@ -536,8 +590,12 @@ def test_seed_l2_includes_noop_when_gcc_option_tokens_supply_includes(tmp_path):
 
     _compile_db_tree(tmp_path)
     incs, pending = seed_l2_includes(
-        headers=[tmp_path / "h.h"], includes=[], sources=tmp_path,
-        build_info=None, build_config=None, defer_cleanup=None,
+        headers=[tmp_path / "h.h"],
+        includes=[],
+        sources=tmp_path,
+        build_info=None,
+        build_config=None,
+        defer_cleanup=None,
         gcc_option_tokens=("-isystem", str(tmp_path / "sdk")),
     )
     assert incs == []
@@ -551,8 +609,12 @@ def test_seed_l2_includes_seeds_when_gcc_options_have_no_includes(tmp_path):
 
     inc = _compile_db_tree(tmp_path)
     incs, pending = seed_l2_includes(
-        headers=[tmp_path / "h.h"], includes=[], sources=tmp_path,
-        build_info=None, build_config=None, defer_cleanup=None,
+        headers=[tmp_path / "h.h"],
+        includes=[],
+        sources=tmp_path,
+        build_info=None,
+        build_config=None,
+        defer_cleanup=None,
         gcc_options="-DNDEBUG -O2",
     )
     assert str(inc) in [str(p) for p in incs]
@@ -577,8 +639,12 @@ def test_seed_l2_includes_from_sources_pack(tmp_path):
     pack_io.write(pack)
 
     incs, pending = seed_l2_includes(
-        headers=[tmp_path / "h.h"], includes=[], sources=pack_dir,
-        build_info=None, build_config=None, defer_cleanup=None,
+        headers=[tmp_path / "h.h"],
+        includes=[],
+        sources=pack_dir,
+        build_info=None,
+        build_config=None,
+        defer_cleanup=None,
     )
     assert str(inc) in [str(p) for p in incs]
     assert isinstance(pending, list)
@@ -597,12 +663,20 @@ def test_derive_l2_include_dirs_build_compile_db_override(tmp_path):
     dbdir = tmp_path / "out"
     dbdir.mkdir()
     (dbdir / "compile_commands.json").write_text(
-        json.dumps([{"directory": str(tmp_path), "file": str(src),
-                     "arguments": ["cc", f"-I{inc}", "-c", str(src)]}]),
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "arguments": ["cc", f"-I{inc}", "-c", str(src)],
+                }
+            ]
+        ),
         encoding="utf-8",
     )
     dirs, cleanups = derive_l2_include_dirs(
-        build_info=None, sources=tmp_path,
+        build_info=None,
+        sources=tmp_path,
         build_compile_db="out/compile_commands.json",
     )
     for fn in cleanups:
@@ -623,12 +697,20 @@ def test_derive_l2_include_dirs_explicit_missing_db_no_stale_fallback(tmp_path):
     src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
     # An unrelated DB the fallback must NOT use.
     (tmp_path / "compile_commands.json").write_text(
-        json.dumps([{"directory": str(tmp_path), "file": str(src),
-                     "arguments": ["cc", f"-I{wrong_inc}", "-c", str(src)]}]),
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "arguments": ["cc", f"-I{wrong_inc}", "-c", str(src)],
+                }
+            ]
+        ),
         encoding="utf-8",
     )
     dirs, cleanups = derive_l2_include_dirs(
-        build_info=None, sources=tmp_path,
+        build_info=None,
+        sources=tmp_path,
         build_compile_db="does/not/exist.json",  # explicit + missing
     )
     for fn in cleanups:
@@ -643,8 +725,15 @@ def _compile_db_tree(tmp_path):
     src = tmp_path / "foo.c"
     src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
     (tmp_path / "compile_commands.json").write_text(
-        json.dumps([{"directory": str(tmp_path), "file": str(src),
-                     "arguments": ["cc", f"-I{inc}", "-c", str(src)]}]),
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "arguments": ["cc", f"-I{inc}", "-c", str(src)],
+                }
+            ]
+        ),
         encoding="utf-8",
     )
     return inc
@@ -657,8 +746,12 @@ def test_seed_l2_includes_noop_when_includes_given(tmp_path):
     existing = [tmp_path / "myinc"]
     # User already passed -I → the fallback is a strict no-op (explicit -I wins).
     incs, pending = seed_l2_includes(
-        headers=[tmp_path / "h.h"], includes=existing, sources=tmp_path,
-        build_info=None, build_config=None, defer_cleanup=None,
+        headers=[tmp_path / "h.h"],
+        includes=existing,
+        sources=tmp_path,
+        build_info=None,
+        build_config=None,
+        defer_cleanup=None,
     )
     assert incs == existing
     assert pending == []
@@ -670,8 +763,12 @@ def test_seed_l2_includes_noop_when_no_headers(tmp_path):
     _compile_db_tree(tmp_path)
     # No -H headers → nothing to scope, so no seeding.
     incs, pending = seed_l2_includes(
-        headers=[], includes=[], sources=tmp_path,
-        build_info=None, build_config=None, defer_cleanup=None,
+        headers=[],
+        includes=[],
+        sources=tmp_path,
+        build_info=None,
+        build_config=None,
+        defer_cleanup=None,
     )
     assert incs == []
     assert pending == []
@@ -683,10 +780,15 @@ def test_seed_l2_includes_seeds_and_defers_cleanup(tmp_path):
     inc = _compile_db_tree(tmp_path)
     defer: list = []
     incs, pending = seed_l2_includes(
-        headers=[tmp_path / "h.h"], includes=[], sources=tmp_path,
-        build_info=None, build_config=None, defer_cleanup=defer,
+        headers=[tmp_path / "h.h"],
+        includes=[],
+        sources=tmp_path,
+        build_info=None,
+        build_config=None,
+        defer_cleanup=defer,
     )
     from pathlib import Path as _P
+
     assert _P(str(inc)) in incs
     # With a defer_cleanup channel, cleanups go there (none for a plain compile DB)
     # and none come back as pending.
@@ -698,8 +800,12 @@ def test_seed_l2_includes_returns_pending_without_defer(tmp_path):
 
     inc = _compile_db_tree(tmp_path)
     incs, pending = seed_l2_includes(
-        headers=[tmp_path / "h.h"], includes=[], sources=tmp_path,
-        build_info=None, build_config=None, defer_cleanup=None,
+        headers=[tmp_path / "h.h"],
+        includes=[],
+        sources=tmp_path,
+        build_info=None,
+        build_config=None,
+        defer_cleanup=None,
     )
     assert str(inc) in [str(p) for p in incs]
     # A plain compile DB spawns no temp build dir, so pending is empty; the call
@@ -714,8 +820,9 @@ def test_graph_build_collect_mode_skips_l4(tmp_path):
     src = tmp_path / "foo.c"
     src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
     (tmp_path / "compile_commands.json").write_text(
-        json.dumps([{"directory": str(tmp_path), "file": str(src),
-                     "command": f"cc -c {src}"}]),
+        json.dumps(
+            [{"directory": str(tmp_path), "file": str(src), "command": f"cc -c {src}"}]
+        ),
         encoding="utf-8",
     )
     snap = AbiSnapshot(library="l", version="1")
@@ -724,17 +831,17 @@ def test_graph_build_collect_mode_skips_l4(tmp_path):
 
     assert snap.build_source is not None
     bs = snap.build_source
-    assert bs.build_evidence.compile_units          # L3 present
-    assert bs.source_graph is not None              # L5 graph built
-    assert bs.source_graph.nodes                     # ...with nodes folded from L3
-    assert bs.source_abi is None                     # L4 skipped (no source replay)
+    assert bs.build_evidence.compile_units  # L3 present
+    assert bs.source_graph is not None  # L5 graph built
+    assert bs.source_graph.nodes  # ...with nodes folded from L3
+    assert bs.source_abi is None  # L4 skipped (no source replay)
 
 
 def test_collection_for_ci_mode_graph_build():
     from abicheck.buildsource.source_replay import collection_for_ci_mode
 
     scope, layers = collection_for_ci_mode("graph-build")
-    assert scope == "off"          # no replay
+    assert scope == "off"  # no replay
     assert layers == ("L3", "L5")  # build facts + graph, no L4
 
 
@@ -746,8 +853,9 @@ def test_meson_builddir_is_autodiscovered(tmp_path):
     bd = tmp_path / "builddir"
     bd.mkdir()
     (bd / "compile_commands.json").write_text(
-        json.dumps([{"directory": str(bd), "file": str(src),
-                     "command": f"cc -c {src}"}]),
+        json.dumps(
+            [{"directory": str(bd), "file": str(src), "command": f"cc -c {src}"}]
+        ),
         encoding="utf-8",
     )
     snap = AbiSnapshot(library="l", version="1")

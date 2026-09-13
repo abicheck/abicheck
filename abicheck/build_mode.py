@@ -41,6 +41,7 @@ Detection heuristics (from PR-ε.1's DWARF expert review):
 * **libc++ ABI version** — ``_ZNSt3__1`` prefix = ABI v1 (stable);
   ``_ZNSt3__2`` = ABI v2 (``_LIBCPP_ABI_VERSION=2``).
 """
+
 from __future__ import annotations
 
 import re
@@ -71,7 +72,8 @@ _GCC_PRODUCER = re.compile(
     re.IGNORECASE,
 )
 _CLANG_PRODUCER = re.compile(
-    r"clang\s+version\s+(?P<ver>\d+(?:\.\d+){0,2})", re.IGNORECASE,
+    r"clang\s+version\s+(?P<ver>\d+(?:\.\d+){0,2})",
+    re.IGNORECASE,
 )
 # Word boundaries on ``icx``/``icc`` so we don't false-match arbitrary
 # substrings (e.g. an unrelated ``pacicx-tool`` or ``pickle``).
@@ -143,19 +145,19 @@ def detect_compiler_family(
 # below reflects what is actually observable.  Caller MUST treat
 # CXX14_OR_LATER as a lower-bound, not a literal claim of C++14.
 _DWARF_LANG_TO_STD: dict[int, CxxStandard] = {
-    0x01: CxxStandard.C,                # DW_LANG_C89
-    0x02: CxxStandard.CXX98,            # DW_LANG_C_plus_plus (pre-C++03)
-    0x0c: CxxStandard.C,                # DW_LANG_C99
+    0x01: CxxStandard.C,  # DW_LANG_C89
+    0x02: CxxStandard.CXX98,  # DW_LANG_C_plus_plus (pre-C++03)
+    0x0C: CxxStandard.C,  # DW_LANG_C99
     # 0x19 (DW_LANG_C_plus_plus_03) is mapped to CXX98 rather than CXX11
     # because the enum has no CXX03 bucket and CXX98 is the closest
     # pre-C++11 standard; upgrading C++03 binaries to CXX11 would
     # misattribute ABI differences to the wrong build mode.
-    0x19: CxxStandard.CXX98,            # DW_LANG_C_plus_plus_03
-    0x1a: CxxStandard.CXX11,            # DW_LANG_C_plus_plus_11
-    0x21: CxxStandard.CXX14_OR_LATER,   # DW_LANG_C_plus_plus_14
-    0x2a: CxxStandard.CXX17,            # DW_LANG_C_plus_plus_17
-    0x2b: CxxStandard.CXX20,            # DW_LANG_C_plus_plus_20
-    0x2e: CxxStandard.CXX23,            # DW_LANG_C_plus_plus_23
+    0x19: CxxStandard.CXX98,  # DW_LANG_C_plus_plus_03
+    0x1A: CxxStandard.CXX11,  # DW_LANG_C_plus_plus_11
+    0x21: CxxStandard.CXX14_OR_LATER,  # DW_LANG_C_plus_plus_14
+    0x2A: CxxStandard.CXX17,  # DW_LANG_C_plus_plus_17
+    0x2B: CxxStandard.CXX20,  # DW_LANG_C_plus_plus_20
+    0x2E: CxxStandard.CXX23,  # DW_LANG_C_plus_plus_23
 }
 
 
@@ -207,10 +209,7 @@ def detect_stdlib_and_abi(
     if saw_libcxx and not saw_libstdcxx:
         return StdlibFamily.LIBCXX, GlibcxxDualAbi.NOT_APPLICABLE, libcpp_abi
     if saw_libstdcxx:
-        abi = (
-            GlibcxxDualAbi.CXX11 if saw_glibcxx_tag
-            else GlibcxxDualAbi.OLD
-        )
+        abi = GlibcxxDualAbi.CXX11 if saw_glibcxx_tag else GlibcxxDualAbi.OLD
         return StdlibFamily.LIBSTDCXX, abi, None
     return StdlibFamily.UNKNOWN, GlibcxxDualAbi.NOT_APPLICABLE, libcpp_abi
 

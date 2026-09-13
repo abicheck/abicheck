@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Tests for abicheck.stack_checker — full-stack ABI checking."""
+
 from __future__ import annotations
 
 import sys
@@ -101,8 +102,17 @@ class TestStackVerdict:
 # ---------------------------------------------------------------------------
 
 
-def _binding(status: BindingStatus, symbol: str = "sym", provider: str | None = "/lib/libfoo.so") -> SymbolBinding:
-    return SymbolBinding(consumer="/app", symbol=symbol, version="", provider=provider, status=status, explanation="")
+def _binding(
+    status: BindingStatus, symbol: str = "sym", provider: str | None = "/lib/libfoo.so"
+) -> SymbolBinding:
+    return SymbolBinding(
+        consumer="/app",
+        symbol=symbol,
+        version="",
+        provider=provider,
+        status=status,
+        explanation="",
+    )
 
 
 def _empty_graph(root: str = "/app") -> DependencyGraph:
@@ -114,8 +124,13 @@ def _graph_with_nodes(**sonames: str) -> DependencyGraph:
     g = DependencyGraph(root="/app")
     for i, (key, soname) in enumerate(sonames.items()):
         g.nodes[key] = ResolvedDSO(
-            path=Path(key), soname=soname, needed=[], rpath="", runpath="",
-            resolution_reason="root" if i == 0 else "default", depth=i,
+            path=Path(key),
+            soname=soname,
+            needed=[],
+            rpath="",
+            runpath="",
+            resolution_reason="root" if i == 0 else "default",
+            depth=i,
         )
     return g
 
@@ -131,11 +146,17 @@ class TestComputeLoadability:
 
     def test_missing_symbols_is_fail(self):
         g = _graph_with_nodes(**{"/app": "app"})
-        assert _compute_loadability(g, [_binding(BindingStatus.MISSING)], []) == StackVerdict.FAIL
+        assert (
+            _compute_loadability(g, [_binding(BindingStatus.MISSING)], [])
+            == StackVerdict.FAIL
+        )
 
     def test_version_mismatch_is_warn(self):
         g = _graph_with_nodes(**{"/app": "app"})
-        assert _compute_loadability(g, [], [_binding(BindingStatus.VERSION_MISMATCH)]) == StackVerdict.WARN
+        assert (
+            _compute_loadability(g, [], [_binding(BindingStatus.VERSION_MISMATCH)])
+            == StackVerdict.WARN
+        )
 
     def test_all_ok_is_pass(self):
         g = _graph_with_nodes(**{"/app": "app"})
@@ -147,26 +168,41 @@ class TestComputeAbiRisk:
         assert _compute_abi_risk([]) == StackVerdict.PASS
 
     def test_removed_is_fail(self):
-        assert _compute_abi_risk([StackChange(library="libfoo.so", change_type="removed")]) == StackVerdict.FAIL
+        assert (
+            _compute_abi_risk([StackChange(library="libfoo.so", change_type="removed")])
+            == StackVerdict.FAIL
+        )
 
     def test_added_is_pass(self):
-        assert _compute_abi_risk([StackChange(library="libfoo.so", change_type="added")]) == StackVerdict.PASS
+        assert (
+            _compute_abi_risk([StackChange(library="libfoo.so", change_type="added")])
+            == StackVerdict.PASS
+        )
 
     def test_breaking_unused_is_warn(self):
         """A BREAKING diff with no impacted imports → WARN (risk, not hard fail)."""
         from unittest.mock import Mock
+
         diff = Mock()
         diff.verdict.value = "BREAKING"
-        sc = StackChange(library="libfoo.so", change_type="content_changed", abi_diff=diff, impacted_imports=[])
+        sc = StackChange(
+            library="libfoo.so",
+            change_type="content_changed",
+            abi_diff=diff,
+            impacted_imports=[],
+        )
         assert _compute_abi_risk([sc]) == StackVerdict.WARN
 
     def test_api_break_with_impacted_is_warn(self):
         from unittest.mock import Mock
+
         diff = Mock()
         diff.verdict.value = "API_BREAK"
         sc = StackChange(
-            library="libfoo.so", change_type="content_changed",
-            abi_diff=diff, impacted_imports=[_binding(BindingStatus.RESOLVED_OK)],
+            library="libfoo.so",
+            change_type="content_changed",
+            abi_diff=diff,
+            impacted_imports=[_binding(BindingStatus.RESOLVED_OK)],
         )
         assert _compute_abi_risk([sc]) == StackVerdict.WARN
 
@@ -219,8 +255,13 @@ class TestDiffStacks:
         lib.write_bytes(b"\x7fELFsamecontent")
         base = DependencyGraph(root="/app")
         base.nodes[str(lib)] = ResolvedDSO(
-            path=lib, soname="libfoo.so", needed=[], rpath="", runpath="",
-            resolution_reason="default", depth=1,
+            path=lib,
+            soname="libfoo.so",
+            needed=[],
+            rpath="",
+            runpath="",
+            resolution_reason="default",
+            depth=1,
         )
         # Same path in both → same hash → no change
         changes = _diff_stacks(base, base)
@@ -232,15 +273,25 @@ class TestDiffStacks:
         real_lib.write_bytes(b"\x7fELFcontent")
         base = DependencyGraph(root="/app")
         base.nodes[str(real_lib)] = ResolvedDSO(
-            path=real_lib, soname="libfoo.so", needed=[], rpath="", runpath="",
-            resolution_reason="default", depth=1,
+            path=real_lib,
+            soname="libfoo.so",
+            needed=[],
+            rpath="",
+            runpath="",
+            resolution_reason="default",
+            depth=1,
         )
         # Candidate points to nonexistent file with same soname
         fake_lib = tmp_path / "other" / "libfoo.so"
         cand = DependencyGraph(root="/app")
         cand.nodes[str(fake_lib)] = ResolvedDSO(
-            path=fake_lib, soname="libfoo.so", needed=[], rpath="", runpath="",
-            resolution_reason="default", depth=1,
+            path=fake_lib,
+            soname="libfoo.so",
+            needed=[],
+            rpath="",
+            runpath="",
+            resolution_reason="default",
+            depth=1,
         )
         changes = _diff_stacks(base, cand)
         assert len(changes) == 1
@@ -256,13 +307,23 @@ class TestDiffStacks:
 
         base = DependencyGraph(root="/app")
         base.nodes[str(old_lib)] = ResolvedDSO(
-            path=old_lib, soname="libfoo.so", needed=[], rpath="", runpath="",
-            resolution_reason="default", depth=1,
+            path=old_lib,
+            soname="libfoo.so",
+            needed=[],
+            rpath="",
+            runpath="",
+            resolution_reason="default",
+            depth=1,
         )
         cand = DependencyGraph(root="/app")
         cand.nodes[str(new_lib)] = ResolvedDSO(
-            path=new_lib, soname="libfoo.so", needed=[], rpath="", runpath="",
-            resolution_reason="default", depth=1,
+            path=new_lib,
+            soname="libfoo.so",
+            needed=[],
+            rpath="",
+            runpath="",
+            resolution_reason="default",
+            depth=1,
         )
         changes = _diff_stacks(base, cand)
         content_changed = [c for c in changes if c.change_type == "content_changed"]

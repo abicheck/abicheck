@@ -1268,7 +1268,10 @@ class TestUnresolvedTypeEdges:
             ),
             # A marker nested one level deep ends at its own list's comma, so
             # its siblings and the enclosing names survive.
-            ("Outer<Inner<typename A::x, Real>, Other>", ["Inner", "Other", "Outer", "Real"]),
+            (
+                "Outer<Inner<typename A::x, Real>, Other>",
+                ["Inner", "Other", "Outer", "Real"],
+            ),
             ("PlainType", ["PlainType"]),
         ],
     )

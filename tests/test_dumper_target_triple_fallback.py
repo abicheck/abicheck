@@ -1067,7 +1067,9 @@ def test_probe_failure_with_an_explicitly_configured_wrapper_does_not_guess(
         dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
     )
     monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/wrapper/clang")
+    monkeypatch.setattr(
+        dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/wrapper/clang"
+    )
     monkeypatch.setattr(sys, "platform", "linux")
 
     parser = _header_ast_parser(

@@ -161,6 +161,7 @@ class TestConstruction:
                 base=_identity("strict_abi"), packs=("rust_c_ffi",)
             )
 
+
 class TestContractConfigUnresolvedBehavior:
     # ADR-049 D9: unresolved_behavior is a closed two-value vocabulary
     # ("not_checkable" default, "warn" the only opt-out) -- unlike
@@ -850,7 +851,9 @@ class TestGateConfigRequireCompleteAnalysisAndScope:
         assert GateConfig().require_complete_analysis is False
 
     def test_require_complete_analysis_is_settable(self):
-        assert GateConfig(require_complete_analysis=True).require_complete_analysis is True
+        assert (
+            GateConfig(require_complete_analysis=True).require_complete_analysis is True
+        )
 
     def test_require_complete_analysis_rejects_non_bool(self):
         with pytest.raises(TypeError, match="require_complete_analysis"):

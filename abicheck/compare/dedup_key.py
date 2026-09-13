@@ -107,9 +107,7 @@ def hashable_value(value: object) -> Any:
     if isinstance(value, dict):
         return (
             _DICT,
-            frozenset(
-                (hashable_value(k), hashable_value(v)) for k, v in value.items()
-            ),
+            frozenset((hashable_value(k), hashable_value(v)) for k, v in value.items()),
         )
     if isinstance(value, (set, frozenset)):
         return (_SET, frozenset(hashable_value(item) for item in value))

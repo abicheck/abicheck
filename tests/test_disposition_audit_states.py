@@ -474,9 +474,7 @@ def test_a_suppressed_required_entrypoint_stays_conserved() -> None:
         [Suppression(symbol=required, reason="known optional entrypoint")]
     )
 
-    scoped = check_plugin_host_contract(
-        old, new, [required], suppression=suppression
-    )
+    scoped = check_plugin_host_contract(old, new, [required], suppression=suppression)
     # The suppressed overlay must not still gate the host contract, and its
     # raw string representation is withdrawn from missing_entrypoints too
     # (mirrors scope_diff_to_app's identical suppressed-missing handling).
@@ -519,9 +517,7 @@ def test_suppressed_required_entrypoint_does_not_inflate_coverage() -> None:
         [Suppression(symbol=required, reason="known optional entrypoint")]
     )
 
-    scoped = check_plugin_host_contract(
-        old, new, [required], suppression=suppression
-    )
+    scoped = check_plugin_host_contract(old, new, [required], suppression=suppression)
     assert scoped.missing_entrypoints == [], "suppression still withdraws the gate"
     assert scoped.coverage == 0.0, (
         "the one required entrypoint is genuinely absent -- suppressing it "
@@ -568,7 +564,9 @@ def test_required_symbol_overlay_ledger_persists_without_a_pre_attached_one() ->
     assert later_ledger is diff.disposition_ledger
     assert later_ledger.detected_total == 1
     [record] = [
-        r for r in later_ledger.records if r.application_point == "required_symbol_overlay"
+        r
+        for r in later_ledger.records
+        if r.application_point == "required_symbol_overlay"
     ]
     assert record.symbol == required
 

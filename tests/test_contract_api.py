@@ -4,6 +4,7 @@ Tests the CLI exit codes, JSON/SARIF/Markdown output schema stability,
 snapshot serialization contract, DiffResult API, and ChangeKind enum
 completeness.
 """
+
 from __future__ import annotations
 
 import json
@@ -50,8 +51,9 @@ def _snap(ver: str, funcs=None, variables=None, types=None, enums=None) -> AbiSn
 
 
 def _fn(name: str, mangled: str, ret: str = "int") -> Function:
-    return Function(name=name, mangled=mangled, return_type=ret,
-                    visibility=Visibility.PUBLIC)
+    return Function(
+        name=name, mangled=mangled, return_type=ret, visibility=Visibility.PUBLIC
+    )
 
 
 def _write_snap(path: Path, snap: AbiSnapshot) -> None:
@@ -103,10 +105,16 @@ class TestCliExitCodes:
         old_p = tmp_path / "old.json"
         new_p = tmp_path / "new.json"
         _write_snap(old_p, _snap("1.0", funcs=[_fn("foo", "_Z3foov")]))
-        _write_snap(new_p, _snap("2.0", funcs=[
-            _fn("foo", "_Z3foov"),
-            _fn("bar", "_Z3barv"),
-        ]))
+        _write_snap(
+            new_p,
+            _snap(
+                "2.0",
+                funcs=[
+                    _fn("foo", "_Z3foov"),
+                    _fn("bar", "_Z3barv"),
+                ],
+            ),
+        )
 
         result = runner.invoke(main, ["compare", str(old_p), str(new_p)])
         assert result.exit_code == 0, (
@@ -118,14 +126,30 @@ class TestCliExitCodes:
         runner = CliRunner()
         old_p = tmp_path / "old.json"
         new_p = tmp_path / "new.json"
-        _write_snap(old_p, _snap("1.0", enums=[EnumType(
-            name="Status",
-            members=[EnumMember("OK", 0), EnumMember("FAIL", 1)],
-        )]))
-        _write_snap(new_p, _snap("2.0", enums=[EnumType(
-            name="Status",
-            members=[EnumMember("OK", 0), EnumMember("ERROR", 1)],
-        )]))
+        _write_snap(
+            old_p,
+            _snap(
+                "1.0",
+                enums=[
+                    EnumType(
+                        name="Status",
+                        members=[EnumMember("OK", 0), EnumMember("FAIL", 1)],
+                    )
+                ],
+            ),
+        )
+        _write_snap(
+            new_p,
+            _snap(
+                "2.0",
+                enums=[
+                    EnumType(
+                        name="Status",
+                        members=[EnumMember("OK", 0), EnumMember("ERROR", 1)],
+                    )
+                ],
+            ),
+        )
 
         result = runner.invoke(main, ["compare", str(old_p), str(new_p)])
         assert result.exit_code == 2, (
@@ -137,10 +161,16 @@ class TestCliExitCodes:
         runner = CliRunner()
         old_p = tmp_path / "old.json"
         new_p = tmp_path / "new.json"
-        _write_snap(old_p, _snap("1.0", funcs=[
-            _fn("foo", "_Z3foov"),
-            _fn("bar", "_Z3barv"),
-        ]))
+        _write_snap(
+            old_p,
+            _snap(
+                "1.0",
+                funcs=[
+                    _fn("foo", "_Z3foov"),
+                    _fn("bar", "_Z3barv"),
+                ],
+            ),
+        )
         _write_snap(new_p, _snap("2.0", funcs=[_fn("foo", "_Z3foov")]))
 
         result = runner.invoke(main, ["compare", str(old_p), str(new_p)])
@@ -255,8 +285,9 @@ class TestMarkdownOutputStructure:
         assert "NO_CHANGE" in md
 
     def test_breaking_section_present(self) -> None:
-        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Function foo removed",
-                   old_value="foo")
+        c = Change(
+            ChangeKind.FUNC_REMOVED, "_Z3foov", "Function foo removed", old_value="foo"
+        )
         diff = _make_diff(changes=[c], verdict=Verdict.BREAKING)
         md = to_markdown(diff)
         assert "BREAKING" in md
@@ -264,8 +295,9 @@ class TestMarkdownOutputStructure:
         assert "Breaking" in md
 
     def test_compatible_section_present(self) -> None:
-        c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "New function bar",
-                   new_value="bar")
+        c = Change(
+            ChangeKind.FUNC_ADDED, "_Z3barv", "New function bar", new_value="bar"
+        )
         diff = _make_diff(changes=[c], verdict=Verdict.COMPATIBLE)
         md = to_markdown(diff)
         assert "COMPATIBLE" in md
@@ -287,9 +319,11 @@ class TestSnapshotJsonSchema:
     def test_snapshot_has_required_top_level_keys(self) -> None:
         from abicheck.storage.sectioned_document import from_sectioned_document
 
-        snap = _snap("1.0",
-                     funcs=[_fn("foo", "_Z3foov")],
-                     enums=[EnumType(name="E", members=[EnumMember("A", 0)])])
+        snap = _snap(
+            "1.0",
+            funcs=[_fn("foo", "_Z3foov")],
+            enums=[EnumType(name="E", members=[EnumMember("A", 0)])],
+        )
         d = from_sectioned_document(json.loads(snapshot_to_json(snap)))
         for key in ("library", "version", "functions", "variables", "types", "enums"):
             assert key in d, f"Missing required snapshot key: {key}"
@@ -304,11 +338,19 @@ class TestSnapshotJsonSchema:
             assert key in func, f"Missing required function key: {key}"
 
     def test_roundtrip_preserves_data(self, tmp_path: Path) -> None:
-        snap = _snap("1.0",
-                     funcs=[_fn("foo", "_Z3foov")],
-                     variables=[Variable(name="g", mangled="_g", type="int")],
-                     types=[RecordType(name="S", kind="struct", size_bits=32,
-                                       fields=[TypeField("x", "int", 0)])])
+        snap = _snap(
+            "1.0",
+            funcs=[_fn("foo", "_Z3foov")],
+            variables=[Variable(name="g", mangled="_g", type="int")],
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    size_bits=32,
+                    fields=[TypeField("x", "int", 0)],
+                )
+            ],
+        )
         path = tmp_path / "snap.json"
         _write_snap(path, snap)
         loaded = load_snapshot(path)

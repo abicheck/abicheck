@@ -15,6 +15,7 @@
 """Tests for abicheck.model.consumer_spec — Workstream D-S1's consumer
 specification (vision-api-abi-evolution.md "D. Optional prebuilt-consumer
 lifecycle")."""
+
 from __future__ import annotations
 
 import hashlib
@@ -53,7 +54,9 @@ class TestConsumerSpecNormalization:
         assert as_consumer_spec(original) is original
 
     def test_is_advisory(self, tmp_path):
-        spec = ConsumerSpec(path=tmp_path / "app", requirement=ConsumerRequirement.ADVISORY)
+        spec = ConsumerSpec(
+            path=tmp_path / "app", requirement=ConsumerRequirement.ADVISORY
+        )
         assert spec.is_advisory is True
 
     def test_provenance_omits_unset_fields(self, tmp_path):
@@ -161,7 +164,12 @@ class TestParseConsumerManifest:
     def test_multiple_consumers(self, tmp_path):
         manifest = self._write(
             tmp_path,
-            {"consumers": [{"path": "bin/a"}, {"path": "bin/b", "requirement": "advisory"}]},
+            {
+                "consumers": [
+                    {"path": "bin/a"},
+                    {"path": "bin/b", "requirement": "advisory"},
+                ]
+            },
         )
         specs = parse_consumer_manifest(manifest)
         assert [s.path.name for s in specs] == ["a", "b"]
@@ -228,7 +236,10 @@ class TestConsumerImpactSummary:
         # prefix as insecure temp-file usage even in a plain data literal) --
         # any placeholder string exercises the field the same way.
         summary = ConsumerImpactSummary(
-            total=3, evaluated=2, affected=1, unreadable_advisory=1,
+            total=3,
+            evaluated=2,
+            affected=1,
+            unreadable_advisory=1,
             unreadable_paths=("consumers/app",),
         )
         assert summary.to_json() == {

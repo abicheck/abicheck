@@ -106,8 +106,14 @@ class TestDumpCmdBuildsARequest:
         result = CliRunner().invoke(
             main,
             [
-                "dump", "-H", str(header), "--sources", str(sources),
-                "--build-info", str(compile_db), "--dry-run",
+                "dump",
+                "-H",
+                str(header),
+                "--sources",
+                str(sources),
+                "--build-info",
+                str(compile_db),
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -160,9 +166,7 @@ class TestResolvedRequestAgreesWithTheCliLocals:
     `--dry-run` describe a different run than the real one.
     """
 
-    @pytest.mark.parametrize(
-        "depth", [None, "binary", "headers", "build", "source"]
-    )
+    @pytest.mark.parametrize("depth", [None, "binary", "headers", "build", "source"])
     def test_collect_mode_matches(self, tmp_path: Path, depth: str | None) -> None:
         """`resolve_dump_collect_context` is itself SO_PATH-blind -- it only
         ever reads ``depth``/``sources``/``build_info``/``headers`` -- so the
@@ -198,9 +202,7 @@ class TestResolvedRequestAgreesWithTheCliLocals:
         assert resolved.collect_mode == cli_mode, depth
         assert resolved.headers == tuple(cli_headers), depth
 
-    def test_header_backend_matches_the_resolved_frontend(
-        self, tmp_path: Path
-    ) -> None:
+    def test_header_backend_matches_the_resolved_frontend(self, tmp_path: Path) -> None:
         """An explicit `--ast-frontend` survives into the resolved request.
 
         `header_backend` (not `effective_header_backend`) is what the dry-run
@@ -378,7 +380,9 @@ class TestExecutionConsumesTheResolvedPlan:
                 library=side.path.name if side.path is not None else "lib",
                 version=resolved.request.input.version,
             )
-            return DumpResult(resolved=resolved, snapshot=snap, effective_depth="binary")
+            return DumpResult(
+                resolved=resolved, snapshot=snap, effective_depth="binary"
+            )
 
         monkeypatch.setattr(
             service_dump_pipeline, "execute_dump_request", _fake_execute_dump_request
@@ -419,20 +423,24 @@ class TestExecutionConsumesTheResolvedPlan:
             captured["resolved"] = resolve_dump_request_for_cli(request)
             return request
 
-        monkeypatch.setattr(
-            "abicheck.cli_dump_request.build_dump_request", _spy_build
-        )
+        monkeypatch.setattr("abicheck.cli_dump_request.build_dump_request", _spy_build)
         seen = self._spy(monkeypatch)
 
         result = CliRunner().invoke(
             main,
             [
-                "dump", str(so_path),
-                "-H", str(header),
-                "--sources", str(sources),
-                "--build-info", str(compile_db),
-                "--depth", "headers",
-                "-o", str(tmp_path / "out.abi.json"),
+                "dump",
+                str(so_path),
+                "-H",
+                str(header),
+                "--sources",
+                str(sources),
+                "--build-info",
+                str(compile_db),
+                "--depth",
+                "headers",
+                "-o",
+                str(tmp_path / "out.abi.json"),
             ],
         )
         assert result.exit_code == 0, result.output

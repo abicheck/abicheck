@@ -202,7 +202,9 @@ def test_required_symbol_scoped_breaking_reported_beside_compatible_headline():
     body = render_comment(model, sha="abc1234")
     assert "ABI BREAKING (scoped)" not in body
     assert "Consumer-scoped verdict: BREAKING" in body
-    assert "plugin_init" not in body.split("Consumer-scoped verdict")[0]  # only in the note
+    assert (
+        "plugin_init" not in body.split("Consumer-scoped verdict")[0]
+    )  # only in the note
     assert "--required-symbol" in body
 
 
@@ -1262,8 +1264,12 @@ def test_api_rollup_collapses_overload_and_member_families():
     # Many members of one type / overloads of one function collapse to a single
     # aggregated row in standard mode (mass-change readability).
     changes = [
-        {"kind": "func_params_changed", "symbol": f"Widget::resize(int{i})",
-         "description": "sig", "severity": "breaking"}
+        {
+            "kind": "func_params_changed",
+            "symbol": f"Widget::resize(int{i})",
+            "description": "sig",
+            "severity": "breaking",
+        }
         for i in range(12)
     ]
     body = render_comment(build_model(_compare_report(changes)), sha="x")
@@ -1287,10 +1293,18 @@ def test_api_rollup_keeps_distinct_symbols_flat():
 def test_api_rollup_strips_template_args():
     # Template instantiations of the same type collapse to one enclosing group.
     changes = [
-        {"kind": "func_params_changed", "symbol": "Vec<int>::push(int)",
-         "description": "s", "severity": "breaking"},
-        {"kind": "func_params_changed", "symbol": "Vec<float>::push(float)",
-         "description": "s", "severity": "breaking"},
+        {
+            "kind": "func_params_changed",
+            "symbol": "Vec<int>::push(int)",
+            "description": "s",
+            "severity": "breaking",
+        },
+        {
+            "kind": "func_params_changed",
+            "symbol": "Vec<float>::push(float)",
+            "description": "s",
+            "severity": "breaking",
+        },
     ]
     body = render_comment(build_model(_compare_report(changes)), sha="x")
     assert "`Vec` (2)" in body
@@ -1299,8 +1313,12 @@ def test_api_rollup_strips_template_args():
 def test_group_row_caps_inline_members():
     # An aggregated row lists members up to a cap, then "+N more".
     changes = [
-        {"kind": "func_params_changed", "symbol": f"Api::call(int{i})",
-         "description": "s", "severity": "breaking"}
+        {
+            "kind": "func_params_changed",
+            "symbol": f"Api::call(int{i})",
+            "description": "s",
+            "severity": "breaking",
+        }
         for i in range(11)
     ]
     body = render_comment(build_model(_compare_report(changes)), sha="x")
@@ -1311,11 +1329,18 @@ def test_group_row_caps_inline_members():
 def test_large_diff_condensed_note_links_report():
     # full overflows → auto-downgrade to standard with a condensed note + link.
     changes = [
-        {"kind": "func_removed", "symbol": f"ns{i}::f", "description": "x" * 300,
-         "severity": "breaking"} for i in range(2000)
+        {
+            "kind": "func_removed",
+            "symbol": f"ns{i}::f",
+            "description": "x" * 300,
+            "severity": "breaking",
+        }
+        for i in range(2000)
     ]
     body = render_comment(
-        build_model(_compare_report(changes)), sha="x", detail="full",
+        build_model(_compare_report(changes)),
+        sha="x",
+        detail="full",
         report_url="https://e/run/2",
     )
     assert "Condensed to fit" in body
@@ -1327,7 +1352,9 @@ def test_comment_hard_truncated_when_even_summary_overflows(monkeypatch):
 
     monkeypatch.setattr(pcr, "_BODY_BUDGET", 220)
     body = render_comment(
-        build_model(_compare_report()), sha="x", detail="full",
+        build_model(_compare_report()),
+        sha="x",
+        detail="full",
         report_url="https://e/run/1",
     )
     assert "truncated to fit" in body
@@ -1339,12 +1366,18 @@ def test_comment_stays_under_github_size_limit():
     from abicheck.pr_comment import GITHUB_COMMENT_LIMIT
 
     changes = [
-        {"kind": "func_removed", "symbol": f"ns{i}::free_{i}",
-         "description": "x" * 200, "severity": "breaking"}
+        {
+            "kind": "func_removed",
+            "symbol": f"ns{i}::free_{i}",
+            "description": "x" * 200,
+            "severity": "breaking",
+        }
         for i in range(4000)
     ]
     body = render_comment(
-        build_model(_compare_report(changes)), sha="x", detail="full",
+        build_model(_compare_report(changes)),
+        sha="x",
+        detail="full",
         report_url="https://example/run/1",
     )
     assert len(body) <= GITHUB_COMMENT_LIMIT
@@ -1354,8 +1387,14 @@ def test_comment_stays_under_github_size_limit():
 def test_backtick_in_symbol_neutralised():
     # A backtick in a symbol must not break the surrounding markdown code span.
     report = _compare_report(
-        [{"kind": "func_removed", "symbol": "weird`sym", "description": "d",
-          "severity": "breaking"}]
+        [
+            {
+                "kind": "func_removed",
+                "symbol": "weird`sym",
+                "description": "d",
+                "severity": "breaking",
+            }
+        ]
     )
     body = render_comment(build_model(report), sha="x")
     assert "weird`sym" not in body
@@ -1385,7 +1424,7 @@ def test_release_render_lists_removed_libraries():
 
 
 def test_suppressed_count_rendered_in_comment():
-    """"Reporting must survive suppression": the comment must say *that*
+    """ "Reporting must survive suppression": the comment must say *that*
     findings were withheld, not just show the post-suppression buckets."""
     report = _compare_report()
     report["suppression"] = {"file_provided": True, "suppressed_count": 3}
@@ -1558,7 +1597,9 @@ def test_additions_render_as_own_section_with_detail():
     assert "new exported function" in body
     assert "foo.h:42" in body
     # the addition doesn't leak into the quality-only Safe section
-    additions_block = body.split("➕ Public API additions")[1].split("ℹ️ Informational findings")[0]
+    additions_block = body.split("➕ Public API additions")[1].split(
+        "ℹ️ Informational findings"
+    )[0]
     assert "foo_v2" in additions_block
     assert "libfoo" not in additions_block
 

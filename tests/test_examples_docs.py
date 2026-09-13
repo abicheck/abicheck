@@ -188,17 +188,18 @@ def test_meta_table_and_see_also_show_subject_links() -> None:
         mod, name="case74_detail_base_class_changed", subjects=["leaked-internal-types"]
     )
     table = mod._meta_table(case)
-    assert (
-        "[Leaked internal types](by-subject/leaked-internal-types.md)" in table
-    )
+    assert "[Leaked internal types](by-subject/leaked-internal-types.md)" in table
     page = mod._render_case_page(case)
-    assert "[Subject: Leaked internal types](by-subject/leaked-internal-types.md)" in page
+    assert (
+        "[Subject: Leaked internal types](by-subject/leaked-internal-types.md)" in page
+    )
 
 
 def test_meta_table_shows_multiple_subjects_when_dual_tagged() -> None:
     mod = _load_generator_module()
     case = _make_case(
-        mod, subjects=["export-declaration-mismatches", "internal-dependency-reachability"]
+        mod,
+        subjects=["export-declaration-mismatches", "internal-dependency-reachability"],
     )
     table = mod._meta_table(case)
     assert "by-subject/export-declaration-mismatches.md" in table

@@ -255,7 +255,11 @@ def classify_effective_change(
     sets = _resolve_kind_sets(policy, kind_sets)
     if verdict is None:
         verdict = effective_verdict_for_change(
-            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
+            change,
+            policy=policy,
+            kind_sets=kind_sets,
+            policy_file=policy_file,
+            today=today,
         )
     if verdict == Verdict.BREAKING:
         return IssueCategory.ABI_BREAKING
@@ -563,7 +567,11 @@ def compute_exit_code(
     worst = 0
     for change in gate_eligible_changes(changes):
         cat = classify_effective_change(
-            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
+            change,
+            policy=policy,
+            kind_sets=kind_sets,
+            policy_file=policy_file,
+            today=today,
         )
         if config.level_for(cat) == SeverityLevel.ERROR:
             worst = max(worst, _CATEGORY_EXIT_CODES[cat])
@@ -606,11 +614,19 @@ def gate_contribution_for_change(
     if config is None:
         return legacy_exit_code(
             effective_verdict_for_change(
-                change, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
+                change,
+                policy=policy,
+                kind_sets=kind_sets,
+                policy_file=policy_file,
+                today=today,
             )
         )
     category = classify_effective_change(
-        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
+        change,
+        policy=policy,
+        kind_sets=kind_sets,
+        policy_file=policy_file,
+        today=today,
     )
     if config.level_for(category) != SeverityLevel.ERROR:
         return 0
@@ -654,7 +670,11 @@ def categorize_changes(
 
     for c in changes:
         cat = classify_effective_change(
-            c, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
+            c,
+            policy=policy,
+            kind_sets=kind_sets,
+            policy_file=policy_file,
+            today=today,
         )
         if cat == IssueCategory.ABI_BREAKING:
             abi.append(c)
@@ -778,8 +798,17 @@ def compute_gate_decision(
     # `categorize_changes` itself is deliberately left unfiltered: it is also
     # the *display* partition, where a not-evaluated finding still belongs.
     gated = gate_eligible_changes(changes)
-    exit_code = compute_exit_code(gated, severity_config, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today)
-    categorized = categorize_changes(gated, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today)
+    exit_code = compute_exit_code(
+        gated,
+        severity_config,
+        policy=policy,
+        kind_sets=kind_sets,
+        policy_file=policy_file,
+        today=today,
+    )
+    categorized = categorize_changes(
+        gated, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today
+    )
     blocking_categories = tuple(
         cat.value
         for cat, cat_changes in (

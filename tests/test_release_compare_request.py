@@ -181,7 +181,9 @@ class TestTempDirTracking:
 
         created: list[Path] = []
 
-        def _fake_resolve_release_package_side(side_dir, variant_id, make_temp_dir, *, side):
+        def _fake_resolve_release_package_side(
+            side_dir, variant_id, make_temp_dir, *, side
+        ):
             # Simulate what a real stored-package side does: ask for one
             # temp dir, then decline (this fixture is not a real package).
             path = make_temp_dir(f"abicheck_relpkg_{side}_")
@@ -240,7 +242,9 @@ class TestTempDirTracking:
 
         created: list[Path] = []
 
-        def _fake_resolve_release_package_side(side_dir, variant_id, make_temp_dir, *, side):
+        def _fake_resolve_release_package_side(
+            side_dir, variant_id, make_temp_dir, *, side
+        ):
             path = make_temp_dir(f"abicheck_relpkg_{side}_")
             created.append(path)
             if side == "new":

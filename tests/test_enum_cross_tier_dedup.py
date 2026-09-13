@@ -317,7 +317,9 @@ class TestEndToEndOnlyOneFindingSurvives:
         old = _snap("1", [("SUM", 0), ("MAX", 1), ("MIN", 2), ("PROD", 3)])
         new = _snap("2", [("SUM", 0), ("MAX", 1), ("MIN", 2)])
         result = compare(old, new)
-        removed = [c for c in result.changes if c.kind is ChangeKind.ENUM_MEMBER_REMOVED]
+        removed = [
+            c for c in result.changes if c.kind is ChangeKind.ENUM_MEMBER_REMOVED
+        ]
         assert len(removed) == 1
         assert removed[0].qualified_name == "ccl::v1::reduction::PROD"
 

@@ -389,12 +389,8 @@ class TestImportLegacySnapshot:
         store = InMemoryObjectStore()
         first = import_legacy_snapshot(doc, store=store, artifact_id="a")
         second = import_legacy_snapshot(doc, store=store, artifact_id="b")
-        first_digest = (
-            first.artifact_refs[0].sections["provenance"].digest
-        )
-        second_digest = (
-            second.artifact_refs[0].sections["provenance"].digest
-        )
+        first_digest = first.artifact_refs[0].sections["provenance"].digest
+        second_digest = second.artifact_refs[0].sections["provenance"].digest
         assert first_digest == second_digest
 
     def test_a_pre_v8_document_with_the_legacy_evidence_pack_key_imports(

@@ -356,7 +356,9 @@ class TestDsoOnlyUnclassifiedIsFailed:
         )
         _write_stored_package(new, libs)
         cfg = _release_config(
-            tmp_path, dso_only=True, fail_on_removed_library=True,
+            tmp_path,
+            dso_only=True,
+            fail_on_removed_library=True,
             on_incomplete_scope=policy,
         )
         code, doc = _invoke_json(
@@ -606,9 +608,7 @@ class TestDegradedSingleArtifactPackageRoutesToTheFanOut:
         if degraded_side == "old":
             old, new = new, old
         cfg = _release_config(tmp_path, on_incomplete_scope=policy)
-        code, doc = _invoke_json(
-            "compare", str(old), str(new), "--config", str(cfg)
-        )
+        code, doc = _invoke_json("compare", str(old), str(new), "--config", str(cfg))
         assert "func_removed" not in json.dumps(doc)
         assert doc["verdict"] != "BREAKING"
         scope = doc["comparison_scope"]
@@ -990,7 +990,9 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
         assert code == 0, doc
         assert doc["run_outcome"]["operational"] == "none"
         assert doc["extraction_failures"] == {}
-        cfg = _release_config(tmp_path, on_incomplete_scope="block", name="block.abicheck.yml")
+        cfg = _release_config(
+            tmp_path, on_incomplete_scope="block", name="block.abicheck.yml"
+        )
         code, doc = _invoke_json(
             "compare", str(old), str(new_dir), "--config", str(cfg)
         )

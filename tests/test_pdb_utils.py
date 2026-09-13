@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Tests for PDB utility functions (pdb_utils.py)."""
+
 from __future__ import annotations
 
 import struct
@@ -29,6 +30,7 @@ from abicheck.pdb_utils import (
 # ---------------------------------------------------------------------------
 # Tests: _is_network_path
 # ---------------------------------------------------------------------------
+
 
 class TestIsNetworkPath:
     def test_unc_backslash(self) -> None:
@@ -63,6 +65,7 @@ class TestIsNetworkPath:
 # ---------------------------------------------------------------------------
 # Tests: locate_pdb
 # ---------------------------------------------------------------------------
+
 
 class TestLocatePdb:
     def test_override_exists(self, tmp_path: Path) -> None:
@@ -102,8 +105,10 @@ class TestLocatePdb:
         pdb = tmp_path / "foo.pdb"
         pdb.write_bytes(b"fake")
         # Use forward slashes so Path.name works correctly on Linux
-        with patch("abicheck.pdb_utils._extract_pdb_path_from_pe",
-                    return_value="/nonexistent/build/foo.pdb"):
+        with patch(
+            "abicheck.pdb_utils._extract_pdb_path_from_pe",
+            return_value="/nonexistent/build/foo.pdb",
+        ):
             result = locate_pdb(dll)
         assert result == pdb
 
@@ -111,8 +116,10 @@ class TestLocatePdb:
         """Network path in PE should be skipped when allow_network=False."""
         dll = tmp_path / "test.dll"
         dll.write_bytes(b"MZ")
-        with patch("abicheck.pdb_utils._extract_pdb_path_from_pe",
-                    return_value="\\\\server\\share\\foo.pdb"):
+        with patch(
+            "abicheck.pdb_utils._extract_pdb_path_from_pe",
+            return_value="\\\\server\\share\\foo.pdb",
+        ):
             result = locate_pdb(dll, allow_network=False)
         assert result is None
 
@@ -120,8 +127,10 @@ class TestLocatePdb:
         """Network path in PE should be tried when allow_network=True."""
         dll = tmp_path / "test.dll"
         dll.write_bytes(b"MZ")
-        with patch("abicheck.pdb_utils._extract_pdb_path_from_pe",
-                    return_value="\\\\server\\share\\foo.pdb"):
+        with patch(
+            "abicheck.pdb_utils._extract_pdb_path_from_pe",
+            return_value="\\\\server\\share\\foo.pdb",
+        ):
             # The network path won't exist, so returns None
             result = locate_pdb(dll, allow_network=True)
         assert result is None
@@ -130,6 +139,7 @@ class TestLocatePdb:
 # ---------------------------------------------------------------------------
 # Tests: _extract_pdb_path_from_pe
 # ---------------------------------------------------------------------------
+
 
 class TestExtractPdbPath:
     def test_invalid_pe(self, tmp_path: Path) -> None:

@@ -582,7 +582,7 @@ def _validate_entry(e: ChangeKindMeta) -> None:
     if not e.impact.strip():
         raise ValueError(
             f"{e.kind!r}: impact must be non-empty — D9's \"complete "
-            f"metadata\" catalog-validation property requires every entry "
+            f'metadata" catalog-validation property requires every entry '
             f"to carry human-readable impact text"
         )
     for policy, override in e.policy_overrides.items():
@@ -673,7 +673,9 @@ class ChangeKindRegistry:
             _validate_entry(e)
             self._entries[e.kind] = e
 
-    def __reduce__(self) -> tuple[type[ChangeKindRegistry], tuple[list[ChangeKindMeta]]]:
+    def __reduce__(
+        self,
+    ) -> tuple[type[ChangeKindRegistry], tuple[list[ChangeKindMeta]]]:
         """Reconstruct through ``__init__`` on unpickling (Codex review, PR #882,
         fresh evidence).
 

@@ -230,7 +230,9 @@ class TestStoredPairEarlyRejections:
         assert code == 64
         assert "--include-private-dso" in out
 
-    def test_release_include_private_dso_config_is_rejected(self, tmp_path: Path) -> None:
+    def test_release_include_private_dso_config_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
         """Phase 7d: release.include_private_dso is a project-wide
         .abicheck.yml setting now -- a project that sets it still gets
         this dispatch's own out-of-scope UsageError (neither stored side
@@ -273,7 +275,9 @@ class TestStoredPairEarlyRejections:
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text("release:\n  dso_only: true\n")
 
-        code, out = _invoke("compare", str(old_path), str(new_path), "--config", str(cfg))
+        code, out = _invoke(
+            "compare", str(old_path), str(new_path), "--config", str(cfg)
+        )
 
         assert code == 64
         assert "release.dso_only" in out

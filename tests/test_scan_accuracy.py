@@ -6,6 +6,7 @@ These tests systematically verify that:
 3. Cross-detector deduplication doesn't lose real changes.
 4. Confidence/evidence tiers are computed correctly.
 """
+
 from __future__ import annotations
 
 import copy
@@ -43,23 +44,32 @@ def _base_snap(version: str = "1.0") -> AbiSnapshot:
         version=version,
         functions=[
             Function(
-                name="process", mangled="_Z7processv",
-                return_type="int", params=[Param(name="data", type="void *", kind=ParamKind.POINTER)],
+                name="process",
+                mangled="_Z7processv",
+                return_type="int",
+                params=[Param(name="data", type="void *", kind=ParamKind.POINTER)],
                 visibility=Visibility.PUBLIC,
             ),
             Function(
-                name="init", mangled="_Z4initv",
-                return_type="void", params=[],
+                name="init",
+                mangled="_Z4initv",
+                return_type="void",
+                params=[],
                 visibility=Visibility.PUBLIC,
             ),
         ],
         variables=[
-            Variable(name="version", mangled="_Z7versionv", type="const char *",
-                     visibility=Visibility.PUBLIC),
+            Variable(
+                name="version",
+                mangled="_Z7versionv",
+                type="const char *",
+                visibility=Visibility.PUBLIC,
+            ),
         ],
         types=[
             RecordType(
-                name="Config", kind="struct",
+                name="Config",
+                kind="struct",
                 fields=[
                     TypeField(name="width", type="int", offset_bits=0),
                     TypeField(name="height", type="int", offset_bits=32),
@@ -92,8 +102,12 @@ class TestIdenticalSnapshotsNoChange:
 
     def test_identical_empty_snapshots_no_change(self):
         snap = AbiSnapshot(
-            library="libtest.so", version="1.0",
-            functions=[], variables=[], types=[], enums=[],
+            library="libtest.so",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            enums=[],
             typedefs={},
         )
         result = compare(snap, copy.deepcopy(snap))
@@ -130,10 +144,15 @@ class TestSingleMutationDetection:
     def test_func_added_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.functions.append(Function(
-            name="cleanup", mangled="_Z7cleanupv",
-            return_type="void", params=[], visibility=Visibility.PUBLIC,
-        ))
+        new.functions.append(
+            Function(
+                name="cleanup",
+                mangled="_Z7cleanupv",
+                return_type="void",
+                params=[],
+                visibility=Visibility.PUBLIC,
+            )
+        )
         result = compare(old, new)
         assert result.verdict == Verdict.COMPATIBLE
         assert any(c.kind == ChangeKind.FUNC_ADDED for c in result.changes)
@@ -206,7 +225,9 @@ class TestSingleMutationDetection:
         # disable surface scoping (orthogonal concern, default-on since ADR-024).
         result = compare(old, new, scope_to_public_surface=False)
         assert result.verdict == Verdict.BREAKING
-        assert any(c.kind == ChangeKind.ENUM_MEMBER_VALUE_CHANGED for c in result.changes)
+        assert any(
+            c.kind == ChangeKind.ENUM_MEMBER_VALUE_CHANGED for c in result.changes
+        )
 
     def test_enum_member_added_detected(self):
         old = _base_snap()
@@ -242,20 +263,29 @@ class TestHiddenSymbolsFalsePositiveResistance:
         old = _base_snap()
         new = copy.deepcopy(old)
         # Add a hidden function to old, remove it from new
-        old.functions.append(Function(
-            name="internal", mangled="_Z8internalv",
-            return_type="void", params=[], visibility=Visibility.HIDDEN,
-        ))
+        old.functions.append(
+            Function(
+                name="internal",
+                mangled="_Z8internalv",
+                return_type="void",
+                params=[],
+                visibility=Visibility.HIDDEN,
+            )
+        )
         result = compare(old, new)
         assert result.verdict == Verdict.NO_CHANGE
 
     def test_hidden_var_change_not_reported(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        old.variables.append(Variable(
-            name="secret", mangled="_Z6secretv", type="int",
-            visibility=Visibility.HIDDEN,
-        ))
+        old.variables.append(
+            Variable(
+                name="secret",
+                mangled="_Z6secretv",
+                type="int",
+                visibility=Visibility.HIDDEN,
+            )
+        )
         result = compare(old, new)
         assert result.verdict == Verdict.NO_CHANGE
 
@@ -267,9 +297,12 @@ class TestCrossDetectorDeduplication:
         """Two FUNC_REMOVED for different symbols must both be kept."""
         old = _base_snap()
         new = AbiSnapshot(
-            library="libtest.so.1", version="1.0",
-            functions=[], variables=old.variables,
-            types=old.types, enums=old.enums,
+            library="libtest.so.1",
+            version="1.0",
+            functions=[],
+            variables=old.variables,
+            types=old.types,
+            enums=old.enums,
             typedefs=old.typedefs,
         )
         result = compare(old, new)
@@ -290,8 +323,12 @@ class TestConfidenceAndEvidenceTiers:
 
     def test_empty_snapshot_low_confidence(self):
         snap = AbiSnapshot(
-            library="libtest.so", version="1.0",
-            functions=[], variables=[], types=[], enums=[],
+            library="libtest.so",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            enums=[],
             typedefs={},
         )
         result = compare(snap, snap)

@@ -24,6 +24,7 @@ real would require a genuine build with ``--sources``/``--build-info``
 evidence. Compiler-free, mirrors ``tests/test_environment_drift.py``'s
 ``TestCase170Example`` validation pattern.
 """
+
 from __future__ import annotations
 
 import json
@@ -78,9 +79,7 @@ class TestCase192CallGraphBreakSurvivesSuppression:
             example_catalog.case_dir(self.CASE) / "suppress-refused.yaml"
         )
         result = compare(old, new, suppression=suppression)
-        removed = next(
-            c for c in result.changes if c.kind is ChangeKind.FUNC_REMOVED
-        )
+        removed = next(c for c in result.changes if c.kind is ChangeKind.FUNC_REMOVED)
         assert removed.public_reachable is True
         assert removed.reachability_kind == "symbol_availability"
         assert removed.reachability_proof_path == (
@@ -94,17 +93,13 @@ class TestCase192CallGraphBreakSurvivesSuppression:
         )
         result = compare(old, new, suppression=suppression)
         assert result.verdict == Verdict.BREAKING
-        assert any(
-            c.kind is ChangeKind.FUNC_REMOVED for c in result.changes
-        )
+        assert any(c.kind is ChangeKind.FUNC_REMOVED for c in result.changes)
         assert any(
             c.kind is ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK
             for c in result.changes
         )
 
-    def test_broad_suppression_applies_with_allow_public_break(
-        self, snapshots
-    ) -> None:
+    def test_broad_suppression_applies_with_allow_public_break(self, snapshots) -> None:
         old, new = snapshots
         suppression = SuppressionList.load(
             example_catalog.case_dir(self.CASE) / "suppress-acknowledged.yaml"
@@ -148,9 +143,7 @@ class TestCase193OrdinaryExportedFnCallNotReachable:
             [Suppression(namespace="totally::unrelated::**", reason="unrelated")]
         )
         result = compare(old, new, suppression=suppression)
-        removed = next(
-            c for c in result.changes if c.kind is ChangeKind.FUNC_REMOVED
-        )
+        removed = next(c for c in result.changes if c.kind is ChangeKind.FUNC_REMOVED)
         assert removed.public_reachable is False
         assert not any(
             c.kind is ChangeKind.INTERNAL_SYMBOL_REQUIRED_BY_PUBLIC_API
@@ -159,7 +152,9 @@ class TestCase193OrdinaryExportedFnCallNotReachable:
 
     def test_broad_suppression_applies_cleanly_no_diagnostic(self, snapshots) -> None:
         old, new = snapshots
-        suppression = SuppressionList.load(example_catalog.case_dir(self.CASE) / "suppress.yaml")
+        suppression = SuppressionList.load(
+            example_catalog.case_dir(self.CASE) / "suppress.yaml"
+        )
         result = compare(old, new, suppression=suppression)
         assert result.verdict == Verdict.NO_CHANGE
         assert result.changes == []

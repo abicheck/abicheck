@@ -122,8 +122,8 @@ def embed_build_source(
     src_is_inputs = (not src_is_pack) and is_inputs_pack_dir(sources)
     bi_pack = (
         load_inputs_pack_or_raise(
-                build_info, exported_symbols=exported, on_warning=on_warning
-            )
+            build_info, exported_symbols=exported, on_warning=on_warning
+        )
         if (bi_is_inputs and build_info is not None)
         else load_pack_or_raise(build_info)
         if (bi_is_pack and build_info is not None)
@@ -131,8 +131,8 @@ def embed_build_source(
     )
     src_pack = (
         load_inputs_pack_or_raise(
-                sources, exported_symbols=exported, on_warning=on_warning
-            )
+            sources, exported_symbols=exported, on_warning=on_warning
+        )
         if (src_is_inputs and sources is not None)
         else load_pack_or_raise(sources)
         if (src_is_pack and sources is not None)
@@ -170,11 +170,7 @@ def embed_build_source(
         # CLI --build-target flag any more, it was removed; only .abicheck.yml's
         # build.targets and this programmatic parameter remain) win over the
         # .abicheck.yml values when supplied.
-        if (
-            build_query is not None
-            or build_compile_db is not None
-            or build_targets
-        ):
+        if build_query is not None or build_compile_db is not None or build_targets:
             import dataclasses
 
             from .build_config import BuildConfig

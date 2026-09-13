@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Tests for abicheck.stack_report — JSON and Markdown output."""
+
 from __future__ import annotations
 
 import json
@@ -25,16 +26,30 @@ from abicheck.stack_checker import StackChange, StackCheckResult, StackVerdict
 from abicheck.stack_report import stack_to_json, stack_to_markdown
 
 
-def _binding(status: BindingStatus, symbol: str = "sym", provider: str | None = "/lib/libfoo.so") -> SymbolBinding:
-    return SymbolBinding(consumer="/app", symbol=symbol, version="", provider=provider, status=status, explanation="test")
+def _binding(
+    status: BindingStatus, symbol: str = "sym", provider: str | None = "/lib/libfoo.so"
+) -> SymbolBinding:
+    return SymbolBinding(
+        consumer="/app",
+        symbol=symbol,
+        version="",
+        provider=provider,
+        status=status,
+        explanation="test",
+    )
 
 
 def _graph_with_nodes(**sonames: str) -> DependencyGraph:
     g = DependencyGraph(root="/app")
     for i, (key, soname) in enumerate(sonames.items()):
         g.nodes[key] = ResolvedDSO(
-            path=Path(key), soname=soname, needed=[], rpath="", runpath="",
-            resolution_reason="root" if i == 0 else "default", depth=i,
+            path=Path(key),
+            soname=soname,
+            needed=[],
+            rpath="",
+            runpath="",
+            resolution_reason="root" if i == 0 else "default",
+            depth=i,
         )
     return g
 
@@ -81,7 +96,9 @@ class TestStackToJson:
 
     def test_missing_symbols_in_json(self):
         result = _make_result(
-            missing=[_binding(BindingStatus.MISSING, symbol="missing_func", provider=None)],
+            missing=[
+                _binding(BindingStatus.MISSING, symbol="missing_func", provider=None)
+            ],
         )
         data = json.loads(stack_to_json(result))
         assert "missing_symbols" in data
@@ -107,7 +124,8 @@ class TestStackToJson:
         result = _make_result(
             stack_changes=[
                 StackChange(
-                    library="libfoo.so", change_type="content_changed",
+                    library="libfoo.so",
+                    change_type="content_changed",
                     not_comparable_reason="scope drift",
                 ),
             ],
@@ -119,7 +137,9 @@ class TestStackToJson:
 
     def test_stack_change_no_not_comparable_reason_omitted_from_json(self):
         result = _make_result(
-            stack_changes=[StackChange(library="libfoo.so", change_type="content_changed")],
+            stack_changes=[
+                StackChange(library="libfoo.so", change_type="content_changed")
+            ],
         )
         data = json.loads(stack_to_json(result))
         assert "not_comparable_reason" not in data["stack_changes"][0]
@@ -130,7 +150,9 @@ class TestStackToJson:
         no way to identify the actual findings without a separate `compare`
         run (mirroring the `scan --baseline` fix)."""
         diff = DiffResult(
-            old_version="1.0", new_version="2.0", library="libfoo.so",
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so",
             changes=[
                 Change(ChangeKind.FUNC_REMOVED, "foo_init", "removed: foo_init"),
             ],
@@ -138,7 +160,9 @@ class TestStackToJson:
         )
         result = _make_result(
             stack_changes=[
-                StackChange(library="libfoo.so", change_type="content_changed", abi_diff=diff),
+                StackChange(
+                    library="libfoo.so", change_type="content_changed", abi_diff=diff
+                ),
             ],
         )
         data = json.loads(stack_to_json(result))
@@ -156,12 +180,17 @@ class TestStackToJson:
             for i in range(15)
         ]
         diff = DiffResult(
-            old_version="1.0", new_version="2.0", library="libfoo.so",
-            changes=changes, verdict=Verdict.BREAKING,
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so",
+            changes=changes,
+            verdict=Verdict.BREAKING,
         )
         result = _make_result(
             stack_changes=[
-                StackChange(library="libfoo.so", change_type="content_changed", abi_diff=diff),
+                StackChange(
+                    library="libfoo.so", change_type="content_changed", abi_diff=diff
+                ),
             ],
         )
         data = json.loads(stack_to_json(result))
@@ -181,8 +210,10 @@ class TestStackToJson:
 
         change = Change(
             kind=ChangeKind.RUNTIME_SYMBOL_PROVIDER_CHANGED,
-            symbol="process", description="moved provider",
-            old_value="liba.so.1", new_value="libb.so.1",
+            symbol="process",
+            description="moved provider",
+            old_value="liba.so.1",
+            new_value="libb.so.1",
         )
         result = _make_result(binding_changes=[change])
         data = json.loads(stack_to_json(result))
@@ -204,12 +235,16 @@ class TestStackToMarkdown:
         assert "Symbol Binding Summary" in md
 
     def test_environments_shown(self):
-        md = stack_to_markdown(_make_result(baseline_env="/base", candidate_env="/cand"))
+        md = stack_to_markdown(
+            _make_result(baseline_env="/base", candidate_env="/cand")
+        )
         assert "Baseline" in md
         assert "Candidate" in md
 
     def test_environments_hidden_when_same(self):
-        md = stack_to_markdown(_make_result(baseline_env="/same", candidate_env="/same"))
+        md = stack_to_markdown(
+            _make_result(baseline_env="/same", candidate_env="/same")
+        )
         assert "## Environments" not in md
 
     def test_binding_changes_section(self):
@@ -218,7 +253,8 @@ class TestStackToMarkdown:
 
         change = Change(
             kind=ChangeKind.RUNTIME_WEAK_RESOLUTION_CHANGED,
-            symbol="opt_feature", description="weak reference now resolves",
+            symbol="opt_feature",
+            description="weak reference now resolves",
         )
         md = stack_to_markdown(_make_result(binding_changes=[change]))
         assert "## Runtime Binding Changes" in md
@@ -237,35 +273,46 @@ class TestStackToMarkdown:
     def test_not_comparable_stack_change_shown(self):
         # ADR-050 D2: a not_comparable dependency renders distinctly from
         # "unknown" (the pre-existing abi_diff=None label) and shows why.
-        md = stack_to_markdown(_make_result(
-            stack_changes=[
-                StackChange(
-                    library="libfoo.so", change_type="content_changed",
-                    not_comparable_reason="scope drift",
-                ),
-            ],
-        ))
+        md = stack_to_markdown(
+            _make_result(
+                stack_changes=[
+                    StackChange(
+                        library="libfoo.so",
+                        change_type="content_changed",
+                        not_comparable_reason="scope drift",
+                    ),
+                ],
+            )
+        )
         assert "`not_comparable`" in md
         assert "scope drift" in md
 
     def test_missing_symbols_section(self):
-        md = stack_to_markdown(_make_result(
-            missing=[_binding(BindingStatus.MISSING, symbol="foo_init", provider=None)],
-        ))
+        md = stack_to_markdown(
+            _make_result(
+                missing=[
+                    _binding(BindingStatus.MISSING, symbol="foo_init", provider=None)
+                ],
+            )
+        )
         assert "Missing Symbols" in md
         assert "foo_init" in md
 
     def test_stack_changes_section_removed(self):
-        md = stack_to_markdown(_make_result(
-            stack_changes=[StackChange(library="libfoo.so", change_type="removed")],
-        ))
+        md = stack_to_markdown(
+            _make_result(
+                stack_changes=[StackChange(library="libfoo.so", change_type="removed")],
+            )
+        )
         assert "Stack Changes" in md
         assert "removed" in md
 
     def test_stack_changes_section_added(self):
-        md = stack_to_markdown(_make_result(
-            stack_changes=[StackChange(library="libfoo.so", change_type="added")],
-        ))
+        md = stack_to_markdown(
+            _make_result(
+                stack_changes=[StackChange(library="libfoo.so", change_type="added")],
+            )
+        )
         assert "Stack Changes" in md
         assert "new in candidate" in md.lower() or "added" in md.lower()
 

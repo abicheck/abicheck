@@ -12,6 +12,7 @@ Error / usage:
 
 These tests use the CLI runner (not subprocess) for speed and isolation.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -35,6 +36,7 @@ from abicheck.serialization import snapshot_to_json
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _snap(ver: str, funcs=None, types=None, enums=None) -> AbiSnapshot:
     s = AbiSnapshot(library="libtest.so", version=ver)
     s.functions = funcs or []
@@ -44,7 +46,9 @@ def _snap(ver: str, funcs=None, types=None, enums=None) -> AbiSnapshot:
 
 
 def _fn(name: str, mangled: str) -> Function:
-    return Function(name=name, mangled=mangled, return_type="int", visibility=Visibility.PUBLIC)
+    return Function(
+        name=name, mangled=mangled, return_type="int", visibility=Visibility.PUBLIC
+    )
 
 
 def _write_snap(path: Path, snap: AbiSnapshot) -> None:
@@ -54,6 +58,7 @@ def _write_snap(path: Path, snap: AbiSnapshot) -> None:
 # ---------------------------------------------------------------------------
 # Exit code 0 — NO_CHANGE
 # ---------------------------------------------------------------------------
+
 
 def test_exit_0_no_change(tmp_path: Path) -> None:
     """Identical snapshots → exit 0 (NO_CHANGE)."""
@@ -74,10 +79,16 @@ def test_exit_0_compatible(tmp_path: Path) -> None:
     old_path = tmp_path / "old.json"
     new_path = tmp_path / "new.json"
     _write_snap(old_path, _snap("1.0", funcs=[_fn("compute", "_Z7computei")]))
-    _write_snap(new_path, _snap("2.0", funcs=[
-        _fn("compute", "_Z7computei"),
-        _fn("helper", "_Z6helperi"),
-    ]))
+    _write_snap(
+        new_path,
+        _snap(
+            "2.0",
+            funcs=[
+                _fn("compute", "_Z7computei"),
+                _fn("helper", "_Z6helperi"),
+            ],
+        ),
+    )
 
     result = runner.invoke(main, ["compare", str(old_path), str(new_path)])
     assert result.exit_code == 0, f"Expected 0, got {result.exit_code}\n{result.output}"
@@ -115,6 +126,7 @@ def test_exit_0_compatible_with_risk(tmp_path: Path) -> None:
 # Exit code 2 — API_BREAK
 # ---------------------------------------------------------------------------
 
+
 def test_exit_2_api_break_enum_renamed(tmp_path: Path) -> None:
     """Enum member renamed → API_BREAK → exit 2."""
     from abicheck.checker import ChangeKind
@@ -127,14 +139,27 @@ def test_exit_2_api_break_enum_renamed(tmp_path: Path) -> None:
     old_path = tmp_path / "old.json"
     new_path = tmp_path / "new.json"
 
-    old = _snap("1.0", enums=[EnumType(
-        name="Status",
-        members=[EnumMember("OK", 0), EnumMember("FAIL", 1)],
-    )])
-    new = _snap("2.0", enums=[EnumType(
-        name="Status",
-        members=[EnumMember("OK", 0), EnumMember("ERROR", 1)],  # renamed FAIL→ERROR
-    )])
+    old = _snap(
+        "1.0",
+        enums=[
+            EnumType(
+                name="Status",
+                members=[EnumMember("OK", 0), EnumMember("FAIL", 1)],
+            )
+        ],
+    )
+    new = _snap(
+        "2.0",
+        enums=[
+            EnumType(
+                name="Status",
+                members=[
+                    EnumMember("OK", 0),
+                    EnumMember("ERROR", 1),
+                ],  # renamed FAIL→ERROR
+            )
+        ],
+    )
     _write_snap(old_path, old)
     _write_snap(new_path, new)
 
@@ -148,12 +173,18 @@ def test_exit_2_api_break_enum_renamed(tmp_path: Path) -> None:
 # Exit code 4 — BREAKING
 # ---------------------------------------------------------------------------
 
+
 def test_exit_4_func_removed(tmp_path: Path) -> None:
     """Public function removed → BREAKING → exit 4."""
     runner = CliRunner()
     old_path = tmp_path / "old.json"
     new_path = tmp_path / "new.json"
-    _write_snap(old_path, _snap("1.0", funcs=[_fn("compute", "_Z7computei"), _fn("helper", "_Z6helperi")]))
+    _write_snap(
+        old_path,
+        _snap(
+            "1.0", funcs=[_fn("compute", "_Z7computei"), _fn("helper", "_Z6helperi")]
+        ),
+    )
     _write_snap(new_path, _snap("2.0", funcs=[_fn("compute", "_Z7computei")]))
 
     result = runner.invoke(main, ["compare", str(old_path), str(new_path)])
@@ -169,14 +200,32 @@ def test_exit_4_struct_size_changed(tmp_path: Path) -> None:
     old_path = tmp_path / "old.json"
     new_path = tmp_path / "new.json"
 
-    old = _snap("1.0", types=[RecordType(
-        name="Buf", kind="struct", size_bits=64,
-        fields=[TypeField("x", "int", 0), TypeField("y", "int", 32)],
-    )])
-    new = _snap("2.0", types=[RecordType(
-        name="Buf", kind="struct", size_bits=96,
-        fields=[TypeField("x", "int", 0), TypeField("y", "int", 32), TypeField("z", "int", 64)],
-    )])
+    old = _snap(
+        "1.0",
+        types=[
+            RecordType(
+                name="Buf",
+                kind="struct",
+                size_bits=64,
+                fields=[TypeField("x", "int", 0), TypeField("y", "int", 32)],
+            )
+        ],
+    )
+    new = _snap(
+        "2.0",
+        types=[
+            RecordType(
+                name="Buf",
+                kind="struct",
+                size_bits=96,
+                fields=[
+                    TypeField("x", "int", 0),
+                    TypeField("y", "int", 32),
+                    TypeField("z", "int", 64),
+                ],
+            )
+        ],
+    )
     _write_snap(old_path, old)
     _write_snap(new_path, new)
 
@@ -189,6 +238,7 @@ def test_exit_4_struct_size_changed(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # Exit code on error / bad usage
 # ---------------------------------------------------------------------------
+
 
 def test_exit_on_missing_argument() -> None:
     """Missing argument → Click usage error → non-zero exit."""
@@ -214,7 +264,14 @@ def test_exit_on_invalid_json(tmp_path: Path) -> None:
 def test_exit_on_nonexistent_file(tmp_path: Path) -> None:
     """Non-existent snapshot file → Click reports error."""
     runner = CliRunner()
-    result = runner.invoke(main, ["compare", str(tmp_path / "missing.json"), str(tmp_path / "also_missing.json")])
+    result = runner.invoke(
+        main,
+        [
+            "compare",
+            str(tmp_path / "missing.json"),
+            str(tmp_path / "also_missing.json"),
+        ],
+    )
     assert result.exit_code != 0, (
         f"Expected non-zero exit for missing file, got {result.exit_code}"
     )
@@ -224,15 +281,23 @@ def test_exit_on_nonexistent_file(tmp_path: Path) -> None:
 # Verdict appears in output (smoke check for JSON format)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("fmt", ["json", "markdown"])
 def test_verdict_in_output_formats(tmp_path: Path, fmt: str) -> None:
     """Verdict string present in both json and markdown output formats."""
     runner = CliRunner()
     old_path = tmp_path / "old.json"
     new_path = tmp_path / "new.json"
-    _write_snap(old_path, _snap("1.0", funcs=[_fn("compute", "_Z7computei"), _fn("helper", "_Z6helperi")]))
+    _write_snap(
+        old_path,
+        _snap(
+            "1.0", funcs=[_fn("compute", "_Z7computei"), _fn("helper", "_Z6helperi")]
+        ),
+    )
     _write_snap(new_path, _snap("2.0", funcs=[_fn("compute", "_Z7computei")]))
 
-    result = runner.invoke(main, ["compare", str(old_path), str(new_path), "-o", f"{fmt}=-"])
+    result = runner.invoke(
+        main, ["compare", str(old_path), str(new_path), "-o", f"{fmt}=-"]
+    )
     assert result.exit_code == 4
     assert "BREAKING" in result.output

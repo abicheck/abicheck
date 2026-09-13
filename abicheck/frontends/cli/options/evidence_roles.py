@@ -169,8 +169,9 @@ def split_build_evidence(pairs: SidedPaths) -> dict[str, object]:
     """
     matrices, contexts = _partition(
         pairs,
-        lambda path: classify_build_info_transport(path)
-        is BuildInfoTransport.PROBE_MATRIX,
+        lambda path: (
+            classify_build_info_transport(path) is BuildInfoTransport.PROBE_MATRIX
+        ),
     )
     old_ctx, new_ctx = _single_per_side(contexts)
     old_matrix, new_matrix = _single_per_side(matrices)

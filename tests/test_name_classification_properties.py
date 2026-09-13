@@ -142,9 +142,7 @@ def _stdlib_local_name(draw: st.DrawFn) -> tuple[str, bool, bool]:
 
     if wants_customization:
         cp = draw(st.sampled_from(_CUSTOMIZATION_POINT_CODES))
-        mangled = (
-            f"{prefix}{n_part}{quals}{ref}{marker}{inline_ns}{cp}I6MyTypeEclERKS0_E{suffix}"
-        )
+        mangled = f"{prefix}{n_part}{quals}{ref}{marker}{inline_ns}{cp}I6MyTypeEclERKS0_E{suffix}"
         expected = False
     else:
         mangled = (

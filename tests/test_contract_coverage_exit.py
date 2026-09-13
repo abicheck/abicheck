@@ -120,9 +120,7 @@ class TestTheCoverageExitIsApplied:
         (`--contract all` / `--no-scope-public-headers`), so it requires no
         root or closure evidence and therefore cannot be short of any. A
         rollback that could itself fail on coverage would not be one."""
-        result = _compare(
-            tmp_path, _compatible_pair(), "--contract", "all"
-        )
+        result = _compare(tmp_path, _compatible_pair(), "--contract", "all")
         assert result.exit_code == 0, result.output
 
     def test_a_run_that_never_asked_the_question_is_untouched(
@@ -381,9 +379,7 @@ class TestTheGatingConditionIsVisible:
     def test_a_run_the_axis_does_not_gate_stays_quiet(self, tmp_path: Path) -> None:
         """No notice when there is nothing to explain -- otherwise the message
         becomes noise every run prints and no one reads."""
-        result = _compare(
-            tmp_path, _compatible_pair(), "--contract", "all"
-        )
+        result = _compare(tmp_path, _compatible_pair(), "--contract", "all")
         assert result.exit_code == 0, result.output
         assert "Contract coverage incomplete" not in result.output
 
@@ -422,9 +418,7 @@ class TestArtifactsAgreeWithTheProcessExit:
     def test_a_clean_run_keeps_its_zero(self, tmp_path: Path) -> None:
         """The fold must not invent a floor for a run that had none."""
         out = tmp_path / "report.sarif"
-        result = _compare(
-            tmp_path, _compatible_pair(), "-o", f"sarif={out}"
-        )
+        result = _compare(tmp_path, _compatible_pair(), "-o", f"sarif={out}")
         assert result.exit_code == 0, result.output
         invocation = json.loads(out.read_text(encoding="utf-8"))["runs"][0][
             "invocations"
@@ -662,9 +656,7 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
         the compatibility axis was already silent and only the accepted
         coverage 1 falls away.
         """
-        without = _compare(
-            tmp_path, _breaking_pair(), "--contract", mode
-        )
+        without = _compare(tmp_path, _breaking_pair(), "--contract", mode)
         with_warn = _compare(
             tmp_path,
             _breaking_pair(),

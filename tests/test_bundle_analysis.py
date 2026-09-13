@@ -99,7 +99,9 @@ class TestAnalyzeBundleBothStagesSucceed:
         metadata = _bundle_metadata()
         old = _snapshot(metadata)
         new = _snapshot(metadata)
-        result = analyze_bundle(old, new, [_diff("libcore.so"), _diff("libconsumer.so")])
+        result = analyze_bundle(
+            old, new, [_diff("libcore.so"), _diff("libconsumer.so")]
+        )
 
         assert result.bundle_findings == []
         assert result.analysis_errors == []
@@ -158,7 +160,10 @@ class TestAnalyzeBundleBothStagesSucceed:
         old = _snapshot(metadata)
         new = _snapshot(metadata)
         result = analyze_bundle(
-            old, new, [_diff("libcore.so"), _diff("libconsumer.so")], policy="plugin_abi"
+            old,
+            new,
+            [_diff("libcore.so"), _diff("libconsumer.so")],
+            policy="plugin_abi",
         )
         assert result.policy == "plugin_abi"
 
@@ -379,7 +384,9 @@ class TestAnalyzeBundleForwardsPolicyFile:
         new = _snapshot(new_meta)
 
         without_override = analyze_bundle(
-            old, new, [_diff("libconsumer.so")],
+            old,
+            new,
+            [_diff("libconsumer.so")],
         )
         found_kinds = {f.kind for f in without_override.bundle_findings}
         assert ChangeKind.BUNDLE_LIBRARY_REMOVED in found_kinds
@@ -389,11 +396,12 @@ class TestAnalyzeBundleForwardsPolicyFile:
         # it necessarily causes) must be overridden for the aggregate to
         # actually change -- overriding only one still leaves the other's
         # default BREAKING classification in effect.
-        pf = PolicyFile(
-            overrides={kind: Verdict.COMPATIBLE for kind in found_kinds}
-        )
+        pf = PolicyFile(overrides={kind: Verdict.COMPATIBLE for kind in found_kinds})
         with_override = analyze_bundle(
-            old, new, [_diff("libconsumer.so")], policy_file=pf,
+            old,
+            new,
+            [_diff("libconsumer.so")],
+            policy_file=pf,
         )
         assert {f.kind for f in with_override.bundle_findings} == found_kinds
         assert with_override.bundle_verdict == Verdict.COMPATIBLE

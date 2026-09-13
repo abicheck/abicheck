@@ -2964,7 +2964,14 @@ def test_dump_source_only_include_dependencies_is_noop(tmp_path):
     out = tmp_path / "libfoo.src.json"
     result = CliRunner().invoke(
         main,
-        ["dump", "--sources", str(tree), "--include-system-declarations", "-o", str(out)],
+        [
+            "dump",
+            "--sources",
+            str(tree),
+            "--include-system-declarations",
+            "-o",
+            str(out),
+        ],
     )
     assert result.exit_code == 0, result.output
     assert out.exists()

@@ -21,6 +21,7 @@ the DT_RPATH↔DT_RUNPATH type flip, symbol hash-style drift, and the
 time64/LFS ABI-flip collapse. All tests use synthetic ``ElfMetadata`` /
 ``AbiSnapshot`` — no real binaries required.
 """
+
 from __future__ import annotations
 
 import sys
@@ -107,10 +108,14 @@ class TestRuntimeFloorRaised:
             needed=["libc.so.6"],
             versions_required={"libc.so.6": ["GLIBC_2.17", "GLIBC_2.28", "GLIBC_2.34"]},
             imports=[
-                ElfImport(name="__libc_start_main", version="GLIBC_2.34",
-                          version_soname="libc.so.6"),
-                ElfImport(name="memcpy", version="GLIBC_2.14",
-                          version_soname="libc.so.6"),
+                ElfImport(
+                    name="__libc_start_main",
+                    version="GLIBC_2.34",
+                    version_soname="libc.so.6",
+                ),
+                ElfImport(
+                    name="memcpy", version="GLIBC_2.14", version_soname="libc.so.6"
+                ),
             ],
         )
         changes = _diff_elf_symbol_versioning(self._old(), new)
@@ -147,9 +152,7 @@ class TestRuntimeFloorRaised:
     def test_prefixes_tracked_independently(self) -> None:
         old = _elf(
             needed=["libstdc++.so.6"],
-            versions_required={
-                "libstdc++.so.6": ["GLIBCXX_3.4.28", "CXXABI_1.3.11"]
-            },
+            versions_required={"libstdc++.so.6": ["GLIBCXX_3.4.28", "CXXABI_1.3.11"]},
         )
         new = _elf(
             needed=["libstdc++.so.6"],
@@ -210,14 +213,20 @@ class TestRuntimeFloorRaised:
 
 class TestRuntimeFloorContract:
     def _pair(self) -> tuple[AbiSnapshot, AbiSnapshot]:
-        old = _snap(_elf(
-            needed=["libc.so.6"],
-            versions_required={"libc.so.6": ["GLIBC_2.17", "GLIBC_2.28"]},
-        ))
-        new = _snap(_elf(
-            needed=["libc.so.6"],
-            versions_required={"libc.so.6": ["GLIBC_2.17", "GLIBC_2.28", "GLIBC_2.34"]},
-        ))
+        old = _snap(
+            _elf(
+                needed=["libc.so.6"],
+                versions_required={"libc.so.6": ["GLIBC_2.17", "GLIBC_2.28"]},
+            )
+        )
+        new = _snap(
+            _elf(
+                needed=["libc.so.6"],
+                versions_required={
+                    "libc.so.6": ["GLIBC_2.17", "GLIBC_2.28", "GLIBC_2.34"]
+                },
+            )
+        )
         return old, new
 
     def test_requirement_within_floor_is_compatible(self) -> None:
@@ -225,8 +234,9 @@ class TestRuntimeFloorContract:
         matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.36"})
         result = compare(old, new, env_matrix=matrix)
         assert result.verdict is Verdict.COMPATIBLE
-        floor = next(c for c in result.changes
-                     if c.kind is ChangeKind.RUNTIME_FLOOR_RAISED)
+        floor = next(
+            c for c in result.changes if c.kind is ChangeKind.RUNTIME_FLOOR_RAISED
+        )
         assert floor.effective_verdict is Verdict.COMPATIBLE
         assert floor.modulation_rule == "runtime_floor_contract"
 
@@ -260,9 +270,9 @@ class TestRuntimeFloorContract:
         # (Codex review #510).
         old, new = self._pair()
         old.elf.soname = new.elf.soname = "libtest.so.1"
-        result = compare(old, new, env_matrix=EnvironmentMatrix(
-            runtime_floors={"GLIBC": "2.28"}
-        ))
+        result = compare(
+            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        )
         assert result.verdict is Verdict.BREAKING
         assert ChangeKind.SONAME_BUMP_RECOMMENDED in _kinds(result.changes)
 
@@ -270,9 +280,9 @@ class TestRuntimeFloorContract:
         # A floor that parses to no numeric components (possible via direct
         # construction, bypassing from_dict validation) must not modulate.
         old, new = self._pair()
-        result = compare(old, new, env_matrix=EnvironmentMatrix(
-            runtime_floors={"GLIBC": "unknown"}
-        ))
+        result = compare(
+            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "unknown"})
+        )
         assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
 
     def test_tag_without_underscore_skipped(self) -> None:
@@ -298,25 +308,22 @@ class TestRuntimeFloorContract:
         # truncate '2.28-1' to (2,) and flip verdicts — it leaves the finding
         # at its default RISK instead (Codex review #510, round 4).
         old, new = self._pair()
-        result = compare(old, new, env_matrix=EnvironmentMatrix(
-            runtime_floors={"GLIBC": "2.28-1"}
-        ))
+        result = compare(
+            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.28-1"})
+        )
         assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
 
     def test_overlong_direct_floor_left_at_default_not_crash(self) -> None:
         old, new = self._pair()
-        result = compare(old, new, env_matrix=EnvironmentMatrix(
-            runtime_floors={"GLIBC": "9" * 5000}
-        ))
+        result = compare(
+            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "9" * 5000})
+        )
         assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
 
     def test_floor_keys_case_insensitive(self) -> None:
-        changes = [
-            c for c in compare(*self._pair()).changes
-        ]
+        changes = [c for c in compare(*self._pair()).changes]
         apply_runtime_floor_contract(changes, {"glibc": "2.36"})
-        floor = next(c for c in changes
-                     if c.kind is ChangeKind.RUNTIME_FLOOR_RAISED)
+        floor = next(c for c in changes if c.kind is ChangeKind.RUNTIME_FLOOR_RAISED)
         assert floor.effective_verdict is Verdict.COMPATIBLE
 
     def test_dt_relr_settled_by_glibc_floor(self) -> None:
@@ -324,12 +331,18 @@ class TestRuntimeFloorContract:
         # above that settles it COMPATIBLE, one below settles it BREAKING.
         old = _snap(_elf())
         new = _snap(_elf(has_dt_relr=True))
-        assert compare(
-            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.36"})
-        ).verdict is Verdict.COMPATIBLE
-        assert compare(
-            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
-        ).verdict is Verdict.BREAKING
+        assert (
+            compare(
+                old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.36"})
+            ).verdict
+            is Verdict.COMPATIBLE
+        )
+        assert (
+            compare(
+                old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+            ).verdict
+            is Verdict.BREAKING
+        )
 
     def test_bare_major_floor_matches_dotted_requirement(self) -> None:
         # A bare-major floor ("GLIBC": "2") parses to (2,) while a real
@@ -351,8 +364,9 @@ class TestRuntimeFloorContract:
     def test_existing_modulation_not_overridden(self) -> None:
         old, new = self._pair()
         result = compare(old, new)
-        floor = next(c for c in result.changes
-                     if c.kind is ChangeKind.RUNTIME_FLOOR_RAISED)
+        floor = next(
+            c for c in result.changes if c.kind is ChangeKind.RUNTIME_FLOOR_RAISED
+        )
         floor.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
         floor.modulation_rule = "someone_else"
         apply_runtime_floor_contract([floor], {"GLIBC": "2.36"})
@@ -390,7 +404,8 @@ class TestPlatformBaselineFloorRaised:
             old, new, env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.27"})
         )
         floor = next(
-            c for c in result.changes
+            c
+            for c in result.changes
             if c.kind is ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED
         )
         assert floor.old_value == "GLIBC_2.27"
@@ -532,9 +547,7 @@ class TestPlatformBaselineFloorRaised:
 
         elf = _elf(
             needed=["libstdc++.so.6"],
-            versions_required={
-                "libstdc++.so.6": ["GLIBCXX_3.4.28", "GLIBCXX_3.4.30"]
-            },
+            versions_required={"libstdc++.so.6": ["GLIBCXX_3.4.28", "GLIBCXX_3.4.30"]},
         )
         assert check_platform_baseline_floor(elf, {"GLIBCXX": "3.4.30"}) == []
         changes = check_platform_baseline_floor(elf, {"GLIBCXX": "3.4.28"})
@@ -813,9 +826,7 @@ class TestMusllinuxGlibcDependency:
             new,
             env_matrix=EnvironmentMatrix(runtime_floors={"MUSLLINUX": "1.2"}),
         )
-        assert ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED in _kinds(
-            result.changes
-        )
+        assert ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED in _kinds(result.changes)
         assert result.verdict is Verdict.BREAKING
 
 
@@ -924,9 +935,7 @@ class TestEnvironmentMatrixRuntimeFloors:
         m = EnvironmentMatrix.from_dict({"runtime_floors": {"GLIBC": 3}})
         assert m.runtime_floors == {"GLIBC": "3"}
 
-    @pytest.mark.parametrize(
-        "bad", ["2.28-1", "2.x", "v2.28", "2..28", "", "9" * 5000]
-    )
+    @pytest.mark.parametrize("bad", ["2.28-1", "2.x", "v2.28", "2..28", "", "9" * 5000])
     def test_partially_numeric_floor_rejected(self, bad: str) -> None:
         # The floor contract parses per dot-component with int(); a floor like
         # "2.28-1" would silently truncate to (2,) and flip verdicts — reject
@@ -954,25 +963,19 @@ class TestEnvironmentMatrixRuntimeFloors:
         assert m.runtime_floors == {"MUSLLINUX": "1.2"}
 
     def test_wheel_context_non_numeric_value_accepted(self) -> None:
-        m = EnvironmentMatrix.from_dict(
-            {"runtime_floors": {"WHEEL_CONTEXT": "1"}}
-        )
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_CONTEXT": "1"}})
         assert m.runtime_floors == {"WHEEL_CONTEXT": "1"}
 
     def test_wheel_context_false_boolean_disables_not_stringified(self) -> None:
         # Codex review #583: str(False) == "False", a non-empty string the
         # downstream checks' plain truthiness test would read as *enabled* —
         # the opposite of a user explicitly disabling the key.
-        m = EnvironmentMatrix.from_dict(
-            {"runtime_floors": {"WHEEL_CONTEXT": False}}
-        )
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_CONTEXT": False}})
         assert m.runtime_floors == {}
         assert not m.runtime_floors.get("WHEEL_CONTEXT")
 
     def test_wheel_context_true_boolean_enables(self) -> None:
-        m = EnvironmentMatrix.from_dict(
-            {"runtime_floors": {"WHEEL_CONTEXT": True}}
-        )
+        m = EnvironmentMatrix.from_dict({"runtime_floors": {"WHEEL_CONTEXT": True}})
         assert m.runtime_floors.get("WHEEL_CONTEXT")
 
     def test_musllinux_false_boolean_disables_not_stringified(self) -> None:
@@ -1027,7 +1030,7 @@ class TestEnvironmentMatrixRuntimeFloors:
 
         old = _snap(_elf(rpath="/usr/local/lib"))
         new = _snap(_elf(rpath="/usr/local/lib"))
-        data = yaml.safe_load("runtime_floors:\n  WHEEL_CONTEXT:\n  GLIBC: \"2.28\"\n")
+        data = yaml.safe_load('runtime_floors:\n  WHEEL_CONTEXT:\n  GLIBC: "2.28"\n')
         matrix = EnvironmentMatrix.from_dict(data)
         result = compare(old, new, env_matrix=matrix)
         assert ChangeKind.WHEEL_RPATH_NOT_PORTABLE not in _kinds(result.changes)
@@ -1072,10 +1075,16 @@ class TestEnvironmentMatrixRuntimeFloors:
         (tmp_path / "new").mkdir()
         matrix = tmp_path / "env.yaml"
         matrix.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
-        result = CliRunner().invoke(main, [
-            "compare", str(tmp_path / "old"), str(tmp_path / "new"),
-            "--env-matrix", str(matrix),
-        ])
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(tmp_path / "old"),
+                str(tmp_path / "new"),
+                "--env-matrix",
+                str(matrix),
+            ],
+        )
         assert result.exit_code == 64
         assert "no such option" in result.output.lower()
 
@@ -1327,9 +1336,7 @@ class TestHashStyles:
 # ── time64 / LFS ABI flip ────────────────────────────────────────────────────
 
 
-def _snap32(
-    typedefs: dict[str, str], *, referenced: bool = True
-) -> AbiSnapshot:
+def _snap32(typedefs: dict[str, str], *, referenced: bool = True) -> AbiSnapshot:
     """32-bit ELF snapshot with the given typedefs.
 
     By default each typedef is referenced by a public function's return type —
@@ -1340,8 +1347,10 @@ def _snap32(
     functions = (
         [
             Function(
-                name=f"use_{n}", mangled=f"use_{n}",
-                return_type=n, visibility=Visibility.PUBLIC,
+                name=f"use_{n}",
+                mangled=f"use_{n}",
+                return_type=n,
+                visibility=Visibility.PUBLIC,
             )
             for n in typedefs
         ]
@@ -1398,14 +1407,21 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.types = [RecordType(
-                name="event", kind="struct",
-                fields=[TypeField(name="stamp", type="time_t")],
-            )]
-            snap.functions = [Function(
-                name="get_event", mangled="get_event",
-                return_type="event", visibility=Visibility.PUBLIC,
-            )]
+            snap.types = [
+                RecordType(
+                    name="event",
+                    kind="struct",
+                    fields=[TypeField(name="stamp", type="time_t")],
+                )
+            ]
+            snap.functions = [
+                Function(
+                    name="get_event",
+                    mangled="get_event",
+                    return_type="event",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
         changes = _diff_time64_abi(old, new)
         assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
 
@@ -1418,14 +1434,21 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.types = [RecordType(
-                name="_private_event", kind="struct",
-                fields=[TypeField(name="stamp", type="time_t")],
-            )]
-            snap.functions = [Function(
-                name="api", mangled="api",
-                return_type="int", visibility=Visibility.PUBLIC,
-            )]
+            snap.types = [
+                RecordType(
+                    name="_private_event",
+                    kind="struct",
+                    fields=[TypeField(name="stamp", type="time_t")],
+                )
+            ]
+            snap.functions = [
+                Function(
+                    name="api",
+                    mangled="api",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
         assert _diff_time64_abi(old, new) == []
 
     def test_elf_only_visibility_counts_as_public_use(self) -> None:
@@ -1437,10 +1460,14 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.functions = [Function(
-                name="get_stamp", mangled="get_stamp",
-                return_type="time_t", visibility=Visibility.ELF_ONLY,
-            )]
+            snap.functions = [
+                Function(
+                    name="get_stamp",
+                    mangled="get_stamp",
+                    return_type="time_t",
+                    visibility=Visibility.ELF_ONLY,
+                )
+            ]
         changes = _diff_time64_abi(old, new)
         assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
 
@@ -1454,14 +1481,21 @@ class TestTime64AbiFlip:
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
             snap.typedefs["Stat"] = "stat_rec"
-            snap.types = [RecordType(
-                name="stat_rec", kind="struct",
-                fields=[TypeField(name="mtime", type="time_t")],
-            )]
-            snap.functions = [Function(
-                name="get_stat", mangled="get_stat",
-                return_type="Stat", visibility=Visibility.PUBLIC,
-            )]
+            snap.types = [
+                RecordType(
+                    name="stat_rec",
+                    kind="struct",
+                    fields=[TypeField(name="mtime", type="time_t")],
+                )
+            ]
+            snap.functions = [
+                Function(
+                    name="get_stat",
+                    mangled="get_stat",
+                    return_type="Stat",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
         changes = _diff_time64_abi(old, new)
         assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
 
@@ -1474,14 +1508,21 @@ class TestTime64AbiFlip:
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
             snap.typedefs["Stat"] = "stat_rec"
-            snap.types = [RecordType(
-                name="stat_rec", kind="struct",
-                fields=[TypeField(name="mtime", type="time_t")],
-            )]
-            snap.functions = [Function(
-                name="api", mangled="api",
-                return_type="int", visibility=Visibility.PUBLIC,
-            )]
+            snap.types = [
+                RecordType(
+                    name="stat_rec",
+                    kind="struct",
+                    fields=[TypeField(name="mtime", type="time_t")],
+                )
+            ]
+            snap.functions = [
+                Function(
+                    name="api",
+                    mangled="api",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
         assert _diff_time64_abi(old, new) == []
 
     def test_namespaced_record_reachable(self) -> None:
@@ -1493,14 +1534,21 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.types = [RecordType(
-                name="ns::Event", kind="struct",
-                fields=[TypeField(name="stamp", type="time_t")],
-            )]
-            snap.functions = [Function(
-                name="get_event", mangled="get_event",
-                return_type="ns::Event", visibility=Visibility.PUBLIC,
-            )]
+            snap.types = [
+                RecordType(
+                    name="ns::Event",
+                    kind="struct",
+                    fields=[TypeField(name="stamp", type="time_t")],
+                )
+            ]
+            snap.functions = [
+                Function(
+                    name="get_event",
+                    mangled="get_event",
+                    return_type="ns::Event",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
         changes = _diff_time64_abi(old, new)
         assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
 
@@ -1514,15 +1562,25 @@ class TestTime64AbiFlip:
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
             snap.types = [
-                RecordType(name="Event", kind="struct",
-                           fields=[TypeField(name="id", type="int")]),
-                RecordType(name="ns::Event", kind="struct",
-                           fields=[TypeField(name="stamp", type="time_t")]),
+                RecordType(
+                    name="Event",
+                    kind="struct",
+                    fields=[TypeField(name="id", type="int")],
+                ),
+                RecordType(
+                    name="ns::Event",
+                    kind="struct",
+                    fields=[TypeField(name="stamp", type="time_t")],
+                ),
             ]
-            snap.functions = [Function(
-                name="get_event", mangled="get_event",
-                return_type="Event", visibility=Visibility.PUBLIC,
-            )]
+            snap.functions = [
+                Function(
+                    name="get_event",
+                    mangled="get_event",
+                    return_type="Event",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
         assert _diff_time64_abi(old, new) == []
 
     def test_base_class_fields_reachable(self) -> None:
@@ -1535,15 +1593,21 @@ class TestTime64AbiFlip:
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
             snap.types = [
-                RecordType(name="Base", kind="struct",
-                           fields=[TypeField(name="stamp", type="time_t")]),
-                RecordType(name="Derived", kind="struct",
-                           fields=[], bases=["Base"]),
+                RecordType(
+                    name="Base",
+                    kind="struct",
+                    fields=[TypeField(name="stamp", type="time_t")],
+                ),
+                RecordType(name="Derived", kind="struct", fields=[], bases=["Base"]),
             ]
-            snap.functions = [Function(
-                name="get_derived", mangled="get_derived",
-                return_type="Derived", visibility=Visibility.PUBLIC,
-            )]
+            snap.functions = [
+                Function(
+                    name="get_derived",
+                    mangled="get_derived",
+                    return_type="Derived",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
         changes = _diff_time64_abi(old, new)
         assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
 
@@ -1555,15 +1619,25 @@ class TestTime64AbiFlip:
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
             snap.types = [
-                RecordType(name="inner", kind="struct",
-                           fields=[TypeField(name="stamp", type="time_t")]),
-                RecordType(name="outer", kind="struct",
-                           fields=[TypeField(name="detail", type="inner")]),
+                RecordType(
+                    name="inner",
+                    kind="struct",
+                    fields=[TypeField(name="stamp", type="time_t")],
+                ),
+                RecordType(
+                    name="outer",
+                    kind="struct",
+                    fields=[TypeField(name="detail", type="inner")],
+                ),
             ]
-            snap.functions = [Function(
-                name="get_outer", mangled="get_outer",
-                return_type="outer", visibility=Visibility.PUBLIC,
-            )]
+            snap.functions = [
+                Function(
+                    name="get_outer",
+                    mangled="get_outer",
+                    return_type="outer",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
         changes = _diff_time64_abi(old, new)
         assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
 
@@ -1571,10 +1645,10 @@ class TestTime64AbiFlip:
         # DWARF spells the LFS typedefs many ways: `unsigned long int`,
         # `long unsigned int`, … — all must bucket, or an ino_t/fsblkcnt_t
         # flip is silently missed (Codex review #510).
-        old = _snap32({"ino_t": "unsigned long int",
-                       "fsblkcnt_t": "long unsigned int"})
-        new = _snap32({"ino_t": "unsigned long long int",
-                       "fsblkcnt_t": "unsigned long long int"})
+        old = _snap32({"ino_t": "unsigned long int", "fsblkcnt_t": "long unsigned int"})
+        new = _snap32(
+            {"ino_t": "unsigned long long int", "fsblkcnt_t": "unsigned long long int"}
+        )
         changes = _diff_time64_abi(old, new)
         assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
         assert "ino_t" in changes[0].description
@@ -1586,10 +1660,14 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.variables = [Variable(
-                name="epoch", mangled="epoch", type="time_t",
-                visibility=Visibility.PUBLIC,
-            )]
+            snap.variables = [
+                Variable(
+                    name="epoch",
+                    mangled="epoch",
+                    type="time_t",
+                    visibility=Visibility.PUBLIC,
+                )
+            ]
         changes = _diff_time64_abi(old, new)
         assert _kinds(changes) == {ChangeKind.TIME64_ABI_CHANGED}
 
@@ -1599,10 +1677,14 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.functions = [Function(
-                name="internal", mangled="internal",
-                return_type="time_t", visibility=Visibility.HIDDEN,
-            )]
+            snap.functions = [
+                Function(
+                    name="internal",
+                    mangled="internal",
+                    return_type="time_t",
+                    visibility=Visibility.HIDDEN,
+                )
+            ]
         assert _diff_time64_abi(old, new) == []
 
     def test_no_elf_metadata_assumes_64bit(self) -> None:
@@ -1610,16 +1692,32 @@ class TestTime64AbiFlip:
         # are both 64-bit, so a long -> long long change is not a width flip.
         from abicheck.model import Function, Visibility
 
-        old = AbiSnapshot(library="l", version="1",
-                          typedefs={"time_t": "long int"},
-                          functions=[Function(name="f", mangled="f",
-                                              return_type="time_t",
-                                              visibility=Visibility.PUBLIC)])
-        new = AbiSnapshot(library="l", version="2",
-                          typedefs={"time_t": "long long int"},
-                          functions=[Function(name="f", mangled="f",
-                                              return_type="time_t",
-                                              visibility=Visibility.PUBLIC)])
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            typedefs={"time_t": "long int"},
+            functions=[
+                Function(
+                    name="f",
+                    mangled="f",
+                    return_type="time_t",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            typedefs={"time_t": "long long int"},
+            functions=[
+                Function(
+                    name="f",
+                    mangled="f",
+                    return_type="time_t",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
         assert _diff_time64_abi(old, new) == []
 
     def test_non_string_underlying_ignored(self) -> None:
@@ -1630,10 +1728,15 @@ class TestTime64AbiFlip:
         assert _diff_time64_abi(old, new) == []
 
     def test_pe_snapshots_skipped(self) -> None:
-        old = AbiSnapshot(library="x.dll", version="1", platform="pe",
-                          typedefs={"time_t": "long int"})
-        new = AbiSnapshot(library="x.dll", version="2", platform="pe",
-                          typedefs={"time_t": "long long int"})
+        old = AbiSnapshot(
+            library="x.dll", version="1", platform="pe", typedefs={"time_t": "long int"}
+        )
+        new = AbiSnapshot(
+            library="x.dll",
+            version="2",
+            platform="pe",
+            typedefs={"time_t": "long long int"},
+        )
         assert _diff_time64_abi(old, new) == []
 
     def test_breaking_verdict_through_compare(self) -> None:
@@ -1701,8 +1804,9 @@ class TestCase170Example:
 
     def test_floor_evidence_names_relink_artifact(self, snapshots) -> None:
         result = compare(*snapshots)
-        floor = next(c for c in result.changes
-                     if c.kind is ChangeKind.RUNTIME_FLOOR_RAISED)
+        floor = next(
+            c for c in result.changes if c.kind is ChangeKind.RUNTIME_FLOOR_RAISED
+        )
         assert "__libc_start_main@GLIBC_2.34" in floor.description
         assert floor.old_value == "GLIBC_2.28"
         assert floor.new_value == "GLIBC_2.34"
@@ -1722,15 +1826,19 @@ class TestDriftReportSection:
     def test_drift_section_lists_environment_findings(self) -> None:
         from abicheck.reporter import to_markdown
 
-        old = _snap(_elf(
-            needed=["libc.so.6"],
-            versions_required={"libc.so.6": ["GLIBC_2.28"]},
-        ))
-        new = _snap(_elf(
-            needed=["libc.so.6"],
-            has_dt_relr=True,
-            versions_required={"libc.so.6": ["GLIBC_2.28", "GLIBC_2.34"]},
-        ))
+        old = _snap(
+            _elf(
+                needed=["libc.so.6"],
+                versions_required={"libc.so.6": ["GLIBC_2.28"]},
+            )
+        )
+        new = _snap(
+            _elf(
+                needed=["libc.so.6"],
+                has_dt_relr=True,
+                versions_required={"libc.so.6": ["GLIBC_2.28", "GLIBC_2.34"]},
+            )
+        )
         md = to_markdown(compare(old, new))
         assert "Environment & Toolchain Drift" in md
         assert "runtime_floor_raised" in md

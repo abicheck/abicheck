@@ -26,6 +26,7 @@ used (no DT_RUNPATH present), propagates through the entire dependency tree.
 
 See ld.so(8) and ``man 8 ld-linux`` for the full specification.
 """
+
 from __future__ import annotations
 
 import logging
@@ -67,23 +68,31 @@ def _check_dso_size(path: Path, max_file_size: int | None) -> None:
 @dataclass
 class ResolvedDSO:
     """A single resolved shared object in the dependency graph."""
-    path: Path                    # Resolved filesystem path
-    soname: str                   # DT_SONAME (or basename if missing)
-    needed: list[str]             # DT_NEEDED entries (raw soname strings)
-    rpath: str                    # DT_RPATH
-    runpath: str                  # DT_RUNPATH
-    resolution_reason: str        # Why resolved here (rpath/runpath/ld_library_path/default/root)
-    depth: int                    # Distance from root binary (0 = root)
+
+    path: Path  # Resolved filesystem path
+    soname: str  # DT_SONAME (or basename if missing)
+    needed: list[str]  # DT_NEEDED entries (raw soname strings)
+    rpath: str  # DT_RPATH
+    runpath: str  # DT_RUNPATH
+    resolution_reason: (
+        str  # Why resolved here (rpath/runpath/ld_library_path/default/root)
+    )
+    depth: int  # Distance from root binary (0 = root)
     elf_metadata: ElfMetadata | None = None  # Full parsed metadata
 
 
 @dataclass
 class DependencyGraph:
     """The resolved transitive dependency closure of a root binary."""
-    root: str                     # Root binary path
+
+    root: str  # Root binary path
     nodes: dict[str, ResolvedDSO] = field(default_factory=dict)  # resolved_path → info
-    edges: list[tuple[str, str]] = field(default_factory=list)   # (consumer_path, provider_path)
-    unresolved: list[tuple[str, str]] = field(default_factory=list)  # (consumer_path, missing_soname)
+    edges: list[tuple[str, str]] = field(
+        default_factory=list
+    )  # (consumer_path, provider_path)
+    unresolved: list[tuple[str, str]] = field(
+        default_factory=list
+    )  # (consumer_path, missing_soname)
 
     @property
     def node_count(self) -> int:
@@ -103,7 +112,7 @@ _INTERP_ARCH_MAP: dict[str, str] = {
     "ld-linux-x86-64": "x86_64-linux-gnu",
     "ld-linux-aarch64": "aarch64-linux-gnu",
     "ld-linux-armhf": "arm-linux-gnueabihf",
-    "ld-linux": "i386-linux-gnu",           # 32-bit x86
+    "ld-linux": "i386-linux-gnu",  # 32-bit x86
     "ld-linux-riscv64": "riscv64-linux-gnu",
     "ld-linux-s390x": "s390x-linux-gnu",
     "ld-linux-ppc64le": "powerpc64le-linux-gnu",
@@ -117,7 +126,7 @@ def _detect_target_triple(interpreter: str) -> str:
     if not interpreter:
         return _FALLBACK_TRIPLE
     base = interpreter.rsplit("/", 1)[-1]  # e.g. "ld-linux-x86-64.so.2"
-    stem = base.split(".so")[0]             # e.g. "ld-linux-x86-64"
+    stem = base.split(".so")[0]  # e.g. "ld-linux-x86-64"
     for prefix, triple in _INTERP_ARCH_MAP.items():
         if stem.startswith(prefix):
             return triple
@@ -194,8 +203,11 @@ def resolve_dependencies(
     propagated_rpaths: dict[str, list[str]] = {}
     if root_node.rpath and not root_node.runpath:
         propagated_rpaths[root_key] = _expand_rpath(
-            root_node.rpath, root_path.parent, prefix,
-            platform_token=platform_token, lib_token=lib_token,
+            root_node.rpath,
+            root_path.parent,
+            prefix,
+            platform_token=platform_token,
+            lib_token=lib_token,
         )
 
     while queue:
@@ -209,15 +221,21 @@ def resolve_dependencies(
 
         visited_sonames.add(soname)
         requester_node = graph.nodes.get(requester_path) if requester_path else None
-        requester_dir = Path(requester_path).parent if requester_path else root_path.parent
+        requester_dir = (
+            Path(requester_path).parent if requester_path else root_path.parent
+        )
 
         search = _build_search_order(
-            soname=soname, requester_node=requester_node,
+            soname=soname,
+            requester_node=requester_node,
             requester_dir=requester_dir,
             propagated_rpaths=propagated_rpaths.get(requester_path or "", []),
-            ld_dirs=ld_dirs, extra_dirs=extra_dirs, prefix=prefix,
+            ld_dirs=ld_dirs,
+            extra_dirs=extra_dirs,
+            prefix=prefix,
             default_dirs=default_dirs,
-            platform_token=platform_token, lib_token=lib_token,
+            platform_token=platform_token,
+            lib_token=lib_token,
         )
 
         resolved = _search_library(soname, search)
@@ -234,9 +252,19 @@ def resolve_dependencies(
             continue
 
         _register_resolved_dso(
-            resolved_path, resolved_key, soname, reason, depth,
-            requester_path, graph, queue, visited_sonames,
-            propagated_rpaths, prefix, platform_token, lib_token,
+            resolved_path,
+            resolved_key,
+            soname,
+            reason,
+            depth,
+            requester_path,
+            graph,
+            queue,
+            visited_sonames,
+            propagated_rpaths,
+            prefix,
+            platform_token,
+            lib_token,
             max_file_size,
         )
 
@@ -263,10 +291,14 @@ def _register_resolved_dso(
     _check_dso_size(resolved_path, max_file_size)
     meta = parse_elf_metadata(resolved_path)
     node = ResolvedDSO(
-        path=resolved_path, soname=meta.soname or soname,
-        needed=list(meta.needed), rpath=meta.rpath,
-        runpath=meta.runpath, resolution_reason=reason,
-        depth=depth, elf_metadata=meta,
+        path=resolved_path,
+        soname=meta.soname or soname,
+        needed=list(meta.needed),
+        rpath=meta.rpath,
+        runpath=meta.runpath,
+        resolution_reason=reason,
+        depth=depth,
+        elf_metadata=meta,
     )
     graph.nodes[resolved_key] = node
     if requester_path:
@@ -275,11 +307,15 @@ def _register_resolved_dso(
     # Propagate RPATH: merge with ancestor RPATHs.
     if meta.rpath and not meta.runpath:
         own_rpaths = _expand_rpath(
-            meta.rpath, resolved_path.parent, prefix,
-            platform_token=platform_token, lib_token=lib_token,
+            meta.rpath,
+            resolved_path.parent,
+            prefix,
+            platform_token=platform_token,
+            lib_token=lib_token,
         )
         propagated_rpaths[resolved_key] = _merge_rpaths(
-            own_rpaths, propagated_rpaths.get(requester_path or "", []),
+            own_rpaths,
+            propagated_rpaths.get(requester_path or "", []),
         )
     elif requester_path and requester_path in propagated_rpaths:
         propagated_rpaths[resolved_key] = propagated_rpaths[requester_path]
@@ -300,7 +336,9 @@ def _merge_rpaths(own: list[str], ancestor: list[str]) -> list[str]:
 
 
 def _seed_root(
-    binary: Path, graph: DependencyGraph, prefix: str,
+    binary: Path,
+    graph: DependencyGraph,
+    prefix: str,
     max_file_size: int | None = None,
 ) -> tuple[Path, str, str, list[str], str, str] | None:
     """Parse the root binary, add it to the graph, and return target config.
@@ -349,6 +387,7 @@ def _seed_root(
 # Search order construction
 # ---------------------------------------------------------------------------
 
+
 def _build_search_order(
     soname: str,
     requester_node: ResolvedDSO | None,
@@ -375,8 +414,11 @@ def _build_search_order(
         # Step 1: DT_RPATH — only if no DT_RUNPATH is present.
         if requester_node.rpath and not requester_node.runpath:
             for d in _expand_rpath(
-                requester_node.rpath, requester_dir, prefix,
-                platform_token=platform_token, lib_token=lib_token,
+                requester_node.rpath,
+                requester_dir,
+                prefix,
+                platform_token=platform_token,
+                lib_token=lib_token,
             ):
                 search.append((d, "rpath"))
         # Also propagated RPATHs from ancestors.
@@ -391,13 +433,20 @@ def _build_search_order(
     # Step 3: DT_RUNPATH — only for direct DT_NEEDED.
     if requester_node is not None and requester_node.runpath:
         for d in _expand_rpath(
-            requester_node.runpath, requester_dir, prefix,
-            platform_token=platform_token, lib_token=lib_token,
+            requester_node.runpath,
+            requester_dir,
+            prefix,
+            platform_token=platform_token,
+            lib_token=lib_token,
         ):
             search.append((d, "runpath"))
 
     # Step 4: Default directories (target-aware).
-    _dirs = default_dirs if default_dirs is not None else _default_dirs_for_triple(_FALLBACK_TRIPLE)
+    _dirs = (
+        default_dirs
+        if default_dirs is not None
+        else _default_dirs_for_triple(_FALLBACK_TRIPLE)
+    )
     for d in _dirs:
         full = os.path.join(prefix, d.lstrip("/")) if prefix else d
         search.append((full, "default"))
@@ -411,7 +460,8 @@ def _build_search_order(
 
 
 def _search_library(
-    soname: str, search: list[tuple[str, str]],
+    soname: str,
+    search: list[tuple[str, str]],
 ) -> tuple[Path, str] | None:
     """Search for *soname* in the ordered directory list.
 
@@ -427,6 +477,7 @@ def _search_library(
 # ---------------------------------------------------------------------------
 # RPATH/RUNPATH expansion
 # ---------------------------------------------------------------------------
+
 
 def _expand_rpath(
     rpath: str,
@@ -455,7 +506,9 @@ def _expand_rpath(
         has_origin = "$ORIGIN" in expanded or "${ORIGIN}" in expanded
         expanded = expanded.replace("${ORIGIN}", origin).replace("$ORIGIN", origin)
         expanded = expanded.replace("${LIB}", lib_token).replace("$LIB", lib_token)
-        expanded = expanded.replace("${PLATFORM}", platform_token).replace("$PLATFORM", platform_token)
+        expanded = expanded.replace("${PLATFORM}", platform_token).replace(
+            "$PLATFORM", platform_token
+        )
         # Only prepend sysroot prefix for non-$ORIGIN paths.
         # $ORIGIN expands to the actual DSO path (which already includes the
         # sysroot prefix if the DSO was found under the sysroot), so

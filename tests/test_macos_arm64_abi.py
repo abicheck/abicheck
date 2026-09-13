@@ -5,6 +5,7 @@ Covers:
 - ARM64 small-struct size change is detected via TYPE_SIZE_CHANGED (#116 base coverage)
 - Documentation regression guards: platforms.md must contain #116 and #119 references
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field as dc_field
@@ -118,7 +119,7 @@ class TestArm64AbiDocumentedLimits:
         small_v1 = RecordType(
             name="Point",
             kind="struct",
-            size_bits=64,   # 2× int32 — fits in registers on ARM64
+            size_bits=64,  # 2× int32 — fits in registers on ARM64
             fields=[
                 TypeField(name="x", type="int", offset_bits=0),
                 TypeField(name="y", type="int", offset_bits=32),
@@ -150,6 +151,7 @@ class TestArm64AbiDocumentedLimits:
         result = compare(old, new)
         assert not result.changes
 
+
 class TestAapcs64AggregateClassification:
     """AArch64 AAPCS64 by-value aggregate passing classifier.
 
@@ -160,34 +162,41 @@ class TestAapcs64AggregateClassification:
 
     def test_hfa_of_floats(self) -> None:
         from abicheck.macho_metadata import classify_aapcs64_aggregate
+
         # struct { float x, y, z; } → HFA of 3 floats (passed in v0..v2)
         assert classify_aapcs64_aggregate(12, ["float", "float", "float"]) == "hfa3"
 
     def test_hfa_of_doubles(self) -> None:
         from abicheck.macho_metadata import classify_aapcs64_aggregate
+
         assert classify_aapcs64_aggregate(16, ["double", "double"]) == "hfa2"
 
     def test_more_than_four_floats_is_not_hfa(self) -> None:
         from abicheck.macho_metadata import classify_aapcs64_aggregate
+
         # 5 floats (20 bytes) exceeds the 4-member HFA limit AND 16-byte limit.
         assert classify_aapcs64_aggregate(20, ["float"] * 5) == "indirect"
 
     def test_mixed_member_types_is_not_hfa(self) -> None:
         from abicheck.macho_metadata import classify_aapcs64_aggregate
+
         # struct { float x; int y; } → not homogeneous; <=16 bytes → register
         assert classify_aapcs64_aggregate(8, ["float", "int"]) == "register"
 
     def test_small_integer_aggregate_in_registers(self) -> None:
         from abicheck.macho_metadata import classify_aapcs64_aggregate
+
         assert classify_aapcs64_aggregate(16, ["long", "long"]) == "register"
 
     def test_large_aggregate_passed_indirectly(self) -> None:
         from abicheck.macho_metadata import classify_aapcs64_aggregate
+
         # 24 bytes > 16-byte limit → indirect (by reference)
         assert classify_aapcs64_aggregate(24, ["long", "long", "long"]) == "indirect"
 
     def test_register_to_indirect_boundary_at_16_bytes(self) -> None:
         from abicheck.macho_metadata import classify_aapcs64_aggregate
+
         # The boundary is the ABI break a struct growing 16→24 bytes triggers:
         # register-passed → indirect-passed (different calling convention).
         before = classify_aapcs64_aggregate(16, ["long", "long"])
@@ -197,6 +206,7 @@ class TestAapcs64AggregateClassification:
 
     def test_hfa_lost_when_non_float_member_added(self) -> None:
         from abicheck.macho_metadata import classify_aapcs64_aggregate
+
         # struct { float x, y; } (HFA, SIMD regs) → add int → no longer HFA.
         before = classify_aapcs64_aggregate(8, ["float", "float"])
         after = classify_aapcs64_aggregate(12, ["float", "float", "int"])
@@ -205,24 +215,29 @@ class TestAapcs64AggregateClassification:
 
     def test_hva_of_short_vectors_over_16_bytes(self) -> None:
         from abicheck.macho_metadata import classify_aapcs64_aggregate
+
         # struct { float32x4_t v[4]; } → 64 bytes, but an HVA: SIMD-register
         # passed (NOT indirect), so it must be recognized before the size cutoff.
         assert classify_aapcs64_aggregate(64, ["float32x4_t"] * 4) == "hva4"
 
     def test_hva_single_neon_vector(self) -> None:
         from abicheck.macho_metadata import classify_aapcs64_aggregate
+
         assert classify_aapcs64_aggregate(16, ["int8x16_t"]) == "hva1"
 
     def test_hva_requires_homogeneous_vectors(self) -> None:
         from abicheck.macho_metadata import classify_aapcs64_aggregate
+
         # Mixed vector types are not an HVA; 32 bytes > 16 → indirect.
-        assert classify_aapcs64_aggregate(32, ["int8x16_t", "float32x4_t"]) == "indirect"
+        assert (
+            classify_aapcs64_aggregate(32, ["int8x16_t", "float32x4_t"]) == "indirect"
+        )
 
     def test_more_than_four_vectors_is_not_hva(self) -> None:
         from abicheck.macho_metadata import classify_aapcs64_aggregate
+
         # 5 identical vectors exceed the 4-member HVA limit → indirect.
         assert classify_aapcs64_aggregate(80, ["float32x4_t"] * 5) == "indirect"
-
 
     def test_arm64_limitation_note_exists(self) -> None:
         """Documentation regression guard: platforms.md must keep the ARM64 section."""

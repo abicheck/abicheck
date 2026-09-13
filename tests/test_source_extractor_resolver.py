@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2024 CodeRabbit Inc.
 """Unit tests for the capability-aware source-ABI extractor resolver (ADR-030 D3)."""
+
 from __future__ import annotations
 
 from abicheck.buildsource.source_extractors import (
@@ -47,7 +48,9 @@ class TestExplicitWithFallback:
         assert "fell back" in c.reason
 
     def test_clang_no_fallback_yields_none(self):
-        c = resolve_source_extractor("clang", available=_avail("castxml"), fallback=False)
+        c = resolve_source_extractor(
+            "clang", available=_avail("castxml"), fallback=False
+        )
         assert c.selected is None
 
     def test_castxml_does_not_upgrade_to_clang(self):
@@ -85,7 +88,9 @@ class TestProfilesContract:
         assert PROFILES["castxml"].capabilities < PROFILES["clang"].capabilities
 
     def test_rank_orders_clang_above_castxml(self):
-        assert PROFILES["clang"].rank > PROFILES["castxml"].rank > PROFILES["android"].rank
+        assert (
+            PROFILES["clang"].rank > PROFILES["castxml"].rank > PROFILES["android"].rank
+        )
 
     def test_no_probe_assumes_available(self):
         c = resolve_source_extractor("clang")

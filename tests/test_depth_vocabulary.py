@@ -150,7 +150,9 @@ def test_depth_monotone() -> None:
     prev: set[str] = set()
     for depth in USER_DEPTHS:
         cur = layers_for(depth)
-        assert prev <= cur, f"{depth.value} dropped layers vs the rung below: {prev - cur}"
+        assert prev <= cur, (
+            f"{depth.value} dropped layers vs the rung below: {prev - cur}"
+        )
         prev = cur
 
 
@@ -234,13 +236,16 @@ def test_collect_inline_pack_applies_graph_scope_override() -> None:
     input (exercising the override line without any compiler)."""
     from abicheck.buildsource.inline import BuildConfig, collect_inline_pack
 
-    assert collect_inline_pack(
-        sources=None,
-        build_info=None,
-        build_config=BuildConfig(graph_detail="full"),
-        scope="changed",
-        layers=("L3", "L4", "L5"),
-    ) is None
+    assert (
+        collect_inline_pack(
+            sources=None,
+            build_info=None,
+            build_config=BuildConfig(graph_detail="full"),
+            scope="changed",
+            layers=("L3", "L4", "L5"),
+        )
+        is None
+    )
 
 
 # ── Command bodies: depth resolution over snapshot inputs (no compiler) ───────
@@ -261,8 +266,11 @@ def _fn(name: str):  # type: ignore[no-untyped-def]
     from abicheck.model import Function, Visibility
 
     return Function(
-        name=name, mangled=name, return_type="int",
-        visibility=Visibility.PUBLIC, is_extern_c=True,
+        name=name,
+        mangled=name,
+        return_type="int",
+        visibility=Visibility.PUBLIC,
+        is_extern_c=True,
     )
 
 
@@ -301,9 +309,7 @@ def test_compare_depth_over_snapshots(tmp_path, depth: str) -> None:  # type: ig
     binary`` clears headers, the non-binary branch leaves them as-is."""
     old = _snap(tmp_path, "libz", "1.0", [_fn("a")])
     new = _snap(tmp_path, "libz", "2.0", [_fn("a")])
-    res = CliRunner().invoke(
-        main, ["compare", str(old), str(new), "--depth", depth]
-    )
+    res = CliRunner().invoke(main, ["compare", str(old), str(new), "--depth", depth])
     assert res.exit_code == 0, _all_output(res)
 
 
@@ -315,11 +321,20 @@ def test_dump_source_only_depth_build_without_facts_fails(tmp_path) -> None:  # 
     src.mkdir()
     res = CliRunner().invoke(
         main,
-        ["dump", "--sources", str(src), "--depth", "build",
-         "-o", str(tmp_path / "out.json")],
+        [
+            "dump",
+            "--sources",
+            str(src),
+            "--depth",
+            "build",
+            "-o",
+            str(tmp_path / "out.json"),
+        ],
     )
     assert res.exit_code != 0, _all_output(res)
-    assert "--depth build was requested but the snapshot only reached" in _all_output(res)
+    assert "--depth build was requested but the snapshot only reached" in _all_output(
+        res
+    )
     assert not (tmp_path / "out.json").exists()
 
 
@@ -428,8 +443,13 @@ def test_dump_json_records_depth_provenance(tmp_path) -> None:  # type: ignore[n
 
     src = tmp_path / "src3"
     src.mkdir()
-    cdb = [{"directory": str(src), "file": "foo.cpp",
-            "arguments": ["c++", "-std=c++17", "-c", "foo.cpp"]}]
+    cdb = [
+        {
+            "directory": str(src),
+            "file": "foo.cpp",
+            "arguments": ["c++", "-std=c++17", "-c", "foo.cpp"],
+        }
+    ]
     (src / "compile_commands.json").write_text(json.dumps(cdb), encoding="utf-8")
     out = tmp_path / "out3.json"
     res = CliRunner().invoke(
@@ -513,8 +533,16 @@ def test_dump_depth_binary_ignores_compile_db(tmp_path) -> None:  # type: ignore
     res = CliRunner().invoke(
         main,
         [
-            "dump", "/no/such/bin.so", "-H", str(hdr), "--build-info", str(cdb),
-            "--depth", "binary", "-o", str(tmp_path / "o.json"),
+            "dump",
+            "/no/such/bin.so",
+            "-H",
+            str(hdr),
+            "--build-info",
+            str(cdb),
+            "--depth",
+            "binary",
+            "-o",
+            str(tmp_path / "o.json"),
         ],
     )
     # The compile-DB-requires-headers UsageError must not fire (it would block the
@@ -542,8 +570,17 @@ def test_dump_depth_source_with_hybrid_frontend_rejected(tmp_path) -> None:  # t
     cfg.write_text("compile:\n  frontend: hybrid\n")
     res = CliRunner().invoke(
         main,
-        ["dump", "--sources", str(src), "--depth", "source",
-         "--config", str(cfg), "-o", str(tmp_path / "out3.json")],
+        [
+            "dump",
+            "--sources",
+            str(src),
+            "--depth",
+            "source",
+            "--config",
+            str(cfg),
+            "-o",
+            str(tmp_path / "out3.json"),
+        ],
     )
     assert res.exit_code != 0, _all_output(res)
     out = _all_output(res)
@@ -574,8 +611,14 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_without_sources_or_build
     res = CliRunner().invoke(
         main,
         [
-            "dump", str(so), "-H", str(hdr), "--depth", "source",
-            "--config", str(cfg),
+            "dump",
+            str(so),
+            "-H",
+            str(hdr),
+            "--depth",
+            "source",
+            "--config",
+            str(cfg),
         ],
     )
     out = _all_output(res)
@@ -605,7 +648,16 @@ def test_dump_depth_source_with_config_hybrid_frontend_rejected(tmp_path) -> Non
     cfg.write_text("compile:\n  frontend: hybrid\n")
     res = CliRunner().invoke(
         main,
-        ["dump", str(so), "--sources", str(src), "--depth", "source", "--config", str(cfg)],
+        [
+            "dump",
+            str(so),
+            "--sources",
+            str(src),
+            "--depth",
+            "source",
+            "--config",
+            str(cfg),
+        ],
     )
     assert res.exit_code != 0, _all_output(res)
     out = _all_output(res)
@@ -613,7 +665,9 @@ def test_dump_depth_source_with_config_hybrid_frontend_rejected(tmp_path) -> Non
     assert "--depth source" in out
 
 
-def test_dump_source_only_depth_source_with_config_hybrid_frontend_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_dump_source_only_depth_source_with_config_hybrid_frontend_rejected(
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
     """Codex review: the source-only dump path (no SO_PATH) used to return
     via dump_source_only() before resolve_dump_compile_context ever ran, so
     a config-selected `compile.frontend: hybrid` reached the L4 extractor
@@ -635,7 +689,9 @@ def test_dump_source_only_depth_source_with_config_hybrid_frontend_rejected(tmp_
     assert "--depth source" in out
 
 
-def test_dump_depth_source_hybrid_frontend_not_rejected_for_prebuilt_pack(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_dump_depth_source_hybrid_frontend_not_rejected_for_prebuilt_pack(
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
     """Codex review: --build-info pointing at a prebuilt BuildSourcePack
     directory only loads and filters its existing L4/L5 facts
     (cli_buildsource.embed_build_source's is_pack_dir branch forces
@@ -656,7 +712,9 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_prebuilt_pack(tmp_pa
     pack_dir = tmp_path / "prebuilt-pack"
     pack = BuildSourcePack(
         root=pack_dir,
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
         source_abi=SourceAbiSurface(
             reachable_declarations=[SourceEntity(id="foo", kind="function")]
         ),
@@ -667,15 +725,24 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_prebuilt_pack(tmp_pa
     res = CliRunner().invoke(
         main,
         [
-            "dump", "--build-info", str(pack_dir), "--depth", "source",
-            "--config", str(cfg), "-o", str(tmp_path / "out.json"),
+            "dump",
+            "--build-info",
+            str(pack_dir),
+            "--depth",
+            "source",
+            "--config",
+            str(cfg),
+            "-o",
+            str(tmp_path / "out.json"),
         ],
     )
     assert res.exit_code == 0, _all_output(res)
     assert "compile.frontend: hybrid" not in _all_output(res)
 
 
-def test_dump_depth_source_hybrid_frontend_rejected_for_mixed_raw_and_pack(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_dump_depth_source_hybrid_frontend_rejected_for_mixed_raw_and_pack(
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
     """Codex review: only ONE of --sources/--build-info being a prebuilt
     pack must not skip the rejection -- the other (raw) side still reaches
     collect_inline_pack with extractor=hybrid, so the unsupported L4 path
@@ -695,9 +762,17 @@ def test_dump_depth_source_hybrid_frontend_rejected_for_mixed_raw_and_pack(tmp_p
     res = CliRunner().invoke(
         main,
         [
-            "dump", "--sources", str(src), "--build-info", str(pack_dir),
-            "--depth", "source", "--config", str(cfg),
-            "-o", str(tmp_path / "out2.json"),
+            "dump",
+            "--sources",
+            str(src),
+            "--build-info",
+            str(pack_dir),
+            "--depth",
+            "source",
+            "--config",
+            str(cfg),
+            "-o",
+            str(tmp_path / "out2.json"),
         ],
     )
     assert res.exit_code != 0, _all_output(res)
@@ -726,7 +801,9 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_pack_sources_raw_bui
     pack_dir = tmp_path / "prebuilt-pack"
     pack = BuildSourcePack(
         root=pack_dir,
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
         source_abi=SourceAbiSurface(
             reachable_declarations=[SourceEntity(id="foo", kind="function")]
         ),
@@ -739,9 +816,17 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_pack_sources_raw_bui
     res = CliRunner().invoke(
         main,
         [
-            "dump", "--sources", str(pack_dir), "--build-info", str(build_info_tree),
-            "--depth", "source", "--config", str(cfg),
-            "-o", str(tmp_path / "out3.json"),
+            "dump",
+            "--sources",
+            str(pack_dir),
+            "--build-info",
+            str(build_info_tree),
+            "--depth",
+            "source",
+            "--config",
+            str(cfg),
+            "-o",
+            str(tmp_path / "out3.json"),
         ],
     )
     assert res.exit_code == 0, _all_output(res)
@@ -763,8 +848,17 @@ def test_dump_depth_headers_with_hybrid_frontend_not_rejected(tmp_path) -> None:
     cfg.write_text("compile:\n  frontend: hybrid\n")
     res = CliRunner().invoke(
         main,
-        ["dump", "--sources", str(src), "--depth", "headers",
-         "--config", str(cfg), "-o", str(tmp_path / "out4.json")],
+        [
+            "dump",
+            "--sources",
+            str(src),
+            "--depth",
+            "headers",
+            "--config",
+            str(cfg),
+            "-o",
+            str(tmp_path / "out4.json"),
+        ],
     )
     assert "compile.frontend: hybrid" not in _all_output(res)
 

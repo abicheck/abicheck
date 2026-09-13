@@ -37,6 +37,7 @@ rest of the evidence package builds on:
 The one rule (D1): an extractor *collects and normalizes facts*; it never
 decides an ABI/API verdict. Verdict policy stays in the core compare engine.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -55,21 +56,27 @@ class CollectionAction(str, Enum):
     build, or reach the network. Only ``INSPECT`` is allowed by default.
     """
 
-    INSPECT = "inspect"                      # read existing files, parse a compile DB / CMake reply
+    INSPECT = "inspect"  # read existing files, parse a compile DB / CMake reply
     QUERY_BUILD_SYSTEM = "query_build_system"  # `ninja -t`, `bazel cquery`/`aquery`, regenerate a File API query
-    RUN_COMPILER = "run_compiler"            # syntax-only source extraction (clang/castxml replay)
-    RUN_BUILD = "run_build"                  # `cmake --build`, `bazel build`, `make`
-    WRAP_BUILD = "wrap_build"                # Bear / intercept-build / compiler wrapper
-    NETWORK = "network"                      # download tools or dependencies
+    RUN_COMPILER = (
+        "run_compiler"  # syntax-only source extraction (clang/castxml replay)
+    )
+    RUN_BUILD = "run_build"  # `cmake --build`, `bazel build`, `make`
+    WRAP_BUILD = "wrap_build"  # Bear / intercept-build / compiler wrapper
+    NETWORK = "network"  # download tools or dependencies
 
 
 #: The only action allowed unless the operator opts in (ADR-032 D5). Everything
 #: heavier than reading files on disk must be explicitly enabled for the run.
-DEFAULT_ALLOWED_ACTIONS: frozenset[CollectionAction] = frozenset({CollectionAction.INSPECT})
+DEFAULT_ALLOWED_ACTIONS: frozenset[CollectionAction] = frozenset(
+    {CollectionAction.INSPECT}
+)
 
 #: Actions that can *never* be enabled through ordinary opt-in flags — only a
 #: future, explicit mode may grant them (ADR-032 D5: network is always denied).
-ALWAYS_DENIED_ACTIONS: frozenset[CollectionAction] = frozenset({CollectionAction.NETWORK})
+ALWAYS_DENIED_ACTIONS: frozenset[CollectionAction] = frozenset(
+    {CollectionAction.NETWORK}
+)
 
 
 class CollectionMode(str, Enum):
@@ -80,8 +87,8 @@ class CollectionMode(str, Enum):
     """
 
     PERMISSIVE = "permissive"  # missing/failed extractors → reduced coverage; collection continues (default)
-    STRICT = "strict"          # requested evidence must be collected and valid, or the command exits non-zero
-    AUDIT = "audit"            # preserve raw artifacts + full diagnostics for debugging extractor behaviour
+    STRICT = "strict"  # requested evidence must be collected and valid, or the command exits non-zero
+    AUDIT = "audit"  # preserve raw artifacts + full diagnostics for debugging extractor behaviour
 
 
 class ExtractorError(RuntimeError):
@@ -113,7 +120,9 @@ def parse_action(raw: Any) -> CollectionAction:
         return CollectionAction(str(raw))
     except ValueError as exc:
         allowed = ", ".join(a.value for a in CollectionAction)
-        raise ValueError(f"unknown collection action {raw!r}; expected one of: {allowed}") from exc
+        raise ValueError(
+            f"unknown collection action {raw!r}; expected one of: {allowed}"
+        ) from exc
 
 
 def parse_actions(raw: Any) -> set[CollectionAction]:
@@ -184,9 +193,16 @@ class ExtractorCapabilities:
 
     #: The declarative capability flags (everything but ``extra``), in schema order.
     _FLAGS = (
-        "compile_db", "target_graph", "toolchain", "link_actions",
-        "source_abi", "source_graph_summary", "call_graph",
-        "requires_build_execution", "requires_compiler_execution", "requires_network",
+        "compile_db",
+        "target_graph",
+        "toolchain",
+        "link_actions",
+        "source_abi",
+        "source_graph_summary",
+        "call_graph",
+        "requires_build_execution",
+        "requires_compiler_execution",
+        "requires_network",
     )
 
     def to_dict(self) -> dict[str, Any]:
@@ -345,7 +361,9 @@ class DataExtractor(Protocol):
         """Collect raw artifacts. Must not normalize verdicts."""
         ...
 
-    def normalize(self, raw_artifacts: list[RawArtifact], output_dir: Path) -> NormalizationResult:
+    def normalize(
+        self, raw_artifacts: list[RawArtifact], output_dir: Path
+    ) -> NormalizationResult:
         """Convert raw artifacts into abicheck-owned schema."""
         ...
 

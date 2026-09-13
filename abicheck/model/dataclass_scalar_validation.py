@@ -36,6 +36,7 @@ mapping) or a nested-dataclass field needs its own shape-specific
 validation that a blind ``isinstance`` check on the raw value could not
 express.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -55,10 +56,10 @@ def scalar_str_field_types(cls: type[Any]) -> dict[str, tuple[type, ...]]:
         hint = hints.get(f.name)
         if hint is str:
             result[f.name] = (str,)
-        elif (
-            typing.get_origin(hint) is UnionType
-            and set(typing.get_args(hint)) == {str, type(None)}
-        ):
+        elif typing.get_origin(hint) is UnionType and set(typing.get_args(hint)) == {
+            str,
+            type(None),
+        }:
             result[f.name] = (str, type(None))
     return result
 

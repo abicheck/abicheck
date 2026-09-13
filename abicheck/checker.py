@@ -1069,9 +1069,7 @@ def compare(
     # of the escape hatch ("the caller can still see a result but knows not
     # to trust it").
     comparability_warnings = [mismatch.reason] if mismatch is not None else []
-    contract_coverage = (
-        _contract_coverage_status(old, new) if old is not None else None
-    )
+    contract_coverage = _contract_coverage_status(old, new) if old is not None else None
 
     # Discover any diff_* detector modules not already imported above, then run
     # all registered detectors via the self-registering registry. ensure_loaded

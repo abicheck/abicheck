@@ -68,7 +68,10 @@ def reject_plugin_loading_options(tokens: list[str]) -> None:
     cannot see the contents of.
     """
     for index, token in enumerate(tokens):
-        if token.startswith(_PLUGIN_LOADING_PREFIXES) or token in _PLUGIN_LOADING_BARE_OPTIONS:
+        if (
+            token.startswith(_PLUGIN_LOADING_PREFIXES)
+            or token in _PLUGIN_LOADING_BARE_OPTIONS
+        ):
             raise ValueError(
                 f"compile.options: plugin-loading flag {token!r} is not permitted "
                 "(loading arbitrary native code into the compiler is not a "
@@ -76,7 +79,9 @@ def reject_plugin_loading_options(tokens: list[str]) -> None:
             )
         if token == "-Xclang" and index + 1 < len(tokens):
             nxt = tokens[index + 1]
-            if nxt in _PLUGIN_LOADING_BARE_OPTIONS or nxt.startswith(_PLUGIN_LOADING_PREFIXES):
+            if nxt in _PLUGIN_LOADING_BARE_OPTIONS or nxt.startswith(
+                _PLUGIN_LOADING_PREFIXES
+            ):
                 raise ValueError(
                     f"compile.options: plugin-loading flag {nxt!r} (via -Xclang) "
                     "is not permitted (loading arbitrary native code into the "
@@ -89,7 +94,9 @@ def reject_plugin_loading_options(tokens: list[str]) -> None:
             # check alone leaves this joined spelling free to smuggle the
             # identical plugin-loading argument straight past it.
             joined = token[len("-Xclang=") :]
-            if joined in _PLUGIN_LOADING_BARE_OPTIONS or joined.startswith(_PLUGIN_LOADING_PREFIXES):
+            if joined in _PLUGIN_LOADING_BARE_OPTIONS or joined.startswith(
+                _PLUGIN_LOADING_PREFIXES
+            ):
                 raise ValueError(
                     f"compile.options: plugin-loading flag {joined!r} (via "
                     "-Xclang=) is not permitted (loading arbitrary native "

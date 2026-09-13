@@ -83,9 +83,7 @@ _TRIPLE_OR_VERSION = _SEGMENT
 _TRIPLE_COMPONENT = st.text(
     alphabet="abcdefghijklmnopqrstuvwxyz0123456789", min_size=1, max_size=8
 )
-_REAL_TRIPLE = st.lists(_TRIPLE_COMPONENT, min_size=2, max_size=4).map(
-    "-".join
-)
+_REAL_TRIPLE = st.lists(_TRIPLE_COMPONENT, min_size=2, max_size=4).map("-".join)
 _REAL_VERSION = st.lists(
     st.integers(min_value=0, max_value=99), min_size=1, max_size=3
 ).map(lambda parts: ".".join(str(p) for p in parts))

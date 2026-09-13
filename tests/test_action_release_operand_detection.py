@@ -66,7 +66,7 @@ def _ask(path: Path, *, abicheck_available: bool, cwd: Path) -> bool:
     """
     require_bash()
     env_setup = (
-        f'_PY_BIN_HAS_ABICHECK=true\n_PY_BIN={sys.executable}\n_PY_SAFE_DIR={cwd}\n'
+        f"_PY_BIN_HAS_ABICHECK=true\n_PY_BIN={sys.executable}\n_PY_SAFE_DIR={cwd}\n"
         if abicheck_available
         else "_PY_BIN_HAS_ABICHECK=false\n"
     )
@@ -119,9 +119,7 @@ class TestAgreementWithTheRealPredicate:
         assert not is_package(plain)
         assert not _ask(plain, abicheck_available=True, cwd=tmp_path)
 
-    def test_a_directory_is_a_release_operand_either_way(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_directory_is_a_release_operand_either_way(self, tmp_path: Path) -> None:
         """`is_package` answers False for a directory by contract (ADR-065
         D2: a directory proves no container completeness), so this one rule
         stays in the shell -- and must survive the probe being consulted."""
@@ -144,9 +142,7 @@ class TestThePreInstallFallback:
             path.write_bytes(b"\x00" * 32)
             assert _ask(path, abicheck_available=False, cwd=tmp_path), name
 
-    def test_the_fallback_is_what_the_probe_improves_on(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_fallback_is_what_the_probe_improves_on(self, tmp_path: Path) -> None:
         """States the gap rather than hiding it: the table cannot see a
         content-routed package, which is exactly why the probe exists. If
         this ever starts passing, the fallback grew content detection and

@@ -210,8 +210,7 @@ def incomplete_scope_diagnostic(
     if record.no_comparison_completed:
         what += " No comparison completed (ADR-065 D7), which is never a clean pass."
     cause = (
-        "no comparison completed (never accepted under any scope.on_incomplete "
-        "setting)"
+        "no comparison completed (never accepted under any scope.on_incomplete setting)"
         if record.no_comparison_completed
         else "scope.on_incomplete: block"
     )

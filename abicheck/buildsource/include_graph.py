@@ -174,7 +174,9 @@ def _expand_argv_response_files(
 def _depfile_token_takes_value(tok: str) -> bool:
     """True for a flag whose *next* argv token is its value and must go too."""
     return tok == "--config" or tok in (
-        _DEPFILE_DROP_WITH_VALUE | _DEPFILE_UNSAFE_WITH_VALUE | _DEPFILE_OUTPUT_WITH_VALUE
+        _DEPFILE_DROP_WITH_VALUE
+        | _DEPFILE_UNSAFE_WITH_VALUE
+        | _DEPFILE_OUTPUT_WITH_VALUE
     )
 
 

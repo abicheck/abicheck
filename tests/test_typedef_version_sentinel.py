@@ -9,6 +9,7 @@ These are compile-time sentinels — their name changes every release by design
 and they are never exported as ELF symbols.  abicheck must NOT report them as
 BREAKING when they change between versions.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -31,28 +32,34 @@ def _snap(typedefs: dict[str, str] | None = None, version: str = "1.0") -> AbiSn
 class TestVersionStampedTypedefPattern:
     """Unit tests for _is_version_stamped_typedef."""
 
-    @pytest.mark.parametrize("name", [
-        "png_libpng_version_1_6_46",
-        "png_libpng_version_1_6_47",
-        "mylib_version_2_0_0",
-        "lib_version_10_3_1",
-        "mylib_version_1_0_0",
-        "MYLIB_VERSION_1_0_0",       # uppercase (re.IGNORECASE)
-        "foo_version_12_34_56",
-    ])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "png_libpng_version_1_6_46",
+            "png_libpng_version_1_6_47",
+            "mylib_version_2_0_0",
+            "lib_version_10_3_1",
+            "mylib_version_1_0_0",
+            "MYLIB_VERSION_1_0_0",  # uppercase (re.IGNORECASE)
+            "foo_version_12_34_56",
+        ],
+    )
     def test_matches_version_stamped(self, name: str) -> None:
         assert _is_version_stamped_typedef(name), f"Expected {name!r} to match"
 
-    @pytest.mark.parametrize("name", [
-        "handler_t",
-        "callback_t",
-        "png_voidp",
-        "size_t",
-        "my_version",                 # no _\d+_\d+_\d+ suffix
-        "version_1_2",                # only two parts (not three)
-        "version_1_2_",               # trailing underscore (not digit)
-        "_version_1_2_3_extra",       # trailing non-numeric content after triple
-    ])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "handler_t",
+            "callback_t",
+            "png_voidp",
+            "size_t",
+            "my_version",  # no _\d+_\d+_\d+ suffix
+            "version_1_2",  # only two parts (not three)
+            "version_1_2_",  # trailing underscore (not digit)
+            "_version_1_2_3_extra",  # trailing non-numeric content after triple
+        ],
+    )
     def test_rejects_non_version_stamped(self, name: str) -> None:
         assert not _is_version_stamped_typedef(name), f"Expected {name!r} NOT to match"
 
@@ -116,33 +123,47 @@ class TestVersionStampedTypedefInChecker:
 
     def test_multiple_version_sentinels_all_downgraded(self) -> None:
         """Multiple version-stamped typedefs removed at once — all are COMPATIBLE."""
-        old = _snap({
-            "libfoo_version_1_0_0": "int",
-            "libfoo_version_1_0_1": "int",  # hypothetical extra sentinel
-        }, version="1.0.0")
-        new = _snap({
-            "libfoo_version_1_1_0": "int",
-        }, version="1.1.0")
+        old = _snap(
+            {
+                "libfoo_version_1_0_0": "int",
+                "libfoo_version_1_0_1": "int",  # hypothetical extra sentinel
+            },
+            version="1.0.0",
+        )
+        new = _snap(
+            {
+                "libfoo_version_1_1_0": "int",
+            },
+            version="1.1.0",
+        )
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
         assert ChangeKind.TYPEDEF_REMOVED not in kinds
         assert result.verdict != Verdict.BREAKING
         # Both removed sentinels must be downgraded — not just one
-        sentinel_changes = [c for c in result.changes if c.kind == ChangeKind.TYPEDEF_VERSION_SENTINEL]
+        sentinel_changes = [
+            c for c in result.changes if c.kind == ChangeKind.TYPEDEF_VERSION_SENTINEL
+        ]
         assert len(sentinel_changes) == 2, (
             f"Expected 2 TYPEDEF_VERSION_SENTINEL changes, got {len(sentinel_changes)}"
         )
 
     def test_version_sentinel_mixed_with_real_break(self) -> None:
         """Version sentinel + a real break → overall still BREAKING."""
-        old = _snap({
-            "png_libpng_version_1_6_46": "char*",
-            "real_typedef": "int",
-        }, version="1.6.46")
-        new = _snap({
-            "png_libpng_version_1_6_47": "char*",
-            # real_typedef removed — this IS a real break
-        }, version="1.6.47")
+        old = _snap(
+            {
+                "png_libpng_version_1_6_46": "char*",
+                "real_typedef": "int",
+            },
+            version="1.6.46",
+        )
+        new = _snap(
+            {
+                "png_libpng_version_1_6_47": "char*",
+                # real_typedef removed — this IS a real break
+            },
+            version="1.6.47",
+        )
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
         # Sentinel should not be TYPEDEF_REMOVED
@@ -178,8 +199,7 @@ class TestVersionStampedTypedefInChecker:
         new = _snap({"mylib_version_2_6_0": "unsigned int"}, version="2.6.0")
         result = compare(old, new)
         sentinel_changes = [
-            c for c in result.changes
-            if c.kind == ChangeKind.TYPEDEF_VERSION_SENTINEL
+            c for c in result.changes if c.kind == ChangeKind.TYPEDEF_VERSION_SENTINEL
         ]
         assert len(sentinel_changes) == 1
         c = sentinel_changes[0]

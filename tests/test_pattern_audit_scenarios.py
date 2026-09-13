@@ -84,6 +84,7 @@ only after the corresponding ChangeKind and detector land. The other
 three are best served by this regression net plus follow-up policy
 work, not by new example directories.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -228,26 +229,30 @@ class TestDuplicateScenarios:
         the enum underlying type widens and every embedding struct
         re-lays out."""
         old = _snap(
-            enums=[EnumType(
-                name="format_kind_t",
-                underlying_type="int",
-                members=[
-                    EnumMember("format_kind_undef", 0),
-                    EnumMember("format_blocked", 2),
-                    EnumMember("format_kind_max", 0x7fff),
-                ],
-            )],
+            enums=[
+                EnumType(
+                    name="format_kind_t",
+                    underlying_type="int",
+                    members=[
+                        EnumMember("format_kind_undef", 0),
+                        EnumMember("format_blocked", 2),
+                        EnumMember("format_kind_max", 0x7FFF),
+                    ],
+                )
+            ],
         )
         new = _snap(
-            enums=[EnumType(
-                name="format_kind_t",
-                underlying_type="long",   # widened
-                members=[
-                    EnumMember("format_kind_undef", 0),
-                    EnumMember("format_blocked", 2),
-                    EnumMember("format_kind_max", 0x7fff_ffff_ffff_ffff),
-                ],
-            )],
+            enums=[
+                EnumType(
+                    name="format_kind_t",
+                    underlying_type="long",  # widened
+                    members=[
+                        EnumMember("format_kind_undef", 0),
+                        EnumMember("format_blocked", 2),
+                        EnumMember("format_kind_max", 0x7FFF_FFFF_FFFF_FFFF),
+                    ],
+                )
+            ],
         )
         kinds = _kinds(compare(old, new))
         # Either the underlying-size detector or the last-member-value
@@ -276,16 +281,20 @@ class TestDuplicateScenarios:
 class TestS1MacroRuntimeSlotRenumbered:
     def test_arg_slot_macro_renumbered_is_caught(self) -> None:
         """The minimum signal: same name, different integer value."""
-        old = _snap(constants={
-            "LIB_ARG_SRC_0": "1",
-            "LIB_ARG_DST_0": "17",
-            "LIB_ARG_WEIGHTS_0": "33",
-        })
-        new = _snap(constants={
-            "LIB_ARG_SRC_0": "2",  # <-- silently renumbered
-            "LIB_ARG_DST_0": "17",
-            "LIB_ARG_WEIGHTS_0": "33",
-        })
+        old = _snap(
+            constants={
+                "LIB_ARG_SRC_0": "1",
+                "LIB_ARG_DST_0": "17",
+                "LIB_ARG_WEIGHTS_0": "33",
+            }
+        )
+        new = _snap(
+            constants={
+                "LIB_ARG_SRC_0": "2",  # <-- silently renumbered
+                "LIB_ARG_DST_0": "17",
+                "LIB_ARG_WEIGHTS_0": "33",
+            }
+        )
         kinds = _kinds(compare(old, new))
         assert ChangeKind.CONSTANT_CHANGED in kinds, (
             "tool must flag a #define numeric value drift on a public "
@@ -296,10 +305,12 @@ class TestS1MacroRuntimeSlotRenumbered:
         """``LIB_ARG_WEIGHTS_0`` removed in a hypothetical cleanup. Old
         consumers passed integer 33 to the execute call; new library
         may now interpret 33 as something else."""
-        old = _snap(constants={
-            "LIB_ARG_SRC_0": "1",
-            "LIB_ARG_WEIGHTS_0": "33",
-        })
+        old = _snap(
+            constants={
+                "LIB_ARG_SRC_0": "1",
+                "LIB_ARG_WEIGHTS_0": "33",
+            }
+        )
         new = _snap(constants={"LIB_ARG_SRC_0": "1"})
         kinds = _kinds(compare(old, new))
         assert ChangeKind.CONSTANT_REMOVED in kinds
@@ -309,14 +320,18 @@ class TestS1MacroRuntimeSlotRenumbered:
         meaning "this dim is filled in at execution time". Changing the
         value breaks every consumer that hard-coded the magic number
         into a struct field or compared against it."""
-        old = _snap(constants={
-            "LIB_RUNTIME_DIM_VAL": "(-9223372036854775807LL - 1)",
-            "LIB_RUNTIME_SIZE_VAL": "((size_t)(-9223372036854775807LL - 1))",
-        })
-        new = _snap(constants={
-            "LIB_RUNTIME_DIM_VAL": "(-2147483648)",  # narrowed to int32
-            "LIB_RUNTIME_SIZE_VAL": "((size_t)(-9223372036854775807LL - 1))",
-        })
+        old = _snap(
+            constants={
+                "LIB_RUNTIME_DIM_VAL": "(-9223372036854775807LL - 1)",
+                "LIB_RUNTIME_SIZE_VAL": "((size_t)(-9223372036854775807LL - 1))",
+            }
+        )
+        new = _snap(
+            constants={
+                "LIB_RUNTIME_DIM_VAL": "(-2147483648)",  # narrowed to int32
+                "LIB_RUNTIME_SIZE_VAL": "((size_t)(-9223372036854775807LL - 1))",
+            }
+        )
         kinds = _kinds(compare(old, new))
         assert ChangeKind.CONSTANT_CHANGED in kinds
 
@@ -389,28 +404,35 @@ class TestS2PointerReturnedInfoStructAppended:
         )
         old = _snap(
             types=[old_struct],
-            functions=[_public_fn(
-                "library_version",
-                ret="const library_version_t *",
-                is_extern_c=True,
-            )],
+            functions=[
+                _public_fn(
+                    "library_version",
+                    ret="const library_version_t *",
+                    is_extern_c=True,
+                )
+            ],
         )
         new = _snap(
             types=[new_struct],
-            functions=[_public_fn(
-                "library_version",
-                ret="const library_version_t *",
-                is_extern_c=True,
-            )],
+            functions=[
+                _public_fn(
+                    "library_version",
+                    ret="const library_version_t *",
+                    is_extern_c=True,
+                )
+            ],
         )
         kinds = _kinds(compare(old, new))
         # At least one of: field-add or size-change must surface.
-        assert any(k in kinds for k in (
-            ChangeKind.TYPE_FIELD_ADDED,
-            ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
-            ChangeKind.TYPE_SIZE_CHANGED,
-            ChangeKind.STRUCT_SIZE_CHANGED,
-        )), (
+        assert any(
+            k in kinds
+            for k in (
+                ChangeKind.TYPE_FIELD_ADDED,
+                ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
+                ChangeKind.TYPE_SIZE_CHANGED,
+                ChangeKind.STRUCT_SIZE_CHANGED,
+            )
+        ), (
             "appending a field to an info struct returned by pointer "
             "must surface as at least a field-add or size-change finding"
         )
@@ -429,13 +451,22 @@ class TestS2PointerReturnedInfoStructAppended:
         # Sentinel test — when the policy lands, the change should carry
         # an asymmetric severity (info or risk for backward path, error
         # for forward path). For now we record the gap.
-        old = _snap(types=[_version_struct(
-            [("major", "int"), ("minor", "int")], size_bits=64,
-        )])
-        new = _snap(types=[_version_struct(
-            [("major", "int"), ("minor", "int"), ("flavor", "unsigned")],
-            size_bits=96,
-        )])
+        old = _snap(
+            types=[
+                _version_struct(
+                    [("major", "int"), ("minor", "int")],
+                    size_bits=64,
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                _version_struct(
+                    [("major", "int"), ("minor", "int"), ("flavor", "unsigned")],
+                    size_bits=96,
+                )
+            ]
+        )
         result = compare(old, new)
         # When implemented, the relevant Change should carry an asymmetric
         # severity hint (e.g. description mentioning "forward-incompatible").
@@ -463,28 +494,32 @@ class TestS3FeatureMacroGatedEnumSkew:
         """Old snapshot was dumped with -DLIB_EXPERIMENTAL_GROUPED, new
         snapshot without — ``sparse_grouped`` enumerator disappears."""
         old = _snap(
-            enums=[EnumType(
-                name="sparse_encoding_t",
-                members=[
-                    EnumMember("sparse_encoding_undef", 0),
-                    EnumMember("sparse_csr", 1),
-                    EnumMember("sparse_packed", 2),
-                    EnumMember("sparse_coo", 3),
-                    EnumMember("sparse_grouped", 4),  # gated
-                ],
-            )],
+            enums=[
+                EnumType(
+                    name="sparse_encoding_t",
+                    members=[
+                        EnumMember("sparse_encoding_undef", 0),
+                        EnumMember("sparse_csr", 1),
+                        EnumMember("sparse_packed", 2),
+                        EnumMember("sparse_coo", 3),
+                        EnumMember("sparse_grouped", 4),  # gated
+                    ],
+                )
+            ],
             constants={"LIB_EXPERIMENTAL_GROUPED": "1"},
         )
         new = _snap(
-            enums=[EnumType(
-                name="sparse_encoding_t",
-                members=[
-                    EnumMember("sparse_encoding_undef", 0),
-                    EnumMember("sparse_csr", 1),
-                    EnumMember("sparse_packed", 2),
-                    EnumMember("sparse_coo", 3),
-                ],
-            )],
+            enums=[
+                EnumType(
+                    name="sparse_encoding_t",
+                    members=[
+                        EnumMember("sparse_encoding_undef", 0),
+                        EnumMember("sparse_csr", 1),
+                        EnumMember("sparse_packed", 2),
+                        EnumMember("sparse_coo", 3),
+                    ],
+                )
+            ],
             constants={},
         )
         kinds = _kinds(compare(old, new))
@@ -510,9 +545,15 @@ class TestS3FeatureMacroGatedEnumSkew:
         # also disappearing, and emit a grouped "build-config skew"
         # overlay rather than two unrelated findings.
         old = _snap(
-            enums=[EnumType("E", members=[
-                EnumMember("a", 0), EnumMember("b", 1),
-            ])],
+            enums=[
+                EnumType(
+                    "E",
+                    members=[
+                        EnumMember("a", 0),
+                        EnumMember("b", 1),
+                    ],
+                )
+            ],
             constants={"FEATURE_FOO": "1"},
         )
         new = _snap(
@@ -527,9 +568,7 @@ class TestS3FeatureMacroGatedEnumSkew:
             and "gat" in (c.description or "").lower()
             for c in result.changes
         )
-        assert feature_gated, (
-            "expected a grouped 'feature-gated' overlay finding"
-        )
+        assert feature_gated, "expected a grouped 'feature-gated' overlay finding"
         assert kinds  # silence unused
 
 
@@ -554,14 +593,18 @@ class TestS4InternalValueRangeLeak:
     def test_constant_change_is_at_least_caught(self) -> None:
         """Minimal floor: even without a dedicated overlay, the constant
         diff must fire."""
-        old = _snap(constants={
-            "internal_only_start": "4096",  # 1 << 12
-            "eltwise_stochastic_round": "4097",
-        })
-        new = _snap(constants={
-            "internal_only_start": "8192",  # 1 << 13
-            "eltwise_stochastic_round": "8193",
-        })
+        old = _snap(
+            constants={
+                "internal_only_start": "4096",  # 1 << 12
+                "eltwise_stochastic_round": "4097",
+            }
+        )
+        new = _snap(
+            constants={
+                "internal_only_start": "8192",  # 1 << 13
+                "eltwise_stochastic_round": "8193",
+            }
+        )
         kinds = _kinds(compare(old, new))
         assert ChangeKind.CONSTANT_CHANGED in kinds
 
@@ -580,28 +623,34 @@ class TestS4InternalValueRangeLeak:
     def test_internal_value_range_leak_overlay(self) -> None:
         # Public function accepts the value, internal constant changes.
         old = _snap(
-            functions=[_public_fn(
-                "lib_attr_set_post_ops_eltwise",
-                ret="lib_status_t",
-                params=[("alg_kind", "lib_alg_kind_t")],
-                is_extern_c=True,
-            )],
+            functions=[
+                _public_fn(
+                    "lib_attr_set_post_ops_eltwise",
+                    ret="lib_status_t",
+                    params=[("alg_kind", "lib_alg_kind_t")],
+                    is_extern_c=True,
+                )
+            ],
             constants={"internal_only_start": "4096"},
         )
         new = _snap(
-            functions=[_public_fn(
-                "lib_attr_set_post_ops_eltwise",
-                ret="lib_status_t",
-                params=[("alg_kind", "lib_alg_kind_t")],
-                is_extern_c=True,
-            )],
+            functions=[
+                _public_fn(
+                    "lib_attr_set_post_ops_eltwise",
+                    ret="lib_status_t",
+                    params=[("alg_kind", "lib_alg_kind_t")],
+                    is_extern_c=True,
+                )
+            ],
             constants={"internal_only_start": "8192"},
         )
         result = compare(old, new)
         assert any(
             "internal" in (c.description or "").lower()
-            and ("value" in (c.description or "").lower()
-                 or "range" in (c.description or "").lower())
+            and (
+                "value" in (c.description or "").lower()
+                or "range" in (c.description or "").lower()
+            )
             and c.symbol == "lib_attr_set_post_ops_eltwise"
             for c in result.changes
         ), "expected an overlay tying the internal-range shift to the public API"
@@ -624,25 +673,33 @@ class TestS5ForwardCompatTagAppended:
     def test_appended_serialization_tag_is_at_least_caught(self) -> None:
         """Minimum floor: a new enumerator must surface as
         ``ENUM_MEMBER_ADDED`` (existing kind)."""
-        old = _snap(enums=[EnumType(
-            name="post_op_kind",
-            members=[
-                EnumMember("post_op_undef", 0),
-                EnumMember("post_op_sum", 1),
-                EnumMember("post_op_eltwise", 2),
-                EnumMember("post_op_binary", 3),
-            ],
-        )])
-        new = _snap(enums=[EnumType(
-            name="post_op_kind",
-            members=[
-                EnumMember("post_op_undef", 0),
-                EnumMember("post_op_sum", 1),
-                EnumMember("post_op_eltwise", 2),
-                EnumMember("post_op_binary", 3),
-                EnumMember("post_op_binary_v2", 4),  # <-- new
-            ],
-        )])
+        old = _snap(
+            enums=[
+                EnumType(
+                    name="post_op_kind",
+                    members=[
+                        EnumMember("post_op_undef", 0),
+                        EnumMember("post_op_sum", 1),
+                        EnumMember("post_op_eltwise", 2),
+                        EnumMember("post_op_binary", 3),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            enums=[
+                EnumType(
+                    name="post_op_kind",
+                    members=[
+                        EnumMember("post_op_undef", 0),
+                        EnumMember("post_op_sum", 1),
+                        EnumMember("post_op_eltwise", 2),
+                        EnumMember("post_op_binary", 3),
+                        EnumMember("post_op_binary_v2", 4),  # <-- new
+                    ],
+                )
+            ]
+        )
         kinds = _kinds(compare(old, new))
         assert ChangeKind.ENUM_MEMBER_ADDED in kinds
 
@@ -651,21 +708,29 @@ class TestS5ForwardCompatTagAppended:
         report ``ENUM_MEMBER_ADDED`` but NOT
         ``ENUM_MEMBER_VALUE_CHANGED`` — the latter is what
         case81-style silent reassignment looks like."""
-        old = _snap(enums=[EnumType(
-            name="post_op_kind",
-            members=[
-                EnumMember("post_op_sum", 1),
-                EnumMember("post_op_eltwise", 2),
-            ],
-        )])
-        new = _snap(enums=[EnumType(
-            name="post_op_kind",
-            members=[
-                EnumMember("post_op_sum", 1),
-                EnumMember("post_op_eltwise", 2),
-                EnumMember("post_op_binary", 3),  # appended only
-            ],
-        )])
+        old = _snap(
+            enums=[
+                EnumType(
+                    name="post_op_kind",
+                    members=[
+                        EnumMember("post_op_sum", 1),
+                        EnumMember("post_op_eltwise", 2),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            enums=[
+                EnumType(
+                    name="post_op_kind",
+                    members=[
+                        EnumMember("post_op_sum", 1),
+                        EnumMember("post_op_eltwise", 2),
+                        EnumMember("post_op_binary", 3),  # appended only
+                    ],
+                )
+            ]
+        )
         kinds = _kinds(compare(old, new))
         assert ChangeKind.ENUM_MEMBER_ADDED in kinds
         assert ChangeKind.ENUM_MEMBER_VALUE_CHANGED not in kinds, (
@@ -678,21 +743,29 @@ class TestS5ForwardCompatTagAppended:
         renumbering must surface as case81-shaped
         ``ENUM_MEMBER_VALUE_CHANGED`` (or a value-changed equivalent),
         independently of the append being flagged as ``_ADDED``."""
-        old = _snap(enums=[EnumType(
-            name="post_op_kind",
-            members=[
-                EnumMember("post_op_sum", 1),
-                EnumMember("post_op_eltwise", 2),
-            ],
-        )])
-        new = _snap(enums=[EnumType(
-            name="post_op_kind",
-            members=[
-                EnumMember("post_op_sum", 1),
-                EnumMember("post_op_eltwise", 3),   # <-- silently renumbered
-                EnumMember("post_op_binary", 2),  # took eltwise's slot
-            ],
-        )])
+        old = _snap(
+            enums=[
+                EnumType(
+                    name="post_op_kind",
+                    members=[
+                        EnumMember("post_op_sum", 1),
+                        EnumMember("post_op_eltwise", 2),
+                    ],
+                )
+            ]
+        )
+        new = _snap(
+            enums=[
+                EnumType(
+                    name="post_op_kind",
+                    members=[
+                        EnumMember("post_op_sum", 1),
+                        EnumMember("post_op_eltwise", 3),  # <-- silently renumbered
+                        EnumMember("post_op_binary", 2),  # took eltwise's slot
+                    ],
+                )
+            ]
+        )
         kinds = _kinds(compare(old, new))
         assert ChangeKind.ENUM_MEMBER_VALUE_CHANGED in kinds, (
             "renumbering an existing enum member during an 'append' must "
@@ -709,17 +782,31 @@ class TestS5ForwardCompatTagAppended:
         strict=False,
     )
     def test_forward_compat_severity_hint(self) -> None:
-        old = _snap(enums=[EnumType("K", members=[
-            EnumMember("a", 0), EnumMember("b", 1),
-        ])])
-        new = _snap(enums=[EnumType("K", members=[
-            EnumMember("a", 0), EnumMember("b", 1), EnumMember("c", 2),
-        ])])
-        result = compare(old, new)
-        assert any(
-            "forward" in (c.description or "").lower()
-            for c in result.changes
+        old = _snap(
+            enums=[
+                EnumType(
+                    "K",
+                    members=[
+                        EnumMember("a", 0),
+                        EnumMember("b", 1),
+                    ],
+                )
+            ]
         )
+        new = _snap(
+            enums=[
+                EnumType(
+                    "K",
+                    members=[
+                        EnumMember("a", 0),
+                        EnumMember("b", 1),
+                        EnumMember("c", 2),
+                    ],
+                )
+            ]
+        )
+        result = compare(old, new)
+        assert any("forward" in (c.description or "").lower() for c in result.changes)
 
 
 # ===========================================================================
