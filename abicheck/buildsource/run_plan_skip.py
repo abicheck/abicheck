@@ -75,6 +75,24 @@ SKIP_NO_CHECKS_DECLARED = "no_checks_declared"
 SKIP_CHECKS_DECLARED_NONE_RESOLVED = "checks_declared_none_resolved"
 
 
+#: What each reason requires of ``declared_checks``. A reason absent from
+#: this mapping is not a reason this build knows, and is rejected rather
+#: than carried through as an opaque label a consumer would have to guess
+#: at.
+_EXPECTED_DECLARED_CHECKS: dict[str, Any] = {
+    SKIP_NO_CHECKS_DECLARED: lambda n: n == 0,
+    SKIP_CHECKS_DECLARED_NONE_RESOLVED: lambda n: n > 0,
+}
+
+#: The same rule in words, for the error message.
+_REASON_EVIDENCE = {
+    SKIP_NO_CHECKS_DECLARED: "nothing was declared, so the count must be 0",
+    SKIP_CHECKS_DECLARED_NONE_RESOLVED: (
+        "checks were declared and none resolved, so the count must be positive"
+    ),
+}
+
+
 @dataclass(frozen=True)
 class RunPlanSkip:
     """Why a generated plan holds no checks (plan slice 7r).
@@ -95,6 +113,37 @@ class RunPlanSkip:
     declared_checks: int
     #: One sentence a human can act on, including where to look next.
     explanation: str
+
+    def __post_init__(self) -> None:
+        """Reject a skip whose reason and evidence contradict each other.
+
+        ``declared_checks`` is not decoration beside the label: it is the
+        fact the classification rests on, and the whole purpose of the v3
+        fields is that a consumer can tell a legitimate bootstrap skip from
+        declared checks that failed to resolve. A block reading
+        ``{"reason": "no_checks_declared", "declared_checks": 7}`` asserts
+        both at once, so accepting it makes the distinction unsafe for
+        every consumer downstream (Codex review, PR #1278).
+
+        Enforced here rather than in :meth:`from_dict` so one rule governs
+        construction, serialization and parsing alike -- the same reason
+        :func:`schema_for_plan` and :func:`parse_skipped_block` share their
+        own invariant instead of stating it twice.
+        """
+        from ..workflows.aggregate import AggregateError
+
+        expected = _EXPECTED_DECLARED_CHECKS.get(self.reason)
+        if expected is None:
+            raise AggregateError(
+                f"run-plan 'skipped.reason' {self.reason!r} is not a "
+                f"recognized skip reason ({sorted(_EXPECTED_DECLARED_CHECKS)})"
+            )
+        if not expected(self.declared_checks):
+            raise AggregateError(
+                f"run-plan 'skipped' is self-contradictory: reason "
+                f"{self.reason!r} with declared_checks="
+                f"{self.declared_checks} -- {_REASON_EVIDENCE[self.reason]}"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return {

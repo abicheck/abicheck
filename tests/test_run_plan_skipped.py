@@ -174,3 +174,88 @@ class TestSkippedBlockReadPath:
         from abicheck import schemas
 
         assert schemas.current("run-plan") == "abicheck.run-plan/v3"
+
+
+class TestSkipEvidenceAgreesWithItsReason:
+    """`declared_checks` is the evidence the reason rests on, so the two
+    cannot contradict each other (Codex review, PR #1278).
+
+    The whole purpose of the v3 fields is that a consumer can tell a
+    legitimate bootstrap skip from declared checks that failed to resolve;
+    a block asserting both at once would make that distinction unsafe for
+    every consumer downstream.
+    """
+
+    @pytest.mark.parametrize(
+        ("reason", "declared"),
+        [
+            (SKIP_NO_CHECKS_DECLARED, 1),
+            (SKIP_NO_CHECKS_DECLARED, 7),
+            (SKIP_CHECKS_DECLARED_NONE_RESOLVED, 0),
+        ],
+    )
+    def test_contradictory_pairs_are_rejected(self, reason: str, declared: int) -> None:
+        from abicheck.buildsource.run_plan import RunPlanSkip
+        from abicheck.workflows.aggregate import AggregateError
+
+        with pytest.raises(AggregateError, match="self-contradictory"):
+            RunPlanSkip(reason, declared, "x")
+
+    @pytest.mark.parametrize(
+        ("reason", "declared"),
+        [(SKIP_NO_CHECKS_DECLARED, 0), (SKIP_CHECKS_DECLARED_NONE_RESOLVED, 1)],
+    )
+    def test_consistent_pairs_are_accepted(self, reason: str, declared: int) -> None:
+        from abicheck.buildsource.run_plan import RunPlanSkip
+
+        assert RunPlanSkip(reason, declared, "x").reason == reason
+
+    @pytest.mark.parametrize("reason", ["", "bootstrap", "no_checks", "SKIPPED"])
+    def test_unknown_reasons_are_rejected(self, reason: str) -> None:
+        """An unrecognized reason is not an opaque label to carry through --
+        a consumer would have to guess what it licenses."""
+        from abicheck.buildsource.run_plan import RunPlan, RunPlanSkip
+        from abicheck.workflows.aggregate import AggregateError
+
+        with pytest.raises(AggregateError):
+            RunPlanSkip(reason, 0, "x")
+        with pytest.raises(AggregateError):
+            RunPlan.from_dict(
+                {
+                    "schema": "abicheck.run-plan/v3",
+                    "skipped": {
+                        "reason": reason,
+                        "declared_checks": 0,
+                        "explanation": "x",
+                    },
+                    "checks": [],
+                }
+            )
+
+    def test_the_read_path_enforces_it_too(self) -> None:
+        from abicheck.buildsource.run_plan import RunPlan
+        from abicheck.workflows.aggregate import AggregateError
+
+        with pytest.raises(AggregateError, match="self-contradictory"):
+            RunPlan.from_dict(
+                {
+                    "schema": "abicheck.run-plan/v3",
+                    "skipped": {
+                        "reason": SKIP_NO_CHECKS_DECLARED,
+                        "declared_checks": 7,
+                        "explanation": "x",
+                    },
+                    "checks": [],
+                }
+            )
+
+    def test_every_reason_the_generator_emits_is_recognized(self) -> None:
+        """Vacuity guard on the registry itself: a reason the classifier can
+        produce but the validator does not know would make every generated
+        plan unreadable, which no example-shaped test above would catch."""
+        from abicheck.buildsource.run_plan_skip import _EXPECTED_DECLARED_CHECKS
+
+        assert set(_EXPECTED_DECLARED_CHECKS) == {
+            SKIP_NO_CHECKS_DECLARED,
+            SKIP_CHECKS_DECLARED_NONE_RESOLVED,
+        }
