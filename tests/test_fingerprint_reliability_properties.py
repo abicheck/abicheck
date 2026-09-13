@@ -174,6 +174,16 @@ class _GuardInvariants:
         old_value,
         new_value,
     ):
+        """The whole guard contract over the complete state space, including
+        bug #7's own invariant: because ``_VALUES`` carries one literal and
+        one genuine fingerprint, every (literal, fingerprint) and
+        (fingerprint, literal) shape mismatch is already an input here, with
+        the same expected ``False``. A separate loop over the shape-mismatch
+        pair used to restate that -- it contributed zero input combinations
+        this cross-product did not already cover, so it was deleted rather
+        than kept as a second spelling of the same 128 calls. Do NOT shrink
+        ``_VALUES`` to a single shape without reinstating that invariant
+        somewhere: the mismatch cases would silently leave the suite."""
         old = _snap(ast_producer=old_producer, reliable=old_reliable, version="1.0")
         new = _snap(ast_producer=new_producer, reliable=new_reliable, version="2.0")
         both_fingerprint_shaped = _is_expr_fingerprint(
@@ -184,21 +194,6 @@ class _GuardInvariants:
             != self._is_legacy(new_producer, new_reliable)
         )
         assert self._call(old, new, old_value, new_value) is expected
-
-    def test_shape_mismatch_never_suppresses(self):
-        """Bug #7's invariant: one side a literal, the other a genuine
-        fingerprint (whatever either side's producer/reliability) is
-        ALWAYS a confirmed real edit -- the unstable algorithm only ever
-        affects a compound expression's fingerprint HASH, never whether a
-        declaration's own value was a literal at all, so this shape
-        transition can never be an algorithm-version artifact."""
-        for old_producer, old_reliable, new_producer, new_reliable in itertools.product(
-            _PRODUCERS, _RELIABLE, _PRODUCERS, _RELIABLE
-        ):
-            old = _snap(ast_producer=old_producer, reliable=old_reliable, version="1.0")
-            new = _snap(ast_producer=new_producer, reliable=new_reliable, version="2.0")
-            assert self._call(old, new, _LITERAL_VALUE, _FINGERPRINT_A) is False
-            assert self._call(old, new, _FINGERPRINT_A, _LITERAL_VALUE) is False
 
     def test_neither_side_fingerprint_shaped_never_suppresses(self):
         """Bug #5's invariant, phrased structurally: two values that are
