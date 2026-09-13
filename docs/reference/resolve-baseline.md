@@ -190,7 +190,7 @@ committed baseline read via `git show base_sha:path`, or `release-contract`)
 
 - name: Compare against resolved baseline
   if: steps.baseline.outputs.outcome == 'resolved'
-  uses: abicheck/abicheck@v0.5.0
+  uses: abicheck/abicheck@v0.6.0
   with:
     old-library: ${{ steps.baseline.outputs.snapshot-path }}
     new-library: build/lib/libpvxs.so

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "abicheck"
-version = "0.5.0"
+version = "0.6.0"
 description = "ABI/API compatibility checker for C/C++ libraries: see how a library's surface evolved, what breaks, and gate it in CI"
 readme = "README.md"
 license = {text = "Apache-2.0"}

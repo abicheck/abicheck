@@ -277,7 +277,7 @@ The whole CLI is seven root commands. Most single-library projects only ever nee
 ### GitHub Action
 
 ```yaml
-- uses: abicheck/abicheck@v0.5.0
+- uses: abicheck/abicheck@v0.6.0
   with:
     old-library: abi-baseline.json
     new-library: build/libfoo.so

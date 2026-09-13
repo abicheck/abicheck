@@ -23,7 +23,7 @@ the PR's own working tree has, which the same PR just edited.
 
 ```yaml
 - name: ABI compatibility check
-  uses: abicheck/abicheck@v0.5.0
+  uses: abicheck/abicheck@v0.6.0
   with:
     old-library: abi/libfoo.abicheck.json
     new-library: build/libfoo.so

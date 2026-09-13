@@ -310,7 +310,7 @@ version to track: the Action builds the Clang plugin (when
 `contrib/abicheck-clang-plugin` at that SHA, not a separately versioned
 `plugin_ref` — the scanner and the producer can never drift apart the way a
 hand-rolled `plugin_ref: v0.5.0` variable next to a differently-pinned
-`uses: abicheck/abicheck@v0.5.0` line can.
+`uses: abicheck/abicheck@v0.6.0` line can.
 
 **`phase: prepare` / `phase: verify`, and why there are two steps.** Wrapper
 and Clang-plugin injection both need *your* build command to run in between —
