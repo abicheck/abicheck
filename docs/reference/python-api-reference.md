@@ -131,6 +131,7 @@ One side of a comparison: a binary/snapshot path plus its build context.
 |---|---|---|
 | `path` | `Path \| None` | *(required)* |
 | `headers` | `tuple[Path, ...]` | `()` |
+| `exclude_headers` | `tuple[str, ...]` | `()` |
 | `includes` | `tuple[Path, ...]` | `()` |
 | `version` | `str` | `''` |
 | `pdb` | `Path \| None` | `None` |
@@ -388,6 +389,7 @@ Auto-detect input type and return an ABI snapshot.
 | `version` | `str` | `''` |
 | `lang` | `str` | `'c++'` |
 | *(keyword-only below)* | | |
+| `exclude_headers` | `Sequence[str]` | `()` |
 | `lang_explicit` | `bool` | `False` |
 | `is_elf` | `bool \| None` | `None` |
 | `pdb_path` | `Path \| None` | `None` |

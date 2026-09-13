@@ -75,6 +75,7 @@ def tier_rank(tier: str) -> int:
 EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # ── L0: visible in the exported symbol table / linker metadata alone ──
     "func_removed": "L0",
+    "func_added_elf_only": "L0",
     "func_removed_elf_only": "L0",
     "func_added": "L0",
     "var_added": "L0",

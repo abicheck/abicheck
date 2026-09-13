@@ -43,6 +43,7 @@ from .policy.gate_decision import gate_decision_for_result
 from .report.change_annotations import (
     change_annotation_fields as _change_annotation_fields,
 )
+from .report.change_operation import operation_for_kind as operation_for_kind
 from .report.contract_fields import (
     add_contract_evaluation_fields as _add_contract_evaluation_fields,
 )
@@ -94,7 +95,6 @@ from .reporter_markdown import (
     _section_severity_label as _section_severity_label,
     _suppress_dangling_correlation_notes as _suppress_dangling_correlation_notes,
     apply_show_only as apply_show_only,
-    operation_for_kind as operation_for_kind,
     parse_show_only_groups as parse_show_only_groups,
     root_cause_evidence_lookup_for_changes as root_cause_evidence_lookup_for_changes,
     root_cause_for_change as root_cause_for_change,

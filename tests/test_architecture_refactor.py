@@ -911,10 +911,21 @@ class TestChangeKindRegistry:
 
 
 def _get_populated_registry():
-    """Import checker (which triggers all detector imports) and return registry."""
+    """The registry as a real comparison sees it: fully discovered.
+
+    Importing ``abicheck.checker`` alone is no longer enough, and the gap is
+    the point. Discovery globs ``abicheck.diff_*`` at the top level and then
+    imports ``_EXTRA_DETECTOR_MODULES``, which is how a detector owned by a
+    responsibility package (``compare/undeclared_exports.py``) reaches the
+    registry at all. A helper that relied on import side effects alone
+    counted one fewer detector than `compare()` actually runs -- so this
+    calls the same ``ensure_loaded()`` the production path calls, and the
+    two counts cannot drift apart again.
+    """
     import abicheck.checker  # noqa: F401 — triggers detector module imports
     from abicheck.detector_registry import registry
 
+    registry.ensure_loaded()
     return registry
 
 
@@ -922,9 +933,9 @@ class TestDetectorRegistry:
     """Self-registering detector registry."""
 
     def test_all_detectors_registered(self):
-        """All 66 detectors are registered via decorators."""
+        """All 67 detectors are registered via decorators."""
         registry = _get_populated_registry()
-        assert len(registry) == 66
+        assert len(registry) == 67
 
     def test_detector_names_unique(self):
         """No duplicate detector names."""
@@ -991,7 +1002,7 @@ class TestDetectorRegistry:
         assert isinstance(changes, list)
         assert isinstance(results, list)
         # Results should have entries for all detectors (enabled or disabled)
-        assert len(results) == 66
+        assert len(results) == 67
 
     def test_support_check_disables_detector(self):
         """Detectors with failing support checks are disabled."""
@@ -1212,7 +1223,7 @@ class TestCompareUsesNewArchitecture:
         result = compare(old, new)
         assert result.verdict.value == "NO_CHANGE"
         assert result.changes == []
-        assert len(result.detector_results) == 66
+        assert len(result.detector_results) == 67
 
     def test_compare_detects_func_removal(self):
         """compare() detects function removal via registry."""
