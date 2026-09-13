@@ -138,7 +138,17 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "abicheck/binary_utils.py",
     "abicheck/dumper.py",
     "abicheck/dwarf_presence.py",
-    "abicheck/service.py",
+    # The whole `service*.py` family by glob, not the facade alone. Naming only
+    # `service.py` covered the re-export and missed the owner: `_attach_header_graph`
+    # lives in `service_header_graph_attach.py`, which `service.py` merely
+    # re-exports for import stability -- so the in-process header-graph benchmark
+    # and every full-CLI live dump execute code a PR could change while skipping
+    # every performance job (Codex review). The same argument applies to the rest
+    # of the family (dump/compare pipelines, native dump, render, metadata and
+    # header-scoped attach): each is real work inside a measured window, and a
+    # per-file list is exactly what went stale here, so this follows the
+    # `buildsource/**` precedent and sweeps the family.
+    "abicheck/service*.py",
     "scripts/benchmark_scaling.py",
     # The harnesses themselves, by prefix rather than by name: the full-CLI
     # harness has already been split twice under the file-size cap
@@ -182,11 +192,7 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     # owners of scan latency a narrower path filter previously missed
     # entirely (no scan-shaped scenario ran under this workflow at all for a
     # change to any of these).
-    "abicheck/service_input_resolution.py",
     "abicheck/dry_run_estimate.py",
-    "abicheck/service_dump_pipeline.py",
-    "abicheck/service_compare_pipeline.py",
-    "abicheck/service_dump_cache.py",
     "abicheck/snapshot_cache.py",
     "abicheck/cli_buildsource.py",
     "abicheck/cli_buildsource_helpers.py",

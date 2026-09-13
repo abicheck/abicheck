@@ -87,14 +87,16 @@ class TestResolveExitDecision:
 
     def test_coverage_floor_raises_a_clean_zero(self) -> None:
         decision = resolve_exit_decision(
-            compatibility_contribution=0, contract_coverage_contribution=1,
+            compatibility_contribution=0,
+            contract_coverage_contribution=1,
         )
         assert decision.code == 1
         assert decision.reasons == (ExitReason.CONTRACT_COVERAGE,)
 
     def test_assurance_floor_raises_a_clean_zero(self) -> None:
         decision = resolve_exit_decision(
-            compatibility_contribution=0, analysis_assurance_contribution=1,
+            compatibility_contribution=0,
+            analysis_assurance_contribution=1,
         )
         assert decision.code == 1
         assert decision.reasons == (ExitReason.ANALYSIS_ASSURANCE,)
@@ -122,7 +124,8 @@ class TestResolveExitDecision:
         )
         assert decision.code == 1
         assert set(decision.reasons) == {
-            ExitReason.CONTRACT_COVERAGE, ExitReason.ANALYSIS_ASSURANCE,
+            ExitReason.CONTRACT_COVERAGE,
+            ExitReason.ANALYSIS_ASSURANCE,
         }
 
     @pytest.mark.parametrize(
@@ -144,7 +147,8 @@ class TestResolveExitDecision:
 
     def test_to_dict_is_json_serializable(self) -> None:
         decision = resolve_exit_decision(
-            compatibility_contribution=0, contract_coverage_contribution=1,
+            compatibility_contribution=0,
+            contract_coverage_contribution=1,
         )
         d = decision.to_dict()
         json.dumps(d)  # must not raise
@@ -173,7 +177,8 @@ class TestResolveExitDecision:
         this axis, which broke this invariant for a promoted scan).
         """
         decision = resolve_exit_decision(
-            compatibility_contribution=0, crosscheck_promotion_contribution=2,
+            compatibility_contribution=0,
+            crosscheck_promotion_contribution=2,
         )
         assert decision.code == 2
         assert decision.reasons == (ExitReason.PROMOTED_CROSSCHECK,)
@@ -190,16 +195,19 @@ class TestResolveExitDecision:
         check on the caller side would drop it.
         """
         decision = resolve_exit_decision(
-            compatibility_contribution=2, crosscheck_promotion_contribution=2,
+            compatibility_contribution=2,
+            crosscheck_promotion_contribution=2,
         )
         assert decision.code == 2
         assert set(decision.reasons) == {
-            ExitReason.COMPATIBILITY_GATE, ExitReason.PROMOTED_CROSSCHECK,
+            ExitReason.COMPATIBILITY_GATE,
+            ExitReason.PROMOTED_CROSSCHECK,
         }
 
     def test_crosscheck_promotion_never_lowers_a_real_break(self) -> None:
         decision = resolve_exit_decision(
-            compatibility_contribution=4, crosscheck_promotion_contribution=2,
+            compatibility_contribution=4,
+            crosscheck_promotion_contribution=2,
         )
         assert decision.code == 4
         assert decision.reasons == (ExitReason.COMPATIBILITY_GATE,)
@@ -233,8 +241,12 @@ class TestResolveCompareExitDecisionAdr064Axes:
     @staticmethod
     def _result(verdict: Verdict = Verdict.NO_CHANGE, **kwargs: object) -> DiffResult:
         return DiffResult(
-            old_version="1.0", new_version="2.0", library="libtest.so",
-            changes=[], verdict=verdict, **kwargs,
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so",
+            changes=[],
+            verdict=verdict,
+            **kwargs,
         )
 
     def test_ordinary_resolver_ignores_both_fields_even_when_set(self) -> None:
@@ -252,7 +264,9 @@ class TestResolveCompareExitDecisionAdr064Axes:
         # Bit-for-bit unchanged for every pre-existing DiffResult.
         result = self._result(Verdict.BREAKING)
         decision = resolve_compare_exit_decision_with_abort_axes(
-            result, None, "legacy",
+            result,
+            None,
+            "legacy",
         )
         assert decision.code == 4
         assert decision.reasons == (ExitReason.COMPATIBILITY_GATE,)
@@ -262,7 +276,9 @@ class TestResolveCompareExitDecisionAdr064Axes:
     def test_evidence_contract_error_dominates_a_clean_gate(self) -> None:
         result = self._result(Verdict.NO_CHANGE, evidence_contract_error=True)
         decision = resolve_compare_exit_decision_with_abort_axes(
-            result, None, "legacy",
+            result,
+            None,
+            "legacy",
         )
         assert decision.code == 7
         assert decision.reasons == (ExitReason.EVIDENCE_CONTRACT_ERROR,)
@@ -274,7 +290,9 @@ class TestResolveCompareExitDecisionAdr064Axes:
         # comparison ran, so the ordinary fold's contributions must survive.
         result = self._result(Verdict.BREAKING, budget_overflow=True)
         decision = resolve_compare_exit_decision_with_abort_axes(
-            result, None, "legacy",
+            result,
+            None,
+            "legacy",
         )
         assert decision.code == 5
         assert decision.reasons == (ExitReason.BUDGET_OVERFLOW,)
@@ -283,10 +301,14 @@ class TestResolveCompareExitDecisionAdr064Axes:
 
     def test_evidence_contract_error_dominates_budget_overflow(self) -> None:
         result = self._result(
-            Verdict.BREAKING, evidence_contract_error=True, budget_overflow=True,
+            Verdict.BREAKING,
+            evidence_contract_error=True,
+            budget_overflow=True,
         )
         decision = resolve_compare_exit_decision_with_abort_axes(
-            result, None, "legacy",
+            result,
+            None,
+            "legacy",
         )
         assert decision.code == 7
         assert decision.reasons == (ExitReason.EVIDENCE_CONTRACT_ERROR,)
@@ -295,11 +317,14 @@ class TestResolveCompareExitDecisionAdr064Axes:
         # Delegation is exact, not merely code-equal.
         result = self._result(Verdict.API_BREAK, budget_overflow=True)
         decision = resolve_compare_exit_decision_with_abort_axes(
-            result, None, "legacy",
+            result,
+            None,
+            "legacy",
         )
         prior = resolve_exit_decision(compatibility_contribution=2)
         expected = resolve_scan_exit_decision(
-            budget_overflow=True, prior_decision=prior,
+            budget_overflow=True,
+            prior_decision=prior,
         )
         assert expected is not None
         assert decision == expected
@@ -347,7 +372,8 @@ class TestResolveScanExitDecision:
         prior decision existed).
         """
         prior = resolve_exit_decision(
-            compatibility_contribution=2, contract_coverage_contribution=1,
+            compatibility_contribution=2,
+            contract_coverage_contribution=1,
         )
         decision = resolve_scan_exit_decision(
             budget_overflow=True,
@@ -388,7 +414,8 @@ class TestResolveScanExitDecision:
         so when both are true for the same run, budget wins, not a tie.
         """
         decision = resolve_scan_exit_decision(
-            budget_overflow=True, not_comparable=True,
+            budget_overflow=True,
+            not_comparable=True,
         )
         assert decision is not None
         assert decision.code == 5
@@ -401,7 +428,9 @@ class TestResolveScanExitDecision:
         could ever be decided -- is even attempted.
         """
         decision = resolve_scan_exit_decision(
-            evidence_contract_error=True, budget_overflow=True, not_comparable=True,
+            evidence_contract_error=True,
+            budget_overflow=True,
+            not_comparable=True,
         )
         assert decision is not None
         assert decision.code == 7
@@ -445,7 +474,8 @@ class TestResolveScanExitDecision:
         for why the numbers stay per-command (ADR-064).
         """
         decision = resolve_scan_exit_decision(
-            not_comparable=True, not_comparable_code=99,
+            not_comparable=True,
+            not_comparable_code=99,
         )
         assert decision is not None
         assert decision.code == 99
@@ -636,7 +666,8 @@ class TestResolveReleaseExitDecision:
         )
         assert decision.code == 4
         assert set(decision.reasons) == {
-            ExitReason.COMPATIBILITY_GATE, ExitReason.OPERATIONAL_ERROR,
+            ExitReason.COMPATIBILITY_GATE,
+            ExitReason.OPERATIONAL_ERROR,
         }
 
     def test_legacy_scheme_operational_error_is_tagged_distinctly(self) -> None:
@@ -682,7 +713,8 @@ class TestResolveReleaseExitDecision:
         )
         assert decision.code == 4
         assert set(decision.reasons) == {
-            ExitReason.COMPATIBILITY_GATE, ExitReason.OPERATIONAL_ERROR,
+            ExitReason.COMPATIBILITY_GATE,
+            ExitReason.OPERATIONAL_ERROR,
         }
 
     def test_severity_scheme_clean_with_no_removed_library_is_clean(self) -> None:
@@ -793,7 +825,10 @@ class TestResolveReleaseExitDecision:
 
 def _fn(name: str, mangled: str) -> Function:
     return Function(
-        name=name, mangled=mangled, return_type="int", visibility=Visibility.PUBLIC,
+        name=name,
+        mangled=mangled,
+        return_type="int",
+        visibility=Visibility.PUBLIC,
     )
 
 
@@ -833,9 +868,7 @@ def _assurance_config_args(tmp_path: Path) -> list[str]:
     ``--require-complete-analysis`` flag."""
     cfg_path = tmp_path / ".abicheck-assurance.yml"
     if not cfg_path.exists():
-        cfg_path.write_text(
-            "assurance:\n  require_complete: true\n", encoding="utf-8"
-        )
+        cfg_path.write_text("assurance:\n  require_complete: true\n", encoding="utf-8")
     return ["--config", str(cfg_path)]
 
 
@@ -876,7 +909,8 @@ class TestCompareExitDecisionIntegration:
         }
 
     def test_breaking_comparison_reports_the_compatibility_gate_reason(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         res = _compare(tmp_path, _breaking_pair(), "-o", "json=-")
         assert res.exit_code == 4, res.output
@@ -887,7 +921,8 @@ class TestCompareExitDecisionIntegration:
         assert report["exit"]["code"] == res.exit_code
 
     def test_require_complete_analysis_floor_matches_process_exit(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """The elf-only pair from `test_analysis_assurance.py`'s own
         contract has an incomplete status -- ``--require-complete-analysis``
@@ -901,7 +936,11 @@ class TestCompareExitDecisionIntegration:
             AbiSnapshot(version="2.0", functions=fns, **common),
         )
         res = _compare(
-            tmp_path, pair, "-o", "json=-", "--require-complete-analysis",
+            tmp_path,
+            pair,
+            "-o",
+            "json=-",
+            "--require-complete-analysis",
         )
         assert res.exit_code == 1, res.output
         report = json.loads(res.stdout[res.stdout.index("{") :])
@@ -916,7 +955,8 @@ class TestCompareExitDecisionIntegration:
         )
 
     def test_scoped_gate_never_narrows_the_full_library_exit(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """Codex review, originally: a `--required-symbol` compare's real
         process exit used to be the *scoped* gate (`result.scoped_exit_code`),
@@ -959,7 +999,8 @@ class TestCompareExitDecisionIntegration:
         assert report["exit"]["code"] == res.exit_code
 
     def test_scoped_gate_failure_still_names_the_compatibility_reason(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """The inverse of the test above: requiring the *removed* symbol
         also fails, but for the same reason (the full-library
@@ -990,7 +1031,8 @@ class TestCompareExitDecisionIntegration:
         assert report["consumer_scope"]["verdict"] == "BREAKING"
 
     def test_scoped_clean_gate_does_not_mask_the_real_assurance_reason(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """Codex review: an earlier revision of the scoped fix read the
         already-*folded* ``result.scoped_exit_code`` as the compatibility
@@ -1056,7 +1098,9 @@ class TestCompareEvidenceContractAndBudgetAxes:
         monkeypatch.setattr(compare_policy, "compare", _fake_compare)
 
     def test_evidence_contract_error_wins_over_a_clean_compatibility_gate(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         self._force_field(monkeypatch, "evidence_contract_error")
         res = _compare(tmp_path, _compatible_pair(), "-o", "json=-")
@@ -1072,7 +1116,9 @@ class TestCompareEvidenceContractAndBudgetAxes:
         assert report["exit"]["compatibility_contribution"] == 0
 
     def test_budget_overflow_preserves_the_prior_breaking_gate(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         self._force_field(monkeypatch, "budget_overflow")
         res = _compare(tmp_path, _breaking_pair(), "-o", "json=-")
@@ -1087,7 +1133,8 @@ class TestCompareEvidenceContractAndBudgetAxes:
         assert report["exit"]["compatibility_contribution"] == 4
 
     def test_default_compare_never_engages_either_axis(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         # The acceptance bar: every pre-existing invocation is bit-for-bit
         # unchanged -- both contributions stay 0, neither reason is named.
@@ -1158,5 +1205,3 @@ class TestIncludeExitDecisionFlag:
         report = json.loads(to_json(result, include_exit_decision=False))
         assert "exit" not in report
         validate_instance(report, load_compare_report_schema())
-
-

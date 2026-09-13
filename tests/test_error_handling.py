@@ -6,6 +6,7 @@ Tests cover:
 - Suppression file edge cases
 - Checker edge cases with unusual data
 """
+
 import json
 
 import pytest
@@ -31,8 +32,13 @@ from abicheck.suppression import Suppression, SuppressionList
 
 
 def _snap(**kwargs):
-    defaults = {"library": "libtest.so", "version": "1.0",
-                "functions": [], "variables": [], "types": []}
+    defaults = {
+        "library": "libtest.so",
+        "version": "1.0",
+        "functions": [],
+        "variables": [],
+        "types": [],
+    }
     defaults.update(kwargs)
     return AbiSnapshot(**defaults)
 
@@ -112,13 +118,20 @@ class TestSerializationErrorHandling:
 
     def test_unknown_visibility_in_function(self):
         with pytest.raises(ValueError):
-            snapshot_from_dict({
-                "library": "lib.so", "version": "1.0",
-                "functions": [{
-                    "name": "f", "mangled": "f", "return_type": "void",
-                    "visibility": "invalid_visibility"
-                }]
-            })
+            snapshot_from_dict(
+                {
+                    "library": "lib.so",
+                    "version": "1.0",
+                    "functions": [
+                        {
+                            "name": "f",
+                            "mangled": "f",
+                            "return_type": "void",
+                            "visibility": "invalid_visibility",
+                        }
+                    ],
+                }
+            )
 
     def test_load_nonexistent_file(self, tmp_path):
         with pytest.raises(FileNotFoundError):
@@ -133,11 +146,17 @@ class TestSerializationErrorHandling:
     def test_roundtrip_preserves_is_extern_c(self):
         """Verify is_extern_c survives serialization round-trip."""
         snap = AbiSnapshot(
-            library="lib.so", version="1.0",
-            functions=[Function(
-                name="cfunc", mangled="cfunc", return_type="void",
-                is_extern_c=True, visibility=Visibility.PUBLIC,
-            )]
+            library="lib.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="cfunc",
+                    mangled="cfunc",
+                    return_type="void",
+                    is_extern_c=True,
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
         d = snapshot_to_dict(snap)
         snap2 = snapshot_from_dict(d)
@@ -146,11 +165,16 @@ class TestSerializationErrorHandling:
     def test_roundtrip_preserves_alignment_bits(self):
         """Verify alignment_bits survives serialization round-trip."""
         snap = AbiSnapshot(
-            library="lib.so", version="1.0",
-            types=[RecordType(
-                name="Aligned", kind="struct",
-                size_bits=128, alignment_bits=64,
-            )]
+            library="lib.so",
+            version="1.0",
+            types=[
+                RecordType(
+                    name="Aligned",
+                    kind="struct",
+                    size_bits=128,
+                    alignment_bits=64,
+                )
+            ],
         )
         d = snapshot_to_dict(snap)
         snap2 = snapshot_from_dict(d)
@@ -159,7 +183,8 @@ class TestSerializationErrorHandling:
     def test_is_union_derived_from_kind_when_missing(self):
         """When is_union is absent from JSON, derive from kind."""
         d = {
-            "library": "lib.so", "version": "1.0",
+            "library": "lib.so",
+            "version": "1.0",
             "types": [{"name": "U", "kind": "union", "fields": []}],
         }
         snap = snapshot_from_dict(d)
@@ -167,16 +192,22 @@ class TestSerializationErrorHandling:
 
     def test_elf_metadata_roundtrip(self):
         from abicheck.elf_metadata import ElfSymbol, SymbolBinding, SymbolType
+
         snap = AbiSnapshot(
-            library="lib.so", version="1.0",
+            library="lib.so",
+            version="1.0",
             elf=ElfMetadata(
                 soname="lib.so.1",
                 needed=["libc.so.6"],
-                symbols=[ElfSymbol(
-                    name="sym", binding=SymbolBinding.GLOBAL,
-                    sym_type=SymbolType.FUNC, size=42,
-                )]
-            )
+                symbols=[
+                    ElfSymbol(
+                        name="sym",
+                        binding=SymbolBinding.GLOBAL,
+                        sym_type=SymbolType.FUNC,
+                        size=42,
+                    )
+                ],
+            ),
         )
         d = snapshot_to_dict(snap)
         snap2 = snapshot_from_dict(d)
@@ -224,7 +255,7 @@ class TestSuppressionErrorHandling:
         bad = tmp_path / "bad.yaml"
         bad.write_text(
             "version: 1\nsuppressions:\n  - symbol: foo\n    typo_key: bar\n",
-            encoding="utf-8"
+            encoding="utf-8",
         )
         with pytest.raises(ValueError, match="unknown key"):
             SuppressionList.load(bad)
@@ -235,13 +266,13 @@ class TestCheckerEdgeCases:
 
     def test_vtable_identical_entries_different_order_is_breaking(self):
         """Vtable reorder (same entries, different order) is breaking."""
-        t_old = RecordType(name="W", kind="class",
-                           vtable=["_ZA", "_ZB", "_ZC"])
-        t_new = RecordType(name="W", kind="class",
-                           vtable=["_ZC", "_ZA", "_ZB"])
+        t_old = RecordType(name="W", kind="class", vtable=["_ZA", "_ZB", "_ZC"])
+        t_new = RecordType(name="W", kind="class", vtable=["_ZC", "_ZA", "_ZB"])
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
         assert r.verdict == Verdict.BREAKING
-        vtable_changes = [c for c in r.changes if c.kind == ChangeKind.TYPE_VTABLE_CHANGED]
+        vtable_changes = [
+            c for c in r.changes if c.kind == ChangeKind.TYPE_VTABLE_CHANGED
+        ]
         assert len(vtable_changes) == 1
         assert "reordered" in vtable_changes[0].description
 

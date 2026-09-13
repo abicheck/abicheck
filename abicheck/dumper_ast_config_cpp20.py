@@ -1248,9 +1248,7 @@ def _preprocess_headers(
             continue
         scan_content, shadow_content = prepared
         per_file.append((path, scan_content))
-        concept = concept or bool(
-            _CONCEPT_AS_TYPE_NAME_PATTERN.search(shadow_content)
-        )
+        concept = concept or bool(_CONCEPT_AS_TYPE_NAME_PATTERN.search(shadow_content))
         requires = requires or bool(
             _REQUIRES_AS_TYPE_NAME_PATTERN.search(shadow_content)
         )

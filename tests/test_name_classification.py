@@ -48,7 +48,9 @@ def test_is_rtti_symbol_false(name: str) -> None:
     assert not is_rtti_symbol(name)
 
 
-@pytest.mark.parametrize("name", ["_ZTIZ4mainEUlvE_", "_ZTSZ3fooEUliE_", "_ZTVZ1gEvE", "_ZTTZ1hEvE"])
+@pytest.mark.parametrize(
+    "name", ["_ZTIZ4mainEUlvE_", "_ZTSZ3fooEUliE_", "_ZTVZ1gEvE", "_ZTTZ1hEvE"]
+)
 def test_local_rtti_detected(name: str) -> None:
     assert is_local_rtti_symbol(name)
     # A function-local RTTI symbol is still a generic RTTI symbol.
@@ -236,7 +238,9 @@ def test_internal_namespace_component_only_considers_owning_scope(name: str) -> 
 
 def test_internal_substring_not_matched_without_length_prefix() -> None:
     # "internal" without the conventional length prefix must not match.
-    assert not has_internal_namespace_component("_ZN3lib8internelE")  # typo, no "8internal"
+    assert not has_internal_namespace_component(
+        "_ZN3lib8internelE"
+    )  # typo, no "8internal"
     assert not has_internal_namespace_component("my_internal_helper")
 
 
@@ -329,17 +333,39 @@ def test_stdlib_rtti_prefixes_is_canonical_union() -> None:
     # The historical memberships (verbatim, pre-merge) — the canonical set must
     # be a superset of each so no symbol previously matched stops matching.
     historical_elf_stdlib_rtti = {
-        "_ZTISt", "_ZTSSt", "_ZTVSt", "_ZTTSt",
-        "_ZTINSt", "_ZTSNSt", "_ZTVNSt", "_ZTTNSt",
-        "_ZTIN9__gnu_cxx", "_ZTSN9__gnu_cxx", "_ZTVN9__gnu_cxx", "_ZTTN9__gnu_cxx",
-        "_ZTIN10__cxxabiv", "_ZTSN10__cxxabiv", "_ZTTN10__cxxabiv",
-        "_ZTIN7__cxx11", "_ZTSN7__cxx11", "_ZTVN7__cxx11", "_ZTTN7__cxx11",
+        "_ZTISt",
+        "_ZTSSt",
+        "_ZTVSt",
+        "_ZTTSt",
+        "_ZTINSt",
+        "_ZTSNSt",
+        "_ZTVNSt",
+        "_ZTTNSt",
+        "_ZTIN9__gnu_cxx",
+        "_ZTSN9__gnu_cxx",
+        "_ZTVN9__gnu_cxx",
+        "_ZTTN9__gnu_cxx",
+        "_ZTIN10__cxxabiv",
+        "_ZTSN10__cxxabiv",
+        "_ZTTN10__cxxabiv",
+        "_ZTIN7__cxx11",
+        "_ZTSN7__cxx11",
+        "_ZTVN7__cxx11",
+        "_ZTTN7__cxx11",
     }
     historical_layout_runtime_rtti = {
-        "_ZTVN10__cxxabiv", "_ZTIN10__cxxabiv", "_ZTSN10__cxxabiv",
-        "_ZTVSt", "_ZTISt", "_ZTSSt",
-        "_ZTVNSt", "_ZTINSt", "_ZTSNSt",
-        "_ZTVN9__gnu_cxx", "_ZTIN9__gnu_cxx", "_ZTSN9__gnu_cxx",
+        "_ZTVN10__cxxabiv",
+        "_ZTIN10__cxxabiv",
+        "_ZTSN10__cxxabiv",
+        "_ZTVSt",
+        "_ZTISt",
+        "_ZTSSt",
+        "_ZTVNSt",
+        "_ZTINSt",
+        "_ZTSNSt",
+        "_ZTVN9__gnu_cxx",
+        "_ZTIN9__gnu_cxx",
+        "_ZTSN9__gnu_cxx",
     }
     canonical = set(STDLIB_RTTI_PREFIXES)
     assert historical_elf_stdlib_rtti <= canonical

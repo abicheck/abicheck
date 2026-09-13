@@ -240,10 +240,18 @@ class MarkReachability:
             from .diff_filtering import _qualified_by_mangled
 
             names: set[str] = set()
-            names.update(f.name for f in snap.functions if f.origin == ScopeOrigin.PUBLIC_HEADER)
-            names.update(v.name for v in snap.variables if v.origin == ScopeOrigin.PUBLIC_HEADER)
-            names.update(t.name for t in snap.types if t.origin == ScopeOrigin.PUBLIC_HEADER)
-            names.update(e.name for e in snap.enums if e.origin == ScopeOrigin.PUBLIC_HEADER)
+            names.update(
+                f.name for f in snap.functions if f.origin == ScopeOrigin.PUBLIC_HEADER
+            )
+            names.update(
+                v.name for v in snap.variables if v.origin == ScopeOrigin.PUBLIC_HEADER
+            )
+            names.update(
+                t.name for t in snap.types if t.origin == ScopeOrigin.PUBLIC_HEADER
+            )
+            names.update(
+                e.name for e in snap.enums if e.origin == ScopeOrigin.PUBLIC_HEADER
+            )
             names.update(
                 _qualified_by_mangled(
                     [
@@ -264,7 +272,9 @@ class MarkReachability:
             )
             return names
 
-        namespaces = self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
+        namespaces = (
+            self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
+        )
         # An absent baseline (``compare --no-baseline``) contributes an empty
         # snapshot here: it declares nothing, exports nothing and carries no
         # call graph, so every union below reduces to the candidate's own and
@@ -299,7 +309,9 @@ class MarkReachability:
         # diff_templates.py — apply it here too, across every declaration
         # kind that carries the field (function/variable/type/enum), not
         # just RecordType.
-        public_header_names = _public_header_names(old_snap) | _public_header_names(ctx.new)
+        public_header_names = _public_header_names(old_snap) | _public_header_names(
+            ctx.new
+        )
         # Codex review, fourth pass: this used to return early here when
         # nothing at all was found reachable (no point tagging
         # public_reachable/reachability_kind — they'd all stay at their
@@ -328,10 +340,17 @@ class MarkReachability:
         # pass (Codex review, three passes).
         def _call_graph_fully_trusted(snap: AbiSnapshot) -> bool:
             build_source = getattr(snap, "build_source", None)
-            graph = getattr(build_source, "source_graph", None) if build_source is not None else None
+            graph = (
+                getattr(build_source, "source_graph", None)
+                if build_source is not None
+                else None
+            )
             if graph is None:
                 return False
-            if not (graph.extractor_passes.get("call_graph") and graph.extractor_passes.get("type_graph")):
+            if not (
+                graph.extractor_passes.get("call_graph")
+                and graph.extractor_passes.get("type_graph")
+            ):
                 return False
             # Both passes completed is not enough on its own: the walk only
             # ever seeds from is_consumer_compiled_public_entry() nodes, not
@@ -365,10 +384,18 @@ class MarkReachability:
         # PROVEN_UNREACHABLE. Check the decl's *actual* presence on each
         # snapshot instead of pattern-matching the kind name, which is immune
         # to new one-sided or attribute-toggle kinds being added later.
-        old_decl_names = {f.mangled for f in old_snap.functions} | {f.name for f in old_snap.functions}
-        old_decl_names |= {v.mangled for v in old_snap.variables} | {v.name for v in old_snap.variables}
-        new_decl_names = {f.mangled for f in ctx.new.functions} | {f.name for f in ctx.new.functions}
-        new_decl_names |= {v.mangled for v in ctx.new.variables} | {v.name for v in ctx.new.variables}
+        old_decl_names = {f.mangled for f in old_snap.functions} | {
+            f.name for f in old_snap.functions
+        }
+        old_decl_names |= {v.mangled for v in old_snap.variables} | {
+            v.name for v in old_snap.variables
+        }
+        new_decl_names = {f.mangled for f in ctx.new.functions} | {
+            f.name for f in ctx.new.functions
+        }
+        new_decl_names |= {v.mangled for v in ctx.new.variables} | {
+            v.name for v in ctx.new.variables
+        }
 
         def _relevant_call_graph_trusted(change: Change, root: str) -> bool:
             """Only require trust from the side(s) *change*'s target actually
@@ -395,9 +422,12 @@ class MarkReachability:
         # alongside types/enums for TYPEDEF_REMOVED/TYPEDEF_BASE_CHANGED's
         # root (the alias name) to be recognized as layout-walk domain.
         known_type_names = (
-            {t.name for t in old_snap.types} | {e.name for e in old_snap.enums}
-            | {t.name for t in ctx.new.types} | {e.name for e in ctx.new.enums}
-            | set(old_snap.typedefs) | set(ctx.new.typedefs)
+            {t.name for t in old_snap.types}
+            | {e.name for e in old_snap.enums}
+            | {t.name for t in ctx.new.types}
+            | {e.name for e in ctx.new.enums}
+            | set(old_snap.typedefs)
+            | set(ctx.new.typedefs)
         )
         # RecordType.qualified_name (DWARF-backend only) resolves a bare name
         # like "Hidden" ("ns::detail::Hidden") for is_internal_type below --
@@ -492,7 +522,11 @@ class MarkReachability:
                 if paths and not (all_indirect and not identity_or_vtable):
                     c.public_reachable = True
                     preferred_path = select_preferred_path(paths)
-                    c.reachability_kind = "value_embedding" if _path_is_value_propagating(preferred_path) else "pointer_or_signature"
+                    c.reachability_kind = (
+                        "value_embedding"
+                        if _path_is_value_propagating(preferred_path)
+                        else "pointer_or_signature"
+                    )
                     c.reachability_proof_path = _format_path(preferred_path)
                     c.reachability_state = ReachabilityState.PROVEN_REACHABLE
                     tagged = True
@@ -512,7 +546,8 @@ class MarkReachability:
             # label carries in EITHER mode — so it is a reliable fallback key
             # independent of which graph provenance produced the evidence.
             call_key = (
-                root if root in call_reachable
+                root
+                if root in call_reachable
                 else (c.qualified_name if c.qualified_name in call_reachable else None)
             )
             if not tagged and call_key is not None:
@@ -592,14 +627,16 @@ class MarkReachability:
                 type_qualified_name = (
                     qualified_name_by_bare.get(root) if enum_owner is None else None
                 )
-                subject_is_internal = is_internal_type(
-                    internal_check_subject, namespaces
-                ) or (
-                    c.qualified_name is not None
-                    and is_internal_type(c.qualified_name, namespaces)
-                ) or (
-                    type_qualified_name is not None
-                    and is_internal_type(type_qualified_name, namespaces)
+                subject_is_internal = (
+                    is_internal_type(internal_check_subject, namespaces)
+                    or (
+                        c.qualified_name is not None
+                        and is_internal_type(c.qualified_name, namespaces)
+                    )
+                    or (
+                        type_qualified_name is not None
+                        and is_internal_type(type_qualified_name, namespaces)
+                    )
                 )
                 layout_domain = root in reachable_types or (
                     subject_is_internal

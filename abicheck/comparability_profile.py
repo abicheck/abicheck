@@ -435,6 +435,7 @@ def _declared_header_insertion_mismatch(
         fatal=False,
     )
 
+
 def _check_profile_fingerprint_comparable(
     old: AbiSnapshot, new: AbiSnapshot
 ) -> ComparabilityMismatch | None:

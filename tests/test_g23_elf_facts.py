@@ -19,6 +19,7 @@ Covers static-TLS drift (A1), .note.gnu.property CET/BTI hardening (A2), ELF
 identity / ABI-flags guard (A3), and STB_GNU_UNIQUE binding transitions (A4).
 All tests use synthetic ``ElfMetadata`` — no real binaries required.
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
@@ -49,11 +50,15 @@ def _tls_sym(name: str = "tls_var") -> ElfSymbol:
 
 
 def _sym_obj(name: str) -> ElfSymbol:
-    return ElfSymbol(name=name, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.OBJECT)
+    return ElfSymbol(
+        name=name, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.OBJECT
+    )
 
 
 def _uniq_obj(name: str) -> ElfSymbol:
-    return ElfSymbol(name=name, binding=SymbolBinding.UNIQUE, sym_type=SymbolType.OBJECT)
+    return ElfSymbol(
+        name=name, binding=SymbolBinding.UNIQUE, sym_type=SymbolType.OBJECT
+    )
 
 
 def _elf(**kwargs) -> ElfMetadata:
@@ -65,6 +70,7 @@ def _elf(**kwargs) -> ElfMetadata:
 
 
 # ── A1: static-TLS drift ────────────────────────────────────────────────────
+
 
 class TestStaticTls:
     def test_introduced_with_tls_symbols(self):
@@ -116,6 +122,7 @@ class TestStaticTls:
 
 # ── A2: .note.gnu.property CET / branch protection ──────────────────────────
 
+
 class TestGnuProperty:
     def test_cet_weakened(self):
         old = _elf(gnu_properties=frozenset({"IBT", "SHSTK"}))
@@ -158,7 +165,9 @@ class TestGnuProperty:
 
     def test_no_change_when_stable(self):
         props = frozenset({"IBT", "SHSTK", "BTI"})
-        r = compare(_snap(_elf(gnu_properties=props)), _snap(_elf(gnu_properties=props)))
+        r = compare(
+            _snap(_elf(gnu_properties=props)), _snap(_elf(gnu_properties=props))
+        )
         ks = _kinds(r)
         assert ChangeKind.CET_PROTECTION_WEAKENED not in ks
         assert ChangeKind.BRANCH_PROTECTION_WEAKENED not in ks
@@ -180,6 +189,7 @@ class TestGnuProperty:
 
 
 # ── A3: ELF identity / ABI-flags guard ──────────────────────────────────────
+
 
 class TestElfIdentity:
     def test_machine_changed_is_breaking(self):
@@ -206,8 +216,12 @@ class TestElfIdentity:
         assert ChangeKind.ELF_CLASS_CHANGED in _kinds(r)
 
     def test_abi_flags_float_change_is_breaking(self):
-        old = ElfMetadata(machine="EM_ARM", abi_flags=frozenset({"float-hard", "eabi5"}))
-        new = ElfMetadata(machine="EM_ARM", abi_flags=frozenset({"float-soft", "eabi5"}))
+        old = ElfMetadata(
+            machine="EM_ARM", abi_flags=frozenset({"float-hard", "eabi5"})
+        )
+        new = ElfMetadata(
+            machine="EM_ARM", abi_flags=frozenset({"float-soft", "eabi5"})
+        )
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.ELF_ABI_FLAGS_CHANGED in _kinds(r)
         assert r.verdict == Verdict.BREAKING
@@ -230,7 +244,9 @@ class TestElfIdentity:
 
     def test_no_change_when_identity_stable(self):
         elf = ElfMetadata(
-            machine="EM_X86_64", elf_class=64, osabi="ELFOSABI_SYSV",
+            machine="EM_X86_64",
+            elf_class=64,
+            osabi="ELFOSABI_SYSV",
             abi_flags=frozenset(),
         )
         r = compare(_snap(elf), _snap(elf))
@@ -280,8 +296,12 @@ class TestElfIdentity:
         # flipped: those bits carry ISA-level (`-march`) drift (e.g. mips32 →
         # mips32r2) that is calling-convention-compatible. The decoded token set
         # is authoritative for arches we decode, so the raw fallback is skipped.
-        old = ElfMetadata(machine="EM_MIPS", abi_flags=frozenset({"mips-abi-0x1000"}), e_flags=0x1000)
-        new = ElfMetadata(machine="EM_MIPS", abi_flags=frozenset({"mips-abi-0x1000"}), e_flags=0x9000)
+        old = ElfMetadata(
+            machine="EM_MIPS", abi_flags=frozenset({"mips-abi-0x1000"}), e_flags=0x1000
+        )
+        new = ElfMetadata(
+            machine="EM_MIPS", abi_flags=frozenset({"mips-abi-0x1000"}), e_flags=0x9000
+        )
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.ELF_ABI_FLAGS_CHANGED not in _kinds(r)
 
@@ -289,8 +309,12 @@ class TestElfIdentity:
         # Rebuilding a RISC-V library with the same -mabi (lp64d/float-double)
         # but toggling the compressed-instruction bit (e_flags 0x4 → 0x5) is an
         # ISA-encoding change, not an ABI break: no elf_abi_flags_changed.
-        old = ElfMetadata(machine="EM_RISCV", abi_flags=frozenset({"float-double"}), e_flags=0x4)
-        new = ElfMetadata(machine="EM_RISCV", abi_flags=frozenset({"float-double"}), e_flags=0x5)
+        old = ElfMetadata(
+            machine="EM_RISCV", abi_flags=frozenset({"float-double"}), e_flags=0x4
+        )
+        new = ElfMetadata(
+            machine="EM_RISCV", abi_flags=frozenset({"float-double"}), e_flags=0x5
+        )
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.ELF_ABI_FLAGS_CHANGED not in _kinds(r)
 
@@ -298,7 +322,9 @@ class TestElfIdentity:
         # Back-compat: a saved baseline produced by the pre-fix decoder carries a
         # legacy `rvc` token in abi_flags. Comparing it against a freshly-parsed
         # side (no `rvc`) with the same real ABI must NOT report a change (#504).
-        old = ElfMetadata(machine="EM_RISCV", abi_flags=frozenset({"float-double", "rvc"}))
+        old = ElfMetadata(
+            machine="EM_RISCV", abi_flags=frozenset({"float-double", "rvc"})
+        )
         new = ElfMetadata(machine="EM_RISCV", abi_flags=frozenset({"float-double"}))
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.ELF_ABI_FLAGS_CHANGED not in _kinds(r)
@@ -313,8 +339,12 @@ class TestElfIdentity:
         assert ChangeKind.ELF_ABI_FLAGS_CHANGED in _kinds(r)
 
     def test_decoded_tokens_equal_and_raw_eflags_equal_no_change(self):
-        old = ElfMetadata(machine="EM_ARM", abi_flags=frozenset({"float-hard"}), e_flags=0x400)
-        new = ElfMetadata(machine="EM_ARM", abi_flags=frozenset({"float-hard"}), e_flags=0x400)
+        old = ElfMetadata(
+            machine="EM_ARM", abi_flags=frozenset({"float-hard"}), e_flags=0x400
+        )
+        new = ElfMetadata(
+            machine="EM_ARM", abi_flags=frozenset({"float-hard"}), e_flags=0x400
+        )
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.ELF_ABI_FLAGS_CHANGED not in _kinds(r)
 
@@ -332,20 +362,49 @@ class TestStaticTlsHiddenTls:
 
 # ── A4: STB_GNU_UNIQUE binding transitions ──────────────────────────────────
 
+
 class TestGnuUniqueBinding:
     def test_became_unique(self):
-        old = _elf(symbols=[
-            ElfSymbol(name="inst", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.OBJECT)])
-        new = _elf(symbols=[
-            ElfSymbol(name="inst", binding=SymbolBinding.UNIQUE, sym_type=SymbolType.OBJECT)])
+        old = _elf(
+            symbols=[
+                ElfSymbol(
+                    name="inst",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.OBJECT,
+                )
+            ]
+        )
+        new = _elf(
+            symbols=[
+                ElfSymbol(
+                    name="inst",
+                    binding=SymbolBinding.UNIQUE,
+                    sym_type=SymbolType.OBJECT,
+                )
+            ]
+        )
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE in _kinds(r)
 
     def test_lost_unique(self):
-        old = _elf(symbols=[
-            ElfSymbol(name="inst", binding=SymbolBinding.UNIQUE, sym_type=SymbolType.OBJECT)])
-        new = _elf(symbols=[
-            ElfSymbol(name="inst", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.OBJECT)])
+        old = _elf(
+            symbols=[
+                ElfSymbol(
+                    name="inst",
+                    binding=SymbolBinding.UNIQUE,
+                    sym_type=SymbolType.OBJECT,
+                )
+            ]
+        )
+        new = _elf(
+            symbols=[
+                ElfSymbol(
+                    name="inst",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.OBJECT,
+                )
+            ]
+        )
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.SYMBOL_BINDING_LOST_UNIQUE in _kinds(r)
 
@@ -353,10 +412,11 @@ class TestGnuUniqueBinding:
         # When a release first gains GNU_UNIQUE exports (e.g. turns on
         # -fgnu-unique), the added unique symbol isn't a both-sides transition,
         # but the library newly becomes non-unloadable — reported once.
-        old = ElfMetadata(machine="EM_X86_64", symbols=[
-            _sym_obj("plain")])
-        new = ElfMetadata(machine="EM_X86_64", symbols=[
-            _sym_obj("plain"), _uniq_obj("inst1"), _uniq_obj("inst2")])
+        old = ElfMetadata(machine="EM_X86_64", symbols=[_sym_obj("plain")])
+        new = ElfMetadata(
+            machine="EM_X86_64",
+            symbols=[_sym_obj("plain"), _uniq_obj("inst1"), _uniq_obj("inst2")],
+        )
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE in _kinds(r)
 
@@ -364,8 +424,9 @@ class TestGnuUniqueBinding:
         # If the old side already had a unique export, adding more doesn't change
         # the library's unloadability → no new finding.
         old = ElfMetadata(machine="EM_X86_64", symbols=[_uniq_obj("inst0")])
-        new = ElfMetadata(machine="EM_X86_64", symbols=[
-            _uniq_obj("inst0"), _uniq_obj("inst1")])
+        new = ElfMetadata(
+            machine="EM_X86_64", symbols=[_uniq_obj("inst0"), _uniq_obj("inst1")]
+        )
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE not in _kinds(r)
 
@@ -392,13 +453,29 @@ class TestGnuUniqueBinding:
         # new binary's GNU_UNIQUE export look newly introduced.
         old = _snap(None)
         new = ElfMetadata(machine="EM_X86_64", symbols=[_uniq_obj("inst")])
-        assert ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE not in _kinds(compare(old, _snap(new)))
+        assert ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE not in _kinds(
+            compare(old, _snap(new))
+        )
 
     def test_unique_does_not_emit_generic_binding_change(self):
-        old = _elf(symbols=[
-            ElfSymbol(name="inst", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.OBJECT)])
-        new = _elf(symbols=[
-            ElfSymbol(name="inst", binding=SymbolBinding.UNIQUE, sym_type=SymbolType.OBJECT)])
+        old = _elf(
+            symbols=[
+                ElfSymbol(
+                    name="inst",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.OBJECT,
+                )
+            ]
+        )
+        new = _elf(
+            symbols=[
+                ElfSymbol(
+                    name="inst",
+                    binding=SymbolBinding.UNIQUE,
+                    sym_type=SymbolType.OBJECT,
+                )
+            ]
+        )
         ks = _kinds(compare(_snap(old), _snap(new)))
         assert ChangeKind.SYMBOL_BINDING_CHANGED not in ks
         assert ChangeKind.SYMBOL_BINDING_STRENGTHENED not in ks

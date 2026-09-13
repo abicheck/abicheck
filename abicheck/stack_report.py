@@ -22,6 +22,7 @@ dict-building logic itself lives in :mod:`abicheck.report.stack`
 (`report/` is the ADR-061 owner for report shapes; this module keeps
 Markdown formatting only). See that module's own docstring.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -58,20 +59,26 @@ def _render_unresolved_section(lines: list[str], graph: DependencyGraph) -> None
     lines.append("")
 
 
-def _render_missing_symbols_section(lines: list[str], missing: list[SymbolBinding]) -> None:
+def _render_missing_symbols_section(
+    lines: list[str], missing: list[SymbolBinding]
+) -> None:
     """Append missing symbols section if any."""
     if not missing:
         return
     lines += ["## ❌ Missing Symbols", ""]
     for b in missing[:20]:
         ver = f"@{b.version}" if b.version else ""
-        lines.append(f"- `{Path(b.consumer).name}` needs `{b.symbol}{ver}` — not found in any loaded DSO")
+        lines.append(
+            f"- `{Path(b.consumer).name}` needs `{b.symbol}{ver}` — not found in any loaded DSO"
+        )
     if len(missing) > 20:
         lines.append(f"- ... +{len(missing) - 20} more")
     lines.append("")
 
 
-def _render_stack_changes_section(lines: list[str], stack_changes: list[StackChange]) -> None:
+def _render_stack_changes_section(
+    lines: list[str], stack_changes: list[StackChange]
+) -> None:
     """Append stack changes section if any."""
     if not stack_changes:
         return
@@ -86,8 +93,19 @@ def _render_stack_changes_section(lines: list[str], stack_changes: list[StackCha
                 verdict = "not_comparable"
             else:
                 verdict = sc.abi_diff.verdict.value if sc.abi_diff else "unknown"
-            emoji = "❌" if verdict == "BREAKING" else ("⚠️" if verdict in ("API_BREAK", "COMPATIBLE_WITH_RISK", "not_comparable") else "✅")
-            lines.append(f"- {emoji} **{sc.library}** — content changed (ABI: `{verdict}`)")
+            emoji = (
+                "❌"
+                if verdict == "BREAKING"
+                else (
+                    "⚠️"
+                    if verdict
+                    in ("API_BREAK", "COMPATIBLE_WITH_RISK", "not_comparable")
+                    else "✅"
+                )
+            )
+            lines.append(
+                f"- {emoji} **{sc.library}** — content changed (ABI: `{verdict}`)"
+            )
             if sc.not_comparable_reason:
                 # Backtick-wrapped, matching this function's own convention
                 # for other embedded free-text (e.g. the missing-symbols
@@ -101,7 +119,9 @@ def _render_stack_changes_section(lines: list[str], stack_changes: list[StackCha
                 tier_str = ", ".join(f"`{t}`" for t in tiers) if tiers else "_none_"
                 if conf is not None:
                     conf_val = conf.value if hasattr(conf, "value") else str(conf)
-                    lines.append(f"  - Confidence: **{conf_val.upper()}** | Evidence: {tier_str}")
+                    lines.append(
+                        f"  - Confidence: **{conf_val.upper()}** | Evidence: {tier_str}"
+                    )
                 elif tiers:
                     lines.append(f"  - Evidence: {tier_str}")
                 if sc.abi_diff.breaking:
@@ -110,7 +130,9 @@ def _render_stack_changes_section(lines: list[str], stack_changes: list[StackCha
     lines.append("")
 
 
-def _render_binding_changes_section(lines: list[str], binding_changes: list[Change]) -> None:
+def _render_binding_changes_section(
+    lines: list[str], binding_changes: list[Change]
+) -> None:
     """Append runtime binding-provider changes section if any."""
     if not binding_changes:
         return
@@ -139,7 +161,11 @@ def stack_to_markdown(result: StackCheckResult) -> str:
         "",
     ]
 
-    if result.baseline_env and result.candidate_env and result.baseline_env != result.candidate_env:
+    if (
+        result.baseline_env
+        and result.candidate_env
+        and result.baseline_env != result.candidate_env
+    ):
         lines += [
             "## Environments",
             "",
@@ -241,6 +267,15 @@ def _render_node(
     children = adj.get(key, [])
     child_prefix = prefix + ("    " if is_last else "│   ")
     for i, child in enumerate(children):
-        _render_node(lines, graph, adj, child, child_prefix, i == len(children) - 1, shown, on_path)
+        _render_node(
+            lines,
+            graph,
+            adj,
+            child,
+            child_prefix,
+            i == len(children) - 1,
+            shown,
+            on_path,
+        )
 
     on_path.discard(key)

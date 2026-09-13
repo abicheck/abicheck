@@ -495,7 +495,9 @@ class TestExplicitTargetTriple:
             is None
         )
         assert (
-            explicit_target_triple(None, ("--config", "darwin.cfg", "-target", "aarch64"))
+            explicit_target_triple(
+                None, ("--config", "darwin.cfg", "-target", "aarch64")
+            )
             is None
         )
 

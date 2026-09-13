@@ -108,9 +108,7 @@ def _functions(draw: st.DrawFn) -> Function:
 @st.composite
 def _variables(draw: st.DrawFn) -> Variable:
     ident = draw(_identifier)
-    return Variable(
-        name=ident, mangled=_data_mangled_for(ident), type=draw(_type_name)
-    )
+    return Variable(name=ident, mangled=_data_mangled_for(ident), type=draw(_type_name))
 
 
 class TestIdentityIsDeterministic:

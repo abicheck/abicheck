@@ -291,7 +291,10 @@ def test_bindings_for_resolves_every_aliasing_and_qualified_call_shape(
     tree = ast.parse(source)
     current_module = "abicheck.scan_engine"
     direct, module_aliases = _bindings_for(
-        tree, current_module, "abicheck.buildsource.cross_source_checks", "run_crosschecks"
+        tree,
+        current_module,
+        "abicheck.buildsource.cross_source_checks",
+        "run_crosschecks",
     )
     calls = 0
     for node in ast.walk(tree):

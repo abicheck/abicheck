@@ -1187,9 +1187,7 @@ class DetectCppPatterns:
         new_findings.extend(detect_serialization_tag_changes(old, ctx.new))
         new_findings.extend(detect_missing_instantiations(old, ctx.new))
 
-        sycl_findings, sycl_suppressed = detect_sycl_overload_set_removal(
-            old, ctx.new
-        )
+        sycl_findings, sycl_suppressed = detect_sycl_overload_set_removal(old, ctx.new)
         new_findings.extend(sycl_findings)
 
         isa_findings, isa_suppressed = detect_cpu_dispatch_isa_dropped(old, ctx.new)
@@ -1197,9 +1195,7 @@ class DetectCppPatterns:
 
         new_findings.extend(detect_tag_type_renamed(old, ctx.new))
         new_findings.extend(detect_default_template_arg_changed(old, ctx.new))
-        new_findings.extend(
-            detect_inline_body_renamed_member(old, ctx.new, changes)
-        )
+        new_findings.extend(detect_inline_body_renamed_member(old, ctx.new, changes))
 
         return new_findings, sycl_suppressed | isa_suppressed
 
@@ -1342,7 +1338,11 @@ class DetectNamespacePatterns:
             detect_namespace_patterns,
         )
 
-        namespaces = self._experimental_namespaces or ctx.experimental_namespaces or DEFAULT_EXPERIMENTAL_NAMESPACES
+        namespaces = (
+            self._experimental_namespaces
+            or ctx.experimental_namespaces
+            or DEFAULT_EXPERIMENTAL_NAMESPACES
+        )
         new_findings = detect_namespace_patterns(
             ctx.old,
             ctx.new,

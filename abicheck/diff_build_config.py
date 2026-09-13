@@ -165,12 +165,14 @@ def detect_cxx_standard_floor_raised(
         return []
     if new_floor <= old_floor:
         return []
-    return [make_change(
-        ChangeKind.CXX_STANDARD_FLOOR_RAISED,
-        symbol="__cplusplus",
-        old=f"C++{old_floor}",
-        new=f"C++{new_floor}",
-    )]
+    return [
+        make_change(
+            ChangeKind.CXX_STANDARD_FLOOR_RAISED,
+            symbol="__cplusplus",
+            old=f"C++{old_floor}",
+            new=f"C++{new_floor}",
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -207,13 +209,15 @@ def detect_behavioural_default_changed(
                 f"Source compiles and links unchanged; runtime "
                 f"behaviour silently differs."
             )
-        changes.append(make_change(
-            ChangeKind.BEHAVIOURAL_DEFAULT_CHANGED,
-            symbol=k,
-            description=desc,
-            old_value=str(ov) if ov is not None else None,
-            new_value=str(nv) if nv is not None else None,
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.BEHAVIOURAL_DEFAULT_CHANGED,
+                symbol=k,
+                description=desc,
+                old_value=str(ov) if ov is not None else None,
+                new_value=str(nv) if nv is not None else None,
+            )
+        )
     return changes
 
 

@@ -7,6 +7,7 @@ Synthetic snapshots — no compiler needed. Exercises:
 - The ``Suppression.namespace`` selector.
 - The verdict-computation guard that blocks downgrades of tagged findings.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -114,7 +115,10 @@ class TestEscalateFrozenNamespaceViolations:
         old = _snap("1.0", [])
         new = _snap("2.0", [])
         pp = DEFAULT_PIPELINE.run(
-            [c], old, new, frozen_namespaces=["**::detail::r1::*"],
+            [c],
+            old,
+            new,
+            frozen_namespaces=["**::detail::r1::*"],
         )
         kept = pp.kept[0]
         assert kept.frozen_namespace_violation == "**::detail::r1::*"
@@ -148,7 +152,10 @@ class TestEscalateFrozenNamespaceViolations:
         old = _snap("1.0", [])
         new = _snap("2.0", [])
         pp = DEFAULT_PIPELINE.run(
-            [c], old, new, frozen_namespaces=["**::detail::r1::*"],
+            [c],
+            old,
+            new,
+            frozen_namespaces=["**::detail::r1::*"],
         )
         assert pp.kept[0].frozen_namespace_violation == "**::detail::r1::*"
 
@@ -161,7 +168,10 @@ class TestEscalateFrozenNamespaceViolations:
         old = _snap("1.0", [])
         new = _snap("2.0", [])
         pp = DEFAULT_PIPELINE.run(
-            [c], old, new, frozen_namespaces=["**::detail::r1::*"],
+            [c],
+            old,
+            new,
+            frozen_namespaces=["**::detail::r1::*"],
         )
         assert pp.kept[0].frozen_namespace_violation is None
 
@@ -171,11 +181,17 @@ class TestEscalateFrozenNamespaceViolations:
         verdict computation downgrades correctly. The step only TAGS the
         finding; it does not invent a new kind or escalate."""
         old = _snap("1.0", [])
-        new = _snap("2.0", [_fn("ns::detail::r1::new_entry", "_ZN2ns6detail2r19new_entryEv")])
-        r = compare(old, new, policy_file=PolicyFile(
-            base_policy="strict_abi",
-            frozen_namespaces=["**::detail::r1::*"],
-        ))
+        new = _snap(
+            "2.0", [_fn("ns::detail::r1::new_entry", "_ZN2ns6detail2r19new_entryEv")]
+        )
+        r = compare(
+            old,
+            new,
+            policy_file=PolicyFile(
+                base_policy="strict_abi",
+                frozen_namespaces=["**::detail::r1::*"],
+            ),
+        )
         # FUNC_ADDED is COMPATIBLE in strict_abi.  Verdict must be COMPATIBLE
         # even though the symbol is inside the frozen namespace.
         assert r.verdict == Verdict.COMPATIBLE
@@ -188,14 +204,26 @@ class TestFrozenNamespaceBlocksDowngrade:
     def test_downgrade_override_ignored_for_tagged_change(self) -> None:
         """A policy override that downgrades FUNC_PARAMS_CHANGED to ignore
         must not apply to a finding inside a frozen namespace."""
-        old = _snap("1.0", [
-            _fn("ns::detail::r1::dispatch", "_ZN2ns6detail2r18dispatchEi",
-                params=[Param(name="n", type="int")]),
-        ])
-        new = _snap("2.0", [
-            _fn("ns::detail::r1::dispatch", "_ZN2ns6detail2r18dispatchEi",
-                params=[Param(name="n", type="long")]),
-        ])
+        old = _snap(
+            "1.0",
+            [
+                _fn(
+                    "ns::detail::r1::dispatch",
+                    "_ZN2ns6detail2r18dispatchEi",
+                    params=[Param(name="n", type="int")],
+                ),
+            ],
+        )
+        new = _snap(
+            "2.0",
+            [
+                _fn(
+                    "ns::detail::r1::dispatch",
+                    "_ZN2ns6detail2r18dispatchEi",
+                    params=[Param(name="n", type="long")],
+                ),
+            ],
+        )
         pf = PolicyFile(
             base_policy="strict_abi",
             overrides={ChangeKind.FUNC_PARAMS_CHANGED: Verdict.COMPATIBLE},
@@ -209,14 +237,26 @@ class TestFrozenNamespaceBlocksDowngrade:
     def test_override_outside_frozen_ns_still_applies(self) -> None:
         """The same downgrade override still works for findings outside
         the frozen namespace — the guard must be scoped to tagged changes."""
-        old = _snap("1.0", [
-            _fn("ns::pub::dispatch", "_ZN2ns3pub8dispatchEi",
-                params=[Param(name="n", type="int")]),
-        ])
-        new = _snap("2.0", [
-            _fn("ns::pub::dispatch", "_ZN2ns3pub8dispatchEi",
-                params=[Param(name="n", type="long")]),
-        ])
+        old = _snap(
+            "1.0",
+            [
+                _fn(
+                    "ns::pub::dispatch",
+                    "_ZN2ns3pub8dispatchEi",
+                    params=[Param(name="n", type="int")],
+                ),
+            ],
+        )
+        new = _snap(
+            "2.0",
+            [
+                _fn(
+                    "ns::pub::dispatch",
+                    "_ZN2ns3pub8dispatchEi",
+                    params=[Param(name="n", type="long")],
+                ),
+            ],
+        )
         pf = PolicyFile(
             base_policy="strict_abi",
             overrides={
@@ -236,14 +276,26 @@ class TestFrozenNamespaceBlocksDowngrade:
         downgrade guard as the legacy verdict path."""
         from abicheck.severity import PRESET_DEFAULT, compute_exit_code
 
-        old = _snap("1.0", [
-            _fn("ns::detail::r1::dispatch", "_ZN2ns6detail2r18dispatchEi",
-                params=[Param(name="n", type="int")]),
-        ])
-        new = _snap("2.0", [
-            _fn("ns::detail::r1::dispatch", "_ZN2ns6detail2r18dispatchEi",
-                params=[Param(name="n", type="long")]),
-        ])
+        old = _snap(
+            "1.0",
+            [
+                _fn(
+                    "ns::detail::r1::dispatch",
+                    "_ZN2ns6detail2r18dispatchEi",
+                    params=[Param(name="n", type="int")],
+                ),
+            ],
+        )
+        new = _snap(
+            "2.0",
+            [
+                _fn(
+                    "ns::detail::r1::dispatch",
+                    "_ZN2ns6detail2r18dispatchEi",
+                    params=[Param(name="n", type="long")],
+                ),
+            ],
+        )
         pf = PolicyFile(
             base_policy="strict_abi",
             overrides={ChangeKind.FUNC_PARAMS_CHANGED: Verdict.COMPATIBLE},
@@ -257,13 +309,16 @@ class TestFrozenNamespaceBlocksDowngrade:
             and c.frozen_namespace_violation == "**::detail::r1::*"
             for c in r.changes
         )
-        assert compute_exit_code(
-            r.changes,
-            PRESET_DEFAULT,
-            policy=r.policy,
-            kind_sets=r._effective_kind_sets(),
-            policy_file=r.policy_file,
-        ) == 4
+        assert (
+            compute_exit_code(
+                r.changes,
+                PRESET_DEFAULT,
+                policy=r.policy,
+                kind_sets=r._effective_kind_sets(),
+                policy_file=r.policy_file,
+            )
+            == 4
+        )
 
         from abicheck.frontends.cli.runtime import _exit_with_severity_or_verdict
 
@@ -276,14 +331,26 @@ class TestFrozenNamespaceBlocksDowngrade:
         """The per-change guard must not make all overrides ineffective."""
         from abicheck.severity import PRESET_DEFAULT, compute_exit_code
 
-        old = _snap("1.0", [
-            _fn("ns::pub::dispatch", "_ZN2ns3pub8dispatchEi",
-                params=[Param(name="n", type="int")]),
-        ])
-        new = _snap("2.0", [
-            _fn("ns::pub::dispatch", "_ZN2ns3pub8dispatchEi",
-                params=[Param(name="n", type="long")]),
-        ])
+        old = _snap(
+            "1.0",
+            [
+                _fn(
+                    "ns::pub::dispatch",
+                    "_ZN2ns3pub8dispatchEi",
+                    params=[Param(name="n", type="int")],
+                ),
+            ],
+        )
+        new = _snap(
+            "2.0",
+            [
+                _fn(
+                    "ns::pub::dispatch",
+                    "_ZN2ns3pub8dispatchEi",
+                    params=[Param(name="n", type="long")],
+                ),
+            ],
+        )
         pf = PolicyFile(
             base_policy="strict_abi",
             overrides={
@@ -295,13 +362,16 @@ class TestFrozenNamespaceBlocksDowngrade:
         r = compare(old, new, policy_file=pf)
 
         assert r.verdict == Verdict.COMPATIBLE
-        assert compute_exit_code(
-            r.changes,
-            PRESET_DEFAULT,
-            policy=r.policy,
-            kind_sets=r._effective_kind_sets(),
-            policy_file=r.policy_file,
-        ) == 0
+        assert (
+            compute_exit_code(
+                r.changes,
+                PRESET_DEFAULT,
+                policy=r.policy,
+                kind_sets=r._effective_kind_sets(),
+                policy_file=r.policy_file,
+            )
+            == 0
+        )
         assert r.breaking == []
 
 
@@ -375,10 +445,16 @@ class TestSuppressionNamespaceSelector:
 
     def test_namespace_in_suppressionlist_end_to_end(self) -> None:
         """A namespace suppression filters a real change through compare()."""
-        old = _snap("1.0", [
-            _fn("ns::detail::r1::dispatch", "_ZN2ns6detail2r18dispatchEi",
-                params=[Param(name="n", type="int")]),
-        ])
+        old = _snap(
+            "1.0",
+            [
+                _fn(
+                    "ns::detail::r1::dispatch",
+                    "_ZN2ns6detail2r18dispatchEi",
+                    params=[Param(name="n", type="int")],
+                ),
+            ],
+        )
         new = _snap("2.0", [])  # function disappeared
         suppression = SuppressionList(
             [Suppression(namespace="**::detail::r1::*", reason="legacy churn")],
@@ -494,7 +570,10 @@ class TestEscalationRegressions:
         old = _snap("1.0", [])
         new = _snap("2.0", [])
         pp = DEFAULT_PIPELINE.run(
-            [c], old, new, frozen_namespaces=["**::detail::r1"],
+            [c],
+            old,
+            new,
+            frozen_namespaces=["**::detail::r1"],
         )
         assert pp.kept[0].frozen_namespace_violation == "**::detail::r1"
 
@@ -505,8 +584,8 @@ class TestEscalationRegressions:
         P1 regression — without this fix, ``**::detail::r1::*`` never
         matches any extern "C" symbol declared in a C++ namespace."""
         old_fn = Function(
-            name="mylib::detail::r1::dispatch",   # C++-qualified record
-            mangled="dispatch",                   # C export name
+            name="mylib::detail::r1::dispatch",  # C++-qualified record
+            mangled="dispatch",  # C export name
             return_type="int",
             params=[Param(name="n", type="int")],
             visibility=Visibility.PUBLIC,
@@ -515,7 +594,7 @@ class TestEscalationRegressions:
         new_fn = Function(
             name="mylib::detail::r1::dispatch",
             mangled="dispatch",
-            return_type="long",                   # widened
+            return_type="long",  # widened
             params=[Param(name="n", type="long")],
             visibility=Visibility.PUBLIC,
             is_extern_c=True,
@@ -528,7 +607,10 @@ class TestEscalationRegressions:
             description="param changed",
         )
         pp = DEFAULT_PIPELINE.run(
-            [c], old, new, frozen_namespaces=["**::detail::r1::*"],
+            [c],
+            old,
+            new,
+            frozen_namespaces=["**::detail::r1::*"],
         )
         assert pp.kept[0].frozen_namespace_violation == "**::detail::r1::*"
 

@@ -49,6 +49,7 @@ from abicheck.reporter import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_snap(
     *,
     library: str = "libtest.so",
@@ -111,32 +112,57 @@ class TestAffectedSymbolsComputation:
 
     def test_type_change_populates_affected_symbols(self):
         """A struct used by functions changes size -> affected_symbols populated."""
-        point = RecordType(name="Point", kind="struct", size_bits=64, fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-            TypeField(name="y", type="int", offset_bits=32),
-        ])
-        point_v2 = RecordType(name="Point", kind="struct", size_bits=96, fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-            TypeField(name="y", type="int", offset_bits=32),
-            TypeField(name="z", type="int", offset_bits=64),
-        ])
+        point = RecordType(
+            name="Point",
+            kind="struct",
+            size_bits=64,
+            fields=[
+                TypeField(name="x", type="int", offset_bits=0),
+                TypeField(name="y", type="int", offset_bits=32),
+            ],
+        )
+        point_v2 = RecordType(
+            name="Point",
+            kind="struct",
+            size_bits=96,
+            fields=[
+                TypeField(name="x", type="int", offset_bits=0),
+                TypeField(name="y", type="int", offset_bits=32),
+                TypeField(name="z", type="int", offset_bits=64),
+            ],
+        )
 
         func_using_point = Function(
-            name="draw_point", mangled="_Z10draw_point5Point",
+            name="draw_point",
+            mangled="_Z10draw_point5Point",
             return_type="void",
             params=[Param(name="p", type="Point")],
         )
         func_not_using_point = Function(
-            name="get_version", mangled="_Z11get_versionv",
-            return_type="int", params=[],
+            name="get_version",
+            mangled="_Z11get_versionv",
+            return_type="int",
+            params=[],
         )
 
-        old = _make_snap(version="1.0", functions=[func_using_point, func_not_using_point], types=[point])
-        new = _make_snap(version="2.0", functions=[func_using_point, func_not_using_point], types=[point_v2])
+        old = _make_snap(
+            version="1.0",
+            functions=[func_using_point, func_not_using_point],
+            types=[point],
+        )
+        new = _make_snap(
+            version="2.0",
+            functions=[func_using_point, func_not_using_point],
+            types=[point_v2],
+        )
 
         result = compare(old, new)
         # Find the type_size_changed change for Point
-        type_changes = [c for c in result.changes if c.kind == ChangeKind.TYPE_SIZE_CHANGED and "Point" in c.symbol]
+        type_changes = [
+            c
+            for c in result.changes
+            if c.kind == ChangeKind.TYPE_SIZE_CHANGED and "Point" in c.symbol
+        ]
         assert len(type_changes) >= 1
         tc = type_changes[0]
         assert tc.affected_symbols is not None
@@ -145,30 +171,51 @@ class TestAffectedSymbolsComputation:
 
     def test_transitive_embedding_affects_outer_type_functions(self):
         """Struct A contains Struct B field. Change B -> functions using A are affected."""
-        inner = RecordType(name="Inner", kind="struct", size_bits=32, fields=[
-            TypeField(name="val", type="int", offset_bits=0),
-        ])
-        inner_v2 = RecordType(name="Inner", kind="struct", size_bits=64, fields=[
-            TypeField(name="val", type="int", offset_bits=0),
-            TypeField(name="extra", type="int", offset_bits=32),
-        ])
-        outer = RecordType(name="Outer", kind="struct", size_bits=64, fields=[
-            TypeField(name="inner", type="Inner", offset_bits=0),
-            TypeField(name="flags", type="int", offset_bits=32),
-        ])
+        inner = RecordType(
+            name="Inner",
+            kind="struct",
+            size_bits=32,
+            fields=[
+                TypeField(name="val", type="int", offset_bits=0),
+            ],
+        )
+        inner_v2 = RecordType(
+            name="Inner",
+            kind="struct",
+            size_bits=64,
+            fields=[
+                TypeField(name="val", type="int", offset_bits=0),
+                TypeField(name="extra", type="int", offset_bits=32),
+            ],
+        )
+        outer = RecordType(
+            name="Outer",
+            kind="struct",
+            size_bits=64,
+            fields=[
+                TypeField(name="inner", type="Inner", offset_bits=0),
+                TypeField(name="flags", type="int", offset_bits=32),
+            ],
+        )
 
         func_using_outer = Function(
-            name="process_outer", mangled="_Z13process_outer5Outer",
+            name="process_outer",
+            mangled="_Z13process_outer5Outer",
             return_type="void",
             params=[Param(name="o", type="Outer")],
         )
 
-        old = _make_snap(version="1.0", functions=[func_using_outer], types=[inner, outer])
-        new = _make_snap(version="2.0", functions=[func_using_outer], types=[inner_v2, outer])
+        old = _make_snap(
+            version="1.0", functions=[func_using_outer], types=[inner, outer]
+        )
+        new = _make_snap(
+            version="2.0", functions=[func_using_outer], types=[inner_v2, outer]
+        )
 
         result = compare(old, new)
         inner_changes = [
-            c for c in result.changes
+            c
+            for c in result.changes
             if c.kind in (ChangeKind.TYPE_SIZE_CHANGED, ChangeKind.TYPE_FIELD_ADDED)
             and "Inner" in c.symbol
         ]
@@ -181,40 +228,67 @@ class TestAffectedSymbolsComputation:
 
     def test_type_change_no_functions_referencing(self):
         """Type change with no functions using the type -> affected_symbols stays empty."""
-        rec = RecordType(name="Unused", kind="struct", size_bits=32, fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-        ])
-        rec_v2 = RecordType(name="Unused", kind="struct", size_bits=64, fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-            TypeField(name="y", type="int", offset_bits=32),
-        ])
+        rec = RecordType(
+            name="Unused",
+            kind="struct",
+            size_bits=32,
+            fields=[
+                TypeField(name="x", type="int", offset_bits=0),
+            ],
+        )
+        rec_v2 = RecordType(
+            name="Unused",
+            kind="struct",
+            size_bits=64,
+            fields=[
+                TypeField(name="x", type="int", offset_bits=0),
+                TypeField(name="y", type="int", offset_bits=32),
+            ],
+        )
         # Function that does NOT use Unused
         func = Function(
-            name="hello", mangled="_Z5hellov",
-            return_type="void", params=[],
+            name="hello",
+            mangled="_Z5hellov",
+            return_type="void",
+            params=[],
         )
 
         old = _make_snap(version="1.0", functions=[func], types=[rec])
         new = _make_snap(version="2.0", functions=[func], types=[rec_v2])
 
         result = compare(old, new)
-        type_changes = [c for c in result.changes if "Unused" in c.symbol and c.kind in _ROOT_TYPE_CHANGE_KINDS]
+        type_changes = [
+            c
+            for c in result.changes
+            if "Unused" in c.symbol and c.kind in _ROOT_TYPE_CHANGE_KINDS
+        ]
         for tc in type_changes:
             # affected_symbols should be None or empty
             assert not tc.affected_symbols or len(tc.affected_symbols) == 0
 
     def test_field_qualified_symbol_strips_to_base_type(self):
         """Change with symbol 'Container::flags' should strip to 'Container'."""
-        container = RecordType(name="Container", kind="struct", size_bits=64, fields=[
-            TypeField(name="flags", type="int", offset_bits=0),
-            TypeField(name="data", type="int", offset_bits=32),
-        ])
-        container_v2 = RecordType(name="Container", kind="struct", size_bits=64, fields=[
-            TypeField(name="data", type="int", offset_bits=0),
-        ])
+        container = RecordType(
+            name="Container",
+            kind="struct",
+            size_bits=64,
+            fields=[
+                TypeField(name="flags", type="int", offset_bits=0),
+                TypeField(name="data", type="int", offset_bits=32),
+            ],
+        )
+        container_v2 = RecordType(
+            name="Container",
+            kind="struct",
+            size_bits=64,
+            fields=[
+                TypeField(name="data", type="int", offset_bits=0),
+            ],
+        )
 
         func = Function(
-            name="use_container", mangled="_Z13use_container9Container",
+            name="use_container",
+            mangled="_Z13use_container9Container",
             return_type="void",
             params=[Param(name="c", type="Container")],
         )
@@ -233,22 +307,34 @@ class TestRedundantChangeFiltering:
 
     def test_type_change_cascades_to_function_param_redundancy(self):
         """A struct size change causes func_params_changed to be redundant."""
-        rec = RecordType(name="Data", kind="struct", size_bits=32, fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-        ])
-        rec_v2 = RecordType(name="Data", kind="struct", size_bits=64, fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-            TypeField(name="y", type="int", offset_bits=32),
-        ])
+        rec = RecordType(
+            name="Data",
+            kind="struct",
+            size_bits=32,
+            fields=[
+                TypeField(name="x", type="int", offset_bits=0),
+            ],
+        )
+        rec_v2 = RecordType(
+            name="Data",
+            kind="struct",
+            size_bits=64,
+            fields=[
+                TypeField(name="x", type="int", offset_bits=0),
+                TypeField(name="y", type="int", offset_bits=32),
+            ],
+        )
 
         func = Function(
-            name="process", mangled="_Z7process4Data",
+            name="process",
+            mangled="_Z7process4Data",
             return_type="void",
             params=[Param(name="d", type="Data")],
         )
         # Old has Data param, new changes the param type description
         func_v2 = Function(
-            name="process", mangled="_Z7process4Data",
+            name="process",
+            mangled="_Z7process4Data",
             return_type="void",
             params=[Param(name="d", type="Data")],
         )
@@ -282,6 +368,7 @@ class TestRedundantChangeFiltering:
         )
         # Use compare internals by constructing changes and filtering
         from abicheck.checker import _filter_redundant
+
         kept, redundant = _filter_redundant([root_change, derived_change])
         assert len(redundant) == 1
         assert redundant[0].kind == ChangeKind.FUNC_PARAMS_CHANGED
@@ -292,6 +379,7 @@ class TestRedundantChangeFiltering:
     def test_no_root_types_means_no_redundancy(self):
         """No root type changes -> all changes kept, no redundancy."""
         from abicheck.checker import _filter_redundant
+
         changes = [
             Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="removed"),
             Change(kind=ChangeKind.FUNC_ADDED, symbol="bar", description="added"),
@@ -306,39 +394,55 @@ class TestEnumEdgeCases:
 
     def test_enum_member_renamed_not_reported_as_removed(self):
         """An enum member rename (same value, different name) is not a plain removal."""
-        old_enum = EnumType(name="Color", members=[
-            EnumMember(name="RED", value=0),
-            EnumMember(name="GRN", value=1),
-            EnumMember(name="BLU", value=2),
-        ])
-        new_enum = EnumType(name="Color", members=[
-            EnumMember(name="RED", value=0),
-            EnumMember(name="GREEN", value=1),  # renamed from GRN
-            EnumMember(name="BLUE", value=2),   # renamed from BLU
-        ])
+        old_enum = EnumType(
+            name="Color",
+            members=[
+                EnumMember(name="RED", value=0),
+                EnumMember(name="GRN", value=1),
+                EnumMember(name="BLU", value=2),
+            ],
+        )
+        new_enum = EnumType(
+            name="Color",
+            members=[
+                EnumMember(name="RED", value=0),
+                EnumMember(name="GREEN", value=1),  # renamed from GRN
+                EnumMember(name="BLUE", value=2),  # renamed from BLU
+            ],
+        )
 
         old = _make_snap(version="1.0", enums=[old_enum])
         new = _make_snap(version="2.0", enums=[new_enum])
 
         result = compare(old, new)
         # Should have renames, not plain removals for GRN and BLU
-        removed = [c for c in result.changes if c.kind == ChangeKind.ENUM_MEMBER_REMOVED]
-        renamed = [c for c in result.changes if c.kind == ChangeKind.ENUM_MEMBER_RENAMED]
+        removed = [
+            c for c in result.changes if c.kind == ChangeKind.ENUM_MEMBER_REMOVED
+        ]
+        renamed = [
+            c for c in result.changes if c.kind == ChangeKind.ENUM_MEMBER_RENAMED
+        ]
         # The rename detector should catch these; removals should be suppressed
         # At minimum, the rename-suppression logic in lines 2802-2806 is exercised
         assert len(removed) == 0 or len(renamed) > 0
 
     def test_enum_member_removed_with_value_collision(self):
         """Multiple added members with same value -> rename heuristic fails, shows removal."""
-        old_enum = EnumType(name="Flags", members=[
-            EnumMember(name="FLAG_A", value=1),
-            EnumMember(name="FLAG_B", value=2),
-        ])
-        new_enum = EnumType(name="Flags", members=[
-            EnumMember(name="FLAG_X", value=1),
-            EnumMember(name="FLAG_Y", value=1),  # same value as FLAG_X
-            EnumMember(name="FLAG_B", value=2),
-        ])
+        old_enum = EnumType(
+            name="Flags",
+            members=[
+                EnumMember(name="FLAG_A", value=1),
+                EnumMember(name="FLAG_B", value=2),
+            ],
+        )
+        new_enum = EnumType(
+            name="Flags",
+            members=[
+                EnumMember(name="FLAG_X", value=1),
+                EnumMember(name="FLAG_Y", value=1),  # same value as FLAG_X
+                EnumMember(name="FLAG_B", value=2),
+            ],
+        )
 
         old = _make_snap(version="1.0", enums=[old_enum])
         new = _make_snap(version="2.0", enums=[new_enum])
@@ -366,7 +470,9 @@ class TestToStat:
     def test_stat_breaking(self):
         result = _make_diff(
             changes=[
-                Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="removed"),
+                Change(
+                    kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="removed"
+                ),
             ],
             verdict=Verdict.BREAKING,
         )
@@ -388,7 +494,11 @@ class TestToStat:
     def test_stat_compatible_with_risk(self):
         result = _make_diff(
             changes=[
-                Change(kind=ChangeKind.NEEDED_ADDED, symbol="test", description="NEEDED added"),
+                Change(
+                    kind=ChangeKind.NEEDED_ADDED,
+                    symbol="test",
+                    description="NEEDED added",
+                ),
             ],
             verdict=Verdict.COMPATIBLE_WITH_RISK,
         )
@@ -398,7 +508,9 @@ class TestToStat:
     def test_stat_json_structure(self):
         result = _make_diff(
             changes=[
-                Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="removed"),
+                Change(
+                    kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="removed"
+                ),
             ],
             verdict=Verdict.BREAKING,
             redundant_count=3,
@@ -427,16 +539,22 @@ class TestShowOnlyFilter:
         return Change(kind=ChangeKind.FUNC_ADDED, symbol="bar", description="added")
 
     def _type_change(self):
-        return Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Pt", description="size changed")
+        return Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Pt", description="size changed"
+        )
 
     def _var_change(self):
         return Change(kind=ChangeKind.VAR_REMOVED, symbol="g_x", description="removed")
 
     def _enum_change(self):
-        return Change(kind=ChangeKind.ENUM_MEMBER_REMOVED, symbol="E::V", description="removed")
+        return Change(
+            kind=ChangeKind.ENUM_MEMBER_REMOVED, symbol="E::V", description="removed"
+        )
 
     def _elf_change(self):
-        return Change(kind=ChangeKind.SONAME_CHANGED, symbol="lib", description="soname changed")
+        return Change(
+            kind=ChangeKind.SONAME_CHANGED, symbol="lib", description="soname changed"
+        )
 
     # Severity filters
     def test_severity_breaking(self):
@@ -452,7 +570,9 @@ class TestShowOnlyFilter:
     def test_severity_api_break(self):
         f = ShowOnlyFilter.parse("api-break")
         # ENUM_MEMBER_RENAMED is in API_BREAK_KINDS → should match
-        api_change = Change(kind=ChangeKind.ENUM_MEMBER_RENAMED, symbol="E::V", description="renamed")
+        api_change = Change(
+            kind=ChangeKind.ENUM_MEMBER_RENAMED, symbol="E::V", description="renamed"
+        )
         assert f.matches(api_change) is True
         # FUNC_REMOVED is in BREAKING_KINDS, not API_BREAK_KINDS → should not match
         assert f.matches(self._brk_change()) is False
@@ -460,11 +580,16 @@ class TestShowOnlyFilter:
     def test_severity_risk(self):
         f = ShowOnlyFilter.parse("risk")
         # SYMBOL_VERSION_REQUIRED_ADDED is in RISK_KINDS → should match
-        risk_change = Change(kind=ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
-                             symbol="GLIBC_2.34", description="new version requirement")
+        risk_change = Change(
+            kind=ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+            symbol="GLIBC_2.34",
+            description="new version requirement",
+        )
         assert f.matches(risk_change) is True
         # NEEDED_ADDED is in COMPATIBLE_KINDS, not RISK_KINDS → should not match
-        compat_change = Change(kind=ChangeKind.NEEDED_ADDED, symbol="lib", description="needed added")
+        compat_change = Change(
+            kind=ChangeKind.NEEDED_ADDED, symbol="lib", description="needed added"
+        )
         assert f.matches(compat_change) is False
 
     # Element filters
@@ -498,25 +623,29 @@ class TestShowOnlyFilter:
     def test_action_added(self):
         f = ShowOnlyFilter.parse("added")
         assert f.matches(self._compat_change()) is True  # func_added ends with _added
-        assert f.matches(self._brk_change()) is False    # func_removed
+        assert f.matches(self._brk_change()) is False  # func_removed
 
     def test_action_removed(self):
         f = ShowOnlyFilter.parse("removed")
-        assert f.matches(self._brk_change()) is True     # func_removed
+        assert f.matches(self._brk_change()) is True  # func_removed
         assert f.matches(self._compat_change()) is False  # func_added
 
     def test_action_changed(self):
         f = ShowOnlyFilter.parse("changed")
-        changed = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="f", description="return changed")
+        changed = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED,
+            symbol="f",
+            description="return changed",
+        )
         assert f.matches(changed) is True
         assert f.matches(self._compat_change()) is False
 
     # Combined filters (AND across dimensions)
     def test_combined_severity_and_element(self):
         f = ShowOnlyFilter.parse("breaking,functions")
-        assert f.matches(self._brk_change()) is True   # breaking + function
+        assert f.matches(self._brk_change()) is True  # breaking + function
         assert f.matches(self._compat_change()) is False  # compatible, not breaking
-        assert f.matches(self._type_change()) is False    # type, not function
+        assert f.matches(self._type_change()) is False  # type, not function
 
     # Invalid token
     def test_invalid_token_raises(self):
@@ -525,7 +654,9 @@ class TestShowOnlyFilter:
 
     # Empty severities (no filter)
     def test_empty_filter_matches_all(self):
-        f = ShowOnlyFilter(severities=frozenset(), elements=frozenset(), actions=frozenset())
+        f = ShowOnlyFilter(
+            severities=frozenset(), elements=frozenset(), actions=frozenset()
+        )
         assert f.matches(self._brk_change()) is True
         assert f.matches(self._compat_change()) is True
 
@@ -537,7 +668,11 @@ class TestApplyShowOnly:
         changes = [
             Change(kind=ChangeKind.FUNC_REMOVED, symbol="f1", description="removed"),
             Change(kind=ChangeKind.FUNC_ADDED, symbol="f2", description="added"),
-            Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="T", description="size changed"),
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="T",
+                description="size changed",
+            ),
         ]
         result = apply_show_only(changes, "breaking,functions")
         # Only breaking + function changes should remain
@@ -733,7 +868,9 @@ class TestToMarkdownBranches:
 
     def test_to_markdown_with_redundancy_note(self):
         result = _make_diff(
-            changes=[Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="removed")],
+            changes=[
+                Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="removed")
+            ],
             verdict=Verdict.BREAKING,
             redundant_count=4,
         )
@@ -741,7 +878,11 @@ class TestToMarkdownBranches:
         assert "4 redundant change(s) hidden" in out
 
     def test_to_markdown_with_suppression_note(self):
-        suppressed = Change(kind=ChangeKind.FUNC_REMOVED, symbol="old_fn", description="suppressed removal")
+        suppressed = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="old_fn",
+            description="suppressed removal",
+        )
         result = _make_diff(
             changes=[],
             verdict=Verdict.NO_CHANGE,
@@ -835,21 +976,30 @@ class TestToMarkdownBranches:
 
     def test_to_markdown_risk_changes_section(self):
         """Exercise the risk changes section in markdown."""
-        c = Change(kind=ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, symbol="GLIBC_2.34",
-                    description="New symbol version requirement: GLIBC_2.34")
+        c = Change(
+            kind=ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+            symbol="GLIBC_2.34",
+            description="New symbol version requirement: GLIBC_2.34",
+        )
         result = _make_diff(changes=[c], verdict=Verdict.COMPATIBLE_WITH_RISK)
         out = to_markdown(result)
         assert "Deployment Risk" in out
 
     def test_to_markdown_compatible_additions_section(self):
-        c = Change(kind=ChangeKind.FUNC_ADDED, symbol="new_fn", description="new_fn added")
+        c = Change(
+            kind=ChangeKind.FUNC_ADDED, symbol="new_fn", description="new_fn added"
+        )
         result = _make_diff(changes=[c], verdict=Verdict.COMPATIBLE)
         out = to_markdown(result)
         assert "Additions" in out
 
     def test_to_markdown_source_breaks_section(self):
         """Exercise source-level breaks section."""
-        c = Change(kind=ChangeKind.FUNC_NOEXCEPT_REMOVED, symbol="f", description="noexcept removed")
+        c = Change(
+            kind=ChangeKind.FUNC_NOEXCEPT_REMOVED,
+            symbol="f",
+            description="noexcept removed",
+        )
         result = _make_diff(changes=[c], verdict=Verdict.API_BREAK)
         out = to_markdown(result)
         assert "Source-Level Breaks" in out or "noexcept" in out
@@ -951,7 +1101,9 @@ class TestStackReportMissingSymbolsTruncation:
     def test_truncation_at_20(self):
         from abicheck.stack_report import _render_missing_symbols_section
 
-        missing = [_make_binding(f"/lib/consumer_{i}.so", f"sym_{i}") for i in range(25)]
+        missing = [
+            _make_binding(f"/lib/consumer_{i}.so", f"sym_{i}") for i in range(25)
+        ]
         lines: list[str] = []
         _render_missing_symbols_section(lines, missing)
         text = "\n".join(lines)
@@ -1013,10 +1165,16 @@ class TestStackReportStackChangesSection:
         from abicheck.stack_report import _render_stack_changes_section
 
         diff = _make_diff(
-            changes=[Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="removed")],
+            changes=[
+                Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="removed")
+            ],
             verdict=Verdict.BREAKING,
         )
-        changes = [StackChange(library="libchanged.so", change_type="content_changed", abi_diff=diff)]
+        changes = [
+            StackChange(
+                library="libchanged.so", change_type="content_changed", abi_diff=diff
+            )
+        ]
         lines: list[str] = []
         _render_stack_changes_section(lines, changes)
         text = "\n".join(lines)
@@ -1028,7 +1186,11 @@ class TestStackReportStackChangesSection:
         from abicheck.stack_report import _render_stack_changes_section
 
         diff = _make_diff(verdict=Verdict.COMPATIBLE)
-        changes = [StackChange(library="libcompat.so", change_type="content_changed", abi_diff=diff)]
+        changes = [
+            StackChange(
+                library="libcompat.so", change_type="content_changed", abi_diff=diff
+            )
+        ]
         lines: list[str] = []
         _render_stack_changes_section(lines, changes)
         text = "\n".join(lines)
@@ -1038,7 +1200,9 @@ class TestStackReportStackChangesSection:
         from abicheck.stack_checker import StackChange
         from abicheck.stack_report import _render_stack_changes_section
 
-        changes = [StackChange(library="libx.so", change_type="content_changed", abi_diff=None)]
+        changes = [
+            StackChange(library="libx.so", change_type="content_changed", abi_diff=None)
+        ]
         lines: list[str] = []
         _render_stack_changes_section(lines, changes)
         text = "\n".join(lines)
@@ -1057,11 +1221,19 @@ class TestStackReportStackChangesSection:
         from abicheck.stack_report import _render_stack_changes_section
 
         brk = [
-            Change(kind=ChangeKind.FUNC_REMOVED, symbol=f"f{i}", description=f"removed f{i}")
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol=f"f{i}",
+                description=f"removed f{i}",
+            )
             for i in range(3)
         ]
         diff = _make_diff(changes=brk, verdict=Verdict.BREAKING)
-        changes = [StackChange(library="libbig.so", change_type="content_changed", abi_diff=diff)]
+        changes = [
+            StackChange(
+                library="libbig.so", change_type="content_changed", abi_diff=diff
+            )
+        ]
         lines: list[str] = []
         _render_stack_changes_section(lines, changes)
         text = "\n".join(lines)
@@ -1198,23 +1370,35 @@ class TestCompareIntegration:
 
     def test_full_pipeline_type_change_with_functions(self):
         """Full compare: type changes, affected symbols enrichment, redundancy filter."""
-        rec = RecordType(name="Config", kind="struct", size_bits=64, fields=[
-            TypeField(name="timeout", type="int", offset_bits=0),
-            TypeField(name="retries", type="int", offset_bits=32),
-        ])
-        rec_v2 = RecordType(name="Config", kind="struct", size_bits=96, fields=[
-            TypeField(name="timeout", type="int", offset_bits=0),
-            TypeField(name="retries", type="int", offset_bits=32),
-            TypeField(name="debug", type="int", offset_bits=64),
-        ])
+        rec = RecordType(
+            name="Config",
+            kind="struct",
+            size_bits=64,
+            fields=[
+                TypeField(name="timeout", type="int", offset_bits=0),
+                TypeField(name="retries", type="int", offset_bits=32),
+            ],
+        )
+        rec_v2 = RecordType(
+            name="Config",
+            kind="struct",
+            size_bits=96,
+            fields=[
+                TypeField(name="timeout", type="int", offset_bits=0),
+                TypeField(name="retries", type="int", offset_bits=32),
+                TypeField(name="debug", type="int", offset_bits=64),
+            ],
+        )
 
         fn1 = Function(
-            name="init_config", mangled="_Z11init_config6Config",
+            name="init_config",
+            mangled="_Z11init_config6Config",
             return_type="void",
             params=[Param(name="c", type="Config")],
         )
         fn2 = Function(
-            name="save_config", mangled="_Z11save_config6Config",
+            name="save_config",
+            mangled="_Z11save_config6Config",
             return_type="int",
             params=[Param(name="c", type="Config")],
         )
@@ -1226,7 +1410,11 @@ class TestCompareIntegration:
         assert result.verdict != Verdict.NO_CHANGE
 
         # Check affected symbols on type changes
-        type_changes = [c for c in result.changes if c.kind in _ROOT_TYPE_CHANGE_KINDS and "Config" in c.symbol]
+        type_changes = [
+            c
+            for c in result.changes
+            if c.kind in _ROOT_TYPE_CHANGE_KINDS and "Config" in c.symbol
+        ]
         all_affected = set()
         for tc in type_changes:
             if tc.affected_symbols:
@@ -1235,16 +1423,27 @@ class TestCompareIntegration:
 
     def test_return_type_uses_affected_type(self):
         """Function returning a changed struct -> should be in affected_symbols."""
-        rec = RecordType(name="Result", kind="struct", size_bits=32, fields=[
-            TypeField(name="code", type="int", offset_bits=0),
-        ])
-        rec_v2 = RecordType(name="Result", kind="struct", size_bits=64, fields=[
-            TypeField(name="code", type="int", offset_bits=0),
-            TypeField(name="msg", type="int", offset_bits=32),
-        ])
+        rec = RecordType(
+            name="Result",
+            kind="struct",
+            size_bits=32,
+            fields=[
+                TypeField(name="code", type="int", offset_bits=0),
+            ],
+        )
+        rec_v2 = RecordType(
+            name="Result",
+            kind="struct",
+            size_bits=64,
+            fields=[
+                TypeField(name="code", type="int", offset_bits=0),
+                TypeField(name="msg", type="int", offset_bits=32),
+            ],
+        )
 
         fn = Function(
-            name="get_result", mangled="_Z10get_resultv",
+            name="get_result",
+            mangled="_Z10get_resultv",
             return_type="Result",
             params=[],
         )
@@ -1253,7 +1452,11 @@ class TestCompareIntegration:
         new = _make_snap(version="2.0", functions=[fn], types=[rec_v2])
 
         result = compare(old, new)
-        type_changes = [c for c in result.changes if "Result" in c.symbol and c.kind in _ROOT_TYPE_CHANGE_KINDS]
+        type_changes = [
+            c
+            for c in result.changes
+            if "Result" in c.symbol and c.kind in _ROOT_TYPE_CHANGE_KINDS
+        ]
         affected = set()
         for tc in type_changes:
             if tc.affected_symbols:
@@ -1270,9 +1473,13 @@ class TestEnrichSourceLocationsNamespace:
     """_enrich_source_locations must resolve ns::Type::field via root type name."""
 
     def test_namespaced_field_gets_location(self):
-        old = _make_snap(types=[
-            RecordType(name="ns::MyStruct", kind="struct", source_location="file.h:10"),
-        ])
+        old = _make_snap(
+            types=[
+                RecordType(
+                    name="ns::MyStruct", kind="struct", source_location="file.h:10"
+                ),
+            ]
+        )
         new = _make_snap()
         changes = [
             Change(ChangeKind.TYPE_FIELD_REMOVED, "ns::MyStruct::flags", "removed"),
@@ -1281,9 +1488,11 @@ class TestEnrichSourceLocationsNamespace:
         assert changes[0].source_location == "file.h:10"
 
     def test_simple_field_still_works(self):
-        old = _make_snap(types=[
-            RecordType(name="MyStruct", kind="struct", source_location="file.h:20"),
-        ])
+        old = _make_snap(
+            types=[
+                RecordType(name="MyStruct", kind="struct", source_location="file.h:20"),
+            ]
+        )
         new = _make_snap()
         changes = [
             Change(ChangeKind.TYPE_FIELD_REMOVED, "MyStruct::flags", "removed"),
@@ -1300,35 +1509,64 @@ class TestEnrichAffectedSymbolsAncestorCache:
         # Inner is embedded in both Wrapper1 and Wrapper2.
         # Changing Inner should find functions using Wrapper1 and Wrapper2
         # via the ancestor cache (Wrapper1/Wrapper2 are not in affected_types).
-        inner = RecordType(name="Inner", kind="struct", size_bits=32, fields=[
-            TypeField(name="val", type="int", offset_bits=0),
-        ])
-        wrapper1 = RecordType(name="Wrapper1", kind="struct", size_bits=64, fields=[
-            TypeField(name="inner", type="Inner", offset_bits=0),
-            TypeField(name="x", type="int", offset_bits=32),
-        ])
-        wrapper2 = RecordType(name="Wrapper2", kind="struct", size_bits=64, fields=[
-            TypeField(name="inner", type="Inner", offset_bits=0),
-            TypeField(name="y", type="int", offset_bits=32),
-        ])
+        inner = RecordType(
+            name="Inner",
+            kind="struct",
+            size_bits=32,
+            fields=[
+                TypeField(name="val", type="int", offset_bits=0),
+            ],
+        )
+        wrapper1 = RecordType(
+            name="Wrapper1",
+            kind="struct",
+            size_bits=64,
+            fields=[
+                TypeField(name="inner", type="Inner", offset_bits=0),
+                TypeField(name="x", type="int", offset_bits=32),
+            ],
+        )
+        wrapper2 = RecordType(
+            name="Wrapper2",
+            kind="struct",
+            size_bits=64,
+            fields=[
+                TypeField(name="inner", type="Inner", offset_bits=0),
+                TypeField(name="y", type="int", offset_bits=32),
+            ],
+        )
         # Also create SecondInner to ensure both hit the ancestor cache for Wrapper1
-        second_inner = RecordType(name="SecondInner", kind="struct", size_bits=32, fields=[
-            TypeField(name="val", type="int", offset_bits=0),
-        ])
-        wrapper_with_both = RecordType(name="WrapperBoth", kind="struct", size_bits=96, fields=[
-            TypeField(name="a", type="Inner", offset_bits=0),
-            TypeField(name="b", type="SecondInner", offset_bits=32),
-            TypeField(name="c", type="int", offset_bits=64),
-        ])
+        second_inner = RecordType(
+            name="SecondInner",
+            kind="struct",
+            size_bits=32,
+            fields=[
+                TypeField(name="val", type="int", offset_bits=0),
+            ],
+        )
+        wrapper_with_both = RecordType(
+            name="WrapperBoth",
+            kind="struct",
+            size_bits=96,
+            fields=[
+                TypeField(name="a", type="Inner", offset_bits=0),
+                TypeField(name="b", type="SecondInner", offset_bits=32),
+                TypeField(name="c", type="int", offset_bits=64),
+            ],
+        )
 
         func1 = Function(
-            name="use_wrapper1", mangled="_Z12use_wrapper19Wrapper1",
-            return_type="void", visibility=Visibility.PUBLIC,
+            name="use_wrapper1",
+            mangled="_Z12use_wrapper19Wrapper1",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
             params=[Param(name="w", type="Wrapper1")],
         )
         func_both = Function(
-            name="use_both", mangled="_Z8use_both10WrapperBoth",
-            return_type="void", visibility=Visibility.PUBLIC,
+            name="use_both",
+            mangled="_Z8use_both10WrapperBoth",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
             params=[Param(name="w", type="WrapperBoth")],
         )
 
@@ -1353,16 +1591,28 @@ class TestEnrichAffectedSymbolsAncestorCache:
         but has no matching functions should not break the lookup."""
         # Parent is an affected type with no functions using it directly.
         # Child embeds Parent. Functions use Child.
-        parent = RecordType(name="Parent", kind="struct", size_bits=32, fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-        ])
-        child = RecordType(name="Child", kind="struct", size_bits=64, fields=[
-            TypeField(name="p", type="Parent", offset_bits=0),
-            TypeField(name="y", type="int", offset_bits=32),
-        ])
+        parent = RecordType(
+            name="Parent",
+            kind="struct",
+            size_bits=32,
+            fields=[
+                TypeField(name="x", type="int", offset_bits=0),
+            ],
+        )
+        child = RecordType(
+            name="Child",
+            kind="struct",
+            size_bits=64,
+            fields=[
+                TypeField(name="p", type="Parent", offset_bits=0),
+                TypeField(name="y", type="int", offset_bits=32),
+            ],
+        )
         func = Function(
-            name="use_child", mangled="_Z9use_child5Child",
-            return_type="void", visibility=Visibility.PUBLIC,
+            name="use_child",
+            mangled="_Z9use_child5Child",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
             params=[Param(name="c", type="Child")],
         )
         old = _make_snap(types=[parent, child], functions=[func])
@@ -1384,8 +1634,10 @@ class TestRegexCacheInOpaqueChecks:
         from abicheck.diff_filtering import _is_pointer_only_type
 
         func = Function(
-            name="create_ctx", mangled="_Z10create_ctx",
-            return_type="Context*", visibility=Visibility.PUBLIC,
+            name="create_ctx",
+            mangled="_Z10create_ctx",
+            return_type="Context*",
+            visibility=Visibility.PUBLIC,
             params=[],
         )
         snap = _make_snap(functions=[func])
@@ -1402,8 +1654,10 @@ class TestRegexCacheInOpaqueChecks:
         from abicheck.diff_filtering import _is_pointer_only_type
 
         func = Function(
-            name="get_val", mangled="_Z7get_val",
-            return_type="MyType", visibility=Visibility.PUBLIC,
+            name="get_val",
+            mangled="_Z7get_val",
+            return_type="MyType",
+            visibility=Visibility.PUBLIC,
             params=[],
         )
         snap = _make_snap(functions=[func])
@@ -1415,8 +1669,10 @@ class TestRegexCacheInOpaqueChecks:
         from abicheck.diff_filtering import _has_public_pointer_factory
 
         func = Function(
-            name="create_handle", mangled="_Z13create_handle",
-            return_type="Handle*", visibility=Visibility.PUBLIC,
+            name="create_handle",
+            mangled="_Z13create_handle",
+            return_type="Handle*",
+            visibility=Visibility.PUBLIC,
             params=[],
         )
         snap = _make_snap(functions=[func])
@@ -1431,8 +1687,10 @@ class TestRegexCacheInOpaqueChecks:
         from abicheck.diff_filtering import _has_public_pointer_factory
 
         func = Function(
-            name="create_handle", mangled="_Z13create_handle",
-            return_type="Handle*", visibility=Visibility.PUBLIC,
+            name="create_handle",
+            mangled="_Z13create_handle",
+            return_type="Handle*",
+            visibility=Visibility.PUBLIC,
             params=[],
         )
         snap = _make_snap(functions=[func])
@@ -1475,13 +1733,27 @@ class TestComputeConfidenceDwarfFlag:
     """Placeholder DWARF objects (has_dwarf=False) must not add 'dwarf' tier."""
 
     def test_placeholder_dwarf_not_counted(self):
-        old = _make_snap(functions=[
-            Function(name="f", mangled="_f", return_type="void", visibility=Visibility.PUBLIC),
-        ])
+        old = _make_snap(
+            functions=[
+                Function(
+                    name="f",
+                    mangled="_f",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                ),
+            ]
+        )
         old.dwarf = DwarfMetadata(has_dwarf=False)
-        new = _make_snap(functions=[
-            Function(name="f", mangled="_f", return_type="void", visibility=Visibility.PUBLIC),
-        ])
+        new = _make_snap(
+            functions=[
+                Function(
+                    name="f",
+                    mangled="_f",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                ),
+            ]
+        )
         new.dwarf = DwarfMetadata(has_dwarf=False)
         tiers, _conf, _warns, _etier = _compute_confidence([], old, new)
         assert "dwarf" not in tiers

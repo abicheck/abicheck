@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Tests for abicheck.appcompat — Application Compatibility Checking (ADR-005)."""
+
 from __future__ import annotations
 
 import json
@@ -61,6 +62,7 @@ from abicheck.reporter import appcompat_to_json, appcompat_to_markdown
 # Unit tests: AppRequirements / AppCompatResult data structures
 # ---------------------------------------------------------------------------
 
+
 class TestDataStructures:
     def test_app_requirements_defaults(self):
         reqs = AppRequirements()
@@ -93,6 +95,7 @@ class TestDataStructures:
 # ---------------------------------------------------------------------------
 # Unit tests: _is_relevant_to_app
 # ---------------------------------------------------------------------------
+
 
 class TestIsRelevantToApp:
     def _make_app(
@@ -205,6 +208,7 @@ class TestIsRelevantToApp:
 # Unit tests: uncovered_missing_symbols
 # ---------------------------------------------------------------------------
 
+
 class TestUncoveredMissingSymbols:
     """A missing symbol/version/entrypoint that already has a matching
     scoped Change must not be counted as a second, separate ABI break
@@ -212,14 +216,16 @@ class TestUncoveredMissingSymbols:
 
     def test_missing_symbol_covered_by_matching_change_is_excluded(self):
         change = Change(
-            kind=ChangeKind.FUNC_REMOVED, symbol="foo",
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="foo",
             description="Function removed: foo",
         )
         assert uncovered_missing_symbols(["foo"], [change]) == []
 
     def test_missing_symbol_with_no_matching_change_is_uncovered(self):
         change = Change(
-            kind=ChangeKind.FUNC_REMOVED, symbol="bar",
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="bar",
             description="Function removed: bar",
         )
         assert uncovered_missing_symbols(["foo"], [change]) == ["foo"]
@@ -232,17 +238,21 @@ class TestUncoveredMissingSymbols:
         import abicheck.demangle as demangle_mod
 
         monkeypatch.setattr(
-            demangle_mod, "demangle", lambda s: "foo()" if s == "_Z3foov" else s,
+            demangle_mod,
+            "demangle",
+            lambda s: "foo()" if s == "_Z3foov" else s,
         )
         change = Change(
-            kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov",
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3foov",
             description="Function removed: _Z3foov",
         )
         assert uncovered_missing_symbols(["foo()"], [change]) == []
 
     def test_missing_symbol_covered_via_affected_symbols(self):
         change = Change(
-            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Config",
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="Config",
             description="Type size changed: Config",
             affected_symbols=["foo_init"],
         )
@@ -253,7 +263,8 @@ class TestUncoveredMissingSymbols:
 
     def test_empty_missing_returns_empty(self):
         change = Change(
-            kind=ChangeKind.FUNC_REMOVED, symbol="foo",
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="foo",
             description="Function removed: foo",
         )
         assert uncovered_missing_symbols([], [change]) == []
@@ -262,6 +273,7 @@ class TestUncoveredMissingSymbols:
 # ---------------------------------------------------------------------------
 # Unit tests: _detect_app_format
 # ---------------------------------------------------------------------------
+
 
 class TestDetectAppFormat:
     def test_nonexistent_path(self, tmp_path):
@@ -295,6 +307,7 @@ class TestDetectAppFormat:
 # ---------------------------------------------------------------------------
 # Unit tests: AppCompatResult verdict computation
 # ---------------------------------------------------------------------------
+
 
 class TestAppCompatResultVerdict:
     def test_missing_symbols_means_breaking(self):
@@ -415,9 +428,15 @@ class TestComputeAppcompatVerdictExcludesResolved:
 # Unit tests: reporters
 # ---------------------------------------------------------------------------
 
+
 class TestAppCompatReporters:
     def _make_result(
-        self, *, missing=None, breaking=None, irrelevant=None, verdict=None,
+        self,
+        *,
+        missing=None,
+        breaking=None,
+        irrelevant=None,
+        verdict=None,
         policy_file=None,
     ):
         return AppCompatResult(
@@ -540,7 +559,9 @@ class TestAppCompatReporters:
         from abicheck.policy_file import PolicyFile
 
         change = Change(
-            kind=ChangeKind.FUNC_REMOVED, symbol="foo_init", description="removed",
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="foo_init",
+            description="removed",
         )
         pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
         result = self._make_result(breaking=[change], policy_file=pf)
@@ -571,6 +592,7 @@ class TestAppCompatReporters:
 # Integration-ish: _is_relevant_to_app with realistic change sets
 # ---------------------------------------------------------------------------
 
+
 class TestFilteringIntegration:
     """Test that filtering correctly partitions changes."""
 
@@ -579,19 +601,33 @@ class TestFilteringIntegration:
             undefined_symbols={"foo_init", "foo_process"},
         )
         changes = [
-            Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo_init", description="removed"),
-            Change(kind=ChangeKind.FUNC_REMOVED, symbol="bar_init", description="removed"),
+            Change(
+                kind=ChangeKind.FUNC_REMOVED, symbol="foo_init", description="removed"
+            ),
+            Change(
+                kind=ChangeKind.FUNC_REMOVED, symbol="bar_init", description="removed"
+            ),
             Change(kind=ChangeKind.FUNC_ADDED, symbol="baz_new", description="added"),
-            Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Config",
-                   description="size changed", affected_symbols=["foo_process"]),
-            Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Internal",
-                   description="size changed", affected_symbols=["bar_helper"]),
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="Config",
+                description="size changed",
+                affected_symbols=["foo_process"],
+            ),
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="Internal",
+                description="size changed",
+                affected_symbols=["bar_helper"],
+            ),
         ]
 
         relevant = [c for c in changes if _is_relevant_to_app(c, app)]
         irrelevant = [c for c in changes if not _is_relevant_to_app(c, app)]
 
-        assert len(relevant) == 2  # foo_init removed + Config size (affects foo_process)
+        assert (
+            len(relevant) == 2
+        )  # foo_init removed + Config size (affects foo_process)
         assert len(irrelevant) == 3  # bar_init removed + baz_new added + Internal size
         assert relevant[0].symbol == "foo_init"
         assert relevant[1].symbol == "Config"
@@ -601,6 +637,7 @@ class TestFilteringIntegration:
 # Unit tests: _detect_app_format edge cases
 # ---------------------------------------------------------------------------
 
+
 class TestDetectAppFormatEdgeCases:
     def test_directory_returns_none(self, tmp_path):
         """Directories are not regular files."""
@@ -609,10 +646,14 @@ class TestDetectAppFormatEdgeCases:
     def test_all_macho_magics(self, tmp_path):
         """All recognized Mach-O magic bytes should return 'macho'."""
         magics = [
-            b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
-            b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
-            b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
-            b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",
+            b"\xfe\xed\xfa\xce",
+            b"\xce\xfa\xed\xfe",
+            b"\xfe\xed\xfa\xcf",
+            b"\xcf\xfa\xed\xfe",
+            b"\xca\xfe\xba\xbe",
+            b"\xbe\xba\xfe\xca",
+            b"\xca\xfe\xba\xbf",
+            b"\xbf\xba\xfe\xca",
         ]
         for i, magic in enumerate(magics):
             f = tmp_path / f"app_{i}.macho"
@@ -629,6 +670,7 @@ class TestDetectAppFormatEdgeCases:
 # ---------------------------------------------------------------------------
 # Unit tests: parse_app_requirements dispatch
 # ---------------------------------------------------------------------------
+
 
 class TestParseAppRequirements:
     def test_unknown_format_raises(self, tmp_path):
@@ -669,6 +711,7 @@ class TestParseAppRequirements:
 # ---------------------------------------------------------------------------
 # Unit tests: _parse_pe_app_requirements with mocks
 # ---------------------------------------------------------------------------
+
 
 class TestParsePeAppRequirements:
     def _make_imp(self, name=None, ordinal=0, import_by_ordinal=False):
@@ -768,6 +811,7 @@ class TestParsePeAppRequirements:
 # Unit tests: _parse_macho_app_requirements with mocks
 # ---------------------------------------------------------------------------
 
+
 class TestParseMachoAppRequirements:
     def test_no_headers(self, tmp_path):
         f = tmp_path / "app.macho"
@@ -864,7 +908,9 @@ class TestParseMachoAppRequirements:
         mock_macho.headers = [header]
 
         with patch("macholib.MachO.MachO", return_value=mock_macho):
-            with patch("macholib.SymbolTable.SymbolTable", side_effect=Exception("fail")):
+            with patch(
+                "macholib.SymbolTable.SymbolTable", side_effect=Exception("fail")
+            ):
                 reqs = _parse_macho_app_requirements(f, "libfoo.dylib")
 
         assert reqs.undefined_symbols == set()
@@ -919,7 +965,9 @@ class TestParseMachoAppRequirements:
         mock_macho.headers = [header]
 
         with patch("macholib.MachO.MachO", return_value=mock_macho):
-            with patch("macholib.SymbolTable.SymbolTable", side_effect=Exception("skip")):
+            with patch(
+                "macholib.SymbolTable.SymbolTable", side_effect=Exception("skip")
+            ):
                 reqs = _parse_macho_app_requirements(f, "libfoo.dylib")
 
         assert "libfoo.dylib" in reqs.needed_libs
@@ -928,6 +976,7 @@ class TestParseMachoAppRequirements:
 # ---------------------------------------------------------------------------
 # Unit tests: _parse_elf_app_requirements with mocks
 # ---------------------------------------------------------------------------
+
 
 class TestParseElfAppRequirements:
     def test_elf_parse_error(self, tmp_path):
@@ -1037,15 +1086,20 @@ class TestParseElfAppRequirements:
         mock_dynsym = MagicMock(spec=SymbolTableSection)
         mock_dynsym.name = ".dynsym"
         mock_dynsym.iter_symbols.return_value = [
-            mock_sym_from_foo,     # idx=0 → ver_entry_2 (from libfoo.so.1)
-            mock_sym_from_other,   # idx=1 → ver_entry_3 (from other lib)
+            mock_sym_from_foo,  # idx=0 → ver_entry_2 (from libfoo.so.1)
+            mock_sym_from_other,  # idx=1 → ver_entry_3 (from other lib)
             mock_sym_unversioned,  # idx=2 → ver_entry_1 (unversioned)
-            mock_sym_defined,      # idx=3 → should be skipped (not UNDEF)
-            mock_sym_empty,        # idx=4 → should be skipped (empty name)
-            mock_sym_local,        # idx=5 → should be skipped (local binding)
+            mock_sym_defined,  # idx=3 → should be skipped (not UNDEF)
+            mock_sym_empty,  # idx=4 → should be skipped (empty name)
+            mock_sym_local,  # idx=5 → should be skipped (local binding)
         ]
 
-        sections = [mock_dynamic, mock_verneed_section, mock_versym_section, mock_dynsym]
+        sections = [
+            mock_dynamic,
+            mock_verneed_section,
+            mock_versym_section,
+            mock_dynsym,
+        ]
 
         mock_elf = MagicMock()
         mock_elf.iter_sections.return_value = sections
@@ -1090,7 +1144,9 @@ class TestParseElfAppRequirements:
 
         with patch("elftools.elf.elffile.ELFFile", return_value=mock_elf):
             # _guess_symbol_origin returns "libc.so.6" → exclude this symbol
-            with patch("abicheck.elf_metadata._guess_symbol_origin", return_value="libc.so.6"):
+            with patch(
+                "abicheck.elf_metadata._guess_symbol_origin", return_value="libc.so.6"
+            ):
                 reqs = _parse_elf_app_requirements(f, "libfoo.so.1")
 
         assert "printf" not in reqs.undefined_symbols
@@ -1236,7 +1292,9 @@ class TestParseElfAppRequirements:
         mock_elf.iter_sections.return_value = [mock_dynsym]
 
         with patch("elftools.elf.elffile.ELFFile", return_value=mock_elf):
-            with patch("abicheck.elf_metadata._guess_symbol_origin", return_value="libfoo.so.1"):
+            with patch(
+                "abicheck.elf_metadata._guess_symbol_origin", return_value="libfoo.so.1"
+            ):
                 reqs = _parse_elf_app_requirements(f, "libfoo.so.1")
 
         assert "foo_init" in reqs.undefined_symbols
@@ -1261,7 +1319,9 @@ class TestParseElfAppRequirements:
         mock_elf.iter_sections.return_value = [mock_dynsym]
 
         with patch("elftools.elf.elffile.ELFFile", return_value=mock_elf):
-            with patch("abicheck.elf_metadata._guess_symbol_origin", return_value="libc.so.6"):
+            with patch(
+                "abicheck.elf_metadata._guess_symbol_origin", return_value="libc.so.6"
+            ):
                 reqs = _parse_elf_app_requirements(f, "libfoo.so.1")
 
         assert "printf" not in reqs.undefined_symbols
@@ -1270,6 +1330,7 @@ class TestParseElfAppRequirements:
 # ---------------------------------------------------------------------------
 # Unit tests: _get_new_lib_exports
 # ---------------------------------------------------------------------------
+
 
 class TestGetNewLibExports:
     def test_elf_exports(self, tmp_path):
@@ -1333,7 +1394,9 @@ class TestGetNewLibExports:
         f = tmp_path / "lib.dylib"
         f.write_bytes(b"\xfe\xed\xfa\xcf" + b"\x00" * 100)
 
-        meta = MachoMetadata(exports=[MachoExport(name="foo_init"), MachoExport(name="")])
+        meta = MachoMetadata(
+            exports=[MachoExport(name="foo_init"), MachoExport(name="")]
+        )
         with patch("abicheck.macho_metadata.parse_macho_metadata", return_value=meta):
             exports = _get_new_lib_exports(f)
 
@@ -1348,6 +1411,7 @@ class TestGetNewLibExports:
 # ---------------------------------------------------------------------------
 # Unit tests: _get_lib_soname
 # ---------------------------------------------------------------------------
+
 
 class TestGetLibSoname:
     def test_elf_soname(self, tmp_path):
@@ -1405,15 +1469,21 @@ class TestGetLibSoname:
 # Unit tests: check_appcompat with mocks
 # ---------------------------------------------------------------------------
 
+
 class TestCheckAppcompat:
     def _mock_deps(self, app_reqs, new_exports, diff, soname="libfoo.so.1"):
         """Return patches for check_appcompat dependencies."""
         return [
             patch("abicheck.appcompat._get_lib_soname", return_value=soname),
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
-            patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="elf"),
+            patch(
+                "abicheck.workflows.input_resolution.detect_binary_format",
+                return_value="elf",
+            ),
             patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()),
-            patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff),
+            patch(
+                "abicheck.workflows.compare_policy.compare_snapshots", return_value=diff
+            ),
             patch("abicheck.appcompat._get_new_lib_exports", return_value=new_exports),
             patch("abicheck.appcompat._detect_app_format", return_value=None),
         ]
@@ -1424,12 +1494,21 @@ class TestCheckAppcompat:
         with binary_fmt=None."""
         from abicheck.errors import ValidationError
 
-        with patch("abicheck.workflows.input_resolution.detect_binary_format", return_value=None), \
-             pytest.raises(ValidationError, match="Unrecognised binary format"):
+        with (
+            patch(
+                "abicheck.workflows.input_resolution.detect_binary_format",
+                return_value=None,
+            ),
+            pytest.raises(ValidationError, match="Unrecognised binary format"),
+        ):
             check_appcompat(tmp_path / "app", tmp_path / "old.so", tmp_path / "new.so")
 
     def test_compatible_no_changes(self, tmp_path):
-        app, old_lib, new_lib = tmp_path / "app", tmp_path / "old.so", tmp_path / "new.so"
+        app, old_lib, new_lib = (
+            tmp_path / "app",
+            tmp_path / "old.so",
+            tmp_path / "new.so",
+        )
         app_reqs = AppRequirements(
             undefined_symbols={"foo_init", "foo_process"},
         )
@@ -1437,7 +1516,15 @@ class TestCheckAppcompat:
         new_exports = {"foo_init", "foo_process", "foo_cleanup"}
 
         patches = self._mock_deps(app_reqs, new_exports, diff)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+        ):
             result = check_appcompat(app, old_lib, new_lib)
 
         assert result.verdict == Verdict.COMPATIBLE
@@ -1457,16 +1544,28 @@ class TestCheckAppcompat:
         app_reqs = AppRequirements(undefined_symbols=set())
         diff = DiffResult(old_version="1", new_version="2", library="libfoo")
 
-        with patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so.1"), \
-             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs), \
-             patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="elf"), \
-             patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()) as mock_run_dump, \
-             patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff), \
-             patch("abicheck.appcompat._get_new_lib_exports", return_value=set()), \
-             patch("abicheck.appcompat._detect_app_format", return_value=None):
+        with (
+            patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so.1"),
+            patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
+            patch(
+                "abicheck.workflows.input_resolution.detect_binary_format",
+                return_value="elf",
+            ),
+            patch(
+                "abicheck.service_dump_native.run_dump", return_value=MagicMock()
+            ) as mock_run_dump,
+            patch(
+                "abicheck.workflows.compare_policy.compare_snapshots", return_value=diff
+            ),
+            patch("abicheck.appcompat._get_new_lib_exports", return_value=set()),
+            patch("abicheck.appcompat._detect_app_format", return_value=None),
+        ):
             check_appcompat(
-                app, old_lib, new_lib,
-                old_headers=[old_hdr], new_headers=[new_hdr],
+                app,
+                old_lib,
+                new_lib,
+                old_headers=[old_hdr],
+                new_headers=[new_hdr],
             )
 
             assert mock_run_dump.call_count == 2
@@ -1479,17 +1578,30 @@ class TestCheckAppcompat:
         whose wrapper defaults `include_dependencies` to True -- suppressing
         the streaming pruner the way this call used to do manually (Codex
         review, PR #840, bdSMk) -- so it must not override that default."""
-        app, old_lib, new_lib = tmp_path / "app", tmp_path / "old.so", tmp_path / "new.so"
+        app, old_lib, new_lib = (
+            tmp_path / "app",
+            tmp_path / "old.so",
+            tmp_path / "new.so",
+        )
         app_reqs = AppRequirements(undefined_symbols=set())
         diff = DiffResult(old_version="1", new_version="2", library="libfoo")
 
-        with patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so.1"), \
-             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs), \
-             patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="elf"), \
-             patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()) as mock_run_dump, \
-             patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff), \
-             patch("abicheck.appcompat._get_new_lib_exports", return_value=set()), \
-             patch("abicheck.appcompat._detect_app_format", return_value=None):
+        with (
+            patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so.1"),
+            patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
+            patch(
+                "abicheck.workflows.input_resolution.detect_binary_format",
+                return_value="elf",
+            ),
+            patch(
+                "abicheck.service_dump_native.run_dump", return_value=MagicMock()
+            ) as mock_run_dump,
+            patch(
+                "abicheck.workflows.compare_policy.compare_snapshots", return_value=diff
+            ),
+            patch("abicheck.appcompat._get_new_lib_exports", return_value=set()),
+            patch("abicheck.appcompat._detect_app_format", return_value=None),
+        ):
             check_appcompat(app, old_lib, new_lib)
 
         assert mock_run_dump.call_count == 2
@@ -1513,17 +1625,30 @@ class TestCheckAppcompat:
         app_reqs = AppRequirements(undefined_symbols=set())
         diff = DiffResult(old_version="1", new_version="2", library="libfoo")
 
-        with patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so.1"), \
-             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs), \
-             patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="elf"), \
-             patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()) as mock_run_dump, \
-             patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff), \
-             patch("abicheck.appcompat._get_new_lib_exports", return_value=set()), \
-             patch("abicheck.appcompat._detect_app_format", return_value=None):
+        with (
+            patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so.1"),
+            patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
+            patch(
+                "abicheck.workflows.input_resolution.detect_binary_format",
+                return_value="elf",
+            ),
+            patch(
+                "abicheck.service_dump_native.run_dump", return_value=MagicMock()
+            ) as mock_run_dump,
+            patch(
+                "abicheck.workflows.compare_policy.compare_snapshots", return_value=diff
+            ),
+            patch("abicheck.appcompat._get_new_lib_exports", return_value=set()),
+            patch("abicheck.appcompat._detect_app_format", return_value=None),
+        ):
             check_appcompat(
-                app, old_lib, new_lib,
-                old_headers=[old_hdr], new_headers=[new_hdr],
-                old_includes=[old_inc], new_includes=[new_inc],
+                app,
+                old_lib,
+                new_lib,
+                old_headers=[old_hdr],
+                new_headers=[new_hdr],
+                old_includes=[old_inc],
+                new_includes=[new_inc],
             )
 
         assert mock_run_dump.call_count == 2
@@ -1532,7 +1657,11 @@ class TestCheckAppcompat:
         assert new_call.kwargs["public_include_search_dirs"] == [new_inc]
 
     def test_missing_symbols_breaking(self, tmp_path):
-        app, old_lib, new_lib = tmp_path / "app", tmp_path / "old.so", tmp_path / "new.so"
+        app, old_lib, new_lib = (
+            tmp_path / "app",
+            tmp_path / "old.so",
+            tmp_path / "new.so",
+        )
         app_reqs = AppRequirements(
             undefined_symbols={"foo_init", "foo_gone"},
         )
@@ -1540,7 +1669,15 @@ class TestCheckAppcompat:
         new_exports = {"foo_init"}  # foo_gone is missing
 
         patches = self._mock_deps(app_reqs, new_exports, diff)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+        ):
             result = check_appcompat(app, old_lib, new_lib)
 
         assert result.verdict == Verdict.BREAKING
@@ -1561,13 +1698,25 @@ class TestCheckAppcompat:
             description="removed",
         )
         diff = DiffResult(
-            old_version="1", new_version="2", library="libfoo",
+            old_version="1",
+            new_version="2",
+            library="libfoo",
             changes=[change],
         )
-        new_exports = {"foo_init"}  # still exported (e.g., diff reports signature change)
+        new_exports = {
+            "foo_init"
+        }  # still exported (e.g., diff reports signature change)
 
         patches = self._mock_deps(app_reqs, new_exports, diff)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+        ):
             result = check_appcompat(app, old_lib, new_lib)
 
         assert len(result.breaking_for_app) == 1
@@ -1587,13 +1736,23 @@ class TestCheckAppcompat:
             description="added",
         )
         diff = DiffResult(
-            old_version="1", new_version="2", library="libfoo",
+            old_version="1",
+            new_version="2",
+            library="libfoo",
             changes=[change],
         )
         new_exports = {"foo_init", "bar_new"}
 
         patches = self._mock_deps(app_reqs, new_exports, diff)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+        ):
             result = check_appcompat(app, old_lib, new_lib)
 
         assert result.verdict == Verdict.COMPATIBLE
@@ -1609,7 +1768,15 @@ class TestCheckAppcompat:
         new_exports = {"foo_init"}
 
         patches = self._mock_deps(app_reqs, new_exports, diff)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+        ):
             result = check_appcompat(app, old_lib, new_lib)
 
         assert result.verdict == Verdict.NO_CHANGE
@@ -1624,7 +1791,15 @@ class TestCheckAppcompat:
         new_exports: set[str] = set()  # No exports at all
 
         patches = self._mock_deps(app_reqs, new_exports, diff)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+        ):
             result = check_appcompat(app, old_lib, new_lib)
 
         assert result.symbol_coverage == 0.0
@@ -1642,7 +1817,9 @@ class TestCheckAppcompat:
             description="removed",
         )
         diff = DiffResult(
-            old_version="1", new_version="2", library="libfoo",
+            old_version="1",
+            new_version="2",
+            library="libfoo",
             changes=[change],
         )
         new_exports = {"foo_init"}
@@ -1651,9 +1828,20 @@ class TestCheckAppcompat:
         mock_pf.compute_verdict.return_value = Verdict.COMPATIBLE_WITH_RISK
 
         patches = self._mock_deps(app_reqs, new_exports, diff)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+        ):
             result = check_appcompat(
-                app, old_lib, new_lib, policy_file=mock_pf,
+                app,
+                old_lib,
+                new_lib,
+                policy_file=mock_pf,
             )
 
         assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
@@ -1678,9 +1866,14 @@ class TestCheckAppcompat:
         with (
             patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so"),
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
-            patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="elf"),
+            patch(
+                "abicheck.workflows.input_resolution.detect_binary_format",
+                return_value="elf",
+            ),
             patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()),
-            patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff),
+            patch(
+                "abicheck.workflows.compare_policy.compare_snapshots", return_value=diff
+            ),
             patch("abicheck.appcompat._get_new_lib_exports", return_value=new_exports),
             patch("abicheck.appcompat._detect_app_format", return_value="elf"),
             patch("abicheck.elf_metadata.parse_elf_metadata", return_value=elf_meta),
@@ -1693,7 +1886,11 @@ class TestCheckAppcompat:
     def test_lang_c(self, tmp_path):
         """lang='c' is forwarded to run_dump() unchanged; run_dump derives
         the "cc" castxml frontend from it (`_dump_elf`'s own check)."""
-        app, old_lib, new_lib = tmp_path / "app", tmp_path / "old.so", tmp_path / "new.so"
+        app, old_lib, new_lib = (
+            tmp_path / "app",
+            tmp_path / "old.so",
+            tmp_path / "new.so",
+        )
         app_reqs = AppRequirements(undefined_symbols=set())
         diff = DiffResult(old_version="1", new_version="2", library="libfoo")
         new_exports: set[str] = set()
@@ -1701,9 +1898,16 @@ class TestCheckAppcompat:
         with (
             patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so"),
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
-            patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="elf"),
-            patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()) as mock_run_dump,
-            patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff),
+            patch(
+                "abicheck.workflows.input_resolution.detect_binary_format",
+                return_value="elf",
+            ),
+            patch(
+                "abicheck.service_dump_native.run_dump", return_value=MagicMock()
+            ) as mock_run_dump,
+            patch(
+                "abicheck.workflows.compare_policy.compare_snapshots", return_value=diff
+            ),
             patch("abicheck.appcompat._get_new_lib_exports", return_value=new_exports),
             patch("abicheck.appcompat._detect_app_format", return_value=None),
         ):
@@ -1729,12 +1933,23 @@ class TestCheckAppcompat:
             patch("abicheck.appcompat._get_lib_soname", return_value="libz.so.1"),
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
             patch("abicheck.appcompat._detect_app_format", return_value="elf"),
-            patch("abicheck.appcompat._get_old_lib_exports_for_scoping", return_value={"inflate"}),
-            patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="elf"),
+            patch(
+                "abicheck.appcompat._get_old_lib_exports_for_scoping",
+                return_value={"inflate"},
+            ),
+            patch(
+                "abicheck.workflows.input_resolution.detect_binary_format",
+                return_value="elf",
+            ),
             patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()),
-            patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff),
+            patch(
+                "abicheck.workflows.compare_policy.compare_snapshots", return_value=diff
+            ),
             patch("abicheck.appcompat._get_new_lib_exports", return_value={"inflate"}),
-            patch("abicheck.elf_metadata.parse_elf_metadata", return_value=SimpleNamespace(versions_defined=[])),
+            patch(
+                "abicheck.elf_metadata.parse_elf_metadata",
+                return_value=SimpleNamespace(versions_defined=[]),
+            ),
         ):
             result = check_appcompat(app, old_lib, new_lib)
 
@@ -1755,12 +1970,23 @@ class TestCheckAppcompat:
             patch("abicheck.appcompat._get_lib_soname", return_value="libz.so.1"),
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
             patch("abicheck.appcompat._detect_app_format", return_value="elf"),
-            patch("abicheck.appcompat._get_old_lib_exports_for_scoping", return_value={"inflate"}),
-            patch("abicheck.workflows.input_resolution.detect_binary_format", return_value="elf"),
+            patch(
+                "abicheck.appcompat._get_old_lib_exports_for_scoping",
+                return_value={"inflate"},
+            ),
+            patch(
+                "abicheck.workflows.input_resolution.detect_binary_format",
+                return_value="elf",
+            ),
             patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()),
-            patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff),
+            patch(
+                "abicheck.workflows.compare_policy.compare_snapshots", return_value=diff
+            ),
             patch("abicheck.appcompat._get_new_lib_exports", return_value={"inflate"}),
-            patch("abicheck.elf_metadata.parse_elf_metadata", return_value=SimpleNamespace(versions_defined=[])),
+            patch(
+                "abicheck.elf_metadata.parse_elf_metadata",
+                return_value=SimpleNamespace(versions_defined=[]),
+            ),
         ):
             result = check_appcompat(app, old_lib, new_lib)
 
@@ -1772,6 +1998,7 @@ class TestCheckAppcompat:
 # ---------------------------------------------------------------------------
 # Unit tests: check_against with mocks
 # ---------------------------------------------------------------------------
+
 
 class TestCheckAgainst:
     def test_compatible(self, tmp_path):
@@ -1875,6 +2102,7 @@ class TestCheckAgainst:
 # Reporter edge cases
 # ---------------------------------------------------------------------------
 
+
 class TestReporterEdgeCases:
     def test_json_missing_versions(self):
         result = AppCompatResult(
@@ -1906,8 +2134,10 @@ class TestReporterEdgeCases:
             old_lib_path="old.so",
             new_lib_path="new.so",
             full_diff=DiffResult(
-                old_version="1", new_version="2",
-                library="libfoo", verdict=Verdict.BREAKING,
+                old_version="1",
+                new_version="2",
+                library="libfoo",
+                verdict=Verdict.BREAKING,
             ),
             verdict=Verdict.COMPATIBLE,
         )
@@ -1917,7 +2147,9 @@ class TestReporterEdgeCases:
 
     def test_markdown_no_changes_message(self):
         change = Change(
-            kind=ChangeKind.FUNC_ADDED, symbol="x", description="added",
+            kind=ChangeKind.FUNC_ADDED,
+            symbol="x",
+            description="added",
         )
         result = AppCompatResult(
             app_path="/usr/bin/myapp",
@@ -1959,16 +2191,22 @@ class TestScopeDiffToAppWithSnapshots:
         old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
         new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
         diff = DiffResult(
-            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
             changes=[Change(ChangeKind.FUNC_REMOVED, "foo_process", "removed")],
             verdict=Verdict.BREAKING,
         )
         app_reqs = AppRequirements(undefined_symbols={"foo_init", "foo_process"})
-        with patch(
-            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+        with (
+            patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
+            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
+        ):
             result = scope_diff_to_app(
-                diff, tmp_path / "app", old_snap, new_snap,
+                diff,
+                tmp_path / "app",
+                old_snap,
+                new_snap,
             )
         assert result.verdict == Verdict.BREAKING
         assert result.missing_symbols == ["foo_process"]
@@ -1983,14 +2221,17 @@ class TestScopeDiffToAppWithSnapshots:
         new_lib = tmp_path / "new.so"
         new_lib.write_bytes(b"\x7fELF" + b"\x00" * 100)
         diff = DiffResult(
-            old_version="1.0", new_version="2.0", library="libfoo.so.1",
-            changes=[], verdict=Verdict.COMPATIBLE,
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
         )
         app_reqs = AppRequirements(undefined_symbols={"foo_init"})
-        with patch(
-            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"), patch(
-            "abicheck.appcompat._get_new_lib_exports", return_value={"foo_init"}
+        with (
+            patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
+            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
+            patch("abicheck.appcompat._get_new_lib_exports", return_value={"foo_init"}),
         ):
             result = scope_diff_to_app(diff, tmp_path / "app", old_snap, new_lib)
         assert result.verdict == Verdict.COMPATIBLE
@@ -2005,18 +2246,23 @@ class TestScopeDiffToAppWithSnapshots:
         old_snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
         new_snap = AbiSnapshot(library="libfoo.so.1", version="2.0")
         diff = DiffResult(
-            old_version="1.0", new_version="2.0", library="libfoo.so.1",
-            changes=[], verdict=Verdict.COMPATIBLE,
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
         )
         app_reqs = AppRequirements(undefined_symbols={"foo_init"})
-        with patch(
-            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+        with (
+            patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
+            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
+        ):
             result = scope_diff_to_app(diff, tmp_path / "app", old_snap, new_snap)
         assert result.missing_symbols == ["foo_init"]
 
     def test_uncovered_missing_symbol_becomes_consumer_required_symbol_removed(
-        self, tmp_path,
+        self,
+        tmp_path,
     ):
         """ADR-044 P2 item 1: a missing symbol with no matching library-diff
         Change is promoted to a first-class, suppressible
@@ -2029,18 +2275,23 @@ class TestScopeDiffToAppWithSnapshots:
         # -- the ONLY evidence this symbol vanished is the consumer's own
         # undefined-symbol requirement.
         diff = DiffResult(
-            old_version="1.0", new_version="2.0", library="libfoo.so.1",
-            changes=[], verdict=Verdict.COMPATIBLE,
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
         )
         app_reqs = AppRequirements(undefined_symbols={"foo_init", "foo_process"})
         app_path = tmp_path / "myapp"
-        with patch(
-            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+        with (
+            patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
+            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
+        ):
             result = scope_diff_to_app(diff, app_path, old_snap, new_snap)
         assert result.missing_symbols == ["foo_process"]
         overlay = [
-            c for c in result.breaking_for_app
+            c
+            for c in result.breaking_for_app
             if c.kind == ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED
         ]
         assert len(overlay) == 1
@@ -2048,7 +2299,8 @@ class TestScopeDiffToAppWithSnapshots:
         assert "myapp" in overlay[0].description
 
     def test_consumer_required_symbol_removed_carries_impact_assessment(
-        self, tmp_path,
+        self,
+        tmp_path,
     ):
         """ADR-052 D2 follow-up (G29 Phase 3, scoped implementation):
         scope_diff_to_app caches this overlay's own ImpactAssessment at
@@ -2060,17 +2312,22 @@ class TestScopeDiffToAppWithSnapshots:
         old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
         new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
         diff = DiffResult(
-            old_version="1.0", new_version="2.0", library="libfoo.so.1",
-            changes=[], verdict=Verdict.COMPATIBLE,
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
         )
         app_reqs = AppRequirements(undefined_symbols={"foo_process"})
         app_path = tmp_path / "myapp"
-        with patch(
-            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+        with (
+            patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
+            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
+        ):
             result = scope_diff_to_app(diff, app_path, old_snap, new_snap)
         (overlay,) = [
-            c for c in result.breaking_for_app
+            c
+            for c in result.breaking_for_app
             if c.kind == ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED
         ]
         assert overlay.impact_assessment is not None
@@ -2100,14 +2357,17 @@ class TestScopeDiffToAppWithSnapshots:
         old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
         new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
         diff = DiffResult(
-            old_version="1.0", new_version="2.0", library="libfoo.so.1",
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
             changes=[Change(ChangeKind.FUNC_REMOVED, "foo_process", "removed")],
             verdict=Verdict.BREAKING,
         )
         app_reqs = AppRequirements(undefined_symbols={"foo_init", "foo_process"})
-        with patch(
-            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+        with (
+            patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
+            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
+        ):
             result = scope_diff_to_app(diff, tmp_path / "app", old_snap, new_snap)
         assert result.missing_symbols == ["foo_process"]
         assert [c.kind for c in result.breaking_for_app] == [ChangeKind.FUNC_REMOVED]
@@ -2126,16 +2386,24 @@ class TestScopeDiffToAppWithSnapshots:
         old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
         new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
         diff = DiffResult(
-            old_version="1.0", new_version="2.0", library="libfoo.so.1",
-            changes=[], verdict=Verdict.COMPATIBLE,
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
         )
         app_reqs = AppRequirements(undefined_symbols={"foo_init", "foo_process"})
         suppression = SuppressionList([Suppression(symbol="foo_process")])
-        with patch(
-            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+        with (
+            patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
+            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
+        ):
             result = scope_diff_to_app(
-                diff, tmp_path / "app", old_snap, new_snap, suppression=suppression,
+                diff,
+                tmp_path / "app",
+                old_snap,
+                new_snap,
+                suppression=suppression,
             )
         assert result.missing_symbols == []
         assert [c.kind for c in result.breaking_for_app] == []
@@ -2145,30 +2413,40 @@ class TestScopeDiffToAppWithSnapshots:
         assert result.symbol_coverage < 100.0
 
     def test_consumer_required_symbol_removed_overlay_survives_unmatched_suppression(
-        self, tmp_path,
+        self,
+        tmp_path,
     ):
         from abicheck.suppression import Suppression, SuppressionList
 
         old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "foo_process"])
         new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
         diff = DiffResult(
-            old_version="1.0", new_version="2.0", library="libfoo.so.1",
-            changes=[], verdict=Verdict.COMPATIBLE,
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
         )
         app_reqs = AppRequirements(undefined_symbols={"foo_init", "foo_process"})
         suppression = SuppressionList([Suppression(symbol="unrelated_symbol")])
-        with patch(
-            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+        with (
+            patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
+            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
+        ):
             result = scope_diff_to_app(
-                diff, tmp_path / "app", old_snap, new_snap, suppression=suppression,
+                diff,
+                tmp_path / "app",
+                old_snap,
+                new_snap,
+                suppression=suppression,
             )
         assert [c.kind for c in result.breaking_for_app] == [
             ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED
         ]
 
     def test_consumer_required_symbol_removed_not_hidden_by_broad_namespace_rule(
-        self, tmp_path,
+        self,
+        tmp_path,
     ):
         """Codex review, fresh evidence: this overlay only ever exists because
         a real --used-by consumer's own undefined-symbol requirement
@@ -2190,18 +2468,26 @@ class TestScopeDiffToAppWithSnapshots:
         old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "ns::detail::foo"])
         new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
         diff = DiffResult(
-            old_version="1.0", new_version="2.0", library="libfoo.so.1",
-            changes=[], verdict=Verdict.COMPATIBLE,
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
         )
         app_reqs = AppRequirements(undefined_symbols={"foo_init", "ns::detail::foo"})
         suppression = SuppressionList(
             [Suppression(namespace="ns::detail::**", reason="detail churn")]
         )
-        with patch(
-            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+        with (
+            patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
+            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
+        ):
             result = scope_diff_to_app(
-                diff, tmp_path / "app", old_snap, new_snap, suppression=suppression,
+                diff,
+                tmp_path / "app",
+                old_snap,
+                new_snap,
+                suppression=suppression,
             )
         assert result.verdict == Verdict.BREAKING
         assert result.missing_symbols == ["ns::detail::foo"]
@@ -2210,7 +2496,8 @@ class TestScopeDiffToAppWithSnapshots:
         assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK in kinds
 
     def test_consumer_required_symbol_removed_broad_rule_applies_with_override(
-        self, tmp_path,
+        self,
+        tmp_path,
     ):
         """The explicit-acknowledgment counterpart: allow_public_break: true
         on the same broad rule does suppress it, same as any other
@@ -2220,20 +2507,32 @@ class TestScopeDiffToAppWithSnapshots:
         old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init", "ns::detail::foo"])
         new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
         diff = DiffResult(
-            old_version="1.0", new_version="2.0", library="libfoo.so.1",
-            changes=[], verdict=Verdict.COMPATIBLE,
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
         )
         app_reqs = AppRequirements(undefined_symbols={"foo_init", "ns::detail::foo"})
-        suppression = SuppressionList([
-            Suppression(
-                namespace="ns::detail::**", reason="reviewed", allow_public_break=True,
-            )
-        ])
-        with patch(
-            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    namespace="ns::detail::**",
+                    reason="reviewed",
+                    allow_public_break=True,
+                )
+            ]
+        )
+        with (
+            patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
+            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
+        ):
             result = scope_diff_to_app(
-                diff, tmp_path / "app", old_snap, new_snap, suppression=suppression,
+                diff,
+                tmp_path / "app",
+                old_snap,
+                new_snap,
+                suppression=suppression,
             )
         assert result.missing_symbols == []
         assert result.breaking_for_app == []
@@ -2257,8 +2556,11 @@ class TestScopeDiffToAppConsumerSpec:
 
     def _diff(self) -> DiffResult:
         return DiffResult(
-            old_version="1.0", new_version="2.0", library="libfoo.so.1",
-            changes=[], verdict=Verdict.COMPATIBLE,
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so.1",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
         )
 
     def test_required_unreadable_consumer_raises(self, tmp_path):
@@ -2272,7 +2574,9 @@ class TestScopeDiffToAppConsumerSpec:
         old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init"])
         new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
         spec = ConsumerSpec(path=unreadable)
-        with pytest.raises(ConsumerUnreadableError, match="Cannot detect binary format"):
+        with pytest.raises(
+            ConsumerUnreadableError, match="Cannot detect binary format"
+        ):
             scope_diff_to_app(self._diff(), spec, old_snap, new_snap)
 
     def test_advisory_unreadable_consumer_is_skipped_not_raised(self, tmp_path):
@@ -2330,9 +2634,10 @@ class TestScopeDiffToAppConsumerSpec:
         digest = "sha256:" + hashlib.sha256(content).hexdigest()
         spec = ConsumerSpec(path=app, digest=digest)
         app_reqs = AppRequirements(undefined_symbols={"foo_init"})
-        with patch(
-            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+        with (
+            patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
+            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
+        ):
             result = scope_diff_to_app(self._diff(), spec, old_snap, new_snap)
         assert result.unreadable is False
         assert result.digest == digest
@@ -2343,10 +2648,13 @@ class TestScopeDiffToAppConsumerSpec:
         old_snap = self._snap("1.0", "libfoo.so.1", ["foo_init"])
         new_snap = self._snap("2.0", "libfoo.so.1", ["foo_init"])
         app_reqs = AppRequirements(undefined_symbols={"foo_init"})
-        with patch(
-            "abicheck.appcompat.parse_app_requirements", return_value=app_reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
-            result = scope_diff_to_app(self._diff(), tmp_path / "app", old_snap, new_snap)
+        with (
+            patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
+            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
+        ):
+            result = scope_diff_to_app(
+                self._diff(), tmp_path / "app", old_snap, new_snap
+            )
         assert result.requirement == "required"
         assert result.platform is None
         assert result.digest is None
@@ -2396,7 +2704,9 @@ class TestLibFmtAndMetaAccessors:
 class TestCheckPeOrdinalImportsWithSnapshots:
     def _snap(self, exports: list[PeExport]) -> AbiSnapshot:
         return AbiSnapshot(
-            library="foo.dll", version="1.0", pe=PeMetadata(exports=exports),
+            library="foo.dll",
+            version="1.0",
+            pe=PeMetadata(exports=exports),
         )
 
     def test_no_ordinal_requirements_short_circuits(self):
@@ -2404,7 +2714,9 @@ class TestCheckPeOrdinalImportsWithSnapshots:
         new_snap = self._snap([PeExport(name="Foo", ordinal=1)])
         app_reqs = AppRequirements(undefined_symbols={"Foo"})
         resolved, retargeted, names = _check_pe_ordinal_imports(
-            old_snap, new_snap, app_reqs,
+            old_snap,
+            new_snap,
+            app_reqs,
         )
         assert (resolved, retargeted, names) == (set(), [], set())
 
@@ -2413,7 +2725,9 @@ class TestCheckPeOrdinalImportsWithSnapshots:
         new_snap = AbiSnapshot(library="foo.dll", version="2.0")  # no .pe field
         app_reqs = AppRequirements(undefined_symbols={"ordinal:1"})
         resolved, retargeted, names = _check_pe_ordinal_imports(
-            old_snap, new_snap, app_reqs,
+            old_snap,
+            new_snap,
+            app_reqs,
         )
         assert (resolved, retargeted, names) == (set(), [], set())
 
@@ -2422,7 +2736,9 @@ class TestCheckPeOrdinalImportsWithSnapshots:
         new_snap = self._snap([PeExport(name="Foo", ordinal=1)])
         app_reqs = AppRequirements(undefined_symbols={"ordinal:1"})
         resolved, retargeted, names = _check_pe_ordinal_imports(
-            old_snap, new_snap, app_reqs,
+            old_snap,
+            new_snap,
+            app_reqs,
         )
         assert resolved == {"ordinal:1"}
         assert retargeted == []
@@ -2433,7 +2749,9 @@ class TestCheckPeOrdinalImportsWithSnapshots:
         new_snap = self._snap([PeExport(name="Bar", ordinal=1)])
         app_reqs = AppRequirements(undefined_symbols={"ordinal:1"})
         resolved, retargeted, names = _check_pe_ordinal_imports(
-            old_snap, new_snap, app_reqs,
+            old_snap,
+            new_snap,
+            app_reqs,
         )
         assert resolved == {"ordinal:1"}
         assert len(retargeted) == 1
@@ -2446,7 +2764,9 @@ class TestCheckPeOrdinalImportsWithSnapshots:
         new_snap = self._snap([PeExport(name="Foo", ordinal=1)])
         app_reqs = AppRequirements(undefined_symbols={"ordinal:abc"})
         resolved, retargeted, names = _check_pe_ordinal_imports(
-            old_snap, new_snap, app_reqs,
+            old_snap,
+            new_snap,
+            app_reqs,
         )
         assert (resolved, retargeted, names) == (set(), [], set())
 
@@ -2457,7 +2777,9 @@ class TestCheckPeOrdinalImportsWithSnapshots:
         new_snap = self._snap([PeExport(name="", ordinal=1)])
         app_reqs = AppRequirements(undefined_symbols={"ordinal:1"})
         resolved, retargeted, names = _check_pe_ordinal_imports(
-            old_snap, new_snap, app_reqs,
+            old_snap,
+            new_snap,
+            app_reqs,
         )
         assert resolved == {"ordinal:1"}
         assert names == set()
@@ -2467,10 +2789,13 @@ class TestCheckPeOrdinalImportsWithSnapshots:
         new_snap = self._snap([PeExport(name="Foo", ordinal=1)])
         app_reqs = AppRequirements(undefined_symbols={"ordinal:1"})
         with patch(
-            "abicheck.appcompat._lib_pe_meta", side_effect=RuntimeError("boom"),
+            "abicheck.appcompat._lib_pe_meta",
+            side_effect=RuntimeError("boom"),
         ):
             resolved, retargeted, names = _check_pe_ordinal_imports(
-                old_snap, new_snap, app_reqs,
+                old_snap,
+                new_snap,
+                app_reqs,
             )
         assert (resolved, retargeted, names) == (set(), [], set())
 
@@ -2675,9 +3000,7 @@ class TestMergeConsumerImpactPaths:
         from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
-        only = ConsumerImpactPath(
-            consumer="app", symbol="foo", public_entries=("run",)
-        )
+        only = ConsumerImpactPath(consumer="app", symbol="foo", public_entries=("run",))
         merged = _merge_consumer_impact_paths([only])
         assert merged.consumer == only.consumer
         assert merged.symbol == only.symbol

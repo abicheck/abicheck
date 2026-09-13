@@ -13,13 +13,16 @@
 # limitations under the License.
 
 """Unit tests for scripts/summarize_test_durations.py."""
+
 from __future__ import annotations
 
 import importlib.util
 import json
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "summarize_test_durations.py"
+SCRIPT = (
+    Path(__file__).resolve().parent.parent / "scripts" / "summarize_test_durations.py"
+)
 
 
 def _load():

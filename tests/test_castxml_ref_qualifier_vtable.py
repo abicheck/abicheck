@@ -28,6 +28,7 @@ model needs:
 These tests build synthetic castxml XML fragments, so they run in the
 fast default suite without the external tool.
 """
+
 from __future__ import annotations
 
 from xml.etree.ElementTree import Element, SubElement
@@ -274,8 +275,6 @@ def test_is_itanium_dtor_symbol_structural(entry: str, is_dtor: bool) -> None:
         "~Renderer",  # castxml fallback entry
     ],
 )
-
-
 def test_has_virtual_destructor_non_itanium_entries(entry: str) -> None:
     rec = RecordType(name="Renderer", kind="class", vtable=[entry])
     assert _has_virtual_destructor(rec)
@@ -287,7 +286,9 @@ def test_is_itanium_dtor_symbol_rejects_oversized_source_name_length() -> None:
     assert not _is_itanium_dtor_symbol("_ZN" + "9" * 5000)
 
 
-def test_is_itanium_dtor_symbol_rejects_oversized_template_arg_source_name_length() -> None:
+def test_is_itanium_dtor_symbol_rejects_oversized_template_arg_source_name_length() -> (
+    None
+):
     from abicheck.idioms import _is_itanium_dtor_symbol
 
     assert not _is_itanium_dtor_symbol("_ZN3FooI" + "9" * 5000 + "EED1Ev")

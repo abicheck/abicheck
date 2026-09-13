@@ -23,6 +23,7 @@ cross-matched across old/new snapshots, fabricating or missing findings for
 the wrong enum -- the exact short/leaf-name collision class already fixed for
 ``RecordType``.
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, compare
@@ -31,15 +32,20 @@ from abicheck.model import AbiSnapshot, EnumMember, EnumType
 
 def _snap(version="1.0", enums=None):
     return AbiSnapshot(
-        library="libtest.so.1", version=version,
-        functions=[], variables=[], types=[], enums=enums or [],
+        library="libtest.so.1",
+        version=version,
+        functions=[],
+        variables=[],
+        types=[],
+        enums=enums or [],
     )
 
 
 def _enum(qualified, members, deprecated=None):
     bare = qualified.split("::")[-1]
     return EnumType(
-        name=bare, qualified_name=qualified,
+        name=bare,
+        qualified_name=qualified,
         members=[EnumMember(name=n, value=v) for n, v in members],
         deprecated=deprecated,
     )
@@ -61,7 +67,9 @@ class TestEnumMemberChangesAmbiguitySafe:
             _snap(enums=[ns2_new, ns1_new]),  # reversed order
         )
 
-        value_changes = [c for c in r.changes if c.kind == ChangeKind.ENUM_MEMBER_VALUE_CHANGED]
+        value_changes = [
+            c for c in r.changes if c.kind == ChangeKind.ENUM_MEMBER_VALUE_CHANGED
+        ]
         assert len(value_changes) == 1
         assert value_changes[0].new_value == "2"
 
@@ -142,5 +150,9 @@ class TestEnumRemovalAmbiguitySafe:
             _snap(enums=[ns2_new]),
         )
 
-        removed = [c for c in r.changes if c.kind == ChangeKind.TYPE_REMOVED and c.symbol == "Status"]
+        removed = [
+            c
+            for c in r.changes
+            if c.kind == ChangeKind.TYPE_REMOVED and c.symbol == "Status"
+        ]
         assert len(removed) == 1

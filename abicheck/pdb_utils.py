@@ -17,6 +17,7 @@
 Extracts the PDB path and GUID from the PE debug directory
 (IMAGE_DEBUG_TYPE_CODEVIEW / RSDS signature) using ``pefile``.
 """
+
 from __future__ import annotations
 
 import logging
@@ -61,7 +62,10 @@ _MAX_CODEVIEW_SIZE = 4096
 
 
 def _resolve_absolute_pdb_path(
-    pwin: PureWindowsPath, dll_path: Path, embedded_name: str, embedded: str,
+    pwin: PureWindowsPath,
+    dll_path: Path,
+    embedded_name: str,
+    embedded: str,
 ) -> Path | None:
     """Try to resolve an absolute Windows PDB path to a local file."""
     try:
@@ -75,7 +79,9 @@ def _resolve_absolute_pdb_path(
             return None
         # Construct a host-native Path for the filesystem check.
         if pwin.drive:
-            candidate = Path(*pwin.parts[1:]) if len(pwin.parts) > 1 else Path(embedded_name)
+            candidate = (
+                Path(*pwin.parts[1:]) if len(pwin.parts) > 1 else Path(embedded_name)
+            )
             candidate = dll_path.parent / candidate
         else:
             candidate = Path(embedded)
@@ -87,10 +93,16 @@ def _resolve_absolute_pdb_path(
 
 
 def _resolve_relative_pdb_path(
-    pwin: PureWindowsPath, dll_path: Path, embedded_name: str,
+    pwin: PureWindowsPath,
+    dll_path: Path,
+    embedded_name: str,
 ) -> Path | None:
     """Try to resolve a relative Windows PDB path against the DLL directory."""
-    candidate = dll_path.parent / Path(*pwin.parts) if pwin.parts else dll_path.parent / embedded_name
+    candidate = (
+        dll_path.parent / Path(*pwin.parts)
+        if pwin.parts
+        else dll_path.parent / embedded_name
+    )
     try:
         candidate.resolve().relative_to(dll_path.parent.resolve())
         if candidate.is_file():
@@ -126,7 +138,8 @@ def _resolve_embedded_pdb(
     # Block network/UNC paths during auto-discovery
     if not allow_network and _is_network_path(embedded):
         log.debug(
-            "locate_pdb: skipping network path %s (use --pdb-path to override)", embedded
+            "locate_pdb: skipping network path %s (use --pdb-path to override)",
+            embedded,
         )
         # Still try the filename-only fallback (always local)
         local = dll_path.parent / embedded_name
@@ -176,7 +189,9 @@ def locate_pdb(
     if pdb_path_override is not None:
         if pdb_path_override.is_file():
             return pdb_path_override
-        log.warning("locate_pdb: explicit pdb_path does not exist: %s", pdb_path_override)
+        log.warning(
+            "locate_pdb: explicit pdb_path does not exist: %s", pdb_path_override
+        )
         return None
 
     found = _resolve_embedded_pdb(dll_path, allow_network)
@@ -230,9 +245,11 @@ def _extract_pdb_path_from_pe(dll_path: Path) -> str | None:
         return None
 
     try:
-        pe.parse_data_directories(directories=[
-            pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_DEBUG"],
-        ])
+        pe.parse_data_directories(
+            directories=[
+                pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_DEBUG"],
+            ]
+        )
 
         if not hasattr(pe, "DIRECTORY_ENTRY_DEBUG"):
             return None

@@ -12,6 +12,7 @@ Detection mechanism:
 castxml status (verified): castxml DOES emit deleted="1" on deleted functions.
 The dumper already reads el.get("deleted") == "1" → is_deleted=True.
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
@@ -34,7 +35,9 @@ def _func(name: str, mangled: str, **kwargs: object) -> Function:
 
 def _elf_with_syms(*names: str) -> ElfMetadata:
     syms = [
-        ElfSymbol(name=n, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC, size=0)
+        ElfSymbol(
+            name=n, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC, size=0
+        )
         for n in names
     ]
     return ElfMetadata(symbols=syms)
@@ -118,12 +121,19 @@ class TestFuncDeletedDetection:
 
     def test_method_becomes_deleted(self) -> None:
         """Class method becoming = delete is BREAKING."""
-        old = _snap(functions=[
-            _func("Foo::process", "_ZN3Foo7processEv", is_virtual=False)
-        ])
-        new = _snap(functions=[
-            _func("Foo::process", "_ZN3Foo7processEv", is_virtual=False, is_deleted=True)
-        ])
+        old = _snap(
+            functions=[_func("Foo::process", "_ZN3Foo7processEv", is_virtual=False)]
+        )
+        new = _snap(
+            functions=[
+                _func(
+                    "Foo::process",
+                    "_ZN3Foo7processEv",
+                    is_virtual=False,
+                    is_deleted=True,
+                )
+            ]
+        )
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
         assert ChangeKind.FUNC_DELETED in kinds
@@ -268,17 +278,23 @@ class TestFuncDeletedEdgeCases:
 
     def test_one_overload_deleted(self) -> None:
         """Only the deleted overload should trigger FUNC_DELETED."""
-        old = _snap(functions=[
-            _func("process", "_Z7processi"),
-            _func("process", "_Z7processf"),
-        ])
-        new = _snap(functions=[
-            _func("process", "_Z7processi"),
-            _func("process", "_Z7processf", is_deleted=True),
-        ])
+        old = _snap(
+            functions=[
+                _func("process", "_Z7processi"),
+                _func("process", "_Z7processf"),
+            ]
+        )
+        new = _snap(
+            functions=[
+                _func("process", "_Z7processi"),
+                _func("process", "_Z7processf", is_deleted=True),
+            ]
+        )
 
         result = compare(old, new)
-        deleted_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_DELETED]
+        deleted_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_DELETED
+        ]
         deleted_symbols = {c.symbol for c in deleted_changes}
 
         assert deleted_symbols == {"_Z7processf"}

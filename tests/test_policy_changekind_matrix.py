@@ -5,6 +5,7 @@ This test ensures that:
 2. Policy downgrade/upgrade logic is consistent.
 3. No kind is accidentally unclassified (would silently default to BREAKING).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -64,9 +65,7 @@ class TestPolicyKindSetsConsistency:
         breaking, api_break, compatible, risk = policy_kind_sets(policy)
         all_covered = breaking | api_break | compatible | risk
         uncovered = set(ChangeKind) - all_covered
-        assert not uncovered, (
-            f"Policy '{policy}' leaves kinds uncovered: {uncovered}"
-        )
+        assert not uncovered, f"Policy '{policy}' leaves kinds uncovered: {uncovered}"
 
     @pytest.mark.parametrize("policy", ALL_POLICIES)
     def test_policy_sets_disjoint(self, policy: str):
@@ -134,8 +133,8 @@ class TestVerdictComputationMatrix:
             kind: ChangeKind
 
         changes = [
-            _FakeChange(kind=ChangeKind.FUNC_ADDED),      # COMPATIBLE
-            _FakeChange(kind=ChangeKind.FUNC_REMOVED),     # BREAKING
+            _FakeChange(kind=ChangeKind.FUNC_ADDED),  # COMPATIBLE
+            _FakeChange(kind=ChangeKind.FUNC_REMOVED),  # BREAKING
         ]
         for policy in ALL_POLICIES:
             assert compute_verdict(changes, policy=policy) == Verdict.BREAKING
@@ -155,8 +154,12 @@ class TestConfidenceComputation:
         from abicheck.model import AbiSnapshot
 
         snap = AbiSnapshot(
-            library="libtest.so", version="1.0",
-            functions=[], variables=[], types=[], enums=[],
+            library="libtest.so",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            enums=[],
             typedefs={},
         )
         result = compare(snap, snap)
@@ -170,8 +173,12 @@ class TestConfidenceComputation:
         from abicheck.model import AbiSnapshot
 
         snap = AbiSnapshot(
-            library="libtest.so", version="1.0",
-            functions=[], variables=[], types=[], enums=[],
+            library="libtest.so",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            enums=[],
             typedefs={},
         )
         result = compare(snap, snap)

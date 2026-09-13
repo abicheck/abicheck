@@ -308,8 +308,12 @@ def _record_bucket(
 
 
 def finalize_ledger(
-    ledger: DispositionLedger, result: DiffResult, severity_config: object | None = None,
-    *, verdict_scored: Iterable[Change] = (), strict_acknowledgments: bool = False,
+    ledger: DispositionLedger,
+    result: DiffResult,
+    severity_config: object | None = None,
+    *,
+    verdict_scored: Iterable[Change] = (),
+    strict_acknowledgments: bool = False,
     today: date | None = None,
 ) -> DispositionLedger:
     """Close *ledger* over *result*, labelling every not-yet-recorded change.
@@ -544,7 +548,10 @@ def close_consumer_scope(
 
 
 def ledger_for(
-    result: DiffResult, severity_config: object | None = None, *, today: date | None = None
+    result: DiffResult,
+    severity_config: object | None = None,
+    *,
+    today: date | None = None,
 ) -> DispositionLedger:
     """The conserved ledger for *result* — the one accessor every consumer uses.
 

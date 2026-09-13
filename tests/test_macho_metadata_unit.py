@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """Unit tests for macho_metadata — dataclass construction, magic detection, serialization, and parsing."""
+
 from __future__ import annotations
 
 import struct
@@ -29,6 +30,7 @@ from abicheck.macho_metadata import (
 )
 
 # ── MachoMetadata dataclass ─────────────────────────────────────────────
+
 
 class TestMachoMetadataDataclass:
     def test_default_construction(self):
@@ -66,6 +68,7 @@ class TestMachoMetadataDataclass:
 
 # ── _version_str ────────────────────────────────────────────────────────
 
+
 class TestVersionStr:
     def test_simple_version(self):
         # 1.2.3 → major=1, minor=2, patch=3
@@ -91,6 +94,7 @@ class TestVersionStr:
 
 
 # ── is_macho magic detection ────────────────────────────────────────────
+
 
 class TestIsMacho:
     def test_macho_64_le(self, tmp_path):
@@ -161,6 +165,7 @@ class TestIsMacho:
 
 # ── Serialization round-trip ─────────────────────────────────────────────
 
+
 class TestMachoSerialization:
     def test_snapshot_roundtrip(self):
         from abicheck.model import AbiSnapshot
@@ -175,7 +180,9 @@ class TestMachoSerialization:
             reexported_libs=[],
             exports=[
                 MachoExport(name="foo_init"),
-                MachoExport(name="foo_weak", sym_type=MachoSymbolType.WEAK, is_weak=True),
+                MachoExport(
+                    name="foo_weak", sym_type=MachoSymbolType.WEAK, is_weak=True
+                ),
             ],
             current_version="1.2.3",
             compat_version="1.0.0",
@@ -199,17 +206,26 @@ class TestMachoSerialization:
 
 # ── Checker diff_macho ───────────────────────────────────────────────────
 
+
 class TestDiffMacho:
     def test_removed_export(self):
         from abicheck.checker import ChangeKind, _diff_macho
         from abicheck.model import AbiSnapshot
 
-        old = AbiSnapshot(library="libfoo.dylib", version="1.0", macho=MachoMetadata(
-            exports=[MachoExport(name="foo"), MachoExport(name="bar")],
-        ))
-        new = AbiSnapshot(library="libfoo.dylib", version="2.0", macho=MachoMetadata(
-            exports=[MachoExport(name="foo")],
-        ))
+        old = AbiSnapshot(
+            library="libfoo.dylib",
+            version="1.0",
+            macho=MachoMetadata(
+                exports=[MachoExport(name="foo"), MachoExport(name="bar")],
+            ),
+        )
+        new = AbiSnapshot(
+            library="libfoo.dylib",
+            version="2.0",
+            macho=MachoMetadata(
+                exports=[MachoExport(name="foo")],
+            ),
+        )
         changes = _diff_macho(old, new)
         removed = [c for c in changes if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(removed) == 1
@@ -219,12 +235,20 @@ class TestDiffMacho:
         from abicheck.checker import ChangeKind, _diff_macho
         from abicheck.model import AbiSnapshot
 
-        old = AbiSnapshot(library="libfoo.dylib", version="1.0", macho=MachoMetadata(
-            exports=[MachoExport(name="foo")],
-        ))
-        new = AbiSnapshot(library="libfoo.dylib", version="2.0", macho=MachoMetadata(
-            exports=[MachoExport(name="foo"), MachoExport(name="baz")],
-        ))
+        old = AbiSnapshot(
+            library="libfoo.dylib",
+            version="1.0",
+            macho=MachoMetadata(
+                exports=[MachoExport(name="foo")],
+            ),
+        )
+        new = AbiSnapshot(
+            library="libfoo.dylib",
+            version="2.0",
+            macho=MachoMetadata(
+                exports=[MachoExport(name="foo"), MachoExport(name="baz")],
+            ),
+        )
         changes = _diff_macho(old, new)
         added = [c for c in changes if c.kind == ChangeKind.FUNC_ADDED]
         assert len(added) == 1
@@ -234,17 +258,28 @@ class TestDiffMacho:
         from abicheck.checker import ChangeKind, _diff_macho
         from abicheck.model import AbiSnapshot
 
-        old = AbiSnapshot(library="libfoo.dylib", version="1.0", macho=MachoMetadata(
-            exports=[MachoExport(name="foo")],
-            install_name="/usr/lib/libfoo.1.dylib",
-        ))
-        new = AbiSnapshot(library="libfoo.dylib", version="2.0", macho=MachoMetadata(
-            exports=[MachoExport(name="foo")],
-            install_name="/usr/lib/libfoo.2.dylib",
-        ))
+        old = AbiSnapshot(
+            library="libfoo.dylib",
+            version="1.0",
+            macho=MachoMetadata(
+                exports=[MachoExport(name="foo")],
+                install_name="/usr/lib/libfoo.1.dylib",
+            ),
+        )
+        new = AbiSnapshot(
+            library="libfoo.dylib",
+            version="2.0",
+            macho=MachoMetadata(
+                exports=[MachoExport(name="foo")],
+                install_name="/usr/lib/libfoo.2.dylib",
+            ),
+        )
         changes = _diff_macho(old, new)
-        soname = [c for c in changes if c.kind == ChangeKind.SONAME_CHANGED
-                  and c.symbol == "LC_ID_DYLIB"]
+        soname = [
+            c
+            for c in changes
+            if c.kind == ChangeKind.SONAME_CHANGED and c.symbol == "LC_ID_DYLIB"
+        ]
         assert len(soname) == 1
         assert soname[0].old_value == "/usr/lib/libfoo.1.dylib"
         assert soname[0].new_value == "/usr/lib/libfoo.2.dylib"
@@ -253,14 +288,22 @@ class TestDiffMacho:
         from abicheck.checker import ChangeKind, _diff_macho
         from abicheck.model import AbiSnapshot
 
-        old = AbiSnapshot(library="libfoo.dylib", version="1.0", macho=MachoMetadata(
-            exports=[MachoExport(name="foo")],
-            compat_version="1.0.0",
-        ))
-        new = AbiSnapshot(library="libfoo.dylib", version="2.0", macho=MachoMetadata(
-            exports=[MachoExport(name="foo")],
-            compat_version="2.0.0",
-        ))
+        old = AbiSnapshot(
+            library="libfoo.dylib",
+            version="1.0",
+            macho=MachoMetadata(
+                exports=[MachoExport(name="foo")],
+                compat_version="1.0.0",
+            ),
+        )
+        new = AbiSnapshot(
+            library="libfoo.dylib",
+            version="2.0",
+            macho=MachoMetadata(
+                exports=[MachoExport(name="foo")],
+                compat_version="2.0.0",
+            ),
+        )
         changes = _diff_macho(old, new)
         compat = [c for c in changes if c.symbol == "compat_version"]
         assert len(compat) == 1
@@ -270,14 +313,25 @@ class TestDiffMacho:
         from abicheck.checker import ChangeKind, _diff_macho
         from abicheck.model import AbiSnapshot
 
-        old = AbiSnapshot(library="libfoo.dylib", version="1.0", macho=MachoMetadata(
-            exports=[MachoExport(name="foo")],
-            dependent_libs=["/usr/lib/libSystem.B.dylib", "/usr/lib/libz.1.dylib"],
-        ))
-        new = AbiSnapshot(library="libfoo.dylib", version="2.0", macho=MachoMetadata(
-            exports=[MachoExport(name="foo")],
-            dependent_libs=["/usr/lib/libSystem.B.dylib", "/usr/lib/libc++.1.dylib"],
-        ))
+        old = AbiSnapshot(
+            library="libfoo.dylib",
+            version="1.0",
+            macho=MachoMetadata(
+                exports=[MachoExport(name="foo")],
+                dependent_libs=["/usr/lib/libSystem.B.dylib", "/usr/lib/libz.1.dylib"],
+            ),
+        )
+        new = AbiSnapshot(
+            library="libfoo.dylib",
+            version="2.0",
+            macho=MachoMetadata(
+                exports=[MachoExport(name="foo")],
+                dependent_libs=[
+                    "/usr/lib/libSystem.B.dylib",
+                    "/usr/lib/libc++.1.dylib",
+                ],
+            ),
+        )
         changes = _diff_macho(old, new)
         removed = [c for c in changes if c.kind == ChangeKind.NEEDED_REMOVED]
         added = [c for c in changes if c.kind == ChangeKind.NEEDED_ADDED]
@@ -292,9 +346,13 @@ class TestDiffMacho:
 
         macho = MachoMetadata(exports=[MachoExport(name="foo")])
         old = AbiSnapshot(library="libfoo.dylib", version="1.0", macho=macho)
-        new = AbiSnapshot(library="libfoo.dylib", version="2.0", macho=MachoMetadata(
-            exports=[MachoExport(name="foo")],
-        ))
+        new = AbiSnapshot(
+            library="libfoo.dylib",
+            version="2.0",
+            macho=MachoMetadata(
+                exports=[MachoExport(name="foo")],
+            ),
+        )
         assert _diff_macho(old, new) == []
 
     def test_empty_macho_metadata(self):
@@ -310,14 +368,25 @@ class TestDiffMacho:
         from abicheck.checker import ChangeKind, _diff_macho
         from abicheck.model import AbiSnapshot
 
-        old = AbiSnapshot(library="libfoo.dylib", version="1.0", macho=MachoMetadata(
-            install_name="/usr/lib/libfoo.1.dylib",
-            dependent_libs=["/usr/lib/libSystem.B.dylib"],
-        ))
-        new = AbiSnapshot(library="libfoo.dylib", version="2.0", macho=MachoMetadata(
-            install_name="/usr/lib/libfoo.2.dylib",
-            dependent_libs=["/usr/lib/libSystem.B.dylib", "/usr/lib/libc++.1.dylib"],
-        ))
+        old = AbiSnapshot(
+            library="libfoo.dylib",
+            version="1.0",
+            macho=MachoMetadata(
+                install_name="/usr/lib/libfoo.1.dylib",
+                dependent_libs=["/usr/lib/libSystem.B.dylib"],
+            ),
+        )
+        new = AbiSnapshot(
+            library="libfoo.dylib",
+            version="2.0",
+            macho=MachoMetadata(
+                install_name="/usr/lib/libfoo.2.dylib",
+                dependent_libs=[
+                    "/usr/lib/libSystem.B.dylib",
+                    "/usr/lib/libc++.1.dylib",
+                ],
+            ),
+        )
         changes = _diff_macho(old, new)
         assert any(c.kind == ChangeKind.SONAME_CHANGED for c in changes)
         assert any(c.kind == ChangeKind.NEEDED_ADDED for c in changes)
@@ -328,12 +397,20 @@ class TestDiffMacho:
         from abicheck.model import AbiSnapshot, Function
 
         fn = Function(name="bar", mangled="_bar", return_type="void")
-        old = AbiSnapshot(library="libfoo.dylib", version="1.0",
-                          functions=[fn],
-                          macho=MachoMetadata(exports=[MachoExport(name="foo"), MachoExport(name="bar")]))
-        new = AbiSnapshot(library="libfoo.dylib", version="2.0",
-                          functions=[fn],
-                          macho=MachoMetadata(exports=[MachoExport(name="foo")]))
+        old = AbiSnapshot(
+            library="libfoo.dylib",
+            version="1.0",
+            functions=[fn],
+            macho=MachoMetadata(
+                exports=[MachoExport(name="foo"), MachoExport(name="bar")]
+            ),
+        )
+        new = AbiSnapshot(
+            library="libfoo.dylib",
+            version="2.0",
+            functions=[fn],
+            macho=MachoMetadata(exports=[MachoExport(name="foo")]),
+        )
         changes = _diff_macho(old, new)
         removed = [c for c in changes if c.kind == ChangeKind.FUNC_REMOVED]
         # "bar" is already in old.functions → must be deduplicated
@@ -345,12 +422,20 @@ class TestDiffMacho:
         from abicheck.model import AbiSnapshot, Function
 
         fn = Function(name="foo", mangled="_foo", return_type="void")
-        old = AbiSnapshot(library="libfoo.dylib", version="1.0",
-                          functions=[fn],
-                          macho=MachoMetadata(exports=[MachoExport(name="foo"), MachoExport(name="baz")]))
-        new = AbiSnapshot(library="libfoo.dylib", version="2.0",
-                          functions=[fn],
-                          macho=MachoMetadata(exports=[MachoExport(name="foo")]))
+        old = AbiSnapshot(
+            library="libfoo.dylib",
+            version="1.0",
+            functions=[fn],
+            macho=MachoMetadata(
+                exports=[MachoExport(name="foo"), MachoExport(name="baz")]
+            ),
+        )
+        new = AbiSnapshot(
+            library="libfoo.dylib",
+            version="2.0",
+            functions=[fn],
+            macho=MachoMetadata(exports=[MachoExport(name="foo")]),
+        )
         changes = _diff_macho(old, new)
         removed = [c for c in changes if c.kind == ChangeKind.FUNC_REMOVED]
         # "baz" is not in functions → must still be emitted
@@ -362,12 +447,20 @@ class TestDiffMacho:
         from abicheck.checker import ChangeKind, _diff_macho
         from abicheck.model import AbiSnapshot
 
-        old = AbiSnapshot(library="libfoo.dylib", version="1.0", macho=MachoMetadata(
-            reexported_libs=["/usr/lib/libA.dylib", "/usr/lib/libB.dylib"],
-        ))
-        new = AbiSnapshot(library="libfoo.dylib", version="2.0", macho=MachoMetadata(
-            reexported_libs=["/usr/lib/libA.dylib", "/usr/lib/libC.dylib"],
-        ))
+        old = AbiSnapshot(
+            library="libfoo.dylib",
+            version="1.0",
+            macho=MachoMetadata(
+                reexported_libs=["/usr/lib/libA.dylib", "/usr/lib/libB.dylib"],
+            ),
+        )
+        new = AbiSnapshot(
+            library="libfoo.dylib",
+            version="2.0",
+            macho=MachoMetadata(
+                reexported_libs=["/usr/lib/libA.dylib", "/usr/lib/libC.dylib"],
+            ),
+        )
         changes = _diff_macho(old, new)
         repointed = [c for c in changes if c.kind == ChangeKind.MACHO_REEXPORT_CHANGED]
         assert len(repointed) == 1
@@ -386,10 +479,11 @@ class TestDiffMacho:
 
 # ── Synthetic Mach-O binary builder ──────────────────────────────────────
 
+
 def _build_macho_64_le(
     *,
     cputype: int = 0x0100000C,  # ARM64
-    filetype: int = 6,          # MH_DYLIB
+    filetype: int = 6,  # MH_DYLIB
     flags: int = 0x00200085,
     install_name: str = "",
     dependent_libs: list[str] | None = None,
@@ -404,7 +498,9 @@ def _build_macho_64_le(
     load_cmds = bytearray()
     ncmds = 0
 
-    def _dylib_cmd(cmd_id: int, name: str, cur_ver: int = 0x10000, compat_ver: int = 0x10000) -> bytes:
+    def _dylib_cmd(
+        cmd_id: int, name: str, cur_ver: int = 0x10000, compat_ver: int = 0x10000
+    ) -> bytes:
         name_bytes = name.encode("utf-8") + b"\x00"
         # dylib_command: cmd(4), cmdsize(4), name_offset(4), timestamp(4), cur_ver(4), compat_ver(4)
         # name_offset = 24 (after the fixed part)
@@ -412,21 +508,25 @@ def _build_macho_64_le(
         total = name_offset + len(name_bytes)
         # Pad to 8-byte alignment
         total = (total + 7) & ~7
-        buf = struct.pack(f"{endian}IIIIII", cmd_id, total, name_offset, 0, cur_ver, compat_ver)
+        buf = struct.pack(
+            f"{endian}IIIIII", cmd_id, total, name_offset, 0, cur_ver, compat_ver
+        )
         buf += name_bytes
         buf += b"\x00" * (total - len(buf))
         return buf
 
     if install_name:
-        cmd = _dylib_cmd(0xD, install_name, cur_ver=(1 << 16) | (2 << 8) | 3, compat_ver=(1 << 16))
+        cmd = _dylib_cmd(
+            0xD, install_name, cur_ver=(1 << 16) | (2 << 8) | 3, compat_ver=(1 << 16)
+        )
         load_cmds += cmd
         ncmds += 1
 
-    for dep in (dependent_libs or []):
+    for dep in dependent_libs or []:
         load_cmds += _dylib_cmd(0xC, dep)
         ncmds += 1
 
-    for dep in (reexported_libs or []):
+    for dep in reexported_libs or []:
         load_cmds += _dylib_cmd(0x8000001F, dep)
         ncmds += 1
 
@@ -460,13 +560,17 @@ def _build_macho_64_le(
         str_indices: list[int] = []
         for name, _, _ in symtab_entries:
             str_indices.append(len(strtab))
-            strtab += b"_" + name.encode("utf-8") + b"\x00"  # Mach-O C symbols have leading _
+            strtab += (
+                b"_" + name.encode("utf-8") + b"\x00"
+            )  # Mach-O C symbols have leading _
 
         # Build nlist_64 entries
         symtab_data = bytearray()
         for i, (name, n_type, n_desc) in enumerate(symtab_entries):
             # nlist_64: n_strx(4), n_type(1), n_sect(1), n_desc(2), n_value(8)
-            symtab_data += struct.pack(f"{endian}IBBHQ", str_indices[i], n_type, 1, n_desc, 0)
+            symtab_data += struct.pack(
+                f"{endian}IBBHQ", str_indices[i], n_type, 1, n_desc, 0
+            )
 
         symoff = data_start
         nsyms = len(symtab_entries)
@@ -474,8 +578,12 @@ def _build_macho_64_le(
         strsize = len(strtab)
 
         # Fill in LC_SYMTAB command
-        symtab_cmd = struct.pack(f"{endian}IIIIII", 0x2, symtab_cmd_size, symoff, nsyms, stroff, strsize)
-        load_cmds[symtab_placeholder_pos:symtab_placeholder_pos + symtab_cmd_size] = symtab_cmd
+        symtab_cmd = struct.pack(
+            f"{endian}IIIIII", 0x2, symtab_cmd_size, symoff, nsyms, stroff, strsize
+        )
+        load_cmds[symtab_placeholder_pos : symtab_placeholder_pos + symtab_cmd_size] = (
+            symtab_cmd
+        )
 
         # Recalculate sizeofcmds since load_cmds length may have changed
         sizeofcmds = len(load_cmds)
@@ -483,22 +591,30 @@ def _build_macho_64_le(
         data_start = hdr_size + sizeofcmds
         symoff = data_start
         stroff = data_start + len(symtab_data)
-        symtab_cmd = struct.pack(f"{endian}IIIIII", 0x2, symtab_cmd_size, symoff, nsyms, stroff, strsize)
-        load_cmds[symtab_placeholder_pos:symtab_placeholder_pos + symtab_cmd_size] = symtab_cmd
+        symtab_cmd = struct.pack(
+            f"{endian}IIIIII", 0x2, symtab_cmd_size, symoff, nsyms, stroff, strsize
+        )
+        load_cmds[symtab_placeholder_pos : symtab_placeholder_pos + symtab_cmd_size] = (
+            symtab_cmd
+        )
 
         trailing = bytes(symtab_data) + bytes(strtab)
     else:
         trailing = b""
 
-    hdr = magic + struct.pack(f"{endian}IIiIIII", cputype, 0, filetype, ncmds, len(load_cmds), flags, 0)
+    hdr = magic + struct.pack(
+        f"{endian}IIiIIII", cputype, 0, filetype, ncmds, len(load_cmds), flags, 0
+    )
     return bytes(hdr) + bytes(load_cmds) + trailing
 
 
 # ── parse_macho_metadata ─────────────────────────────────────────────────
 
+
 class TestParseMachoMetadata:
     def test_nonexistent_file_returns_empty(self):
         from pathlib import Path
+
         meta = parse_macho_metadata(Path("/nonexistent/fake.dylib"))
         assert isinstance(meta, MachoMetadata)
         assert meta.exports == []
@@ -543,9 +659,9 @@ class TestParseMachoMetadata:
         N_WEAK_DEF = 0x0080
         data = _build_macho_64_le(
             symbols=[
-                ("my_func", N_EXT | N_SECT, 0),           # normal export
+                ("my_func", N_EXT | N_SECT, 0),  # normal export
                 ("weak_func", N_EXT | N_SECT, N_WEAK_DEF),  # weak export
-                ("internal", N_SECT, 0),                    # not exported (no N_EXT)
+                ("internal", N_SECT, 0),  # not exported (no N_EXT)
             ],
         )
         f = tmp_path / "libtest.dylib"
@@ -600,8 +716,12 @@ class TestParseMachoMetadata:
 
     def test_parse_fat_binary_multi_arch_prefers_known_arch(self, tmp_path):
         """Fat binary with x86_64 + arm64 slices: both are parseable (arch selection is deterministic)."""
-        inner_x86 = _build_macho_64_le(cputype=0x01000007, install_name="/usr/lib/libfat_x86.dylib")
-        inner_arm = _build_macho_64_le(cputype=0x0100000C, install_name="/usr/lib/libfat_arm.dylib")
+        inner_x86 = _build_macho_64_le(
+            cputype=0x01000007, install_name="/usr/lib/libfat_x86.dylib"
+        )
+        inner_arm = _build_macho_64_le(
+            cputype=0x0100000C, install_name="/usr/lib/libfat_arm.dylib"
+        )
         # fat header: magic + nfat_arch
         n_arches = 2
         header_size = 4 + 4 + n_arches * 20
@@ -623,6 +743,7 @@ class TestParseMachoMetadata:
         # Verify host-arch preference: arm64/aarch64 runners should get arm slice,
         # x86_64 runners should get x86 slice, not silently always first-wins.
         import platform as _plat
+
         machine = _plat.machine().lower()
         if machine in ("arm64", "aarch64"):
             assert meta.install_name == "/usr/lib/libfat_arm.dylib", (
@@ -645,9 +766,11 @@ class TestParseMachoMetadata:
 
 # ── CLI _dump_native_binary / _detect_binary_format ──────────────────────
 
+
 class TestCliIntegration:
     def test_detect_binary_format_pe(self, tmp_path):
         from abicheck.cli_resolve import _detect_binary_format
+
         p = tmp_path / "test.dll"
         data = bytearray(0x84 + 4)
         data[0:2] = b"MZ"
@@ -658,6 +781,7 @@ class TestCliIntegration:
 
     def test_detect_binary_format_macho(self, tmp_path):
         from abicheck.cli_resolve import _detect_binary_format
+
         data = _build_macho_64_le()
         p = tmp_path / "lib.dylib"
         p.write_bytes(data)
@@ -665,12 +789,14 @@ class TestCliIntegration:
 
     def test_detect_binary_format_elf(self, tmp_path):
         from abicheck.cli_resolve import _detect_binary_format
+
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         assert _detect_binary_format(p) == "elf"
 
     def test_detect_binary_format_unknown(self, tmp_path):
         from abicheck.cli_resolve import _detect_binary_format
+
         p = tmp_path / "data.txt"
         p.write_text("hello")
         assert _detect_binary_format(p) is None
@@ -709,7 +835,9 @@ class TestCliIntegration:
         f = tmp_path / "lib.dylib"
         f.write_bytes(b"fake")
 
-        with mock_patch("abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta):
+        with mock_patch(
+            "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
+        ):
             snap = _dump_native_binary(f, "macho", [], [], "1.0", "c")
 
         assert snap.platform == "macho"
@@ -731,8 +859,10 @@ class TestCliIntegration:
         f = tmp_path / "empty.dll"
         f.write_bytes(b"fake")
         # machine set (parse succeeded) but no exports at all
-        with mock_patch("abicheck.pe_metadata.parse_pe_metadata",
-                        return_value=PeMetadata(machine="IMAGE_FILE_MACHINE_AMD64")):
+        with mock_patch(
+            "abicheck.pe_metadata.parse_pe_metadata",
+            return_value=PeMetadata(machine="IMAGE_FILE_MACHINE_AMD64"),
+        ):
             with pytest.raises(click.ClickException, match="no exports"):
                 _dump_native_binary(f, "pe", [], [], "1.0", "c")
 
@@ -749,8 +879,12 @@ class TestCliIntegration:
         f = tmp_path / "empty.dylib"
         f.write_bytes(b"fake")
         # Completely empty metadata — no exports, no install_name, no dependent_libs
-        with mock_patch("abicheck.macho_metadata.parse_macho_metadata", return_value=MachoMetadata()):
-            with pytest.raises(click.ClickException, match="no exports or load-command metadata"):
+        with mock_patch(
+            "abicheck.macho_metadata.parse_macho_metadata", return_value=MachoMetadata()
+        ):
+            with pytest.raises(
+                click.ClickException, match="no exports or load-command metadata"
+            ):
                 _dump_native_binary(f, "macho", [], [], "1.0", "c")
 
     def test_dump_native_binary_unsupported_format(self, tmp_path):
@@ -768,6 +902,7 @@ class TestCliIntegration:
 
 # ── install_name / compat_version gained coverage ────────────────────────────
 
+
 class TestDiffMachoGuards:
     """Tests for install_name and compat_version change detection."""
 
@@ -775,8 +910,15 @@ class TestDiffMachoGuards:
         """old=empty, new=set: gaining an install name is reported."""
         from abicheck.checker import ChangeKind, _diff_macho
         from abicheck.model import AbiSnapshot
-        old = AbiSnapshot(library="a.dylib", version="1.0", macho=MachoMetadata(install_name=""))
-        new = AbiSnapshot(library="a.dylib", version="2.0", macho=MachoMetadata(install_name="/usr/lib/a.dylib"))
+
+        old = AbiSnapshot(
+            library="a.dylib", version="1.0", macho=MachoMetadata(install_name="")
+        )
+        new = AbiSnapshot(
+            library="a.dylib",
+            version="2.0",
+            macho=MachoMetadata(install_name="/usr/lib/a.dylib"),
+        )
         changes = _diff_macho(old, new)
         assert any(c.kind == ChangeKind.SONAME_CHANGED for c in changes)
 
@@ -784,7 +926,14 @@ class TestDiffMachoGuards:
         """old=empty, new=set: gaining a compat version is reported."""
         from abicheck.checker import ChangeKind, _diff_macho
         from abicheck.model import AbiSnapshot
-        old = AbiSnapshot(library="a.dylib", version="1.0", macho=MachoMetadata(compat_version=""))
-        new = AbiSnapshot(library="a.dylib", version="2.0", macho=MachoMetadata(compat_version="1.0.0"))
+
+        old = AbiSnapshot(
+            library="a.dylib", version="1.0", macho=MachoMetadata(compat_version="")
+        )
+        new = AbiSnapshot(
+            library="a.dylib",
+            version="2.0",
+            macho=MachoMetadata(compat_version="1.0.0"),
+        )
         changes = _diff_macho(old, new)
         assert any(c.kind == ChangeKind.COMPAT_VERSION_CHANGED for c in changes)

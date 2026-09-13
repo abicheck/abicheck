@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Tests for TypeMetadataSource protocol and resolution logic."""
+
 from __future__ import annotations
 
 from abicheck.btf_metadata import BtfMetadata
@@ -48,7 +49,9 @@ class TestTypeMetadataSourceProtocol:
         meta = DwarfMetadata(
             has_dwarf=True,
             structs={"foo": StructLayout(name="foo", byte_size=8)},
-            enums={"bar": EnumInfo(name="bar", underlying_byte_size=4, members={"X": 1})},
+            enums={
+                "bar": EnumInfo(name="bar", underlying_byte_size=4, members={"X": 1})
+            },
         )
         assert meta.get_struct_layout("foo") is not None
         assert meta.get_struct_layout("missing") is None
@@ -68,32 +71,42 @@ class TestResolveDebugMetadata:
 
     def test_userspace_prefers_dwarf(self) -> None:
         result = resolve_debug_metadata(
-            dwarf=self._make_dwarf(), btf=self._make_btf(), ctf=self._make_ctf(),
+            dwarf=self._make_dwarf(),
+            btf=self._make_btf(),
+            ctf=self._make_ctf(),
         )
         assert isinstance(result, DwarfMetadata)
 
     def test_kernel_prefers_btf(self) -> None:
         result = resolve_debug_metadata(
-            dwarf=self._make_dwarf(), btf=self._make_btf(), ctf=self._make_ctf(),
+            dwarf=self._make_dwarf(),
+            btf=self._make_btf(),
+            ctf=self._make_ctf(),
             prefer_btf=True,
         )
         assert isinstance(result, BtfMetadata)
 
     def test_fallback_to_btf_when_no_dwarf(self) -> None:
         result = resolve_debug_metadata(
-            dwarf=DwarfMetadata(), btf=self._make_btf(), ctf=self._make_ctf(),
+            dwarf=DwarfMetadata(),
+            btf=self._make_btf(),
+            ctf=self._make_ctf(),
         )
         assert isinstance(result, BtfMetadata)
 
     def test_fallback_to_ctf_when_nothing_else(self) -> None:
         result = resolve_debug_metadata(
-            dwarf=DwarfMetadata(), btf=BtfMetadata(), ctf=self._make_ctf(),
+            dwarf=DwarfMetadata(),
+            btf=BtfMetadata(),
+            ctf=self._make_ctf(),
         )
         assert isinstance(result, CtfMetadata)
 
     def test_none_when_all_empty(self) -> None:
         result = resolve_debug_metadata(
-            dwarf=DwarfMetadata(), btf=BtfMetadata(), ctf=CtfMetadata(),
+            dwarf=DwarfMetadata(),
+            btf=BtfMetadata(),
+            ctf=CtfMetadata(),
         )
         assert result is None
 

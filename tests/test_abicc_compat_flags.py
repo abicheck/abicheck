@@ -10,6 +10,7 @@ Verifies that abicheck compat command:
 - _filter_source_only removes BINARY_ONLY_KINDS
 - _build_skip_suppression handles exact names and patterns
 """
+
 from __future__ import annotations
 
 import pytest
@@ -27,13 +28,15 @@ from abicheck.compat.cli import (
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+
 def _result(verdict: Verdict, kinds: list[ChangeKind]) -> DiffResult:
     changes = [
         Change(kind=k, symbol=f"_sym_{i}", description=k.value)
         for i, k in enumerate(kinds)
     ]
     return DiffResult(
-        old_version="1.0", new_version="2.0",
+        old_version="1.0",
+        new_version="2.0",
         library="libtest.so.1",
         changes=changes,
         verdict=verdict,
@@ -41,6 +44,7 @@ def _result(verdict: Verdict, kinds: list[ChangeKind]) -> DiffResult:
 
 
 # ── _apply_strict ────────────────────────────────────────────────────────────
+
 
 class TestApplyStrict:
     def test_pure_addition_stays_compatible_in_strict(self):
@@ -99,9 +103,12 @@ class TestApplyStrict:
 
 # ── _filter_source_only ───────────────────────────────────────────────────────
 
+
 class TestFilterSourceOnly:
     def test_removes_binary_only_soname(self):
-        r = _result(Verdict.BREAKING, [ChangeKind.SONAME_CHANGED, ChangeKind.FUNC_REMOVED])
+        r = _result(
+            Verdict.BREAKING, [ChangeKind.SONAME_CHANGED, ChangeKind.FUNC_REMOVED]
+        )
         filtered = _filter_source_only(r)
         kinds = {c.kind for c in filtered.changes}
         assert ChangeKind.SONAME_CHANGED not in kinds
@@ -134,10 +141,14 @@ class TestFilterSourceOnly:
         source-only views just like symbol_size_changed (Codex review)."""
         assert ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL in _BINARY_ONLY_KINDS
         from abicheck.compat.cli import _filter_source_only
-        r = _result(Verdict.COMPATIBLE_WITH_RISK,
-                    [ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL])
+
+        r = _result(
+            Verdict.COMPATIBLE_WITH_RISK, [ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL]
+        )
         filtered = _filter_source_only(r)
-        assert ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL not in {c.kind for c in filtered.changes}
+        assert ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL not in {
+            c.kind for c in filtered.changes
+        }
 
     def test_const_object_size_change_is_binary_only(self):
         """symbol_size_changed_const_object is still ELF st_size metadata."""
@@ -169,7 +180,9 @@ class TestFilterSourceOnly:
         filtered = _filter_source_only(
             _result(Verdict.BREAKING, [ChangeKind.LONG_DOUBLE_ABI_CHANGED])
         )
-        assert ChangeKind.LONG_DOUBLE_ABI_CHANGED not in {c.kind for c in filtered.changes}
+        assert ChangeKind.LONG_DOUBLE_ABI_CHANGED not in {
+            c.kind for c in filtered.changes
+        }
         assert filtered.verdict == Verdict.NO_CHANGE
 
     def test_g23_b1_thunk_kinds_are_not_binary_only(self):
@@ -182,14 +195,17 @@ class TestFilterSourceOnly:
         ):
             assert kind not in _BINARY_ONLY_KINDS, kind
         from abicheck.compat.cli import _filter_source_only
-        r = _result(Verdict.BREAKING,
-                    [ChangeKind.SYMBOL_SIZE_CHANGED_CONST_OBJECT])
+
+        r = _result(Verdict.BREAKING, [ChangeKind.SYMBOL_SIZE_CHANGED_CONST_OBJECT])
         filtered = _filter_source_only(r)
-        assert ChangeKind.SYMBOL_SIZE_CHANGED_CONST_OBJECT not in {c.kind for c in filtered.changes}
+        assert ChangeKind.SYMBOL_SIZE_CHANGED_CONST_OBJECT not in {
+            c.kind for c in filtered.changes
+        }
         assert filtered.verdict == Verdict.NO_CHANGE
 
 
 # ── _build_skip_suppression ───────────────────────────────────────────────────
+
 
 class TestBuildSkipSuppression:
     def test_exact_symbol_match(self, tmp_path):
@@ -230,6 +246,7 @@ class TestBuildSkipSuppression:
     def test_merge_combines_suppressions(self, tmp_path):
         """SuppressionList.merge() combines rules from both lists."""
         from abicheck.suppression import Suppression, SuppressionList
+
         a = SuppressionList(suppressions=[Suppression(symbol="_sym1")])
         b = SuppressionList(suppressions=[Suppression(symbol="_sym2")])
         merged = SuppressionList.merge(a, b)
@@ -237,6 +254,7 @@ class TestBuildSkipSuppression:
 
 
 # ── CLI flag parsing ──────────────────────────────────────────────────────────
+
 
 class TestCompatCliFlags:
     """Verify all ABICC-equivalent flags are accepted by the CLI parser."""
@@ -282,6 +300,7 @@ class TestCompatCliFlags:
 
 # ── API_BREAK_KINDS / BINARY_ONLY_KINDS completeness ──────────────────────
 
+
 class TestKindSets:
     def test_no_overlap_between_source_and_binary(self):
         overlap = _API_BREAK_KINDS & _BINARY_ONLY_KINDS
@@ -296,7 +315,11 @@ class TestKindSets:
     def test_filter_source_only_source_break_verdict(self):
         """_filter_source_only: API_BREAK_KINDS changes → correct verdict + filtering."""
         from abicheck.compat.cli import _filter_source_only
-        r = _result(Verdict.BREAKING, [ChangeKind.SONAME_CHANGED, ChangeKind.FUNC_PARAMS_CHANGED])
+
+        r = _result(
+            Verdict.BREAKING,
+            [ChangeKind.SONAME_CHANGED, ChangeKind.FUNC_PARAMS_CHANGED],
+        )
         filtered = _filter_source_only(r)
         # SONAME removed, FUNC_PARAMS_CHANGED stays
         assert ChangeKind.SONAME_CHANGED not in {c.kind for c in filtered.changes}

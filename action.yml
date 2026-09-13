@@ -452,14 +452,18 @@ inputs:
     required: false
   bundle-system-providers:
     description: >
-      Removed (CLI cleanup phase two, PR J). The cross-library
-      bundle-analysis layer's system-provider allow-list extension moved to
+      RETIRED (CLI cleanup phase two, PR J — hard removal). The
+      cross-library bundle-analysis layer's system-provider allow-list
+      extension was removed here and moved to
       `.abicheck.yml`'s `bundle.system_providers:` block, reachable through
       the `build-config` input. Kept registered as a tombstone for the same
       reason as `jobs` above — an undeclared input is dropped silently,
       which here would drop a real analysis setting. Setting it is a hard
       error: move the list into `.abicheck.yml` and point `build-config` at
-      it.
+      it. (Marked RETIRED, like every other hard-error tombstone here, so
+      `tests/test_action_retired_inputs_contract.py` holds it to the same
+      executable fail-closed guarantee; `jobs` above is the softer
+      warn-only class and deliberately keeps its own wording.)
     required: false
   allow-build-query:
     description: >

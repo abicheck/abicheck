@@ -83,9 +83,7 @@ def test_entity_from_function_stamps_compiler_generated_ownership() -> None:
 
     # The positive control: an identical, genuinely user-written declaration
     # (is_compiler_generated False) carries no such hint.
-    user_written = entity_from_function(
-        Function(is_compiler_generated=False, **common)
-    )
+    user_written = entity_from_function(Function(is_compiler_generated=False, **common))
     assert user_written.api_relevant is True
     assert "compiler_generated" not in user_written.ownership
 
@@ -126,9 +124,7 @@ def test_link_source_abi_drops_unmatched_compiler_generated_declarations() -> No
     # A real export IS present -- the ODR-used case (e.g. a public function
     # returning Widget by value calls this implicit copy assignment). It
     # must be linked like any ordinary declaration, not dropped.
-    surface_matched = link_source_abi(
-        [tu], exported_symbols=["_ZN6WidgetaSERKS_"]
-    )
+    surface_matched = link_source_abi([tu], exported_symbols=["_ZN6WidgetaSERKS_"])
     assert phantom.id in {d.id for d in surface_matched.reachable_declarations}
     assert (
         surface_matched.mappings["source_decl_to_binary_symbol"][phantom.identity()]
@@ -234,9 +230,7 @@ def test_link_source_abi_rescues_a_synthetic_ctor_key_with_a_real_export() -> No
 
     # A real export for a *different* class's constructor -- confirms this
     # isn't a vacuous "any ctor export rescues everything" match.
-    surface_no_match = link_source_abi(
-        [tu], exported_symbols=["_ZN5OtherC1ERKS_"]
-    )
+    surface_no_match = link_source_abi([tu], exported_symbols=["_ZN5OtherC1ERKS_"])
     assert synthetic_ctor.id not in {
         d.id for d in surface_no_match.reachable_declarations
     }
@@ -245,15 +239,11 @@ def test_link_source_abi_rescues_a_synthetic_ctor_key_with_a_real_export() -> No
     # C2 vs. the synthetic key's own unspecified overload -- deliberately
     # imprecise at the per-overload level, see ctor_export_match's own
     # docstring): rescued.
-    surface_matched = link_source_abi(
-        [tu], exported_symbols=["_ZN6WidgetC2ERKS_"]
-    )
+    surface_matched = link_source_abi([tu], exported_symbols=["_ZN6WidgetC2ERKS_"])
     assert synthetic_ctor.id in {d.id for d in surface_matched.reachable_declarations}
 
 
-def test_link_source_abi_rescues_a_synthetic_ctor_key_for_an_abi_tagged_owner() -> (
-    None
-):
+def test_link_source_abi_rescues_a_synthetic_ctor_key_for_an_abi_tagged_owner() -> None:
     """Codex review, PR #930: `itanium_scope_components` renders an ABI-tagged
     owner (`__attribute__((abi_tag("v1")))`) as `"Widget[abi:v1]"`, but
     castxml's own synthetic ctor key encodes only the plain source-level
@@ -303,17 +293,13 @@ def test_link_source_abi_rescues_a_synthetic_ctor_key_via_msvc_export() -> None:
 
     # A real export for a *different* class's MSVC-mangled constructor --
     # confirms this isn't a vacuous "any MSVC ctor export rescues everything".
-    surface_no_match = link_source_abi(
-        [tu], exported_symbols=["??0Other@@QEAA@XZ"]
-    )
+    surface_no_match = link_source_abi([tu], exported_symbols=["??0Other@@QEAA@XZ"])
     assert synthetic_ctor.id not in {
         d.id for d in surface_no_match.reachable_declarations
     }
 
     # The real, MSVC-mangled export IS for this class's constructor: rescued.
-    surface_matched = link_source_abi(
-        [tu], exported_symbols=["??0Widget@@QEAA@XZ"]
-    )
+    surface_matched = link_source_abi([tu], exported_symbols=["??0Widget@@QEAA@XZ"])
     assert synthetic_ctor.id in {d.id for d in surface_matched.reachable_declarations}
 
 

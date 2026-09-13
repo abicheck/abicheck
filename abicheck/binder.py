@@ -18,6 +18,7 @@ Simulates the dynamic linker's symbol resolution: for each imported (undefined)
 symbol in each DSO, determines which provider DSO will satisfy the reference,
 accounting for symbol versioning, visibility, and binding strength.
 """
+
 from __future__ import annotations
 
 import logging
@@ -35,20 +36,21 @@ class BindingStatus(str, Enum):
     RESOLVED_OK = "resolved_ok"
     MISSING = "missing"
     VERSION_MISMATCH = "version_mismatch"
-    WEAK_UNRESOLVED = "weak_unresolved"       # Weak ref, no provider (OK at runtime)
+    WEAK_UNRESOLVED = "weak_unresolved"  # Weak ref, no provider (OK at runtime)
     VISIBILITY_BLOCKED = "visibility_blocked"
-    INTERPOSED = "interposed"                  # Resolved but via interposition
+    INTERPOSED = "interposed"  # Resolved but via interposition
 
 
 @dataclass
 class SymbolBinding:
     """Result of resolving one imported symbol."""
-    consumer: str            # DSO path that imports the symbol
-    symbol: str              # Symbol name
-    version: str             # Required version (or "")
-    provider: str | None     # DSO path that provides it (None if missing)
+
+    consumer: str  # DSO path that imports the symbol
+    symbol: str  # Symbol name
+    version: str  # Required version (or "")
+    provider: str | None  # DSO path that provides it (None if missing)
     status: BindingStatus
-    explanation: str          # Human-readable reason
+    explanation: str  # Human-readable reason
 
 
 def compute_bindings(
@@ -183,7 +185,10 @@ def _try_versioned_match(
                 first_provider is not None
                 and first_provider != provider_path
                 and _provider_has_version(
-                    export_index, first_provider, sym_name, required_version,
+                    export_index,
+                    first_provider,
+                    sym_name,
+                    required_version,
                 )
             ):
                 return SymbolBinding(
@@ -247,8 +252,11 @@ def _make_not_found_binding(
     """Create the appropriate SymbolBinding when no provider matched."""
     if found_name_hidden_only and not found_name_visible:
         return SymbolBinding(
-            consumer=consumer, symbol=sym_name, version=required_version,
-            provider=first_hidden_provider, status=BindingStatus.VISIBILITY_BLOCKED,
+            consumer=consumer,
+            symbol=sym_name,
+            version=required_version,
+            provider=first_hidden_provider,
+            status=BindingStatus.VISIBILITY_BLOCKED,
             explanation=(
                 f"Symbol {sym_name} found in {first_hidden_provider} but all versions "
                 "have hidden/internal visibility"
@@ -256,8 +264,11 @@ def _make_not_found_binding(
         )
     if found_name_visible:
         return SymbolBinding(
-            consumer=consumer, symbol=sym_name, version=required_version,
-            provider=first_provider, status=BindingStatus.VERSION_MISMATCH,
+            consumer=consumer,
+            symbol=sym_name,
+            version=required_version,
+            provider=first_provider,
+            status=BindingStatus.VERSION_MISMATCH,
             explanation=(
                 f"Symbol {sym_name} found but version {required_version!r} not matched "
                 f"(first provider: {first_provider})"
@@ -265,13 +276,19 @@ def _make_not_found_binding(
         )
     if is_weak:
         return SymbolBinding(
-            consumer=consumer, symbol=sym_name, version=required_version,
-            provider=None, status=BindingStatus.WEAK_UNRESOLVED,
+            consumer=consumer,
+            symbol=sym_name,
+            version=required_version,
+            provider=None,
+            status=BindingStatus.WEAK_UNRESOLVED,
             explanation=f"Weak symbol {sym_name} unresolved (acceptable at runtime)",
         )
     return SymbolBinding(
-        consumer=consumer, symbol=sym_name, version=required_version,
-        provider=None, status=BindingStatus.MISSING,
+        consumer=consumer,
+        symbol=sym_name,
+        version=required_version,
+        provider=None,
+        status=BindingStatus.MISSING,
         explanation=f"Symbol {sym_name} not found in any loaded DSO",
     )
 
@@ -304,9 +321,9 @@ def _resolve_import(
     search_order = preload_paths + load_order
 
     # Track whether we found the symbol name at all, with/without visibility.
-    found_name_visible = False    # found with at least one visible version
+    found_name_visible = False  # found with at least one visible version
     found_name_hidden_only = False  # found but all versions are hidden/internal
-    first_provider = None         # first provider with a visible matching symbol
+    first_provider = None  # first provider with a visible matching symbol
     first_hidden_provider = None  # first provider where symbol exists but is hidden
 
     for provider_path in search_order:
@@ -339,21 +356,34 @@ def _resolve_import(
         # Check version compatibility.
         if required_version:
             match = _try_versioned_match(
-                consumer, sym_name, required_version, provider_path,
-                versions, first_provider, export_index,
+                consumer,
+                sym_name,
+                required_version,
+                provider_path,
+                versions,
+                first_provider,
+                export_index,
             )
             if match is not None:
                 return match
             # Symbol found but version doesn't match — keep searching.
         else:
             match = _try_unversioned_match(
-                consumer, sym_name, provider_path, versions,
+                consumer,
+                sym_name,
+                provider_path,
+                versions,
             )
             if match is not None:
                 return match
 
     return _make_not_found_binding(
-        consumer, sym_name, required_version, is_weak,
-        found_name_visible, found_name_hidden_only,
-        first_provider, first_hidden_provider,
+        consumer,
+        sym_name,
+        required_version,
+        is_weak,
+        found_name_visible,
+        found_name_hidden_only,
+        first_provider,
+        first_hidden_provider,
     )

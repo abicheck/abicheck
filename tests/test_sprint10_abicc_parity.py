@@ -11,6 +11,7 @@ Tests for two detector improvements:
 
 All fixtures are original C++ ABI scenarios authored for this project.
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
@@ -24,6 +25,7 @@ from abicheck.model import (
 )
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _snap(
     version: str = "1.0",
@@ -59,6 +61,7 @@ def _func(
 
 # ── FUNC_VISIBILITY_CHANGED ───────────────────────────────────────────────────
 
+
 class TestFuncVisibilityChanged:
     """Public function becomes hidden: binary ABI break.
 
@@ -90,7 +93,9 @@ class TestFuncVisibilityChanged:
         old_f = _func("render", "_Z6renderv", visibility=Visibility.PUBLIC)
         new_f = _func("render", "_Z6renderv", visibility=Visibility.HIDDEN)
         r = compare(_snap(functions=[old_f]), _snap("2.0", functions=[new_f]))
-        change = next(c for c in r.changes if c.kind == ChangeKind.FUNC_VISIBILITY_CHANGED)
+        change = next(
+            c for c in r.changes if c.kind == ChangeKind.FUNC_VISIBILITY_CHANGED
+        )
         assert change.old_value == Visibility.PUBLIC.value
         assert change.new_value == Visibility.HIDDEN.value
         assert "_Z6renderv" in change.symbol
@@ -127,7 +132,9 @@ class TestFuncVisibilityChanged:
             _snap("2.0", functions=[stable, new_api]),
         )
         assert r.verdict == Verdict.BREAKING
-        vis_changes = [c for c in r.changes if c.kind == ChangeKind.FUNC_VISIBILITY_CHANGED]
+        vis_changes = [
+            c for c in r.changes if c.kind == ChangeKind.FUNC_VISIBILITY_CHANGED
+        ]
         assert len(vis_changes) == 1
         assert "_Z3apiv" in vis_changes[0].symbol
 
@@ -142,7 +149,9 @@ class TestFuncVisibilityChanged:
         no headers are provided).
         """
         old_f = _func("sym", "_Z3symv", visibility=Visibility.ELF_ONLY)
-        r = compare(_snap(functions=[old_f], elf_only_mode=True), _snap("2.0", functions=[]))
+        r = compare(
+            _snap(functions=[old_f], elf_only_mode=True), _snap("2.0", functions=[])
+        )
         assert any(c.kind == ChangeKind.FUNC_REMOVED_ELF_ONLY for c in r.changes)
         assert not any(c.kind == ChangeKind.FUNC_REMOVED for c in r.changes)
         assert not any(c.kind == ChangeKind.FUNC_VISIBILITY_CHANGED for c in r.changes)
@@ -158,12 +167,15 @@ class TestFuncVisibilityChanged:
         new_f = _func("sym", "_Z3symv", visibility=Visibility.HIDDEN)
         r = compare(_snap(functions=[old_f]), _snap("2.0", functions=[new_f]))
         assert r.verdict == Verdict.BREAKING
-        change = next(c for c in r.changes if c.kind == ChangeKind.FUNC_VISIBILITY_CHANGED)
+        change = next(
+            c for c in r.changes if c.kind == ChangeKind.FUNC_VISIBILITY_CHANGED
+        )
         assert change.old_value == Visibility.ELF_ONLY.value
         assert change.new_value == Visibility.HIDDEN.value
 
 
 # ── TYPE_FIELD_ADDED breaking variant ────────────────────────────────────────
+
 
 class TestTypeFieldAddedBreaking:
     """Field addition is BREAKING for polymorphic types.
@@ -193,7 +205,9 @@ class TestTypeFieldAddedBreaking:
         r = compare(_snap(types=[old_t]), _snap("2.0", types=[new_t]))
         assert r.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.TYPE_FIELD_ADDED for c in r.changes)
-        assert not any(c.kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE for c in r.changes)
+        assert not any(
+            c.kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE for c in r.changes
+        )
 
     def test_field_added_to_virtual_base_class_is_breaking(self) -> None:
         old_t = RecordType(
@@ -214,7 +228,9 @@ class TestTypeFieldAddedBreaking:
         r = compare(_snap(types=[old_t]), _snap("2.0", types=[new_t]))
         assert r.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.TYPE_FIELD_ADDED for c in r.changes)
-        assert not any(c.kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE for c in r.changes)
+        assert not any(
+            c.kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE for c in r.changes
+        )
 
     def test_field_added_to_plain_struct_is_compatible(self) -> None:
         """Standard-layout non-polymorphic struct: field addition is compatible."""

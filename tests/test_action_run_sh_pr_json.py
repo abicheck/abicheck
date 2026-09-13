@@ -263,9 +263,7 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --view show=added -o ma
         )
         assert pr_json.read_text(encoding="utf-8").strip() == "rerun-sentinel"
 
-    def test_rerun_strips_a_stale_export_targeting_the_same_path(
-        self, tmp_path
-    ):
+    def test_rerun_strips_a_stale_export_targeting_the_same_path(self, tmp_path):
         """Codex review, fresh evidence, round 9: NOT_COMPARABLE (and any
         other early-refusal verdict) aborts the primary run before it ever
         renders its own injected ``-o json=$PR_JSON`` sidecar -- confirmed

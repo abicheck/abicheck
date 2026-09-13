@@ -1342,7 +1342,8 @@ class TestAnalysisAssuranceCliIntegration:
             tmp_path,
             _elf_only_pair(),
             "--require-complete-analysis",
-            "-o", "json=-",
+            "-o",
+            "json=-",
         )
         assert res.exit_code == 1, res.output
         # The floor diagnostic is echoed to stderr (see
@@ -1661,7 +1662,9 @@ class TestScopedExitFloorAppliedBeforeRendering:
         assert scoped_gate["scopedExitCode"] == 0
         assert doc["runs"][0]["invocations"][0]["exitCode"] == 0
 
-    def test_junit_gate_exit_code_is_the_consumer_scope_alone(self, tmp_path: Path) -> None:
+    def test_junit_gate_exit_code_is_the_consumer_scope_alone(
+        self, tmp_path: Path
+    ) -> None:
         """JUnit sibling of the SARIF test above (workstream D-S1)."""
         old_p, new_p = self._pair(tmp_path)
         res = CliRunner().invoke(
@@ -1929,4 +1932,3 @@ class TestDwarfChannelAsymmetry:
             *_assurance_config_args(tmp_path),
         )
         assert res.exit_code != 0, res.output
-

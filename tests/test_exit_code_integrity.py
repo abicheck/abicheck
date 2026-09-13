@@ -37,7 +37,13 @@ from abicheck.severity import legacy_exit_code
 
 
 def _fn(name: str) -> Function:
-    return Function(name=name, mangled=name, return_type="void", params=[], visibility=Visibility.PUBLIC)
+    return Function(
+        name=name,
+        mangled=name,
+        return_type="void",
+        params=[],
+        visibility=Visibility.PUBLIC,
+    )
 
 
 @pytest.mark.parametrize(
@@ -82,7 +88,9 @@ def test_compare_release_flow_matches_canonical(worst: str) -> None:
 def test_compare_flow_matches_canonical() -> None:
     from abicheck.frontends.cli.runtime import _exit_with_severity_or_verdict
 
-    old = AbiSnapshot(library="libfoo.so.1", version="1.0", functions=[_fn("a"), _fn("b")])
+    old = AbiSnapshot(
+        library="libfoo.so.1", version="1.0", functions=[_fn("a"), _fn("b")]
+    )
     new = AbiSnapshot(library="libfoo.so.1", version="2.0", functions=[_fn("a")])
     result = compare(old, new, scope_to_public_surface=False)
 
@@ -94,8 +102,15 @@ def test_compare_and_release_agree_for_each_verdict() -> None:
     # The cross-flow guarantee: identical verdict → identical exit code.
     from abicheck.cli_compare_release import _exit_compare_release
 
-    for v in (Verdict.BREAKING, Verdict.API_BREAK, Verdict.COMPATIBLE, Verdict.NO_CHANGE):
-        release_code = _exit_code_of(_exit_compare_release, v.name, False, [], severity_exit_code=None)
+    for v in (
+        Verdict.BREAKING,
+        Verdict.API_BREAK,
+        Verdict.COMPATIBLE,
+        Verdict.NO_CHANGE,
+    ):
+        release_code = _exit_code_of(
+            _exit_compare_release, v.name, False, [], severity_exit_code=None
+        )
         assert release_code == legacy_exit_code(v)
 
 
@@ -131,7 +146,9 @@ class TestReleaseContractCoverageFold:
 
         code = _exit_code_of(
             _exit_compare_release,
-            "NO_CHANGE", False, [],
+            "NO_CHANGE",
+            False,
+            [],
             severity_exit_code=None,
             contract_coverage_exit_contribution=1,
         )
@@ -142,7 +159,9 @@ class TestReleaseContractCoverageFold:
 
         code = _exit_code_of(
             _exit_compare_release,
-            "BREAKING", False, [],
+            "BREAKING",
+            False,
+            [],
             severity_exit_code=None,
             contract_coverage_exit_contribution=1,
         )
@@ -156,7 +175,9 @@ class TestReleaseContractCoverageFold:
 
         code = _exit_code_of(
             _exit_compare_release,
-            "NO_CHANGE", True, ["removed_lib"],
+            "NO_CHANGE",
+            True,
+            ["removed_lib"],
             severity_exit_code=None,
             contract_coverage_exit_contribution=1,
         )
@@ -167,7 +188,9 @@ class TestReleaseContractCoverageFold:
 
         code = _exit_code_of(
             _exit_compare_release,
-            "ERROR", False, [],
+            "ERROR",
+            False,
+            [],
             severity_exit_code=None,
             contract_coverage_exit_contribution=1,
         )
@@ -178,7 +201,9 @@ class TestReleaseContractCoverageFold:
 
         code = _exit_code_of(
             _exit_compare_release,
-            "COMPATIBLE", False, [],
+            "COMPATIBLE",
+            False,
+            [],
             severity_exit_code=0,
             contract_coverage_exit_contribution=1,
         )
@@ -189,7 +214,9 @@ class TestReleaseContractCoverageFold:
 
         code = _exit_code_of(
             _exit_compare_release,
-            "COMPATIBLE", True, ["removed_lib"],
+            "COMPATIBLE",
+            True,
+            ["removed_lib"],
             severity_exit_code=0,
             contract_coverage_exit_contribution=1,
         )
@@ -207,7 +234,9 @@ class TestReleaseContractCoverageFold:
 
         code = _exit_code_of(
             _exit_compare_release,
-            worst, False, [],
+            worst,
+            False,
+            [],
             severity_exit_code=None,
             contract_coverage_exit_contribution=0,
         )
@@ -245,7 +274,9 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
 
         real = _exit_code_of(
             _exit_compare_release,
-            "NO_CHANGE", True, ["removed_lib"],
+            "NO_CHANGE",
+            True,
+            ["removed_lib"],
             severity_exit_code=None,
             contract_coverage_exit_contribution=1,
         )
@@ -260,7 +291,9 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
 
         real = _exit_code_of(
             _exit_compare_release,
-            "ERROR", False, [],
+            "ERROR",
+            False,
+            [],
             severity_exit_code=None,
             contract_coverage_exit_contribution=1,
         )
@@ -275,7 +308,9 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
 
         real = _exit_code_of(
             _exit_compare_release,
-            "COMPATIBLE", False, [],
+            "COMPATIBLE",
+            False,
+            [],
             severity_exit_code=0,
             contract_coverage_exit_contribution=1,
         )
@@ -290,7 +325,9 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
 
         real = _exit_code_of(
             _exit_compare_release,
-            "COMPATIBLE", True, ["removed_lib"],
+            "COMPATIBLE",
+            True,
+            ["removed_lib"],
             severity_exit_code=0,
             contract_coverage_exit_contribution=1,
         )
@@ -324,7 +361,11 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
             _exit_compare_release, "ERROR", False, [], severity_exit_code=None
         )
         mine = resolve_release_exit_decision_for_report(
-            "ERROR", False, [], None, 0,
+            "ERROR",
+            False,
+            [],
+            None,
+            0,
             [{"verdict": "BREAKING"}, {"verdict": "ERROR"}],
         )
         assert mine.code == real == 4
@@ -346,7 +387,11 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
             _exit_compare_release, "BREAKING", False, [], severity_exit_code=None
         )
         mine = resolve_release_exit_decision_for_report(
-            "BREAKING", False, [], None, 0,
+            "BREAKING",
+            False,
+            [],
+            None,
+            0,
             [{"verdict": "NO_CHANGE"}, {"verdict": "NO_CHANGE"}],
         )
         assert mine.code == real == 4
@@ -367,7 +412,11 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         from abicheck.workflows.gate import resolve_release_exit_decision_for_report
 
         mine = resolve_release_exit_decision_for_report(
-            "not_comparable", False, [], None, 0,
+            "not_comparable",
+            False,
+            [],
+            None,
+            0,
             [{"verdict": "not_comparable"}, {"verdict": "ERROR"}],
         )
         assert mine.code == 16
@@ -407,7 +456,11 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         from abicheck.workflows.gate import resolve_release_exit_decision_for_report
 
         mine = resolve_release_exit_decision_for_report(
-            "ERROR", False, [], None, 0,
+            "ERROR",
+            False,
+            [],
+            None,
+            0,
             [{"verdict": "NO_CHANGE"}, {"verdict": "ERROR"}],
             "BREAKING",
         )

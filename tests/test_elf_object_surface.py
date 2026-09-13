@@ -21,6 +21,7 @@ compiler (stock `cc`), so — like `test_probe_examples.py` — it runs in the
 default lane and self-skips when no compiler is available, rather than using
 the castxml-gated ``integration`` marker.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -44,7 +45,8 @@ def _compile_object(src: str, out: Path) -> None:
         pytest.skip("cc unavailable; cannot compile relocatable object")
     res = subprocess.run(
         [cc, "-c", "-x", "c", "-", "-o", str(out)],
-        input=src.encode(), capture_output=True,
+        input=src.encode(),
+        capture_output=True,
     )
     if res.returncode != 0:
         pytest.skip(f"cc failed: {res.stderr.decode()[:200]}")
@@ -68,9 +70,7 @@ def test_symtab_fallback_captures_object_global_symbols(tmp_path: Path) -> None:
     # static symbols are local → never part of the exported surface
     assert "helper" not in names
     # captured entries are GLOBAL-bound defined symbols
-    assert all(
-        s.binding is not SymbolBinding.LOCAL for s in meta.symbols
-    )
+    assert all(s.binding is not SymbolBinding.LOCAL for s in meta.symbols)
 
 
 def test_symtab_fallback_excludes_undefined_references(tmp_path: Path) -> None:

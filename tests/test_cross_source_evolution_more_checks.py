@@ -111,9 +111,7 @@ def test_header_build_context_mismatch_wired_into_compare_by_default() -> None:
     new = _hbcm_snapshot(_HBCM_FLAG)
     result = compare(old, new, scope_to_public_surface=False)
     hits = [
-        c
-        for c in result.changes
-        if c.kind == ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH
+        c for c in result.changes if c.kind == ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH
     ]
     assert len(hits) == 1
     assert hits[0].cross_source_evolution == CrossSourceEvolution.NOT_EVALUATED
@@ -313,7 +311,9 @@ def test_identity_collision_detected_wired_into_compare_by_default() -> None:
     old = _icd_snapshot(_ICD_NONE)
     new = _icd_snapshot(_ICD_FLAG)
     result = compare(old, new, scope_to_public_surface=False)
-    hits = [c for c in result.changes if c.kind == ChangeKind.IDENTITY_COLLISION_DETECTED]
+    hits = [
+        c for c in result.changes if c.kind == ChangeKind.IDENTITY_COLLISION_DETECTED
+    ]
     assert len(hits) == 1
     assert hits[0].cross_source_evolution == CrossSourceEvolution.NOT_EVALUATED
 
@@ -423,7 +423,9 @@ def test_compile_context_conflict_identity_distinguishes_two_conflict_kinds() ->
     changes = compute_cross_source_evolution(old, new)
     hits = [c for c in changes if c.kind == ChangeKind.COMPILE_CONTEXT_CONFLICT]
     assert len(hits) == 2, "the flag conflict and the define conflict must not collapse"
-    assert all(c.cross_source_evolution == CrossSourceEvolution.PERSISTENT for c in hits)
+    assert all(
+        c.cross_source_evolution == CrossSourceEvolution.PERSISTENT for c in hits
+    )
     by_old_value = {c.old_value: c for c in hits}
     assert set(by_old_value) == {"-frtti", "FOO"}
 
@@ -526,7 +528,9 @@ def test_source_surface_dso_mismatch_wired_into_compare_by_default() -> None:
     old = _ssdm_snapshot(_SSDM_NONE)
     new = _ssdm_snapshot(_SSDM_FLAG)
     result = compare(old, new, scope_to_public_surface=False)
-    hits = [c for c in result.changes if c.kind == ChangeKind.SOURCE_SURFACE_DSO_MISMATCH]
+    hits = [
+        c for c in result.changes if c.kind == ChangeKind.SOURCE_SURFACE_DSO_MISMATCH
+    ]
     assert len(hits) == 1
     assert hits[0].cross_source_evolution == CrossSourceEvolution.NOT_EVALUATED
 

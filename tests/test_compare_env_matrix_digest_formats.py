@@ -43,7 +43,9 @@ from abicheck.service_render import render_output
 #: Every ``compare`` output format that renders through the shared
 #: envelope/document pipeline (``service_render._SUPPORTED_FORMATS``, minus
 #: the ``md`` alias of ``markdown``).
-_COMPARE_SUPPORTED_FORMATS = frozenset({"json", "sarif", "html", "junit", "markdown", "review"})
+_COMPARE_SUPPORTED_FORMATS = frozenset(
+    {"json", "sarif", "html", "junit", "markdown", "review"}
+)
 
 
 def _snapshot_with_glibc_dependency() -> AbiSnapshot:
@@ -123,9 +125,7 @@ def test_every_format_omits_the_env_matrix_digest_when_absent(fmt: str) -> None:
         assert "envMatrixSourceSha256" not in payload["runs"][0]["properties"]
     elif fmt == "junit":
         root = ET.fromstring(text)
-        names = {
-            p.get("name") for p in root.findall("./testsuite/properties/property")
-        }
+        names = {p.get("name") for p in root.findall("./testsuite/properties/property")}
         assert "env_matrix_source_sha256" not in names
     elif fmt == "html":
         assert "Deployment floor digest" not in text

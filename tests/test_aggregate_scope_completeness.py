@@ -503,7 +503,9 @@ class TestIncompleteScopePolicyIsInTheDigest:
         docs = {}
         for policy in ("warn", "block"):
             out = tmp_path / f"{policy}.json"
-            cfg = _release_config(tmp_path, on_incomplete_scope=policy, name=f"{policy}.abicheck.yml")
+            cfg = _release_config(
+                tmp_path, on_incomplete_scope=policy, name=f"{policy}.abicheck.yml"
+            )
             CliRunner().invoke(
                 main,
                 [

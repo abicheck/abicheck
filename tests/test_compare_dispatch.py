@@ -20,6 +20,7 @@ an application/PIE operand with a hint at `appcompat`. Directory/package operand
 fan out to the same per-library comparison the (now deprecated) `compare-release`
 runs — so `compare <dir> <dir>` reproduces a `compare-release <dir> <dir>` run.ADR-061 Phase 4, throughout: patch the owner, not ``abicheck.cli`` -- its lazy ``__getattr__`` means a ``setattr`` there rebinds nothing the caller reads.
 """
+
 from __future__ import annotations
 
 import json
@@ -41,7 +42,6 @@ from abicheck.serialization import snapshot_to_json
 _SNAP = AbiSnapshot(library="stub", version="0")
 
 
-
 class TestCompareHeaderMarksProvenance:
     """compare's --header is documented as "Public header file or directory"
 
@@ -53,7 +53,9 @@ class TestCompareHeaderMarksProvenance:
     """
 
     def test_resolve_compare_snapshots_passes_header_as_public_header(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import cli_resolve
@@ -61,7 +63,9 @@ class TestCompareHeaderMarksProvenance:
         calls: list[dict] = []
 
         def fake_resolve_input(path, headers, includes, version, lang, **kwargs):
-            calls.append({"path": path, "headers": headers, "version": version, **kwargs})
+            calls.append(
+                {"path": path, "headers": headers, "version": version, **kwargs}
+            )
             return _snap(version=version)
 
         # ADR-055 D1: `_resolve_compare_snapshots` no longer resolves anything
@@ -73,14 +77,25 @@ class TestCompareHeaderMarksProvenance:
         old_h = [tmp_path / "old.h"]
         new_h = [tmp_path / "new.h"]
         cli_resolve._resolve_compare_snapshots(
-            tmp_path / "old.so", tmp_path / "new.so",
-            "elf", "elf",
-            old_h, new_h,
-            [], [],
-            "old", "new",
+            tmp_path / "old.so",
+            tmp_path / "new.so",
+            "elf",
+            "elf",
+            old_h,
+            new_h,
+            [],
+            [],
+            "old",
+            "new",
             "c++",
-            None, None, None,
-            False, None, False, (), "",
+            None,
+            None,
+            None,
+            False,
+            None,
+            False,
+            (),
+            "",
         )
         assert len(calls) == 2
         old_call, new_call = calls
@@ -95,7 +110,9 @@ class TestResolveCompareSnapshotsDependencyScope:
     compare consistently instead of the historical asymmetry."""
 
     def test_defaults_to_filtered_on_both_sides(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import cli_resolve
@@ -109,20 +126,34 @@ class TestResolveCompareSnapshotsDependencyScope:
         monkeypatch.setattr(_input_resolution, "resolve_input", fake_resolve_input)
 
         cli_resolve._resolve_compare_snapshots(
-            tmp_path / "old.so", tmp_path / "new.so",
-            "elf", "elf",
-            [], [], [], [],
-            "old", "new",
+            tmp_path / "old.so",
+            tmp_path / "new.so",
+            "elf",
+            "elf",
+            [],
+            [],
+            [],
+            [],
+            "old",
+            "new",
             "c++",
-            None, None, None,
-            False, None, False, (), "",
+            None,
+            None,
+            None,
+            False,
+            None,
+            False,
+            (),
+            "",
         )
         assert len(calls) == 2
         assert calls[0]["include_dependencies"] is False
         assert calls[1]["include_dependencies"] is False
 
     def test_include_dependencies_true_reaches_both_sides(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import cli_resolve
@@ -136,13 +167,25 @@ class TestResolveCompareSnapshotsDependencyScope:
         monkeypatch.setattr(_input_resolution, "resolve_input", fake_resolve_input)
 
         cli_resolve._resolve_compare_snapshots(
-            tmp_path / "old.so", tmp_path / "new.so",
-            "elf", "elf",
-            [], [], [], [],
-            "old", "new",
+            tmp_path / "old.so",
+            tmp_path / "new.so",
+            "elf",
+            "elf",
+            [],
+            [],
+            [],
+            [],
+            "old",
+            "new",
             "c++",
-            None, None, None,
-            False, None, False, (), "",
+            None,
+            None,
+            None,
+            False,
+            None,
+            False,
+            (),
+            "",
             include_dependencies=True,
         )
         assert calls[0]["include_dependencies"] is True
@@ -150,7 +193,8 @@ class TestResolveCompareSnapshotsDependencyScope:
 
 
 def test_resolve_compare_snapshots_resolves_old_and_new_sequentially(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``_resolve_compare_snapshots`` (the native ``compare`` CLI's own
     old/new resolution, including its ``--dump-manifest`` path) calls
@@ -192,14 +236,25 @@ def test_resolve_compare_snapshots_resolves_old_and_new_sequentially(
     old_h = [tmp_path / "old.h"]
     new_h = [tmp_path / "new.h"]
     cli_resolve._resolve_compare_snapshots(
-        tmp_path / "old.so", tmp_path / "new.so",
-        "elf", "elf",
-        old_h, new_h,
-        [], [],
-        "old", "new",
+        tmp_path / "old.so",
+        tmp_path / "new.so",
+        "elf",
+        "elf",
+        old_h,
+        new_h,
+        [],
+        [],
+        "old",
+        "new",
         "c++",
-        None, None, None,
-        False, None, False, (), "",
+        None,
+        None,
+        None,
+        False,
+        None,
+        False,
+        (),
+        "",
     )
     assert len(calls) == 2
     (old_version, _old_start, old_end), (new_version, new_start, _new_end) = calls
@@ -210,12 +265,23 @@ def test_resolve_compare_snapshots_resolves_old_and_new_sequentially(
     assert new_start >= old_end
 
 
-def _snap(version: str = "1.0", funcs: list[Function] | None = None,
-          library: str = "libfoo.so") -> AbiSnapshot:
+def _snap(
+    version: str = "1.0",
+    funcs: list[Function] | None = None,
+    library: str = "libfoo.so",
+) -> AbiSnapshot:
     if funcs is None:
-        funcs = [Function(name="foo", mangled="_Z3foov", return_type="int",
-                          visibility=Visibility.PUBLIC)]
-    return AbiSnapshot(library=library, version=version, functions=funcs, from_headers=True)
+        funcs = [
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+        ]
+    return AbiSnapshot(
+        library=library, version=version, functions=funcs, from_headers=True
+    )
 
 
 def _write_snap(path: Path, snap: AbiSnapshot) -> Path:
@@ -274,13 +340,17 @@ def test_inputs_pack_routes_to_out_of_band_loader_not_dropped(tmp_path: Path) ->
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     (inputs / "source_facts").mkdir()
-    (inputs / "manifest.json").write_text(json.dumps({
-        "kind": "abicheck_inputs",
-        "abicheck_inputs_version": 1,
-        "library": "libfoo.so",
-        "version": "1.0",
-        "created_by": "test",
-    }))
+    (inputs / "manifest.json").write_text(
+        json.dumps(
+            {
+                "kind": "abicheck_inputs",
+                "abicheck_inputs_version": 1,
+                "library": "libfoo.so",
+                "version": "1.0",
+                "created_by": "test",
+            }
+        )
+    )
 
     from abicheck.frontends.cli.commands.compare import _source_is_pack
 
@@ -308,18 +378,35 @@ def test_embed_inline_source_forwards_toolchain_and_collects(
     # Pretend the input is a native ELF binary so the embed path is taken.
     monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
     cc = CompileContext(
-        gcc_path="/x/g++", gcc_prefix="aarch64-", gcc_options="-O2",
-        gcc_option_tokens=("-DFOO",), sysroot=Path("/sysroot"), nostdinc=True,
+        gcc_path="/x/g++",
+        gcc_prefix="aarch64-",
+        gcc_options="-O2",
+        gcc_option_tokens=("-DFOO",),
+        sysroot=Path("/sysroot"),
+        nostdinc=True,
     )
     out, kept, kept_bi = climod._embed_inline_source_side(
-        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-        headers=(), includes=(), version="1.0", lang="c++",
-        header_backend="auto", compile_context=cc,
-        frontend_explicit=False, nostdinc_explicit=False, build_info=None,
-        follow_deps=True, search_paths=(Path("/libs"),),
-        ld_library_path="/x:/y", dwarf_only=True, debug_format="dwarf",
+        _Ctx(),
+        input_path=tmp_path / "lib.so",
+        sources=tree,
+        headers=(),
+        includes=(),
+        version="1.0",
+        lang="c++",
+        header_backend="auto",
+        compile_context=cc,
+        frontend_explicit=False,
+        nostdinc_explicit=False,
+        build_info=None,
+        follow_deps=True,
+        search_paths=(Path("/libs"),),
+        ld_library_path="/x:/y",
+        dwarf_only=True,
+        debug_format="dwarf",
         pdb_path=Path("/p.pdb"),
-        collect_mode="source-target", out_dir=tmp_path, label="old",
+        collect_mode="source-target",
+        out_dir=tmp_path,
+        label="old",
     )
 
     assert kept is None and kept_bi is None and out == tmp_path / "old.abi.json"
@@ -327,20 +414,32 @@ def test_embed_inline_source_forwards_toolchain_and_collects(
     # against threading a removed/renamed option through ctx.invoke (which would
     # only blow up at runtime with a real Context, not this fake one). Codex review.
     import inspect
+
     dump_params = set(inspect.signature(climod.dump_cmd.callback).parameters)
     assert set(captured) <= dump_params, set(captured) - dump_params
-    assert captured["sources"] == tree and captured["_resolved_collect_mode"] == "source-target"
+    assert (
+        captured["sources"] == tree
+        and captured["_resolved_collect_mode"] == "source-target"
+    )
     # The resolved compile context is frozen and handed to dump verbatim (so dump
     # does not re-resolve / re-discover the tree's config) — Codex review.
     frozen = captured["_resolved_compile_context"]
     assert frozen.gcc_path == "/x/g++" and frozen.sysroot == Path("/sysroot")
-    assert frozen.nostdinc is True and frozen.gcc_option_tokens == ("-DFOO",) and frozen.frontend == "auto"
+    assert (
+        frozen.nostdinc is True
+        and frozen.gcc_option_tokens == ("-DFOO",)
+        and frozen.frontend == "auto"
+    )
     # dependency-analysis knobs ride into the inline dump too (Codex review)
-    assert captured["follow_deps"] is True and captured["search_paths"] == (Path("/libs"),)
+    assert captured["follow_deps"] is True and captured["search_paths"] == (
+        Path("/libs"),
+    )
     assert captured["ld_library_path"] == "/x:/y"
     # native dump selectors ride one resolved `DumpDebugConfig` (Phase 7c).
     rd = captured["_resolved_debug"]
-    assert rd.dwarf_only is True and rd.format == "dwarf" and rd.pdb_path == Path("/p.pdb")
+    assert (
+        rd.dwarf_only is True and rd.format == "dwarf" and rd.pdb_path == Path("/p.pdb")
+    )
 
 
 def test_embed_inline_source_forwards_lang_explicit(
@@ -367,14 +466,28 @@ def test_embed_inline_source_forwards_lang_explicit(
 
     monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
     climod._embed_inline_source_side(
-        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-        headers=(), includes=(), version="1.0", lang="c++",
+        _Ctx(),
+        input_path=tmp_path / "lib.so",
+        sources=tree,
+        headers=(),
+        includes=(),
+        version="1.0",
+        lang="c++",
         lang_explicit=True,
-        header_backend="auto", compile_context=CompileContext(),
-        frontend_explicit=False, nostdinc_explicit=False, build_info=None,
-        follow_deps=False, search_paths=(), ld_library_path="",
-        dwarf_only=False, debug_format=None, pdb_path=None,
-        collect_mode="source-target", out_dir=tmp_path, label="old",
+        header_backend="auto",
+        compile_context=CompileContext(),
+        frontend_explicit=False,
+        nostdinc_explicit=False,
+        build_info=None,
+        follow_deps=False,
+        search_paths=(),
+        ld_library_path="",
+        dwarf_only=False,
+        debug_format=None,
+        pdb_path=None,
+        collect_mode="source-target",
+        out_dir=tmp_path,
+        label="old",
     )
 
     assert captured["_resolved_lang_explicit"] is True
@@ -402,14 +515,30 @@ def test_embed_inline_source_forwards_debug_roots(tmp_path: Path, monkeypatch) -
     monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
     droot = tmp_path / "debugroot"
     climod._embed_inline_source_side(
-        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-        headers=(), includes=(), version="1.0", lang="c++",
-        header_backend="auto", compile_context=CompileContext(),
-        frontend_explicit=False, nostdinc_explicit=False, build_info=None,
-        follow_deps=False, search_paths=(), ld_library_path="",
-        dwarf_only=False, debug_format=None, pdb_path=None,
-        collect_mode="source-target", out_dir=tmp_path, label="old",
-        debug_roots=(droot,), debuginfod=True, debuginfod_url="https://example.test",
+        _Ctx(),
+        input_path=tmp_path / "lib.so",
+        sources=tree,
+        headers=(),
+        includes=(),
+        version="1.0",
+        lang="c++",
+        header_backend="auto",
+        compile_context=CompileContext(),
+        frontend_explicit=False,
+        nostdinc_explicit=False,
+        build_info=None,
+        follow_deps=False,
+        search_paths=(),
+        ld_library_path="",
+        dwarf_only=False,
+        debug_format=None,
+        pdb_path=None,
+        collect_mode="source-target",
+        out_dir=tmp_path,
+        label="old",
+        debug_roots=(droot,),
+        debuginfod=True,
+        debuginfod_url="https://example.test",
     )
     dump_params = set(inspect.signature(climod.dump_cmd.callback).parameters)
     assert set(captured) <= dump_params, set(captured) - dump_params
@@ -443,13 +572,27 @@ def test_embed_inline_source_merges_tree_config_but_cli_wins(
     # frontend left at default "auto", NOT explicit → config's clang wins; the
     # tree's sysroot is picked up too.
     climod._embed_inline_source_side(
-        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-        headers=(), includes=(), version="1.0", lang="c++",
-        header_backend="auto", compile_context=CompileContext(),
-        frontend_explicit=False, nostdinc_explicit=False, build_info=None,
-        follow_deps=False, search_paths=(), ld_library_path="",
-        dwarf_only=False, debug_format=None, pdb_path=None,
-        collect_mode="source-target", out_dir=tmp_path, label="old",
+        _Ctx(),
+        input_path=tmp_path / "lib.so",
+        sources=tree,
+        headers=(),
+        includes=(),
+        version="1.0",
+        lang="c++",
+        header_backend="auto",
+        compile_context=CompileContext(),
+        frontend_explicit=False,
+        nostdinc_explicit=False,
+        build_info=None,
+        follow_deps=False,
+        search_paths=(),
+        ld_library_path="",
+        dwarf_only=False,
+        debug_format=None,
+        pdb_path=None,
+        collect_mode="source-target",
+        out_dir=tmp_path,
+        label="old",
     )
     merged = captured["_resolved_compile_context"]
     assert merged.frontend == "clang" and merged.sysroot == Path("/from/cfg")
@@ -457,13 +600,27 @@ def test_embed_inline_source_merges_tree_config_but_cli_wins(
     # Now mark --ast-frontend auto explicit → CLI "auto" must beat config clang.
     captured.clear()
     climod._embed_inline_source_side(
-        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-        headers=(), includes=(), version="1.0", lang="c++",
-        header_backend="auto", compile_context=CompileContext(),
-        frontend_explicit=True, nostdinc_explicit=False, build_info=None,
-        follow_deps=False, search_paths=(), ld_library_path="",
-        dwarf_only=False, debug_format=None, pdb_path=None,
-        collect_mode="source-target", out_dir=tmp_path, label="old",
+        _Ctx(),
+        input_path=tmp_path / "lib.so",
+        sources=tree,
+        headers=(),
+        includes=(),
+        version="1.0",
+        lang="c++",
+        header_backend="auto",
+        compile_context=CompileContext(),
+        frontend_explicit=True,
+        nostdinc_explicit=False,
+        build_info=None,
+        follow_deps=False,
+        search_paths=(),
+        ld_library_path="",
+        dwarf_only=False,
+        debug_format=None,
+        pdb_path=None,
+        collect_mode="source-target",
+        out_dir=tmp_path,
+        label="old",
     )
     assert captured["_resolved_compile_context"].frontend == "auto"
 
@@ -471,13 +628,27 @@ def test_embed_inline_source_merges_tree_config_but_cli_wins(
     # the tree merge even though this tree's config omits it (Codex review).
     captured.clear()
     climod._embed_inline_source_side(
-        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-        headers=(), includes=(), version="1.0", lang="c++",
-        header_backend="auto", compile_context=CompileContext(nostdinc=True),
-        frontend_explicit=False, nostdinc_explicit=True, build_info=None,
-        follow_deps=False, search_paths=(), ld_library_path="",
-        dwarf_only=False, debug_format=None, pdb_path=None,
-        collect_mode="source-target", out_dir=tmp_path, label="old",
+        _Ctx(),
+        input_path=tmp_path / "lib.so",
+        sources=tree,
+        headers=(),
+        includes=(),
+        version="1.0",
+        lang="c++",
+        header_backend="auto",
+        compile_context=CompileContext(nostdinc=True),
+        frontend_explicit=False,
+        nostdinc_explicit=True,
+        build_info=None,
+        follow_deps=False,
+        search_paths=(),
+        ld_library_path="",
+        dwarf_only=False,
+        debug_format=None,
+        pdb_path=None,
+        collect_mode="source-target",
+        out_dir=tmp_path,
+        label="old",
     )
     assert captured["_resolved_compile_context"].nostdinc is True
 
@@ -500,13 +671,27 @@ def test_embed_inline_source_ignored_when_depth_collects_nothing(
 
     monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
     out, kept, kept_bi = climod._embed_inline_source_side(
-        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-        headers=(), includes=(), version="1.0", lang="c++",
-        header_backend="auto", compile_context=CompileContext(),
-        frontend_explicit=False, nostdinc_explicit=False, build_info=None,
-        follow_deps=False, search_paths=(),
-        ld_library_path="", dwarf_only=False, debug_format=None,
-        pdb_path=None, collect_mode="off", out_dir=tmp_path, label="old",
+        _Ctx(),
+        input_path=tmp_path / "lib.so",
+        sources=tree,
+        headers=(),
+        includes=(),
+        version="1.0",
+        lang="c++",
+        header_backend="auto",
+        compile_context=CompileContext(),
+        frontend_explicit=False,
+        nostdinc_explicit=False,
+        build_info=None,
+        follow_deps=False,
+        search_paths=(),
+        ld_library_path="",
+        dwarf_only=False,
+        debug_format=None,
+        pdb_path=None,
+        collect_mode="off",
+        out_dir=tmp_path,
+        label="old",
     )
 
     assert kept is None and kept_bi is None and out == tmp_path / "lib.so"
@@ -534,13 +719,27 @@ def test_embed_inline_source_drops_raw_build_info_when_tree_ignored(
 
     monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
     _, kept, kept_bi = climod._embed_inline_source_side(
-        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-        headers=(), includes=(), version="1.0", lang="c++",
-        header_backend="auto", compile_context=CompileContext(),
-        frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
-        follow_deps=False, search_paths=(),
-        ld_library_path="", dwarf_only=False, debug_format=None,
-        pdb_path=None, collect_mode="off", out_dir=tmp_path, label="old",
+        _Ctx(),
+        input_path=tmp_path / "lib.so",
+        sources=tree,
+        headers=(),
+        includes=(),
+        version="1.0",
+        lang="c++",
+        header_backend="auto",
+        compile_context=CompileContext(),
+        frontend_explicit=False,
+        nostdinc_explicit=False,
+        build_info=raw_build,
+        follow_deps=False,
+        search_paths=(),
+        ld_library_path="",
+        dwarf_only=False,
+        debug_format=None,
+        pdb_path=None,
+        collect_mode="off",
+        out_dir=tmp_path,
+        label="old",
     )
 
     assert kept is None and kept_bi is None  # raw build dir dropped, not kept
@@ -565,13 +764,27 @@ def test_embed_inline_collects_raw_build_info_without_sources(
 
     monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
     out, kept, kept_bi = climod._embed_inline_source_side(
-        _Ctx(), input_path=tmp_path / "lib.so", sources=None,
-        headers=(), includes=(), version="1.0", lang="c++",
-        header_backend="auto", compile_context=CompileContext(),
-        frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
-        follow_deps=False, search_paths=(),
-        ld_library_path="", dwarf_only=False, debug_format=None,
-        pdb_path=None, collect_mode="build", out_dir=tmp_path, label="old",
+        _Ctx(),
+        input_path=tmp_path / "lib.so",
+        sources=None,
+        headers=(),
+        includes=(),
+        version="1.0",
+        lang="c++",
+        header_backend="auto",
+        compile_context=CompileContext(),
+        frontend_explicit=False,
+        nostdinc_explicit=False,
+        build_info=raw_build,
+        follow_deps=False,
+        search_paths=(),
+        ld_library_path="",
+        dwarf_only=False,
+        debug_format=None,
+        pdb_path=None,
+        collect_mode="build",
+        out_dir=tmp_path,
+        label="old",
     )
 
     # The dump was invoked with the raw build-info forwarded; both consumed → None.
@@ -598,13 +811,27 @@ def test_embed_inline_raw_build_info_on_snapshot_is_ignored(
 
     monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), None))
     out, kept, kept_bi = climod._embed_inline_source_side(
-        _Ctx(), input_path=tmp_path / "old.json", sources=None,
-        headers=(), includes=(), version="1.0", lang="c++",
-        header_backend="auto", compile_context=CompileContext(),
-        frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
-        follow_deps=False, search_paths=(), ld_library_path="",
-        dwarf_only=False, debug_format=None, pdb_path=None,
-        collect_mode="build", out_dir=tmp_path, label="old",
+        _Ctx(),
+        input_path=tmp_path / "old.json",
+        sources=None,
+        headers=(),
+        includes=(),
+        version="1.0",
+        lang="c++",
+        header_backend="auto",
+        compile_context=CompileContext(),
+        frontend_explicit=False,
+        nostdinc_explicit=False,
+        build_info=raw_build,
+        follow_deps=False,
+        search_paths=(),
+        ld_library_path="",
+        dwarf_only=False,
+        debug_format=None,
+        pdb_path=None,
+        collect_mode="build",
+        out_dir=tmp_path,
+        label="old",
     )
 
     assert kept is None and kept_bi is None  # raw build-info dropped, not kept
@@ -628,13 +855,27 @@ def test_embed_inline_raw_build_info_dropped_at_off_depth(
 
     monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
     _, kept, kept_bi = climod._embed_inline_source_side(
-        _Ctx(), input_path=tmp_path / "lib.so", sources=None,
-        headers=(), includes=(), version="1.0", lang="c++",
-        header_backend="auto", compile_context=CompileContext(),
-        frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
-        follow_deps=False, search_paths=(), ld_library_path="",
-        dwarf_only=False, debug_format=None, pdb_path=None,
-        collect_mode="off", out_dir=tmp_path, label="old",
+        _Ctx(),
+        input_path=tmp_path / "lib.so",
+        sources=None,
+        headers=(),
+        includes=(),
+        version="1.0",
+        lang="c++",
+        header_backend="auto",
+        compile_context=CompileContext(),
+        frontend_explicit=False,
+        nostdinc_explicit=False,
+        build_info=raw_build,
+        follow_deps=False,
+        search_paths=(),
+        ld_library_path="",
+        dwarf_only=False,
+        debug_format=None,
+        pdb_path=None,
+        collect_mode="off",
+        out_dir=tmp_path,
+        label="old",
     )
 
     assert kept is None and kept_bi is None and called["n"] == 0
@@ -668,14 +909,28 @@ def test_embed_inline_source_rejects_hybrid_frontend_at_depth_source(
     monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
     with pytest.raises(climod.click.UsageError, match="compile.frontend: hybrid"):
         climod._embed_inline_source_side(
-            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-            headers=(), includes=(), version="1.0", lang="c++",
-            header_backend="hybrid", compile_context=CompileContext(),
-            frontend_explicit=True, nostdinc_explicit=False, build_info=None,
-            follow_deps=False, search_paths=(),
-            ld_library_path="", dwarf_only=False, debug_format=None,
-            pdb_path=None, collect_mode="source-target", out_dir=tmp_path,
-            label="old", depth="source",
+            _Ctx(),
+            input_path=tmp_path / "lib.so",
+            sources=tree,
+            headers=(),
+            includes=(),
+            version="1.0",
+            lang="c++",
+            header_backend="hybrid",
+            compile_context=CompileContext(),
+            frontend_explicit=True,
+            nostdinc_explicit=False,
+            build_info=None,
+            follow_deps=False,
+            search_paths=(),
+            ld_library_path="",
+            dwarf_only=False,
+            debug_format=None,
+            pdb_path=None,
+            collect_mode="source-target",
+            out_dir=tmp_path,
+            label="old",
+            depth="source",
         )
     assert called["n"] == 0  # rejected before the inline dump ever runs
 
@@ -708,17 +963,36 @@ def test_the_hybrid_rejection_names_only_live_flags(
     monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
     with pytest.raises(climod.click.UsageError) as excinfo:
         climod._embed_inline_source_side(
-            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-            headers=(), includes=(), version="1.0", lang="c++",
-            header_backend="hybrid", compile_context=CompileContext(),
-            frontend_explicit=True, nostdinc_explicit=False, build_info=None,
-            follow_deps=False, search_paths=(),
-            ld_library_path="", dwarf_only=False, debug_format=None,
-            pdb_path=None, collect_mode="source-target", out_dir=tmp_path,
-            label="old", depth="source",
+            _Ctx(),
+            input_path=tmp_path / "lib.so",
+            sources=tree,
+            headers=(),
+            includes=(),
+            version="1.0",
+            lang="c++",
+            header_backend="hybrid",
+            compile_context=CompileContext(),
+            frontend_explicit=True,
+            nostdinc_explicit=False,
+            build_info=None,
+            follow_deps=False,
+            search_paths=(),
+            ld_library_path="",
+            dwarf_only=False,
+            debug_format=None,
+            pdb_path=None,
+            collect_mode="source-target",
+            out_dir=tmp_path,
+            label="old",
+            depth="source",
         )
     msg = str(excinfo.value)
-    for dead in ("--old-ast-frontend", "--new-ast-frontend", "--old-sources", "--ast-frontend"):
+    for dead in (
+        "--old-ast-frontend",
+        "--new-ast-frontend",
+        "--old-sources",
+        "--ast-frontend",
+    ):
         assert dead not in msg, msg
     # ...and it still names a real way out, so the fix is not just deletion.
     assert "compile.frontend: castxml" in msg, msg
@@ -750,16 +1024,28 @@ def _embed_side_capturing_warning(
 
     monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), fmt))
     climod._embed_inline_source_side(
-        _Ctx(), input_path=tmp_path / "old.json",
+        _Ctx(),
+        input_path=tmp_path / "old.json",
         sources=tree if sources_raw else None,
-        headers=(), includes=(), version="1.0", lang="c++",
-        header_backend="castxml", compile_context=CompileContext(),
-        frontend_explicit=False, nostdinc_explicit=False,
+        headers=(),
+        includes=(),
+        version="1.0",
+        lang="c++",
+        header_backend="castxml",
+        compile_context=CompileContext(),
+        frontend_explicit=False,
+        nostdinc_explicit=False,
         build_info=db if build_info_raw else None,
-        follow_deps=False, search_paths=(),
-        ld_library_path="", dwarf_only=False, debug_format=None,
-        pdb_path=None, collect_mode=collect_mode, out_dir=tmp_path,
-        label="old", depth=None,
+        follow_deps=False,
+        search_paths=(),
+        ld_library_path="",
+        dwarf_only=False,
+        debug_format=None,
+        pdb_path=None,
+        collect_mode=collect_mode,
+        out_dir=tmp_path,
+        label="old",
+        depth=None,
     )
     return capsys.readouterr().err
 
@@ -788,9 +1074,13 @@ def test_a_snapshot_input_names_the_live_spelling_of_what_it_ignored(
     hit an unknown option (Codex review, alongside the frontend hint).
     """
     err = _embed_side_capturing_warning(
-        tmp_path, monkeypatch, capsys,
-        fmt=None, collect_mode="source-target",
-        sources_raw=sources_raw, build_info_raw=build_info_raw,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        fmt=None,
+        collect_mode="source-target",
+        sources_raw=sources_raw,
+        build_info_raw=build_info_raw,
     )
     assert expected in err, err
     for dead in ("--old-sources", "--old-build-info"):
@@ -805,7 +1095,11 @@ def test_a_depth_that_collects_nothing_names_the_live_spelling(
     # The sibling path, same rewrite: --depth binary/headers resolves
     # collect_mode to "off", so raw evidence is ignored with a note.
     err = _embed_side_capturing_warning(
-        tmp_path, monkeypatch, capsys, fmt="elf", collect_mode="off",
+        tmp_path,
+        monkeypatch,
+        capsys,
+        fmt="elf",
+        collect_mode="off",
     )
     assert "--sources old=/--build-info old= was given" in err, err
     assert "--old-sources" not in err, err
@@ -830,14 +1124,28 @@ def test_embed_inline_source_hybrid_not_rejected_below_depth_source(
 
     monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
     climod._embed_inline_source_side(
-        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-        headers=(), includes=(), version="1.0", lang="c++",
-        header_backend="hybrid", compile_context=CompileContext(),
-        frontend_explicit=True, nostdinc_explicit=False, build_info=None,
-        follow_deps=False, search_paths=(),
-        ld_library_path="", dwarf_only=False, debug_format=None,
-        pdb_path=None, collect_mode="build", out_dir=tmp_path,
-        label="old", depth="build",
+        _Ctx(),
+        input_path=tmp_path / "lib.so",
+        sources=tree,
+        headers=(),
+        includes=(),
+        version="1.0",
+        lang="c++",
+        header_backend="hybrid",
+        compile_context=CompileContext(),
+        frontend_explicit=True,
+        nostdinc_explicit=False,
+        build_info=None,
+        follow_deps=False,
+        search_paths=(),
+        ld_library_path="",
+        dwarf_only=False,
+        debug_format=None,
+        pdb_path=None,
+        collect_mode="build",
+        out_dir=tmp_path,
+        label="old",
+        depth="build",
     )
     assert called["n"] == 1  # inline dump ran normally, no rejection
 
@@ -854,8 +1162,11 @@ def test_header_graph_flag_is_removed(tmp_path: Path) -> None:
     result = CliRunner().invoke(
         main,
         [
-            "compare", str(old_f), str(new_f),
-            "--sources", "old=" + str(tree),
+            "compare",
+            str(old_f),
+            str(new_f),
+            "--sources",
+            "old=" + str(tree),
             "--header-graph",
         ],
     )
@@ -881,13 +1192,36 @@ def test_compare_source_tree_on_snapshot_input_is_ignored(tmp_path: Path) -> Non
 
 
 def _breaking_pair(lib: str = "libfoo.so") -> tuple[AbiSnapshot, AbiSnapshot]:
-    old = _snap("1.0", [
-        Function(name="foo", mangled="_Z3foov", return_type="int", visibility=Visibility.PUBLIC),
-        Function(name="bar", mangled="_Z3barv", return_type="void", visibility=Visibility.PUBLIC),
-    ], library=lib)
-    new = _snap("2.0", [
-        Function(name="foo", mangled="_Z3foov", return_type="int", visibility=Visibility.PUBLIC),
-    ], library=lib)
+    old = _snap(
+        "1.0",
+        [
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            ),
+            Function(
+                name="bar",
+                mangled="_Z3barv",
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+            ),
+        ],
+        library=lib,
+    )
+    new = _snap(
+        "2.0",
+        [
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            ),
+        ],
+        library=lib,
+    )
     return old, new
 
 
@@ -902,11 +1236,11 @@ def _make_pie_executable(path: Path) -> Path:
     hdr[4] = 2  # ELFCLASS64
     hdr[5] = 1  # little-endian
     hdr[6] = 1  # EV_CURRENT
-    struct.pack_into("<H", hdr, 16, 3)   # e_type = ET_DYN
-    struct.pack_into("<H", hdr, 18, 0x3e)  # e_machine = x86-64
-    struct.pack_into("<Q", hdr, 32, e_phoff)   # e_phoff
+    struct.pack_into("<H", hdr, 16, 3)  # e_type = ET_DYN
+    struct.pack_into("<H", hdr, 18, 0x3E)  # e_machine = x86-64
+    struct.pack_into("<Q", hdr, 32, e_phoff)  # e_phoff
     struct.pack_into("<H", hdr, 54, e_phentsize)  # e_phentsize
-    struct.pack_into("<H", hdr, 56, e_phnum)   # e_phnum
+    struct.pack_into("<H", hdr, 56, e_phnum)  # e_phnum
     # One program header: PT_INTERP (p_type=3).
     ph = bytearray(e_phentsize)
     struct.pack_into("<I", ph, 0, 3)  # p_type = PT_INTERP
@@ -972,6 +1306,7 @@ def _invoke(*args: str) -> tuple[int, str, str]:
 
 # ── classifier ────────────────────────────────────────────────────────────────
 
+
 class TestClassifier:
     def test_snapshot_is_file(self, tmp_path: Path) -> None:
         p = _write_snap(tmp_path / "libfoo.json", _snap())
@@ -992,6 +1327,7 @@ class TestClassifier:
 
 
 # ── dispatch ──────────────────────────────────────────────────────────────────
+
 
 class TestCompareDispatch:
     def test_file_vs_file_snapshot(self, tmp_path: Path) -> None:
@@ -1016,9 +1352,15 @@ class TestCompareDispatch:
         assert code == 4
         assert "BREAKING" in out
 
-    @pytest.mark.parametrize("flag, expected", [("--include-system-declarations", True), (None, False)])
+    @pytest.mark.parametrize(
+        "flag, expected", [("--include-system-declarations", True), (None, False)]
+    )
     def test_include_dependencies_reaches_set_comparison(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str | None, expected: bool,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        flag: str | None,
+        expected: bool,
     ) -> None:
         """Codex review: a directory/package ``compare`` used to drop
         ``--include-system-declarations`` entirely on its way through
@@ -1040,7 +1382,9 @@ class TestCompareDispatch:
             seen.append(bool(kwargs.get("include_dependencies")))
             return real_run_compare_pair(*args, **kwargs)
 
-        monkeypatch.setattr("abicheck.cli_compare_release_pairwise._run_compare_pair", _capture)
+        monkeypatch.setattr(
+            "abicheck.cli_compare_release_pairwise._run_compare_pair", _capture
+        )
 
         extra = [flag] if flag else []
         code, _, _ = _invoke("compare", str(old_dir), str(new_dir), *extra)
@@ -1094,7 +1438,11 @@ class TestCompareDispatch:
         _write_snap(new_dir / "libfoo.json", _snap())
         write_path = tmp_path / "sec.json"
         code, out, err = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", f"json={write_path}",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            f"json={write_path}",
         )
         assert code == 0
         assert write_path.is_file()
@@ -1113,8 +1461,7 @@ class TestCompareDispatch:
         # legacy 0/2/4 mapping while a severity setting is in effect.
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text(
-            "severity:\n"
-            "  abi_breaking: warning\n",
+            "severity:\n  abi_breaking: warning\n",
             encoding="utf-8",
         )
         old_dir = tmp_path / "old"
@@ -1133,7 +1480,8 @@ class TestCompareDispatch:
         assert json.loads(out)["verdict"] == "BREAKING"
 
     def test_config_exit_code_scheme_key_no_longer_exists_for_set_inputs(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """CLI cleanup phase two PR G2 deleted the top-level
         `exit_code_scheme:` config key entirely (it used to force the
@@ -1153,7 +1501,13 @@ class TestCompareDispatch:
         _write_snap(new_dir / "libfoo.json", _snap())
 
         code, out, err = _invoke(
-            "compare", str(old_dir), str(new_dir), "--config", str(cfg), "-o", "json=-",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "-o",
+            "json=-",
         )
 
         assert code == 64
@@ -1187,16 +1541,16 @@ class TestCompareDispatch:
         _write_snap(new_dir / "libfoo.json", _snap())
         # sided value like "old=src" — the path follows the side prefix
         side, _, name = value.partition("=")
-        (tmp_path / name).mkdir(exist_ok=True)  # --sources/--build-info need a real path
+        (tmp_path / name).mkdir(
+            exist_ok=True
+        )  # --sources/--build-info need a real path
         code, out, err = _invoke(
             "compare", str(old_dir), str(new_dir), flag, f"{side}={tmp_path / name}"
         )
         assert code != 0
         assert "not supported for directory/package" in (out + err)
 
-    def test_header_graph_flags_are_removed_on_set_inputs(
-        self, tmp_path: Path
-    ) -> None:
+    def test_header_graph_flags_are_removed_on_set_inputs(self, tmp_path: Path) -> None:
         """CLI cleanup H1: --header-graph/--header-graph-includes are gone
         outright now, so a directory/package compare rejects them the same
         way any other unknown option is rejected — a usage error, not a
@@ -1208,8 +1562,11 @@ class TestCompareDispatch:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         code, out, err = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--header-graph", "--header-graph-includes",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--header-graph",
+            "--header-graph-includes",
         )
         assert code == 64, (out, err)
         assert "No such option" in (out + err)
@@ -1303,8 +1660,11 @@ class TestCompareDispatch:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         code, out, err = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--include", "old:support=old/src",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--include",
+            "old:support=old/src",
         )
         assert code != 0
         msg = out + err
@@ -1368,8 +1728,8 @@ class TestCompareDispatch:
         assert not reports.exists(), "nothing may be written for a rejected export"
 
 
-
 # ── parity: compare <dir> <dir> == compare-release <dir> <dir> (summary) ────────
+
 
 class TestReleaseFanoutParity:
     def test_dir_summary_matches_compare_release(self, tmp_path: Path) -> None:
@@ -1402,7 +1762,13 @@ class TestReleaseFanoutParity:
         _write_snap(old_dir / "libfoo.json", old_foo)
         _write_snap(new_dir / "libfoo.json", new_foo)
         code, _, _ = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "json=-", "-o", f"json={out_dir}/",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
+            "-o",
+            f"json={out_dir}/",
         )
         assert code == 4
         # Per-library reports were written under --output-dir (two-level output).
@@ -1411,6 +1777,7 @@ class TestReleaseFanoutParity:
 
 
 # ── directory comparison (no deprecation: compare-release was removed) ───────
+
 
 class TestDirectoryComparison:
     def test_compare_directories_runs_release_fanout(self, tmp_path: Path) -> None:
@@ -1426,7 +1793,6 @@ class TestDirectoryComparison:
         assert "deprecated" not in (result.stderr or "")
 
 
-
 class TestCompareCliSharesServiceResolution:
     """ADR-055 D1: the native ``compare`` CLI no longer resolves inputs itself.
 
@@ -1440,7 +1806,9 @@ class TestCompareCliSharesServiceResolution:
     """
 
     def test_delegates_to_the_shared_resolution(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from abicheck import cli_resolve, service
 
@@ -1463,14 +1831,25 @@ class TestCompareCliSharesServiceResolution:
 
         monkeypatch.setattr(service, "resolve_compare_request", _spy)
         old, new = cli_resolve._resolve_compare_snapshots(
-            tmp_path / "old.so", tmp_path / "new.so",
-            "elf", "elf",
-            [tmp_path / "old.h"], [tmp_path / "new.h"],
-            [], [],
-            "1.0", "2.0",
+            tmp_path / "old.so",
+            tmp_path / "new.so",
+            "elf",
+            "elf",
+            [tmp_path / "old.h"],
+            [tmp_path / "new.h"],
+            [],
+            [],
+            "1.0",
+            "2.0",
             "c++",
-            None, None, None,
-            True, "dwarf", True, (tmp_path / "libs",), "/opt/lib",
+            None,
+            None,
+            None,
+            True,
+            "dwarf",
+            True,
+            (tmp_path / "libs",),
+            "/opt/lib",
         )
         assert (old.version, new.version) == ("old", "new")
         assert len(seen) == 1
@@ -1491,7 +1870,9 @@ class TestCompareCliSharesServiceResolution:
         assert request.ld_library_path == "/opt/lib"
 
     def test_translates_service_errors_into_click_exceptions(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The contract ``_resolve_input`` documented survives the move.
 
@@ -1506,9 +1887,25 @@ class TestCompareCliSharesServiceResolution:
 
         def _call() -> None:
             cli_resolve._resolve_compare_snapshots(
-                tmp_path / "old.so", tmp_path / "new.so",
-                "elf", "elf", [], [], [], [], "1.0", "2.0", "c++",
-                None, None, None, False, None, False, (), "",
+                tmp_path / "old.so",
+                tmp_path / "new.so",
+                "elf",
+                "elf",
+                [],
+                [],
+                [],
+                [],
+                "1.0",
+                "2.0",
+                "c++",
+                None,
+                None,
+                None,
+                False,
+                None,
+                False,
+                (),
+                "",
             )
 
         def _raise(exc):

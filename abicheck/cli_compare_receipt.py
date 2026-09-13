@@ -919,9 +919,7 @@ def _release_md_library_findings(
         # machine document may not be silently truncated (see
         # `report.release_display_limits`, which owns the one automatic cap
         # since plan slice 7m retired every way of overriding it).
-        shown = (
-            all_findings if display_cap is None else all_findings[:display_cap]
-        )
+        shown = all_findings if display_cap is None else all_findings[:display_cap]
         rendered_truncated = len(shown) < len(all_findings)
         for f in shown:
             symbol = f.get("symbol")

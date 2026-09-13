@@ -87,7 +87,10 @@ class TestToAggregateManifest:
             gate_unexpected_target="fail",
         )
         manifest = to_aggregate_manifest(plan)
-        assert manifest["gate"] == {"missing_required": "warn", "unexpected_target": "fail"}
+        assert manifest["gate"] == {
+            "missing_required": "warn",
+            "unexpected_target": "fail",
+        }
         expected = ExpectedTargets.from_manifest_data(manifest)
         assert expected.gate_missing_required is OnMissingRequired.WARN
 
@@ -207,7 +210,9 @@ class TestToAggregateManifest:
             {"unexpected_target": None},
         ],
     )
-    def test_malformed_v2_gate_is_rejected_not_silently_discarded(self, bad_gate) -> None:
+    def test_malformed_v2_gate_is_rejected_not_silently_discarded(
+        self, bad_gate
+    ) -> None:
         """Codex review, fresh evidence: a malformed `gate` on an otherwise
         valid v2 plan must be a loud AggregateError, not silently coerced to
         "no gate" -- `to_aggregate_manifest()` would then omit the policy

@@ -29,14 +29,27 @@ from abicheck.buildsource.source_graph import SourceGraphSummary, _type_node_id
 
 def test_kythe_call_and_ref_edges() -> None:
     g = SourceGraphSummary()
-    added = ingest_kythe_entries(g, [
-        {"edge_kind": "/kythe/edge/ref/call",
-         "source": {"signature": "caller"}, "target": {"signature": "callee"}},
-        {"edge_kind": "/kythe/edge/ref",
-         "source": {"signature": "user"}, "target": {"signature": "type"}},
-        {"edge_kind": "/kythe/edge/childof",  # not a ref edge → ignored
-         "source": {"signature": "a"}, "target": {"signature": "b"}},
-    ], ref="merged.kzip")
+    added = ingest_kythe_entries(
+        g,
+        [
+            {
+                "edge_kind": "/kythe/edge/ref/call",
+                "source": {"signature": "caller"},
+                "target": {"signature": "callee"},
+            },
+            {
+                "edge_kind": "/kythe/edge/ref",
+                "source": {"signature": "user"},
+                "target": {"signature": "type"},
+            },
+            {
+                "edge_kind": "/kythe/edge/childof",  # not a ref edge → ignored
+                "source": {"signature": "a"},
+                "target": {"signature": "b"},
+            },
+        ],
+        ref="merged.kzip",
+    )
     assert added == 2
     kinds = {e.kind for e in g.edges}
     assert kinds == {"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"}
@@ -44,27 +57,48 @@ def test_kythe_call_and_ref_edges() -> None:
     assert call.provenance == "kythe" and call.confidence == "reduced"
     assert call.attrs["resolution"] == "points_to"
     assert g.external_graph_refs == [
-        {"backend": "kythe", "ref": "merged.kzip", "edges_ingested": 2, "confidence": "reduced"}
+        {
+            "backend": "kythe",
+            "ref": "merged.kzip",
+            "edges_ingested": 2,
+            "confidence": "reduced",
+        }
     ]
 
 
 def test_kythe_uses_path_when_no_signature() -> None:
     g = SourceGraphSummary()
-    ingest_kythe_entries(g, [
-        {"edge_kind": "/kythe/edge/ref/call",
-         "source": {"path": "a.cpp"}, "target": {"path": "b.cpp"}},
-    ])
+    ingest_kythe_entries(
+        g,
+        [
+            {
+                "edge_kind": "/kythe/edge/ref/call",
+                "source": {"path": "a.cpp"},
+                "target": {"path": "b.cpp"},
+            },
+        ],
+    )
     assert any(n.label == "a.cpp" for n in g.nodes)
 
 
 def test_kythe_skips_malformed_and_self_edges() -> None:
     g = SourceGraphSummary()
-    added = ingest_kythe_entries(g, [
-        "not a dict",
-        {"edge_kind": "/kythe/edge/ref/call", "source": {}, "target": {"signature": "x"}},
-        {"edge_kind": "/kythe/edge/ref/call",
-         "source": {"signature": "s"}, "target": {"signature": "s"}},  # self
-    ])
+    added = ingest_kythe_entries(
+        g,
+        [
+            "not a dict",
+            {
+                "edge_kind": "/kythe/edge/ref/call",
+                "source": {},
+                "target": {"signature": "x"},
+            },
+            {
+                "edge_kind": "/kythe/edge/ref/call",
+                "source": {"signature": "s"},
+                "target": {"signature": "s"},
+            },  # self
+        ],
+    )
     assert added == 0
 
 
@@ -73,10 +107,17 @@ def test_kythe_extends_edge_maps_to_type_inherits() -> None:
     # unambiguously matches TYPE_INHERITS -- src is the derived record,
     # target the base, exactly abicheck's own convention.
     g = SourceGraphSummary()
-    added = ingest_kythe_entries(g, [
-        {"edge_kind": "/kythe/edge/extends",
-         "source": {"signature": "Derived"}, "target": {"signature": "Base"}},
-    ], ref="merged.kzip")
+    added = ingest_kythe_entries(
+        g,
+        [
+            {
+                "edge_kind": "/kythe/edge/extends",
+                "source": {"signature": "Derived"},
+                "target": {"signature": "Base"},
+            },
+        ],
+        ref="merged.kzip",
+    )
     assert added == 1
     edge = next(e for e in g.edges if e.kind == "TYPE_INHERITS")
     assert edge.provenance == "kythe" and edge.confidence == "reduced"
@@ -92,10 +133,16 @@ def test_kythe_extends_edge_maps_to_type_inherits() -> None:
 
 def test_kythe_extends_access_qualified_variant_also_maps() -> None:
     g = SourceGraphSummary()
-    added = ingest_kythe_entries(g, [
-        {"edge_kind": "/kythe/edge/extends/public",
-         "source": {"signature": "Derived"}, "target": {"signature": "Base"}},
-    ])
+    added = ingest_kythe_entries(
+        g,
+        [
+            {
+                "edge_kind": "/kythe/edge/extends/public",
+                "source": {"signature": "Derived"},
+                "target": {"signature": "Base"},
+            },
+        ],
+    )
     assert added == 1
     assert g.edges[0].kind == "TYPE_INHERITS"
 
@@ -104,23 +151,39 @@ def test_kythe_edge_kind_merely_sharing_extends_prefix_is_not_matched() -> None:
     # Codex review: a plain startswith("/kythe/edge/extends") also accepted an
     # unrelated edge kind that merely shares the prefix textually.
     g = SourceGraphSummary()
-    added = ingest_kythe_entries(g, [
-        {"edge_kind": "/kythe/edge/extendsFoo",
-         "source": {"signature": "Derived"}, "target": {"signature": "Base"}},
-    ])
+    added = ingest_kythe_entries(
+        g,
+        [
+            {
+                "edge_kind": "/kythe/edge/extendsFoo",
+                "source": {"signature": "Derived"},
+                "target": {"signature": "Base"},
+            },
+        ],
+    )
     assert added == 0
 
 
 def test_codeql_tuples_with_string_and_label_cells() -> None:
     g = SourceGraphSummary()
-    added = ingest_codeql_call_results(g, {"#select": {"tuples": [
-        ["caller1", "callee1"],
-        [{"label": "caller2"}, {"label": "callee2"}],
-        ["x", "x"],            # self → skipped
-        ["only-one"],          # too short → skipped
-    ]}}, ref="codeql-db/")
+    added = ingest_codeql_call_results(
+        g,
+        {
+            "#select": {
+                "tuples": [
+                    ["caller1", "callee1"],
+                    [{"label": "caller2"}, {"label": "callee2"}],
+                    ["x", "x"],  # self → skipped
+                    ["only-one"],  # too short → skipped
+                ]
+            }
+        },
+        ref="codeql-db/",
+    )
     assert added == 2
-    assert all(e.kind == "DECL_CALLS_DECL" and e.provenance == "codeql" for e in g.edges)
+    assert all(
+        e.kind == "DECL_CALLS_DECL" and e.provenance == "codeql" for e in g.edges
+    )
     assert g.external_graph_refs[0]["backend"] == "codeql"
 
 
@@ -136,25 +199,42 @@ def test_codeql_extends_results() -> None:
     # relation kind -- the caller (not the shape) determines what a result
     # set means (a class-hierarchy query here, a call-graph query above).
     g = SourceGraphSummary()
-    added = ingest_codeql_extends_results(g, {"#select": {"tuples": [
-        ["Derived", "Base"],
-        [{"label": "Derived2"}, {"label": "Base2"}],
-        ["Same", "Same"],   # self -> skipped
-    ]}}, ref="codeql-db/")
+    added = ingest_codeql_extends_results(
+        g,
+        {
+            "#select": {
+                "tuples": [
+                    ["Derived", "Base"],
+                    [{"label": "Derived2"}, {"label": "Base2"}],
+                    ["Same", "Same"],  # self -> skipped
+                ]
+            }
+        },
+        ref="codeql-db/",
+    )
     assert added == 2
     assert all(e.kind == "TYPE_INHERITS" and e.provenance == "codeql" for e in g.edges)
     assert all(e.attrs["role"] == "base" for e in g.edges)
     assert g.external_graph_refs[0]["backend"] == "codeql"
     # Same node scheme as the Kythe path -- type://, not decl://.
-    assert any(n.id == _type_node_id("Derived") and n.kind == "record_type" for n in g.nodes)
+    assert any(
+        n.id == _type_node_id("Derived") and n.kind == "record_type" for n in g.nodes
+    )
 
 
 def test_backends_round_trip_through_summary() -> None:
     g = SourceGraphSummary()
-    ingest_kythe_entries(g, [
-        {"edge_kind": "/kythe/edge/ref/call",
-         "source": {"signature": "a"}, "target": {"signature": "b"}},
-    ], ref="k")
+    ingest_kythe_entries(
+        g,
+        [
+            {
+                "edge_kind": "/kythe/edge/ref/call",
+                "source": {"signature": "a"},
+                "target": {"signature": "b"},
+            },
+        ],
+        ref="k",
+    )
     restored = SourceGraphSummary.from_dict(g.finalize().to_dict())
     assert restored.external_graph_refs == g.external_graph_refs
     assert any(e.kind == "DECL_CALLS_DECL" for e in restored.edges)
@@ -175,9 +255,17 @@ def _cdb(tmp_path):
     src = tmp_path / "foo.cpp"
     src.write_text("int foo(){return 1;}\n")
     cdb = tmp_path / "cc.json"
-    cdb.write_text(json.dumps([{
-        "directory": str(tmp_path), "file": str(src), "command": f"c++ -c {src} -o foo.o",
-    }]))
+    cdb.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "command": f"c++ -c {src} -o foo.o",
+                }
+            ]
+        )
+    )
     return cdb
 
 
@@ -214,23 +302,36 @@ def test_collect_evidence_kythe_entries_folds_edges(tmp_path) -> None:
     from abicheck.cli_buildsource_helpers import _collect_source_graph
 
     kythe = tmp_path / "kythe.json"
-    kythe.write_text(json.dumps([
-        {"edge_kind": "/kythe/edge/ref/call",
-         "source": {"signature": "_Za"}, "target": {"signature": "_Zb"}},
-    ]))
+    kythe.write_text(
+        json.dumps(
+            [
+                {
+                    "edge_kind": "/kythe/edge/ref/call",
+                    "source": {"signature": "_Za"},
+                    "target": {"signature": "_Zb"},
+                },
+            ]
+        )
+    )
     merged, extractors = _merged_from_compile_db(tmp_path)
     # --source-graph defaults to "off"; --kythe-entries alone implicitly
     # promotes it to "summary" inside _collect_source_graph.
     graph, _detail = _collect_source_graph(
-        merged, extractors,
-        source_graph="off", changed_paths=(),
-        kythe_entries=kythe, codeql_results=None,
+        merged,
+        extractors,
+        source_graph="off",
+        changed_paths=(),
+        kythe_entries=kythe,
+        codeql_results=None,
         codeql_extends_results=None,
-        surface=None, clang_bin="clang",
+        surface=None,
+        clang_bin="clang",
     )
     assert graph is not None
     assert any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
-    assert graph.external_graph_refs and graph.external_graph_refs[0]["backend"] == "kythe"
+    assert (
+        graph.external_graph_refs and graph.external_graph_refs[0]["backend"] == "kythe"
+    )
 
 
 def test_collect_evidence_codeql_results_folds_edges(tmp_path) -> None:
@@ -242,11 +343,15 @@ def test_collect_evidence_codeql_results_folds_edges(tmp_path) -> None:
     codeql.write_text(json.dumps({"#select": {"tuples": [["_Za", "_Zb"]]}}))
     merged, extractors = _merged_from_compile_db(tmp_path)
     graph, _detail = _collect_source_graph(
-        merged, extractors,
-        source_graph="off", changed_paths=(),
-        kythe_entries=None, codeql_results=codeql,
+        merged,
+        extractors,
+        source_graph="off",
+        changed_paths=(),
+        kythe_entries=None,
+        codeql_results=codeql,
         codeql_extends_results=None,
-        surface=None, clang_bin="clang",
+        surface=None,
+        clang_bin="clang",
     )
     assert graph is not None and any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
 
@@ -264,14 +369,21 @@ def test_collect_evidence_codeql_extends_results_folds_edges(tmp_path) -> None:
     codeql.write_text(json.dumps({"#select": {"tuples": [["Derived", "Base"]]}}))
     merged, extractors = _merged_from_compile_db(tmp_path)
     graph, _detail = _collect_source_graph(
-        merged, extractors,
-        source_graph="off", changed_paths=(),
-        kythe_entries=None, codeql_results=None,
+        merged,
+        extractors,
+        source_graph="off",
+        changed_paths=(),
+        kythe_entries=None,
+        codeql_results=None,
         codeql_extends_results=codeql,
-        surface=None, clang_bin="clang",
+        surface=None,
+        clang_bin="clang",
     )
     assert graph is not None and any(e.kind == "TYPE_INHERITS" for e in graph.edges)
-    assert graph.external_graph_refs and graph.external_graph_refs[0]["backend"] == "codeql"
+    assert (
+        graph.external_graph_refs
+        and graph.external_graph_refs[0]["backend"] == "codeql"
+    )
 
 
 def test_collect_evidence_codeql_extends_non_object_records_failed_extractor(
@@ -288,15 +400,17 @@ def test_collect_evidence_codeql_extends_non_object_records_failed_extractor(
     codeql.write_text(json.dumps(["not", "an", "object"]))
     merged, extractors = _merged_from_compile_db(tmp_path)
     _collect_source_graph(
-        merged, extractors,
-        source_graph="off", changed_paths=(),
-        kythe_entries=None, codeql_results=None,
+        merged,
+        extractors,
+        source_graph="off",
+        changed_paths=(),
+        kythe_entries=None,
+        codeql_results=None,
         codeql_extends_results=codeql,
-        surface=None, clang_bin="clang",
+        surface=None,
+        clang_bin="clang",
     )
-    record = next(
-        e for e in extractors if e.name == "graph_backend:codeql_extends"
-    )
+    record = next(e for e in extractors if e.name == "graph_backend:codeql_extends")
     assert record.status == "failed"
 
 
@@ -308,11 +422,15 @@ def test_collect_evidence_malformed_backend_export_degrades(tmp_path) -> None:
     merged, extractors = _merged_from_compile_db(tmp_path)
     # Malformed export must not abort collection; a graph is still produced.
     graph, _detail = _collect_source_graph(
-        merged, extractors,
-        source_graph="off", changed_paths=(),
-        kythe_entries=bad, codeql_results=None,
+        merged,
+        extractors,
+        source_graph="off",
+        changed_paths=(),
+        kythe_entries=bad,
+        codeql_results=None,
         codeql_extends_results=None,
-        surface=None, clang_bin="clang",
+        surface=None,
+        clang_bin="clang",
     )
     assert graph is not None
 
@@ -371,11 +489,15 @@ def test_collect_evidence_kythe_implied_graph_still_records_bazel_inputs(
     surface = SourceAbiSurface(library="", target_id="")
 
     graph, _detail = _collect_source_graph(
-        merged, extractors,
-        source_graph="off", changed_paths=(),
-        kythe_entries=kythe, codeql_results=None,
+        merged,
+        extractors,
+        source_graph="off",
+        changed_paths=(),
+        kythe_entries=kythe,
+        codeql_results=None,
         codeql_extends_results=None,
-        surface=surface, clang_bin="clang",
+        surface=surface,
+        clang_bin="clang",
     )
     assert graph is not None
     assert any(

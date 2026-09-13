@@ -20,6 +20,7 @@ parsing instead of text-scraping ``readelf`` output.
 
 See docs/adr/001-technology-stack.md for rationale.
 """
+
 from __future__ import annotations
 
 import logging
@@ -89,6 +90,7 @@ _HIDDEN_VISIBILITIES = frozenset({"STV_HIDDEN", "STV_INTERNAL"})
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def parse_elf_metadata(so_path: Path) -> ElfMetadata:
     """Extract ELF dynamic + symbol metadata from *so_path* using pyelftools.
 
@@ -112,6 +114,7 @@ def parse_elf_metadata(so_path: Path) -> ElfMetadata:
 # Internal parsing
 # ---------------------------------------------------------------------------
 
+
 def _parse(f: IO[bytes], so_path: Path) -> ElfMetadata:
     meta = ElfMetadata()
     elf = ELFFile(f)
@@ -122,10 +125,14 @@ def _parse(f: IO[bytes], so_path: Path) -> ElfMetadata:
     _parse_abi_tag(elf, meta, so_path)
     has_relro_segment, is_et_dyn = _parse_segments(elf, meta, so_path)
 
-    ver_sym_section, dynsym_section, ver_index_map = _parse_all_sections(elf, meta, so_path)
+    ver_sym_section, dynsym_section, ver_index_map = _parse_all_sections(
+        elf, meta, so_path
+    )
 
     # Correlate per-symbol version entries using sections captured above.
-    _correlate_symbol_versions(ver_sym_section, dynsym_section, meta, ver_index_map, so_path)
+    _correlate_symbol_versions(
+        ver_sym_section, dynsym_section, meta, ver_index_map, so_path
+    )
 
     _postprocess_metadata(meta, ver_index_map, ver_sym_section, dynsym_section, so_path)
 
@@ -145,7 +152,9 @@ def _read_pointer_size(elf: ELFFile, so_path: Path) -> int:
     try:
         return 4 if elf.elfclass == 32 else 8
     except Exception as exc:  # noqa: BLE001
-        log.warning("parse_elf_metadata: failed to read ELF class from %s: %s", so_path, exc)
+        log.warning(
+            "parse_elf_metadata: failed to read ELF class from %s: %s", so_path, exc
+        )
         return 8
 
 
@@ -162,7 +171,12 @@ _EF_RISCV_FLOAT_ABI_MASK = 0x0006  # 0=soft, 2=single, 4=double, 6=quad
 # it is deliberately NOT decoded — toggling it must not report an ABI break.
 _EF_RISCV_RVE = 0x0008
 _EF_MIPS_ABI_MASK = 0x0000F000
-_RISCV_FLOAT_ABI_NAMES = {0x0: "float-soft", 0x2: "float-single", 0x4: "float-double", 0x6: "float-quad"}
+_RISCV_FLOAT_ABI_NAMES = {
+    0x0: "float-soft",
+    0x2: "float-single",
+    0x4: "float-double",
+    0x6: "float-quad",
+}
 
 
 def _decode_abi_flags(machine: str, e_flags: int) -> frozenset[str]:
@@ -183,7 +197,11 @@ def _decode_abi_flags(machine: str, e_flags: int) -> frozenset[str]:
         if eabi:
             tokens.add(f"eabi{eabi}")
     elif machine in ("EM_RISCV",):
-        tokens.add(_RISCV_FLOAT_ABI_NAMES.get(e_flags & _EF_RISCV_FLOAT_ABI_MASK, "float-unknown"))
+        tokens.add(
+            _RISCV_FLOAT_ABI_NAMES.get(
+                e_flags & _EF_RISCV_FLOAT_ABI_MASK, "float-unknown"
+            )
+        )
         if e_flags & _EF_RISCV_RVE:
             tokens.add("rve")
     elif machine in ("EM_MIPS",):
@@ -203,7 +221,9 @@ def _read_identity(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
         meta.abi_flags = _decode_abi_flags(meta.machine, meta.e_flags)
         meta.ei_data = "LSB" if elf.little_endian else "MSB"
     except Exception as exc:  # noqa: BLE001
-        log.warning("parse_elf_metadata: failed to read ELF identity from %s: %s", so_path, exc)
+        log.warning(
+            "parse_elf_metadata: failed to read ELF identity from %s: %s", so_path, exc
+        )
 
 
 # ── GNU-property control-flow-protection decoding (G23-A2) ──────────────────
@@ -228,7 +248,9 @@ _X86_ISA_1_LEVEL_TOKENS: tuple[tuple[int, str], ...] = (
 )
 
 
-def _decode_gnu_property_desc(desc: bytes, little_endian: bool, align: int = 8) -> frozenset[str]:
+def _decode_gnu_property_desc(
+    desc: bytes, little_endian: bool, align: int = 8
+) -> frozenset[str]:
     """Parse a NT_GNU_PROPERTY_TYPE_0 note description into feature tokens.
 
     The description is a sequence of properties, each laid out as
@@ -310,7 +332,9 @@ def _parse_abi_tag(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
                     meta.min_kernel_version = floor
                     return
     except Exception as exc:  # noqa: BLE001
-        log.warning("parse_elf_metadata: failed to read .note.ABI-tag from %s: %s", so_path, exc)
+        log.warning(
+            "parse_elf_metadata: failed to read .note.ABI-tag from %s: %s", so_path, exc
+        )
 
 
 def _parse_gnu_property(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
@@ -330,7 +354,11 @@ def _parse_gnu_property(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
             features |= _decode_gnu_property_desc(desc, elf.little_endian, align)
         meta.gnu_properties = frozenset(features)
     except Exception as exc:  # noqa: BLE001
-        log.warning("parse_elf_metadata: failed to read GNU-property notes from %s: %s", so_path, exc)
+        log.warning(
+            "parse_elf_metadata: failed to read GNU-property notes from %s: %s",
+            so_path,
+            exc,
+        )
 
 
 def _iter_gnu_property_descs(elf: ELFFile) -> Iterator[bytes]:
@@ -410,7 +438,11 @@ def _parse_segments(
                 # suppressed (G23-A1).
                 meta.has_tls_symbols = True
     except Exception as exc:  # noqa: BLE001
-        log.warning("parse_elf_metadata: failed to read program headers from %s: %s", so_path, exc)
+        log.warning(
+            "parse_elf_metadata: failed to read program headers from %s: %s",
+            so_path,
+            exc,
+        )
 
     # PIE = position-independent *executable* (ET_DYN with the DF_1_PIE flag).
     # _parse_dynamic sets meta.is_pie tentatively from DF_1_PIE; gate it on
@@ -419,7 +451,9 @@ def _parse_segments(
     try:
         is_et_dyn = elf.header.e_type == "ET_DYN"
     except Exception as exc:  # noqa: BLE001
-        log.warning("parse_elf_metadata: failed to read e_type from %s: %s", so_path, exc)
+        log.warning(
+            "parse_elf_metadata: failed to read e_type from %s: %s", so_path, exc
+        )
 
     return has_relro_segment, is_et_dyn
 
@@ -465,7 +499,7 @@ def _parse_all_sections(
     # Build separate version-index maps from .gnu.version_d and .gnu.version_r.
     # Verdef and verneed indices are normally non-overlapping, but separating
     # them prevents mis-attribution if a malformed ELF reuses an index.
-    verdef_index_map: _VerIndexMap = {}   # idx → ("", ver, True)
+    verdef_index_map: _VerIndexMap = {}  # idx → ("", ver, True)
     verneed_index_map: _VerIndexMap = {}  # idx → (lib, ver, False)
 
     ver_sym_section: GNUVerSymSection | None = None
@@ -475,13 +509,22 @@ def _parse_all_sections(
     for section in elf.iter_sections():
         try:
             dynsym_section, symtab_section, ver_sym_section = _process_section(
-                section, meta, verdef_index_map, verneed_index_map,
-                dynsym_section, symtab_section, ver_sym_section,
+                section,
+                meta,
+                verdef_index_map,
+                verneed_index_map,
+                dynsym_section,
+                symtab_section,
+                ver_sym_section,
             )
         except Exception as exc:  # noqa: BLE001
             # Partial-success: log malformed section, keep results from other sections.
-            log.warning("parse_elf_metadata: skipping malformed section %r in %s: %s",
-                        section.name, so_path, exc)
+            log.warning(
+                "parse_elf_metadata: skipping malformed section %r in %s: %s",
+                section.name,
+                so_path,
+                exc,
+            )
 
     # Relocatable objects (ET_REL `.o`, e.g. a probe-built object) carry no
     # `.dynsym` — their symbol surface lives in `.symtab`. Fall back to it so the
@@ -492,8 +535,9 @@ def _parse_all_sections(
         try:
             _parse_dynsym(symtab_section, meta)
         except Exception as exc:  # noqa: BLE001
-            log.warning("parse_elf_metadata: skipping malformed .symtab in %s: %s",
-                        so_path, exc)
+            log.warning(
+                "parse_elf_metadata: skipping malformed .symtab in %s: %s", so_path, exc
+            )
 
     # Merge: verdef entries take priority over verneed on index collision.
     ver_index_map: _VerIndexMap = {**verneed_index_map, **verdef_index_map}
@@ -509,7 +553,9 @@ def _process_section(
     dynsym_section: SymbolTableSection | None,
     symtab_section: SymbolTableSection | None,
     ver_sym_section: GNUVerSymSection | None,
-) -> tuple[SymbolTableSection | None, SymbolTableSection | None, GNUVerSymSection | None]:
+) -> tuple[
+    SymbolTableSection | None, SymbolTableSection | None, GNUVerSymSection | None
+]:
     """Dispatch one ELF section to the appropriate parser; return updated refs."""
     if isinstance(section, DynamicSection):
         _parse_dynamic(section, meta)
@@ -587,7 +633,8 @@ def _postprocess_metadata(
     _ver_def_names: set[str] = set(meta.versions_defined)
     if _ver_def_names:
         meta.symbols = [
-            sym for sym in meta.symbols
+            sym
+            for sym in meta.symbols
             if not (
                 sym.name in _ver_def_names
                 and sym.size == 0
@@ -600,11 +647,13 @@ def _postprocess_metadata(
     # _guess_symbol_origin call in _parse_dynsym always sees an empty needed list.
     # The fixup also corrects symbols that were mis-attributed to the wrong
     # default library (e.g. libstdc++.so.6 vs libc++.so.1).
-    _GENERIC_FALLBACKS = frozenset({  # pylint: disable=invalid-name
-        "libstdc++.so.6",
-        "libgcc_s.so.1",
-        "libc.so.6",
-    })
+    _GENERIC_FALLBACKS = frozenset(
+        {  # pylint: disable=invalid-name
+            "libstdc++.so.6",
+            "libgcc_s.so.1",
+            "libc.so.6",
+        }
+    )
     for sym in meta.symbols:
         if sym.origin_lib is None or sym.origin_lib in _GENERIC_FALLBACKS:
             new_origin = _guess_symbol_origin(sym.name, meta.needed)
@@ -613,17 +662,17 @@ def _postprocess_metadata(
 
 
 # Dynamic-flag bit constants (elf.h).
-_DT_RELR = 36             # DT_RELR (packed relative relocations)
-_DF_ORIGIN = 0x1          # DT_FLAGS
-_DF_SYMBOLIC = 0x2        # DT_FLAGS
-_DF_TEXTREL = 0x4         # DT_FLAGS
-_DF_BIND_NOW = 0x8        # DT_FLAGS
-_DF_STATIC_TLS = 0x10     # DT_FLAGS
-_DF_1_NOW = 0x1           # DT_FLAGS_1
-_DF_1_NODELETE = 0x8      # DT_FLAGS_1
-_DF_1_NOOPEN = 0x10       # DT_FLAGS_1
-_DF_1_ORIGIN = 0x80       # DT_FLAGS_1
-_DF_1_PIE = 0x08000000    # DT_FLAGS_1
+_DT_RELR = 36  # DT_RELR (packed relative relocations)
+_DF_ORIGIN = 0x1  # DT_FLAGS
+_DF_SYMBOLIC = 0x2  # DT_FLAGS
+_DF_TEXTREL = 0x4  # DT_FLAGS
+_DF_BIND_NOW = 0x8  # DT_FLAGS
+_DF_STATIC_TLS = 0x10  # DT_FLAGS
+_DF_1_NOW = 0x1  # DT_FLAGS_1
+_DF_1_NODELETE = 0x8  # DT_FLAGS_1
+_DF_1_NOOPEN = 0x10  # DT_FLAGS_1
+_DF_1_ORIGIN = 0x80  # DT_FLAGS_1
+_DF_1_PIE = 0x08000000  # DT_FLAGS_1
 
 # Dynamic tags that mark load/unload-time code. The *SZ tags are checked too:
 # lld emits DT_INIT_ARRAY even when empty, so a zero size must not count.
@@ -841,7 +890,11 @@ _ORIGIN_PREFIX_TABLE: list[tuple[tuple[str, ...], _FinderFn | None, str]] = [
         "libstdc++.so.6",
     ),
     # C++ operator new / delete (Itanium ABI)
-    (("_Znwm", "_Znwj", "_Znam", "_Znaj", "_ZdlPv", "_ZdaPv", "_ZnwmSt", "_ZnamSt"), _find_cxx_stdlib, "libstdc++.so.6"),
+    (
+        ("_Znwm", "_Znwj", "_Znam", "_Znaj", "_ZdlPv", "_ZdaPv", "_ZnwmSt", "_ZnamSt"),
+        _find_cxx_stdlib,
+        "libstdc++.so.6",
+    ),
     # Intel SVML
     (("__svml_",), None, "<intel-compiler-rt>"),
     # x87 math helpers (libgcc.a static)
@@ -855,51 +908,57 @@ _ORIGIN_PREFIX_TABLE: list[tuple[tuple[str, ...], _FinderFn | None, str]] = [
 ]
 
 
-_FUNDAMENTAL_CXX_RTTI_SINGLE_CHAR_TYPE_CODES: frozenset[str] = frozenset({
-    "v",   # void
-    "w",   # wchar_t
-    "b",   # bool
-    "c",   # char
-    "a",   # signed char
-    "h",   # unsigned char
-    "s",   # short
-    "t",   # unsigned short
-    "i",   # int
-    "j",   # unsigned int
-    "l",   # long
-    "m",   # unsigned long
-    "x",   # long long
-    "y",   # unsigned long long
-    "n",   # __int128
-    "o",   # unsigned __int128
-    "f",   # float
-    "d",   # double
-    "e",   # long double
-    "g",   # __float128
-    "z",   # ellipsis
-})
+_FUNDAMENTAL_CXX_RTTI_SINGLE_CHAR_TYPE_CODES: frozenset[str] = frozenset(
+    {
+        "v",  # void
+        "w",  # wchar_t
+        "b",  # bool
+        "c",  # char
+        "a",  # signed char
+        "h",  # unsigned char
+        "s",  # short
+        "t",  # unsigned short
+        "i",  # int
+        "j",  # unsigned int
+        "l",  # long
+        "m",  # unsigned long
+        "x",  # long long
+        "y",  # unsigned long long
+        "n",  # __int128
+        "o",  # unsigned __int128
+        "f",  # float
+        "d",  # double
+        "e",  # long double
+        "g",  # __float128
+        "z",  # ellipsis
+    }
+)
 
-_FUNDAMENTAL_CXX_RTTI_MULTI_CHAR_TYPE_CODES: frozenset[str] = frozenset({
-    "Dn",  # std::nullptr_t
-    "Du",  # char8_t
-    "Di",  # char32_t
-    "Ds",  # char16_t
-    "Dh",  # half-precision floating point
-    "Df",  # decimal32
-    "Dd",  # decimal64
-    "De",  # decimal128
-})
+_FUNDAMENTAL_CXX_RTTI_MULTI_CHAR_TYPE_CODES: frozenset[str] = frozenset(
+    {
+        "Dn",  # std::nullptr_t
+        "Du",  # char8_t
+        "Di",  # char32_t
+        "Ds",  # char16_t
+        "Dh",  # half-precision floating point
+        "Df",  # decimal32
+        "Dd",  # decimal64
+        "De",  # decimal128
+    }
+)
 
 _CXX_SIZED_FLOAT_TYPE_CODE_RE = re.compile(r"DF[0-9]+(?:_|[A-Za-z]+)")
 
-_FUNDAMENTAL_CXX_RTTI_TYPE_MODIFIERS: frozenset[str] = frozenset({
-    "P",  # pointer
-    "R",  # lvalue reference
-    "O",  # rvalue reference
-    "K",  # const qualifier
-    "V",  # volatile qualifier
-    "r",  # restrict qualifier
-})
+_FUNDAMENTAL_CXX_RTTI_TYPE_MODIFIERS: frozenset[str] = frozenset(
+    {
+        "P",  # pointer
+        "R",  # lvalue reference
+        "O",  # rvalue reference
+        "K",  # const qualifier
+        "V",  # volatile qualifier
+        "r",  # restrict qualifier
+    }
+)
 
 
 def _is_fundamental_cxx_type_encoding(encoding: str) -> bool:
@@ -991,13 +1050,15 @@ def _parse_dynsym(section: SymbolTableSection, meta: ElfMetadata) -> None:
             if not name or binding == SymbolBinding.LOCAL:
                 continue
             sym_type = _TYPE_MAP.get(type_str, SymbolType.NOTYPE)
-            meta.imports.append(ElfImport(
-                name=name,
-                binding=binding,
-                sym_type=sym_type,
-                version="",  # correlated later via .gnu.version
-                is_default=True,
-            ))
+            meta.imports.append(
+                ElfImport(
+                    name=name,
+                    binding=binding,
+                    sym_type=sym_type,
+                    version="",  # correlated later via .gnu.version
+                    is_default=True,
+                )
+            )
             continue
 
         # Skip absolute (version-def markers).
@@ -1020,17 +1081,19 @@ def _parse_dynsym(section: SymbolTableSection, meta: ElfMetadata) -> None:
         # which is parsed separately in _parse_version_def/_parse_version_need.
         # We leave version="" here; callers correlate via versions_defined/required.
 
-        meta.symbols.append(ElfSymbol(
-            name=name,
-            binding=binding,
-            sym_type=sym_type,
-            size=sym.entry.st_size,
-            version="",
-            is_default=True,
-            visibility=vis_str.replace("STV_", "").lower(),
-            origin_lib=_guess_symbol_origin(name, meta.needed),
-            value_alignment=_value_alignment(int(sym.entry.st_value)),
-        ))
+        meta.symbols.append(
+            ElfSymbol(
+                name=name,
+                binding=binding,
+                sym_type=sym_type,
+                size=sym.entry.st_size,
+                version="",
+                is_default=True,
+                visibility=vis_str.replace("STV_", "").lower(),
+                origin_lib=_guess_symbol_origin(name, meta.needed),
+                value_alignment=_value_alignment(int(sym.entry.st_value)),
+            )
+        )
 
 
 def _build_verdef_index(
@@ -1069,7 +1132,11 @@ def _is_import_sym(sym: object) -> bool:
     """Check if a dynsym entry is a counted import symbol."""
     if sym.entry.st_shndx != "SHN_UNDEF":
         return False
-    return bool(sym.name and _BINDING_MAP.get(sym.entry.st_info.bind, SymbolBinding.OTHER) != SymbolBinding.LOCAL)
+    return bool(
+        sym.name
+        and _BINDING_MAP.get(sym.entry.st_info.bind, SymbolBinding.OTHER)
+        != SymbolBinding.LOCAL
+    )
 
 
 def _is_export_sym(sym: object) -> bool:
@@ -1082,7 +1149,9 @@ def _is_export_sym(sym: object) -> bool:
 
 
 def _parse_ver_entries(
-    ver_sym_section: object, num_vers: int, so_path: Path,
+    ver_sym_section: object,
+    num_vers: int,
+    so_path: Path,
 ) -> list[tuple[int, bool]] | None:
     """Parse .gnu.version into a list of (version_index, is_hidden) per symbol."""
     ver_entries: list[tuple[int, bool]] = []
@@ -1100,7 +1169,9 @@ def _parse_ver_entries(
             idx = raw & 0x7FFF
             ver_entries.append((idx, is_hidden))
     except Exception as exc:  # noqa: BLE001
-        log.warning("parse_elf_metadata: failed to read .gnu.version from %s: %s", so_path, exc)
+        log.warning(
+            "parse_elf_metadata: failed to read .gnu.version from %s: %s", so_path, exc
+        )
         return None
     return ver_entries
 
@@ -1145,7 +1216,13 @@ def _correlate_symbol_versions(
             break
         ver_idx, is_hidden = ver_entries[sym_ordinal]
         export_idx, import_idx = _apply_version_to_symbol(
-            sym, ver_idx, is_hidden, ver_index_map, meta, export_idx, import_idx,
+            sym,
+            ver_idx,
+            is_hidden,
+            ver_index_map,
+            meta,
+            export_idx,
+            import_idx,
         )
 
 

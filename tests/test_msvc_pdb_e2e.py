@@ -98,8 +98,13 @@ def _build_dll(work: Path, name: str, *, v2: bool) -> tuple[Path, Path]:
     dll = work / f"{name}.dll"
     pdb = work / f"{name}.pdb"
     cmd = [
-        "cl", "/nologo", "/LD", "/Zi", "/EHsc",
-        f"/Fe:{dll}", f"/Fd:{pdb}",
+        "cl",
+        "/nologo",
+        "/LD",
+        "/Zi",
+        "/EHsc",
+        f"/Fe:{dll}",
+        f"/Fd:{pdb}",
         str(work / "foo.cpp"),
     ]
     if v2:
@@ -204,5 +209,7 @@ class TestMsvcPdbEndToEnd:
             f"expected BREAKING for removed export, got {result.verdict.value}; "
             f"changes={[c.kind.value for c in result.changes]}"
         )
-        assert any("legacy_fn" in (c.symbol or "") or "legacy_fn" in (c.description or "")
-                   for c in result.changes), "legacy_fn removal not reported"
+        assert any(
+            "legacy_fn" in (c.symbol or "") or "legacy_fn" in (c.description or "")
+            for c in result.changes
+        ), "legacy_fn removal not reported"

@@ -160,9 +160,7 @@ def _consumer_required_nodes(graph: SourceGraphSummary) -> frozenset[str]:
     compute its own tier. Empty — and therefore inert — for every graph with
     no consumer facts folded in.
     """
-    return frozenset(
-        e.dst for e in graph.edges if e.kind == "CONSUMER_REQUIRES_SYMBOL"
-    )
+    return frozenset(e.dst for e in graph.edges if e.kind == "CONSUMER_REQUIRES_SYMBOL")
 
 
 def _graph_path_tier(

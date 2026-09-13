@@ -27,6 +27,7 @@ This is a single-snapshot hygiene anti-pattern (like ADR-027's
 symbols *newly introduced* on the new side, so an unchanged pre-existing leak
 does not spam every comparison.
 """
+
 from __future__ import annotations
 
 import re

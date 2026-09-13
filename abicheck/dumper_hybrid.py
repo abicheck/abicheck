@@ -840,7 +840,10 @@ def _merge_record_type(
         # signal available.
         if clang_t.is_template_pattern and not t.is_template_pattern:
             updates["is_template_pattern"] = True
-        if clang_t.has_anonymous_aggregate_fields and not t.has_anonymous_aggregate_fields:
+        if (
+            clang_t.has_anonymous_aggregate_fields
+            and not t.has_anonymous_aggregate_fields
+        ):
             updates["has_anonymous_aggregate_fields"] = True
 
     clang_fields_by_name = {cf.name: cf for cf in clang_t.fields} if clang_t else {}
@@ -1206,4 +1209,6 @@ def run_hybrid_dump(
     with closure_identity.defer_closure_identity_renumbering():
         castxml_snap = dump_fn(so_path, headers, header_backend="castxml", **kwargs)
         clang_snap = dump_fn(so_path, headers, header_backend="clang", **kwargs)
-    return closure_identity.renumber_anonymous_closure_identities(merge_snapshots(castxml_snap, clang_snap))
+    return closure_identity.renumber_anonymous_closure_identities(
+        merge_snapshots(castxml_snap, clang_snap)
+    )

@@ -28,6 +28,7 @@ LF_STRUCTURE, LF_CLASS, LF_UNION, LF_ENUM, LF_FIELDLIST, LF_MEMBER,
 LF_ENUMERATE, LF_PROCEDURE, LF_MFUNCTION, LF_MODIFIER, LF_POINTER,
 LF_ARRAY, LF_BITFIELD, LF_INDEX.
 """
+
 from __future__ import annotations
 
 import logging
@@ -86,8 +87,8 @@ LF_IVBCLASS = 0x1402
 LF_METHOD = 0x150F
 
 # IPI (stream 4) "id" leaf records — carry source-file provenance for UDTs.
-LF_STRING_ID = 0x1605        # { substr_list_id: u32, name: char[] }
-LF_UDT_SRC_LINE = 0x1606     # { udt_ti: u32, src_string_id: u32, line: u32 }
+LF_STRING_ID = 0x1605  # { substr_list_id: u32, name: char[] }
+LF_UDT_SRC_LINE = 0x1606  # { udt_ti: u32, src_string_id: u32, line: u32 }
 LF_UDT_MOD_SRC_LINE = 0x1607  # { udt_ti: u32, src_string_id: u32, line: u32, mod: u16 }
 
 # Numeric leaf constants
@@ -155,7 +156,7 @@ _SIMPLE_TYPE_NAMES: dict[int, str] = {
     0x71: "unsigned int",
     0x72: "char16_t",
     0x73: "char32_t",
-    0x74: "int",        # 32-bit signed int
+    0x74: "int",  # 32-bit signed int
     0x75: "unsigned int",  # 32-bit unsigned int
     0x76: "long long",  # 64-bit signed
     0x77: "unsigned long long",  # 64-bit unsigned
@@ -163,13 +164,30 @@ _SIMPLE_TYPE_NAMES: dict[int, str] = {
 
 # Simple type sizes in bytes (by kind, lower 8 bits)
 _SIMPLE_TYPE_SIZES: dict[int, int] = {
-    0x00: 0, 0x03: 0,
-    0x10: 1, 0x20: 1, 0x68: 1,
-    0x11: 2, 0x21: 2, 0x72: 2,
-    0x12: 4, 0x22: 4, 0x70: 4, 0x71: 4, 0x74: 4, 0x75: 4,
-    0x13: 8, 0x23: 8, 0x76: 8, 0x77: 8,
-    0x30: 1, 0x69: 2, 0x73: 4,
-    0x40: 4, 0x41: 8, 0x42: 16,
+    0x00: 0,
+    0x03: 0,
+    0x10: 1,
+    0x20: 1,
+    0x68: 1,
+    0x11: 2,
+    0x21: 2,
+    0x72: 2,
+    0x12: 4,
+    0x22: 4,
+    0x70: 4,
+    0x71: 4,
+    0x74: 4,
+    0x75: 4,
+    0x13: 8,
+    0x23: 8,
+    0x76: 8,
+    0x77: 8,
+    0x30: 1,
+    0x69: 2,
+    0x73: 4,
+    0x40: 4,
+    0x41: 8,
+    0x42: 16,
 }
 
 
@@ -177,9 +195,11 @@ _SIMPLE_TYPE_SIZES: dict[int, int] = {
 # MSF (Multi-Stream File) container parser
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class MsfFile:
     """Parsed MSF container — provides access to individual streams."""
+
     block_size: int
     num_blocks: int
     stream_sizes: list[int]
@@ -202,7 +222,7 @@ class MsfFile:
         for blk in blocks:
             offset = blk * self.block_size
             chunk = min(remaining, self.block_size)
-            parts.append(self._data[offset:offset + chunk])
+            parts.append(self._data[offset : offset + chunk])
             remaining -= chunk
             if remaining <= 0:
                 break
@@ -219,8 +239,9 @@ def parse_msf(data: bytes) -> MsfFile:
     if data[:_MSF_MAGIC_LEN] != _MSF_MAGIC:
         raise ValidationError("Not a PDB 7.0 file (bad magic)")
 
-    (block_size, _fpm_block, num_blocks, dir_bytes, _unknown,
-     block_map_addr) = struct.unpack_from("<IIIIII", data, _MSF_MAGIC_LEN)
+    (block_size, _fpm_block, num_blocks, dir_bytes, _unknown, block_map_addr) = (
+        struct.unpack_from("<IIIIII", data, _MSF_MAGIC_LEN)
+    )
 
     if block_size not in (512, 1024, 2048, 4096):
         raise ValidationError(f"Unsupported PDB block size: {block_size}")
@@ -245,7 +266,7 @@ def parse_msf(data: bytes) -> MsfFile:
         chunk = min(remaining, block_size)
         if off + chunk > len(data):
             raise ValidationError(f"PDB block {blk} out of bounds (file too small)")
-        dir_parts.append(data[off:off + chunk])
+        dir_parts.append(data[off : off + chunk])
         remaining -= chunk
     dir_data = b"".join(dir_parts)
 
@@ -292,6 +313,7 @@ def parse_msf(data: bytes) -> MsfFile:
 # ---------------------------------------------------------------------------
 # Numeric leaf decoding
 # ---------------------------------------------------------------------------
+
 
 def _read_numeric_leaf(data: bytes, offset: int) -> tuple[int, int]:
     """Read a CodeView numeric leaf at *offset*.
@@ -350,17 +372,20 @@ def _read_cstring(data: bytes, offset: int) -> tuple[str, int]:
 # TPI stream parser
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class TpiRecord:
     """A single CodeView type record from the TPI stream."""
+
     type_index: int
-    leaf: int       # record kind (LF_xxx)
-    data: bytes     # record payload (after leaf type field)
+    leaf: int  # record kind (LF_xxx)
+    data: bytes  # record payload (after leaf type field)
 
 
 @dataclass
 class TpiStream:
     """Parsed TPI (or IPI) stream."""
+
     type_index_begin: int
     type_index_end: int
     records: list[TpiRecord]
@@ -378,11 +403,18 @@ def parse_tpi_stream(data: bytes) -> TpiStream:
     if len(data) < 56:
         raise ValidationError("TPI stream too small")
 
-    (version, header_size, ti_begin, ti_end, type_bytes,
-     ) = struct.unpack_from("<IIIII", data, 0)
+    (
+        version,
+        header_size,
+        ti_begin,
+        ti_end,
+        type_bytes,
+    ) = struct.unpack_from("<IIIII", data, 0)
 
     if version != _TPI_VERSION_V80:
-        log.warning("Unexpected TPI version %d (expected %d)", version, _TPI_VERSION_V80)
+        log.warning(
+            "Unexpected TPI version %d (expected %d)", version, _TPI_VERSION_V80
+        )
 
     records: list[TpiRecord] = []
     pos = header_size
@@ -394,12 +426,14 @@ def parse_tpi_stream(data: bytes) -> TpiStream:
         if rec_len < 2:
             break
         (leaf,) = struct.unpack_from("<H", data, pos + 2)
-        rec_data = data[pos + 4:pos + 2 + rec_len]
-        records.append(TpiRecord(
-            type_index=current_ti,
-            leaf=leaf,
-            data=rec_data,
-        ))
+        rec_data = data[pos + 4 : pos + 2 + rec_len]
+        records.append(
+            TpiRecord(
+                type_index=current_ti,
+                leaf=leaf,
+                data=rec_data,
+            )
+        )
         # Records are 4-byte aligned
         pos += 2 + rec_len
         pos = (pos + 3) & ~3
@@ -466,9 +500,11 @@ def extract_udt_source_files(ipi: TpiStream) -> dict[int, str]:
 # DBI stream parser
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class DbiHeader:
     """Parsed DBI stream header (64 bytes)."""
+
     version_signature: int
     version_header: int
     age: int
@@ -493,6 +529,7 @@ class DbiHeader:
 @dataclass
 class DbiModuleInfo:
     """One module entry from the DBI module info substream."""
+
     module_name: str
     obj_file_name: str
     module_sym_stream: int
@@ -504,6 +541,7 @@ class DbiModuleInfo:
 @dataclass
 class DbiStream:
     """Parsed DBI stream."""
+
     header: DbiHeader
     modules: list[DbiModuleInfo]
 
@@ -543,13 +581,28 @@ def parse_dbi_stream(data: bytes) -> DbiStream:
     while pos + 64 <= end:
         # Fixed-size part of ModInfo (64 bytes)
         # Layout: Unused1(4) + SectionContribEntry(28) + rest(32)
-        (_unused1, _sec, _pad1, _offset, _size, _chars,
-         _mod_idx, _pad2, _data_crc, _reloc_crc,
-         _mod_flags, mod_sym_stream,
-         sym_byte_size, _c11_byte_size, c13_byte_size,
-         source_file_count, _pad3, _unused2,
-         _src_name_idx, _pdb_path_idx,
-         ) = struct.unpack_from("<IHHiiIHHIIHHIIIHHIII", data, pos)
+        (
+            _unused1,
+            _sec,
+            _pad1,
+            _offset,
+            _size,
+            _chars,
+            _mod_idx,
+            _pad2,
+            _data_crc,
+            _reloc_crc,
+            _mod_flags,
+            mod_sym_stream,
+            sym_byte_size,
+            _c11_byte_size,
+            c13_byte_size,
+            source_file_count,
+            _pad3,
+            _unused2,
+            _src_name_idx,
+            _pdb_path_idx,
+        ) = struct.unpack_from("<IHHiiIHHIIHHIIIHHIII", data, pos)
         pos += 64
 
         # Two null-terminated strings: ModuleName, ObjFileName
@@ -559,14 +612,16 @@ def parse_dbi_stream(data: bytes) -> DbiStream:
         # 4-byte align
         pos = (pos + 3) & ~3
 
-        modules.append(DbiModuleInfo(
-            module_name=mod_name,
-            obj_file_name=obj_name,
-            module_sym_stream=mod_sym_stream,
-            sym_byte_size=sym_byte_size,
-            c13_byte_size=c13_byte_size,
-            source_file_count=source_file_count,
-        ))
+        modules.append(
+            DbiModuleInfo(
+                module_name=mod_name,
+                obj_file_name=obj_name,
+                module_sym_stream=mod_sym_stream,
+                sym_byte_size=sym_byte_size,
+                c13_byte_size=c13_byte_size,
+                source_file_count=source_file_count,
+            )
+        )
 
     return DbiStream(header=header, modules=modules)
 
@@ -575,9 +630,11 @@ def parse_dbi_stream(data: bytes) -> DbiStream:
 # High-level type record interpretation
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CvStruct:
     """Parsed LF_STRUCTURE / LF_CLASS / LF_UNION."""
+
     type_index: int
     name: str
     field_list_ti: int
@@ -591,6 +648,7 @@ class CvStruct:
 @dataclass
 class CvEnum:
     """Parsed LF_ENUM."""
+
     type_index: int
     name: str
     field_list_ti: int
@@ -602,6 +660,7 @@ class CvEnum:
 @dataclass
 class CvMember:
     """Parsed LF_MEMBER (non-static data member)."""
+
     name: str
     type_ti: int
     offset: int
@@ -611,6 +670,7 @@ class CvMember:
 @dataclass
 class CvEnumerator:
     """Parsed LF_ENUMERATE."""
+
     name: str
     value: int
 
@@ -625,6 +685,7 @@ class CvOneMethod:
     (a PDB has no DWARF-style per-symbol linkage, but methods are named right
     in their class's fieldlist).
     """
+
     name: str
     type_ti: int
 
@@ -632,6 +693,7 @@ class CvOneMethod:
 @dataclass
 class CvProcedure:
     """Parsed LF_PROCEDURE."""
+
     type_index: int
     return_type_ti: int
     calling_convention: int
@@ -642,6 +704,7 @@ class CvProcedure:
 @dataclass
 class CvMemberFunction:
     """Parsed LF_MFUNCTION."""
+
     type_index: int
     return_type_ti: int
     class_type_ti: int
@@ -655,6 +718,7 @@ class CvMemberFunction:
 @dataclass
 class CvPointer:
     """Parsed LF_POINTER."""
+
     type_index: int
     referent_ti: int
     attrs: int
@@ -664,6 +728,7 @@ class CvPointer:
 @dataclass
 class CvArray:
     """Parsed LF_ARRAY."""
+
     type_index: int
     element_type_ti: int
     index_type_ti: int
@@ -674,6 +739,7 @@ class CvArray:
 @dataclass
 class CvModifier:
     """Parsed LF_MODIFIER."""
+
     type_index: int
     modified_ti: int
     is_const: bool
@@ -684,9 +750,10 @@ class CvModifier:
 @dataclass
 class CvBitfield:
     """Parsed LF_BITFIELD."""
+
     type_index: int
     underlying_ti: int
-    length: int   # bit width
+    length: int  # bit width
     position: int  # bit position
 
 
@@ -707,7 +774,9 @@ class TypeDatabase:
         self._arrays: dict[int, CvArray] = {}
         self._modifiers: dict[int, CvModifier] = {}
         self._bitfields: dict[int, CvBitfield] = {}
-        self._fieldlists: dict[int, list[Any]] = {}  # ti → list of CvMember/CvEnumerator/etc.
+        self._fieldlists: dict[
+            int, list[Any]
+        ] = {}  # ti → list of CvMember/CvEnumerator/etc.
         self._arglists: dict[int, list[int]] = {}  # ti → list of type indices
         # Forward-ref → definition mapping
         self._fwd_to_def: dict[int, int] = {}
@@ -725,8 +794,12 @@ class TypeDatabase:
             try:
                 self._parse_record(rec)
             except (struct.error, IndexError, ValueError) as exc:
-                log.debug("Failed to parse TPI record ti=0x%x leaf=0x%x: %s",
-                          rec.type_index, rec.leaf, exc)
+                log.debug(
+                    "Failed to parse TPI record ti=0x%x leaf=0x%x: %s",
+                    rec.type_index,
+                    rec.leaf,
+                    exc,
+                )
 
         # Build forward-ref → definition mapping in 2 passes:
         # Pass 1: collect all definitions (structs + enums) by name
@@ -789,7 +862,8 @@ class TypeDatabase:
             if len(d) < 16:
                 return
             (count, prop, field_ti, _derived_ti, _vshape_ti) = struct.unpack_from(
-                "<HHIII", d, 0)
+                "<HHIII", d, 0
+            )
             pos = 16
         byte_size, pos = _read_numeric_leaf(d, pos)
         name, _pos = _read_cstring(d, pos)
@@ -819,7 +893,9 @@ class TypeDatabase:
         )
 
     def _parse_fieldlist(
-        self, ti: int, d: bytes,
+        self,
+        ti: int,
+        d: bytes,
         _visited: set[int] | None = None,
     ) -> None:
         if _visited is None:
@@ -850,9 +926,15 @@ class TypeDatabase:
                 new_pos = self._parse_lf_index(d, pos, members, _visited)
             elif sub_leaf == LF_ONEMETHOD:
                 new_pos = self._parse_lf_onemethod(d, pos, members)
-            elif sub_leaf in (LF_STMEMBER, LF_NESTTYPE,
-                              LF_VFUNCTAB, LF_BCLASS, LF_VBCLASS,
-                              LF_IVBCLASS, LF_METHOD):
+            elif sub_leaf in (
+                LF_STMEMBER,
+                LF_NESTTYPE,
+                LF_VFUNCTAB,
+                LF_BCLASS,
+                LF_VBCLASS,
+                LF_IVBCLASS,
+                LF_METHOD,
+            ):
                 # Skip known sub-records we don't need
                 new_pos = self._skip_subrecord(sub_leaf, d, pos)
             else:
@@ -868,7 +950,10 @@ class TypeDatabase:
         self._fieldlists[ti] = members
 
     def _parse_lf_member(
-        self, d: bytes, pos: int, members: list[Any],
+        self,
+        d: bytes,
+        pos: int,
+        members: list[Any],
     ) -> int | None:
         """Parse an LF_MEMBER sub-record; return the new position, or None if truncated."""
         if pos + 6 > len(d):
@@ -877,14 +962,21 @@ class TypeDatabase:
         pos += 6
         offset_val, pos = _read_numeric_leaf(d, pos)
         name, pos = _read_cstring(d, pos)
-        members.append(CvMember(
-            name=name, type_ti=type_ti,
-            offset=offset_val, access=attr & 0x03,
-        ))
+        members.append(
+            CvMember(
+                name=name,
+                type_ti=type_ti,
+                offset=offset_val,
+                access=attr & 0x03,
+            )
+        )
         return pos
 
     def _parse_lf_enumerate(
-        self, d: bytes, pos: int, members: list[Any],
+        self,
+        d: bytes,
+        pos: int,
+        members: list[Any],
     ) -> int | None:
         """Parse an LF_ENUMERATE sub-record; return the new position, or None if truncated."""
         if pos + 2 > len(d):
@@ -897,7 +989,11 @@ class TypeDatabase:
         return pos
 
     def _parse_lf_index(
-        self, d: bytes, pos: int, members: list[Any], _visited: set[int],
+        self,
+        d: bytes,
+        pos: int,
+        members: list[Any],
+        _visited: set[int],
     ) -> int | None:
         """Parse an LF_INDEX continuation sub-record; return the new position, or None if truncated."""
         # LF_INDEX — continuation to another LF_FIELDLIST.
@@ -915,7 +1011,10 @@ class TypeDatabase:
         return pos
 
     def _parse_lf_onemethod(
-        self, d: bytes, pos: int, members: list[Any],
+        self,
+        d: bytes,
+        pos: int,
+        members: list[Any],
     ) -> int | None:
         """Parse an LF_ONEMETHOD sub-record; return the new position, or None if truncated."""
         # attr(2) + type_ti(4) [+ vbaseoff(4) if intro virtual] + name.
@@ -992,7 +1091,8 @@ class TypeDatabase:
         if len(d) < 12:
             return
         (rvtype, calltype, _funcattr, parmcount, arglist) = struct.unpack_from(
-            "<IBBHI", d, 0)
+            "<IBBHI", d, 0
+        )
         self._procedures[ti] = CvProcedure(
             type_index=ti,
             return_type_ti=rvtype,
@@ -1004,9 +1104,16 @@ class TypeDatabase:
     def _parse_mfunction(self, ti: int, d: bytes) -> None:
         if len(d) < 24:
             return
-        (rvtype, classtype, thistype, calltype, _funcattr,
-         parmcount, arglist, thisadjust) = struct.unpack_from(
-            "<IIIBBHIi", d, 0)
+        (
+            rvtype,
+            classtype,
+            thistype,
+            calltype,
+            _funcattr,
+            parmcount,
+            arglist,
+            thisadjust,
+        ) = struct.unpack_from("<IIIBBHIi", d, 0)
         self._mfunctions[ti] = CvMemberFunction(
             type_index=ti,
             return_type_ti=rvtype,
@@ -1267,9 +1374,11 @@ class TypeDatabase:
 # Top-level PDB file parser
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PdbFile:
     """Fully parsed PDB file."""
+
     msf: MsfFile
     tpi: TpiStream | None = None
     dbi: DbiStream | None = None
@@ -1324,9 +1433,7 @@ def parse_pdb(path: Path) -> PdbFile:
     return pdb
 
 
-def _resolve_udt_source_files(
-    ipi: TpiStream, types: TypeDatabase
-) -> dict[str, str]:
+def _resolve_udt_source_files(ipi: TpiStream, types: TypeDatabase) -> dict[str, str]:
     """Resolve the IPI UDT-source map (ti → file) to a UDT *name* → file map."""
     by_ti = extract_udt_source_files(ipi)
     if not by_ti:

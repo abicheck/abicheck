@@ -63,13 +63,23 @@ class TestFindLayoutToolBin:
 class TestCompileFlagsSlicing:
     def test_strips_cc_bin_and_ast_dump_tail(self):
         cmd = [
-            "clang++", "-I", "/inc", "-std=gnu++17",
-            "-fsyntax-only", "-ferror-limit=0", "-Xclang", "-ast-dump=json",
+            "clang++",
+            "-I",
+            "/inc",
+            "-std=gnu++17",
+            "-fsyntax-only",
+            "-ferror-limit=0",
+            "-Xclang",
+            "-ast-dump=json",
             "/work/agg.hpp",
         ]
         flags = _compile_flags_from_ast_dump_command(cmd)
         assert flags == [
-            "-I", "/inc", "-std=gnu++17", "-fsyntax-only", "-ferror-limit=0",
+            "-I",
+            "/inc",
+            "-std=gnu++17",
+            "-fsyntax-only",
+            "-ferror-limit=0",
         ]
 
     def test_defensive_fallback_when_no_xclang(self):
@@ -84,16 +94,29 @@ class TestCompileFlagsSlicing:
         # user's own flag/value plus every later shared flag (system
         # includes, language mode), not just abicheck's dump-mode tail.
         cmd = [
-            "clang++", "-I", "/inc", "-Xclang", "-some-user-flag",
-            "-isystem", "/usr/include/probed",
-            "-fsyntax-only", "-ferror-limit=0", "-Xclang", "-ast-dump=json",
+            "clang++",
+            "-I",
+            "/inc",
+            "-Xclang",
+            "-some-user-flag",
+            "-isystem",
+            "/usr/include/probed",
+            "-fsyntax-only",
+            "-ferror-limit=0",
+            "-Xclang",
+            "-ast-dump=json",
             "/work/agg.hpp",
         ]
         flags = _compile_flags_from_ast_dump_command(cmd)
         assert flags == [
-            "-I", "/inc", "-Xclang", "-some-user-flag",
-            "-isystem", "/usr/include/probed",
-            "-fsyntax-only", "-ferror-limit=0",
+            "-I",
+            "/inc",
+            "-Xclang",
+            "-some-user-flag",
+            "-isystem",
+            "/usr/include/probed",
+            "-fsyntax-only",
+            "-ferror-limit=0",
         ]
 
 
@@ -113,14 +136,18 @@ class TestRunLayoutTool:
     def test_subprocess_timeout_returns_none(self, tmp_path):
         header = tmp_path / "a.h"
         header.write_text("struct Foo {};")
-        with patch(
-            "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
-        ), patch(
-            "abicheck.clang_layout_tool._resolve_clang_langmode",
-            return_value=(True, False, False, "gnu"),
-        ), patch(
-            "abicheck.clang_layout_tool.subprocess.run",
-            side_effect=subprocess.TimeoutExpired(cmd="x", timeout=1),
+        with (
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
+            ),
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_langmode",
+                return_value=(True, False, False, "gnu"),
+            ),
+            patch(
+                "abicheck.clang_layout_tool.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="x", timeout=1),
+            ),
         ):
             assert run_layout_tool("some-binary", [header], []) is None
 
@@ -130,13 +157,17 @@ class TestRunLayoutTool:
         fake_result = subprocess.CompletedProcess(
             args=["x"], returncode=0, stdout="not json", stderr=""
         )
-        with patch(
-            "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
-        ), patch(
-            "abicheck.clang_layout_tool._resolve_clang_langmode",
-            return_value=(True, False, False, "gnu"),
-        ), patch(
-            "abicheck.clang_layout_tool.subprocess.run", return_value=fake_result
+        with (
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
+            ),
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_langmode",
+                return_value=(True, False, False, "gnu"),
+            ),
+            patch(
+                "abicheck.clang_layout_tool.subprocess.run", return_value=fake_result
+            ),
         ):
             assert run_layout_tool("some-binary", [header], []) is None
 
@@ -144,15 +175,22 @@ class TestRunLayoutTool:
         header = tmp_path / "a.h"
         header.write_text("struct Foo {};")
         fake_result = subprocess.CompletedProcess(
-            args=["x"], returncode=0, stdout='{"ok": true, "records": "oops"}', stderr=""
+            args=["x"],
+            returncode=0,
+            stdout='{"ok": true, "records": "oops"}',
+            stderr="",
         )
-        with patch(
-            "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
-        ), patch(
-            "abicheck.clang_layout_tool._resolve_clang_langmode",
-            return_value=(True, False, False, "gnu"),
-        ), patch(
-            "abicheck.clang_layout_tool.subprocess.run", return_value=fake_result
+        with (
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
+            ),
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_langmode",
+                return_value=(True, False, False, "gnu"),
+            ),
+            patch(
+                "abicheck.clang_layout_tool.subprocess.run", return_value=fake_result
+            ),
         ):
             assert run_layout_tool("some-binary", [header], []) is None
 
@@ -169,17 +207,22 @@ class TestRunLayoutTool:
         header = tmp_path / "a.h"
         header.write_text("struct Foo { int a; };")
         fake_result = subprocess.CompletedProcess(
-            args=["x"], returncode=0,
+            args=["x"],
+            returncode=0,
             stdout='{"ok": false, "records": [{"qualified_name": "Foo", "size_bits": 32}]}',
             stderr="",
         )
-        with patch(
-            "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
-        ), patch(
-            "abicheck.clang_layout_tool._resolve_clang_langmode",
-            return_value=(True, False, False, "gnu"),
-        ), patch(
-            "abicheck.clang_layout_tool.subprocess.run", return_value=fake_result
+        with (
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
+            ),
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_langmode",
+                return_value=(True, False, False, "gnu"),
+            ),
+            patch(
+                "abicheck.clang_layout_tool.subprocess.run", return_value=fake_result
+            ),
         ):
             assert run_layout_tool("some-binary", [header], []) is None
 
@@ -194,21 +237,25 @@ class TestRunLayoutTool:
             agg_path = Path(cmd[1])
             assert agg_path.exists()
             return subprocess.CompletedProcess(
-                args=cmd, returncode=0,
+                args=cmd,
+                returncode=0,
                 stdout=__import__("json").dumps({"ok": True, "records": fake_records}),
                 stderr="",
             )
 
-        with patch(
-            "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
-        ), patch(
-            "abicheck.clang_layout_tool._resolve_clang_langmode",
-            return_value=(True, False, False, "gnu"),
-        ), patch(
-            "abicheck.clang_layout_tool._resolve_clang_system_includes",
-            return_value=(),
-        ), patch(
-            "abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run
+        with (
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
+            ),
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_langmode",
+                return_value=(True, False, False, "gnu"),
+            ),
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_system_includes",
+                return_value=(),
+            ),
+            patch("abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run),
         ):
             result = run_layout_tool("/path/to/tool", [header], [])
 
@@ -231,24 +278,27 @@ class TestRunLayoutTool:
         def _fake_run(cmd, **kwargs):
             captured_cmd["cmd"] = cmd
             return subprocess.CompletedProcess(
-                args=cmd, returncode=0,
-                stdout='{"ok": true, "records": []}', stderr="",
+                args=cmd,
+                returncode=0,
+                stdout='{"ok": true, "records": []}',
+                stderr="",
             )
 
-        with patch(
-            "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
-        ), patch(
-            "abicheck.clang_layout_tool._resolve_clang_langmode",
-            return_value=(True, False, False, "gnu"),
-        ), patch(
-            "abicheck.clang_layout_tool._resolve_clang_system_includes",
-            return_value=("/usr/include/probed-libstdcxx",),
-        ) as mock_probe, patch(
-            "abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run
+        with (
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
+            ),
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_langmode",
+                return_value=(True, False, False, "gnu"),
+            ),
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_system_includes",
+                return_value=("/usr/include/probed-libstdcxx",),
+            ) as mock_probe,
+            patch("abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run),
         ):
-            run_layout_tool(
-                "/path/to/tool", [header], [], gcc_options="--sysroot=/x"
-            )
+            run_layout_tool("/path/to/tool", [header], [], gcc_options="--sysroot=/x")
 
         # The probe itself must be called with the caller's compile context.
         mock_probe.assert_called_once()
@@ -275,26 +325,31 @@ class TestRunLayoutTool:
             attempt["n"] += 1
             if attempt["n"] == 1:
                 return subprocess.CompletedProcess(
-                    args=cmd, returncode=0,
+                    args=cmd,
+                    returncode=0,
                     stdout='{"ok": false, "records": []}',
                     stderr="fatal error: 'cstddef' file not found\n",
                 )
             return subprocess.CompletedProcess(
-                args=cmd, returncode=0,
+                args=cmd,
+                returncode=0,
                 stdout='{"ok": true, "records": [{"qualified_name": "Foo", "size_bits": 32}]}',
                 stderr="",
             )
 
-        with patch(
-            "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
-        ), patch(
-            "abicheck.clang_layout_tool._resolve_clang_langmode",
-            return_value=(False, False, False, "gnu"),
-        ), patch(
-            "abicheck.clang_layout_tool._resolve_clang_system_includes",
-            return_value=(),
-        ), patch(
-            "abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run
+        with (
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
+            ),
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_langmode",
+                return_value=(False, False, False, "gnu"),
+            ),
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_system_includes",
+                return_value=(),
+            ),
+            patch("abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run),
         ):
             result = run_layout_tool("/path/to/tool", [header], [])
 
@@ -324,25 +379,31 @@ class TestRunLayoutTool:
                     "directly\n"
                 )
                 return subprocess.CompletedProcess(
-                    args=cmd, returncode=0,
-                    stdout='{"ok": false, "records": []}', stderr=stderr,
+                    args=cmd,
+                    returncode=0,
+                    stdout='{"ok": false, "records": []}',
+                    stderr=stderr,
                 )
             return subprocess.CompletedProcess(
-                args=cmd, returncode=0,
+                args=cmd,
+                returncode=0,
                 stdout='{"ok": true, "records": [{"qualified_name": "Foo", "size_bits": 32}]}',
                 stderr="",
             )
 
-        with patch(
-            "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
-        ), patch(
-            "abicheck.clang_layout_tool._resolve_clang_langmode",
-            return_value=(True, False, False, "gnu"),
-        ), patch(
-            "abicheck.clang_layout_tool._resolve_clang_system_includes",
-            return_value=(),
-        ), patch(
-            "abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run
+        with (
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
+            ),
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_langmode",
+                return_value=(True, False, False, "gnu"),
+            ),
+            patch(
+                "abicheck.clang_layout_tool._resolve_clang_system_includes",
+                return_value=(),
+            ),
+            patch("abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run),
         ):
             result = run_layout_tool("/path/to/tool", [h_ok, h_bad], [])
 
@@ -373,7 +434,10 @@ class TestBareBaseName:
 class TestApplyRecordFacts:
     def test_backfills_only_none_scalar_fields(self):
         t = RecordType(
-            name="Foo", kind="struct", size_bits=None, alignment_bits=64,
+            name="Foo",
+            kind="struct",
+            size_bits=None,
+            alignment_bits=64,
         )
         facts = {"size_bits": 192, "alignment_bits": 128, "data_size_bits": 192}
         updated = _apply_record_facts(t, facts)
@@ -409,8 +473,12 @@ class TestApplyRecordFacts:
         # qualified spelling here would make a namespaced base's offset
         # incomparable against a castxml/DWARF baseline's base_offsets dict
         # (_check_base_offsets does an exact key lookup).
-        t = RecordType(name="Derived", kind="class", bases=["ns::Base"], base_offsets={})
-        facts = {"bases": [{"name": "ns::Base", "offset_bits": 64, "is_virtual": False}]}
+        t = RecordType(
+            name="Derived", kind="class", bases=["ns::Base"], base_offsets={}
+        )
+        facts = {
+            "bases": [{"name": "ns::Base", "offset_bits": 64, "is_virtual": False}]
+        }
         updated = _apply_record_facts(t, facts)
         assert updated.base_offsets == {"Base": 64}
 
@@ -493,7 +561,10 @@ class TestApplyLayoutFacts:
         # dumper_layout_backfill.py's DWARF backfill already guards against
         # this identical ambiguity for the same reason.
         pattern = RecordType(
-            name="Box", kind="class", size_bits=None, is_template_pattern=True,
+            name="Box",
+            kind="class",
+            size_bits=None,
+            is_template_pattern=True,
         )
         snap = AbiSnapshot(library="lib", version="1.0", types=[pattern])
         records = [{"qualified_name": "Box", "size_bits": 32}]
@@ -555,9 +626,7 @@ class TestAttachClangLayout:
             ast_producer="clang",
             frontend_context_kind="device",
         )
-        with patch(
-            "abicheck.clang_layout_tool.find_layout_tool_bin"
-        ) as mock_find_bin:
+        with patch("abicheck.clang_layout_tool.find_layout_tool_bin") as mock_find_bin:
             result = attach_clang_layout(snap, [header], [], lang=None, compile=None)
         assert result is snap
         mock_find_bin.assert_not_called()
@@ -591,12 +660,15 @@ class TestAttachClangLayout:
             library="lib", version="1.0", ast_producer="clang", types=[t]
         )
         fake_records = [{"qualified_name": "Foo", "size_bits": 32}]
-        with patch(
-            "abicheck.clang_layout_tool.find_layout_tool_bin",
-            return_value="/fake/tool",
-        ), patch(
-            "abicheck.clang_layout_tool.run_layout_tool", return_value=fake_records
-        ) as mock_run:
+        with (
+            patch(
+                "abicheck.clang_layout_tool.find_layout_tool_bin",
+                return_value="/fake/tool",
+            ),
+            patch(
+                "abicheck.clang_layout_tool.run_layout_tool", return_value=fake_records
+            ) as mock_run,
+        ):
             result = attach_clang_layout(snap, [header], [], lang=None, compile=None)
         assert result.type_by_name("Foo").size_bits == 32
         mock_run.assert_called_once()
@@ -615,12 +687,15 @@ class TestAttachClangLayout:
         header = tmp_path / "a.h"
         header.write_text("struct Foo { int a; };")
         snap = AbiSnapshot(library="lib", version="1.0", ast_producer="clang")
-        with patch(
-            "abicheck.clang_layout_tool.find_layout_tool_bin",
-            return_value="/fake/tool",
-        ), patch(
-            "abicheck.clang_layout_tool.run_layout_tool", return_value=None
-        ) as mock_run:
+        with (
+            patch(
+                "abicheck.clang_layout_tool.find_layout_tool_bin",
+                return_value="/fake/tool",
+            ),
+            patch(
+                "abicheck.clang_layout_tool.run_layout_tool", return_value=None
+            ) as mock_run,
+        ):
             attach_clang_layout(snap, [header], [], lang="c", compile=None)
         assert mock_run.call_args.kwargs["compiler"] == "cc"
 
@@ -636,22 +711,30 @@ class TestAttachClangLayout:
         header = tmp_path / "a.h"
         header.write_text("struct Foo { int a; }; struct Bar { int b; };")
         castxml_backed = RecordType(
-            name="Foo", kind="struct", size_bits=192, alignment_bits=32,
+            name="Foo",
+            kind="struct",
+            size_bits=192,
+            alignment_bits=32,
         )
         clang_only = RecordType(name="Bar", kind="struct", size_bits=None)
         snap = AbiSnapshot(
-            library="lib", version="1.0", ast_producer="hybrid",
+            library="lib",
+            version="1.0",
+            ast_producer="hybrid",
             types=[castxml_backed, clang_only],
         )
         fake_records = [
             {"qualified_name": "Foo", "size_bits": 999},  # must NOT be applied
             {"qualified_name": "Bar", "size_bits": 32},
         ]
-        with patch(
-            "abicheck.clang_layout_tool.find_layout_tool_bin",
-            return_value="/fake/tool",
-        ), patch(
-            "abicheck.clang_layout_tool.run_layout_tool", return_value=fake_records
+        with (
+            patch(
+                "abicheck.clang_layout_tool.find_layout_tool_bin",
+                return_value="/fake/tool",
+            ),
+            patch(
+                "abicheck.clang_layout_tool.run_layout_tool", return_value=fake_records
+            ),
         ):
             result = attach_clang_layout(snap, [header], [], lang=None, compile=None)
         # The castxml-sourced record already had real layout -- untouched.

@@ -220,7 +220,11 @@ def test_existing_install_is_replaced_before_version_probe(tmp_path: Path) -> No
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
     }
     result = subprocess.run(
-        [bash_executable(), str(INSTALLER)], capture_output=True, text=True, env=env, check=False
+        [bash_executable(), str(INSTALLER)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     assert not poison_log.exists()
@@ -240,7 +244,11 @@ def test_local_archive_checksum_rejection_is_fail_closed(tmp_path: Path) -> None
         "ABICHECK_CASTXML_INSTALL_ROOT": str(tmp_path / "install"),
     }
     result = subprocess.run(
-        [bash_executable(), str(INSTALLER)], capture_output=True, text=True, env=env, check=False
+        [bash_executable(), str(INSTALLER)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
     )
     assert result.returncode != 0
     assert "FAILED" in result.stdout + result.stderr
@@ -255,12 +263,13 @@ def test_composite_castxml_action_invokes_the_pinned_installer() -> None:
     action = ROOT / ".github/actions/setup-castxml/action.yml"
     spec = yaml.safe_load(action.read_text(encoding="utf-8"))
     steps = spec["runs"]["steps"]
-    assert any("action/install-castxml.sh" in str(step.get("run", "")) for step in steps), (
-        "the composite must still run the pinned installer"
-    )
+    assert any(
+        "action/install-castxml.sh" in str(step.get("run", "")) for step in steps
+    ), "the composite must still run the pinned installer"
     # The cache is keyed on the installer's own contents; if that stops being
     # true a re-pin would silently reuse the previous build's cache entry.
     assert any(
-        "hashFiles('action/install-castxml.sh')" in str(step.get("with", {}).get("key", ""))
+        "hashFiles('action/install-castxml.sh')"
+        in str(step.get("with", {}).get("key", ""))
         for step in steps
     ), "the cache key must still be derived from the installer script"

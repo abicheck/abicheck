@@ -290,9 +290,7 @@ class TestInteriorInsertionProperties:
 
     @pytest.mark.parametrize("old_value,new_value", [(None, "[]"), ("[]", None)])
     def test_declines_when_either_side_is_absent(self, old_value, new_value):
-        assert not _header_sequence_is_interior_insertion(
-            old_value, new_value, {"x.h"}
-        )
+        assert not _header_sequence_is_interior_insertion(old_value, new_value, {"x.h"})
 
     def test_declines_malformed_json(self):
         assert not _header_sequence_is_interior_insertion(
@@ -356,7 +354,7 @@ class TestCompareRecordsRatherThanRefuses:
         }
 
     def test_the_reason_is_disclosed_not_swallowed(self, tmp_path):
-        """"Record before disposing": a consumer must be able to see WHY
+        """ "Record before disposing": a consumer must be able to see WHY
         assurance dropped, not just that it did."""
         from abicheck.checker import compare
 

@@ -486,7 +486,8 @@ class TestAssessChangeWithCachedImpactAssessment:
 
     def test_root_cause_is_always_recomputed_not_read_from_cache(self) -> None:
         cached = ImpactAssessment(
-            root_cause_id="stale-id", root_cause_display="stale-display",
+            root_cause_id="stale-id",
+            root_cause_display="stale-display",
             impact_group_id="stale-id",
         )
         change = _change(impact_assessment=cached)
@@ -506,9 +507,7 @@ class TestAssessChangeWithCachedImpactAssessment:
             "reachability_state": ReachabilityState.PROVEN_REACHABLE,
         }
         uncached = assess_change(_change(**flat_fields))
-        cached = assess_change(
-            _change(impact_assessment=uncached, **flat_fields)
-        )
+        cached = assess_change(_change(impact_assessment=uncached, **flat_fields))
         assert cached == uncached
 
     def test_none_cached_falls_back_to_derivation(self) -> None:

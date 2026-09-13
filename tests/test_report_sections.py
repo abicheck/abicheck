@@ -15,6 +15,7 @@ report sections (summary, severity groups, impact, release
 recommendation, confidence) and HTML escaping are present — guarding
 output *structure* without committing brittle full-text golden files.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -34,7 +35,9 @@ def _snap(ver: str, funcs: list[Function]) -> AbiSnapshot:
 
 def _fn(name: str, mangled: str) -> Function:
     return Function(
-        name=name, mangled=mangled, return_type="int",
+        name=name,
+        mangled=mangled,
+        return_type="int",
         visibility=Visibility.PUBLIC,
     )
 
@@ -54,6 +57,7 @@ def _addition_result():
 # ---------------------------------------------------------------------------
 # Markdown
 # ---------------------------------------------------------------------------
+
 
 def test_markdown_breaking_has_all_sections() -> None:
     result = _removal_result()
@@ -99,10 +103,13 @@ def test_markdown_recommendation_is_opt_in(show_rec: bool) -> None:
 # HTML
 # ---------------------------------------------------------------------------
 
+
 def test_html_breaking_has_sections() -> None:
     html = generate_html_report(
-        _removal_result(), lib_name="libfoo.so",
-        old_version="1.0", new_version="2.0",
+        _removal_result(),
+        lib_name="libfoo.so",
+        old_version="1.0",
+        new_version="2.0",
     )
     assert html.lstrip().startswith("<!DOCTYPE")
     for section in ("Removed", "Changed", "Added", "Binary Compatibility"):
@@ -115,8 +122,10 @@ def test_html_escapes_symbol_names() -> None:
     old = _snap("1.0", [_fn("compute", "_Z7computei"), _fn("he<lp>er", "_Z6helperi")])
     new = _snap("2.0", [_fn("compute", "_Z7computei")])
     html = generate_html_report(
-        compare(old, new), lib_name="libfoo.so",
-        old_version="1.0", new_version="2.0",
+        compare(old, new),
+        lib_name="libfoo.so",
+        old_version="1.0",
+        new_version="2.0",
     )
     assert "he&lt;lp&gt;er" in html
     assert "he<lp>er" not in html
@@ -124,8 +133,10 @@ def test_html_escapes_symbol_names() -> None:
 
 def test_html_compatible_is_100_percent() -> None:
     html = generate_html_report(
-        _addition_result(), lib_name="libfoo.so",
-        old_version="1.0", new_version="2.0",
+        _addition_result(),
+        lib_name="libfoo.so",
+        old_version="1.0",
+        new_version="2.0",
     )
     # Pure additions keep binary compatibility at 100%.
     assert "100" in html
@@ -145,8 +156,10 @@ def test_html_evaluated_finding_carries_contract_decision() -> None:
     change.compatibility_decision = Verdict.BREAKING
     change.contract_evidence_refs = ("public_header:old",)
     html = generate_html_report(
-        result, lib_name="libfoo.so",
-        old_version="1.0", new_version="2.0",
+        result,
+        lib_name="libfoo.so",
+        old_version="1.0",
+        new_version="2.0",
     )
     assert "relevance: IN_CONTRACT" in html
     assert "reason: public_header_direct" in html
@@ -157,8 +170,10 @@ def test_html_evaluated_finding_carries_contract_decision() -> None:
 
 def test_html_unstamped_finding_has_no_contract_badge() -> None:
     html = generate_html_report(
-        _removal_result(), lib_name="libfoo.so",
-        old_version="1.0", new_version="2.0",
+        _removal_result(),
+        lib_name="libfoo.so",
+        old_version="1.0",
+        new_version="2.0",
     )
     assert "Contract —" not in html
 
@@ -173,8 +188,10 @@ def test_html_stamped_finding_without_optional_fields_shows_relevance_only() -> 
     change = result.changes[0]
     change.contract_relevance = ContractRelevance.NOT_APPLICABLE
     html = generate_html_report(
-        result, lib_name="libfoo.so",
-        old_version="1.0", new_version="2.0",
+        result,
+        lib_name="libfoo.so",
+        old_version="1.0",
+        new_version="2.0",
     )
     start = html.index("📜 Contract — ") + len("📜 Contract — ")
     badge = html[start : html.index("</div>", start)]

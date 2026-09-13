@@ -56,14 +56,14 @@ AUTO = "auto"
 #: The full set of source-ABI capabilities a backend may provide. Ordered most-
 #: to-least commonly decisive so a capability-gap report reads naturally.
 ALL_CAPABILITIES: tuple[str, ...] = (
-    "declarations",            # function/type/variable declarations + signatures
-    "types",                   # record/enum/union layout-relevant type info
-    "const_values",            # public const/constexpr scalar values
-    "default_arguments",       # default-argument expressions on parameters
-    "macros",                  # object-/function-like macro definitions
-    "inline_bodies",           # inline/template/constexpr function *body* fingerprints
-    "concepts",                # C++20 concept constraints / requires-expressions
-    "constructor_mangling",    # mangled names for user-declared constructors
+    "declarations",  # function/type/variable declarations + signatures
+    "types",  # record/enum/union layout-relevant type info
+    "const_values",  # public const/constexpr scalar values
+    "default_arguments",  # default-argument expressions on parameters
+    "macros",  # object-/function-like macro definitions
+    "inline_bodies",  # inline/template/constexpr function *body* fingerprints
+    "concepts",  # C++20 concept constraints / requires-expressions
+    "constructor_mangling",  # mangled names for user-declared constructors
 )
 
 
@@ -101,9 +101,14 @@ PROFILES: dict[str, SourceExtractorProfile] = {
     CASTXML: SourceExtractorProfile(
         name=CASTXML,
         rank=20,
-        capabilities=frozenset({
-            "declarations", "types", "const_values", "default_arguments",
-        }),
+        capabilities=frozenset(
+            {
+                "declarations",
+                "types",
+                "const_values",
+                "default_arguments",
+            }
+        ),
     ),
     ANDROID: SourceExtractorProfile(
         name=ANDROID,
@@ -201,7 +206,9 @@ def resolve_source_extractor(
     # Android is only ever used when explicitly requested (needs a dump file).
     if requested == ANDROID:
         if _availability_for(ANDROID, available):
-            return SourceExtractorChoice(selected=ANDROID, reason="android adapter (explicit)")
+            return SourceExtractorChoice(
+                selected=ANDROID, reason="android adapter (explicit)"
+            )
         return SourceExtractorChoice(
             selected=None,
             skipped=[(ANDROID, "android dump adapter unavailable")],
@@ -220,7 +227,11 @@ def resolve_source_extractor(
         # semantics for a castxml-specific run. So castxml-absent yields
         # selected=None (unavailable) rather than clang.
         req_rank = PROFILES[requested].rank
-        tail = [p for p in pref if p != requested and PROFILES[p].rank < req_rank] if fallback else []
+        tail = (
+            [p for p in pref if p != requested and PROFILES[p].rank < req_rank]
+            if fallback
+            else []
+        )
         chain = [requested] + tail
         lead = requested
     else:
@@ -239,7 +250,10 @@ def resolve_source_extractor(
             else:
                 reason = f"{name} (requested)"
             return SourceExtractorChoice(
-                selected=name, skipped=skipped, reason=reason, fell_back=fell_back,
+                selected=name,
+                skipped=skipped,
+                reason=reason,
+                fell_back=fell_back,
             )
         skipped.append((name, "not available (tool not found in PATH)"))
 

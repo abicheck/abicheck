@@ -218,7 +218,9 @@ def validate_zstd_frame_completeness(
         # everything and there is nothing left to slice.
         remaining = remaining[consumed - len(dobj.unused_data) :]
     if not saw_data_frame:
-        raise SnapshotError(f"{source}: corrupt or truncated zstd stream (no data frame at all)")
+        raise SnapshotError(
+            f"{source}: corrupt or truncated zstd stream (no data frame at all)"
+        )
 
 
 def skip_leading_skippable_frames(data: bytes) -> bytes:

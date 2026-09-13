@@ -73,7 +73,10 @@ def _func(ident: str) -> Function:
 
 def _var(ident: str) -> Variable:
     return Variable(
-        name=ident, mangled=f"_Z{len(ident)}{ident}", type="int", visibility=Visibility.PUBLIC
+        name=ident,
+        mangled=f"_Z{len(ident)}{ident}",
+        type="int",
+        visibility=Visibility.PUBLIC,
     )
 
 

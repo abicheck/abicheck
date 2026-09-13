@@ -184,7 +184,9 @@ class TestBundleArchiveCentralDirectoryGuard:
 
         path = tmp_path / "fake.zip"
         # Low entry count (10, well under the cap), huge cd_size (200 MiB).
-        eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 0, 10, 200 * 1024 * 1024, 0, 0)
+        eocd = struct.pack(
+            "<IHHHHIIH", 0x06054B50, 0, 0, 0, 10, 200 * 1024 * 1024, 0, 0
+        )
         path.write_bytes(b"PK\x03\x04" + b"junk" + eocd)
 
         with pytest.raises(SnapshotError, match="central directory claims"):
@@ -780,7 +782,9 @@ class TestBundleArchiveReaderRejectsInvalidUtf8Filenames:
         eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 1, 1, len(cd), len(lfh), 0)
         return lfh + cd + eocd
 
-    def test_raises_snapshot_error_not_unicode_decode_error(self, tmp_path: Path) -> None:
+    def test_raises_snapshot_error_not_unicode_decode_error(
+        self, tmp_path: Path
+    ) -> None:
         # Premise: real zipfile really does raise UnicodeDecodeError for
         # this construction, confirming the fixture reproduces the bug.
         data = self._zip_with_invalid_utf8_filename()
@@ -851,7 +855,9 @@ class TestBundleArchiveReaderRejectsInvalidUtf8LocalHeaderFilenames:
         eocd = struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, 1, 1, len(cd), len(lfh), 0)
         return lfh + cd + eocd
 
-    def test_raises_snapshot_error_not_unicode_decode_error(self, tmp_path: Path) -> None:
+    def test_raises_snapshot_error_not_unicode_decode_error(
+        self, tmp_path: Path
+    ) -> None:
         # Premise: real zipfile really does raise UnicodeDecodeError from
         # open() -- construction itself succeeds, since the CD name is clean.
         data = self._zip_with_invalid_utf8_local_filename()
@@ -899,8 +905,14 @@ class TestReadBlobRejectsTruncatedZstdFrames:
 
         path = tmp_path / "bundle.archive.zip"
         with zipfile.ZipFile(path, mode="w") as zf:
-            zf.writestr(MANIFEST_MEMBER, json.dumps({"library_blobs": {"a.so": partial_hash}}))
-            zf.writestr(f"blobs/{partial_hash}.json.zst", truncated, compress_type=zipfile.ZIP_STORED)
+            zf.writestr(
+                MANIFEST_MEMBER, json.dumps({"library_blobs": {"a.so": partial_hash}})
+            )
+            zf.writestr(
+                f"blobs/{partial_hash}.json.zst",
+                truncated,
+                compress_type=zipfile.ZIP_STORED,
+            )
         return path, partial
 
     def test_read_blob_raises_instead_of_silently_returning_truncated_content(
@@ -948,7 +960,9 @@ class TestReadBlobRejectsTruncatedZstdFrames:
             with pytest.raises(SnapshotError, match="corrupt or truncated zstd stream"):
                 reader.read_blob(manifest["library_blobs"]["a.so"])
 
-    def test_read_blob_raises_for_a_completely_empty_member(self, tmp_path: Path) -> None:
+    def test_read_blob_raises_for_a_completely_empty_member(
+        self, tmp_path: Path
+    ) -> None:
         """A zero-byte stored member decodes to `b""` via `stream_reader()`
         with no error, and the frame-completeness `while` loop never even
         runs (nothing to walk) -- so a member named after the empty-
@@ -1079,7 +1093,9 @@ class TestReadBlobHandlesSkippableFrames:
             decoded = reader.read_blob(manifest["library_blobs"]["a.so"])
             elapsed = time.monotonic() - t0
         assert decoded == b"hello world"
-        assert elapsed < 5.0, f"expected near-linear walk, took {elapsed:.2f}s for {n_frames} frames"
+        assert elapsed < 5.0, (
+            f"expected near-linear walk, took {elapsed:.2f}s for {n_frames} frames"
+        )
 
     def test_read_blob_walks_many_small_real_frames_in_near_linear_time(
         self, tmp_path: Path
@@ -1113,7 +1129,9 @@ class TestReadBlobHandlesSkippableFrames:
             decoded = reader.read_blob(manifest["library_blobs"]["a.so"])
             elapsed = time.monotonic() - t0
         assert decoded == b"hello world"
-        assert elapsed < 5.0, f"expected near-linear walk, took {elapsed:.2f}s for {n_frames} frames"
+        assert elapsed < 5.0, (
+            f"expected near-linear walk, took {elapsed:.2f}s for {n_frames} frames"
+        )
 
 
 class TestSniffDoesNotConsumeAOneShotFifoProducer:

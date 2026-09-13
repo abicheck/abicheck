@@ -353,7 +353,8 @@ def load_required_symbols(
         data = candidate.read_bytes()
         digest, path = hashlib.sha256(data).hexdigest(), str(candidate)
         from_file = [
-            s for line in data.decode("utf-8").splitlines()
+            s
+            for line in data.decode("utf-8").splitlines()
             if (s := line.strip()) and not s.startswith("#")
         ]
     # De-duplicate while preserving first-seen order.
@@ -661,7 +662,9 @@ def resolve_compare_config(
     fail_on_removed_library = bool(cfg.gate_fail_on_removed_library) if cfg else False
     release_dso_only = bool(cfg.release_dso_only) if cfg else False
     release_support_promise = (cfg.release_support_promise if cfg else None) or "off"
-    release_include_private_dso = bool(cfg.release_include_private_dso) if cfg else False
+    release_include_private_dso = (
+        bool(cfg.release_include_private_dso) if cfg else False
+    )
     res_limit_nodes = cfg.resource_limits_max_bundle_facts_decode_nodes if cfg else None
     require_complete_analysis = bool(cfg.assurance_require_complete) if cfg else False
     deployment = cfg.deployment if cfg else None

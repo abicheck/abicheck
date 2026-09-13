@@ -1,4 +1,5 @@
 """Unit tests for abicheck.report_classifications module."""
+
 from __future__ import annotations
 
 import pytest
@@ -24,6 +25,7 @@ from abicheck.report_classifications import (
 # ---------------------------------------------------------------------------
 # Frozenset constants are non-empty
 # ---------------------------------------------------------------------------
+
 
 class TestConstants:
     def test_removed_kinds_contains_expected_members(self):
@@ -61,32 +63,39 @@ class TestConstants:
 # category()
 # ---------------------------------------------------------------------------
 
+
 class TestCategory:
-    @pytest.mark.parametrize("kind_s, expected", [
-        ("func_removed", "Functions"),
-        ("var_added", "Variables"),
-        ("type_size_changed", "Types"),
-        ("struct_field_removed", "Types"),
-        ("union_field_type_changed", "Types"),
-        ("field_bitfield_changed", "Types"),
-        ("typedef_removed", "Types"),
-        ("enum_member_added", "Enums"),
-        ("soname_changed", "ELF / DWARF"),
-        ("symbol_type_changed", "ELF / DWARF"),
-        ("needed_added", "ELF / DWARF"),
-        ("rpath_changed", "ELF / DWARF"),
-        ("runpath_changed", "ELF / DWARF"),
-        ("ifunc_introduced", "ELF / DWARF"),
-        ("common_symbol_risk", "ELF / DWARF"),
-        ("dwarf_info_missing", "ELF / DWARF"),
-    ])
+    @pytest.mark.parametrize(
+        "kind_s, expected",
+        [
+            ("func_removed", "Functions"),
+            ("var_added", "Variables"),
+            ("type_size_changed", "Types"),
+            ("struct_field_removed", "Types"),
+            ("union_field_type_changed", "Types"),
+            ("field_bitfield_changed", "Types"),
+            ("typedef_removed", "Types"),
+            ("enum_member_added", "Enums"),
+            ("soname_changed", "ELF / DWARF"),
+            ("symbol_type_changed", "ELF / DWARF"),
+            ("needed_added", "ELF / DWARF"),
+            ("rpath_changed", "ELF / DWARF"),
+            ("runpath_changed", "ELF / DWARF"),
+            ("ifunc_introduced", "ELF / DWARF"),
+            ("common_symbol_risk", "ELF / DWARF"),
+            ("dwarf_info_missing", "ELF / DWARF"),
+        ],
+    )
     def test_known_categories(self, kind_s, expected):
         assert category(kind_s) == expected
 
-    @pytest.mark.parametrize("kind_s", [
-        "calling_convention_changed",
-        "unknown_kind",
-    ])
+    @pytest.mark.parametrize(
+        "kind_s",
+        [
+            "calling_convention_changed",
+            "unknown_kind",
+        ],
+    )
     def test_other_category(self, kind_s):
         assert category(kind_s) == "Other"
 
@@ -94,6 +103,7 @@ class TestCategory:
 # ---------------------------------------------------------------------------
 # severity()
 # ---------------------------------------------------------------------------
+
 
 class TestSeverity:
     def test_high_severity(self):
@@ -120,23 +130,30 @@ class TestSeverity:
 # is_type_problem()
 # ---------------------------------------------------------------------------
 
+
 class TestIsTypeProblem:
-    @pytest.mark.parametrize("kind_s", [
-        "type_size_changed",
-        "struct_field_removed",
-        "union_field_type_changed",
-        "field_bitfield_changed",
-        "typedef_base_changed",
-        "enum_member_added",
-        "base_class_position_changed",
-    ])
+    @pytest.mark.parametrize(
+        "kind_s",
+        [
+            "type_size_changed",
+            "struct_field_removed",
+            "union_field_type_changed",
+            "field_bitfield_changed",
+            "typedef_base_changed",
+            "enum_member_added",
+            "base_class_position_changed",
+        ],
+    )
     def test_true_for_type_kinds(self, kind_s):
         assert is_type_problem(kind_s) is True
 
-    @pytest.mark.parametrize("kind_s", [
-        "func_removed",
-        "var_added",
-    ])
+    @pytest.mark.parametrize(
+        "kind_s",
+        [
+            "func_removed",
+            "var_added",
+        ],
+    )
     def test_false_for_non_type_kinds(self, kind_s):
         assert is_type_problem(kind_s) is False
 
@@ -145,20 +162,27 @@ class TestIsTypeProblem:
 # is_symbol_problem()
 # ---------------------------------------------------------------------------
 
+
 class TestIsSymbolProblem:
-    @pytest.mark.parametrize("kind_s", [
-        "func_removed",
-        "func_added",
-        "var_removed",
-        "var_type_changed",
-    ])
+    @pytest.mark.parametrize(
+        "kind_s",
+        [
+            "func_removed",
+            "func_added",
+            "var_removed",
+            "var_type_changed",
+        ],
+    )
     def test_true_for_symbol_kinds(self, kind_s):
         assert is_symbol_problem(kind_s) is True
 
-    @pytest.mark.parametrize("kind_s", [
-        "type_size_changed",
-        "soname_changed",
-    ])
+    @pytest.mark.parametrize(
+        "kind_s",
+        [
+            "type_size_changed",
+            "soname_changed",
+        ],
+    )
     def test_false_for_non_symbol_kinds(self, kind_s):
         assert is_symbol_problem(kind_s) is False
 
@@ -166,6 +190,7 @@ class TestIsSymbolProblem:
 # ---------------------------------------------------------------------------
 # kind_str()
 # ---------------------------------------------------------------------------
+
 
 class TestKindStr:
     def test_kind_with_value_attr(self):
@@ -199,6 +224,7 @@ class TestKindStr:
 # ---------------------------------------------------------------------------
 # is_breaking()
 # ---------------------------------------------------------------------------
+
 
 class TestIsBreaking:
     def test_breaking_kind(self):

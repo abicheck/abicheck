@@ -159,8 +159,11 @@ class TestLockstepSonameSuppressionUpdatesDispositionAudit:
 
         change = Change(ChangeKind.SONAME_BUMP_UNNECESSARY, "DT_SONAME", "bump")
         result = DiffResult(
-            old_version="1", new_version="2", library=lib,
-            changes=[change], verdict=verdict,
+            old_version="1",
+            new_version="2",
+            library=lib,
+            changes=[change],
+            verdict=verdict,
         )
         ledger = DispositionLedger()
         finalize_ledger(ledger, result)
@@ -192,14 +195,20 @@ class TestLockstepSonameSuppressionUpdatesDispositionAudit:
         assert before["counts"]["suppressed"] == 0
 
         core_result = DiffResult(
-            old_version="1", new_version="2", library="libonedal_core.so",
+            old_version="1",
+            new_version="2",
+            library="libonedal_core.so",
             changes=[Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
             verdict=Verdict.BREAKING,
         )
         core = {
-            "library": "libonedal_core.so", "verdict": "BREAKING",
-            "breaking": 1, "source_breaks": 0, "risk_changes": 0,
-            "compatible_additions": 0, "_diff_result": core_result,
+            "library": "libonedal_core.so",
+            "verdict": "BREAKING",
+            "breaking": 1,
+            "source_breaks": 0,
+            "risk_changes": 0,
+            "compatible_additions": 0,
+            "_diff_result": core_result,
         }
         n = _suppress_lockstep_soname_findings([umbrella, core], "BREAKING", None)
         assert n == 1
@@ -236,14 +245,20 @@ class TestLockstepSonameSuppressionUpdatesDispositionAudit:
         assert umbrella_result.suppressed_changes == []
 
         core_result = DiffResult(
-            old_version="1", new_version="2", library="libonedal_core.so",
+            old_version="1",
+            new_version="2",
+            library="libonedal_core.so",
             changes=[Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
             verdict=Verdict.BREAKING,
         )
         core = {
-            "library": "libonedal_core.so", "verdict": "BREAKING",
-            "breaking": 1, "source_breaks": 0, "risk_changes": 0,
-            "compatible_additions": 0, "_diff_result": core_result,
+            "library": "libonedal_core.so",
+            "verdict": "BREAKING",
+            "breaking": 1,
+            "source_breaks": 0,
+            "risk_changes": 0,
+            "compatible_additions": 0,
+            "_diff_result": core_result,
         }
         n = _suppress_lockstep_soname_findings([umbrella, core], "BREAKING", None)
         assert n == 1
@@ -270,16 +285,23 @@ class TestLockstepSonameSuppressionUpdatesDispositionAudit:
 
         umbrella = self._entry_with_real_ledger("libonedal.so", Verdict.COMPATIBLE)
         core_result = DiffResult(
-            old_version="1", new_version="2", library="libonedal_core.so",
+            old_version="1",
+            new_version="2",
+            library="libonedal_core.so",
             changes=[Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
             verdict=Verdict.BREAKING,
         )
         core = {
-            "library": "libonedal_core.so", "verdict": "BREAKING",
-            "breaking": 1, "source_breaks": 0, "risk_changes": 0,
-            "compatible_additions": 0, "_diff_result": core_result,
+            "library": "libonedal_core.so",
+            "verdict": "BREAKING",
+            "breaking": 1,
+            "source_breaks": 0,
+            "risk_changes": 0,
+            "compatible_additions": 0,
+            "_diff_result": core_result,
             "disposition_audit": {
-                "detected_total": 1, "effective_total": 1,
+                "detected_total": 1,
+                "effective_total": 1,
                 "counts": {"gating": 1},
             },
         }

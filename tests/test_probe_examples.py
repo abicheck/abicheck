@@ -15,6 +15,7 @@ through the *mainline* ``compare`` command via the side-aware ``--probe-matrix``
 reach the verdict and the JSON/SARIF output, not only the standalone
 ``probe compare`` path.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -52,9 +53,18 @@ def _build_trivial_so(out: Path, soname: str) -> None:
     src = out.parent / "lib.c"
     src.write_text("int api(int x){return x;}\n", encoding="utf-8")
     res = subprocess.run(
-        [cc, "-shared", "-fPIC", "-g", str(src), "-o", str(out),
-         f"-Wl,-soname,{soname}"],
-        capture_output=True, text=True,
+        [
+            cc,
+            "-shared",
+            "-fPIC",
+            "-g",
+            str(src),
+            "-o",
+            str(out),
+            f"-Wl,-soname,{soname}",
+        ],
+        capture_output=True,
+        text=True,
     )
     if res.returncode != 0:
         pytest.fail(f"cc failed building {soname}: {res.stderr}")
@@ -86,14 +96,20 @@ def test_cxx_standard_floor_raised_through_compare(tmp_path: Path) -> None:
     # Floor detection reads only the parsed -std flags, so no compilation
     # is required (snapshot=False keeps the fixture fast and hermetic).
     m_old = run_probe_matrix(
-        spec, library_name="stddemo", version="1.0", snapshot=False,
+        spec,
+        library_name="stddemo",
+        version="1.0",
+        snapshot=False,
     )
     new_spec = dataclasses.replace(
         spec,
         configurations=tuple(c for c in spec.configurations if c.id != "cxx14"),
     )
     m_new = run_probe_matrix(
-        new_spec, library_name="stddemo", version="2.0", snapshot=False,
+        new_spec,
+        library_name="stddemo",
+        version="2.0",
+        snapshot=False,
     )
     assert m_old.cxx_stds == {"cxx14": 14, "cxx17": 17}
     assert m_new.cxx_stds == {"cxx17": 17}
@@ -112,16 +128,16 @@ def test_cxx_standard_floor_raised_through_compare(tmp_path: Path) -> None:
     json_res = runner.invoke(
         main,
         [
-        "compare",
-        str(old_so),
-        str(new_so),
-        "--build-info",
-        "old=" + str(old_matrix),
-        "--build-info",
-        "new=" + str(new_matrix),
-        "-o",
-        "json=-",
-    ],
+            "compare",
+            str(old_so),
+            str(new_so),
+            "--build-info",
+            "old=" + str(old_matrix),
+            "--build-info",
+            "new=" + str(new_matrix),
+            "-o",
+            "json=-",
+        ],
     )
     assert json_res.exit_code in (2, 4), json_res.output
     data = json.loads(json_res.stdout)
@@ -131,16 +147,16 @@ def test_cxx_standard_floor_raised_through_compare(tmp_path: Path) -> None:
     sarif_res = runner.invoke(
         main,
         [
-        "compare",
-        str(old_so),
-        str(new_so),
-        "--build-info",
-        "old=" + str(old_matrix),
-        "--build-info",
-        "new=" + str(new_matrix),
-        "-o",
-        "sarif=-",
-    ],
+            "compare",
+            str(old_so),
+            str(new_so),
+            "--build-info",
+            "old=" + str(old_matrix),
+            "--build-info",
+            "new=" + str(new_matrix),
+            "-o",
+            "sarif=-",
+        ],
     )
     assert "cxx_standard_floor_raised" in sarif_res.stdout
 
@@ -160,14 +176,20 @@ def test_cxx_standard_floor_raised_through_compare_release(tmp_path: Path) -> No
 
     spec = load_probe_spec(PROBES_DIR / "cxx_standard.yaml")
     m_old = run_probe_matrix(
-        spec, library_name="stddemo", version="1.0", snapshot=False,
+        spec,
+        library_name="stddemo",
+        version="1.0",
+        snapshot=False,
     )
     new_spec = dataclasses.replace(
         spec,
         configurations=tuple(c for c in spec.configurations if c.id != "cxx14"),
     )
     m_new = run_probe_matrix(
-        new_spec, library_name="stddemo", version="2.0", snapshot=False,
+        new_spec,
+        library_name="stddemo",
+        version="2.0",
+        snapshot=False,
     )
     old_matrix = tmp_path / "std-1.0.json"
     new_matrix = tmp_path / "std-2.0.json"
@@ -186,16 +208,16 @@ def test_cxx_standard_floor_raised_through_compare_release(tmp_path: Path) -> No
     res = runner.invoke(
         main,
         [
-        "compare",
-        str(old_dir),
-        str(new_dir),
-        "--build-info",
-        "old=" + str(old_matrix),
-        "--build-info",
-        "new=" + str(new_matrix),
-        "-o",
-        "json=-",
-    ],
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--build-info",
+            "old=" + str(old_matrix),
+            "--build-info",
+            "new=" + str(new_matrix),
+            "-o",
+            "json=-",
+        ],
     )
     # Floor-raised is a source-level break → API_BREAK → release exit 2.
     assert res.exit_code == 2, res.output
@@ -208,7 +230,8 @@ def test_cxx_standard_floor_raised_through_compare_release(tmp_path: Path) -> No
     # Without the matrix flags the same release is clean (regression guard
     # against the matrix path firing unconditionally).
     res_clean = runner.invoke(
-        main, ["compare", str(old_dir), str(new_dir), "-o", "json=-"],
+        main,
+        ["compare", str(old_dir), str(new_dir), "-o", "json=-"],
     )
     assert res_clean.exit_code == 0, res_clean.output
     assert "matrix_findings" not in json.loads(res_clean.stdout)
@@ -228,11 +251,15 @@ def test_feature_macro_api_depends_fires_end_to_end(tmp_path: Path) -> None:
         pytest.skip("cc unavailable; cannot compile probe matrix")
     spec = load_probe_spec(PROBES_DIR / "feature_macro.yaml")
     m_old = run_probe_matrix(
-        spec, library_name="featuredemo", version="1.0",
+        spec,
+        library_name="featuredemo",
+        version="1.0",
         work_dir=tmp_path / "old",
     )
     m_new = run_probe_matrix(
-        spec, library_name="featuredemo", version="2.0",
+        spec,
+        library_name="featuredemo",
+        version="2.0",
         work_dir=tmp_path / "new",
     )
     compile_errors = [r.error for r in m_old.results if r.error]
@@ -257,10 +284,16 @@ def test_feature_macro_api_depends_reaches_mainline_compare(tmp_path: Path) -> N
 
     spec = load_probe_spec(PROBES_DIR / "feature_macro.yaml")
     m_old = run_probe_matrix(
-        spec, library_name="featuredemo", version="1.0", work_dir=tmp_path / "old",
+        spec,
+        library_name="featuredemo",
+        version="1.0",
+        work_dir=tmp_path / "old",
     )
     m_new = run_probe_matrix(
-        spec, library_name="featuredemo", version="2.0", work_dir=tmp_path / "new",
+        spec,
+        library_name="featuredemo",
+        version="2.0",
+        work_dir=tmp_path / "new",
     )
     old_matrix = tmp_path / "fm-1.0.json"
     new_matrix = tmp_path / "fm-2.0.json"
@@ -275,16 +308,16 @@ def test_feature_macro_api_depends_reaches_mainline_compare(tmp_path: Path) -> N
     res = CliRunner().invoke(
         main,
         [
-        "compare",
-        str(old_so),
-        str(new_so),
-        "--build-info",
-        "old=" + str(old_matrix),
-        "--build-info",
-        "new=" + str(new_matrix),
-        "-o",
-        "json=-",
-    ],
+            "compare",
+            str(old_so),
+            str(new_so),
+            "--build-info",
+            "old=" + str(old_matrix),
+            "--build-info",
+            "new=" + str(new_matrix),
+            "-o",
+            "json=-",
+        ],
     )
     data = json.loads(res.stdout)
     kinds = {c["kind"] for c in data.get("changes", [])}

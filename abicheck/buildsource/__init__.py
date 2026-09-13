@@ -30,6 +30,7 @@ artifact diff also proves the break.
 Phase 0 (this module) ships the manifest, coverage model, on-disk pack layout,
 and snapshot reference. ADR-029 adds the build-evidence model and adapters.
 """
+
 from __future__ import annotations
 
 from ..model.graph_facts import GraphEdge, GraphNode

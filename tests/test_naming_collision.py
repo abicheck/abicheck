@@ -1,4 +1,5 @@
 """Tests for naming collision clarity (6a-6c)."""
+
 import subprocess
 import sys
 
@@ -8,6 +9,7 @@ class TestMainModuleImport:
         """__main__.py can be imported without side effects."""
         import abicheck.__main__ as mod
         from abicheck.cli import main
+
         assert mod.main is main
 
 
@@ -16,7 +18,9 @@ class TestMainModule:
         """python -m abicheck --version should work."""
         result = subprocess.run(
             [sys.executable, "-m", "abicheck", "--version"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         assert result.returncode == 0
         assert "abicheck/abicheck" in result.stdout
@@ -25,7 +29,9 @@ class TestMainModule:
         """Version output should include project qualifier."""
         result = subprocess.run(
             [sys.executable, "-m", "abicheck", "--version"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         # Format: "abicheck X.Y.Z (abicheck/abicheck)"
         assert "(abicheck/abicheck)" in result.stdout

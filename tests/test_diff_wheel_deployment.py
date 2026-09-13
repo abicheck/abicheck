@@ -333,9 +333,7 @@ class TestWheelTagArchitectureMismatchUnit:
     def test_matching_elf_machine_no_finding(self) -> None:
         elf = _elf(machine="EM_X86_64")
         assert (
-            check_wheel_tag_architecture_mismatch(
-                elf, None, {"WHEEL_ARCH": "x86_64"}
-            )
+            check_wheel_tag_architecture_mismatch(elf, None, {"WHEEL_ARCH": "x86_64"})
             == []
         )
 
@@ -362,18 +360,14 @@ class TestWheelTagArchitectureMismatchUnit:
     def test_ppc64le_claim_with_little_endian_binary_clean(self) -> None:
         elf = _elf(machine="EM_PPC64", ei_data="LSB")
         assert (
-            check_wheel_tag_architecture_mismatch(
-                elf, None, {"WHEEL_ARCH": "ppc64le"}
-            )
+            check_wheel_tag_architecture_mismatch(elf, None, {"WHEEL_ARCH": "ppc64le"})
             == []
         )
 
     def test_ppc64_claim_with_big_endian_binary_clean(self) -> None:
         elf = _elf(machine="EM_PPC64", ei_data="MSB")
         assert (
-            check_wheel_tag_architecture_mismatch(
-                elf, None, {"WHEEL_ARCH": "ppc64"}
-            )
+            check_wheel_tag_architecture_mismatch(elf, None, {"WHEEL_ARCH": "ppc64"})
             == []
         )
 
@@ -382,9 +376,7 @@ class TestWheelTagArchitectureMismatchUnit:
         # purely from the endianness check having no evidence to compare.
         elf = _elf(machine="EM_PPC64", ei_data="")
         assert (
-            check_wheel_tag_architecture_mismatch(
-                elf, None, {"WHEEL_ARCH": "ppc64le"}
-            )
+            check_wheel_tag_architecture_mismatch(elf, None, {"WHEEL_ARCH": "ppc64le"})
             == []
         )
 
@@ -403,18 +395,14 @@ class TestWheelTagArchitectureMismatchUnit:
     def test_x86_64_claim_with_correct_endianness_clean(self) -> None:
         elf = _elf(machine="EM_X86_64", ei_data="LSB")
         assert (
-            check_wheel_tag_architecture_mismatch(
-                elf, None, {"WHEEL_ARCH": "x86_64"}
-            )
+            check_wheel_tag_architecture_mismatch(elf, None, {"WHEEL_ARCH": "x86_64"})
             == []
         )
 
     def test_s390x_claim_with_correct_big_endian_clean(self) -> None:
         elf = _elf(machine="EM_S390", ei_data="MSB")
         assert (
-            check_wheel_tag_architecture_mismatch(
-                elf, None, {"WHEEL_ARCH": "s390x"}
-            )
+            check_wheel_tag_architecture_mismatch(elf, None, {"WHEEL_ARCH": "s390x"})
             == []
         )
 
@@ -430,9 +418,7 @@ class TestWheelTagArchitectureMismatchUnit:
         # musllinux single-arch wheel tags too.
         elf = _elf(machine="EM_RISCV", ei_data="LSB")
         assert (
-            check_wheel_tag_architecture_mismatch(
-                elf, None, {"WHEEL_ARCH": "riscv64"}
-            )
+            check_wheel_tag_architecture_mismatch(elf, None, {"WHEEL_ARCH": "riscv64"})
             == []
         )
 
@@ -503,9 +489,7 @@ class TestWheelTagArchitectureMismatchUnit:
     def test_x86_64_claim_with_64bit_binary_clean(self) -> None:
         elf = _elf(machine="EM_X86_64", ei_data="LSB", elf_class=64)
         assert (
-            check_wheel_tag_architecture_mismatch(
-                elf, None, {"WHEEL_ARCH": "x86_64"}
-            )
+            check_wheel_tag_architecture_mismatch(elf, None, {"WHEEL_ARCH": "x86_64"})
             == []
         )
 
@@ -527,9 +511,7 @@ class TestWheelTagArchitectureMismatchUnit:
         # _ARCH_CLAIM_TO_ELF_CLASS deliberately excludes i686/armv7l.
         elf = _elf(machine="EM_386", ei_data="LSB")
         assert (
-            check_wheel_tag_architecture_mismatch(
-                elf, None, {"WHEEL_ARCH": "i686"}
-            )
+            check_wheel_tag_architecture_mismatch(elf, None, {"WHEEL_ARCH": "i686"})
             == []
         )
 
@@ -542,9 +524,7 @@ class TestWheelTagArchitectureMismatchUnit:
             abi_flags=frozenset({"float-hard", "eabi5"}),
         )
         assert (
-            check_wheel_tag_architecture_mismatch(
-                elf, None, {"WHEEL_ARCH": "armv7l"}
-            )
+            check_wheel_tag_architecture_mismatch(elf, None, {"WHEEL_ARCH": "armv7l"})
             == []
         )
 
@@ -556,9 +536,7 @@ class TestWheelTagArchitectureMismatchUnit:
             abi_flags=frozenset({"float-hard", "eabi5"}),
         )
         assert (
-            check_wheel_tag_architecture_mismatch(
-                elf, None, {"WHEEL_ARCH": "armv7l"}
-            )
+            check_wheel_tag_architecture_mismatch(elf, None, {"WHEEL_ARCH": "armv7l"})
             == []
         )
 
@@ -640,9 +618,7 @@ class TestWheelTagArchitectureMismatchUnit:
         # false-positive purely from having no evidence to compare.
         elf = _elf(machine="EM_ARM", ei_data="LSB", elf_class=32, abi_flags=frozenset())
         assert (
-            check_wheel_tag_architecture_mismatch(
-                elf, None, {"WHEEL_ARCH": "armv7l"}
-            )
+            check_wheel_tag_architecture_mismatch(elf, None, {"WHEEL_ARCH": "armv7l"})
             == []
         )
 
@@ -659,9 +635,7 @@ class TestWheelTagArchitectureMismatchUnit:
     def test_matching_macho_cpu_type_no_finding(self) -> None:
         macho = _macho(cpu_type="ARM64")
         assert (
-            check_wheel_tag_architecture_mismatch(
-                None, macho, {"WHEEL_ARCH": "arm64"}
-            )
+            check_wheel_tag_architecture_mismatch(None, macho, {"WHEEL_ARCH": "arm64"})
             == []
         )
 
@@ -699,9 +673,7 @@ class TestWheelTagArchitectureMismatchUnit:
 
     def test_no_elf_or_macho_evidence_no_finding(self) -> None:
         assert (
-            check_wheel_tag_architecture_mismatch(
-                None, None, {"WHEEL_ARCH": "x86_64"}
-            )
+            check_wheel_tag_architecture_mismatch(None, None, {"WHEEL_ARCH": "x86_64"})
             == []
         )
 
@@ -714,9 +686,7 @@ class TestWheelTagArchitectureMismatchUnit:
         elf = _elf(machine="")
         macho = _macho(cpu_type="ARM64")
         assert (
-            check_wheel_tag_architecture_mismatch(
-                elf, macho, {"WHEEL_ARCH": "arm64"}
-            )
+            check_wheel_tag_architecture_mismatch(elf, macho, {"WHEEL_ARCH": "arm64"})
             == []
         )
 
@@ -745,9 +715,7 @@ class TestWheelTagArchitectureMismatchUnit:
         # the arm64 slice.
         macho = _macho(cpu_type="ARM64", cpu_types=["X86_64", "ARM64"])
         assert (
-            check_wheel_tag_architecture_mismatch(
-                None, macho, {"WHEEL_ARCH": "x86_64"}
-            )
+            check_wheel_tag_architecture_mismatch(None, macho, {"WHEEL_ARCH": "x86_64"})
             == []
         )
 
@@ -794,9 +762,7 @@ class TestWheelTagArchitectureMismatchUnit:
     def test_empty_cpu_type_and_empty_cpu_types_no_finding(self) -> None:
         macho = _macho(cpu_type="", cpu_types=[])
         assert (
-            check_wheel_tag_architecture_mismatch(
-                None, macho, {"WHEEL_ARCH": "x86_64"}
-            )
+            check_wheel_tag_architecture_mismatch(None, macho, {"WHEEL_ARCH": "x86_64"})
             == []
         )
 
@@ -806,7 +772,9 @@ class TestWheelTagArchitectureMismatchCliEndToEnd:
         old = _elf_snap(_elf(machine="EM_AARCH64"))
         new = _elf_snap(_elf(machine="EM_AARCH64"))
         result = compare(
-            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"WHEEL_ARCH": "x86_64"})
+            old,
+            new,
+            env_matrix=EnvironmentMatrix(runtime_floors={"WHEEL_ARCH": "x86_64"}),
         )
         assert ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH in _kinds(result.changes)
         assert result.verdict is Verdict.BREAKING
@@ -815,7 +783,9 @@ class TestWheelTagArchitectureMismatchCliEndToEnd:
         old = _snap(_macho(cpu_type="ARM64"))
         new = _snap(_macho(cpu_type="ARM64"))
         result = compare(
-            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"WHEEL_ARCH": "x86_64"})
+            old,
+            new,
+            env_matrix=EnvironmentMatrix(runtime_floors={"WHEEL_ARCH": "x86_64"}),
         )
         assert ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH in _kinds(result.changes)
         assert result.verdict is Verdict.BREAKING
@@ -824,7 +794,9 @@ class TestWheelTagArchitectureMismatchCliEndToEnd:
         old = _elf_snap(_elf(machine="EM_X86_64"))
         new = _elf_snap(_elf(machine="EM_X86_64"))
         result = compare(
-            old, new, env_matrix=EnvironmentMatrix(runtime_floors={"WHEEL_ARCH": "x86_64"})
+            old,
+            new,
+            env_matrix=EnvironmentMatrix(runtime_floors={"WHEEL_ARCH": "x86_64"}),
         )
         assert ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH not in _kinds(result.changes)
 
@@ -845,21 +817,15 @@ class TestWheelRpathNotPortableUnit:
 
     def test_no_rpath_no_finding(self) -> None:
         elf = _elf(rpath="", runpath="")
-        assert (
-            check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"}) == []
-        )
+        assert check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"}) == []
 
     def test_origin_relative_rpath_clean(self) -> None:
         elf = _elf(rpath="$ORIGIN/../foo.libs")
-        assert (
-            check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"}) == []
-        )
+        assert check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"}) == []
 
     def test_origin_relative_runpath_clean(self) -> None:
         elf = _elf(runpath="$ORIGIN/../foo.libs")
-        assert (
-            check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"}) == []
-        )
+        assert check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"}) == []
 
     def test_runpath_present_ignores_stale_absolute_rpath(self) -> None:
         # Codex review #583, follow-up: DT_RPATH is only consulted by the
@@ -868,9 +834,7 @@ class TestWheelRpathNotPortableUnit:
         # stale absolute DT_RPATH alongside a portable DT_RUNPATH is never
         # actually used, so it must not be flagged.
         elf = _elf(rpath="/build/sysroot/lib", runpath="$ORIGIN/../foo.libs")
-        assert (
-            check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"}) == []
-        )
+        assert check_wheel_rpath_not_portable(elf, {"WHEEL_CONTEXT": "1"}) == []
 
     def test_runpath_present_flags_its_own_absolute_entry_not_rpath(
         self,
@@ -920,9 +884,7 @@ class TestWheelRpathNotPortableUnit:
         assert "/usr/lib" in changes[0].new_value
 
     def test_no_elf_no_finding(self) -> None:
-        assert (
-            check_wheel_rpath_not_portable(None, {"WHEEL_CONTEXT": "1"}) == []
-        )
+        assert check_wheel_rpath_not_portable(None, {"WHEEL_CONTEXT": "1"}) == []
 
     def test_wheel_context_combined_with_other_floors_still_flags(self) -> None:
         elf = _elf(rpath="/usr/local/lib")
@@ -940,32 +902,19 @@ class TestWheelClosureDependencyViolationUnit:
 
     def test_declared_floor_without_wheel_context_not_flagged(self) -> None:
         elf = _elf(needed=["libopenblas-a1b2c3d4.so.0"])
-        assert (
-            check_wheel_closure_dependency_violation(elf, {"GLIBC": "2.28"}) == []
-        )
-        assert (
-            check_wheel_closure_dependency_violation(elf, {"MUSLLINUX": "1.2"})
-            == []
-        )
+        assert check_wheel_closure_dependency_violation(elf, {"GLIBC": "2.28"}) == []
+        assert check_wheel_closure_dependency_violation(elf, {"MUSLLINUX": "1.2"}) == []
 
     def test_no_vendored_dependency_no_finding(self) -> None:
         elf = _elf(needed=["libc.so.6"])
         assert (
-            check_wheel_closure_dependency_violation(
-                elf, {"WHEEL_CONTEXT": "1"}
-            )
-            == []
+            check_wheel_closure_dependency_violation(elf, {"WHEEL_CONTEXT": "1"}) == []
         )
 
     def test_vendored_dependency_with_origin_rpath_clean(self) -> None:
-        elf = _elf(
-            needed=["libopenblas-a1b2c3d4.so.0"], rpath="$ORIGIN/../foo.libs"
-        )
+        elf = _elf(needed=["libopenblas-a1b2c3d4.so.0"], rpath="$ORIGIN/../foo.libs")
         assert (
-            check_wheel_closure_dependency_violation(
-                elf, {"WHEEL_CONTEXT": "1"}
-            )
-            == []
+            check_wheel_closure_dependency_violation(elf, {"WHEEL_CONTEXT": "1"}) == []
         )
 
     def test_vendored_dependency_with_stale_origin_rpath_still_flagged(
@@ -982,19 +931,13 @@ class TestWheelClosureDependencyViolationUnit:
             runpath="/build/sysroot/lib",
             soname="libfoo.so.1",
         )
-        changes = check_wheel_closure_dependency_violation(
-            elf, {"WHEEL_CONTEXT": "1"}
-        )
+        changes = check_wheel_closure_dependency_violation(elf, {"WHEEL_CONTEXT": "1"})
         assert len(changes) == 1
         assert changes[0].kind is ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION
 
     def test_vendored_dependency_without_origin_rpath_flagged(self) -> None:
-        elf = _elf(
-            needed=["libopenblas-a1b2c3d4.so.0"], rpath="", soname="libfoo.so.1"
-        )
-        changes = check_wheel_closure_dependency_violation(
-            elf, {"WHEEL_CONTEXT": "1"}
-        )
+        elf = _elf(needed=["libopenblas-a1b2c3d4.so.0"], rpath="", soname="libfoo.so.1")
+        changes = check_wheel_closure_dependency_violation(elf, {"WHEEL_CONTEXT": "1"})
         assert len(changes) == 1
         assert changes[0].kind is ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION
         assert changes[0].new_value == "libopenblas-a1b2c3d4.so.0"
@@ -1003,17 +946,12 @@ class TestWheelClosureDependencyViolationUnit:
         # An absolute (non-$ORIGIN) rpath doesn't count as a bundling
         # mechanism for this check.
         elf = _elf(needed=["libopenblas-a1b2c3d4.so.0"], rpath="/usr/local/lib")
-        changes = check_wheel_closure_dependency_violation(
-            elf, {"WHEEL_CONTEXT": "1"}
-        )
+        changes = check_wheel_closure_dependency_violation(elf, {"WHEEL_CONTEXT": "1"})
         assert len(changes) == 1
 
     def test_no_elf_no_finding(self) -> None:
         assert (
-            check_wheel_closure_dependency_violation(
-                None, {"WHEEL_CONTEXT": "1"}
-            )
-            == []
+            check_wheel_closure_dependency_violation(None, {"WHEEL_CONTEXT": "1"}) == []
         )
 
 
@@ -1033,9 +971,7 @@ class TestWheelRpathAndClosureCliEndToEnd:
         result = compare(
             old,
             new,
-            env_matrix=EnvironmentMatrix(
-                runtime_floors={"WHEEL_CONTEXT": "1"}
-            ),
+            env_matrix=EnvironmentMatrix(runtime_floors={"WHEEL_CONTEXT": "1"}),
         )
         assert ChangeKind.WHEEL_RPATH_NOT_PORTABLE in _kinds(result.changes)
         assert result.verdict is not Verdict.BREAKING
@@ -1046,13 +982,9 @@ class TestWheelRpathAndClosureCliEndToEnd:
         result = compare(
             old,
             new,
-            env_matrix=EnvironmentMatrix(
-                runtime_floors={"WHEEL_CONTEXT": "1"}
-            ),
+            env_matrix=EnvironmentMatrix(runtime_floors={"WHEEL_CONTEXT": "1"}),
         )
-        assert ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION in _kinds(
-            result.changes
-        )
+        assert ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION in _kinds(result.changes)
         assert result.verdict is Verdict.BREAKING
 
     def test_glibc_alone_does_not_trigger_wheel_checks(self) -> None:
@@ -1122,9 +1054,11 @@ def test_env_matrix_diagnostics_stay_beside_their_own_check(monkeypatch):
             module,
             attr,
             (
-                lambda n: lambda *a, **k: [
-                    Change(kind=ChangeKind.FUNC_REMOVED, symbol=n, description=n)
-                ]
+                lambda n: (
+                    lambda *a, **k: [
+                        Change(kind=ChangeKind.FUNC_REMOVED, symbol=n, description=n)
+                    ]
+                )
             )(name),
         )
 

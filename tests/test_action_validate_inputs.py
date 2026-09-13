@@ -447,7 +447,12 @@ class TestRemovedInputTombstones:
         inputs = yaml.safe_load(action_yml.read_text())["inputs"]
         assert name in inputs
         description = inputs[name]["description"].lower()
-        assert "removed" in description
+        # Either tombstone wording counts: the hard-error tombstones are
+        # marked RETIRED (the marker
+        # `tests/test_action_retired_inputs_contract.py` derives its
+        # exhaustive fail-closed set from), while `jobs` -- warn-only,
+        # since it changed no analysis semantics -- keeps "removed".
+        assert "removed" in description or "retired" in description
 
 
 @pytest.mark.skipif(
@@ -727,12 +732,12 @@ class TestCompareAcceptsCompileContextForDirectoryOrPackage:
                 var: value,
             }
         )
-        assert result.returncode == 0, f"{var}={value}: " + result.stdout + result.stderr
+        assert result.returncode == 0, (
+            f"{var}={value}: " + result.stdout + result.stderr
+        )
         assert "does not support lang/ast-frontend" not in result.stdout
 
-    def test_directory_operand_with_gcc_path_is_accepted(
-        self, tmp_path: Path
-    ) -> None:
+    def test_directory_operand_with_gcc_path_is_accepted(self, tmp_path: Path) -> None:
         lib_dir = tmp_path / "lib"
         lib_dir.mkdir()
         result = _run_validate(

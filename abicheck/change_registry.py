@@ -51,10 +51,12 @@ from .model.change_catalog.source import SOURCE_ENTRIES
 from .model.change_catalog.symbols import SYMBOLS_ENTRIES
 from .model.change_catalog.types import TYPES_ENTRIES
 
-REGISTRY = ChangeKindRegistry([
-    *SYMBOLS_ENTRIES,
-    *TYPES_ENTRIES,
-    *PLATFORM_ENTRIES,
-    *BUILD_ENTRIES,
-    *SOURCE_ENTRIES,
-])
+REGISTRY = ChangeKindRegistry(
+    [
+        *SYMBOLS_ENTRIES,
+        *TYPES_ENTRIES,
+        *PLATFORM_ENTRIES,
+        *BUILD_ENTRIES,
+        *SOURCE_ENTRIES,
+    ]
+)

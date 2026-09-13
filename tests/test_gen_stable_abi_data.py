@@ -14,13 +14,13 @@ _SPEC.loader.exec_module(gen_stable_abi_data)
 
 
 def test_extract_rejects_non_c_symbol_names() -> None:
-    toml_bytes = br'''
+    toml_bytes = rb"""
 [function."PySafe"]
 added = "3.2"
 
 [function."PyBad\"\n, **(__import__('os').system('echo pwned') and {}) #"]
 added = "3.14"
-'''
+"""
 
     with pytest.raises(ValueError, match="invalid Stable-ABI symbol name"):
         gen_stable_abi_data.extract(toml_bytes)

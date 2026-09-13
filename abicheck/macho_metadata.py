@@ -18,6 +18,7 @@ Uses ``macholib`` for parsing Mach-O headers, load commands, exported symbols,
 and dependency information from Apple shared libraries. Supports both
 single-arch and fat/universal binaries (preferred arch slice is analyzed).
 """
+
 from __future__ import annotations
 
 import logging
@@ -77,21 +78,20 @@ _FILETYPE_NAMES: dict[int, str] = {
 }
 
 
-
 # ---------------------------------------------------------------------------
 # Magic detection
 # ---------------------------------------------------------------------------
 
 # Mach-O magic numbers (both byte orders + fat/universal binaries)
 _MACHO_MAGICS = {
-    b"\xfe\xed\xfa\xce",   # MH_MAGIC (32-bit)
-    b"\xce\xfa\xed\xfe",   # MH_CIGAM (32-bit, swapped)
-    b"\xfe\xed\xfa\xcf",   # MH_MAGIC_64 (64-bit)
-    b"\xcf\xfa\xed\xfe",   # MH_CIGAM_64 (64-bit, swapped)
-    b"\xca\xfe\xba\xbe",   # FAT_MAGIC (universal binary)
-    b"\xbe\xba\xfe\xca",   # FAT_CIGAM (universal, swapped)
-    b"\xca\xfe\xba\xbf",   # FAT_MAGIC_64 (fat64 universal binary)
-    b"\xbf\xba\xfe\xca",   # FAT_CIGAM_64 (fat64, swapped)
+    b"\xfe\xed\xfa\xce",  # MH_MAGIC (32-bit)
+    b"\xce\xfa\xed\xfe",  # MH_CIGAM (32-bit, swapped)
+    b"\xfe\xed\xfa\xcf",  # MH_MAGIC_64 (64-bit)
+    b"\xcf\xfa\xed\xfe",  # MH_CIGAM_64 (64-bit, swapped)
+    b"\xca\xfe\xba\xbe",  # FAT_MAGIC (universal binary)
+    b"\xbe\xba\xfe\xca",  # FAT_CIGAM (universal, swapped)
+    b"\xca\xfe\xba\xbf",  # FAT_MAGIC_64 (fat64 universal binary)
+    b"\xbf\xba\xfe\xca",  # FAT_CIGAM_64 (fat64, swapped)
 }
 
 
@@ -136,7 +136,10 @@ _CPU_SUBTYPE_MASK = 0x00FFFFFF
 
 def _cpu_slice_name(cputype: int, cpusubtype: int) -> str:
     """Human-readable architecture name for a slice, arm64e-aware."""
-    if cputype == _CPU_TYPE_ARM64 and (cpusubtype & _CPU_SUBTYPE_MASK) == _CPU_SUBTYPE_ARM64E:
+    if (
+        cputype == _CPU_TYPE_ARM64
+        and (cpusubtype & _CPU_SUBTYPE_MASK) == _CPU_SUBTYPE_ARM64E
+    ):
         return "ARM64E"
     return str(CPU_TYPE_NAMES.get(cputype, f"0x{cputype:x}"))
 
@@ -271,7 +274,9 @@ def _parse_export_trie(dylib_path: Path, header: Any, meta: MachoMetadata) -> No
             trie = f.read(export_size)
         entries = _walk_export_trie(trie)
     except (OSError, ValueError) as exc:
-        log.debug("parse_macho_metadata: export trie unreadable for %s: %s", dylib_path, exc)
+        log.debug(
+            "parse_macho_metadata: export trie unreadable for %s: %s", dylib_path, exc
+        )
         return
 
     by_name = {e.name: e for e in meta.exports if e.name}
@@ -292,7 +297,9 @@ def _parse_export_trie(dylib_path: Path, header: Any, meta: MachoMetadata) -> No
         sym_type = (
             MachoSymbolType.REEXPORT
             if is_reexport
-            else MachoSymbolType.WEAK if is_weak else MachoSymbolType.EXPORTED
+            else MachoSymbolType.WEAK
+            if is_weak
+            else MachoSymbolType.EXPORTED
         )
         export = MachoExport(name=name, sym_type=sym_type, is_weak=is_weak)
         meta.exports.append(export)
@@ -302,6 +309,7 @@ def _parse_export_trie(dylib_path: Path, header: Any, meta: MachoMetadata) -> No
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def parse_macho_metadata(dylib_path: Path) -> MachoMetadata:
     """Extract Mach-O export/import metadata from *dylib_path*.
@@ -340,8 +348,14 @@ def _select_header(macho: MachO) -> Any:
     _CPU_TYPE_X86_64 = 0x01000007  # pylint: disable=invalid-name
     _CPU_TYPE_ARM64 = 0x0100000C  # pylint: disable=invalid-name
 
-    preferred = _CPU_TYPE_ARM64 if platform.machine() in ("arm64", "aarch64") else _CPU_TYPE_X86_64
-    fallback_type = _CPU_TYPE_X86_64 if preferred == _CPU_TYPE_ARM64 else _CPU_TYPE_ARM64
+    preferred = (
+        _CPU_TYPE_ARM64
+        if platform.machine() in ("arm64", "aarch64")
+        else _CPU_TYPE_X86_64
+    )
+    fallback_type = (
+        _CPU_TYPE_X86_64 if preferred == _CPU_TYPE_ARM64 else _CPU_TYPE_ARM64
+    )
 
     for hdr in macho.headers:
         if int(hdr.header.cputype) == preferred:
@@ -495,12 +509,19 @@ def _parse_macho_symbols(
             n_sect = int(nlist_entry.n_sect)
             seg = section_segment.get(n_sect, "")
             is_data = seg == "__DATA"
-            meta.exports.append(MachoExport(
-                name=name, sym_type=sym_type, is_weak=is_weak, is_data=is_data,
-            ))
+            meta.exports.append(
+                MachoExport(
+                    name=name,
+                    sym_type=sym_type,
+                    is_weak=is_weak,
+                    is_data=is_data,
+                )
+            )
     except Exception as exc:  # noqa: BLE001
         # SymbolTable may fail on binaries without LC_SYMTAB (stripped, .tbd stubs, etc.)
-        log.debug("parse_macho_metadata: SymbolTable failed for %s: %s", dylib_path, exc)
+        log.debug(
+            "parse_macho_metadata: SymbolTable failed for %s: %s", dylib_path, exc
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -508,10 +529,16 @@ def _parse_macho_symbols(
 # ---------------------------------------------------------------------------
 #: Fundamental floating-point member types that can form an HFA (Homogeneous
 #: Floating-point Aggregate) under AAPCS64 §5.9.5.
-_AAPCS64_HFA_BASE_TYPES = frozenset({
-    "float", "double", "long double",
-    "__fp16", "_Float16", "__bf16",
-})
+_AAPCS64_HFA_BASE_TYPES = frozenset(
+    {
+        "float",
+        "double",
+        "long double",
+        "__fp16",
+        "_Float16",
+        "__bf16",
+    }
+)
 
 #: AArch64 passes an aggregate in general registers only when it is <= 16 bytes;
 #: larger aggregates are passed indirectly (by reference to a caller copy).

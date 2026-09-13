@@ -65,9 +65,13 @@ def test_compare_dump_manifest_and_header_same_side_rejected(tmp_path, runner):
     result = runner.invoke(
         main,
         [
-            "compare", str(old_so), str(new_so),
-            "-H", "old=" + str(header),
-            "--dump-manifest", "old=" + str(manifest),
+            "compare",
+            str(old_so),
+            str(new_so),
+            "-H",
+            "old=" + str(header),
+            "--dump-manifest",
+            "old=" + str(manifest),
         ],
     )
     assert result.exit_code != 0
@@ -85,8 +89,11 @@ def test_compare_dump_manifest_rejects_non_elf_input(tmp_path, runner):
     result = runner.invoke(
         main,
         [
-            "compare", str(snap), str(new_so),
-            "--dump-manifest", "old=" + str(manifest),
+            "compare",
+            str(snap),
+            str(new_so),
+            "--dump-manifest",
+            "old=" + str(manifest),
         ],
     )
     assert result.exit_code != 0
@@ -105,8 +112,11 @@ def test_compare_dump_manifest_rejected_for_directory_inputs(tmp_path, runner):
     result = runner.invoke(
         main,
         [
-            "compare", str(old_dir), str(new_dir),
-            "--dump-manifest", "old=" + str(manifest),
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--dump-manifest",
+            "old=" + str(manifest),
         ],
     )
     assert result.exit_code != 0
@@ -131,8 +141,11 @@ def test_compare_dump_manifest_directory_rejection_wins_over_malformed_yaml(
     result = runner.invoke(
         main,
         [
-            "compare", str(old_dir), str(new_dir),
-            "--dump-manifest", "old=" + str(bad_manifest),
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--dump-manifest",
+            "old=" + str(bad_manifest),
         ],
     )
     assert result.exit_code != 0
@@ -147,8 +160,11 @@ def test_compare_dump_manifest_malformed_yaml_rejected(tmp_path, runner):
     result = runner.invoke(
         main,
         [
-            "compare", str(old_so), str(new_so),
-            "--dump-manifest", "new=" + str(manifest),
+            "compare",
+            str(old_so),
+            str(new_so),
+            "--dump-manifest",
+            "new=" + str(manifest),
         ],
     )
     assert result.exit_code != 0
@@ -377,8 +393,11 @@ def test_compare_dump_manifest_and_release_manifest_coexist(
     monkeypatch.setattr(
         "abicheck.service.compare_snapshots",
         lambda *_a, **_kw: DiffResult(
-            old_version="1", new_version="1", library="old.so",
-            verdict=Verdict.NO_CHANGE, assurance="none",
+            old_version="1",
+            new_version="1",
+            library="old.so",
+            verdict=Verdict.NO_CHANGE,
+            assurance="none",
         ),
     )
     monkeypatch.setattr(
@@ -388,9 +407,13 @@ def test_compare_dump_manifest_and_release_manifest_coexist(
     result = runner.invoke(
         main,
         [
-            "compare", str(old_so), str(new_so),
-            "--instantiation-manifest", str(release_manifest),
-            "--dump-manifest", "old=" + str(dump_manifest),
+            "compare",
+            str(old_so),
+            str(new_so),
+            "--instantiation-manifest",
+            str(release_manifest),
+            "--dump-manifest",
+            "old=" + str(dump_manifest),
         ],
     )
     assert result.exit_code == 0, result.output

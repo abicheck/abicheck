@@ -327,7 +327,10 @@ class TestReporterJsonLeaf:
         entry = out["leaf_changes"][0]
         assert entry["public_reachable"] is True
         assert entry["reachability_kind"] == "value_embedding"
-        assert entry["reachability_proof_path"] == "ns::Pub → field:impl_ → ns::detail::Impl"
+        assert (
+            entry["reachability_proof_path"]
+            == "ns::Pub → field:impl_ → ns::detail::Impl"
+        )
 
     def test_leaf_json_omits_reachability_fields_when_unset(self) -> None:
         from abicheck.reporter import to_json
@@ -541,7 +544,9 @@ class TestPostProcessingHelpers:
 class TestDetectInternalLeaksStep:
     def _leak_snaps(self) -> tuple[AbiSnapshot, AbiSnapshot]:
         old = _snap(
-            functions=[_public_fn("get", "ns::detail::Impl", [])],  # by value → genuine leak
+            functions=[
+                _public_fn("get", "ns::detail::Impl", [])
+            ],  # by value → genuine leak
             types=[
                 _record(
                     "ns::detail::Impl",
@@ -552,7 +557,9 @@ class TestDetectInternalLeaksStep:
             ],
         )
         new = _snap(
-            functions=[_public_fn("get", "ns::detail::Impl", [])],  # by value → genuine leak
+            functions=[
+                _public_fn("get", "ns::detail::Impl", [])
+            ],  # by value → genuine leak
             types=[
                 _record(
                     "ns::detail::Impl",
@@ -905,8 +912,18 @@ class TestInternalLeakReachability:
         from abicheck.internal_leak import _path_is_value_propagating
 
         snap = _snap()  # type map unused now (markers are precomputed)
-        assert _path_is_value_propagating(["Public", "field:impl_", "ns::detail::Impl"], snap) is True
-        assert _path_is_value_propagating(["Public", "field:impl_", "indirect:edge", "ns::detail::Impl"], snap) is False
+        assert (
+            _path_is_value_propagating(
+                ["Public", "field:impl_", "ns::detail::Impl"], snap
+            )
+            is True
+        )
+        assert (
+            _path_is_value_propagating(
+                ["Public", "field:impl_", "indirect:edge", "ns::detail::Impl"], snap
+            )
+            is False
+        )
 
     def test_pointer_only_layout_leak_is_suppressed(self) -> None:
         # P2 (UXL field run): an internal type reachable *only* through a pointer

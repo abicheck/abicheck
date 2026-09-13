@@ -3,6 +3,7 @@ sibling sub-modules in PR #251. Exercises the moved helpers and command bodies
 directly so that the patch-level coverage of the new files reflects what was
 already covered when the code lived in the parent modules.
 """
+
 from __future__ import annotations
 
 import errno
@@ -49,29 +50,48 @@ class TestCompatErrors:
         assert _classify_compat_error_exit_code(KeyboardInterrupt()) == 11
 
     def test_tool_missing_message_is_three(self) -> None:
-        assert _classify_compat_error_exit_code(
-            RuntimeError("castxml not found in PATH"), context="parsing",
-        ) == 3
+        assert (
+            _classify_compat_error_exit_code(
+                RuntimeError("castxml not found in PATH"),
+                context="parsing",
+            )
+            == 3
+        )
 
     def test_compile_failure_is_five(self) -> None:
-        assert _classify_compat_error_exit_code(
-            RuntimeError("castxml failed: cannot compile"),
-        ) == 5
+        assert (
+            _classify_compat_error_exit_code(
+                RuntimeError("castxml failed: cannot compile"),
+            )
+            == 5
+        )
 
     def test_descriptor_context_is_six(self) -> None:
-        assert _classify_compat_error_exit_code(
-            ValueError("bad XML"), context="parsing descriptor",
-        ) == 6
+        assert (
+            _classify_compat_error_exit_code(
+                ValueError("bad XML"),
+                context="parsing descriptor",
+            )
+            == 6
+        )
 
     def test_report_context_is_seven(self) -> None:
-        assert _classify_compat_error_exit_code(
-            RuntimeError("oops"), context="writing report",
-        ) == 7
+        assert (
+            _classify_compat_error_exit_code(
+                RuntimeError("oops"),
+                context="writing report",
+            )
+            == 7
+        )
 
     def test_dump_context_is_eight(self) -> None:
-        assert _classify_compat_error_exit_code(
-            RuntimeError("snapshot failed"), context="running dump pipeline",
-        ) == 8
+        assert (
+            _classify_compat_error_exit_code(
+                RuntimeError("snapshot failed"),
+                context="running dump pipeline",
+            )
+            == 8
+        )
 
     def test_fallback_is_ten(self) -> None:
         assert _classify_compat_error_exit_code(RuntimeError("unknown")) == 10
@@ -122,11 +142,18 @@ class TestCliStackBasics:
         assert "stack" in result.output.lower()
 
     def test_stack_check_same_baseline_candidate_rejected(self, tmp_path: Path) -> None:
-        result = CliRunner().invoke(main, [
-            "deps", "compare", "usr/bin/myapp",
-            "--old-root", str(tmp_path),
-            "--new-root", str(tmp_path),
-        ])
+        result = CliRunner().invoke(
+            main,
+            [
+                "deps",
+                "compare",
+                "usr/bin/myapp",
+                "--old-root",
+                str(tmp_path),
+                "--new-root",
+                str(tmp_path),
+            ],
+        )
         assert result.exit_code != 0
         assert "same sysroot" in result.output
 
@@ -144,11 +171,18 @@ class TestCliStackBasics:
         candidate.mkdir()
         (baseline / "fake").write_text("hello", encoding="utf-8")
         (candidate / "fake").write_text("hello", encoding="utf-8")
-        result = CliRunner().invoke(main, [
-            "deps", "compare", "fake",
-            "--old-root", str(baseline),
-            "--new-root", str(candidate),
-        ])
+        result = CliRunner().invoke(
+            main,
+            [
+                "deps",
+                "compare",
+                "fake",
+                "--old-root",
+                str(baseline),
+                "--new-root",
+                str(candidate),
+            ],
+        )
         assert result.exit_code != 0
         assert "requires an ELF binary" in result.output
 
@@ -159,43 +193,54 @@ class TestCliStackBasics:
 class TestTemplateHelpers:
     """Cover the standalone string helpers in diff_platform_templates."""
 
-    @pytest.mark.parametrize("type_str,expected", [
-        ("std::vector<int>", ["int"]),
-        ("std::map<int, double>", ["int", "double"]),
-        ("Foo<Bar<int>, double>", ["Bar<int>", "double"]),
-        ("std::vector<>", []),
-        ("std::function<void(int, double)>", ["void(int, double)"]),
-        ("int", None),
-        ("std::vector<int", None),  # unbalanced
-        # Regression: angle depth must unwind even when '>' appears while
-        # parentheses are open (function-pointer templates).
-        (
-            "Foo<void (*)(std::vector<int>), double>",
-            ["void (*)(std::vector<int>)", "double"],
-        ),
-    ])
+    @pytest.mark.parametrize(
+        "type_str,expected",
+        [
+            ("std::vector<int>", ["int"]),
+            ("std::map<int, double>", ["int", "double"]),
+            ("Foo<Bar<int>, double>", ["Bar<int>", "double"]),
+            ("std::vector<>", []),
+            ("std::function<void(int, double)>", ["void(int, double)"]),
+            ("int", None),
+            ("std::vector<int", None),  # unbalanced
+            # Regression: angle depth must unwind even when '>' appears while
+            # parentheses are open (function-pointer templates).
+            (
+                "Foo<void (*)(std::vector<int>), double>",
+                ["void (*)(std::vector<int>)", "double"],
+            ),
+        ],
+    )
     def test_extract_template_args(
-        self, type_str: str, expected: list[str] | None,
+        self,
+        type_str: str,
+        expected: list[str] | None,
     ) -> None:
         assert _extract_template_args(type_str) == expected
 
-    @pytest.mark.parametrize("type_str,expected", [
-        ("std::vector<int>", "std::vector"),
-        ("std::map<int, double>", "std::map"),
-        ("Foo<Bar<int>>", "Foo"),
-        ("int", "int"),
-    ])
+    @pytest.mark.parametrize(
+        "type_str,expected",
+        [
+            ("std::vector<int>", "std::vector"),
+            ("std::map<int, double>", "std::map"),
+            ("Foo<Bar<int>>", "Foo"),
+            ("int", "int"),
+        ],
+    )
     def test_template_outer(self, type_str: str, expected: str) -> None:
         assert _template_outer(type_str) == expected
 
     def test_split_top_level_args_respects_nesting(self) -> None:
         assert _split_top_level_args("int, Foo<int, double>, char") == [
-            "int", "Foo<int, double>", "char",
+            "int",
+            "Foo<int, double>",
+            "char",
         ]
 
     def test_split_top_level_args_respects_parens(self) -> None:
         assert _split_top_level_args("void(int, double), char") == [
-            "void(int, double)", "char",
+            "void(int, double)",
+            "char",
         ]
 
     def test_split_top_level_args_unwinds_angle_through_open_paren(self) -> None:
@@ -256,12 +301,17 @@ class TestCastxmlAtomicType:
 
         def snapshot(param_type: str) -> AbiSnapshot:
             return AbiSnapshot(
-                library="libtest.so", version="1",
-                functions=[Function(
-                    name="f", mangled="_Z1fv", return_type="void",
-                    params=[Param(name="value", type=param_type)],
-                    visibility=Visibility.PUBLIC,
-                )],
+                library="libtest.so",
+                version="1",
+                functions=[
+                    Function(
+                        name="f",
+                        mangled="_Z1fv",
+                        return_type="void",
+                        params=[Param(name="value", type=param_type)],
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
             )
 
         result = compare(
@@ -269,7 +319,9 @@ class TestCastxmlAtomicType:
             snapshot(self._atomic_type_name("long")),
         )
 
-        assert any(change.kind == ChangeKind.FUNC_PARAMS_CHANGED for change in result.changes)
+        assert any(
+            change.kind == ChangeKind.FUNC_PARAMS_CHANGED for change in result.changes
+        )
 
     def test_atomic_added_from_castxml_type_preserves_qualifier_change(self) -> None:
         from abicheck.checker import ChangeKind, compare
@@ -277,12 +329,17 @@ class TestCastxmlAtomicType:
 
         def snapshot(param_type: str) -> AbiSnapshot:
             return AbiSnapshot(
-                library="libtest.so", version="1",
-                functions=[Function(
-                    name="f", mangled="_Z1fv", return_type="void",
-                    params=[Param(name="value", type=param_type)],
-                    visibility=Visibility.PUBLIC,
-                )],
+                library="libtest.so",
+                version="1",
+                functions=[
+                    Function(
+                        name="f",
+                        mangled="_Z1fv",
+                        return_type="void",
+                        params=[Param(name="value", type=param_type)],
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
             )
 
         result = compare(snapshot("int"), snapshot(self._atomic_type_name("int")))
@@ -315,14 +372,26 @@ class TestCastxmlVtableUnindexed:
         cls = Element("Class", id="c1", name="C", members="")
         root.append(cls)
         # Two virtual methods, neither with a vtable_index attribute.
-        root.append(Element(
-            "Method", id="m1", name="foo", mangled="_ZN1C3fooEv",
-            virtual="1", context="c1",
-        ))
-        root.append(Element(
-            "Method", id="m2", name="bar", mangled="_ZN1C3barEv",
-            virtual="1", context="c1",
-        ))
+        root.append(
+            Element(
+                "Method",
+                id="m1",
+                name="foo",
+                mangled="_ZN1C3fooEv",
+                virtual="1",
+                context="c1",
+            )
+        )
+        root.append(
+            Element(
+                "Method",
+                id="m2",
+                name="bar",
+                mangled="_ZN1C3barEv",
+                virtual="1",
+                context="c1",
+            )
+        )
         parser = _CastxmlParser(root, set(), set())
         slots = parser._collect_virtual_methods("c1")
         # Pre-fix, both methods would land on the same `None` key in a dict and

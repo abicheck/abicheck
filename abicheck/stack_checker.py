@@ -20,6 +20,7 @@ root binary and produces a stack-level verdict covering:
   - ABI risk: are there harmful ABI changes in any dependency?
   - Impact: which imports are affected by changed dependencies?
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -49,8 +50,9 @@ class StackVerdict(str, Enum):
 @dataclass
 class StackChange:
     """A changed DSO between baseline and candidate stacks."""
-    library: str               # SONAME or path
-    change_type: str           # "added", "removed", "content_changed"
+
+    library: str  # SONAME or path
+    change_type: str  # "added", "removed", "content_changed"
     abi_diff: DiffResult | None = None  # Per-library ABI diff
     impacted_imports: list[SymbolBinding] = field(default_factory=list)
     # ADR-050 D2: set instead of leaving abi_diff an unexplained None when
@@ -65,11 +67,12 @@ class StackChange:
 @dataclass
 class StackCheckResult:
     """Result of a full-stack ABI compatibility check."""
+
     root_binary: str
     baseline_env: str
     candidate_env: str
-    loadability: StackVerdict       # Will it load?
-    abi_risk: StackVerdict          # Are there harmful ABI changes?
+    loadability: StackVerdict  # Will it load?
+    abi_risk: StackVerdict  # Are there harmful ABI changes?
     baseline_graph: DependencyGraph
     candidate_graph: DependencyGraph
     bindings_baseline: list[SymbolBinding] = field(default_factory=list)
@@ -81,7 +84,7 @@ class StackCheckResult:
     # single DSO's own export table changed (dependency reordering, a
     # sibling library gaining/losing the export, interposition drift).
     binding_changes: list[Change] = field(default_factory=list)
-    risk_score: str = "low"                    # "high", "medium", "low"
+    risk_score: str = "low"  # "high", "medium", "low"
 
 
 def _compute_loadability(
@@ -343,7 +346,9 @@ def check_stack(
     candidate_bindings = compute_bindings(candidate_graph)
 
     missing = [b for b in candidate_bindings if b.status == BindingStatus.MISSING]
-    version_mismatches = [b for b in candidate_bindings if b.status == BindingStatus.VERSION_MISMATCH]
+    version_mismatches = [
+        b for b in candidate_bindings if b.status == BindingStatus.VERSION_MISMATCH
+    ]
 
     loadability = _compute_loadability(candidate_graph, missing, version_mismatches)
     stack_changes = _diff_stacks(baseline_graph, candidate_graph, candidate_bindings)
@@ -394,12 +399,16 @@ def check_single_env(
     bindings = compute_bindings(graph)
 
     missing = [b for b in bindings if b.status == BindingStatus.MISSING]
-    version_mismatches = [b for b in bindings if b.status == BindingStatus.VERSION_MISMATCH]
+    version_mismatches = [
+        b for b in bindings if b.status == BindingStatus.VERSION_MISMATCH
+    ]
 
     loadability = _compute_loadability(graph, missing, version_mismatches)
 
-    risk_score = "high" if loadability == StackVerdict.FAIL else (
-        "medium" if loadability == StackVerdict.WARN else "low"
+    risk_score = (
+        "high"
+        if loadability == StackVerdict.FAIL
+        else ("medium" if loadability == StackVerdict.WARN else "low")
     )
 
     return StackCheckResult(
@@ -427,12 +436,16 @@ def _diff_stacks(
     changes: list[StackChange] = []
 
     # Build soname → node mapping for each stack.
-    baseline_by_soname = {node.soname: (key, node) for key, node in baseline.nodes.items()}
-    candidate_by_soname = {node.soname: (key, node) for key, node in candidate.nodes.items()}
+    baseline_by_soname = {
+        node.soname: (key, node) for key, node in baseline.nodes.items()
+    }
+    candidate_by_soname = {
+        node.soname: (key, node) for key, node in candidate.nodes.items()
+    }
 
     # Index candidate bindings by provider path for impacted_imports lookup.
     bindings_by_provider: dict[str, list[SymbolBinding]] = {}
-    for b in (candidate_bindings or []):
+    for b in candidate_bindings or []:
         if b.provider:
             bindings_by_provider.setdefault(b.provider, []).append(b)
 
@@ -462,12 +475,14 @@ def _diff_stacks(
             # Unreadable file — treat as content changed (error).
             abi_diff = None
             impacted = bindings_by_provider.get(cand_key, [])
-            changes.append(StackChange(
-                library=soname,
-                change_type="content_changed",
-                abi_diff=abi_diff,
-                impacted_imports=impacted,
-            ))
+            changes.append(
+                StackChange(
+                    library=soname,
+                    change_type="content_changed",
+                    abi_diff=abi_diff,
+                    impacted_imports=impacted,
+                )
+            )
         elif base_hash != cand_hash:
             # Run per-library ABI diff using the existing checker. A genuine
             # comparability-gate mismatch (ADR-050 D2) is not just another
@@ -481,13 +496,15 @@ def _diff_stacks(
                 not_comparable_reason = str(exc)
             # Populate impacted_imports: bindings that reference the changed DSO.
             impacted = bindings_by_provider.get(cand_key, [])
-            changes.append(StackChange(
-                library=soname,
-                change_type="content_changed",
-                abi_diff=abi_diff,
-                impacted_imports=impacted,
-                not_comparable_reason=not_comparable_reason,
-            ))
+            changes.append(
+                StackChange(
+                    library=soname,
+                    change_type="content_changed",
+                    abi_diff=abi_diff,
+                    impacted_imports=impacted,
+                    not_comparable_reason=not_comparable_reason,
+                )
+            )
 
     return changes
 
@@ -500,7 +517,9 @@ def _file_hash(path: Path) -> str | None:
         return None
 
 
-def _run_abi_diff(old_path: Path, new_path: Path, library_name: str) -> DiffResult | None:
+def _run_abi_diff(
+    old_path: Path, new_path: Path, library_name: str
+) -> DiffResult | None:
     """Run the existing abicheck compare on two library files.
 
     Raises:

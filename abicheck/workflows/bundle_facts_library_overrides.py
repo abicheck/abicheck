@@ -121,7 +121,9 @@ def _require_str_list(value: object, *, where: str) -> list[str]:
         # an accidentally blank `headers: [""]` entry into "scan the
         # manifest's own directory" instead of the clean rejection every
         # other malformed path value here gets.
-        raise BundleFactsLibraryOverridesError(f"{where}: must not contain an empty string")
+        raise BundleFactsLibraryOverridesError(
+            f"{where}: must not contain an empty string"
+        )
     return value
 
 
@@ -143,7 +145,8 @@ def _resolve_str_list_as_paths(
     value: object, *, base_dir: Path | None, where: str
 ) -> list[Path]:
     return [
-        _resolve_path(p, base_dir=base_dir) for p in _require_str_list(value, where=where)
+        _resolve_path(p, base_dir=base_dir)
+        for p in _require_str_list(value, where=where)
     ]
 
 
@@ -459,7 +462,9 @@ def known_libraries_for_new_side(
     # every manifest library key as unknown even though the comparison
     # itself would succeed fine.
     if new_dir.is_dir():
-        new_files = discover_shared_libraries(new_dir, include_private=include_private_dso)
+        new_files = discover_shared_libraries(
+            new_dir, include_private=include_private_dso
+        )
     else:
         new_files = [new_dir]
     new_map, _match_warnings = build_match_map(new_files)

@@ -78,9 +78,7 @@ def _fixture_path(case_name: str, filename: str) -> Path:
 
 
 def _no_baseline_report(path: Path, *extra: str) -> dict:
-    result = invoke_cli(
-        "compare", "--no-baseline", str(path), "-o", "json=-", *extra
-    )
+    result = invoke_cli("compare", "--no-baseline", str(path), "-o", "json=-", *extra)
     assert result.exit_code in (0, 1), (
         f"compare --no-baseline aborted on {path.name} "
         f"(exit={result.exit_code}):\n{result.output}"
@@ -303,5 +301,3 @@ def test_audit_gate_axis_honors_a_policy_promoted_verdict(tmp_path: Path) -> Non
     assert {f["kind"] for f in report["findings"]} == {"exported_not_public"}, (
         "the override must not change which finding is reported, only whether it gates"
     )
-
-

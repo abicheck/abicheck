@@ -156,10 +156,10 @@ def _split_namespace_segments(pattern: str) -> list[str]:
         if ch == "[":
             end = _bracket_class_end(pattern, i)
             if end != -1:
-                buf.append(pattern[i:end + 1])
+                buf.append(pattern[i : end + 1])
                 i = end + 1
                 continue
-        if pattern[i:i + 2] == "::":
+        if pattern[i : i + 2] == "::":
             segments.append("".join(buf))
             buf = []
             i += 2
@@ -298,7 +298,9 @@ class _SegmentGlobMatcher:
 
     def __init__(self, pattern: str, segments: list[str]) -> None:
         if segments.count("**") <= 1:
-            self._simple: re.Pattern[str] | None = re.compile(_translate_namespace_glob(pattern))
+            self._simple: re.Pattern[str] | None = re.compile(
+                _translate_namespace_glob(pattern)
+            )
             self._runs: list[tuple[str, ...] | None | _WildcardRunMatcher] = []
             self._tail: re.Pattern[str] | None = None
             return
@@ -512,7 +514,9 @@ def _compile_run(run: list[str]) -> tuple[str, ...] | None | _WildcardRunMatcher
     source = "::".join(run)
     pattern = re.compile("(?s:" + _fnmatch_segment_regex(source) + ")\\Z")
     last_segment = run[-1] if not _has_wildcard_char(run[-1]) else None
-    return _WildcardRunMatcher(pattern, monotonic=source.endswith("*"), last_segment=last_segment)
+    return _WildcardRunMatcher(
+        pattern, monotonic=source.endswith("*"), last_segment=last_segment
+    )
 
 
 def _segment_offsets(name_segments: list[str]) -> tuple[list[int], list[int]]:
@@ -718,7 +722,9 @@ def _translate_namespace_glob(pattern: str) -> str:
     return "(?s:" + "".join(parts) + ")\\Z"
 
 
-def _compile_namespace_glob(glob: str | None, field_name: str) -> _SegmentGlobMatcher | None:
+def _compile_namespace_glob(
+    glob: str | None, field_name: str
+) -> _SegmentGlobMatcher | None:
     """Compile a namespace-selector glob (``namespace``/``entity_namespace``/
     ``cause_namespace``) to a :class:`_SegmentGlobMatcher`, using the same
     pathspec/gitignore-style globstar semantics :func:`_translate_namespace_glob`

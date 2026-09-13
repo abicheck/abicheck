@@ -78,7 +78,9 @@ EXAMPLES_DIR = example_catalog.CASES_DIR
 #: `struct_field_type_changed` went missing on Linux once that fix landed).
 #: Both kinds are independently sufficient for BREAKING per each case's
 #: README, so accept either rather than pinning one.
-_STRUCT_FIELD_KINDS = frozenset({"type_field_type_changed", "struct_field_type_changed"})
+_STRUCT_FIELD_KINDS = frozenset(
+    {"type_field_type_changed", "struct_field_type_changed"}
+)
 _STRUCT_SIZE_KINDS = frozenset({"type_size_changed", "struct_size_changed"})
 CASES = [
     (

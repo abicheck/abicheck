@@ -395,9 +395,7 @@ class TestUseCaseImpactOnCompare:
         # `--show-only removed` displays no findings here (the only change is
         # an addition), so the block must attribute none either.
         scoped = _json_report(
-            _compare(
-                manifest, old, new, "-o", "json=-", "--view", "show=removed"
-            )
+            _compare(manifest, old, new, "-o", "json=-", "--view", "show=removed")
         )
         block = scoped["use_case_impact"]
         assert block["by_use_case"] == {}
@@ -469,9 +467,7 @@ class TestUseCaseImpactOnCompare:
         """Omitted, not emitted empty, when the flag was never passed."""
         old = _snapshot_with_walkable_graph(tmp_path, "old", with_train_function=True)
         new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
-        res = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "-o", "json=-"]
-        )
+        res = CliRunner().invoke(main, ["compare", str(old), str(new), "-o", "json=-"])
         assert res.exit_code == 4, res.output
         assert "use_case_impact" not in _json_report(res)
 
@@ -498,9 +494,13 @@ class TestUseCaseImpactOnCompare:
         new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
         secondary = tmp_path / "second.json"
         res = _compare(
-            manifest, old, new,
-            "-o", f"{fmt}={tmp_path / f'r.{fmt}'}",
-            "-o", f"json={secondary}",
+            manifest,
+            old,
+            new,
+            "-o",
+            f"{fmt}={tmp_path / f'r.{fmt}'}",
+            "-o",
+            f"json={secondary}",
         )
         assert res.exit_code == 4, res.output
         assert "--use-cases is not supported" not in res.output
@@ -529,8 +529,11 @@ class TestUseCaseImpactOnCompare:
         new = _snapshot_with_walkable_graph(tmp_path, "new", with_train_function=False)
         secondary = tmp_path / "full.json"
         res = _compare(
-            manifest, old, new,
-            "-o", "oneline=-",
+            manifest,
+            old,
+            new,
+            "-o",
+            "oneline=-",
             # This test's `--use-cases` needs the fixtures'
             # `build_source.source_graph` (an L5 fact) to resolve
             # entrypoints, which ADR-063 Phase 8's `--depth` ceiling
@@ -538,8 +541,10 @@ class TestUseCaseImpactOnCompare:
             # `source`, same as a real `--depth binary` run would.
             # `oneline`'s *format* is what this test exercises, not its
             # depth.
-            "--depth", "source",
-            "-o", f"json={secondary}",
+            "--depth",
+            "source",
+            "-o",
+            f"json={secondary}",
         )
         # ADR-068 §3 #28's evidence-contract floor (exit 7) does not apply
         # here: `old`/`new` are pre-serialized JSON snapshots this run never

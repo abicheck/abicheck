@@ -25,6 +25,7 @@ move the shared logic to a leaf module both sides can depend on).
 existing ``from .cross_source_checks import _change`` call sites and tests
 keep working.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

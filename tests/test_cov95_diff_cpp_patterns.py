@@ -432,7 +432,11 @@ class TestInlineAccessorsFor:
         # just an exact-string match) is what makes real case89-style
         # matching work; a regression here silently drops every real
         # accessor match (review-driven regression guard).
-        fn = _fn("get_class_count", "_ZNK5mylib10descriptor15get_class_countEv", is_inline=True)
+        fn = _fn(
+            "get_class_count",
+            "_ZNK5mylib10descriptor15get_class_countEv",
+            is_inline=True,
+        )
         out = _inline_accessors_for([fn], {"descriptor"})
         assert out == [fn]
 

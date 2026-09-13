@@ -413,7 +413,9 @@ class TestSyntheticCtorDtorKeysNormalizeEnclosingLambdaScope:
         root = Element("CastXML", attrib={"format": "1.4.0"})
         _file(root, "f1", source_path)
         SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
-        SubElement(root, "Namespace", attrib={"id": "_2", "name": "demo", "context": "_1"})
+        SubElement(
+            root, "Namespace", attrib={"id": "_2", "name": "demo", "context": "_1"}
+        )
 
         struct_el = SubElement(root, "Struct")
         struct_el.set("id", "_3")

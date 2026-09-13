@@ -8,6 +8,7 @@ Platform requirements:
 - Windows: gcc (MinGW) — produces PE DLLs with export tables
 - Linux: gcc — produces ELF .so files (covered by test_elf_parse_integration.py)
 """
+
 from __future__ import annotations
 
 import shutil
@@ -21,6 +22,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _has_tool(name: str) -> bool:
     return shutil.which(name) is not None
@@ -75,33 +77,56 @@ def _require_compile_success(
         f"stderr:\n{stderr}"
     )
     if optional_feature is not None:
-        pytest.skip(f"optional compiler feature {optional_feature!r} unavailable: {detail}")
+        pytest.skip(
+            f"optional compiler feature {optional_feature!r} unavailable: {detail}"
+        )
     pytest.fail(f"{tool} failed to build the test fixture:\n{detail}")
 
 
-def _compile_dylib(src: str, name: str, tmp: Path,
-                   extra_flags: list[str] | None = None,
-                   optional_feature: str | None = None) -> Path:
+def _compile_dylib(
+    src: str,
+    name: str,
+    tmp: Path,
+    extra_flags: list[str] | None = None,
+    optional_feature: str | None = None,
+) -> Path:
     """Compile C source to a macOS dynamic library (.dylib)."""
     out = tmp / name
     cmd = [
-        "clang", "-shared", "-fPIC",
-        "-o", str(out), "-x", "c", "-",
+        "clang",
+        "-shared",
+        "-fPIC",
+        "-o",
+        str(out),
+        "-x",
+        "c",
+        "-",
         *(extra_flags or []),
     ]
     result = subprocess.run(cmd, input=src.encode(), capture_output=True)
-    _require_compile_success("clang", cmd, src, result, optional_feature=optional_feature)
+    _require_compile_success(
+        "clang", cmd, src, result, optional_feature=optional_feature
+    )
     return out
 
 
-def _compile_dll(src: str, name: str, tmp: Path,
-                 extra_flags: list[str] | None = None,
-                 optional_feature: str | None = None) -> Path:
+def _compile_dll(
+    src: str,
+    name: str,
+    tmp: Path,
+    extra_flags: list[str] | None = None,
+    optional_feature: str | None = None,
+) -> Path:
     """Compile C source to a Windows DLL using MinGW gcc."""
     out = tmp / name
     cmd = [
-        "gcc", "-shared",
-        "-o", str(out), "-x", "c", "-",
+        "gcc",
+        "-shared",
+        "-o",
+        str(out),
+        "-x",
+        "c",
+        "-",
         *(extra_flags or []),
     ]
     result = subprocess.run(cmd, input=src.encode(), capture_output=True)
@@ -112,6 +137,7 @@ def _compile_dll(src: str, name: str, tmp: Path,
 # ---------------------------------------------------------------------------
 # macOS / Mach-O integration tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @skip_unless_macos
@@ -153,7 +179,9 @@ class TestMachoIntegration:
         src = "int fn(void) { return 0; }"
         with tempfile.TemporaryDirectory() as td:
             dylib = _compile_dylib(
-                src, "libinstname.dylib", Path(td),
+                src,
+                "libinstname.dylib",
+                Path(td),
                 extra_flags=["-install_name", "@rpath/libinstname.1.dylib"],
             )
             meta = parse_macho_metadata(dylib)
@@ -171,9 +199,9 @@ class TestMachoIntegration:
 
         assert len(meta.dependent_libs) > 0, "Expected at least one dependent lib"
         # macOS links against libSystem.B.dylib (or similar)
-        assert any("libSystem" in d or "libc" in d.lower()
-                    for d in meta.dependent_libs), \
-            f"Expected system lib in deps: {meta.dependent_libs}"
+        assert any(
+            "libSystem" in d or "libc" in d.lower() for d in meta.dependent_libs
+        ), f"Expected system lib in deps: {meta.dependent_libs}"
 
     def test_parse_hidden_symbols_excluded(self) -> None:
         """Hidden-visibility symbols must NOT appear in MachoMetadata.exports."""
@@ -219,7 +247,9 @@ class TestMachoIntegration:
             dylib = _compile_dylib(src, "libcli.dylib", Path(td))
             result = subprocess.run(
                 [sys.executable, "-m", "abicheck.cli", "dump", str(dylib)],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
 
         assert result.returncode == 0, f"dump failed: {result.stderr}"
@@ -236,35 +266,48 @@ class TestMachoIntegration:
             td_path = Path(td)
             old = _compile_dylib(
                 "int api_fn(void) { return 1; }\nint other_fn(void) { return 2; }",
-                "libold.dylib", td_path,
+                "libold.dylib",
+                td_path,
             )
             new = _compile_dylib(
                 "int other_fn(void) { return 2; }",
-                "libnew.dylib", td_path,
+                "libnew.dylib",
+                td_path,
             )
 
             # Dump both
             for lib, out in [(old, "old.json"), (new, "new.json")]:
                 r = subprocess.run(
-                    [sys.executable, "-m", "abicheck.cli", "dump", str(lib),
-                     "-o", str(td_path / out)],
-                    capture_output=True, text=True, check=False,
+                    [
+                        sys.executable,
+                        "-m",
+                        "abicheck.cli",
+                        "dump",
+                        str(lib),
+                        "-o",
+                        str(td_path / out),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
                 )
                 assert r.returncode == 0, f"dump failed: {r.stderr}"
 
             # Compare
             cmp = subprocess.run(
                 [
-                sys.executable,
-                "-m",
-                "abicheck.cli",
-                "compare",
-                str(td_path / "old.json"),
-                str(td_path / "new.json"),
-                "-o",
-                "markdown=-",
-            ],
-                capture_output=True, text=True, check=False,
+                    sys.executable,
+                    "-m",
+                    "abicheck.cli",
+                    "compare",
+                    str(td_path / "old.json"),
+                    str(td_path / "new.json"),
+                    "-o",
+                    "markdown=-",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
             )
 
         assert cmp.returncode == 4, (
@@ -283,12 +326,17 @@ class TestMachoIntegration:
             td_path = Path(td)
             old = _compile_dylib(
                 "int api_fn(void){return 1;}\nint other_fn(void){return 2;}",
-                "libold.dylib", td_path,
+                "libold.dylib",
+                td_path,
             )
-            new = _compile_dylib("int other_fn(void){return 2;}", "libnew.dylib", td_path)
+            new = _compile_dylib(
+                "int other_fn(void){return 2;}", "libnew.dylib", td_path
+            )
             cmp = subprocess.run(
                 [sys.executable, "-m", "abicheck.cli", "compare", str(old), str(new)],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
         assert cmp.returncode == 4, (
             f"Expected BREAKING (exit 4), got {cmp.returncode}\n{cmp.stderr}\n{cmp.stdout}"
@@ -309,7 +357,9 @@ class TestMachoIntegration:
             b = _compile_dylib(src, "libb.dylib", td_path, extra_flags=same_id)
             cmp = subprocess.run(
                 [sys.executable, "-m", "abicheck.cli", "compare", str(a), str(b)],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
         assert cmp.returncode == 0, (
             f"Expected COMPATIBLE (exit 0), got {cmp.returncode}\n{cmp.stderr}\n{cmp.stdout}"
@@ -319,6 +369,7 @@ class TestMachoIntegration:
 # ---------------------------------------------------------------------------
 # Windows / PE integration tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 @skip_unless_windows
@@ -396,7 +447,9 @@ class TestPeIntegration:
             dll = _compile_dll(src, "cli.dll", Path(td))
             result = subprocess.run(
                 [sys.executable, "-m", "abicheck.cli", "dump", str(dll)],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
 
         assert result.returncode == 0, f"dump failed: {result.stderr}"
@@ -414,19 +467,30 @@ class TestPeIntegration:
             old = _compile_dll(
                 "__declspec(dllexport) int api_fn(void) { return 1; }\n"
                 "__declspec(dllexport) int other_fn(void) { return 2; }",
-                "old.dll", td_path,
+                "old.dll",
+                td_path,
             )
             new = _compile_dll(
                 "__declspec(dllexport) int other_fn(void) { return 2; }",
-                "new.dll", td_path,
+                "new.dll",
+                td_path,
             )
 
             # Dump both
             for lib, out in [(old, "old.json"), (new, "new.json")]:
                 r = subprocess.run(
-                    [sys.executable, "-m", "abicheck.cli", "dump", str(lib),
-                     "-o", str(td_path / out)],
-                    capture_output=True, text=True, check=False,
+                    [
+                        sys.executable,
+                        "-m",
+                        "abicheck.cli",
+                        "dump",
+                        str(lib),
+                        "-o",
+                        str(td_path / out),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
                 )
                 assert r.returncode == 0, f"dump failed: {r.stderr}"
 
@@ -436,16 +500,19 @@ class TestPeIntegration:
             env = {**subprocess.os.environ, "PYTHONUTF8": "1"}
             cmp = subprocess.run(
                 [
-                sys.executable,
-                "-m",
-                "abicheck.cli",
-                "compare",
-                str(td_path / "old.json"),
-                str(td_path / "new.json"),
-                "-o",
-                "markdown=-",
-            ],
-                capture_output=True, encoding="utf-8", check=False, env=env,
+                    sys.executable,
+                    "-m",
+                    "abicheck.cli",
+                    "compare",
+                    str(td_path / "old.json"),
+                    str(td_path / "new.json"),
+                    "-o",
+                    "markdown=-",
+                ],
+                capture_output=True,
+                encoding="utf-8",
+                check=False,
+                env=env,
             )
 
         assert cmp.returncode == 4, (
@@ -462,14 +529,20 @@ class TestPeIntegration:
             old = _compile_dll(
                 "__declspec(dllexport) int api_fn(void){return 1;}\n"
                 "__declspec(dllexport) int other_fn(void){return 2;}",
-                "old.dll", td_path,
+                "old.dll",
+                td_path,
             )
             new = _compile_dll(
-                "__declspec(dllexport) int other_fn(void){return 2;}", "new.dll", td_path,
+                "__declspec(dllexport) int other_fn(void){return 2;}",
+                "new.dll",
+                td_path,
             )
             cmp = subprocess.run(
                 [sys.executable, "-m", "abicheck.cli", "compare", str(old), str(new)],
-                capture_output=True, encoding="utf-8", check=False, env=env,
+                capture_output=True,
+                encoding="utf-8",
+                check=False,
+                env=env,
             )
         assert cmp.returncode == 4, (
             f"Expected BREAKING (exit 4), got {cmp.returncode}\n{cmp.stderr}\n{cmp.stdout}"
@@ -479,15 +552,20 @@ class TestPeIntegration:
     def test_native_identical_dll_is_compatible(self) -> None:
         """Identical native DLLs compare COMPATIBLE (exit 0)."""
         env = {**subprocess.os.environ, "PYTHONUTF8": "1"}
-        src = ("__declspec(dllexport) int api_fn(void){return 1;}\n"
-               "__declspec(dllexport) int other_fn(void){return 2;}")
+        src = (
+            "__declspec(dllexport) int api_fn(void){return 1;}\n"
+            "__declspec(dllexport) int other_fn(void){return 2;}"
+        )
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
             a = _compile_dll(src, "a.dll", td_path)
             b = _compile_dll(src, "b.dll", td_path)
             cmp = subprocess.run(
                 [sys.executable, "-m", "abicheck.cli", "compare", str(a), str(b)],
-                capture_output=True, encoding="utf-8", check=False, env=env,
+                capture_output=True,
+                encoding="utf-8",
+                check=False,
+                env=env,
             )
         assert cmp.returncode == 0, (
             f"Expected COMPATIBLE (exit 0), got {cmp.returncode}\n{cmp.stderr}\n{cmp.stdout}"

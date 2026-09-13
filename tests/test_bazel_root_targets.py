@@ -831,9 +831,12 @@ def test_dump_cli_explicit_config_scoping_matches_dry_run_and_real_run(
     runner = CliRunner()
     common_args = [
         "dump",
-        "--sources", str(src),
-        "--build-info", str(aquery),
-        "--config", str(explicit_cfg),
+        "--sources",
+        str(src),
+        "--build-info",
+        str(aquery),
+        "--config",
+        str(explicit_cfg),
     ]
 
     dry_run_result = runner.invoke(main, [*common_args, "--dry-run"])

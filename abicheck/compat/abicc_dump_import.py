@@ -17,6 +17,7 @@
 This module is intentionally isolated from main compat logic so ABICC dump parsing
 can evolve independently while keeping the CLI flow simple.
 """
+
 from __future__ import annotations
 
 import ast
@@ -48,12 +49,16 @@ def import_abicc_perl_dump(path: Path) -> AbiSnapshot:
         raise SnapshotError(f"Failed to read ABICC Perl dump: {exc}") from exc
 
     if not looks_like_perl_dump(text):
-        raise ValidationError("Invalid ABICC Perl dump: expected Data::Dumper content starting with $VAR1")
+        raise ValidationError(
+            "Invalid ABICC Perl dump: expected Data::Dumper content starting with $VAR1"
+        )
 
     data = _parse_perl_dumper_subset(text)
 
     if not isinstance(data, dict):
-        raise ValidationError("Invalid ABICC Perl dump: top-level structure is not a hash/dict")
+        raise ValidationError(
+            "Invalid ABICC Perl dump: top-level structure is not a hash/dict"
+        )
 
     return _snapshot_from_abicc_dict(data, path)
 
@@ -88,7 +93,9 @@ def _parse_perl_dumper_subset(text: str) -> object:
     try:
         return json.loads(json.dumps(obj))
     except (TypeError, json.JSONDecodeError) as exc:
-        raise ValidationError(f"Failed to normalize ABICC Perl dump structure: {exc}") from exc
+        raise ValidationError(
+            f"Failed to normalize ABICC Perl dump structure: {exc}"
+        ) from exc
 
 
 def _perl_expr_to_python_literal(expr: str) -> str:
@@ -146,8 +153,12 @@ def _snapshot_from_abicc_dict(data: dict[str, object], path: Path) -> AbiSnapsho
     type_info = data.get("TypeInfo")
     symbol_info = data.get("SymbolInfo")
 
-    type_map: dict[str, dict[str, object]] = type_info if isinstance(type_info, dict) else {}
-    sym_map: dict[str, dict[str, object]] = symbol_info if isinstance(symbol_info, dict) else {}
+    type_map: dict[str, dict[str, object]] = (
+        type_info if isinstance(type_info, dict) else {}
+    )
+    sym_map: dict[str, dict[str, object]] = (
+        symbol_info if isinstance(symbol_info, dict) else {}
+    )
 
     library = str(data.get("LibraryName") or path.stem)
     version = str(data.get("LibraryVersion") or "unknown")
@@ -165,7 +176,9 @@ def _snapshot_from_abicc_dict(data: dict[str, object], path: Path) -> AbiSnapsho
 
         short_name = str(sym.get("ShortName") or mangled)
 
-        is_function = any(k in sym for k in ("Param", "Return", "Constructor", "Destructor"))
+        is_function = any(
+            k in sym for k in ("Param", "Return", "Constructor", "Destructor")
+        )
         if is_function:
             params = _parse_params(sym, type_map)
             return_type = _resolve_type_name(sym.get("Return"), type_map)
@@ -205,7 +218,9 @@ def _snapshot_from_abicc_dict(data: dict[str, object], path: Path) -> AbiSnapsho
     )
 
 
-def _parse_params(sym: dict[str, object], type_map: dict[str, dict[str, object]]) -> list[Param]:
+def _parse_params(
+    sym: dict[str, object], type_map: dict[str, dict[str, object]]
+) -> list[Param]:
     raw = sym.get("Param")
     if not isinstance(raw, dict):
         return []

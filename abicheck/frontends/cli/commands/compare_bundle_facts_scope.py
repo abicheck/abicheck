@@ -59,7 +59,9 @@ def scope_terms_for(
     directly (kept for call-site back-compat -- both fallback call sites in
     this module's callers pass ``{}``)."""
     return comparison_scope_terms(
-        resolve_scope_decision(getattr(result, "scope_record", None), on_incomplete_scope)
+        resolve_scope_decision(
+            getattr(result, "scope_record", None), on_incomplete_scope
+        )
     )
 
 

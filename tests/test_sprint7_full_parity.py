@@ -35,7 +35,9 @@ from abicheck.model import (
 
 
 def _snap(**kwargs: object) -> AbiSnapshot:
-    defaults: dict[str, object] = dict(library="lib.so", version="1.0", from_headers=True)
+    defaults: dict[str, object] = dict(
+        library="lib.so", version="1.0", from_headers=True
+    )
     defaults.update(kwargs)
     return AbiSnapshot(**defaults)  # type: ignore[arg-type]
 
@@ -516,7 +518,7 @@ class TestParamRenamed:
                     "_Z4drawii",
                     params=[Param("width", "int"), Param("height", "int")],
                 )
-            ]
+            ],
         )
         new = _snap(
             from_headers=True,
@@ -524,7 +526,7 @@ class TestParamRenamed:
                 _func(
                     "draw", "_Z4drawii", params=[Param("w", "int"), Param("h", "int")]
                 )
-            ]
+            ],
         )
         result = compare(old, new)
         renames = [c for c in result.changes if c.kind == ChangeKind.PARAM_RENAMED]
@@ -543,13 +545,21 @@ class TestParamRenamed:
         assert result.verdict == Verdict.API_BREAK
 
     def test_dwarf_only_param_rename_is_not_source_break(self) -> None:
-        old = _snap(functions=[_func("f", "_Z1fi", params=[Param("arg_size", "int")])], from_headers=False)
-        new = _snap(functions=[_func("f", "_Z1fi", params=[Param("size", "int")])], from_headers=False)
+        old = _snap(
+            functions=[_func("f", "_Z1fi", params=[Param("arg_size", "int")])],
+            from_headers=False,
+        )
+        new = _snap(
+            functions=[_func("f", "_Z1fi", params=[Param("size", "int")])],
+            from_headers=False,
+        )
         result = compare(old, new)
         assert ChangeKind.PARAM_RENAMED not in _kinds(result)
         assert result.verdict == Verdict.NO_CHANGE
 
-    def test_legacy_snapshot_inferred_headers_param_rename_not_source_break(self) -> None:
+    def test_legacy_snapshot_inferred_headers_param_rename_not_source_break(
+        self,
+    ) -> None:
         """Legacy snapshots predating the from_headers key infer header
         provenance from a populated surface — but a DWARF-only dump satisfies
         that same inference, so param renames must stay suppressed.

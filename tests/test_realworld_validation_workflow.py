@@ -152,6 +152,4 @@ class TestContractEvaluationStepAgainstARealPackage:
         names = [s.get("name") for s in steps]
         assert names.index(
             "Compare a real Debian package against itself"
-        ) < names.index(
-            "Compare a real Debian package against itself, with --contract"
-        )
+        ) < names.index("Compare a real Debian package against itself, with --contract")

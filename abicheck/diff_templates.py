@@ -130,6 +130,7 @@ def _qualified_function_name(name: str, mangled: str) -> str:
         return name
     if mangled.startswith("_Z"):
         from .demangle import demangle_batch
+
         return demangle_batch([mangled]).get(mangled, name)
     return name
 
@@ -179,7 +180,7 @@ def _pointer_declarator_star_index(qualified: str, paren_index: int) -> int:
     """
     star_index = -1
     depth = 0
-    for offset, ch in enumerate(qualified[paren_index + 1:]):
+    for offset, ch in enumerate(qualified[paren_index + 1 :]):
         idx = paren_index + 1 + offset
         if ch == "<":
             depth += 1
@@ -326,7 +327,7 @@ def _strip_param_signature(qualified: str) -> str:
     while i != -1:
         prefix = qualified[:i]
         m = _OPERATOR_TOKEN_RE.search(prefix)
-        if m is not None and m.end() == len(prefix) and qualified[i:i + 2] == "()":
+        if m is not None and m.end() == len(prefix) and qualified[i : i + 2] == "()":
             # operator()'s own, empty parentheses are part of the
             # identifier — skip exactly that pair and keep searching for
             # the real parameter-list opener.
@@ -386,7 +387,7 @@ def _strip_param_signature(qualified: str) -> str:
                 i = qualified.find("(", close + 1)
             continue
         if saw_pointer_wrapper and wrapper_star_index != -1:
-            return qualified[wrapper_star_index + 1:i]
+            return qualified[wrapper_star_index + 1 : i]
         return prefix
     return qualified
 
@@ -468,15 +469,17 @@ def _batch_demangle_for_identity(funcs: list[Function]) -> dict[str, str]:
     platform's raw mangled spelling produced it.
     """
     from .demangle import demangle_batch
+
     normalized = [
-        n for f in funcs
-        if (n := _normalize_mach_o_mangled(f.mangled)).startswith("_Z")
+        n for f in funcs if (n := _normalize_mach_o_mangled(f.mangled)).startswith("_Z")
     ]
     return demangle_batch(normalized) if normalized else {}
 
 
 def _canonical_identity_name(
-    name: str, mangled: str, demangled: dict[str, str],
+    name: str,
+    mangled: str,
+    demangled: dict[str, str],
 ) -> str:
     """Return the most stable available qualified identity for a function,
     for use where "is this the same declaration on both sides" must be
@@ -556,7 +559,9 @@ def _canonical_identity_name(
 
 
 def _callable_identity_name(
-    name: str, mangled: str, demangled: dict[str, str],
+    name: str,
+    mangled: str,
+    demangled: dict[str, str],
 ) -> str:
     """:func:`_canonical_identity_name`, with any parameter-list signature
     stripped -- the callable-name portion alone.
@@ -599,7 +604,8 @@ def _internal_template_stems(
 
 
 def _functions_by_stem(
-    funcs: list[Function], demangled: dict[str, str],
+    funcs: list[Function],
+    demangled: dict[str, str],
 ) -> dict[str, list[Function]]:
     """Group *funcs* by template-args-stripped stem."""
     out: dict[str, list[Function]] = defaultdict(list)
@@ -619,7 +625,8 @@ def _function_signature(f: Function) -> tuple[str, int, str]:
 
 
 def _instantiation_set(
-    funcs: list[Function], demangled: dict[str, str],
+    funcs: list[Function],
+    demangled: dict[str, str],
 ) -> set[tuple[str, tuple[str, int, str]]]:
     return {
         (_canonical_identity_name(f.name, f.mangled, demangled), _function_signature(f))
@@ -686,10 +693,9 @@ def detect_internal_template_leaks(
     # unchanged between old and new resolves to byte-identical canonical
     # text on both sides regardless of demangle_batch's own dict-ordering.
     demangled = _batch_demangle_for_identity(old_funcs + new_funcs)
-    internal_stems = (
-        _internal_template_stems(old_funcs, internal_namespaces, demangled)
-        | _internal_template_stems(new_funcs, internal_namespaces, demangled)
-    )
+    internal_stems = _internal_template_stems(
+        old_funcs, internal_namespaces, demangled
+    ) | _internal_template_stems(new_funcs, internal_namespaces, demangled)
     if not internal_stems:
         return []
 
@@ -796,31 +802,35 @@ def detect_cpo_kind_changed(
 
     # function → variable
     for name in sorted((old_funcs - old_vars) & (new_vars - new_funcs)):
-        changes.append(make_change(
-            ChangeKind.CPO_KIND_CHANGED,
-            symbol=name,
-            name=name,
-            old="function",
-            new="variable (function-object / CPO)",
-            new_value="variable",
-            public_reachable=True,
-            reachability_state=ReachabilityState.PROVEN_REACHABLE,
-            reachability_kind="direct_public_symbol",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.CPO_KIND_CHANGED,
+                symbol=name,
+                name=name,
+                old="function",
+                new="variable (function-object / CPO)",
+                new_value="variable",
+                public_reachable=True,
+                reachability_state=ReachabilityState.PROVEN_REACHABLE,
+                reachability_kind="direct_public_symbol",
+            )
+        )
 
     # variable → function
     for name in sorted((old_vars - old_funcs) & (new_funcs - new_vars)):
-        changes.append(make_change(
-            ChangeKind.CPO_KIND_CHANGED,
-            symbol=name,
-            name=name,
-            old="variable (function-object / CPO)",
-            new="function",
-            old_value="variable",
-            public_reachable=True,
-            reachability_state=ReachabilityState.PROVEN_REACHABLE,
-            reachability_kind="direct_public_symbol",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.CPO_KIND_CHANGED,
+                symbol=name,
+                name=name,
+                old="variable (function-object / CPO)",
+                new="function",
+                old_value="variable",
+                public_reachable=True,
+                reachability_state=ReachabilityState.PROVEN_REACHABLE,
+                reachability_kind="direct_public_symbol",
+            )
+        )
 
     return changes
 
@@ -901,21 +911,23 @@ def detect_overload_set_rerouted(
         # are not under-counted.
         if len(old_by_stem[stem]) < 2 and len(new_by_stem[stem]) < 2:
             continue
-        changes.append(make_change(
-            ChangeKind.OVERLOAD_SET_REROUTED,
-            symbol=stem,
-            name=stem,
-            detail=f"{len(removed)} overload(s) removed and {len(added)} added in the same revision",
-            old_value=str(sorted(_fmt_key(k) for k in old_sigs)),
-            new_value=str(sorted(_fmt_key(k) for k in new_sigs)),
-            # ADR-044 D1 (Codex review): _by_stem above filters to
-            # Visibility.PUBLIC, so this finding's mere existence already
-            # proves its subject is public — same reliable-signal tagging as
-            # CPO_KIND_CHANGED above.
-            public_reachable=True,
-            reachability_state=ReachabilityState.PROVEN_REACHABLE,
-            reachability_kind="direct_public_symbol",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.OVERLOAD_SET_REROUTED,
+                symbol=stem,
+                name=stem,
+                detail=f"{len(removed)} overload(s) removed and {len(added)} added in the same revision",
+                old_value=str(sorted(_fmt_key(k) for k in old_sigs)),
+                new_value=str(sorted(_fmt_key(k) for k in new_sigs)),
+                # ADR-044 D1 (Codex review): _by_stem above filters to
+                # Visibility.PUBLIC, so this finding's mere existence already
+                # proves its subject is public — same reliable-signal tagging as
+                # CPO_KIND_CHANGED above.
+                public_reachable=True,
+                reachability_state=ReachabilityState.PROVEN_REACHABLE,
+                reachability_kind="direct_public_symbol",
+            )
+        )
 
     return changes
 
@@ -1022,22 +1034,24 @@ def detect_mandatory_template_param_added(
         # no-reliable-signal reasoning as before, now narrowed to exactly
         # the cases that do have one.
         subject_is_public = old_public.get(stem, False) or new_public.get(stem, False)
-        changes.append(make_change(
-            ChangeKind.MANDATORY_TEMPLATE_PARAM_ADDED,
-            symbol=stem,
-            name=stem,
-            old=str(old_min),
-            public_reachable=subject_is_public,
-            reachability_state=(
-                ReachabilityState.PROVEN_REACHABLE
-                if subject_is_public
-                else ReachabilityState.UNKNOWN
-            ),
-            reachability_kind="direct_public_symbol" if subject_is_public else None,
-            new=str(new_min),
-            old_value=f"min_arity={old_min}",
-            new_value=f"min_arity={new_min}",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.MANDATORY_TEMPLATE_PARAM_ADDED,
+                symbol=stem,
+                name=stem,
+                old=str(old_min),
+                public_reachable=subject_is_public,
+                reachability_state=(
+                    ReachabilityState.PROVEN_REACHABLE
+                    if subject_is_public
+                    else ReachabilityState.UNKNOWN
+                ),
+                reachability_kind="direct_public_symbol" if subject_is_public else None,
+                new=str(new_min),
+                old_value=f"min_arity={old_min}",
+                new_value=f"min_arity={new_min}",
+            )
+        )
 
     return changes
 
@@ -1118,19 +1132,21 @@ def detect_unspecified_return_now_named(
                 f"wrote out the type no longer compiles; only `auto` "
                 f"captures it now."
             )
-        changes.append(make_change(
-            ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED,
-            symbol=qname,
-            description=desc,
-            old_value=old_rt,
-            new_value=new_rt,
-            # ADR-044 D1 (Codex review): _index() above filters to
-            # Visibility.PUBLIC functions only, so this finding's mere
-            # existence already proves its subject is public.
-            public_reachable=True,
-            reachability_state=ReachabilityState.PROVEN_REACHABLE,
-            reachability_kind="direct_public_symbol",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED,
+                symbol=qname,
+                description=desc,
+                old_value=old_rt,
+                new_value=new_rt,
+                # ADR-044 D1 (Codex review): _index() above filters to
+                # Visibility.PUBLIC functions only, so this finding's mere
+                # existence already proves its subject is public.
+                public_reachable=True,
+                reachability_state=ReachabilityState.PROVEN_REACHABLE,
+                reachability_kind="direct_public_symbol",
+            )
+        )
 
     return changes
 
@@ -1173,9 +1189,7 @@ def detect_missing_instantiations(
 
     old.index()
     new.index()
-    new_mangled = {
-        f.mangled for f in new.functions if is_public_export(f)
-    }
+    new_mangled = {f.mangled for f in new.functions if is_public_export(f)}
     findings: list[Change] = []
     surviving_stems: set[str] = set()
     for fn in new.functions:
@@ -1195,22 +1209,24 @@ def detect_missing_instantiations(
         stem = _strip_template_args(qname)
         if stem not in surviving_stems:
             continue
-        findings.append(make_change(
-            ChangeKind.INSTANTIATION_MISSING_FROM_BINARY,
-            symbol=fn.mangled,
-            name=fn.name,
-            detail=stem,
-            old_value=fn.mangled,
-            new_value=None,
-            # ADR-044 D1: both loops above filter to Visibility.PUBLIC, so
-            # this finding's mere existence already proves its subject is
-            # public — same reliable-signal tagging as the detectors in
-            # detect_template_patterns. Runs via DetectCppPatterns, also
-            # after ApplySuppression.
-            public_reachable=True,
-            reachability_state=ReachabilityState.PROVEN_REACHABLE,
-            reachability_kind="direct_public_symbol",
-        ))
+        findings.append(
+            make_change(
+                ChangeKind.INSTANTIATION_MISSING_FROM_BINARY,
+                symbol=fn.mangled,
+                name=fn.name,
+                detail=stem,
+                old_value=fn.mangled,
+                new_value=None,
+                # ADR-044 D1: both loops above filter to Visibility.PUBLIC, so
+                # this finding's mere existence already proves its subject is
+                # public — same reliable-signal tagging as the detectors in
+                # detect_template_patterns. Runs via DetectCppPatterns, also
+                # after ApplySuppression.
+                public_reachable=True,
+                reachability_state=ReachabilityState.PROVEN_REACHABLE,
+                reachability_kind="direct_public_symbol",
+            )
+        )
     return findings
 
 
@@ -1411,9 +1427,13 @@ def detect_template_patterns(
     internal_namespaces: tuple[str, ...] = _INTERNAL_TEMPLATE_NAMESPACES,
 ) -> list[Change]:
     out: list[Change] = []
-    out.extend(detect_internal_template_leaks(
-        old, new, internal_namespaces=internal_namespaces,
-    ))
+    out.extend(
+        detect_internal_template_leaks(
+            old,
+            new,
+            internal_namespaces=internal_namespaces,
+        )
+    )
     out.extend(detect_cpo_kind_changed(old, new))
     out.extend(detect_overload_set_rerouted(old, new))
     out.extend(detect_mandatory_template_param_added(old, new))

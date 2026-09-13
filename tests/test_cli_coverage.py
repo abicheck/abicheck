@@ -4,6 +4,7 @@ Tests _sniff_text_format edge cases, _resolve_input error paths,
 dump_cmd stdout output, compare_cmd ignored-flags warnings,
 and policy-file warning.
 """
+
 from __future__ import annotations
 
 import json
@@ -18,6 +19,7 @@ from abicheck.model import AbiSnapshot
 from abicheck.serialization import snapshot_to_json
 
 # ── _sniff_text_format ─────────────────────────────────────────────────
+
 
 class TestSniffTextFormat:
     def test_oserror_returns_unknown(self, tmp_path):
@@ -45,6 +47,7 @@ class TestSniffTextFormat:
 
 
 # ── _resolve_input error paths ─────────────────────────────────────────
+
 
 class TestResolveInputErrors:
     def test_elf_bad_include_dir(self, tmp_path, monkeypatch):
@@ -100,7 +103,9 @@ class TestResolveInputErrors:
             "abicheck.compat.abicc_dump_import.import_abicc_perl_dump",
             lambda _p: (_ for _ in ()).throw(ValueError("parse error")),
         )
-        with pytest.raises(click.ClickException, match="Failed to import ABICC Perl dump"):
+        with pytest.raises(
+            click.ClickException, match="Failed to import ABICC Perl dump"
+        ):
             _resolve_input(f, [], [], "1.0", "c++", is_elf=False)
 
     def test_unknown_format_error(self, tmp_path):
@@ -131,6 +136,7 @@ class TestResolveInputErrors:
 
 # ── dump_cmd stdout ────────────────────────────────────────────────────
 
+
 class TestDumpCmdStdout:
     def test_dump_to_stdout(self, tmp_path, monkeypatch):
         """dump command without -o writes JSON to stdout."""
@@ -153,6 +159,7 @@ class TestDumpCmdStdout:
 
 # ── compare_cmd ignored-flags warnings ─────────────────────────────────
 
+
 def _make_snapshots(tmp_path: Path) -> tuple[Path, Path]:
     old = AbiSnapshot(library="lib.so", version="1.0")
     new = AbiSnapshot(library="lib.so", version="2.0")
@@ -164,14 +171,19 @@ def _make_snapshots(tmp_path: Path) -> tuple[Path, Path]:
 
 
 class TestCompareIgnoredFlagsWarnings:
-    @pytest.mark.parametrize("flag,arg_maker,side_prefix,expected_warning", [
-        ("-I", "dir", "", "-I/--include"),
-        ("--header", "file", "old=", "--header old="),
-        ("--header", "file", "new=", "--header new="),
-        ("--include", "dir", "old=", "--include old="),
-        ("--include", "dir", "new=", "--include new="),
-    ])
-    def test_ignored_flag_warning(self, tmp_path, flag, arg_maker, side_prefix, expected_warning):
+    @pytest.mark.parametrize(
+        "flag,arg_maker,side_prefix,expected_warning",
+        [
+            ("-I", "dir", "", "-I/--include"),
+            ("--header", "file", "old=", "--header old="),
+            ("--header", "file", "new=", "--header new="),
+            ("--include", "dir", "old=", "--include old="),
+            ("--include", "dir", "new=", "--include new="),
+        ],
+    )
+    def test_ignored_flag_warning(
+        self, tmp_path, flag, arg_maker, side_prefix, expected_warning
+    ):
         """Header/include flags are warned when both inputs are snapshots."""
         old_p, new_p = _make_snapshots(tmp_path)
         if arg_maker == "dir":
@@ -181,14 +193,22 @@ class TestCompareIgnoredFlagsWarnings:
             arg = tmp_path / "h.h"
             arg.write_text("int f();", encoding="utf-8")
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), flag, side_prefix + str(arg),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                flag,
+                side_prefix + str(arg),
+            ],
+        )
         assert result.exit_code == 0
         assert expected_warning in result.output
 
 
 # ── compare_cmd --policy NAME|PATH ─────────────────────────────────────
+
 
 class TestComparePolicyOperand:
     """``--policy`` takes a profile name or a policy document.
@@ -205,29 +225,51 @@ class TestComparePolicyOperand:
             "base_policy: strict_abi\noverrides: {}\n", encoding="utf-8"
         )
 
-        result = CliRunner().invoke(main, [
-            "compare", str(old_p), str(new_p), "--policy", str(policy_file),
-        ])
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--policy",
+                str(policy_file),
+            ],
+        )
         assert result.exit_code == 0, result.output
         assert "ignored" not in result.output.lower()
 
     def test_a_profile_name_is_accepted(self, tmp_path):
         old_p, new_p = _make_snapshots(tmp_path)
-        result = CliRunner().invoke(main, [
-            "compare", str(old_p), str(new_p), "--policy", "sdk_vendor",
-        ])
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--policy",
+                "sdk_vendor",
+            ],
+        )
         assert result.exit_code == 0, result.output
 
     def test_neither_a_profile_nor_a_document_is_a_usage_error(self, tmp_path):
         old_p, new_p = _make_snapshots(tmp_path)
-        result = CliRunner().invoke(main, [
-            "compare", str(old_p), str(new_p), "--policy", "no-such-thing",
-        ])
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--policy",
+                "no-such-thing",
+            ],
+        )
         assert result.exit_code == 64, result.output
         assert "not a built-in profile" in result.output
 
 
 # ── compare_cmd policy-file error paths ────────────────────────────────
+
 
 class TestComparePolicyFileErrors:
     def test_policy_file_import_error(self, tmp_path, monkeypatch):
@@ -238,14 +280,22 @@ class TestComparePolicyFileErrors:
 
         monkeypatch.setattr(
             "abicheck.policy_file.PolicyFile.load",
-            classmethod(lambda cls, _p: (_ for _ in ()).throw(ImportError("missing dep"))),
+            classmethod(
+                lambda cls, _p: (_ for _ in ()).throw(ImportError("missing dep"))
+            ),
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p),
-            "--policy", str(policy_file),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--policy",
+                str(policy_file),
+            ],
+        )
         assert result.exit_code != 0
         assert "missing dep" in result.output
 
@@ -257,19 +307,28 @@ class TestComparePolicyFileErrors:
 
         monkeypatch.setattr(
             "abicheck.policy_file.PolicyFile.load",
-            classmethod(lambda cls, _p: (_ for _ in ()).throw(ValueError("invalid format"))),
+            classmethod(
+                lambda cls, _p: (_ for _ in ()).throw(ValueError("invalid format"))
+            ),
         )
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p),
-            "--policy", str(policy_file),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--policy",
+                str(policy_file),
+            ],
+        )
         assert result.exit_code != 0
         assert "invalid format" in result.output
 
 
 # ── compare_cmd API_BREAK exit code ────────────────────────────────────
+
 
 class TestCompareApiBreakExitCode:
     def test_api_break_exits_2(self, tmp_path, monkeypatch):
@@ -282,11 +341,15 @@ class TestCompareApiBreakExitCode:
         new_p.write_text("{}", encoding="utf-8")
 
         snap = AbiSnapshot(library="lib.so", version="1.0")
-        monkeypatch.setattr("abicheck.workflows.input_resolution.load_snapshot", lambda _: snap)
+        monkeypatch.setattr(
+            "abicheck.workflows.input_resolution.load_snapshot", lambda _: snap
+        )
         monkeypatch.setattr(
             "abicheck.service.compare_snapshots",
             lambda *_a, **_kw: DiffResult(
-                old_version="1", new_version="2", library="lib.so",
+                old_version="1",
+                new_version="2",
+                library="lib.so",
                 verdict=Verdict.API_BREAK,
                 changes=[Change(ChangeKind.FUNC_REMOVED, "foo", "removed")],
             ),

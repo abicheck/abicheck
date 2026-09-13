@@ -136,7 +136,9 @@ def _require_tools() -> None:
     # failure instead of a clean pytest.skip.
     required = ("clang", "gcc", "g++", "castxml")
     if not all(_have(tool) for tool in required):
-        pytest.skip("clang, gcc, g++, and castxml are all required for the L2 parity gate")
+        pytest.skip(
+            "clang, gcc, g++, and castxml are all required for the L2 parity gate"
+        )
 
 
 # ── C++ corpus: functions/ctors/dtors, variables/constants, namespaced ──────
@@ -237,7 +239,9 @@ int c_add(int a, int b) { return a + b; }
 
 
 @pytest.fixture(scope="module")
-def cpp_snapshots(tmp_path_factory: pytest.TempPathFactory) -> tuple[AbiSnapshot, AbiSnapshot]:
+def cpp_snapshots(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[AbiSnapshot, AbiSnapshot]:
     _require_tools()
     tmp_path = tmp_path_factory.mktemp("parity_cpp")
     header = tmp_path / "api.h"
@@ -256,7 +260,9 @@ def cpp_snapshots(tmp_path_factory: pytest.TempPathFactory) -> tuple[AbiSnapshot
 
 
 @pytest.fixture(scope="module")
-def c_snapshots(tmp_path_factory: pytest.TempPathFactory) -> tuple[AbiSnapshot, AbiSnapshot]:
+def c_snapshots(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[AbiSnapshot, AbiSnapshot]:
     _require_tools()
     tmp_path = tmp_path_factory.mktemp("parity_c")
     header = tmp_path / "capi.h"
@@ -532,9 +538,7 @@ class TestVariablesAndConstants:
         assert mangled in c_vars and mangled in d_vars
         assert classify(c_vars[mangled].type, d_vars[mangled].type) is Parity.EQUAL
         assert (
-            classify(
-                c_vars[mangled].visibility, d_vars[mangled].visibility
-            )
+            classify(c_vars[mangled].visibility, d_vars[mangled].visibility)
             is Parity.EQUAL
         )
         assert castxml_snap.constants.get("outer::inner::kMaxWidgets") == "16"
@@ -565,7 +569,10 @@ class TestNamespacedAndCompositeRecords:
         assert len(c_flags.fields) == len(d_flags.fields) == 3
         for cf, df in zip(c_flags.fields, d_flags.fields):
             assert cf.name == df.name
-            assert classify(cf.type, df.type) in (Parity.EQUAL, Parity.SEMANTICALLY_EQUAL)
+            assert classify(cf.type, df.type) in (
+                Parity.EQUAL,
+                Parity.SEMANTICALLY_EQUAL,
+            )
             assert cf.is_bitfield is df.is_bitfield is True
             assert cf.bitfield_bits == df.bitfield_bits
         # Field offset/layout: castxml computes real layout; the clang

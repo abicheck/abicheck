@@ -801,9 +801,13 @@ class CompatibilityPolicyConfig:
                 "CompatibilityPolicyConfig.pack_overrides values must be "
                 f"Verdict members, not raw strings: {non_verdict_pack}"
             )
-        bad = sorted(k for k, v in self.pack_overrides.items() if self.overrides.get(k) != v)
+        bad = sorted(
+            k for k, v in self.pack_overrides.items() if self.overrides.get(k) != v
+        )
         if bad:
-            raise ValueError(f"pack_overrides not a value-equal subset of overrides: {bad}")
+            raise ValueError(
+                f"pack_overrides not a value-equal subset of overrides: {bad}"
+            )
         object.__setattr__(self, "pack_overrides", _frozen_mapping(self.pack_overrides))
 
 
@@ -971,7 +975,9 @@ class CompatibilityEvaluationConfig:
     #: ``SuppressionConfig`` (empty ``rules`` or not) means one was.
     suppressions: SuppressionConfig | None = None
     #: ADR-066 D4. `kw_only=True`: every real call site is keyword-based (CodeRabbit review).
-    versioning: VersioningPolicy = field(default_factory=built_in_default_versioning_policy, kw_only=True)
+    versioning: VersioningPolicy = field(
+        default_factory=built_in_default_versioning_policy, kw_only=True
+    )
     provenance: Mapping[str, ValueProvenance] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

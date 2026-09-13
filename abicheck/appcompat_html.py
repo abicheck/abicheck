@@ -50,7 +50,11 @@ def appcompat_to_html(result: object, *, demangle: bool = True) -> str:
     h = html.escape
 
     verdict = getattr(result, "verdict", None)
-    v_label: str = verdict.value if verdict is not None and hasattr(verdict, "value") else str(verdict or "UNKNOWN")
+    v_label: str = (
+        verdict.value
+        if verdict is not None and hasattr(verdict, "value")
+        else str(verdict or "UNKNOWN")
+    )
     fg, bg = _VERDICT_STYLE.get(v_label, ("#212121", "#f5f5f5"))
 
     app_path = getattr(result, "app_path", "")
@@ -82,7 +86,13 @@ def appcompat_to_html(result: object, *, demangle: bool = True) -> str:
     if demangle:
         prewarm_demangle_batch(
             [*breaking, *irrelevant],
-            attrs=("symbol", "description", "old_value", "new_value", "affected_symbols"),
+            attrs=(
+                "symbol",
+                "description",
+                "old_value",
+                "new_value",
+                "affected_symbols",
+            ),
         )
         # missing_symbols is a plain list of raw mangled names, not change
         # objects prewarm_demangle_batch's attr-based extraction can read --
@@ -104,14 +114,21 @@ def appcompat_to_html(result: object, *, demangle: bool = True) -> str:
     old_meta = getattr(full_diff, "old_metadata", None) if full_diff else None
     new_meta = getattr(full_diff, "new_metadata", None) if full_diff else None
     if old_meta or new_meta:
+
         def _row(label: str, old_val: str, new_val: str) -> str:
-            return f"<tr><th>{label}</th><td>{h(old_val)}</td><td>{h(new_val)}</td></tr>"
+            return (
+                f"<tr><th>{label}</th><td>{h(old_val)}</td><td>{h(new_val)}</td></tr>"
+            )
 
         old_path = getattr(old_meta, "path", "\u2014") if old_meta else "\u2014"
         new_path = getattr(new_meta, "path", "\u2014") if new_meta else "\u2014"
-        old_sha_val = (getattr(old_meta, "sha256", None) or "\u2014") if old_meta else "\u2014"
+        old_sha_val = (
+            (getattr(old_meta, "sha256", None) or "\u2014") if old_meta else "\u2014"
+        )
         old_sha = old_sha_val[:16] + "\u2026"
-        new_sha_val = (getattr(new_meta, "sha256", None) or "\u2014") if new_meta else "\u2014"
+        new_sha_val = (
+            (getattr(new_meta, "sha256", None) or "\u2014") if new_meta else "\u2014"
+        )
         new_sha = new_sha_val[:16] + "\u2026"
         old_size = str(getattr(old_meta, "size_bytes", 0)) if old_meta else "\u2014"
         new_size = str(getattr(new_meta, "size_bytes", 0)) if new_meta else "\u2014"
@@ -136,9 +153,11 @@ def appcompat_to_html(result: object, *, demangle: bool = True) -> str:
         conf_color = {"high": "#1b5e20", "medium": "#e65100", "low": "#b71c1c"}.get(
             conf_val, "#212121"
         )
-        tier_badges = " ".join(
-            f"<span class='kind-badge'>{h(t)}</span>" for t in tiers
-        ) if tiers else "<em>none</em>"
+        tier_badges = (
+            " ".join(f"<span class='kind-badge'>{h(t)}</span>" for t in tiers)
+            if tiers
+            else "<em>none</em>"
+        )
         confidence_html = f"""<div class='summary-section'>
   <h3>\U0001f50d Analysis Confidence</h3>
   <table class='summary-table'>
@@ -165,9 +184,7 @@ def appcompat_to_html(result: object, *, demangle: bool = True) -> str:
     # Missing versions section
     missing_ver_html = ""
     if missing_ver:
-        rows = "\n".join(
-            f"<tr><td><code>{h(v)}</code></td></tr>" for v in missing_ver
-        )
+        rows = "\n".join(f"<tr><td><code>{h(v)}</code></td></tr>" for v in missing_ver)
         missing_ver_html = f"""<div class='section section-changed'>
   <h3>\u26a0\ufe0f Missing Symbol Versions ({len(missing_ver)})</h3>
   <table class='changes'><thead><tr><th>Version</th></tr></thead>

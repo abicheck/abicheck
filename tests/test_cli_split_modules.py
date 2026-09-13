@@ -57,11 +57,16 @@ class TestCompareReleaseErrorPaths:
                 old_debug_dir=None,
                 new_debug_dir=None,
                 resolve_debug_info=lambda *_a, **_kw: None,
-                old_h=[], new_h=[],
-                old_inc=[], new_inc=[],
-                old_version="1", new_version="2",
-                lang="c++", suppress=None,
-                policy="", policy_file_path=None,
+                old_h=[],
+                new_h=[],
+                old_inc=[],
+                new_inc=[],
+                old_version="1",
+                new_version="2",
+                lang="c++",
+                suppress=None,
+                policy="",
+                policy_file_path=None,
                 output_dir=None,
             )
         assert entry["verdict"] == "ERROR"
@@ -90,11 +95,16 @@ class TestCompareReleaseErrorPaths:
                 old_debug_dir=None,
                 new_debug_dir=None,
                 resolve_debug_info=lambda *_a, **_kw: None,
-                old_h=[], new_h=[],
-                old_inc=[], new_inc=[],
-                old_version="1", new_version="2",
-                lang="c++", suppress=None,
-                policy="", policy_file_path=None,
+                old_h=[],
+                new_h=[],
+                old_inc=[],
+                new_inc=[],
+                old_version="1",
+                new_version="2",
+                lang="c++",
+                suppress=None,
+                policy="",
+                policy_file_path=None,
                 output_dir=None,
             )
         assert entry["verdict"] == "ERROR"
@@ -123,11 +133,16 @@ class TestCompareReleaseErrorPaths:
                 old_debug_dir=None,
                 new_debug_dir=None,
                 resolve_debug_info=lambda *_a, **_kw: None,
-                old_h=[], new_h=[],
-                old_inc=[], new_inc=[],
-                old_version="1", new_version="2",
-                lang="c++", suppress=None,
-                policy="", policy_file_path=None,
+                old_h=[],
+                new_h=[],
+                old_inc=[],
+                new_inc=[],
+                old_version="1",
+                new_version="2",
+                lang="c++",
+                suppress=None,
+                policy="",
+                policy_file_path=None,
                 output_dir=None,
             )
         assert entry["verdict"] == "not_comparable"
@@ -158,11 +173,16 @@ class TestCompareReleaseErrorPaths:
                 old_debug_dir=None,
                 new_debug_dir=None,
                 resolve_debug_info=lambda *_a, **_kw: None,
-                old_h=[], new_h=[],
-                old_inc=[], new_inc=[],
-                old_version="1", new_version="2",
-                lang="c++", suppress=None,
-                policy="", policy_file_path=None,
+                old_h=[],
+                new_h=[],
+                old_inc=[],
+                new_inc=[],
+                old_version="1",
+                new_version="2",
+                lang="c++",
+                suppress=None,
+                policy="",
+                policy_file_path=None,
                 output_dir=output_dir,
             )
         doc = json.loads((output_dir / "libfoo.json").read_text(encoding="utf-8"))
@@ -178,10 +198,15 @@ class TestCompareReleaseErrorPaths:
         old_dir.mkdir()
         new_dir.mkdir()
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_dir), str(new_dir),
-            "--annotate-additions",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--annotate-additions",
+            ],
+        )
         assert result.exit_code == 64
         assert "No such option" in result.output
 
@@ -192,9 +217,14 @@ class TestCompareReleaseErrorPaths:
         old_dir.mkdir()
         new_dir.mkdir()
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_dir), str(new_dir),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+            ],
+        )
         assert result.exit_code != 0
         assert "No supported ABI inputs" in result.output
 
@@ -209,9 +239,14 @@ class TestCompareReleaseErrorPaths:
             old_dir=tmp_path / "old",
             new_dir=tmp_path / "new",
             library_results=[
-                {"library": "libfoo.so", "verdict": "COMPATIBLE",
-                 "breaking": 0, "source_breaks": 0,
-                 "risk_changes": 0, "compatible_additions": 1},
+                {
+                    "library": "libfoo.so",
+                    "verdict": "COMPATIBLE",
+                    "breaking": 0,
+                    "source_breaks": 0,
+                    "risk_changes": 0,
+                    "compatible_additions": 1,
+                },
             ],
             removed_keys=[],
             added_keys=[],
@@ -234,9 +269,14 @@ class TestCompareReleaseErrorPaths:
             old_dir=tmp_path / "old",
             new_dir=tmp_path / "new",
             library_results=[
-                {"library": "libfoo.so", "verdict": "BREAKING",
-                 "breaking": 2, "source_breaks": 0,
-                 "risk_changes": 0, "compatible_additions": 0},
+                {
+                    "library": "libfoo.so",
+                    "verdict": "BREAKING",
+                    "breaking": 2,
+                    "source_breaks": 0,
+                    "risk_changes": 0,
+                    "compatible_additions": 0,
+                },
             ],
             removed_keys=["libold.so"],
             added_keys=["libnew.so"],
@@ -251,6 +291,7 @@ class TestCompareReleaseErrorPaths:
     def _matrix_change():
         from abicheck.checker_policy import ChangeKind
         from abicheck.checker_types import Change
+
         return Change(
             kind=ChangeKind.CXX_STANDARD_FLOOR_RAISED,
             symbol="cxx14",
@@ -264,6 +305,7 @@ class TestCompareReleaseErrorPaths:
         """A DiffResult carrying the matrix change (via the real pipeline)."""
         from abicheck.checker import compare
         from abicheck.model import AbiSnapshot
+
         return compare(
             AbiSnapshot(library="<build-config matrix>", version="1.0"),
             AbiSnapshot(library="<build-config matrix>", version="2.0"),
@@ -300,7 +342,9 @@ class TestCompareReleaseErrorPaths:
             }
         ]
 
-    def test_format_release_summary_markdown_matrix_findings(self, tmp_path: Path) -> None:
+    def test_format_release_summary_markdown_matrix_findings(
+        self, tmp_path: Path
+    ) -> None:
         """Markdown renders a build-configuration findings section."""
         from abicheck.cli_compare_release import _format_release_summary
 
@@ -346,7 +390,10 @@ class TestCompareReleaseErrorPaths:
         from abicheck.cli_compare_release import _collect_matrix_result
 
         result, verdict = _collect_matrix_result(
-            None, None, "strict_abi", "COMPATIBLE",
+            None,
+            None,
+            "strict_abi",
+            "COMPATIBLE",
         )
         assert result is None
         assert verdict == "COMPATIBLE"
@@ -358,10 +405,14 @@ class TestCompareReleaseErrorPaths:
         fake = [self._matrix_change()]
         old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
         with patch(
-            "abicheck.frontends.cli.runtime._load_probe_matrix_changes", return_value=fake,
+            "abicheck.frontends.cli.runtime._load_probe_matrix_changes",
+            return_value=fake,
         ):
             result, verdict = cli_compare_release._collect_matrix_result(
-                old_m, new_m, "strict_abi", "COMPATIBLE",
+                old_m,
+                new_m,
+                "strict_abi",
+                "COMPATIBLE",
             )
         # CXX_STANDARD_FLOOR_RAISED is a source-level break → API_BREAK,
         # which is worse than the incoming COMPATIBLE.
@@ -369,7 +420,9 @@ class TestCompareReleaseErrorPaths:
         assert result is not None
         assert [c.kind.value for c in result.changes] == ["cxx_standard_floor_raised"]
 
-    def test_collect_matrix_result_respects_policy_file_override(self, tmp_path: Path) -> None:
+    def test_collect_matrix_result_respects_policy_file_override(
+        self, tmp_path: Path
+    ) -> None:
         """A --policy override (e.g. ignore) applies to matrix findings,
         matching the single-pair compare path (checker.compare → PolicyFile)."""
         from abicheck import cli_compare_release
@@ -384,10 +437,14 @@ class TestCompareReleaseErrorPaths:
         fake = [self._matrix_change()]
         old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
         with patch(
-            "abicheck.frontends.cli.runtime._load_probe_matrix_changes", return_value=fake,
+            "abicheck.frontends.cli.runtime._load_probe_matrix_changes",
+            return_value=fake,
         ):
             _, verdict = cli_compare_release._collect_matrix_result(
-                old_m, new_m, "strict_abi", "COMPATIBLE",
+                old_m,
+                new_m,
+                "strict_abi",
+                "COMPATIBLE",
                 policy_file_path=policy_file,
             )
         # The override downgrades the finding, so it must NOT escalate the
@@ -412,10 +469,14 @@ class TestCompareReleaseErrorPaths:
         fake = [self._matrix_change()]
         old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
         with patch(
-            "abicheck.frontends.cli.runtime._load_probe_matrix_changes", return_value=fake,
+            "abicheck.frontends.cli.runtime._load_probe_matrix_changes",
+            return_value=fake,
         ):
             _, verdict = cli_compare_release._collect_matrix_result(
-                old_m, new_m, "strict_abi", "COMPATIBLE",
+                old_m,
+                new_m,
+                "strict_abi",
+                "COMPATIBLE",
                 pack_application=pack_app,
             )
         # The pack's override downgrades the finding, so it must NOT escalate
@@ -440,10 +501,14 @@ class TestCompareReleaseErrorPaths:
         fake = [self._matrix_change()]
         old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
         with patch(
-            "abicheck.frontends.cli.runtime._load_probe_matrix_changes", return_value=fake,
+            "abicheck.frontends.cli.runtime._load_probe_matrix_changes",
+            return_value=fake,
         ):
             result, verdict = cli_compare_release._collect_matrix_result(
-                old_m, new_m, "strict_abi", "COMPATIBLE",
+                old_m,
+                new_m,
+                "strict_abi",
+                "COMPATIBLE",
                 suppress=supp,
             )
         # Suppressed → no kept finding and the verdict is not escalated.
@@ -474,11 +539,15 @@ class TestCompareReleaseErrorPaths:
 
         with pytest.raises(SystemExit) as exc_info:
             _exit_compare_release(
-                "COMPATIBLE", fail_on_removed=True, removed_keys=["libgone.so"],
+                "COMPATIBLE",
+                fail_on_removed=True,
+                removed_keys=["libgone.so"],
             )
         assert exc_info.value.code == 8
 
-    def test_bundle_analysis_snapshot_failure_returns_none(self, tmp_path: Path) -> None:
+    def test_bundle_analysis_snapshot_failure_returns_none(
+        self, tmp_path: Path
+    ) -> None:
         """If build_bundle_snapshot raises, _run_bundle_analysis should
         log a warning and return None instead of crashing the run."""
         from abicheck.cli_compare_release import _run_bundle_analysis
@@ -520,12 +589,15 @@ class TestCompareReleaseErrorPaths:
             captured["system_providers"] = kwargs.get("system_providers")
             return BundleDiffResult(old_root=tmp_path, new_root=tmp_path)
 
-        with patch(
-            "abicheck.bundle.build_bundle_snapshot",
-            return_value=fake_snap,
-        ), patch(
-            "abicheck.bundle_analysis.analyze_bundle",
-            side_effect=_fake_analyze_bundle,
+        with (
+            patch(
+                "abicheck.bundle.build_bundle_snapshot",
+                return_value=fake_snap,
+            ),
+            patch(
+                "abicheck.bundle_analysis.analyze_bundle",
+                side_effect=_fake_analyze_bundle,
+            ),
         ):
             _run_bundle_analysis(
                 old_map={"libfoo.so": old_path},
@@ -549,12 +621,15 @@ class TestCompareReleaseErrorPaths:
         old_path = tmp_path / "libfoo.so"
         old_path.write_bytes(b"\x7fELF")
 
-        with patch(
-            "abicheck.bundle.build_bundle_snapshot",
-            return_value=fake_snap,
-        ), patch(
-            "abicheck.bundle.compare_bundle",
-            side_effect=RuntimeError("compare boom"),
+        with (
+            patch(
+                "abicheck.bundle.build_bundle_snapshot",
+                return_value=fake_snap,
+            ),
+            patch(
+                "abicheck.bundle.compare_bundle",
+                side_effect=RuntimeError("compare boom"),
+            ),
         ):
             result = _run_bundle_analysis(
                 old_map={"libfoo.so": old_path},
@@ -577,12 +652,15 @@ class TestCompareReleaseErrorPaths:
         old_path = tmp_path / "libfoo.so"
         old_path.write_bytes(b"\x7fELF")
 
-        with patch(
-            "abicheck.bundle.build_bundle_snapshot",
-            return_value=fake_snap,
-        ), patch(
-            "abicheck.bundle.load_manifest",
-            side_effect=FileNotFoundError("missing"),
+        with (
+            patch(
+                "abicheck.bundle.build_bundle_snapshot",
+                return_value=fake_snap,
+            ),
+            patch(
+                "abicheck.bundle.load_manifest",
+                side_effect=FileNotFoundError("missing"),
+            ),
         ):
             with pytest.raises(click.ClickException, match="Failed to load manifest"):
                 _run_bundle_analysis(
@@ -609,12 +687,15 @@ class TestCompareReleaseErrorPaths:
             captured.update(kwargs)
             return BundleDiffResult(old_root=tmp_path, new_root=tmp_path)
 
-        with patch(
-            "abicheck.bundle.build_bundle_snapshot",
-            return_value=fake_snap,
-        ), patch(
-            "abicheck.bundle.compare_bundle",
-            side_effect=_fake_compare_bundle,
+        with (
+            patch(
+                "abicheck.bundle.build_bundle_snapshot",
+                return_value=fake_snap,
+            ),
+            patch(
+                "abicheck.bundle.compare_bundle",
+                side_effect=_fake_compare_bundle,
+            ),
         ):
             _run_bundle_analysis(
                 old_map={"libfoo.so": old_path},
@@ -667,8 +748,11 @@ class TestCompareReleaseErrorPaths:
             old_dir=tmp_path / "old",
             new_dir=tmp_path / "new",
             library_results=[
-                {"library": "libfoo.so", "verdict": "ERROR",
-                 "error": "something went wrong"},
+                {
+                    "library": "libfoo.so",
+                    "verdict": "ERROR",
+                    "error": "something went wrong",
+                },
             ],
             removed_keys=[],
             added_keys=[],
@@ -707,15 +791,23 @@ class TestCompareReleaseErrorPaths:
         # named fixture -- order-dependent on whether the module has already
         # been imported with its real binding by an earlier test (Codex
         # review, reproduced).
-        with patch(
-            "abicheck.workflows.release_request.is_package",
-            return_value=True,
-        ), patch(
-            "abicheck.workflows.release_request.detect_extractor",
-            return_value=None,
+        with (
+            patch(
+                "abicheck.workflows.release_request.is_package",
+                return_value=True,
+            ),
+            patch(
+                "abicheck.workflows.release_request.detect_extractor",
+                return_value=None,
+            ),
         ):
-            result = runner.invoke(main, [
-                "compare", str(old_pkg), str(new_pkg),
-            ])
+            result = runner.invoke(
+                main,
+                [
+                    "compare",
+                    str(old_pkg),
+                    str(new_pkg),
+                ],
+            )
         assert result.exit_code != 0
         assert "Unrecognized package format" in result.output

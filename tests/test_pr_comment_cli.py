@@ -156,9 +156,7 @@ def test_cli_pr_comment_subject_ignored_for_compare_report(tmp_path):
     report = tmp_path / "report.json"
     report.write_text(json.dumps(_compare_report()), encoding="utf-8")
     out = tmp_path / "comment.md"
-    result = _run_cli(
-        [str(report), "--subject", "should-not-appear", "-o", str(out)]
-    )
+    result = _run_cli([str(report), "--subject", "should-not-appear", "-o", str(out)])
     assert result.exit_code == 0
     body = out.read_text(encoding="utf-8")
     assert "libfoo.so" in body

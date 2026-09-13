@@ -492,7 +492,9 @@ class TestPolicyFrozenNamespaces:
     def test_frozen_namespaces_change_the_baseline_digest(self):
         plain = _result()
         frozen = _result(policy_file=PolicyFile(frozen_namespaces=["detail::impl"]))
-        f1 = effective_config_fields_from_raw(plain, severity_config=None, exit_code_scheme="legacy")
+        f1 = effective_config_fields_from_raw(
+            plain, severity_config=None, exit_code_scheme="legacy"
+        )
         f2 = effective_config_fields_from_raw(
             frozen, severity_config=None, exit_code_scheme="legacy"
         )
@@ -576,9 +578,7 @@ class TestReleaseOutputDirSummaryCarriesDigest:
     def test_output_dir_summary_carries_digest(self, tmp_path):
         from abicheck.cli_compare_release import _write_release_summary_file
 
-        _write_release_summary_file(
-            tmp_path, "NO_CHANGE", [], [], [], {}, {}
-        )
+        _write_release_summary_file(tmp_path, "NO_CHANGE", [], [], [], {}, {})
         data = json.loads((tmp_path / "summary.json").read_text())
         assert data["effective_config_digest"].startswith("sha256:")
         assert data["effective_config_fields"]["_tier"] == "baseline"
@@ -638,7 +638,9 @@ class TestBaselineTierBuiltinPolicyIdentity:
             result, severity_config=None, exit_code_scheme="legacy"
         )
         identity = builtin_policy_identity("strict_abi")
-        assert fields["policy.base"] == f"strict_abi@{identity.version}:{identity.sha256}"
+        assert (
+            fields["policy.base"] == f"strict_abi@{identity.version}:{identity.sha256}"
+        )
 
     def test_different_builtin_policies_hash_differently(self):
         f1 = effective_config_fields_from_raw(
@@ -859,10 +861,9 @@ class TestRichTierGateAxesUseCallerSuppliedValues:
         )
         assert fields_with_real_gate["gate.exit_code_scheme"] == "severity"
         assert fields_with_blanked_gate["gate.exit_code_scheme"] == "legacy"
-        assert (
-            effective_config_digest(fields_with_real_gate)
-            != effective_config_digest(fields_with_blanked_gate)
-        )
+        assert effective_config_digest(
+            fields_with_real_gate
+        ) != effective_config_digest(fields_with_blanked_gate)
 
     def test_rich_tier_severity_fields_track_the_caller_supplied_severity(self):
         config = _minimal_evaluation_config()
@@ -929,9 +930,7 @@ class TestRichTierPrefersContractContextMergedConfig:
 
         return PersistedContractContext(
             contract_evidence=ContractEvidenceBlock(),
-            evaluation_context=EvaluationContextBlock(
-                resolved_config=resolved_config
-            ),
+            evaluation_context=EvaluationContextBlock(resolved_config=resolved_config),
         )
 
     def test_merged_context_config_wins_over_unmerged_evaluation_config(self):
@@ -1025,9 +1024,7 @@ class TestBaselineExplicitScope:
             == scoped_again.explicit_scope_source_sha256
         )
 
-        scoped_different = compare(
-            old_snap, new_snap, force_public_symbols={"pub_b"}
-        )
+        scoped_different = compare(old_snap, new_snap, force_public_symbols={"pub_b"})
         assert (
             scoped.explicit_scope_source_sha256
             != scoped_different.explicit_scope_source_sha256
@@ -1056,12 +1053,8 @@ class TestBaselineExplicitScopeCoversPostManifest:
             )
 
         common = {"library": "libfoo.so.1", "from_headers": True}
-        old_snap = AbiSnapshot(
-            version="1.0", functions=[_fn("pp_a", "pp_a")], **common
-        )
-        new_snap = AbiSnapshot(
-            version="2.0", functions=[_fn("pp_a", "pp_a")], **common
-        )
+        old_snap = AbiSnapshot(version="1.0", functions=[_fn("pp_a", "pp_a")], **common)
+        new_snap = AbiSnapshot(version="2.0", functions=[_fn("pp_a", "pp_a")], **common)
 
         no_scope = compare(old_snap, new_snap)
         assert no_scope.explicit_scope_source_sha256 is None
@@ -1101,12 +1094,8 @@ class TestBaselineExplicitScopeCoversPostManifest:
             version="2.0", functions=[_fn("shared", "shared")], **common
         )
 
-        via_force_public = compare(
-            old_snap, new_snap, force_public_symbols={"shared"}
-        )
-        via_allowlist = compare(
-            old_snap, new_snap, public_surface_allowlist={"shared"}
-        )
+        via_force_public = compare(old_snap, new_snap, force_public_symbols={"shared"})
+        via_allowlist = compare(old_snap, new_snap, public_surface_allowlist={"shared"})
         both = compare(
             old_snap,
             new_snap,
@@ -1140,12 +1129,8 @@ class TestBaselineExplicitScopeCoversPostManifest:
             )
 
         common = {"library": "libfoo.so.1", "from_headers": True}
-        old_snap = AbiSnapshot(
-            version="1.0", functions=[_fn("pp_a", "pp_a")], **common
-        )
-        new_snap = AbiSnapshot(
-            version="2.0", functions=[_fn("pp_a", "pp_a")], **common
-        )
+        old_snap = AbiSnapshot(version="1.0", functions=[_fn("pp_a", "pp_a")], **common)
+        new_snap = AbiSnapshot(version="2.0", functions=[_fn("pp_a", "pp_a")], **common)
 
         no_manifest = compare(old_snap, new_snap)
         empty_manifest = compare(old_snap, new_snap, public_surface_allowlist=set())
@@ -1289,8 +1274,12 @@ class TestPatternVerdictsAxis:
     def test_flag_changes_the_baseline_digest(self):
         off = _result(pattern_verdicts_enabled=False)
         on = _result(pattern_verdicts_enabled=True)
-        f1 = effective_config_fields_from_raw(off, severity_config=None, exit_code_scheme="legacy")
-        f2 = effective_config_fields_from_raw(on, severity_config=None, exit_code_scheme="legacy")
+        f1 = effective_config_fields_from_raw(
+            off, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields_from_raw(
+            on, severity_config=None, exit_code_scheme="legacy"
+        )
         assert f1["policy.pattern_verdicts"] == "False"
         assert f2["policy.pattern_verdicts"] == "True"
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -1299,8 +1288,12 @@ class TestPatternVerdictsAxis:
         config = _minimal_evaluation_config()
         off = _result(evaluation_config=config, pattern_verdicts_enabled=False)
         on = _result(evaluation_config=config, pattern_verdicts_enabled=True)
-        f1 = effective_config_fields_from_raw(off, severity_config=None, exit_code_scheme="legacy")
-        f2 = effective_config_fields_from_raw(on, severity_config=None, exit_code_scheme="legacy")
+        f1 = effective_config_fields_from_raw(
+            off, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields_from_raw(
+            on, severity_config=None, exit_code_scheme="legacy"
+        )
         assert f1["policy.pattern_verdicts"] == "False"
         assert f2["policy.pattern_verdicts"] == "True"
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -1354,19 +1347,32 @@ class TestCollapseVersionedSymbolsAxis:
     def test_flag_changes_the_baseline_digest(self):
         off = _result(collapse_versioned_symbols_enabled=False)
         on = _result(collapse_versioned_symbols_enabled=True)
-        f1 = effective_config_fields_from_raw(off, severity_config=None, exit_code_scheme="legacy")
-        f2 = effective_config_fields_from_raw(on, severity_config=None, exit_code_scheme="legacy")
+        f1 = effective_config_fields_from_raw(
+            off, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields_from_raw(
+            on, severity_config=None, exit_code_scheme="legacy"
+        )
         assert f1["policy.collapse_versioned_symbols"] == "False"
         assert f2["policy.collapse_versioned_symbols"] == "True"
         assert effective_config_digest(f1) != effective_config_digest(f2)
 
     def test_flag_changes_the_rich_tier_digest(self):
         config = _minimal_evaluation_config()
-        off = _result(evaluation_config=config, collapse_versioned_symbols_enabled=False)
+        off = _result(
+            evaluation_config=config, collapse_versioned_symbols_enabled=False
+        )
         on = _result(evaluation_config=config, collapse_versioned_symbols_enabled=True)
-        f1 = effective_config_fields_from_raw(off, severity_config=None, exit_code_scheme="legacy")
-        f2 = effective_config_fields_from_raw(on, severity_config=None, exit_code_scheme="legacy")
-        assert f1["policy.collapse_versioned_symbols"] != f2["policy.collapse_versioned_symbols"]
+        f1 = effective_config_fields_from_raw(
+            off, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields_from_raw(
+            on, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert (
+            f1["policy.collapse_versioned_symbols"]
+            != f2["policy.collapse_versioned_symbols"]
+        )
         assert effective_config_digest(f1) != effective_config_digest(f2)
 
     def test_compare_stamps_the_flag(self):
@@ -1402,8 +1408,12 @@ class TestSurfaceMetricsAxis:
     def test_flag_changes_the_baseline_digest(self):
         off = _result(surface_metrics_enabled=False)
         on = _result(surface_metrics_enabled=True)
-        f1 = effective_config_fields_from_raw(off, severity_config=None, exit_code_scheme="legacy")
-        f2 = effective_config_fields_from_raw(on, severity_config=None, exit_code_scheme="legacy")
+        f1 = effective_config_fields_from_raw(
+            off, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields_from_raw(
+            on, severity_config=None, exit_code_scheme="legacy"
+        )
         assert f1["policy.surface_metrics"] == "False"
         assert f2["policy.surface_metrics"] == "True"
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -1412,8 +1422,12 @@ class TestSurfaceMetricsAxis:
         config = _minimal_evaluation_config()
         off = _result(evaluation_config=config, surface_metrics_enabled=False)
         on = _result(evaluation_config=config, surface_metrics_enabled=True)
-        f1 = effective_config_fields_from_raw(off, severity_config=None, exit_code_scheme="legacy")
-        f2 = effective_config_fields_from_raw(on, severity_config=None, exit_code_scheme="legacy")
+        f1 = effective_config_fields_from_raw(
+            off, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields_from_raw(
+            on, severity_config=None, exit_code_scheme="legacy"
+        )
         assert f1["policy.surface_metrics"] != f2["policy.surface_metrics"]
         assert effective_config_digest(f1) != effective_config_digest(f2)
 
@@ -1527,8 +1541,12 @@ class TestReconcileBuildContextAxis:
     def test_flag_changes_the_baseline_digest(self):
         off = _result(reconcile_build_context_enabled=False)
         on = _result(reconcile_build_context_enabled=True)
-        f1 = effective_config_fields_from_raw(off, severity_config=None, exit_code_scheme="legacy")
-        f2 = effective_config_fields_from_raw(on, severity_config=None, exit_code_scheme="legacy")
+        f1 = effective_config_fields_from_raw(
+            off, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields_from_raw(
+            on, severity_config=None, exit_code_scheme="legacy"
+        )
         assert f1["policy.reconcile_build_context"] == "False"
         assert f2["policy.reconcile_build_context"] == "True"
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -1537,9 +1555,15 @@ class TestReconcileBuildContextAxis:
         config = _minimal_evaluation_config()
         off = _result(evaluation_config=config, reconcile_build_context_enabled=False)
         on = _result(evaluation_config=config, reconcile_build_context_enabled=True)
-        f1 = effective_config_fields_from_raw(off, severity_config=None, exit_code_scheme="legacy")
-        f2 = effective_config_fields_from_raw(on, severity_config=None, exit_code_scheme="legacy")
-        assert f1["policy.reconcile_build_context"] != f2["policy.reconcile_build_context"]
+        f1 = effective_config_fields_from_raw(
+            off, severity_config=None, exit_code_scheme="legacy"
+        )
+        f2 = effective_config_fields_from_raw(
+            on, severity_config=None, exit_code_scheme="legacy"
+        )
+        assert (
+            f1["policy.reconcile_build_context"] != f2["policy.reconcile_build_context"]
+        )
         assert effective_config_digest(f1) != effective_config_digest(f2)
 
     def test_compare_stamps_the_flag(self):
@@ -1671,6 +1695,4 @@ class TestScopeToPublicSurfaceRequestedAxis:
             fields_on["surface.scope_to_public_surface_requested"]
             != fields_off["surface.scope_to_public_surface_requested"]
         )
-        assert effective_config_digest(fields_on) != effective_config_digest(
-            fields_off
-        )
+        assert effective_config_digest(fields_on) != effective_config_digest(fields_off)

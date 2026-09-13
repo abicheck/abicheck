@@ -66,8 +66,7 @@ class TestResolveForceCppExportedSymbolEvidence:
         h = tmp_path / "h.h"
         h.write_text("int main_op(int x);\n", encoding="utf-8")
         assert (
-            _resolve_force_cpp(None, [h], None, (), frozenset({"__Z7main_opi"}))
-            is True
+            _resolve_force_cpp(None, [h], None, (), frozenset({"__Z7main_opi"})) is True
         )
 
     def test_msvc_mangled_export_forces_cpp(self, tmp_path):
@@ -93,8 +92,7 @@ class TestResolveForceCppExportedSymbolEvidence:
         h = tmp_path / "h.h"
         h.write_text("int main_op(int x);\n", encoding="utf-8")
         assert (
-            _resolve_force_cpp("c", [h], None, (), frozenset({"_Z7main_opi"}))
-            is False
+            _resolve_force_cpp("c", [h], None, (), frozenset({"_Z7main_opi"})) is False
         )
 
     def test_export_evidence_is_a_fallback_not_a_veto(self, tmp_path):
@@ -119,9 +117,7 @@ class TestResolveForceCppExportedSymbolEvidence:
         h = tmp_path / "options.h"
         h.write_text("struct options { int new; };\n", encoding="utf-8")
         assert (
-            _resolve_force_cpp(
-                None, [h], None, (), frozenset({"_Z14other_cxx_funcv"})
-            )
+            _resolve_force_cpp(None, [h], None, (), frozenset({"_Z14other_cxx_funcv"}))
             is False
         )
 
@@ -135,8 +131,7 @@ class TestResolveForceCppExportedSymbolEvidence:
         h = tmp_path / "h.h"
         h.write_text("int compute(int x);\n", encoding="utf-8")
         assert (
-            _resolve_force_cpp(None, [h], None, (), frozenset({"_Z7computei"}))
-            is True
+            _resolve_force_cpp(None, [h], None, (), frozenset({"_Z7computei"})) is True
         )
 
     def test_coincidental_substring_without_length_prefix_does_not_correlate(
@@ -154,9 +149,7 @@ class TestResolveForceCppExportedSymbolEvidence:
         h = tmp_path / "h.h"
         h.write_text("int compute(int x);\n", encoding="utf-8")
         assert (
-            _resolve_force_cpp(
-                None, [h], None, (), frozenset({"_Z14recomputeStuffi"})
-            )
+            _resolve_force_cpp(None, [h], None, (), frozenset({"_Z14recomputeStuffi"}))
             is False
         )
 
@@ -173,9 +166,7 @@ class TestHeaderDeclaredIdentifiersExcludesInactiveText:
 
     def test_line_comment_does_not_contribute_an_identifier(self, tmp_path):
         h = tmp_path / "h.h"
-        h.write_text(
-            "// TODO: compute this differently\nint real_decl(int x);\n"
-        )
+        h.write_text("// TODO: compute this differently\nint real_decl(int x);\n")
         ids = _header_declared_identifiers([h])
         assert "compute" not in ids
         assert "real_decl" in ids
@@ -194,20 +185,14 @@ class TestHeaderDeclaredIdentifiersExcludesInactiveText:
         assert "compute" not in ids
         assert "real_decl" in ids
 
-    def test_inactive_if_zero_block_does_not_contribute_an_identifier(
-        self, tmp_path
-    ):
+    def test_inactive_if_zero_block_does_not_contribute_an_identifier(self, tmp_path):
         h = tmp_path / "h.h"
-        h.write_text(
-            "#if 0\nint compute(int x);\n#endif\nint real_decl(int x);\n"
-        )
+        h.write_text("#if 0\nint compute(int x);\n#endif\nint real_decl(int x);\n")
         ids = _header_declared_identifiers([h])
         assert "compute" not in ids
         assert "real_decl" in ids
 
-    def test_macro_definition_and_use_still_contribute_identifiers(
-        self, tmp_path
-    ):
+    def test_macro_definition_and_use_still_contribute_identifiers(self, tmp_path):
         """Control: active code -- including a macro's own name, its
         parameter names, and its body -- is real source text, not a
         comment/string/inactive-branch exclusion, so it must still
@@ -229,26 +214,19 @@ class TestHeaderDeclaredIdentifiersExcludesInactiveText:
         h = tmp_path / "h.h"
         h.write_text("// TODO: compute this differently\nint f(int x);\n")
         assert (
-            _resolve_force_cpp(None, [h], None, (), frozenset({"_Z7computei"}))
-            is False
+            _resolve_force_cpp(None, [h], None, (), frozenset({"_Z7computei"})) is False
         )
 
-    def test_end_to_end_string_literal_only_match_does_not_force_cpp(
-        self, tmp_path
-    ):
+    def test_end_to_end_string_literal_only_match_does_not_force_cpp(self, tmp_path):
         h = tmp_path / "h.h"
         h.write_text('const char *s = "compute";\nint f(int x);\n')
         assert (
-            _resolve_force_cpp(None, [h], None, (), frozenset({"_Z7computei"}))
-            is False
+            _resolve_force_cpp(None, [h], None, (), frozenset({"_Z7computei"})) is False
         )
 
-    def test_end_to_end_inactive_if_zero_only_match_does_not_force_cpp(
-        self, tmp_path
-    ):
+    def test_end_to_end_inactive_if_zero_only_match_does_not_force_cpp(self, tmp_path):
         h = tmp_path / "h.h"
         h.write_text("#if 0\nint compute(int x);\n#endif\nint f(int x);\n")
         assert (
-            _resolve_force_cpp(None, [h], None, (), frozenset({"_Z7computei"}))
-            is False
+            _resolve_force_cpp(None, [h], None, (), frozenset({"_Z7computei"})) is False
         )

@@ -17,7 +17,11 @@ def _follows_type_operator(qualtype: str, paren_index: int) -> bool:
     while start > 0 and (qualtype[start - 1].isalnum() or qualtype[start - 1] == "_"):
         start -= 1
     return qualtype[start:end] in {
-        "decltype", "typeof", "__typeof", "__typeof__", "typeof_unqual",
+        "decltype",
+        "typeof",
+        "__typeof",
+        "__typeof__",
+        "typeof_unqual",
     }
 
 
@@ -112,9 +116,18 @@ def _target_default_abi_attribute(target_triple: str | None) -> str | None:
         return None
     if "windows" in parts:
         return "ms_abi"
-    if any(os_name in parts for os_name in (
-        "linux", "android", "darwin", "freebsd", "netbsd", "openbsd", "solaris",
-    )):
+    if any(
+        os_name in parts
+        for os_name in (
+            "linux",
+            "android",
+            "darwin",
+            "freebsd",
+            "netbsd",
+            "openbsd",
+            "solaris",
+        )
+    ):
         return "sysv_abi"
     return None
 
@@ -148,9 +161,7 @@ def clang_contract_attributes(
         if isinstance(effective_type, str):
             qualifiers = _function_qualifiers(effective_type)
             for spelling in ("ms_abi", "sysv_abi"):
-                if re.search(
-                    rf"__attribute__\s*\(\(\s*{spelling}\s*\)\)", qualifiers
-                ):
+                if re.search(rf"__attribute__\s*\(\(\s*{spelling}\s*\)\)", qualifiers):
                     tokens.add(spelling)
 
     default_abi = _target_default_abi_attribute(target_triple)

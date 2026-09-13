@@ -25,6 +25,7 @@ _seed_queue_from_public_types() exits early in that case.  Function- and
 variable-based seeding still runs, so a genuine leak (where a public
 function's signature leads to an internal type) is still detected.
 """
+
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
@@ -104,7 +105,8 @@ class TestBuildTypeMapFlag:
 
     def test_header_path_returns_false(self) -> None:
         snap = AbiSnapshot(
-            library="l.so", version="1",
+            library="l.so",
+            version="1",
             types=[RecordType(name="Public", kind="class")],
         )
         _, is_fallback = _build_type_map(snap)
@@ -138,6 +140,7 @@ class TestSeedQueueSkipsOnDwarfFallback:
 
     def test_skips_when_is_dwarf_fallback_true(self) -> None:
         import collections
+
         snap = _dwarf_snap(
             structs={"PublicLooking": _struct_layout("PublicLooking")},
         )
@@ -154,8 +157,10 @@ class TestSeedQueueSkipsOnDwarfFallback:
 
     def test_seeds_when_is_dwarf_fallback_false(self) -> None:
         import collections
+
         snap = AbiSnapshot(
-            library="l.so", version="1",
+            library="l.so",
+            version="1",
             types=[RecordType(name="PublicType", kind="class")],
         )
         type_map, _ = _build_type_map(snap)
@@ -212,11 +217,13 @@ class TestDwarfFallbackNoSpuriousLeak:
         old = self._make_snap(32)
         new = self._make_snap(64)
         # Simulate a layout change on the private impl type.
-        changes = [Change(
-            kind=ChangeKind.TYPE_SIZE_CHANGED,
-            symbol="ns::detail::PrivateImpl",
-            description="size changed from 32 to 64 bits",
-        )]
+        changes = [
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="ns::detail::PrivateImpl",
+                description="size changed from 32 to 64 bits",
+            )
+        ]
         leaks = detect_internal_leaks(changes, old, new)
         assert leaks == [], (
             "INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API must NOT fire when the "
@@ -272,11 +279,13 @@ class TestDwarfFallbackGenuineLeakDetected:
     def test_detect_internal_leaks_genuine_finding_emitted(self) -> None:
         old = self._make_snap(32)
         new = self._make_snap(64)
-        changes = [Change(
-            kind=ChangeKind.TYPE_SIZE_CHANGED,
-            symbol="ns::detail::Impl",
-            description="size changed",
-        )]
+        changes = [
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="ns::detail::Impl",
+                description="size changed",
+            )
+        ]
         leaks = detect_internal_leaks(changes, old, new)
         assert len(leaks) == 1
         assert leaks[0].kind == ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API
@@ -298,27 +307,43 @@ class TestPointerMediatedLayoutLeakSuppressed:
     suppressed. An identity/vtable change on the same type still fires.
     """
 
-    def _snap(self, *, serializer_field_type: str, serializer_vtable=None) -> AbiSnapshot:
+    def _snap(
+        self, *, serializer_field_type: str, serializer_vtable=None
+    ) -> AbiSnapshot:
         return AbiSnapshot(
             library="libtbb.so",
             version="1.0",
             functions=[
                 Function(
-                    name="make", mangled="make", return_type="Public*",
-                    params=[], visibility=Visibility.PUBLIC,
+                    name="make",
+                    mangled="make",
+                    return_type="Public*",
+                    params=[],
+                    visibility=Visibility.PUBLIC,
                 )
             ],
             types=[
-                RecordType(name="Public", kind="class", fields=[
-                    # held through a smart pointer -> indirection
-                    TypeField(name="impl_", type="std::unique_ptr<ns::detail::Proxy>"),
-                ]),
-                RecordType(name="ns::detail::Proxy", kind="class", fields=[
-                    # embedded by value below the pointer
-                    TypeField(name="ser", type="ns::detail::Serializer"),
-                ]),
                 RecordType(
-                    name="ns::detail::Serializer", kind="class",
+                    name="Public",
+                    kind="class",
+                    fields=[
+                        # held through a smart pointer -> indirection
+                        TypeField(
+                            name="impl_", type="std::unique_ptr<ns::detail::Proxy>"
+                        ),
+                    ],
+                ),
+                RecordType(
+                    name="ns::detail::Proxy",
+                    kind="class",
+                    fields=[
+                        # embedded by value below the pointer
+                        TypeField(name="ser", type="ns::detail::Serializer"),
+                    ],
+                ),
+                RecordType(
+                    name="ns::detail::Serializer",
+                    kind="class",
                     fields=[TypeField(name="count", type=serializer_field_type)],
                     vtable=serializer_vtable,
                 ),
@@ -331,11 +356,13 @@ class TestPointerMediatedLayoutLeakSuppressed:
         # whole sub-path is behind a pointer — a layout-only change is demoted.
         old = self._snap(serializer_field_type="int")
         new = self._snap(serializer_field_type="std::atomic<int>")
-        changes = [Change(
-            kind=ChangeKind.TYPE_FIELD_TYPE_CHANGED,
-            symbol="ns::detail::Serializer",
-            description="count: int -> std::atomic<int>",
-        )]
+        changes = [
+            Change(
+                kind=ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+                symbol="ns::detail::Serializer",
+                description="count: int -> std::atomic<int>",
+            )
+        ]
         leaks = detect_internal_leaks(changes, old, new)
         assert leaks == [], (
             "a layout change to a type embedded by value below a unique_ptr does "
@@ -349,26 +376,53 @@ class TestPointerMediatedLayoutLeakSuppressed:
         # Proxy, so the Serializer embedded by value in Proxy is behind a pointer.
         def _snap(count_type: str) -> AbiSnapshot:
             return AbiSnapshot(
-                library="libtbb.so", version="1.0",
-                functions=[Function(
-                    name="make", mangled="make", return_type="Public*",
-                    params=[], visibility=Visibility.PUBLIC,
-                )],
+                library="libtbb.so",
+                version="1.0",
+                functions=[
+                    Function(
+                        name="make",
+                        mangled="make",
+                        return_type="Public*",
+                        params=[],
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
                 types=[
-                    RecordType(name="Public", kind="class", fields=[
-                        TypeField(name="t", type="std::_Tuple_impl<0, ns::detail::Proxy*, ns::detail::Deleter>"),
-                    ]),
-                    RecordType(name="ns::detail::Proxy", kind="class", fields=[
-                        TypeField(name="ser", type="ns::detail::Serializer"),
-                    ]),
-                    RecordType(name="ns::detail::Serializer", kind="class",
-                               fields=[TypeField(name="count", type=count_type)]),
+                    RecordType(
+                        name="Public",
+                        kind="class",
+                        fields=[
+                            TypeField(
+                                name="t",
+                                type="std::_Tuple_impl<0, ns::detail::Proxy*, ns::detail::Deleter>",
+                            ),
+                        ],
+                    ),
+                    RecordType(
+                        name="ns::detail::Proxy",
+                        kind="class",
+                        fields=[
+                            TypeField(name="ser", type="ns::detail::Serializer"),
+                        ],
+                    ),
+                    RecordType(
+                        name="ns::detail::Serializer",
+                        kind="class",
+                        fields=[TypeField(name="count", type=count_type)],
+                    ),
                 ],
             )
+
         leaks = detect_internal_leaks(
-            [Change(kind=ChangeKind.TYPE_FIELD_TYPE_CHANGED,
-                    symbol="ns::detail::Serializer", description="count")],
-            _snap("int"), _snap("std::atomic<int>"),
+            [
+                Change(
+                    kind=ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+                    symbol="ns::detail::Serializer",
+                    description="count",
+                )
+            ],
+            _snap("int"),
+            _snap("std::atomic<int>"),
         )
         assert leaks == [], (
             "a decomposed-unique_ptr (nested pointer template arg) path is behind "
@@ -378,11 +432,13 @@ class TestPointerMediatedLayoutLeakSuppressed:
     def test_vtable_change_behind_pointer_still_fires(self) -> None:
         old = self._snap(serializer_field_type="int")
         new = self._snap(serializer_field_type="int", serializer_vtable=["f1", "f2"])
-        changes = [Change(
-            kind=ChangeKind.TYPE_VTABLE_CHANGED,
-            symbol="ns::detail::Serializer",
-            description="vtable changed",
-        )]
+        changes = [
+            Change(
+                kind=ChangeKind.TYPE_VTABLE_CHANGED,
+                symbol="ns::detail::Serializer",
+                description="vtable changed",
+            )
+        ]
         leaks = detect_internal_leaks(changes, old, new)
         assert len(leaks) == 1, (
             "a vtable change propagates through a pointer (virtual dispatch) and "
@@ -394,14 +450,23 @@ class TestPointerMediatedLayoutLeakSuppressed:
         return AbiSnapshot(
             library="lib.so",
             version="1.0",
-            functions=[Function(
-                name="make", mangled="make", return_type="Public*",
-                params=[], visibility=Visibility.PUBLIC,
-            )],
+            functions=[
+                Function(
+                    name="make",
+                    mangled="make",
+                    return_type="Public*",
+                    params=[],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
             types=[
-                RecordType(name="Public", kind="class", fields=[
-                    TypeField(name="impl_", type=impl_field_type),
-                ]),
+                RecordType(
+                    name="Public",
+                    kind="class",
+                    fields=[
+                        TypeField(name="impl_", type=impl_field_type),
+                    ],
+                ),
                 RecordType(name="ns::detail::Impl", kind="struct", size_bits=impl_size),
             ],
         )
@@ -414,11 +479,13 @@ class TestPointerMediatedLayoutLeakSuppressed:
         # to Public, so the leak must NOT be suppressed.
         old = self._pimpl_snap(impl_field_type="ns::detail::Impl*", impl_size=64)
         new = self._pimpl_snap(impl_field_type="ns::detail::Impl", impl_size=128)
-        changes = [Change(
-            kind=ChangeKind.TYPE_SIZE_CHANGED,
-            symbol="ns::detail::Impl",
-            description="size 64 -> 128",
-        )]
+        changes = [
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="ns::detail::Impl",
+                description="size 64 -> 128",
+            )
+        ]
         leaks = detect_internal_leaks(changes, old, new)
         assert len(leaks) == 1, (
             "an internal type newly embedded by value carries its layout into the "
@@ -432,22 +499,43 @@ class TestPointerMediatedLayoutLeakSuppressed:
         # so a layout change propagates and the leak must fire.
         def _snap(impl_size: int) -> AbiSnapshot:
             return AbiSnapshot(
-                library="lib.so", version="1.0",
-                functions=[Function(
-                    name="make_pimpl", mangled="make_pimpl", return_type="PimplHandle*",
-                    params=[], visibility=Visibility.PUBLIC,
-                )],
+                library="lib.so",
+                version="1.0",
+                functions=[
+                    Function(
+                        name="make_pimpl",
+                        mangled="make_pimpl",
+                        return_type="PimplHandle*",
+                        params=[],
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
                 types=[
-                    RecordType(name="PimplHandle", kind="class", fields=[
-                        TypeField(name="state", type="ns::detail::Impl"),  # by value
-                    ]),
-                    RecordType(name="ns::detail::Impl", kind="struct", size_bits=impl_size),
+                    RecordType(
+                        name="PimplHandle",
+                        kind="class",
+                        fields=[
+                            TypeField(
+                                name="state", type="ns::detail::Impl"
+                            ),  # by value
+                        ],
+                    ),
+                    RecordType(
+                        name="ns::detail::Impl", kind="struct", size_bits=impl_size
+                    ),
                 ],
             )
+
         leaks = detect_internal_leaks(
-            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
-                    symbol="ns::detail::Impl", description="size")],
-            _snap(32), _snap(64),
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl",
+                    description="size",
+                )
+            ],
+            _snap(32),
+            _snap(64),
         )
         assert len(leaks) == 1, (
             "a 'Pimpl'-named public type embedding an internal type by value is a "
@@ -461,22 +549,39 @@ class TestPointerMediatedLayoutLeakSuppressed:
         # smart-pointer alias.
         def _snap(size: int) -> AbiSnapshot:
             return AbiSnapshot(
-                library="lib.so", version="1.0",
-                functions=[Function(
-                    name="make", mangled="make", return_type="Public*",
-                    params=[], visibility=Visibility.PUBLIC,
-                )],
+                library="lib.so",
+                version="1.0",
+                functions=[
+                    Function(
+                        name="make",
+                        mangled="make",
+                        return_type="Public*",
+                        params=[],
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
                 types=[
-                    RecordType(name="Public", kind="class", fields=[
-                        TypeField(name="state", type="ns::detail::Pimpl"),
-                    ]),
+                    RecordType(
+                        name="Public",
+                        kind="class",
+                        fields=[
+                            TypeField(name="state", type="ns::detail::Pimpl"),
+                        ],
+                    ),
                     RecordType(name="ns::detail::Pimpl", kind="struct", size_bits=size),
                 ],
             )
+
         leaks = detect_internal_leaks(
-            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
-                    symbol="ns::detail::Pimpl", description="size")],
-            _snap(32), _snap(64),
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Pimpl",
+                    description="size",
+                )
+            ],
+            _snap(32),
+            _snap(64),
         )
         assert len(leaks) == 1, (
             f"a by-value field of a record named 'Pimpl' must still leak (got: {leaks})"
@@ -489,23 +594,40 @@ class TestPointerMediatedLayoutLeakSuppressed:
         # must be resolved, so a layout-only change is demoted (suppressed).
         def _snap(size: int) -> AbiSnapshot:
             return AbiSnapshot(
-                library="lib.so", version="1.0",
-                functions=[Function(
-                    name="make", mangled="make", return_type="Public*",
-                    params=[], visibility=Visibility.PUBLIC,
-                )],
+                library="lib.so",
+                version="1.0",
+                functions=[
+                    Function(
+                        name="make",
+                        mangled="make",
+                        return_type="Public*",
+                        params=[],
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
                 types=[
-                    RecordType(name="Public", kind="class", fields=[
-                        TypeField(name="impl", type="Handle"),
-                    ]),
+                    RecordType(
+                        name="Public",
+                        kind="class",
+                        fields=[
+                            TypeField(name="impl", type="Handle"),
+                        ],
+                    ),
                     RecordType(name="ns::detail::Impl", kind="struct", size_bits=size),
                 ],
                 typedefs={"Handle": "ns::detail::Impl*"},
             )
+
         leaks = detect_internal_leaks(
-            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
-                    symbol="ns::detail::Impl", description="size")],
-            _snap(32), _snap(64),
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl",
+                    description="size",
+                )
+            ],
+            _snap(32),
+            _snap(64),
         )
         assert leaks == [], (
             "a layout change behind a pointer typedef must be demoted, not leaked "
@@ -519,22 +641,41 @@ class TestPointerMediatedLayoutLeakSuppressed:
         # indirection, so a layout change to Impl still leaks.
         def _snap(size: int) -> AbiSnapshot:
             return AbiSnapshot(
-                library="lib.so", version="1.0",
-                functions=[Function(
-                    name="make", mangled="make", return_type="Public*",
-                    params=[], visibility=Visibility.PUBLIC,
-                )],
+                library="lib.so",
+                version="1.0",
+                functions=[
+                    Function(
+                        name="make",
+                        mangled="make",
+                        return_type="Public*",
+                        params=[],
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
                 types=[
-                    RecordType(name="Public", kind="class", fields=[
-                        TypeField(name="p", type="std::pair<ns::detail::Impl, int*>"),
-                    ]),
+                    RecordType(
+                        name="Public",
+                        kind="class",
+                        fields=[
+                            TypeField(
+                                name="p", type="std::pair<ns::detail::Impl, int*>"
+                            ),
+                        ],
+                    ),
                     RecordType(name="ns::detail::Impl", kind="struct", size_bits=size),
                 ],
             )
+
         leaks = detect_internal_leaks(
-            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
-                    symbol="ns::detail::Impl", description="size")],
-            _snap(32), _snap(64),
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl",
+                    description="size",
+                )
+            ],
+            _snap(32),
+            _snap(64),
         )
         assert len(leaks) == 1, (
             "a by-value template arg must leak; an unrelated nested pointer must "
@@ -548,22 +689,41 @@ class TestPointerMediatedLayoutLeakSuppressed:
         # pointer too — a layout change to Impl must be demoted.
         def _snap(size: int) -> AbiSnapshot:
             return AbiSnapshot(
-                library="lib.so", version="1.0",
-                functions=[Function(
-                    name="make", mangled="make", return_type="Public*",
-                    params=[], visibility=Visibility.PUBLIC,
-                )],
+                library="lib.so",
+                version="1.0",
+                functions=[
+                    Function(
+                        name="make",
+                        mangled="make",
+                        return_type="Public*",
+                        params=[],
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
                 types=[
-                    RecordType(name="Public", kind="class", fields=[
-                        TypeField(name="p", type="std::pair<ns::detail::Impl, int>*"),
-                    ]),
+                    RecordType(
+                        name="Public",
+                        kind="class",
+                        fields=[
+                            TypeField(
+                                name="p", type="std::pair<ns::detail::Impl, int>*"
+                            ),
+                        ],
+                    ),
                     RecordType(name="ns::detail::Impl", kind="struct", size_bits=size),
                 ],
             )
+
         leaks = detect_internal_leaks(
-            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
-                    symbol="ns::detail::Impl", description="size")],
-            _snap(32), _snap(64),
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl",
+                    description="size",
+                )
+            ],
+            _snap(32),
+            _snap(64),
         )
         assert leaks == [], (
             "a by-value template arg behind a top-level pointer must be demoted "
@@ -576,18 +736,34 @@ class TestPointerMediatedLayoutLeakSuppressed:
         # layout — a layout-only change must be demoted, not leaked.
         def _snap(size: int) -> AbiSnapshot:
             return AbiSnapshot(
-                library="lib.so", version="1.0",
-                functions=[Function(
-                    name="use", mangled="use", return_type="void",
-                    params=[Param(name="h", type="ns::detail::Impl*", pointer_depth=1)],
-                    visibility=Visibility.PUBLIC,
-                )],
-                types=[RecordType(name="ns::detail::Impl", kind="struct", size_bits=size)],
+                library="lib.so",
+                version="1.0",
+                functions=[
+                    Function(
+                        name="use",
+                        mangled="use",
+                        return_type="void",
+                        params=[
+                            Param(name="h", type="ns::detail::Impl*", pointer_depth=1)
+                        ],
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
+                types=[
+                    RecordType(name="ns::detail::Impl", kind="struct", size_bits=size)
+                ],
             )
+
         leaks = detect_internal_leaks(
-            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
-                    symbol="ns::detail::Impl", description="size")],
-            _snap(32), _snap(64),
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl",
+                    description="size",
+                )
+            ],
+            _snap(32),
+            _snap(64),
         )
         assert leaks == [], (
             f"opaque-handle pointer param must not leak a layout change (got: {leaks})"
@@ -599,22 +775,42 @@ class TestPointerMediatedLayoutLeakSuppressed:
         # This wrapper embeds Impl by value, so Impl's layout is public ABI.
         def _snap(size: int) -> AbiSnapshot:
             return AbiSnapshot(
-                library="lib.so", version="1.0",
-                functions=[Function(
-                    name="make", mangled="make", return_type="Public*",
-                    params=[], visibility=Visibility.PUBLIC,
-                )],
+                library="lib.so",
+                version="1.0",
+                functions=[
+                    Function(
+                        name="make",
+                        mangled="make",
+                        return_type="Public*",
+                        params=[],
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
                 types=[
-                    RecordType(name="Public", kind="class", fields=[
-                        TypeField(name="member", type="acme::unique_ptr_value<ns::detail::Impl>"),
-                    ]),
+                    RecordType(
+                        name="Public",
+                        kind="class",
+                        fields=[
+                            TypeField(
+                                name="member",
+                                type="acme::unique_ptr_value<ns::detail::Impl>",
+                            ),
+                        ],
+                    ),
                     RecordType(name="ns::detail::Impl", kind="struct", size_bits=size),
                 ],
             )
+
         leaks = detect_internal_leaks(
-            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
-                    symbol="ns::detail::Impl", description="size")],
-            _snap(32), _snap(64),
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl",
+                    description="size",
+                )
+            ],
+            _snap(32),
+            _snap(64),
         )
         assert len(leaks) == 1, (
             "a by-value template with a smart-pointer-like name must still leak "
@@ -627,22 +823,42 @@ class TestPointerMediatedLayoutLeakSuppressed:
         # must be demoted even though `pimpl` is not std::*_ptr.
         def _snap(size: int) -> AbiSnapshot:
             return AbiSnapshot(
-                library="lib.so", version="1.0",
-                functions=[Function(
-                    name="make", mangled="make", return_type="Public*",
-                    params=[], visibility=Visibility.PUBLIC,
-                )],
+                library="lib.so",
+                version="1.0",
+                functions=[
+                    Function(
+                        name="make",
+                        mangled="make",
+                        return_type="Public*",
+                        params=[],
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
                 types=[
-                    RecordType(name="Public", kind="class", fields=[
-                        TypeField(name="impl_", type="oneapi::dal::detail::pimpl<ns::detail::Impl>"),
-                    ]),
+                    RecordType(
+                        name="Public",
+                        kind="class",
+                        fields=[
+                            TypeField(
+                                name="impl_",
+                                type="oneapi::dal::detail::pimpl<ns::detail::Impl>",
+                            ),
+                        ],
+                    ),
                     RecordType(name="ns::detail::Impl", kind="struct", size_bits=size),
                 ],
             )
+
         leaks = detect_internal_leaks(
-            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
-                    symbol="ns::detail::Impl", description="size")],
-            _snap(32), _snap(64),
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl",
+                    description="size",
+                )
+            ],
+            _snap(32),
+            _snap(64),
         )
         assert leaks == [], f"pimpl<T> alias is a pointer wrapper (got: {leaks})"
 
@@ -652,22 +868,42 @@ class TestPointerMediatedLayoutLeakSuppressed:
         # change to Impl still leaks.
         def _snap(size: int) -> AbiSnapshot:
             return AbiSnapshot(
-                library="lib.so", version="1.0",
-                functions=[Function(
-                    name="make", mangled="make", return_type="Public*",
-                    params=[], visibility=Visibility.PUBLIC,
-                )],
+                library="lib.so",
+                version="1.0",
+                functions=[
+                    Function(
+                        name="make",
+                        mangled="make",
+                        return_type="Public*",
+                        params=[],
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
                 types=[
-                    RecordType(name="Public", kind="class", fields=[
-                        TypeField(name="p", type="std::pair<ns::detail::Impl, oneapi::dal::detail::pimpl<ns::detail::Other>>"),
-                    ]),
+                    RecordType(
+                        name="Public",
+                        kind="class",
+                        fields=[
+                            TypeField(
+                                name="p",
+                                type="std::pair<ns::detail::Impl, oneapi::dal::detail::pimpl<ns::detail::Other>>",
+                            ),
+                        ],
+                    ),
                     RecordType(name="ns::detail::Impl", kind="struct", size_bits=size),
                 ],
             )
+
         leaks = detect_internal_leaks(
-            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
-                    symbol="ns::detail::Impl", description="size")],
-            _snap(32), _snap(64),
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl",
+                    description="size",
+                )
+            ],
+            _snap(32),
+            _snap(64),
         )
         assert len(leaks) == 1, (
             "a by-value arg must still leak even when a sibling arg is a pimpl "
@@ -679,18 +915,33 @@ class TestPointerMediatedLayoutLeakSuppressed:
         # pointer stored in the pair — the seed must mark that edge indirect.
         def _snap(size: int) -> AbiSnapshot:
             return AbiSnapshot(
-                library="lib.so", version="1.0",
-                functions=[Function(
-                    name="get", mangled="get",
-                    return_type="std::pair<int, ns::detail::Impl*>",
-                    return_pointer_depth=0, params=[], visibility=Visibility.PUBLIC,
-                )],
-                types=[RecordType(name="ns::detail::Impl", kind="struct", size_bits=size)],
+                library="lib.so",
+                version="1.0",
+                functions=[
+                    Function(
+                        name="get",
+                        mangled="get",
+                        return_type="std::pair<int, ns::detail::Impl*>",
+                        return_pointer_depth=0,
+                        params=[],
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
+                types=[
+                    RecordType(name="ns::detail::Impl", kind="struct", size_bits=size)
+                ],
             )
+
         leaks = detect_internal_leaks(
-            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
-                    symbol="ns::detail::Impl", description="size")],
-            _snap(32), _snap(64),
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl",
+                    description="size",
+                )
+            ],
+            _snap(32),
+            _snap(64),
         )
         assert leaks == [], (
             f"a pointer template arg in a signature must be demoted (got: {leaks})"
@@ -700,16 +951,32 @@ class TestPointerMediatedLayoutLeakSuppressed:
         # A by-value return embeds the type in the calling convention — must leak.
         def _snap(size: int) -> AbiSnapshot:
             return AbiSnapshot(
-                library="lib.so", version="1.0",
-                functions=[Function(
-                    name="get", mangled="get", return_type="ns::detail::Impl",
-                    return_pointer_depth=0, params=[], visibility=Visibility.PUBLIC,
-                )],
-                types=[RecordType(name="ns::detail::Impl", kind="struct", size_bits=size)],
+                library="lib.so",
+                version="1.0",
+                functions=[
+                    Function(
+                        name="get",
+                        mangled="get",
+                        return_type="ns::detail::Impl",
+                        return_pointer_depth=0,
+                        params=[],
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
+                types=[
+                    RecordType(name="ns::detail::Impl", kind="struct", size_bits=size)
+                ],
             )
+
         leaks = detect_internal_leaks(
-            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
-                    symbol="ns::detail::Impl", description="size")],
-            _snap(32), _snap(64),
+            [
+                Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl",
+                    description="size",
+                )
+            ],
+            _snap(32),
+            _snap(64),
         )
         assert len(leaks) == 1, f"a by-value return must leak (got: {leaks})"

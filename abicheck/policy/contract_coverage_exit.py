@@ -66,6 +66,7 @@ CLI_MITIGATION = (
     "or set contract.unresolved=warn to accept incomplete coverage."
 )
 
+
 def coverage_exit_for_context(ctx: Any) -> int:
     """The exit floor a persisted contract context imposes (``0``/``1``).
 
@@ -142,9 +143,7 @@ def coverage_failure_diagnostic(
     )
 
 
-def coverage_diagnostic_from_summary(
-    summary: Any, *, base_exit: int = 0
-) -> str | None:
+def coverage_diagnostic_from_summary(summary: Any, *, base_exit: int = 0) -> str | None:
     """The same notice, built from a rendered ``scan`` summary dict.
 
     ``scan``'s CLI never holds the ``DiffResult`` -- ``_run_baseline_compare``
@@ -183,8 +182,7 @@ def _coverage_message(
         # feature draws between accepting incomplete assurance and
         # pretending it was complete (Codex review).
         effect = (
-            "Accepted by contract.unresolved=warn, so it contributes 0 to "
-            "the exit code"
+            "Accepted by contract.unresolved=warn, so it contributes 0 to the exit code"
         )
     elif base_exit < floor:
         effect = f"Exit code floored to {floor}"

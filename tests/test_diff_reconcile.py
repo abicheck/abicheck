@@ -316,7 +316,9 @@ def test_added_non_terminal_field_is_kept():
     but observed in new must also be terminal on the pruned (old) side. A non-last
     ``is_last=False`` registry entry keeps the ``type_field_added`` finding (Codex
     review #498, P1)."""
-    old = _snap("1", [_tf("version")], conditional={"S": {"added": _guarded(is_last=False)}})
+    old = _snap(
+        "1", [_tf("version")], conditional={"S": {"added": _guarded(is_last=False)}}
+    )
     new = _snap("2", [_tf("version"), _tf("added")])
     result = compare(
         old, new, scope_to_public_surface=True, reconcile_build_context=True
@@ -328,7 +330,9 @@ def test_added_non_terminal_field_is_kept():
 def test_added_terminal_field_is_reconciled():
     """The added direction, terminal field: a guarded field pruned from old and
     observed as the final member of new reconciles (Codex review #498, P1)."""
-    old = _snap("1", [_tf("version")], conditional={"S": {"added": _guarded(is_last=True)}})
+    old = _snap(
+        "1", [_tf("version")], conditional={"S": {"added": _guarded(is_last=True)}}
+    )
     new = _snap("2", [_tf("version"), _tf("added")])
     result = compare(
         old, new, scope_to_public_surface=True, reconcile_build_context=True
@@ -440,7 +444,9 @@ def test_pruned_field_qualifier_change_is_kept():
     changed (``const int`` → ``int``) is a real ABI change: carrying the cv/mutable
     bits in the reconciled declaration keeps the finding rather than collapsing it
     to NO_CHANGE (Codex review #498, P2)."""
-    old = _snap("1", [_tf("version"), TypeField(name="mode", type="int", is_const=True)])
+    old = _snap(
+        "1", [_tf("version"), TypeField(name="mode", type="int", is_const=True)]
+    )
     new = _snap("2", [_tf("version")], conditional=_reg("mode"))  # registry: non-const
     result = compare(
         old, new, scope_to_public_surface=True, reconcile_build_context=True
@@ -642,9 +648,9 @@ def test_service_compare_snapshots_reconciles_unconditionally():
 
     from abicheck.service import compare_snapshots
 
-    assert "reconcile_build_context" not in inspect.signature(
-        compare_snapshots
-    ).parameters
+    assert (
+        "reconcile_build_context" not in inspect.signature(compare_snapshots).parameters
+    )
     old, new = _fp_pair()
     assert compare_snapshots(old, new).verdict == Verdict.NO_CHANGE
 

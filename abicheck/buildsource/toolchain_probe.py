@@ -686,7 +686,11 @@ def _version_errors(
 
 
 def _clang_target_errors(
-    where: str, declared_target: str, metadata: dict[str, Any], binding_id: str, path: Any
+    where: str,
+    declared_target: str,
+    metadata: dict[str, Any],
+    binding_id: str,
+    path: Any,
 ) -> list[str]:
     """Target errors for a Clang-family binding, probed with ``--target=``.
 
@@ -772,7 +776,12 @@ def _triple_mismatches(declared_target: str, probed_triple: str) -> list[str]:
     ) and declared_env != probed_env:
         mismatches.append(f"environment {declared_env!r} vs {probed_env!r}")
 
-    if declared_os is None and probed_os is None and declared_env is None and probed_env is None:
+    if (
+        declared_os is None
+        and probed_os is None
+        and declared_env is None
+        and probed_env is None
+    ):
         declared_rest = _strip_generic_vendor(
             [p for p in declared_target.split("-")[1:] if p]
         )

@@ -21,7 +21,13 @@ from abicheck.report_model import ReportModel
 
 
 def _fn(name: str, ret: str = "void") -> Function:
-    return Function(name=name, mangled=name, return_type=ret, params=[], visibility=Visibility.PUBLIC)
+    return Function(
+        name=name,
+        mangled=name,
+        return_type=ret,
+        params=[],
+        visibility=Visibility.PUBLIC,
+    )
 
 
 def _snap(funcs: list[Function]) -> AbiSnapshot:
@@ -73,4 +79,6 @@ def test_reporter_classifier_delegates_to_model() -> None:
     new = _snap([_fn("a")])
     result = compare(old, new, scope_to_public_surface=False)
     changes = list(result.changes)
-    assert _classify_changes_by_kind(changes, result) == ReportModel.classify(changes, result)
+    assert _classify_changes_by_kind(changes, result) == ReportModel.classify(
+        changes, result
+    )

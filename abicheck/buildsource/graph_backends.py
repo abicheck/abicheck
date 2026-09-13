@@ -46,6 +46,7 @@ edge to one fixed kind regardless of what the source node actually is would
 be a real semantic error, not just an approximation, so it is left as a
 documented, open gap rather than guessed at.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -80,10 +81,15 @@ def _kythe_identity(vname: Any) -> str:
 def _add_decl(graph: SourceGraphSummary, ident: str, provenance: str) -> str:
     node_id = _decl_node_id(ident)
     if not graph.has_node(node_id):
-        graph.add_node(GraphNode(
-            id=node_id, kind="source_decl", label=ident,
-            provenance=provenance, confidence=CONF_REDUCED,
-        ))
+        graph.add_node(
+            GraphNode(
+                id=node_id,
+                kind="source_decl",
+                label=ident,
+                provenance=provenance,
+                confidence=CONF_REDUCED,
+            )
+        )
     return node_id
 
 
@@ -98,10 +104,15 @@ def _add_type(graph: SourceGraphSummary, ident: str, provenance: str) -> str:
     """
     node_id = _type_node_id(ident)
     if not graph.has_node(node_id):
-        graph.add_node(GraphNode(
-            id=node_id, kind="record_type", label=ident,
-            provenance=provenance, confidence=CONF_REDUCED,
-        ))
+        graph.add_node(
+            GraphNode(
+                id=node_id,
+                kind="record_type",
+                label=ident,
+                provenance=provenance,
+                confidence=CONF_REDUCED,
+            )
+        )
     return node_id
 
 
@@ -137,20 +148,36 @@ def ingest_kythe_entries(
             continue
         if is_extends:
             kind, attrs = "TYPE_INHERITS", {"role": "base"}
-            src_id, dst_id = _add_type(graph, src, "kythe"), _add_type(graph, dst, "kythe")
+            src_id, dst_id = (
+                _add_type(graph, src, "kythe"),
+                _add_type(graph, dst, "kythe"),
+            )
         else:
-            kind = "DECL_CALLS_DECL" if edge_kind.startswith(_KYTHE_CALL_PREFIX) else "DECL_REFERENCES_DECL"
+            kind = (
+                "DECL_CALLS_DECL"
+                if edge_kind.startswith(_KYTHE_CALL_PREFIX)
+                else "DECL_REFERENCES_DECL"
+            )
             attrs = (
                 {"call_kind": "unknown", "resolution": "points_to"}
                 if kind == "DECL_CALLS_DECL"
                 else {}
             )
-            src_id, dst_id = _add_decl(graph, src, "kythe"), _add_decl(graph, dst, "kythe")
+            src_id, dst_id = (
+                _add_decl(graph, src, "kythe"),
+                _add_decl(graph, dst, "kythe"),
+            )
         before = len(graph.edges)
-        graph.add_edge(GraphEdge(
-            src=src_id, dst=dst_id,
-            kind=kind, provenance="kythe", confidence=CONF_REDUCED, attrs=attrs,
-        ))
+        graph.add_edge(
+            GraphEdge(
+                src=src_id,
+                dst=dst_id,
+                kind=kind,
+                provenance="kythe",
+                confidence=CONF_REDUCED,
+                attrs=attrs,
+            )
+        )
         added += len(graph.edges) - before
     _record_backend(graph, "kythe", ref, added)
     return added
@@ -187,11 +214,16 @@ def ingest_codeql_call_results(
         if not caller or not callee or caller == callee:
             continue
         before = len(graph.edges)
-        graph.add_edge(GraphEdge(
-            src=_add_decl(graph, caller, "codeql"), dst=_add_decl(graph, callee, "codeql"),
-            kind="DECL_CALLS_DECL", provenance="codeql", confidence=CONF_REDUCED,
-            attrs={"call_kind": "unknown", "resolution": "points_to"},
-        ))
+        graph.add_edge(
+            GraphEdge(
+                src=_add_decl(graph, caller, "codeql"),
+                dst=_add_decl(graph, callee, "codeql"),
+                kind="DECL_CALLS_DECL",
+                provenance="codeql",
+                confidence=CONF_REDUCED,
+                attrs={"call_kind": "unknown", "resolution": "points_to"},
+            )
+        )
         added += len(graph.edges) - before
     _record_backend(graph, "codeql", ref, added)
     return added
@@ -221,21 +253,30 @@ def ingest_codeql_extends_results(
         if not derived or not base or derived == base:
             continue
         before = len(graph.edges)
-        graph.add_edge(GraphEdge(
-            src=_add_type(graph, derived, "codeql"), dst=_add_type(graph, base, "codeql"),
-            kind="TYPE_INHERITS", provenance="codeql", confidence=CONF_REDUCED,
-            attrs={"role": "base"},
-        ))
+        graph.add_edge(
+            GraphEdge(
+                src=_add_type(graph, derived, "codeql"),
+                dst=_add_type(graph, base, "codeql"),
+                kind="TYPE_INHERITS",
+                provenance="codeql",
+                confidence=CONF_REDUCED,
+                attrs={"role": "base"},
+            )
+        )
         added += len(graph.edges) - before
     _record_backend(graph, "codeql", ref, added)
     return added
 
 
-def _record_backend(graph: SourceGraphSummary, backend: str, ref: str, edges: int) -> None:
+def _record_backend(
+    graph: SourceGraphSummary, backend: str, ref: str, edges: int
+) -> None:
     """Note the external graph store in ``external_graph_refs`` (ADR-031 D1/D7)."""
-    graph.external_graph_refs.append({
-        "backend": backend,
-        "ref": ref,
-        "edges_ingested": edges,
-        "confidence": CONF_REDUCED,
-    })
+    graph.external_graph_refs.append(
+        {
+            "backend": backend,
+            "ref": ref,
+            "edges_ingested": edges,
+            "confidence": CONF_REDUCED,
+        }
+    )

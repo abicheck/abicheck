@@ -652,22 +652,32 @@ def _report_not_comparable(
     must describe the same outcome -- a refusal included -- not only a
     completed comparison.
     """
-    kind = "profile_mismatch" if isinstance(exc, ProfileMismatchError) else "scope_mismatch"
+    kind = (
+        "profile_mismatch"
+        if isinstance(exc, ProfileMismatchError)
+        else "scope_mismatch"
+    )
     message = str(exc)
     click.echo(
         f"Error: '{old.library}' old={old.version!r} new={new.version!r} are not "
         f"comparable: {message}\n"
         "The two snapshots were not extracted under a comparable profile/scope "
         "contract (ADR-050 D1/D2), so no verdict was produced. Pass "
-        '--diagnostic-comparison to force a tentative diff (stamped '
+        "--diagnostic-comparison to force a tentative diff (stamped "
         'assurance: "none") if you understand the risk.',
         err=True,
     )
     from .report.not_comparable import OperationalStatus
 
     _report_run_aborted(
-        kind, message, old.library, old.version, new.version,
-        fmt=fmt, output=output, secondary_writes=secondary_writes,
+        kind,
+        message,
+        old.library,
+        old.version,
+        new.version,
+        fmt=fmt,
+        output=output,
+        secondary_writes=secondary_writes,
         operational=OperationalStatus.NOT_COMPARABLE,
     )
 
@@ -844,8 +854,14 @@ def _exit_on_budget_overflow(
     from .report.not_comparable import OperationalStatus
 
     _report_run_aborted(
-        "budget_overflow", str(exc), library, old_version, new_version,
-        fmt=fmt, output=output, operational=OperationalStatus.BUDGET_OVERFLOW,
+        "budget_overflow",
+        str(exc),
+        library,
+        old_version,
+        new_version,
+        fmt=fmt,
+        output=output,
+        operational=OperationalStatus.BUDGET_OVERFLOW,
         secondary_writes=secondary_writes,
     )
     sys.exit(5)

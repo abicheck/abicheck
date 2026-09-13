@@ -9,6 +9,7 @@ the merge precedence rules and the coverage-table reconciliation; the
 binary-parsing entry point (``print_data_sources``) is exercised by the
 integration lane.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -205,7 +206,9 @@ def test_print_data_sources_rejects_corrupt_pack(tmp_path) -> None:
     # is_pack_dir accepts the dir, but BuildSourcePack.load will choke).
     (pack_dir / "build" / "build_evidence.json").write_text("{ not valid json")
 
-    with pytest.raises(click.ClickException, match="Invalid Build-info build-source pack"):
+    with pytest.raises(
+        click.ClickException, match="Invalid Build-info build-source pack"
+    ):
         print_data_sources(
             not_a_binary,
             has_headers=False,

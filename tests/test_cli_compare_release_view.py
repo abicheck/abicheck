@@ -121,14 +121,18 @@ def _write_struct_size_change_pair(tmp_path: Path) -> tuple[Path, Path]:
     old_dir.mkdir()
     new_dir.mkdir()
     point_v1 = RecordType(
-        name="Point", kind="struct", size_bits=64,
+        name="Point",
+        kind="struct",
+        size_bits=64,
         fields=[
             TypeField(name="x", type="int", offset_bits=0),
             TypeField(name="y", type="int", offset_bits=32),
         ],
     )
     point_v2 = RecordType(
-        name="Point", kind="struct", size_bits=96,
+        name="Point",
+        kind="struct",
+        size_bits=96,
         fields=[
             TypeField(name="x", type="int", offset_bits=0),
             TypeField(name="y", type="int", offset_bits=32),
@@ -136,17 +140,25 @@ def _write_struct_size_change_pair(tmp_path: Path) -> tuple[Path, Path]:
         ],
     )
     draw_point = Function(
-        name="draw_point", mangled="_Z10draw_point5Point",
-        return_type="void", params=[Param(name="p", type="Point")],
+        name="draw_point",
+        mangled="_Z10draw_point5Point",
+        return_type="void",
+        params=[Param(name="p", type="Point")],
         visibility=Visibility.PUBLIC,
     )
     old_snap = AbiSnapshot(
-        library="libfoo.so", version="1.0",
-        functions=[draw_point], types=[point_v1], from_headers=True,
+        library="libfoo.so",
+        version="1.0",
+        functions=[draw_point],
+        types=[point_v1],
+        from_headers=True,
     )
     new_snap = AbiSnapshot(
-        library="libfoo.so", version="2.0",
-        functions=[draw_point], types=[point_v2], from_headers=True,
+        library="libfoo.so",
+        version="2.0",
+        functions=[draw_point],
+        types=[point_v2],
+        from_headers=True,
     )
     _write_snap(old_dir / "libfoo.json", old_snap)
     _write_snap(new_dir / "libfoo.json", new_snap)
@@ -189,11 +201,15 @@ def _write_matrix_pair(tmp_path: Path, old_std: int, new_std: int) -> tuple[Path
     findings have no per-library home, which is what makes them a distinct
     axis from the per-library findings the other test classes cover."""
     old_matrix = MatrixSnapshot(
-        library="libfoo.so", version="1.0", spec_name="std-probe",
+        library="libfoo.so",
+        version="1.0",
+        spec_name="std-probe",
         cxx_stds={"cfg": old_std},
     )
     new_matrix = MatrixSnapshot(
-        library="libfoo.so", version="2.0", spec_name="std-probe",
+        library="libfoo.so",
+        version="2.0",
+        spec_name="std-probe",
         cxx_stds={"cfg": new_std},
     )
     old_path = tmp_path / "matrix_old.json"
@@ -215,8 +231,11 @@ class TestReleaseViewShowOnly:
         # exit code) is unaffected -- policy/view changes never alter what
         # was actually observed (AGENTS.md "Record before disposing").
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--view", "show=variables",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "show=variables",
         )
         assert result.exit_code == 4, result.output
         assert "api_b" not in result.output
@@ -229,8 +248,11 @@ class TestReleaseViewShowOnly:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--view", "show=functions",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "show=functions",
         )
         assert result.exit_code == 4, result.output
         assert "## Per-Library Findings" in result.output
@@ -240,7 +262,13 @@ class TestReleaseViewShowOnly:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "json=-", "--view", "show=variables",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
+            "--view",
+            "show=variables",
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -261,8 +289,11 @@ class TestReleaseViewShowOnly:
 
         baseline = _invoke("compare", str(old_dir), str(new_dir))
         filtered = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--view", "show=variables",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "show=variables",
         )
         assert baseline.exit_code == filtered.exit_code == 4
 
@@ -284,7 +315,13 @@ class TestReleaseViewShowOnly:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "json=-", "--view", "show=variables",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
+            "--view",
+            "show=variables",
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -309,7 +346,11 @@ class TestReleaseViewShowOnly:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "json=-",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -362,7 +403,13 @@ class TestReleaseViewShowOnly:
         old_dir, new_dir = _write_removed_functions_pair(tmp_path, count=25)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "json=-", "--view", "show=functions",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
+            "--view",
+            "show=functions",
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -392,7 +439,13 @@ class TestReleaseViewShowOnly:
         old_dir, new_dir = _write_removed_functions_pair(tmp_path, count=25)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "json=-", "--view", "show=functions",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
+            "--view",
+            "show=functions",
         )
         assert result.exit_code == 4, result.output
         lib = json.loads(result.output)["libraries"][0]
@@ -484,7 +537,11 @@ class TestReleaseViewShowOnly:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "--view", "show=variables",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "show=variables",
         )
         assert result.exit_code == 4, result.output
         assert "api_b" not in result.output
@@ -520,8 +577,11 @@ class TestReleaseViewDemangle:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--view", "no-demangle",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "no-demangle",
         )
         assert result.exit_code == 4, result.output
         assert _MANGLED in result.output
@@ -533,7 +593,13 @@ class TestReleaseViewDemangle:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "json=-", "--view", "demangle",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
+            "--view",
+            "demangle",
         )
         assert result.exit_code == 4, result.output
         assert _MANGLED in result.output
@@ -550,8 +616,11 @@ class TestReleaseViewPatterns:
 
         baseline = _invoke("compare", str(old_dir), str(new_dir))
         with_patterns = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--view", "patterns",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "patterns",
         )
         assert with_patterns.exit_code == baseline.exit_code == 4
         # `--view patterns`'s only visible effect is the per-library stderr
@@ -561,8 +630,9 @@ class TestReleaseViewPatterns:
         # stream).
         assert "No pattern-aware modulations applied." in with_patterns.output
         report_marker = "# ABI Release Comparison"
-        assert baseline.output[baseline.output.index(report_marker) :] == (
-            with_patterns.output[with_patterns.output.index(report_marker) :]
+        assert (
+            baseline.output[baseline.output.index(report_marker) :]
+            == (with_patterns.output[with_patterns.output.index(report_marker) :])
         )
 
 
@@ -583,8 +653,11 @@ class TestReleaseViewPatternsMultiLibraryOrdering:
         old_dir, new_dir = _write_removed_function_pair_multi(tmp_path, names)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--view", "patterns",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "patterns",
         )
         assert result.exit_code == 4, result.output
 
@@ -625,8 +698,11 @@ class TestReleaseViewReportModeRejected:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--view", "leaf",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "leaf",
         )
         assert result.exit_code == 64, result.output
         assert "--view leaf is not available" in result.output
@@ -638,8 +714,11 @@ class TestReleaseViewReportModeRejected:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--view", "root-cause",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "root-cause",
         )
         assert result.exit_code == 64, result.output
         assert "--view root-cause is not available" in result.output
@@ -655,8 +734,11 @@ class TestReleaseViewReportModeRejected:
 
         for token in ("full", "impact"):
             result = _invoke(
-                "compare", str(old_dir), str(new_dir),
-                "--view", token,
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--view",
+                token,
             )
             assert result.exit_code == 4, (token, result.output)
 
@@ -677,8 +759,12 @@ class TestReleaseViewReportModeRejectedUnderDryRun:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--dry-run", "--view", "leaf",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--dry-run",
+            "--view",
+            "leaf",
         )
         assert result.exit_code == 64, result.output
         assert "--view leaf is not available" in result.output
@@ -689,23 +775,29 @@ class TestReleaseViewReportModeRejectedUnderDryRun:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--dry-run", "--view", "root-cause",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--dry-run",
+            "--view",
+            "root-cause",
         )
         assert result.exit_code == 64, result.output
         assert "--view root-cause is not available" in result.output
 
-    def test_full_and_impact_still_succeed_under_dry_run(
-        self, tmp_path: Path
-    ) -> None:
+    def test_full_and_impact_still_succeed_under_dry_run(self, tmp_path: Path) -> None:
         """Companion: the fix must not reject the two view modes a
         directory/package release fan-out genuinely supports."""
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         for token in ("full", "impact"):
             result = _invoke(
-                "compare", str(old_dir), str(new_dir),
-                "--dry-run", "--view", token,
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--dry-run",
+                "--view",
+                token,
             )
             assert result.exit_code == 0, (token, result.output)
 
@@ -728,11 +820,19 @@ class TestReleaseProjectPolicyOverrideRejectedUnderDryRun:
             "policy:\n  overrides:\n    not_a_kind: ignore\n", encoding="utf-8"
         )
         dry = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--config", str(cfg), "--dry-run",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "--dry-run",
         )
         real = _invoke(
-            "compare", str(old_dir), str(new_dir), "--config", str(cfg),
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--config",
+            str(cfg),
         )
         assert dry.exit_code == 64, dry.output
         assert real.exit_code == 64, real.output
@@ -747,8 +847,12 @@ class TestReleaseProjectPolicyOverrideRejectedUnderDryRun:
             encoding="utf-8",
         )
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--config", str(cfg), "--dry-run",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "--dry-run",
         )
         assert result.exit_code == 0, result.output
 
@@ -772,14 +876,15 @@ class TestReleaseViewFilteredRejected:
     unconditionally here too, which regressed that no-op back to a blanket
     rejection (caught by CI, see this file's own git history)."""
 
-    def test_filtered_is_rejected_for_a_directory_operand(
-        self, tmp_path: Path
-    ) -> None:
+    def test_filtered_is_rejected_for_a_directory_operand(self, tmp_path: Path) -> None:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--view", "filtered",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "filtered",
         )
         assert result.exit_code == 64, result.output
         assert "--view filtered is not available" in result.output
@@ -791,23 +896,28 @@ class TestReleaseViewFilteredRejected:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--dry-run", "--view", "filtered",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--dry-run",
+            "--view",
+            "filtered",
         )
         assert result.exit_code == 64, result.output
         assert "--view filtered is not available" in result.output
 
-    def test_suppressions_with_no_suppress_stays_a_no_op(
-        self, tmp_path: Path
-    ) -> None:
+    def test_suppressions_with_no_suppress_stays_a_no_op(self, tmp_path: Path) -> None:
         """Companion, the exact regression CI caught: ``--view
         suppressions`` alone (no ``--suppress``) must still be accepted as
         a no-op on a directory/package operand, not rejected."""
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--view", "suppressions",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "suppressions",
         )
         assert result.exit_code == 4, result.output
 
@@ -820,8 +930,11 @@ class TestReleaseViewFilteredRejected:
 
         for token in ("full", "impact"):
             result = _invoke(
-                "compare", str(old_dir), str(new_dir),
-                "--view", token,
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--view",
+                token,
             )
             assert result.exit_code == 4, (token, result.output)
 
@@ -840,7 +953,13 @@ class TestReleaseViewImpactAggregate:
         old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "json=-", "--view", "impact",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
+            "--view",
+            "impact",
         )
         assert result.exit_code == 4, result.output
         data = json.loads(result.output)
@@ -859,7 +978,11 @@ class TestReleaseViewImpactAggregate:
         old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "json=-",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
         )
         assert result.exit_code == 4, result.output
         data = json.loads(result.output)
@@ -870,7 +993,11 @@ class TestReleaseViewImpactAggregate:
         old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "--view", "impact",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "impact",
         )
         assert result.exit_code == 4, result.output
         assert "**Impact**" in result.output
@@ -939,10 +1066,20 @@ class TestReleaseViewImpactJUnitParity:
         old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
 
         with_impact = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "junit=-", "--view", "impact",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "junit=-",
+            "--view",
+            "impact",
         )
         without_impact = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "junit=-",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "junit=-",
         )
         assert with_impact.exit_code == 4, with_impact.output
         assert without_impact.exit_code == 4, without_impact.output
@@ -954,7 +1091,13 @@ class TestReleaseViewImpactJUnitParity:
         old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "junit=-", "--view", "impact",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "junit=-",
+            "--view",
+            "impact",
         )
         assert result.exit_code == 4, result.output
         assert "<?xml" in result.output
@@ -976,7 +1119,13 @@ class TestReleaseViewImpactJUnitParity:
         new_snap_path = new_dir / "libfoo.json"
 
         single_pair = _invoke(
-            "compare", str(old_snap_path), str(new_snap_path), "-o", "junit=-", "--view", "impact",
+            "compare",
+            str(old_snap_path),
+            str(new_snap_path),
+            "-o",
+            "junit=-",
+            "--view",
+            "impact",
         )
         assert single_pair.exit_code == 4, single_pair.output
         assert "<?xml" in single_pair.output
@@ -1000,7 +1149,13 @@ class TestReleaseViewShowOnlyJUnit:
         assert 'failures="1"' in baseline.output
 
         filtered = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "junit=-", "--view", "show=variables",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "junit=-",
+            "--view",
+            "show=variables",
         )
         # show_only is presentation-only -- the exit code (computed from the
         # real, unfiltered DiffResult) is unaffected even though the JUnit
@@ -1015,7 +1170,13 @@ class TestReleaseViewShowOnlyJUnit:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "junit=-", "--view", "show=functions",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "junit=-",
+            "--view",
+            "show=functions",
         )
         assert result.exit_code == 4, result.output
         assert 'failures="1"' in result.output
@@ -1082,10 +1243,15 @@ class TestReleaseViewShowOnlyReleaseGlobalFindings:
         assert doc["matrix_verdict"] == "API_BREAK"
 
         md_result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--build-info", f"old={matrix_old}",
-            "--build-info", f"new={matrix_new}",
-            "--view", "show=breaking",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--build-info",
+            f"old={matrix_old}",
+            "--build-info",
+            f"new={matrix_new}",
+            "--view",
+            "show=breaking",
         )
         assert md_result.exit_code == 4, md_result.output
         assert "Build-Configuration (Matrix) Findings" not in md_result.output
@@ -1130,7 +1296,13 @@ class TestReleaseViewShowOnlyOutputDirStaysFull:
         output_dir = tmp_path / "out"
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "--view", "show=variables", "-o", f"json={output_dir}/",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "show=variables",
+            "-o",
+            f"json={output_dir}/",
         )
         assert result.exit_code == 4, result.output
 
@@ -1145,6 +1317,8 @@ class TestReleaseViewShowOnlyOutputDirStaysFull:
         # `findings` dicts) -- full/unfiltered: the same function finding a
         # `--view show=variables` filter removed from the primary render
         # must still be present here.
-        lib_report = json.loads((output_dir / "libfoo.json").read_text(encoding="utf-8"))
+        lib_report = json.loads(
+            (output_dir / "libfoo.json").read_text(encoding="utf-8")
+        )
         kinds = {c["kind"] for c in lib_report["changes"]}
         assert {"func_removed", "public_surface_shrank"} <= kinds

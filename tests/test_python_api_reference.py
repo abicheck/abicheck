@@ -50,7 +50,9 @@ def test_every_public_name_appears_in_generated_reference():
     gen = _load_gen()
     content = gen.OUT_PATH.read_text(encoding="utf-8")
     for name in service.__all__:
-        assert f"`{name}`" in content, f"{name!r} missing from generated Python API reference"
+        assert f"`{name}`" in content, (
+            f"{name!r} missing from generated Python API reference"
+        )
 
 
 def test_run_compare_return_annotation_appears_in_generated_reference():
@@ -59,7 +61,9 @@ def test_run_compare_return_annotation_appears_in_generated_reference():
     # this.
     gen = _load_gen()
     content = gen.OUT_PATH.read_text(encoding="utf-8")
-    section = content.split("## `run_compare`", 1)[1].split("## `run_compare_request`", 1)[0]
+    section = content.split("## `run_compare`", 1)[1].split(
+        "## `run_compare_request`", 1
+    )[0]
     assert "**Returns:** `CompareResult`" in section
 
 

@@ -107,14 +107,19 @@ def maybe_write_bundle_facts_archive(
     *snapshot_to_dict* is ``serialization.snapshot_to_dict``, passed in --
     see the module-level comment above."""
     if format == "archive":
-        return write_bundle_facts_archive(facts, path, snapshot_to_dict=snapshot_to_dict)
+        return write_bundle_facts_archive(
+            facts, path, snapshot_to_dict=snapshot_to_dict
+        )
     if format != "json":
         raise ValueError(f"save_bundle_facts: unknown format {format!r}")
     return None
 
 
 def maybe_read_bundle_facts_archive(
-    path: str | Path, format: str, *, snapshot_from_dict: Callable[[dict[str, Any]], AbiSnapshot],
+    path: str | Path,
+    format: str,
+    *,
+    snapshot_from_dict: Callable[[dict[str, Any]], AbiSnapshot],
     max_json_object_nodes: int = DEFAULT_MAX_JSON_OBJECT_NODES,
 ) -> BundleFacts | None:
     """``storage.bundle_facts_codec.load_bundle_facts``'s ``format=``
@@ -136,7 +141,10 @@ def maybe_read_bundle_facts_archive(
         resolved = format
     if resolved == "archive":
         return read_bundle_facts_archive(
-            path, snapshot_from_dict=snapshot_from_dict, _fp=fp, max_json_object_nodes=max_json_object_nodes
+            path,
+            snapshot_from_dict=snapshot_from_dict,
+            _fp=fp,
+            max_json_object_nodes=max_json_object_nodes,
         )
     # Known residual gap: for "json", *fp* is closed rather than handed to
     # `read_snapshot_text(path)`'s own open, so the sniff-then-reopen race
@@ -236,7 +244,9 @@ def write_bundle_facts_archive(
 
         # Streamed the same way the per-snapshot loop above is.
         remaining = max(DEFAULT_MAX_BUNDLE_DECODED_BYTES - decoded_size_bytes, 0)
-        encoded_manifest = bounded_encode_utf8(manifest_to_dict(facts.manifest), remaining)
+        encoded_manifest = bounded_encode_utf8(
+            manifest_to_dict(facts.manifest), remaining
+        )
         if encoded_manifest is None:
             raise SnapshotError(_oversized_bundle_message())
         manifest_payload = encoded_manifest
@@ -256,7 +266,9 @@ def write_bundle_facts_archive(
     # (b) Aggregate decoded-byte cap, mirroring read_bundle_facts_archive():
     # every *duplicate* name's own copy, not each unique blob's bytes once.
     hash_counts = Counter(library_blobs.values())
-    reader_charged_bytes = sum(len(unique_payloads[h]) * n for h, n in hash_counts.items())
+    reader_charged_bytes = sum(
+        len(unique_payloads[h]) * n for h, n in hash_counts.items()
+    )
     # manifest_blob is charged once more, whenever present.
     if manifest_blob is not None:
         reader_charged_bytes += len(unique_payloads[manifest_blob])
@@ -281,7 +293,8 @@ def write_bundle_facts_archive(
         "manifest_blob": manifest_blob,
         # Also sorted -- unordered-by-name key/value data.
         "filesystem_aliases": {
-            name: list(aliases) for name, aliases in sorted(facts.filesystem_aliases.items())
+            name: list(aliases)
+            for name, aliases in sorted(facts.filesystem_aliases.items())
         },
         "library_filenames": dict(sorted(facts.library_filenames.items())),
         "degraded_members": dict(sorted(facts.degraded_members.items())),
@@ -373,7 +386,9 @@ def read_bundle_facts_archive(
         try:
             return snapshot_from_dict(blob)
         except (TypeError, KeyError, AttributeError, IndexError) as exc:
-            raise SnapshotError(f"{path}: {description} has a malformed snapshot shape: {exc}") from exc
+            raise SnapshotError(
+                f"{path}: {description} has a malformed snapshot shape: {exc}"
+            ) from exc
 
     reader_cm = (
         BundleArchiveReader.from_open_file(_fp, path)
@@ -500,7 +515,9 @@ def read_bundle_facts_archive(
                 try:
                     per_library_snapshots[name] = copy.deepcopy(cached_snapshot)
                 except RecursionError as exc:
-                    raise SnapshotError(f"{path}: blob for library {name!r} is too deeply nested to duplicate") from exc
+                    raise SnapshotError(
+                        f"{path}: blob for library {name!r} is too deeply nested to duplicate"
+                    ) from exc
                 continue
             raw = _cached_blob(h)
             blob = _load_blob_json(raw, f"blob for library {name!r}")
@@ -543,12 +560,22 @@ def read_bundle_facts_archive(
                         "genuinely oversized bundle)."
                     )
                 total_decoded += copy_bytes
-            instantiation_manifest = manifest_from_dict(_load_blob_json(raw_manifest, "manifest_blob"))
-        degraded_members = validated_degraded_members(manifest.get("degraded_members", {}))
-        require_degraded_marker_version(degraded_members, bundle_facts_schema_version, what=f"{path}: bundle archive")
+            instantiation_manifest = manifest_from_dict(
+                _load_blob_json(raw_manifest, "manifest_blob")
+            )
+        degraded_members = validated_degraded_members(
+            manifest.get("degraded_members", {})
+        )
+        require_degraded_marker_version(
+            degraded_members,
+            bundle_facts_schema_version,
+            what=f"{path}: bundle archive",
+        )
         return BundleFacts(
             schema_version=bundle_facts_schema_version,
-            variant_fingerprint=validated_variant_fingerprint(manifest.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)),
+            variant_fingerprint=validated_variant_fingerprint(
+                manifest.get("variant_fingerprint", DEFAULT_VARIANT_FINGERPRINT)
+            ),
             per_library_snapshots=per_library_snapshots,
             manifest=instantiation_manifest,
             filesystem_aliases=validated_alias_map(
@@ -558,5 +585,7 @@ def read_bundle_facts_archive(
                 manifest.get("library_filenames", {})
             ),
             degraded_members=degraded_members,
-            inventory_complete=validated_inventory_complete(manifest.get("inventory_complete", False)),
+            inventory_complete=validated_inventory_complete(
+                manifest.get("inventory_complete", False)
+            ),
         )

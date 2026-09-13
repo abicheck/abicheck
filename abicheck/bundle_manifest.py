@@ -253,7 +253,9 @@ def load_manifest(path: Path) -> InstantiationManifest:
     return InstantiationManifest(entries=tuple(entries))
 
 
-def _validate_manifest_entries(source: Path | str, entries: list[ManifestEntry]) -> None:
+def _validate_manifest_entries(
+    source: Path | str, entries: list[ManifestEntry]
+) -> None:
     """Validate structural invariants of already-constructed :class:`ManifestEntry`
     objects, independent of how they were built.
 

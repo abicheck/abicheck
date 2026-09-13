@@ -60,7 +60,9 @@ def _meta(
 def _snapshot(libraries: dict[str, ElfMetadata]) -> BundleSnapshot:
     libs = {name: Path(f"/fake/{name}") for name in libraries}
     graph = _compute_resolution_graph(libs, libraries)
-    return BundleSnapshot(root=Path("/fake"), libraries=libs, metadata=libraries, resolution=graph)
+    return BundleSnapshot(
+        root=Path("/fake"), libraries=libs, metadata=libraries, resolution=graph
+    )
 
 
 def _diff_out_of_surface(library: str, *changes: Change) -> DiffResult:

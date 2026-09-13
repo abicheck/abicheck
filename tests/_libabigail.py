@@ -78,8 +78,14 @@ def compile_shared_lib(
     src_file.write_text(src.strip() + "\n", encoding="utf-8")
     compiler = "gcc" if lang == "c" else "g++"
     cmd = [
-        compiler, "-shared", "-fPIC", "-g", "-fvisibility=default",
-        "-o", str(out), str(src_file),
+        compiler,
+        "-shared",
+        "-fPIC",
+        "-g",
+        "-fvisibility=default",
+        "-o",
+        str(out),
+        str(src_file),
     ]
     if soname is not None:
         cmd.insert(1, f"-Wl,-soname,{soname}")

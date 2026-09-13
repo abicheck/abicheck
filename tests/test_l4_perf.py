@@ -197,10 +197,7 @@ def test_headers_only_public_roots_perf_guard_avoids_full_fanout() -> None:
             for idx in range(120)
         ]
     )
-    include_map = {
-        f"cu://{idx}": [f"src/private{idx}.h"]
-        for idx in range(120)
-    }
+    include_map = {f"cu://{idx}": [f"src/private{idx}.h"] for idx in range(120)}
     include_map["cu://17"] = ["../pvxs/log.h", "src/private17.h"]
     include_map["cu://89"] = ["../pvxs/client.h", "src/private89.h"]
 

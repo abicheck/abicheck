@@ -43,14 +43,20 @@ from abicheck.model import AbiSnapshot, Variable
 from abicheck.policy_file import PolicyFile
 
 
-def _snap_with_object(name: str, size: int, *, variable: Variable | None = None) -> AbiSnapshot:
+def _snap_with_object(
+    name: str, size: int, *, variable: Variable | None = None
+) -> AbiSnapshot:
     s = AbiSnapshot(library="libX11.so.6", version="1")
     s.elf = ElfMetadata(  # type: ignore[attr-defined]
         soname="libX11.so.6",
-        symbols=[ElfSymbol(
-            name=name, binding=SymbolBinding.GLOBAL,
-            sym_type=SymbolType.OBJECT, size=size,
-        )],
+        symbols=[
+            ElfSymbol(
+                name=name,
+                binding=SymbolBinding.GLOBAL,
+                sym_type=SymbolType.OBJECT,
+                size=size,
+            )
+        ],
     )
     if variable is not None:
         s.variables.append(variable)
@@ -85,8 +91,9 @@ def test_partition_kinds():
 
 def test_internal_data_symbol_size_change_is_breaking_by_default():
     # _XkeyTable is internal-looking (reserved leading underscore).
-    r = compare(_snap_with_object("_XkeyTable", 47318),
-                _snap_with_object("_XkeyTable", 48459))
+    r = compare(
+        _snap_with_object("_XkeyTable", 47318), _snap_with_object("_XkeyTable", 48459)
+    )
     kinds = {c.kind for c in r.changes}
     assert ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL in kinds
     assert ChangeKind.SYMBOL_SIZE_CHANGED not in kinds
@@ -95,8 +102,10 @@ def test_internal_data_symbol_size_change_is_breaking_by_default():
 
 def test_public_data_symbol_size_change_is_still_breaking():
     # No leading underscore -> public-looking -> hard break preserved.
-    r = compare(_snap_with_object("jpeg_std_message_table", 1032),
-                _snap_with_object("jpeg_std_message_table", 1040))
+    r = compare(
+        _snap_with_object("jpeg_std_message_table", 1032),
+        _snap_with_object("jpeg_std_message_table", 1040),
+    )
     kinds = {c.kind for c in r.changes}
     assert ChangeKind.SYMBOL_SIZE_CHANGED in kinds
     assert ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL not in kinds
@@ -108,8 +117,12 @@ def test_public_const_unbounded_string_growth_preserves_copy_reloc_break():
     # Even without a fixed header bound, old non-PIE consumers can still carry
     # copy relocations sized from the old DSO symbol.
     r = compare(
-        _header_snap_with_object("pj_release", 29, variable=_const_string_var("pj_release")),
-        _header_snap_with_object("pj_release", 31, variable=_const_string_var("pj_release")),
+        _header_snap_with_object(
+            "pj_release", 29, variable=_const_string_var("pj_release")
+        ),
+        _header_snap_with_object(
+            "pj_release", 31, variable=_const_string_var("pj_release")
+        ),
     )
     kinds = {c.kind for c in r.changes}
     assert ChangeKind.SYMBOL_SIZE_CHANGED_CONST_OBJECT in kinds
@@ -122,8 +135,12 @@ def test_public_const_unbounded_string_shrink_is_compatible():
     # for the old symbol. If the new string is shorter, that old slot is still
     # large enough, so this is not the truncation/overflow hazard that growth is.
     r = compare(
-        _header_snap_with_object("pj_release", 31, variable=_const_string_var("pj_release")),
-        _header_snap_with_object("pj_release", 29, variable=_const_string_var("pj_release")),
+        _header_snap_with_object(
+            "pj_release", 31, variable=_const_string_var("pj_release")
+        ),
+        _header_snap_with_object(
+            "pj_release", 29, variable=_const_string_var("pj_release")
+        ),
     )
     kinds = {c.kind for c in r.changes}
     assert ChangeKind.SYMBOL_SIZE_CHANGED_CONST_OBJECT not in kinds
@@ -133,8 +150,12 @@ def test_public_const_unbounded_string_shrink_is_compatible():
 
 def test_dwarf_const_unbounded_string_is_breaking_without_header_evidence():
     r = compare(
-        _snap_with_object("_private_release", 31, variable=_const_string_var("_private_release")),
-        _snap_with_object("_private_release", 29, variable=_const_string_var("_private_release")),
+        _snap_with_object(
+            "_private_release", 31, variable=_const_string_var("_private_release")
+        ),
+        _snap_with_object(
+            "_private_release", 29, variable=_const_string_var("_private_release")
+        ),
     )
     kinds = {c.kind for c in r.changes}
     assert ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL in kinds
@@ -147,10 +168,15 @@ def test_policy_override_can_downgrade_internal_size_change():
     # explicitly accept it as risk.
     pf = PolicyFile(
         base_policy="strict_abi",
-        overrides={ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL: Verdict.COMPATIBLE_WITH_RISK},
+        overrides={
+            ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL: Verdict.COMPATIBLE_WITH_RISK
+        },
     )
-    c = Change(kind=ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL, symbol="_XkeyTable",
-               description="size 47318 -> 48459")
+    c = Change(
+        kind=ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL,
+        symbol="_XkeyTable",
+        description="size 47318 -> 48459",
+    )
     assert pf.compute_verdict([c]) == Verdict.COMPATIBLE_WITH_RISK
 
 
@@ -159,18 +185,24 @@ def test_policy_override_can_downgrade_public_size_change():
         base_policy="strict_abi",
         overrides={ChangeKind.SYMBOL_SIZE_CHANGED: Verdict.COMPATIBLE_WITH_RISK},
     )
-    c = Change(kind=ChangeKind.SYMBOL_SIZE_CHANGED, symbol="jpeg_std_message_table",
-               description="size grew")
+    c = Change(
+        kind=ChangeKind.SYMBOL_SIZE_CHANGED,
+        symbol="jpeg_std_message_table",
+        description="size grew",
+    )
     assert pf.compute_verdict([c]) == Verdict.COMPATIBLE_WITH_RISK
 
 
 def test_policy_file_downgrades_internal_size_change_end_to_end(tmp_path: Path):
     policy = tmp_path / "policy.yaml"
-    policy.write_text(textwrap.dedent("""
+    policy.write_text(
+        textwrap.dedent("""
         base_policy: strict_abi
         overrides:
           symbol_size_changed_internal: risk
-    """).strip(), encoding="utf-8")
+    """).strip(),
+        encoding="utf-8",
+    )
     pf = PolicyFile.load(policy)
 
     r = compare(

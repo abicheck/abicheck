@@ -1,5 +1,6 @@
 # pylint: disable=too-many-branches,too-many-statements,too-many-locals,too-many-arguments,too-many-return-statements
 """Sprint 4 tests: advanced DWARF detectors (calling convention, packing, toolchain drift)."""
+
 from __future__ import annotations
 
 import json
@@ -26,6 +27,7 @@ from abicheck.serialization import (
 )
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _snap(adv: AdvancedDwarfMetadata | None) -> AbiSnapshot:
     s = AbiSnapshot(library="libx.so", version="v")
@@ -68,6 +70,7 @@ def _adv(
 
 # ── graceful degradation ──────────────────────────────────────────────────────
 
+
 def test_diff_advanced_dwarf_no_dwarf() -> None:
     old = _adv(has_dwarf=False)
     new = _adv(has_dwarf=True)
@@ -81,6 +84,7 @@ def test_diff_both_no_dwarf() -> None:
 
 
 # ── calling convention ────────────────────────────────────────────────────────
+
 
 def test_calling_convention_changed() -> None:
     old = _snap(_adv(calling={"foo": "program"}))
@@ -206,7 +210,9 @@ def test_target_arch_round_trips_through_serialization() -> None:
 def test_callee_saved_fallback_detects_calling_convention_drift() -> None:
     """ELF CFI fallback: saved rdi/rsi indicates ms_abi shift."""
     old = _snap(_adv(callee_saved={"foo": frozenset({"rbx", "rbp", "r12"})}))
-    new = _snap(_adv(callee_saved={"foo": frozenset({"rbx", "rbp", "r12", "rdi", "rsi"})}))
+    new = _snap(
+        _adv(callee_saved={"foo": frozenset({"rbx", "rbp", "r12", "rdi", "rsi"})})
+    )
     r = compare(old, new)
     kinds = {c.kind for c in r.changes}
     assert ChangeKind.CALLING_CONVENTION_CHANGED in kinds
@@ -267,6 +273,7 @@ def test_value_abi_trait_unchanged_no_change() -> None:
 
 # ── struct packing ────────────────────────────────────────────────────────────
 
+
 def test_struct_packing_added() -> None:
     # "Ctx" must exist in old all_struct_names so diff knows it's a pre-existing
     # struct that became packed (not a brand-new packed struct, which has no ABI contract).
@@ -280,7 +287,7 @@ def test_struct_packing_added() -> None:
 
 def test_struct_packing_added_new_struct_no_report() -> None:
     """Brand-new packed struct (not in old binary) should NOT report packing change."""
-    old = _snap(_adv(packed=set()))           # "Ctx" never existed in old
+    old = _snap(_adv(packed=set()))  # "Ctx" never existed in old
     new = _snap(_adv(packed={"Ctx"}))
     r = compare(old, new)
     kinds = {c.kind for c in r.changes}
@@ -312,6 +319,7 @@ def test_struct_packing_unchanged_no_change() -> None:
 
 # ── toolchain flag drift ──────────────────────────────────────────────────────
 
+
 def test_toolchain_flag_added_compatible_warning() -> None:
     old = _snap(_adv(flags={"-fshort-enums"}))
     new = _snap(_adv(flags={"-fshort-enums", "-mabi=lp64"}))
@@ -342,8 +350,11 @@ def test_toolchain_no_drift_no_change() -> None:
 
 # ── DW_AT_producer parsing ────────────────────────────────────────────────────
 
+
 def test_parse_producer_gcc() -> None:
-    info = _parse_producer("GNU C17 13.2.1 20230812 -fshort-enums -m64 -fabi-version=18")
+    info = _parse_producer(
+        "GNU C17 13.2.1 20230812 -fshort-enums -m64 -fabi-version=18"
+    )
     assert info.compiler == "GCC"
     assert info.version == "13.2.1"
     assert "-fshort-enums" in info.abi_flags
@@ -400,11 +411,14 @@ def test_process_cu_unions_flags_across_cus() -> None:
 
 # ── JSON serialization (set → list → set roundtrip) ──────────────────────────
 
+
 def test_serialization_roundtrip_no_crash() -> None:
     """snapshot_to_json must not raise TypeError on set fields."""
     from abicheck.storage.sectioned_document import from_sectioned_document
 
-    snap = _snap(_adv(calling={"foo": "program"}, packed={"A", "B"}, flags={"-fshort-enums"}))
+    snap = _snap(
+        _adv(calling={"foo": "program"}, packed={"A", "B"}, flags={"-fshort-enums"})
+    )
     # This must not raise TypeError: Object of type set is not JSON serializable
     json_str = snapshot_to_json(snap)
     data = from_sectioned_document(json.loads(json_str))
@@ -413,7 +427,9 @@ def test_serialization_roundtrip_no_crash() -> None:
 
 
 def test_serialization_roundtrip_set_values() -> None:
-    snap = _snap(_adv(calling={"foo": "program"}, packed={"A", "B"}, flags={"-fshort-enums"}))
+    snap = _snap(
+        _adv(calling={"foo": "program"}, packed={"A", "B"}, flags={"-fshort-enums"})
+    )
     d = snapshot_to_dict(snap)
     snap2 = snapshot_from_dict(d)
     assert snap2.dwarf_advanced is not None
@@ -433,6 +449,7 @@ def test_serialization_empty_sets_roundtrip() -> None:
 
 # ── Integration: real packed struct detection via DWARF ───────────────────────
 
+
 @pytest.mark.integration
 @pytest.mark.skipif(sys.platform != "linux", reason="ELF/DWARF tests require Linux")
 def test_packed_struct_detected_from_real_dwarf() -> None:
@@ -449,7 +466,8 @@ PackedCtx g_ctx;
         so = Path(td) / "libpacked.so"
         result = subprocess.run(
             ["gcc", "-g", "-shared", "-fPIC", "-o", str(so), "-x", "c", "-"],
-            input=src.encode(), capture_output=True,
+            input=src.encode(),
+            capture_output=True,
         )
         if result.returncode != 0:
             pytest.skip(f"gcc failed: {result.stderr.decode()[:200]}")
@@ -474,7 +492,8 @@ NormalCtx g;
         so = Path(td) / "libnormal.so"
         result = subprocess.run(
             ["gcc", "-g", "-shared", "-fPIC", "-o", str(so), "-x", "c", "-"],
-            input=src.encode(), capture_output=True,
+            input=src.encode(),
+            capture_output=True,
         )
         if result.returncode != 0:
             pytest.skip(f"gcc failed: {result.stderr.decode()[:200]}")
@@ -486,6 +505,7 @@ NormalCtx g;
 
 
 # ── C3: compare()-level no-change test for value_abi_traits ──────────────────
+
 
 def test_value_abi_traits_same_no_change_emitted() -> None:
     """Same value_abi_traits in both snapshots must NOT emit VALUE_ABI_TRAIT_CHANGED."""

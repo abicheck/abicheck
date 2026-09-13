@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Unit tests for pe_metadata — dataclass construction, magic detection, serialization, and parsing."""
+
 from __future__ import annotations
 
 import struct
@@ -28,6 +29,7 @@ from abicheck.pe_metadata import (
 )
 
 # ── PeMetadata dataclass ────────────────────────────────────────────────
+
 
 class TestPeMetadataDataclass:
     def test_default_construction(self):
@@ -57,13 +59,18 @@ class TestPeMetadataDataclass:
         assert exp.forwarder == ""
 
     def test_pe_export_forwarded(self):
-        exp = PeExport(name="func", ordinal=5, sym_type=PeSymbolType.FORWARDED,
-                       forwarder="NTDLL.RtlFoo")
+        exp = PeExport(
+            name="func",
+            ordinal=5,
+            sym_type=PeSymbolType.FORWARDED,
+            forwarder="NTDLL.RtlFoo",
+        )
         assert exp.sym_type == PeSymbolType.FORWARDED
         assert exp.forwarder == "NTDLL.RtlFoo"
 
 
 # ── is_pe magic detection ───────────────────────────────────────────────
+
 
 def _make_pe_file(tmp_path: Path, pe_offset: int = 0x80) -> Path:
     """Create a minimal file with valid PE magic bytes."""
@@ -71,7 +78,7 @@ def _make_pe_file(tmp_path: Path, pe_offset: int = 0x80) -> Path:
     data = bytearray(pe_offset + 4)
     data[0:2] = b"MZ"
     struct.pack_into("<I", data, 0x3C, pe_offset)
-    data[pe_offset:pe_offset + 4] = b"PE\x00\x00"
+    data[pe_offset : pe_offset + 4] = b"PE\x00\x00"
     p.write_bytes(bytes(data))
     return p
 
@@ -117,6 +124,7 @@ class TestIsPe:
 
 # ── Serialization round-trip ─────────────────────────────────────────────
 
+
 class TestPeSerialization:
     def test_snapshot_roundtrip(self):
         from abicheck.model import AbiSnapshot
@@ -128,8 +136,12 @@ class TestPeSerialization:
             dll_characteristics=0x8160,
             exports=[
                 PeExport(name="init", ordinal=1),
-                PeExport(name="fwd", ordinal=2, sym_type=PeSymbolType.FORWARDED,
-                         forwarder="OTHER.init"),
+                PeExport(
+                    name="fwd",
+                    ordinal=2,
+                    sym_type=PeSymbolType.FORWARDED,
+                    forwarder="OTHER.init",
+                ),
             ],
             imports={"KERNEL32.dll": ["LoadLibraryA", "GetProcAddress"]},
             file_version="1.0.0.0",
@@ -152,17 +164,26 @@ class TestPeSerialization:
 
 # ── Checker diff_pe ──────────────────────────────────────────────────────
 
+
 class TestDiffPe:
     def test_removed_export(self):
         from abicheck.checker import ChangeKind, _diff_pe
         from abicheck.model import AbiSnapshot
 
-        old = AbiSnapshot(library="test.dll", version="1.0", pe=PeMetadata(
-            exports=[PeExport(name="foo"), PeExport(name="bar")],
-        ))
-        new = AbiSnapshot(library="test.dll", version="2.0", pe=PeMetadata(
-            exports=[PeExport(name="foo")],
-        ))
+        old = AbiSnapshot(
+            library="test.dll",
+            version="1.0",
+            pe=PeMetadata(
+                exports=[PeExport(name="foo"), PeExport(name="bar")],
+            ),
+        )
+        new = AbiSnapshot(
+            library="test.dll",
+            version="2.0",
+            pe=PeMetadata(
+                exports=[PeExport(name="foo")],
+            ),
+        )
         changes = _diff_pe(old, new)
         removed = [c for c in changes if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(removed) == 1
@@ -172,12 +193,20 @@ class TestDiffPe:
         from abicheck.checker import ChangeKind, _diff_pe
         from abicheck.model import AbiSnapshot
 
-        old = AbiSnapshot(library="test.dll", version="1.0", pe=PeMetadata(
-            exports=[PeExport(name="foo")],
-        ))
-        new = AbiSnapshot(library="test.dll", version="2.0", pe=PeMetadata(
-            exports=[PeExport(name="foo"), PeExport(name="baz")],
-        ))
+        old = AbiSnapshot(
+            library="test.dll",
+            version="1.0",
+            pe=PeMetadata(
+                exports=[PeExport(name="foo")],
+            ),
+        )
+        new = AbiSnapshot(
+            library="test.dll",
+            version="2.0",
+            pe=PeMetadata(
+                exports=[PeExport(name="foo"), PeExport(name="baz")],
+            ),
+        )
         changes = _diff_pe(old, new)
         added = [c for c in changes if c.kind == ChangeKind.FUNC_ADDED]
         assert len(added) == 1
@@ -187,14 +216,28 @@ class TestDiffPe:
         from abicheck.checker import ChangeKind, _diff_pe
         from abicheck.model import AbiSnapshot
 
-        old = AbiSnapshot(library="test.dll", version="1.0", pe=PeMetadata(
-            exports=[PeExport(name="x")],
-            imports={"KERNEL32.dll": ["LoadLibraryA"], "USER32.dll": ["MessageBoxA"]},
-        ))
-        new = AbiSnapshot(library="test.dll", version="2.0", pe=PeMetadata(
-            exports=[PeExport(name="x")],
-            imports={"KERNEL32.dll": ["LoadLibraryA"], "ADVAPI32.dll": ["RegOpenKeyA"]},
-        ))
+        old = AbiSnapshot(
+            library="test.dll",
+            version="1.0",
+            pe=PeMetadata(
+                exports=[PeExport(name="x")],
+                imports={
+                    "KERNEL32.dll": ["LoadLibraryA"],
+                    "USER32.dll": ["MessageBoxA"],
+                },
+            ),
+        )
+        new = AbiSnapshot(
+            library="test.dll",
+            version="2.0",
+            pe=PeMetadata(
+                exports=[PeExport(name="x")],
+                imports={
+                    "KERNEL32.dll": ["LoadLibraryA"],
+                    "ADVAPI32.dll": ["RegOpenKeyA"],
+                },
+            ),
+        )
         changes = _diff_pe(old, new)
         removed = [c for c in changes if c.kind == ChangeKind.NEEDED_REMOVED]
         added = [c for c in changes if c.kind == ChangeKind.NEEDED_ADDED]
@@ -209,9 +252,13 @@ class TestDiffPe:
 
         pe = PeMetadata(exports=[PeExport(name="foo")])
         old = AbiSnapshot(library="test.dll", version="1.0", pe=pe)
-        new = AbiSnapshot(library="test.dll", version="2.0", pe=PeMetadata(
-            exports=[PeExport(name="foo")],
-        ))
+        new = AbiSnapshot(
+            library="test.dll",
+            version="2.0",
+            pe=PeMetadata(
+                exports=[PeExport(name="foo")],
+            ),
+        )
         assert _diff_pe(old, new) == []
 
     def test_empty_pe_metadata(self):
@@ -227,12 +274,20 @@ class TestDiffPe:
         from abicheck.checker import ChangeKind, _diff_pe
         from abicheck.model import AbiSnapshot
 
-        old = AbiSnapshot(library="test.dll", version="1.0", pe=PeMetadata(
-            exports=[PeExport(name="", ordinal=42), PeExport(name="named")],
-        ))
-        new = AbiSnapshot(library="test.dll", version="2.0", pe=PeMetadata(
-            exports=[PeExport(name="named")],
-        ))
+        old = AbiSnapshot(
+            library="test.dll",
+            version="1.0",
+            pe=PeMetadata(
+                exports=[PeExport(name="", ordinal=42), PeExport(name="named")],
+            ),
+        )
+        new = AbiSnapshot(
+            library="test.dll",
+            version="2.0",
+            pe=PeMetadata(
+                exports=[PeExport(name="named")],
+            ),
+        )
         changes = _diff_pe(old, new)
         removed = [c for c in changes if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(removed) == 1
@@ -242,12 +297,20 @@ class TestDiffPe:
         from abicheck.checker import ChangeKind, _diff_pe
         from abicheck.model import AbiSnapshot
 
-        old = AbiSnapshot(library="test.dll", version="1.0", pe=PeMetadata(
-            exports=[PeExport(name="named")],
-        ))
-        new = AbiSnapshot(library="test.dll", version="2.0", pe=PeMetadata(
-            exports=[PeExport(name="named"), PeExport(name="", ordinal=99)],
-        ))
+        old = AbiSnapshot(
+            library="test.dll",
+            version="1.0",
+            pe=PeMetadata(
+                exports=[PeExport(name="named")],
+            ),
+        )
+        new = AbiSnapshot(
+            library="test.dll",
+            version="2.0",
+            pe=PeMetadata(
+                exports=[PeExport(name="named"), PeExport(name="", ordinal=99)],
+            ),
+        )
         changes = _diff_pe(old, new)
         added = [c for c in changes if c.kind == ChangeKind.FUNC_ADDED]
         assert len(added) == 1
@@ -259,12 +322,18 @@ class TestDiffPe:
         from abicheck.model import AbiSnapshot, Function
 
         fn = Function(name="bar", mangled="_bar", return_type="void")
-        old = AbiSnapshot(library="test.dll", version="1.0",
-                          functions=[fn],
-                          pe=PeMetadata(exports=[PeExport(name="foo"), PeExport(name="bar")]))
-        new = AbiSnapshot(library="test.dll", version="2.0",
-                          functions=[fn],
-                          pe=PeMetadata(exports=[PeExport(name="foo")]))
+        old = AbiSnapshot(
+            library="test.dll",
+            version="1.0",
+            functions=[fn],
+            pe=PeMetadata(exports=[PeExport(name="foo"), PeExport(name="bar")]),
+        )
+        new = AbiSnapshot(
+            library="test.dll",
+            version="2.0",
+            functions=[fn],
+            pe=PeMetadata(exports=[PeExport(name="foo")]),
+        )
         changes = _diff_pe(old, new)
         removed = [c for c in changes if c.kind == ChangeKind.FUNC_REMOVED]
         # "bar" is already in old.functions → must be deduplicated
@@ -276,12 +345,18 @@ class TestDiffPe:
         from abicheck.model import AbiSnapshot, Function
 
         fn = Function(name="foo", mangled="_foo", return_type="void")
-        old = AbiSnapshot(library="test.dll", version="1.0",
-                          functions=[fn],
-                          pe=PeMetadata(exports=[PeExport(name="foo"), PeExport(name="baz")]))
-        new = AbiSnapshot(library="test.dll", version="2.0",
-                          functions=[fn],
-                          pe=PeMetadata(exports=[PeExport(name="foo")]))
+        old = AbiSnapshot(
+            library="test.dll",
+            version="1.0",
+            functions=[fn],
+            pe=PeMetadata(exports=[PeExport(name="foo"), PeExport(name="baz")]),
+        )
+        new = AbiSnapshot(
+            library="test.dll",
+            version="2.0",
+            functions=[fn],
+            pe=PeMetadata(exports=[PeExport(name="foo")]),
+        )
         changes = _diff_pe(old, new)
         removed = [c for c in changes if c.kind == ChangeKind.FUNC_REMOVED]
         # "baz" is not in functions → must still be emitted
@@ -289,6 +364,7 @@ class TestDiffPe:
 
 
 # ── parse_pe_metadata ───────────────────────────────────────────────────
+
 
 class TestParsePeMetadata:
     def test_nonexistent_file_returns_empty(self):
@@ -422,7 +498,6 @@ class TestParsePeMetadata:
 
         assert isinstance(meta, PeMetadata)
         assert meta.exports == []
-
 
     def test_parse_delay_imports_and_missing_subsystem_version(self, tmp_path):
         """Exercise DIRECTORY_ENTRY_DELAY_IMPORT parsing (named, ordinal-only,

@@ -168,7 +168,11 @@ def _effective_decls(
     out: dict[str, tuple[object, ...]] = {}
     for f in rec.fields:
         entry = registry.get(f.name)
-        if entry is not None and entry.get("negative") and entry.get("guard") in defines:
+        if (
+            entry is not None
+            and entry.get("negative")
+            and entry.get("guard") in defines
+        ):
             continue  # #ifndef-guarded field the defining build really prunes
         out[f.name] = (
             f.type,

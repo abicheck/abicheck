@@ -20,6 +20,7 @@ Exit codes:
     1  one or more cases gained a spurious BREAKING
     2  input/usage error
 """
+
 from __future__ import annotations
 
 import json
@@ -147,7 +148,9 @@ def _classify_results(
         if expected in _COMPATIBLE_EXPECTED and got == "BREAKING":
             false_positives.append(f"{case}: expected {expected} got {got}")
         elif expected == "BREAKING" and got in _COMPATIBLE_EXPECTED:
-            downgrades.append(f"{case}: {expected}→{got} (evidence lost in {label} mode)")
+            downgrades.append(
+                f"{case}: {expected}→{got} (evidence lost in {label} mode)"
+            )
     return false_positives, downgrades, errors
 
 
@@ -156,19 +159,26 @@ def _report(
 ) -> int:
     """Print the guard report and return the process exit code."""
     if downgrades:
-        print(f"{label} downgrades (expected evidence loss, reported): {len(downgrades)}")
+        print(
+            f"{label} downgrades (expected evidence loss, reported): {len(downgrades)}"
+        )
         for d in downgrades:
             print(f"  - {d}")
 
     failed = False
     if errors:
-        print(f"\nERROR: {label} run did not produce a verdict for {len(errors)} case(s) "
-              "(crash/compare failure — the FP invariant was never checked):", file=sys.stderr)
+        print(
+            f"\nERROR: {label} run did not produce a verdict for {len(errors)} case(s) "
+            "(crash/compare failure — the FP invariant was never checked):",
+            file=sys.stderr,
+        )
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         failed = True
     if false_positives:
-        print(f"\nERROR: {label} false positives: {len(false_positives)}", file=sys.stderr)
+        print(
+            f"\nERROR: {label} false positives: {len(false_positives)}", file=sys.stderr
+        )
         for fp in false_positives:
             print(f"  - {fp}", file=sys.stderr)
         failed = True

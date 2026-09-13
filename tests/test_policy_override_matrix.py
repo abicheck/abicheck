@@ -7,6 +7,7 @@ Verifies that:
 4. PolicyFile overrides move kinds between verdict buckets correctly
 5. Unclassified ChangeKinds fail-safe to BREAKING
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -34,12 +35,14 @@ from abicheck.policy_file import PolicyFile
 @dataclass(frozen=True)
 class _FakeChange:
     """Minimal stub satisfying the HasKind protocol for compute_verdict."""
+
     kind: ChangeKind
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Classification Completeness
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestClassificationCompleteness:
     """Every ChangeKind must be classified under every policy."""
@@ -77,6 +80,7 @@ class TestClassificationCompleteness:
 # ═══════════════════════════════════════════════════════════════════════════
 # Verdict Computation per Policy
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestVerdictComputation:
     """Verify compute_verdict produces correct verdicts."""
@@ -146,7 +150,9 @@ class TestSdkVendorPolicy:
         """sdk_vendor should downgrade at least some kinds."""
         assert len(SDK_VENDOR_DOWNGRADED) > 0
 
-    @pytest.mark.parametrize("kind", sorted(SDK_VENDOR_DOWNGRADED, key=lambda k: k.value))
+    @pytest.mark.parametrize(
+        "kind", sorted(SDK_VENDOR_DOWNGRADED, key=lambda k: k.value)
+    )
     def test_sdk_vendor_verdict_for_downgraded_kind(self, kind):
         """Each downgraded kind produces API_BREAK in strict, COMPATIBLE in sdk_vendor."""
         strict_v = compute_verdict([_FakeChange(kind)], policy="strict_abi")
@@ -175,7 +181,9 @@ class TestPluginAbiPolicy:
         """plugin_abi should downgrade at least some kinds."""
         assert len(PLUGIN_ABI_DOWNGRADED) > 0
 
-    @pytest.mark.parametrize("kind", sorted(PLUGIN_ABI_DOWNGRADED, key=lambda k: k.value))
+    @pytest.mark.parametrize(
+        "kind", sorted(PLUGIN_ABI_DOWNGRADED, key=lambda k: k.value)
+    )
     def test_plugin_abi_verdict_for_downgraded_kind(self, kind):
         strict_v = compute_verdict([_FakeChange(kind)], policy="strict_abi")
         plugin_v = compute_verdict([_FakeChange(kind)], policy="plugin_abi")
@@ -329,8 +337,7 @@ class TestExhaustiveMatrix:
             for k in ChangeKind
         )
         assert any(
-            _expected_verdict(k, "strict_abi")
-            is not _expected_verdict(k, "plugin_abi")
+            _expected_verdict(k, "strict_abi") is not _expected_verdict(k, "plugin_abi")
             for k in ChangeKind
         )
 
@@ -338,6 +345,7 @@ class TestExhaustiveMatrix:
 # ═══════════════════════════════════════════════════════════════════════════
 # PolicyFile Overrides
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestPolicyFileOverrides:
     """PolicyFile can override individual ChangeKind verdicts."""
@@ -398,18 +406,28 @@ class TestPolicyFileOverrides:
 # PolicyFile with compare()
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 class TestPolicyFileWithCompare:
     """PolicyFile integration with the compare() function."""
 
     def _pub_func(self, name, mangled, ret="void", params=None, **kwargs):
-        return Function(name=name, mangled=mangled, return_type=ret,
-                        params=params or [], visibility=Visibility.PUBLIC, **kwargs)
+        return Function(
+            name=name,
+            mangled=mangled,
+            return_type=ret,
+            params=params or [],
+            visibility=Visibility.PUBLIC,
+            **kwargs,
+        )
 
     def _snap(self, functions=None, variables=None, types=None, enums=None):
         return AbiSnapshot(
-            library="libtest.so.1", version="1.0",
-            functions=functions or [], variables=variables or [],
-            types=types or [], enums=enums or [],
+            library="libtest.so.1",
+            version="1.0",
+            functions=functions or [],
+            variables=variables or [],
+            types=types or [],
+            enums=enums or [],
         )
 
     def test_policy_file_downgrades_func_removed(self):
@@ -449,13 +467,16 @@ class TestPolicyFileWithCompare:
 # Unknown / Invalid Policies
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 class TestUnknownPolicy:
     """Unknown policies should fall back to strict_abi."""
 
     def test_unknown_policy_falls_back(self):
         """Unknown policy name should default to strict_abi behavior."""
         strict_v = compute_verdict(
-            [_FakeChange(ChangeKind.FUNC_REMOVED)], policy="strict_abi")
+            [_FakeChange(ChangeKind.FUNC_REMOVED)], policy="strict_abi"
+        )
         unknown_v = compute_verdict(
-            [_FakeChange(ChangeKind.FUNC_REMOVED)], policy="nonexistent_policy")
+            [_FakeChange(ChangeKind.FUNC_REMOVED)], policy="nonexistent_policy"
+        )
         assert strict_v == unknown_v == Verdict.BREAKING

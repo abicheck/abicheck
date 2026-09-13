@@ -18,6 +18,7 @@ Detection mechanism:
 Filtering is applied in: parse_functions(), parse_variables(),
 _is_public_record_type(), parse_enums(), parse_typedefs().
 """
+
 from __future__ import annotations
 
 from xml.etree.ElementTree import Element, SubElement
@@ -38,7 +39,7 @@ def _make_castxml_xml_with_builtin() -> Element:
 
     builtin_file = SubElement(root, "File")
     builtin_file.set("id", "f0")
-    builtin_file.set("name", "<builtin>")       # real castxml: no hyphen
+    builtin_file.set("name", "<builtin>")  # real castxml: no hyphen
 
     cmdline_file = SubElement(root, "File")
     cmdline_file.set("id", "f2")
@@ -50,7 +51,7 @@ def _make_castxml_xml_with_builtin() -> Element:
     user_struct.set("name", "MyStruct")
     user_struct.set("size", "64")
     user_struct.set("align", "32")
-    user_struct.set("file", "f1")               # real castxml: direct file attr
+    user_struct.set("file", "f1")  # real castxml: direct file attr
     user_struct.set("location", "f1:5")
 
     # Built-in function with __ prefix (should NOT appear)
@@ -96,6 +97,7 @@ class TestBuiltinsFiltered:
     def test_user_struct_in_types(self) -> None:
         """User-defined struct from mylib.h must appear in parse_types()."""
         from abicheck.dumper import _CastxmlParser
+
         root = _make_castxml_xml_with_builtin()
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
         types = parser.parse_types()
@@ -105,6 +107,7 @@ class TestBuiltinsFiltered:
     def test_va_list_struct_not_in_types(self) -> None:
         """__va_list_tag (name starts with __) must NOT appear in parse_types()."""
         from abicheck.dumper import _CastxmlParser
+
         root = _make_castxml_xml_with_builtin()
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
         types = parser.parse_types()
@@ -114,6 +117,7 @@ class TestBuiltinsFiltered:
     def test_cmdline_struct_not_in_types(self) -> None:
         """__CMDLINE_DEFINE__ (name starts with __) must NOT appear in parse_types()."""
         from abicheck.dumper import _CastxmlParser
+
         root = _make_castxml_xml_with_builtin()
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
         types = parser.parse_types()
@@ -123,6 +127,7 @@ class TestBuiltinsFiltered:
     def test_user_func_in_functions(self) -> None:
         """User-defined function from mylib.h must appear in parse_functions()."""
         from abicheck.dumper import _CastxmlParser
+
         root = _make_castxml_xml_with_builtin()
         parser = _CastxmlParser(
             root,
@@ -136,6 +141,7 @@ class TestBuiltinsFiltered:
     def test_builtin_func_filtered_from_snapshot(self) -> None:
         """__builtin_va_list must NOT appear in functions."""
         from abicheck.dumper import _CastxmlParser
+
         root = _make_castxml_xml_with_builtin()
         parser = _CastxmlParser(
             root,
@@ -151,12 +157,20 @@ class TestBuiltinsFiltered:
         from abicheck.checker import compare
         from abicheck.model import AbiSnapshot, RecordType
 
-        old = AbiSnapshot(library="lib.so", version="1.0", types=[
-            RecordType(name="MyStruct", kind="struct"),
-        ])
-        new = AbiSnapshot(library="lib.so", version="2.0", types=[
-            RecordType(name="MyStruct", kind="struct"),
-        ])
+        old = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            types=[
+                RecordType(name="MyStruct", kind="struct"),
+            ],
+        )
+        new = AbiSnapshot(
+            library="lib.so",
+            version="2.0",
+            types=[
+                RecordType(name="MyStruct", kind="struct"),
+            ],
+        )
         result = compare(old, new)
         assert not result.changes
 
@@ -177,7 +191,7 @@ class TestBuiltinLocationFilter:
 
         builtin_file = SubElement(root, "File")
         builtin_file.set("id", "f0")
-        builtin_file.set("name", "<builtin>")   # real castxml: no hyphen
+        builtin_file.set("name", "<builtin>")  # real castxml: no hyphen
 
         cmdline_file = SubElement(root, "File")
         cmdline_file.set("id", "f2")
@@ -194,7 +208,9 @@ class TestBuiltinLocationFilter:
         # Built-in struct WITHOUT __ prefix — must be filtered by file location
         builtin_struct = SubElement(root, "Struct")
         builtin_struct.set("id", "_2")
-        builtin_struct.set("name", "va_list")   # no __ prefix — only location filter catches it
+        builtin_struct.set(
+            "name", "va_list"
+        )  # no __ prefix — only location filter catches it
         builtin_struct.set("size", "64")
         builtin_struct.set("file", "f0")
         builtin_struct.set("location", "f0:0")
@@ -260,17 +276,21 @@ class TestBuiltinLocationFilter:
     def test_builtin_struct_no_underscore_filtered_by_location(self) -> None:
         """Struct 'va_list' (no __ prefix) from <builtin> must be filtered."""
         from abicheck.dumper import _CastxmlParser
+
         root = self._make_xml_real_format()
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
         types = parser.parse_types()
         names = {t.name for t in types}
         assert "UserType" in names
         assert "va_list" not in names, "va_list from <builtin> must be filtered"
-        assert "SomeDefine" not in names, "SomeDefine from <command-line> must be filtered"
+        assert "SomeDefine" not in names, (
+            "SomeDefine from <command-line> must be filtered"
+        )
 
     def test_builtin_func_no_underscore_filtered_by_location(self) -> None:
         """Function from <builtin> must not appear even if in exported symbols."""
         from abicheck.dumper import _CastxmlParser
+
         root = self._make_xml_real_format()
         parser = _CastxmlParser(
             root,
@@ -284,6 +304,7 @@ class TestBuiltinLocationFilter:
     def test_builtin_typedef_filtered(self) -> None:
         """Typedef from <builtin> (e.g. size_t) must not appear in typedefs."""
         from abicheck.dumper import _CastxmlParser
+
         root = self._make_xml_real_format()
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
         typedefs = parser.parse_typedefs()
@@ -293,6 +314,7 @@ class TestBuiltinLocationFilter:
     def test_builtin_enum_filtered(self) -> None:
         """Enum from <builtin> without __ prefix must not appear in enums."""
         from abicheck.dumper import _CastxmlParser
+
         root = self._make_xml_real_format()
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
         enums = parser.parse_enums()

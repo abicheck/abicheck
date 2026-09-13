@@ -317,7 +317,14 @@ class TestSetInputsAreRejected:
 
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_dir), str(new_dir), "--use-cases", str(manifest), *extra],
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--use-cases",
+                str(manifest),
+                *extra,
+            ],
         )
         assert result.exit_code == 64, result.output
 
@@ -423,17 +430,20 @@ class TestStatKeepsItsSummaryOnlyShape:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old), str(new), "--use-cases", str(manifest),
-                "-o", f"{fmt}={tmp_path / f'r.{fmt}'}",
+                "compare",
+                str(old),
+                str(new),
+                "--use-cases",
+                str(manifest),
+                "-o",
+                f"{fmt}={tmp_path / f'r.{fmt}'}",
             ],
         )
         assert result.exit_code == 64, result.output
         assert "no output this run renders" in result.output
         assert f"-o {fmt}=..." in result.output
 
-    def test_two_non_carrying_formats_are_still_rejected(
-        self, tmp_path: Path
-    ) -> None:
+    def test_two_non_carrying_formats_are_still_rejected(self, tmp_path: Path) -> None:
         # The rescue is "some export carries it", not "a second export was
         # given".
         old, new = self._pair(tmp_path)
@@ -442,9 +452,15 @@ class TestStatKeepsItsSummaryOnlyShape:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old), str(new), "--use-cases", str(manifest),
-                "-o", f"sarif={tmp_path / 'r.sarif'}",
-                "-o", f"html={tmp_path / 'r.html'}",
+                "compare",
+                str(old),
+                str(new),
+                "--use-cases",
+                str(manifest),
+                "-o",
+                f"sarif={tmp_path / 'r.sarif'}",
+                "-o",
+                f"html={tmp_path / 'r.html'}",
             ],
         )
         assert result.exit_code == 64, result.output
@@ -452,9 +468,7 @@ class TestStatKeepsItsSummaryOnlyShape:
         assert "-o html=..." in result.output
 
     @pytest.mark.parametrize("fmt", ["json", "markdown", "review"])
-    def test_the_carrying_formats_stay_accepted(
-        self, tmp_path: Path, fmt: str
-    ) -> None:
+    def test_the_carrying_formats_stay_accepted(self, tmp_path: Path, fmt: str) -> None:
         # The rejection must be scoped to the formats that really drop it.
         old, new = self._pair(tmp_path)
         manifest = tmp_path / "uc.yaml"
@@ -462,14 +476,14 @@ class TestStatKeepsItsSummaryOnlyShape:
         result = CliRunner().invoke(
             main,
             [
-            "compare",
-            str(old),
-            str(new),
-            "--use-cases",
-            str(manifest),
-            "-o",
-            f"{fmt}=-",
-        ],
+                "compare",
+                str(old),
+                str(new),
+                "--use-cases",
+                str(manifest),
+                "-o",
+                f"{fmt}=-",
+            ],
         )
         assert "--use-cases is not supported" not in result.output, result.output
 
@@ -496,8 +510,11 @@ class TestStatKeepsItsSummaryOnlyShape:
         from abicheck.reporter import to_stat_json
 
         result = DiffResult(
-            old_version="1", new_version="2", library="libfoo.so",
-            changes=[_change("train")], verdict=Verdict.BREAKING,
+            old_version="1",
+            new_version="2",
+            library="libfoo.so",
+            changes=[_change("train")],
+            verdict=Verdict.BREAKING,
         )
         result.use_case_impact = build_use_case_impact(
             [UseCaseDefinition(use_case="uc", entrypoints=("train",))],
@@ -621,18 +638,24 @@ class TestOneRowPerUseCaseNotPerManifestEntry:
         assert row.tests == ("t1", "t2")
 
     def test_a_repeat_inside_one_use_case_is_not_listed_twice(self) -> None:
-        (row,) = self._impact([
-            UseCaseDefinition(use_case="training", entrypoints=("train",)),
-            UseCaseDefinition(use_case="training", entrypoints=("train", "predict")),
-        ]).resolutions
+        (row,) = self._impact(
+            [
+                UseCaseDefinition(use_case="training", entrypoints=("train",)),
+                UseCaseDefinition(
+                    use_case="training", entrypoints=("train", "predict")
+                ),
+            ]
+        ).resolutions
         assert row.resolved_entrypoints == ("train", "predict")
 
     def test_distinct_use_cases_are_still_separate(self) -> None:
         # The coalescing must key on the name, not collapse everything.
-        impact = self._impact([
-            UseCaseDefinition(use_case="training", entrypoints=("train",)),
-            UseCaseDefinition(use_case="serving", entrypoints=("predict",)),
-        ])
+        impact = self._impact(
+            [
+                UseCaseDefinition(use_case="training", entrypoints=("train",)),
+                UseCaseDefinition(use_case="serving", entrypoints=("predict",)),
+            ]
+        )
         assert impact.use_case_count == 2
         assert [r.use_case for r in impact.resolutions] == ["training", "serving"]
 
@@ -664,7 +687,9 @@ class TestTheDryRunValidatesTheManifest:
                 version=version,
                 functions=[
                     Function(
-                        name=f, mangled=f, return_type="int",
+                        name=f,
+                        mangled=f,
+                        return_type="int",
                         visibility=Visibility.PUBLIC,
                     )
                     for f in funcs

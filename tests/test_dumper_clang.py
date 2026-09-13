@@ -141,12 +141,16 @@ def test_parse_functions_signature_and_qualifiers() -> None:
     assert fn.params[1].default == "1"
 
 
-@pytest.mark.parametrize("attr_kind, expected", [
-    ("MSABIAttr", "ms_abi"),
-    ("SysVABIAttr", "sysv_abi"),
-])
+@pytest.mark.parametrize(
+    "attr_kind, expected",
+    [
+        ("MSABIAttr", "ms_abi"),
+        ("SysVABIAttr", "sysv_abi"),
+    ],
+)
 def test_parse_functions_preserves_x86_64_abi_attributes(
-    attr_kind: str, expected: str,
+    attr_kind: str,
+    expected: str,
 ) -> None:
     root = _tu(
         {
@@ -164,7 +168,9 @@ def test_parse_functions_preserves_x86_64_abi_attributes(
     assert fn.contract_attributes == [expected]
 
 
-def test_parse_functions_recovers_outer_ms_abi_from_qual_type_when_attr_node_is_omitted() -> None:
+def test_parse_functions_recovers_outer_ms_abi_from_qual_type_when_attr_node_is_omitted() -> (
+    None
+):
     root = _tu(
         {
             "kind": "FunctionDecl",
@@ -207,9 +213,7 @@ def test_parse_functions_does_not_claim_nested_callback_abi_attribute() -> None:
             "name": "api",
             "loc": {"file": "include/api.h", "line": 3},
             "mangledName": "api",
-            "type": {
-                "qualType": "void (void (*)(int) __attribute__((ms_abi)))"
-            },
+            "type": {"qualType": "void (void (*)(int) __attribute__((ms_abi)))"},
             "inner": [],
         }
     )
@@ -226,9 +230,7 @@ def test_parse_functions_does_not_claim_nested_return_function_abi_attribute() -
             "name": "factory",
             "loc": {"file": "include/api.h", "line": 3},
             "mangledName": "factory",
-            "type": {
-                "qualType": "void (__attribute__((sysv_abi)) *())()"
-            },
+            "type": {"qualType": "void (__attribute__((sysv_abi)) *())()"},
             "inner": [],
         }
     )
@@ -238,7 +240,9 @@ def test_parse_functions_does_not_claim_nested_return_function_abi_attribute() -
     assert fn.contract_attributes == []
 
 
-def test_parse_functions_does_not_claim_real_clang_returned_callback_abi_spelling() -> None:
+def test_parse_functions_does_not_claim_real_clang_returned_callback_abi_spelling() -> (
+    None
+):
     root = _tu(
         {
             "kind": "FunctionDecl",
@@ -247,9 +251,7 @@ def test_parse_functions_does_not_claim_real_clang_returned_callback_abi_spellin
             "mangledName": "factory",
             # This is the real Clang JSON AST spelling for:
             # void (__attribute__((ms_abi)) *factory(void))(int);
-            "type": {
-                "qualType": "void (*(void))(int) __attribute__((ms_abi))"
-            },
+            "type": {"qualType": "void (*(void))(int) __attribute__((ms_abi))"},
             "inner": [],
         }
     )
@@ -259,20 +261,31 @@ def test_parse_functions_does_not_claim_real_clang_returned_callback_abi_spellin
     assert fn.contract_attributes == []
 
 
-def test_configured_target_triple_uses_frontend_option_order(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_configured_target_triple_uses_frontend_option_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, object] = {}
 
     def _run(cmd: list[str], **kwargs: object) -> object:
         captured["cmd"] = cmd
-        return type("Result", (), {"returncode": 0, "stdout": "x86_64-pc-linux-gnu\n"})()
+        return type(
+            "Result", (), {"returncode": 0, "stdout": "x86_64-pc-linux-gnu\n"}
+        )()
 
     monkeypatch.setattr(dumper.subprocess, "run", _run)
 
-    assert _configured_target_triple(
-        "--target=first -DFROM_OPTIONS", ("--target=last", "@flags.rsp"), "clang"
-    ) == "x86_64-pc-linux-gnu"
+    assert (
+        _configured_target_triple(
+            "--target=first -DFROM_OPTIONS", ("--target=last", "@flags.rsp"), "clang"
+        )
+        == "x86_64-pc-linux-gnu"
+    )
     assert captured["cmd"] == [
-        "clang", "--target=first", "-DFROM_OPTIONS", "--target=last", "@flags.rsp",
+        "clang",
+        "--target=first",
+        "-DFROM_OPTIONS",
+        "--target=last",
+        "@flags.rsp",
         "-print-target-triple",
     ]
 
@@ -331,9 +344,12 @@ def test_parse_functions_does_not_make_ignored_attribute_spelling_a_fact() -> No
 def test_parse_functions_discards_explicit_sysv_default_for_known_target() -> None:
     root = _tu(
         {
-            "kind": "FunctionDecl", "name": "api",
-            "loc": {"file": "include/api.h", "line": 3}, "mangledName": "api",
-            "type": {"qualType": "void () __attribute__((sysv_abi))"}, "inner": [],
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            "type": {"qualType": "void () __attribute__((sysv_abi))"},
+            "inner": [],
         }
     )
 
@@ -347,9 +363,12 @@ def test_parse_functions_discards_explicit_sysv_default_for_known_target() -> No
 def test_parse_functions_discards_explicit_ms_default_for_known_target() -> None:
     root = _tu(
         {
-            "kind": "FunctionDecl", "name": "api",
-            "loc": {"file": "include/api.h", "line": 3}, "mangledName": "api",
-            "type": {"qualType": "void () __attribute__((ms_abi))"}, "inner": [],
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            "type": {"qualType": "void () __attribute__((ms_abi))"},
+            "inner": [],
         }
     )
 
@@ -363,9 +382,12 @@ def test_parse_functions_discards_explicit_ms_default_for_known_target() -> None
 def test_parse_functions_keeps_abi_spelling_without_known_x86_default() -> None:
     root = _tu(
         {
-            "kind": "FunctionDecl", "name": "api",
-            "loc": {"file": "include/api.h", "line": 3}, "mangledName": "api",
-            "type": {"qualType": "void () __attribute__((ms_abi))"}, "inner": [],
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "include/api.h", "line": 3},
+            "mangledName": "api",
+            "type": {"qualType": "void () __attribute__((ms_abi))"},
+            "inner": [],
         }
     )
 
@@ -3763,7 +3785,9 @@ def test_header_ast_parser_clang_branch(monkeypatch: pytest.MonkeyPatch) -> None
             "type": {"qualType": "void ()"},
         }
     )
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False))
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
     parser = _header_ast_parser(
         [],
         [],
@@ -3817,17 +3841,31 @@ def test_header_ast_parser_passes_explicit_target_to_clang_parser(
 ) -> None:
     ast = _tu(
         {
-            "kind": "FunctionDecl", "name": "api",
-            "loc": {"file": "api.h", "line": 1}, "mangledName": "api",
+            "kind": "FunctionDecl",
+            "name": "api",
+            "loc": {"file": "api.h", "line": 1},
+            "mangledName": "api",
             "type": {"qualType": "void () __attribute__((sysv_abi))"},
         }
     )
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False))
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
     parser = _header_ast_parser(
-        [], [], backend="clang", compiler="c++", gcc_path=None, gcc_prefix=None,
-        gcc_options="--target=x86_64-pc-linux-gnu", sysroot=None, nostdinc=False,
-        lang=None, exported_dynamic={"api"}, exported_static=set(),
-        public_header_paths=[], public_dir_paths=[],
+        [],
+        [],
+        backend="clang",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options="--target=x86_64-pc-linux-gnu",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic={"api"},
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
     )
 
     assert [f.contract_attributes for f in parser.parse_functions()] == [[]]
@@ -3847,7 +3885,9 @@ def test_header_ast_parser_clang_branch_records_abi_dialect(
             "type": {"qualType": "void ()"},
         }
     )
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False))
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
     parser = _header_ast_parser(
         [],
         [],
@@ -3879,7 +3919,9 @@ def test_header_ast_parser_clang_branch_records_msvc_abi_dialect(
             "type": {"qualType": "void ()"},
         }
     )
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False))
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
     monkeypatch.setattr(
         dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/llvm/bin/cl.exe"
     )

@@ -379,9 +379,7 @@ def resolved_config_to_dict(config: CompatibilityEvaluationConfig) -> dict[str, 
             "hints": {
                 "internal_namespaces": list(config.surface.internal_namespaces),
                 # ADR-069; always emitted, so "absent" never means "empty".
-                "experimental_namespaces": list(
-                    config.surface.experimental_namespaces
-                ),
+                "experimental_namespaces": list(config.surface.experimental_namespaces),
             },
         },
         "assurance": {"require_evidence": config.assurance.require_evidence},

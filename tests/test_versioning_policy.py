@@ -173,7 +173,9 @@ class TestReleaseAcceptance:
             promise=CompatibilityPromise.ABI_WITHIN_MAJOR,
             enforcement=VersioningEnforcement.BLOCK,
         )
-        acceptance = evaluate_release_acceptance(_diff_result(Verdict.API_BREAK), policy)
+        acceptance = evaluate_release_acceptance(
+            _diff_result(Verdict.API_BREAK), policy
+        )
         assert acceptance.accepted is True
 
     def test_api_within_minor_rejects_an_api_break(self) -> None:
@@ -183,7 +185,9 @@ class TestReleaseAcceptance:
             promise=CompatibilityPromise.API_WITHIN_MINOR,
             enforcement=VersioningEnforcement.BLOCK,
         )
-        acceptance = evaluate_release_acceptance(_diff_result(Verdict.API_BREAK), policy)
+        acceptance = evaluate_release_acceptance(
+            _diff_result(Verdict.API_BREAK), policy
+        )
         assert acceptance.accepted is False
 
     def test_strict_promise_with_warn_accepts_but_notes_deviation(self) -> None:

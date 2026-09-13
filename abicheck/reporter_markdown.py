@@ -1302,7 +1302,11 @@ def compute_severity_summary(
     )
 
     categorized = categorize_changes(
-        changes, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
+        changes,
+        policy=policy,
+        kind_sets=kind_sets,
+        policy_file=policy_file,
+        today=today,
     )
     # ADR-049 D1: the `Count` column above is factual over what is
     # displayed, but `Exit Impact` is a claim about the *gate* -- so it has

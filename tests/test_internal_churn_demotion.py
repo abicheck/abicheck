@@ -196,22 +196,37 @@ def test_non_matching_frozen_namespace_still_demotes():
 
 def test_public_typedef_to_internal_type_is_not_demoted():
     pub_fn = Function(
-        name="make", mangled="make", return_type="PublicImpl",
-        params=[], visibility=Visibility.PUBLIC,
+        name="make",
+        mangled="make",
+        return_type="PublicImpl",
+        params=[],
+        visibility=Visibility.PUBLIC,
     )
     old = AbiSnapshot(
-        library="lib.so.1", version="1", functions=[pub_fn],
+        library="lib.so.1",
+        version="1",
+        functions=[pub_fn],
         types=[
-            RecordType(name="ns::detail::Impl", kind="struct", size_bits=32,
-                       fields=[TypeField(name="x", type="int", offset_bits=0)]),
+            RecordType(
+                name="ns::detail::Impl",
+                kind="struct",
+                size_bits=32,
+                fields=[TypeField(name="x", type="int", offset_bits=0)],
+            ),
         ],
         typedefs={"PublicImpl": "ns::detail::Impl"},
     )
     new = AbiSnapshot(
-        library="lib.so.1", version="2", functions=[pub_fn],
+        library="lib.so.1",
+        version="2",
+        functions=[pub_fn],
         types=[
-            RecordType(name="ns::detail::Impl", kind="struct", size_bits=64,
-                       fields=[TypeField(name="x", type="long long", offset_bits=0)]),
+            RecordType(
+                name="ns::detail::Impl",
+                kind="struct",
+                size_bits=64,
+                fields=[TypeField(name="x", type="long long", offset_bits=0)],
+            ),
         ],
         typedefs={"PublicImpl": "ns::detail::Impl"},
     )

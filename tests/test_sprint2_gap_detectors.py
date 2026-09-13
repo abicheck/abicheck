@@ -8,6 +8,7 @@ Covers:
 - BASE_CLASS_POSITION_CHANGED  (base class order reordered)
 - BASE_CLASS_VIRTUAL_CHANGED   (base became virtual or non-virtual)
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
@@ -20,6 +21,7 @@ from abicheck.model import (
 )
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _snap(
     version: str = "1.0",
@@ -48,7 +50,9 @@ def _func(name: str, mangled: str | None = None, **kwargs) -> Function:
     )
 
 
-def _var(name: str, mangled: str | None = None, type: str = "int", **kwargs) -> Variable:
+def _var(
+    name: str, mangled: str | None = None, type: str = "int", **kwargs
+) -> Variable:
     return Variable(
         name=name,
         mangled=mangled or f"_{name}",
@@ -67,6 +71,7 @@ def _kinds(result) -> set[ChangeKind]:
 
 
 # ── FUNC_DELETED ──────────────────────────────────────────────────────────────
+
 
 class TestFuncDeleted:
     def test_func_becomes_deleted_is_breaking(self):
@@ -99,6 +104,7 @@ class TestFuncDeleted:
 
 # ── VAR_BECAME_CONST ─────────────────────────────────────────────────────────
 
+
 class TestVarBecameConst:
     def test_var_became_const_is_breaking(self):
         old = _snap(variables=[_var("g_buf", "_g_buf", is_const=False)])
@@ -121,6 +127,7 @@ class TestVarBecameConst:
 
 
 # ── VAR_LOST_CONST ───────────────────────────────────────────────────────────
+
 
 class TestVarLostConst:
     def test_var_lost_const_is_breaking(self):
@@ -145,6 +152,7 @@ class TestVarLostConst:
 
 
 # ── TYPE_BECAME_OPAQUE ───────────────────────────────────────────────────────
+
 
 class TestTypeBecameOpaque:
     def test_complete_to_opaque_is_breaking(self):
@@ -178,6 +186,7 @@ class TestTypeBecameOpaque:
 
 
 # ── BASE_CLASS_POSITION_CHANGED ───────────────────────────────────────────────
+
 
 class TestBaseClassPositionChanged:
     def test_base_reorder_is_breaking(self):
@@ -215,6 +224,7 @@ class TestBaseClassPositionChanged:
 
 
 # ── BASE_CLASS_VIRTUAL_CHANGED ────────────────────────────────────────────────
+
 
 class TestBaseClassVirtualChanged:
     def test_base_became_virtual_is_breaking(self):
@@ -274,7 +284,11 @@ class TestOpaqueSizeBitsNone:
     def test_opaque_type_no_size_bits(self):
         """Real castxml forward-decls have size_bits=None — must not crash."""
         old = _snap(types=[RecordType(name="Ctx", kind="struct", size_bits=64)])
-        new = _snap(types=[RecordType(name="Ctx", kind="struct", size_bits=None, is_opaque=True)])
+        new = _snap(
+            types=[
+                RecordType(name="Ctx", kind="struct", size_bits=None, is_opaque=True)
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.TYPE_BECAME_OPAQUE in _kinds(result)
         assert result.verdict == Verdict.BREAKING
@@ -289,7 +303,11 @@ class TestVarConstFalsePositive:
         assert ChangeKind.VAR_BECAME_CONST not in _kinds(result)
 
     def test_type_name_const_iterator_no_false_positive(self):
-        old = _snap(variables=[_var("it", "_it", type="const_iterator", is_const=False)])
-        new = _snap(variables=[_var("it", "_it", type="const_iterator", is_const=False)])
+        old = _snap(
+            variables=[_var("it", "_it", type="const_iterator", is_const=False)]
+        )
+        new = _snap(
+            variables=[_var("it", "_it", type="const_iterator", is_const=False)]
+        )
         result = compare(old, new)
         assert ChangeKind.VAR_BECAME_CONST not in _kinds(result)

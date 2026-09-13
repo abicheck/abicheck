@@ -17,7 +17,9 @@ def _surface(concept_value: str) -> SourceAbiSurface:
                 kind="concept",
                 qualified_name="lib::Accepts",
                 value=concept_value,
-                source_location=SourceLocation(path="include/lib.h", line=7, origin="PUBLIC_HEADER"),
+                source_location=SourceLocation(
+                    path="include/lib.h", line=7, origin="PUBLIC_HEADER"
+                ),
                 visibility="public_header",
                 api_relevant=True,
             )

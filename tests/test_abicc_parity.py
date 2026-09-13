@@ -13,6 +13,7 @@ Three test classes mirror the libabigail parity structure:
 
 Requires: abi-compliance-checker, gcc/g++, castxml.
 """
+
 from __future__ import annotations
 
 import re
@@ -42,7 +43,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "int add(int a, int b) { return a + b; }",
         "int add(int a, int b);\nint sub(int a, int b);",
         "int add(int a, int b);",
-        "c", "BREAKING", "BREAKING", "parity",
+        "c",
+        "BREAKING",
+        "BREAKING",
+        "parity",
     ),
     (
         "fn_added",
@@ -50,7 +54,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "int add(int a, int b) { return a + b; }\nint mul(int a, int b) { return a*b; }",
         "int add(int a, int b);",
         "int add(int a, int b);\nint mul(int a, int b);",
-        "c", "COMPATIBLE", "COMPATIBLE", "parity",
+        "c",
+        "COMPATIBLE",
+        "COMPATIBLE",
+        "parity",
     ),
     (
         "no_change",
@@ -58,7 +65,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "int add(int a, int b) { return a + b; }",
         "int add(int a, int b);",
         "int add(int a, int b);",
-        "c", "NO_CHANGE", "NO_CHANGE", "parity",
+        "c",
+        "NO_CHANGE",
+        "NO_CHANGE",
+        "parity",
     ),
     (
         "return_type",
@@ -66,7 +76,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "long get_val(void) { return 42; }",
         "int  get_val(void);",
         "long get_val(void);",
-        "c", "BREAKING", "BREAKING", "parity",
+        "c",
+        "BREAKING",
+        "BREAKING",
+        "parity",
     ),
     (
         "param_type",
@@ -74,7 +87,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "void set_val(long x) { (void)x; }",
         "void set_val(int  x);",
         "void set_val(long x);",
-        "c", "BREAKING", "BREAKING", "parity",
+        "c",
+        "BREAKING",
+        "BREAKING",
+        "parity",
     ),
     # enum value change: ABICC detects with headers
     (
@@ -85,7 +101,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "Color get_color(void) { return RED; }",
         "typedef enum { RED=0, GREEN=1, BLUE=2 } Color;\nColor get_color(void);",
         "typedef enum { RED=0, GREEN=10, BLUE=2 } Color;\nColor get_color(void);",
-        "c", "BREAKING", "BREAKING", "parity",
+        "c",
+        "BREAKING",
+        "BREAKING",
+        "parity",
     ),
     # visibility change
     (
@@ -98,7 +117,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         '__attribute__((visibility("default"))) int api();',
         '__attribute__((visibility("hidden")))  int helper();\n'
         '__attribute__((visibility("default"))) int api();',
-        "c", "BREAKING", "BREAKING", "parity",
+        "c",
+        "BREAKING",
+        "BREAKING",
+        "parity",
     ),
     # ── abicheck correct: vtable_reorder — ABICC misses in XML descriptor mode ──
     # ABICC without abi-dumper doesn't detect vtable reordering from headers+libs;
@@ -119,7 +141,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "Base* make();",
         "struct Base { virtual int bar(); virtual int foo(); virtual ~Base(); };\n"
         "Base* make();",
-        "cpp", "BREAKING", "NO_CHANGE", "correct",
+        "cpp",
+        "BREAKING",
+        "NO_CHANGE",
+        "correct",
     ),
     # ── abicheck correct: struct_size — ABICC misses in XML descriptor mode ──
     # ABICC in XML descriptor mode reports COMPATIBLE (sees field additions but
@@ -132,7 +157,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "Point make_point(int x) { Point p = {x, 0}; return p; }",
         "typedef struct { int x; } Point;\nPoint make_point(int x);",
         "typedef struct { int x; int y; } Point;\nPoint make_point(int x);",
-        "c", "BREAKING", "COMPATIBLE", "correct",
+        "c",
+        "BREAKING",
+        "COMPATIBLE",
+        "correct",
     ),
     # ── parity: multiple functions removed ──
     (
@@ -141,7 +169,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "int a(void) { return 1; }",
         "int a(void);\nint b(void);\nint c(void);",
         "int a(void);",
-        "c", "BREAKING", "BREAKING", "parity",
+        "c",
+        "BREAKING",
+        "BREAKING",
+        "parity",
     ),
     # ── parity: multiple functions added ──
     (
@@ -150,7 +181,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "int a(void) { return 1; }\nint b(void) { return 2; }\nint c(void) { return 3; }",
         "int a(void);",
         "int a(void);\nint b(void);\nint c(void);",
-        "c", "COMPATIBLE", "COMPATIBLE", "parity",
+        "c",
+        "COMPATIBLE",
+        "COMPATIBLE",
+        "parity",
     ),
     # ── parity: enum member removed ──
     (
@@ -159,7 +193,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "typedef enum { A=0, C=2 } E;\nE get_e(void) { return A; }",
         "typedef enum { A=0, B=1, C=2 } E;\nE get_e(void);",
         "typedef enum { A=0, C=2 } E;\nE get_e(void);",
-        "c", "BREAKING", "BREAKING", "parity",
+        "c",
+        "BREAKING",
+        "BREAKING",
+        "parity",
     ),
     # ── global variable removed — parity confirmed ──
     # abicheck now agrees with ABICC: removing exported global variable is BREAKING.
@@ -171,7 +208,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "int get_version(void) { return 2; }",
         "extern int api_version;\nint get_version(void);",
         "int get_version(void);",
-        "c", "BREAKING", "BREAKING", "parity",
+        "c",
+        "BREAKING",
+        "BREAKING",
+        "parity",
     ),
     # ── issue#128: non-trivial destructor changes calling convention (x64 SysV ABI) ──
     # Adding a user-defined destructor to a struct makes it non-trivial under the
@@ -189,7 +229,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "v get_v(void) { v x; x.a = 1.0f; x.b = 2.0f; return x; }",
         "struct v { float a; float b; };\nv get_v(void);",
         "struct v { float a; float b; ~v(); };\nv get_v(void);",
-        "cpp", "BREAKING", "NO_CHANGE", "correct",
+        "cpp",
+        "BREAKING",
+        "NO_CHANGE",
+        "correct",
     ),
     # ── PR#109: typedef→derived class false positive in base detection ──
     # ABICC had a bug where a typedef pointing to a derived class caused a false
@@ -216,7 +259,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "struct Derived : public Base { int y; };\n"
         "typedef Derived MyType;\n"
         "MyType* get_obj(void);",
-        "cpp", "NO_CHANGE", "NO_CHANGE", "parity",
+        "cpp",
+        "NO_CHANGE",
+        "NO_CHANGE",
+        "parity",
     ),
     # ── Issue #100 — = delete now detected by abicheck ────────────────────────
     # Both abicheck and ABICC used to miss the = delete change through the
@@ -237,11 +283,13 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "Foo* make_foo(int x) { (void)x; static Foo f; return &f; }",
         "class Foo { public: Foo(); Foo(const Foo&) = delete; };\n"
         "Foo* make_foo(int x) { (void)x; static Foo f; return &f; }",
-        "class Foo { public: Foo(); Foo(const Foo&); };\n"
-        "Foo* make_foo(int x);",
+        "class Foo { public: Foo(); Foo(const Foo&); };\nFoo* make_foo(int x);",
         "class Foo { public: Foo(); Foo(const Foo&) = delete; };\n"
         "Foo* make_foo(int x);",
-        "cpp", "BREAKING", "NO_CHANGE", "correct",
+        "cpp",
+        "BREAKING",
+        "NO_CHANGE",
+        "correct",
     ),
     # ── Issue #96 — Incomplete type → complete type (type became opaque) ─────
     # When a struct goes from complete definition to forward-declaration only,
@@ -256,11 +304,12 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "struct Blob* alloc_blob(void) { static struct Blob b; return &b; }",
         "struct Blob { int x; int y; };\n"
         "struct Blob* alloc_blob(void) { static struct Blob b; return &b; }",
-        "struct Blob { int x; int y; };\n"
-        "struct Blob* alloc_blob(void);",
-        "struct Blob;\n"
-        "struct Blob* alloc_blob(void);",
-        "c", "BREAKING", "BREAKING", "parity",
+        "struct Blob { int x; int y; };\nstruct Blob* alloc_blob(void);",
+        "struct Blob;\nstruct Blob* alloc_blob(void);",
+        "c",
+        "BREAKING",
+        "BREAKING",
+        "parity",
     ),
     # ── Issue #125 — Inline functions not checked ─────────────────────────────
     # When the header marks a function as inline, callers may stop linking against
@@ -278,7 +327,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "int compute(int x) { return x * 2; }",
         "int compute(int x);",
         "inline int compute(int x) { return x * 2; }",
-        "cpp", "API_BREAK", "NO_CHANGE", "correct",
+        "cpp",
+        "API_BREAK",
+        "NO_CHANGE",
+        "correct",
     ),
     # ── Issue #125 — Function loses inline attribute ──────────────────────────
     # When an inline function loses the inline attribute in the header, existing
@@ -291,7 +343,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "int fast_compute(int x) { return x + 1; }",
         "inline int fast_compute(int x) { return x + 1; }",
         "int fast_compute(int x);",
-        "cpp", "COMPATIBLE", "NO_CHANGE", "risk",
+        "cpp",
+        "COMPATIBLE",
+        "NO_CHANGE",
+        "risk",
     ),
     # ── Issue #128 — Non-trivial destructor changes calling convention ────────
     # Adding a non-trivial destructor to a class affects whether the object is
@@ -326,7 +381,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "    ~Widget();\n"
         "};\n"
         "Widget make_widget(int v);",
-        "cpp", "BREAKING", "NO_CHANGE", "correct",
+        "cpp",
+        "BREAKING",
+        "NO_CHANGE",
+        "correct",
     ),
     # ── Risk: global var type widened (int→long, same size LP64) ─────────────
     # On LP64 (Linux x86-64), int=4 bytes, long=8 bytes.
@@ -341,7 +399,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         "long api_level = 3;",
         "extern int api_level;",
         "extern long api_level;",
-        "c", "BREAKING", "BREAKING", "parity",
+        "c",
+        "BREAKING",
+        "BREAKING",
+        "parity",
     ),
     # ── parity: no spurious visibility change ─────────────────────────────────
     # A class with a method that has an explicit visibility annotation should NOT
@@ -353,7 +414,10 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
         '__attribute__((visibility("default"))) int public_api(int x) { return x; }',
         '__attribute__((visibility("default"))) int public_api(int x);',
         '__attribute__((visibility("default"))) int public_api(int x);',
-        "c", "NO_CHANGE", "NO_CHANGE", "parity",
+        "c",
+        "NO_CHANGE",
+        "NO_CHANGE",
+        "parity",
     ),
 ]
 
@@ -369,6 +433,7 @@ _RISK = [c for c in PARITY_CASES if c[8] == "risk"]
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _require_tool(name: str) -> None:
     if shutil.which(name) is None:
         pytest.skip(f"{name} not found in PATH")
@@ -379,8 +444,16 @@ def _compile_so(src: str, out: Path, lang: str) -> None:
     src_file = out.with_suffix(ext)
     src_file.write_text(textwrap.dedent(src).strip(), encoding="utf-8")
     compiler = "gcc" if lang == "c" else "g++"
-    cmd = [compiler, "-shared", "-fPIC", "-g", "-fvisibility=default",
-           "-o", str(out), str(src_file)]
+    cmd = [
+        compiler,
+        "-shared",
+        "-fPIC",
+        "-g",
+        "-fvisibility=default",
+        "-o",
+        str(out),
+        str(src_file),
+    ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     if r.returncode != 0:
         pytest.fail(f"Compilation failed: {r.stderr[:200]}")
@@ -437,8 +510,12 @@ def _run_abicheck(
             warnings.catch_warnings(),
         ):
             warnings.simplefilter("ignore")
-            old_snap = dump(old, headers=headers_v1, version="v1", compiler=compiler, lang=lang)
-            new_snap = dump(new, headers=headers_v2, version="v2", compiler=compiler, lang=lang)
+            old_snap = dump(
+                old, headers=headers_v1, version="v1", compiler=compiler, lang=lang
+            )
+            new_snap = dump(
+                new, headers=headers_v2, version="v2", compiler=compiler, lang=lang
+            )
 
         # Parity baseline predates default scoping (ADR-024 Phase 5); compare
         # unscoped for an apples-to-apples verdict against abi-compliance-checker.
@@ -487,10 +564,14 @@ def _run_abicc(
 
     cmd = [
         "abi-compliance-checker",
-        "-lib", "libtest",
-        "-old", str(old_desc),
-        "-new", str(new_desc),
-        "-report-path", str(report_path),
+        "-lib",
+        "libtest",
+        "-old",
+        str(old_desc),
+        "-new",
+        str(new_desc),
+        "-report-path",
+        str(report_path),
     ]
 
     try:
@@ -529,10 +610,16 @@ def _run_abicc(
     #        type_problems_high:0;...;tool_version:2.3 -->
     # If any change-count field is non-zero, it's COMPATIBLE.
     change_fields = (
-        "affected", "added", "removed",
-        "type_problems_high", "type_problems_medium", "type_problems_low",
-        "interface_problems_high", "interface_problems_medium",
-        "interface_problems_low", "changed_constants",
+        "affected",
+        "added",
+        "removed",
+        "type_problems_high",
+        "type_problems_medium",
+        "type_problems_low",
+        "interface_problems_high",
+        "interface_problems_medium",
+        "interface_problems_low",
+        "changed_constants",
     )
     for field in change_fields:
         m = re.search(rf"{field}:(\d+)", report_text)
@@ -543,9 +630,13 @@ def _run_abicc(
 
 
 def _setup(
-    name: str, src_v1: str, src_v2: str,
-    hdr_v1: str | None, hdr_v2: str | None,
-    lang: str, tmp_path: Path,
+    name: str,
+    src_v1: str,
+    src_v2: str,
+    hdr_v1: str | None,
+    hdr_v2: str | None,
+    lang: str,
+    tmp_path: Path,
 ) -> tuple[str, str, str]:
     """Compile .so files, run both tools.
 
@@ -570,15 +661,24 @@ def _setup(
 # Test classes
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.abicc
 @pytest.mark.parametrize(
     "name,src_v1,src_v2,hdr_v1,hdr_v2,lang,abicheck_exp,abicc_exp,_",
-    _CONFIRMED, ids=[c[0] for c in _CONFIRMED],
+    _CONFIRMED,
+    ids=[c[0] for c in _CONFIRMED],
 )
 def test_confirmed_parity(
-    name: str, src_v1: str, src_v2: str,
-    hdr_v1: str | None, hdr_v2: str | None, lang: str,
-    abicheck_exp: str, abicc_exp: str, _: str, tmp_path: Path,
+    name: str,
+    src_v1: str,
+    src_v2: str,
+    hdr_v1: str | None,
+    hdr_v2: str | None,
+    lang: str,
+    abicheck_exp: str,
+    abicc_exp: str,
+    _: str,
+    tmp_path: Path,
 ) -> None:
     """Both tools must agree on verdict -- full parity enforced."""
     ac, cc, diag = _setup(name, src_v1, src_v2, hdr_v1, hdr_v2, lang, tmp_path)
@@ -590,12 +690,20 @@ def test_confirmed_parity(
 @pytest.mark.abicc
 @pytest.mark.parametrize(
     "name,src_v1,src_v2,hdr_v1,hdr_v2,lang,abicheck_exp,abicc_exp,_",
-    _CORRECT, ids=[c[0] for c in _CORRECT],
+    _CORRECT,
+    ids=[c[0] for c in _CORRECT],
 )
 def test_abicheck_correct(
-    name: str, src_v1: str, src_v2: str,
-    hdr_v1: str | None, hdr_v2: str | None, lang: str,
-    abicheck_exp: str, abicc_exp: str, _: str, tmp_path: Path,
+    name: str,
+    src_v1: str,
+    src_v2: str,
+    hdr_v1: str | None,
+    hdr_v2: str | None,
+    lang: str,
+    abicheck_exp: str,
+    abicc_exp: str,
+    _: str,
+    tmp_path: Path,
 ) -> None:
     """abicheck detects the break; ABICC misses it.
 
@@ -614,12 +722,20 @@ def test_abicheck_correct(
 @pytest.mark.abicc
 @pytest.mark.parametrize(
     "name,src_v1,src_v2,hdr_v1,hdr_v2,lang,abicheck_exp,abicc_exp,_",
-    _DIVERGE, ids=[c[0] for c in _DIVERGE],
+    _DIVERGE,
+    ids=[c[0] for c in _DIVERGE],
 )
 def test_known_divergence(
-    name: str, src_v1: str, src_v2: str,
-    hdr_v1: str | None, hdr_v2: str | None, lang: str,
-    abicheck_exp: str, abicc_exp: str, _: str, tmp_path: Path,
+    name: str,
+    src_v1: str,
+    src_v2: str,
+    hdr_v1: str | None,
+    hdr_v2: str | None,
+    lang: str,
+    abicheck_exp: str,
+    abicc_exp: str,
+    _: str,
+    tmp_path: Path,
 ) -> None:
     """Intentional stable divergences. Fails if pattern changes unexpectedly."""
     ac, cc, diag = _setup(name, src_v1, src_v2, hdr_v1, hdr_v2, lang, tmp_path)
@@ -631,8 +747,7 @@ def test_known_divergence(
         )
 
     assert ac == abicheck_exp, (
-        f"abicheck changed unexpectedly on '{name}': "
-        f"expected {abicheck_exp}, got {ac}"
+        f"abicheck changed unexpectedly on '{name}': expected {abicheck_exp}, got {ac}"
     )
     assert cc == abicc_exp, (
         f"ABICC changed unexpectedly on '{name}': "
@@ -643,12 +758,20 @@ def test_known_divergence(
 @pytest.mark.abicc
 @pytest.mark.parametrize(
     "name,src_v1,src_v2,hdr_v1,hdr_v2,lang,abicheck_exp,abicc_exp,_",
-    _RISK, ids=[c[0] for c in _RISK],
+    _RISK,
+    ids=[c[0] for c in _RISK],
 )
 def test_risk(
-    name: str, src_v1: str, src_v2: str,
-    hdr_v1: str | None, hdr_v2: str | None, lang: str,
-    abicheck_exp: str, abicc_exp: str, _: str, tmp_path: Path,
+    name: str,
+    src_v1: str,
+    src_v2: str,
+    hdr_v1: str | None,
+    hdr_v2: str | None,
+    lang: str,
+    abicheck_exp: str,
+    abicc_exp: str,
+    _: str,
+    tmp_path: Path,
 ) -> None:
     """Potentially breaking changes (REVIEW_NEEDED / risk category).
 
@@ -660,8 +783,7 @@ def test_risk(
     """
     ac, cc, diag = _setup(name, src_v1, src_v2, hdr_v1, hdr_v2, lang, tmp_path)
     assert ac == abicheck_exp, (
-        f"abicheck changed unexpectedly on '{name}': "
-        f"expected {abicheck_exp}, got {ac}"
+        f"abicheck changed unexpectedly on '{name}': expected {abicheck_exp}, got {ac}"
     )
     # ABICC verdict is informational for risk cases — log but don't hard-fail
     if ac == cc:

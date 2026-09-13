@@ -170,9 +170,15 @@ def pathological_lib(tmp_path: Path) -> tuple[Path, Path]:
     so = tmp_path / "libdeep.so"
     subprocess.run(
         [
-            "g++", "-shared", "-fPIC", "-std=c++20",
+            "g++",
+            "-shared",
+            "-fPIC",
+            "-std=c++20",
             f"-ftemplate-depth={_DEEP_TEMPLATE_DEPTH + 50}",
-            "-o", str(so), str(src), f"-I{tmp_path}",
+            "-o",
+            str(so),
+            str(src),
+            f"-I{tmp_path}",
         ],
         check=True,
         capture_output=True,

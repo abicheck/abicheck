@@ -28,6 +28,7 @@ signature*: when ``CONFIG_MODVERSIONS`` is on, the loader rejects an
 out-of-tree module whose embedded CRC disagrees, so a CRC change is a hard load
 break even though the symbol name is unchanged.
 """
+
 from __future__ import annotations
 
 import os

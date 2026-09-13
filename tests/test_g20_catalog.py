@@ -34,9 +34,7 @@ _EXAMPLES = example_catalog.CASES_DIR
 _GT = example_catalog.load_ground_truth()["verdicts"]
 
 #: G20 cases: those declaring a cross-check expectation (the v4 audit corpus).
-_G20_CASES = sorted(
-    name for name, info in _GT.items() if info.get("mode") == "audit"
-)
+_G20_CASES = sorted(name for name, info in _GT.items() if info.get("mode") == "audit")
 
 
 def _kinds(case_name: str, filename: str = "snapshot.abi.json") -> set[str]:

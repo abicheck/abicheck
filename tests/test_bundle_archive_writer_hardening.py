@@ -104,7 +104,9 @@ class TestBundleArchiveWriterCloseFailureCleanup:
             nonlocal calls
             calls += 1
             if calls == 1:
-                raise OSError(errno.ENOSPC, "simulated disk full while writing central directory")
+                raise OSError(
+                    errno.ENOSPC, "simulated disk full while writing central directory"
+                )
             # A later __del__-triggered close() (the underlying fp is
             # already closed by this class's own cleanup path by then)
             # must not raise a second, unrelated exception during GC.
@@ -306,7 +308,8 @@ class TestBundleArchiveWriterNewArchivePermissions:
     `TestBundleArchiveWriterDoesNotToggleTheProcessUmask` below."""
 
     @pytest.mark.skipif(
-        sys.platform == "win32", reason="POSIX permission bits are not meaningful on Windows"
+        sys.platform == "win32",
+        reason="POSIX permission bits are not meaningful on Windows",
     )
     def test_a_new_archive_gets_umask_appropriate_permissions(
         self, tmp_path: Path
@@ -323,7 +326,8 @@ class TestBundleArchiveWriterNewArchivePermissions:
         assert stat.S_IMODE(path.stat().st_mode) == 0o644
 
     @pytest.mark.skipif(
-        sys.platform == "win32", reason="POSIX permission bits are not meaningful on Windows"
+        sys.platform == "win32",
+        reason="POSIX permission bits are not meaningful on Windows",
     )
     def test_a_new_archive_honors_a_stricter_umask(self, tmp_path: Path) -> None:
         path = tmp_path / "bundle.archive.zip"
@@ -338,7 +342,8 @@ class TestBundleArchiveWriterNewArchivePermissions:
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
     @pytest.mark.skipif(
-        sys.platform == "win32", reason="POSIX permission bits are not meaningful on Windows"
+        sys.platform == "win32",
+        reason="POSIX permission bits are not meaningful on Windows",
     )
     def test_overwriting_an_existing_archive_still_preserves_its_mode(
         self, tmp_path: Path

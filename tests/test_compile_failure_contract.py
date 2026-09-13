@@ -27,6 +27,7 @@ These tests state the contract as invariants over the whole failure domain
 optional-feature label), not against the one flag that happened to break —
 AGENTS.md, "A bug fix's regression test targets the bug *class*".
 """
+
 from __future__ import annotations
 
 import ast
@@ -45,8 +46,12 @@ _SRC = "int fn(void) { return 0; }"
 Failed = pytest.fail.Exception
 
 
-def _completed(returncode: int, stderr: bytes = b"boom") -> subprocess.CompletedProcess[bytes]:
-    return subprocess.CompletedProcess(args=["cc"], returncode=returncode, stdout=b"", stderr=stderr)
+def _completed(
+    returncode: int, stderr: bytes = b"boom"
+) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.CompletedProcess(
+        args=["cc"], returncode=returncode, stdout=b"", stderr=stderr
+    )
 
 
 # The oracle is deliberately *not* the implementation's own branch: "a nonzero
@@ -68,7 +73,9 @@ def _expected(returncode: int, optional_feature: str | None) -> str:
     [0, 1, 2, 4, 33, 64, 126, 127, 128, 139, 255, -9, -11],
 )
 @pytest.mark.parametrize("optional_feature", [None, "-fsanitize=address"])
-def test_outcome_over_the_whole_exit_status_domain(returncode: int, optional_feature: str | None) -> None:
+def test_outcome_over_the_whole_exit_status_domain(
+    returncode: int, optional_feature: str | None
+) -> None:
     expected = _expected(returncode, optional_feature)
     result = _completed(returncode)
 
@@ -90,11 +97,7 @@ def test_outcome_over_the_whole_exit_status_domain(returncode: int, optional_fea
 
 def test_oracle_is_not_a_constant() -> None:
     """Vacuity guard: an oracle reduced to one answer makes the sweep vacuous."""
-    answers = {
-        _expected(rc, feature)
-        for rc in (0, 1)
-        for feature in (None, "x")
-    }
+    answers = {_expected(rc, feature) for rc in (0, 1) for feature in (None, "x")}
     assert answers == {"return", "skip", "fail"}
 
 
@@ -116,7 +119,11 @@ def test_failure_diagnostics_survive_any_stderr(stderr: bytes) -> None:
     compiler error."""
     with pytest.raises(Failed) as excinfo:
         _require_compile_success(
-            "clang", ["clang", "-shared", "-o", "x.so"], _SRC, _completed(1, stderr), optional_feature=None
+            "clang",
+            ["clang", "-shared", "-o", "x.so"],
+            _SRC,
+            _completed(1, stderr),
+            optional_feature=None,
         )
 
     message = str(excinfo.value)
@@ -149,7 +156,8 @@ def test_no_compile_helper_skips_on_a_bare_returncode() -> None:
     helpers = [
         node
         for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name in {"_compile_dylib", "_compile_dll"}
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {"_compile_dylib", "_compile_dll"}
     ]
     assert {h.name for h in helpers} == {"_compile_dylib", "_compile_dll"}
 
@@ -159,8 +167,12 @@ def test_no_compile_helper_skips_on_a_bare_returncode() -> None:
             for node in ast.walk(helper)
             if isinstance(node, ast.Call)
         ]
-        assert "pytest.skip" not in calls, f"{helper.name} still skips on a compiler error"
-        assert "_require_compile_success" in calls, f"{helper.name} does not enforce the contract"
+        assert "pytest.skip" not in calls, (
+            f"{helper.name} still skips on a compiler error"
+        )
+        assert "_require_compile_success" in calls, (
+            f"{helper.name} does not enforce the contract"
+        )
 
 
 @pytest.mark.integration
@@ -191,7 +203,15 @@ def test_every_parametrized_id_in_this_module_stays_short() -> None:
     import sys
 
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", __file__, "--collect-only", "-q", "--no-header"],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            __file__,
+            "--collect-only",
+            "-q",
+            "--no-header",
+        ],
         capture_output=True,
         text=True,
         cwd=str(Path(__file__).resolve().parent.parent),
