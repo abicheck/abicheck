@@ -2115,7 +2115,7 @@ New regression tests: `tests/test_comparability_header_inventory_growth.py`
 `check_contracts_comparable` at every insertion position, the real
 `public_header_dirs` CLI shape with content changes riding along, one
 rejection case per independently-drifting profile field, and the invariant
-itself stated exhaustively over ~4k enumerated (old, new) ordered
+itself stated exhaustively over ~40k enumerated (old, new) ordered
 selections against an independent `itertools.combinations` oracle (with
 vacuity guards on both the oracle and the function under test), plus the
 extracted primitive's own contract (reflexivity, transitivity, reversal

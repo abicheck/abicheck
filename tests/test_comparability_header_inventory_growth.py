@@ -242,7 +242,7 @@ def _oracle_is_insertion_growth(old: tuple[str, ...], new: tuple[str, ...]) -> b
 
 def _permutations_and_subsets():
     """Every (old, new) pair over a 5-name universe where each side is an
-    ordered, duplicate-free selection of size 2..4 -- ~4k pairs covering
+    ordered, duplicate-free selection of size 2..4 -- ~40k pairs covering
     growth, shrinkage, reorder, insertion at every position, and disjoint
     sets alike."""
     selections = [
