@@ -61,6 +61,7 @@ __all__ = [
     "RECONCILED_FUNCTIONS",
     "RECONCILED_VARIABLES",
     "cached_reconciliation",
+    "invalidate_reconciliation",
     "reconcile_declaration_lists",
     "reconcile_surfaces",
     "store_reconciliation",
@@ -283,3 +284,30 @@ def _appended(
     part of this defect calls for.
     """
     return list(original) + [decl for k, decl in reconciled.items() if k not in before]
+
+
+def invalidate_reconciliation(old: AbiSnapshot | None) -> None:
+    """Drop any memoised reconciliation held on *old*.
+
+    :func:`cached_reconciliation` matches on object identity, which is only
+    sound while the snapshots are read-only -- the memo's own stated scope.
+    A caller that holds two ``AbiSnapshot`` objects, compares them, *mutates*
+    one (flipping a declaration's contract fact from unknown to a
+    producer-confirmed ``False``, say) and compares the same objects again
+    would otherwise be served the first call's surfaces and see no change at
+    all, where an equivalent fresh pair reports one (Codex review, P2). The
+    typed API makes that shape reachable: nothing there requires a caller to
+    rebuild its snapshots between comparisons.
+
+    So :func:`~abicheck.checker.compare` calls this on entry, which makes the
+    memo's scope what its docstring always claimed -- one comparison -- rather
+    than the lifetime of the object it happens to hang on. It is deliberately
+    keyed to *old* alone (both slots live there) and never inspects the
+    surfaces: a validity token derived from the facts would have to visit
+    every declaration in both full maps, which is the cost the memo exists to
+    avoid.
+    """
+    if old is None:
+        return
+    for slot in (RECONCILED_FUNCTIONS, RECONCILED_VARIABLES):
+        old.__dict__.pop(slot, None)

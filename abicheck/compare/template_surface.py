@@ -28,6 +28,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 from ..elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
 from ..model.surface_facts import in_public_surface
 from .surface_reconcile import reconcile_declaration_lists
@@ -35,7 +38,11 @@ from .surface_reconcile import reconcile_declaration_lists
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, Function
 
-__all__ = ["public_functions", "reconciled_public_functions"]
+__all__ = [
+    "public_functions",
+    "reconciled_public_function_maps",
+    "reconciled_public_functions",
+]
 
 
 def public_functions(snap: AbiSnapshot) -> list[Function]:
@@ -74,4 +81,45 @@ def reconciled_public_functions(
         new_exported=exported_symbol_names(
             getattr(new, "elf", None), FUNCTION_SYMBOL_TYPES
         ),
+    )
+
+
+def reconciled_public_function_maps(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    key: Callable[[Function], str] = lambda f: f.mangled,
+) -> tuple[dict[str, Function], dict[str, Function]]:
+    """:func:`reconciled_public_functions`, as the mangled-keyed maps the
+    type-spelling and integer-model detectors join on.
+
+    They select with the same ``in_public_surface`` predicate as the template
+    detectors, then key the result themselves -- so the evidence asymmetry
+    costs them the same pair, and with it a real finding: a
+    ``char *`` -> ``char8_t *`` return change on a promised-but-unexported
+    function reported ``CHAR8T_MIGRATION`` only when both sides happened to
+    carry contract evidence, and an ``int`` -> ``long`` group likewise lost
+    ``INTEGER_MODEL_CHANGED`` (Codex review, P2).
+
+    *key* is used for the reconciliation join as well as for the returned
+    maps, so the two cannot disagree about what counts as the same
+    declaration. Later wins on a duplicate key, matching the dict
+    comprehensions this replaces.
+    """
+    reconciled_old, reconciled_new = reconcile_declaration_lists(
+        public_functions(old),
+        public_functions(new),
+        old_all=old.functions,
+        new_all=new.functions,
+        key=key,
+        old_exported=exported_symbol_names(
+            getattr(old, "elf", None), FUNCTION_SYMBOL_TYPES
+        ),
+        new_exported=exported_symbol_names(
+            getattr(new, "elf", None), FUNCTION_SYMBOL_TYPES
+        ),
+    )
+    return (
+        {key(f): f for f in reconciled_old},
+        {key(f): f for f in reconciled_new},
     )

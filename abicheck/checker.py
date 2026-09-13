@@ -32,6 +32,7 @@ from .checker_types import (  # noqa: F401
     LibraryMetadata,
 )
 from .comparability import check_contracts_comparable, comparability_outcome
+from .compare.surface_reconcile import invalidate_reconciliation
 from .confidence import _compute_confidence
 from .contract_pipeline import (
     ContractEvaluationStage,
@@ -1049,6 +1050,7 @@ def compare(
         two places to keep in sync for no added safety on the supported
         paths.
     """
+    invalidate_reconciliation(old)  # memo is per-comparison; see its docstring
     # A contract mismatch is a disagreement *between two sides*; with the
     # baseline declared absent there is no second contract to disagree with.
     mismatch = (

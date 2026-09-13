@@ -527,6 +527,111 @@ class TestListShapedSurfaceDetectors:
         assert _diff_var_values(old, new) == []
 
 
+class TestTypeSpellingAndIntegerModelDetectors:
+    """The last two detectors that key their own surface off
+    `in_public_surface` see the reconciled pair too.
+
+    They select the same population the template detectors do and then key it
+    themselves, so the asymmetry cost them the same pair -- and with it a
+    real finding rather than a false one: a `char *` -> `char8_t *` return
+    change reported `CHAR8T_MIGRATION` only when both sides happened to carry
+    contract evidence (Codex review, P2).
+    """
+
+    @staticmethod
+    def _snapshot(returns: dict[str, str], *, evidence: bool) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libgen.so",
+            version="1",
+            functions=[
+                Function(
+                    name=name,
+                    mangled=name,
+                    return_type=ret,
+                    visibility=Visibility.HIDDEN,
+                    in_public_contract_fact=_contract(evidence),
+                )
+                for name, ret in returns.items()
+            ],
+            elf=ElfMetadata(
+                soname="libgen.so.1",
+                symbols=[ElfSymbol(name="_Z6anchorv", visibility="default")],
+            ),
+            from_headers=True,
+        )
+
+    @given(evidence_on_old=st.booleans(), count=st.integers(min_value=1, max_value=5))
+    @settings(deadline=None, max_examples=20)
+    def test_a_char8_t_migration_survives_an_evidence_gap(
+        self, evidence_on_old: bool, count: int
+    ) -> None:
+        names = [f"_Z3fn{i}v" for i in range(count)]
+        old = self._snapshot(dict.fromkeys(names, "char *"), evidence=evidence_on_old)
+        new = self._snapshot(
+            dict.fromkeys(names, "char8_t *"), evidence=not evidence_on_old
+        )
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.CHAR8T_MIGRATION in kinds, sorted(k.value for k in kinds)
+
+    @given(evidence_on_old=st.booleans())
+    @settings(deadline=None, max_examples=10)
+    def test_an_integer_model_flip_survives_an_evidence_gap(
+        self, evidence_on_old: bool
+    ) -> None:
+        names = [f"_Z3fn{i}v" for i in range(6)]
+        old = self._snapshot(dict.fromkeys(names, "int"), evidence=evidence_on_old)
+        new = self._snapshot(dict.fromkeys(names, "long"), evidence=not evidence_on_old)
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.INTEGER_MODEL_CHANGED in kinds, sorted(k.value for k in kinds)
+
+
+class TestReconciliationIsScopedToOneComparison:
+    """The per-pair memo may not outlive the comparison that built it.
+
+    It matches on object identity, which is sound only while the snapshots
+    are read-only. Nothing in the typed API requires a caller to rebuild its
+    snapshots between comparisons, so the same two objects can be compared,
+    mutated, and compared again -- and the second call was served the first
+    call's surfaces, reporting nothing where an equivalent fresh pair reports
+    a finding (Codex review, P2).
+
+    The oracle is that fresh pair: same inputs, built from scratch.
+    """
+
+    @given(names=_names, variables=st.booleans())
+    @settings(deadline=None, max_examples=25)
+    def test_mutating_a_snapshot_between_comparisons_is_not_served_a_stale_surface(
+        self, names: list[str], variables: bool
+    ) -> None:
+        def pair() -> tuple[AbiSnapshot, AbiSnapshot]:
+            return (
+                _snapshot(names, evidence=True, variables=variables),
+                _snapshot(names, evidence=False, variables=variables),
+            )
+
+        old, new = pair()
+        assert not [
+            c for c in compare(old, new).changes if c.kind in _SURFACE_EXIT_KINDS
+        ]
+        # The producer now *observed* these out of the public contract: a real
+        # finding, not an evidence gap.
+        for decl in new.variables if variables else new.functions:
+            decl.in_public_contract_fact = Fact.present(False)
+        reused = {
+            c.symbol for c in compare(old, new).changes if c.kind in _SURFACE_EXIT_KINDS
+        }
+        fresh_old, fresh_new = pair()
+        for decl in fresh_new.variables if variables else fresh_new.functions:
+            decl.in_public_contract_fact = Fact.present(False)
+        expected = {
+            c.symbol
+            for c in compare(fresh_old, fresh_new).changes
+            if c.kind in _SURFACE_EXIT_KINDS
+        }
+        assert expected == set(names), expected
+        assert reused == expected
+
+
 class TestReleaseJobMemoryBudgetIsDepthAware:
     """The release fan-out's per-worker RAM budget follows the evidence
     depth the run actually asks for.
