@@ -104,4 +104,22 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       (ADR-064 stage 1b already wrote it, always ``0`` on a release); it
 #:       can now be nonzero. A pre-1.3 consumer reads nothing differently;
 #:       one that wants the block feature-detects the key or requires >= 1.3.
-RELEASE_SCHEMA_VERSION = "1.3"
+#: - ``1.4`` adds the two ADR-067 disposition ledgers to each ``libraries[]``
+#:       entry: ``suppression`` (``file_provided``/``suppressed_count``/
+#:       ``suppressed_changes[]``, each naming the rule that hid it) and
+#:       ``surface_scope`` (``out_of_surface_count``/``out_of_surface_
+#:       changes[]``, each naming its exclusion reason). Both are the
+#:       *identical* blocks a single-pair ``compare`` report already carries,
+#:       produced by the same two builders (``reporter.disposition_ledger_
+#:       blocks``), so a consumer reads one shape at either cardinality.
+#:       Before this, a release that suppressed or scoped out its entire
+#:       breaking set emitted only counts and echoed the detail to stderr, so
+#:       the report artifact itself could not say what had been disposed of
+#:       or by which rule (Codex review, PR #1284). Present ONLY when the
+#:       setting was in effect -- ``surface_scope`` when scoping ran,
+#:       ``suppression`` when a suppression document was supplied or
+#:       something was actually suppressed -- the same "present only when
+#:       active" convention 1.3's own blocks follow, which keeps every
+#:       release document produced without them byte-identical. A pre-1.4
+#:       consumer reads nothing differently.
+RELEASE_SCHEMA_VERSION = "1.4"

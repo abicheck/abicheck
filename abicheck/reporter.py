@@ -862,6 +862,38 @@ def _add_suppression(d: dict[str, object], result: DiffResult) -> None:
     }
 
 
+def disposition_ledger_blocks(result: DiffResult) -> dict[str, object]:
+    """The two ADR-067 *disposition* disclosure blocks for one comparison.
+
+    ``suppression`` (what a rule hid, with the rule's own id/source/reason)
+    and ``surface_scope`` (what public-surface scoping demoted, with each
+    finding's exclusion reason) -- built by the very same two functions the
+    scalar ``compare`` JSON path uses, so there is one shape, not a second
+    release-flavoured copy of it.
+
+    Exists because the release fan-out had neither (Codex review, PR #1284).
+    A directory/package ``compare`` captured both ledgers as *text* and
+    echoed them to stderr, so a requested JSON or Markdown release artifact
+    carried the per-library counts but named neither the rules that fired
+    nor the findings they disposed of -- a passing report could hide every
+    break in it, which is the exact failure ADR-067's record-before-disposing
+    rule exists to prevent, and a terminal log is not a report.
+
+    Returns only the blocks that actually say something: ``surface_scope``
+    when scoping ran (``_add_surface_scope``'s own condition), and
+    ``suppression`` when a suppression document was supplied or a finding was
+    suppressed. A library with neither adds no keys, which is what keeps
+    every release document produced without those settings unchanged.
+    """
+    blocks: dict[str, object] = {}
+    _add_suppression(blocks, result)
+    suppression = cast("dict[str, object]", blocks["suppression"])
+    if not (suppression.get("file_provided") or suppression.get("suppressed_count")):
+        del blocks["suppression"]
+    _add_surface_scope(blocks, result)
+    return blocks
+
+
 def _add_detectors(d: dict[str, object], result: DiffResult) -> None:
     """Add detector metadata — only detectors with findings or a coverage gap."""
     d["detectors"] = [

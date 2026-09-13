@@ -924,7 +924,7 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "Source-level (`API_BREAK`).",
         description_template="Python parameter removed from {name}: {detail}",
         entity=_ENT.FUNCTION,
-        operation=_OP.REMOVED,
+        operation=_OP.MODIFIED,  # the function persists (Codex, PR #1284)
     ),
     _E(
         "python_api_parameter_renamed",

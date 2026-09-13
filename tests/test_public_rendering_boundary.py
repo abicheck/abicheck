@@ -138,3 +138,315 @@ class TestEveryPublicRendererRejectsARetiredMode:
 
         with pytest.raises(ValidationError, match="root-cause"):
             to_json(self._result(), report_mode="leaf")
+
+    def test_to_junit_xml_multi_is_an_entry_point_too(self):
+        """`to_junit_xml_multi` takes its own `report_mode` and reaches
+        `_build_testsuite` directly, so validating its single-result sibling
+        left it emitting a full document for a retired mode (Codex review,
+        PR #1284). Its signature differs from the four above, which is
+        precisely why the sweep missed it."""
+        from abicheck.errors import ValidationError
+        from abicheck.junit_report import to_junit_xml_multi
+        from abicheck.model import AbiSnapshot
+
+        pairs = [(self._result(), AbiSnapshot(library="libfoo.so", version="1.0"))]
+        for mode in ("leaf", "not-a-mode", ""):
+            with pytest.raises(ValidationError):
+                to_junit_xml_multi(pairs, report_mode=mode)
+        for mode in ("full", "impact", "root-cause"):
+            assert to_junit_xml_multi(pairs, report_mode=mode), mode
+
+
+class TestARenderedDocumentOnStdoutIsNeverPollutedByALedger:
+    """A machine document written to stdout must parse, whatever ledgers the
+    run discloses.
+
+    Plan slice 7o made the pattern, suppression and public-surface-scope
+    ledgers *unconditional*. They are human text and go to stderr, so a real
+    shell's `-o json=- > report.json` is unaffected -- but "goes to stderr"
+    is a property nothing asserted, and a single misrouted `click.echo`
+    turns every one of those redirects into a syntax error at the consumer.
+    The bug class is "a disclosure added to the terminal leaks into a
+    document", not any one ledger, so this sweeps the ledger-triggering
+    configurations against the machine formats rather than pinning the one
+    case that surfaced it.
+    """
+
+    def _dirs(self, tmp_path):
+        import json
+
+        from abicheck.model import (
+            AbiSnapshot,
+            Function,
+            RecordType,
+            TypeField,
+            Visibility,
+        )
+        from abicheck.serialization import save_snapshot
+
+        old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+
+        def _rec(name, size):
+            return RecordType(
+                name=name,
+                kind="struct",
+                size_bits=size,
+                fields=[TypeField(name="x", type="int")],
+            )
+
+        pub = Function(
+            name="api_call",
+            mangled="api_call",
+            return_type="int",
+            visibility=Visibility.PUBLIC,
+        )
+        gone = Function(
+            name="internal_helper",
+            mangled="internal_helper",
+            return_type="int",
+            visibility=Visibility.PUBLIC,
+        )
+        old = AbiSnapshot(
+            library="libfoo.so",
+            version="1",
+            functions=[pub, gone],
+            types=[_rec("Config", 32), _rec("InternalCache", 64)],
+        )
+        new = AbiSnapshot(
+            library="libfoo.so",
+            version="2",
+            functions=[pub],
+            types=[_rec("Config", 32), _rec("InternalCache", 128)],
+        )
+        for d, snap in ((old_dir, old), (new_dir, new)):
+            save_snapshot(snap, d / "libfoo.json")
+        assert json.loads((old_dir / "libfoo.json").read_text())
+        return old_dir, new_dir
+
+    def _run(self, args):
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        result = CliRunner().invoke(main, args)
+        return result
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            pytest.param([], id="no-ledger"),
+            pytest.param(["--scope-public-headers"], id="scope-ledger"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        ("cardinality", "fmt"),
+        [
+            # Both cardinalities, because they echo through different code:
+            # the release fan-out captures each library's ledger and replays
+            # it after the parallel futures complete, the scalar path echoes
+            # inline. `sarif` is single-pair only by design.
+            ("pair", "json"),
+            ("pair", "sarif"),
+            ("pair", "junit"),
+            ("directory", "json"),
+            ("directory", "junit"),
+        ],
+    )
+    def test_stdout_parses_for_every_machine_format(
+        self, tmp_path, cardinality, fmt, extra
+    ):
+        import json
+        import xml.etree.ElementTree as ET
+
+        old_dir, new_dir = self._dirs(tmp_path)
+        if cardinality == "pair":
+            operands = [str(old_dir / "libfoo.json"), str(new_dir / "libfoo.json")]
+        else:
+            operands = [str(old_dir), str(new_dir)]
+        result = self._run(["compare", *operands, *extra, "-o", f"{fmt}=-"])
+        assert result.exit_code in (0, 2, 4), result.output
+        stdout = result.stdout
+        assert stdout.strip(), f"{cardinality}/{fmt} wrote nothing to stdout"
+        if fmt in ("json", "sarif"):
+            json.loads(stdout)  # raises if a ledger was spliced in
+        else:
+            ET.fromstring(stdout)  # noqa: S314 - our own output
+
+    def test_the_scope_ledger_really_is_disclosed_on_stderr(self, tmp_path):
+        """The other half, and the reason this is not just "send it
+        nowhere": a test that only asserts stdout parses is satisfied by
+        deleting the disclosure, which is the ADR-067 regression the slice
+        exists to prevent. So assert the same run *does* carry it, on the
+        stream it belongs on."""
+        old_dir, new_dir = self._dirs(tmp_path)
+        result = self._run(
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--scope-public-headers",
+                "-o",
+                "json=-",
+            ]
+        )
+        assert "non-public ABI surface" in result.stderr
+        assert "non-public ABI surface" not in result.stdout
+
+
+class TestTheReleaseReportCarriesItsDispositionLedgers:
+    """ADR-067, the structured half, at package cardinality.
+
+    A directory/package `compare` captured each library's suppression and
+    public-surface-scope ledgers as *text* and echoed them to stderr, so the
+    requested JSON artifact carried the counts but named neither the rule
+    that fired nor the finding it disposed of -- a passing release report
+    could hide every break in it, and a terminal log is not a report (Codex
+    review, PR #1284). The fix reuses the scalar path's own two builders, so
+    the claim worth pinning is *sameness of shape at both cardinalities*,
+    not the presence of some release-flavoured key.
+    """
+
+    def _dirs(self, tmp_path):
+        from abicheck.model import (
+            AbiSnapshot,
+            Function,
+            RecordType,
+            TypeField,
+            Visibility,
+        )
+        from abicheck.serialization import save_snapshot
+
+        old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+
+        def _rec(name, size):
+            return RecordType(
+                name=name,
+                kind="struct",
+                size_bits=size,
+                fields=[TypeField(name="x", type="int")],
+            )
+
+        pub = Function(
+            name="api_call",
+            mangled="api_call",
+            return_type="int",
+            visibility=Visibility.PUBLIC,
+        )
+        old = AbiSnapshot(
+            library="libfoo.so",
+            version="1",
+            functions=[pub],
+            types=[_rec("Config", 32), _rec("InternalCache", 64)],
+        )
+        new = AbiSnapshot(
+            library="libfoo.so",
+            version="2",
+            functions=[pub],
+            types=[_rec("Config", 32), _rec("InternalCache", 128)],
+        )
+        for d, snap in ((old_dir, old), (new_dir, new)):
+            save_snapshot(snap, d / "libfoo.json")
+        return old_dir, new_dir
+
+    def _json(self, args):
+        import json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        result = CliRunner().invoke(main, args)
+        assert result.exit_code in (0, 2, 4), result.output
+        return json.loads(result.stdout)
+
+    def test_scope_ledger_is_in_the_release_document_not_only_on_stderr(self, tmp_path):
+        old_dir, new_dir = self._dirs(tmp_path)
+        doc = self._json(
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--scope-public-headers",
+                "-o",
+                "json=-",
+            ]
+        )
+        lib = doc["libraries"][0]
+        scope = lib["surface_scope"]
+        assert scope["out_of_surface_count"] >= 1
+        # The excluded finding itself, with the reason it was excluded --
+        # the part a count alone cannot say.
+        excluded = scope["out_of_surface_changes"]
+        assert len(excluded) == scope["out_of_surface_count"]
+        assert any(e["symbol"] == "InternalCache" for e in excluded)
+        assert all(e.get("reason") for e in excluded)
+
+    def test_the_release_block_has_the_same_shape_as_the_scalar_one(self, tmp_path):
+        """Same builders, so the keys must agree exactly -- a release-only
+        spelling of the same facts is the failure mode this guards."""
+        old_dir, new_dir = self._dirs(tmp_path)
+        release = self._json(
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--scope-public-headers",
+                "-o",
+                "json=-",
+            ]
+        )["libraries"][0]["surface_scope"]
+        scalar = self._json(
+            [
+                "compare",
+                str(old_dir / "libfoo.json"),
+                str(new_dir / "libfoo.json"),
+                "--scope-public-headers",
+                "-o",
+                "json=-",
+            ]
+        )["surface_scope"]
+        assert set(release) == set(scalar)
+        assert set(release["out_of_surface_changes"][0]) == set(
+            scalar["out_of_surface_changes"][0]
+        )
+
+    def test_absent_when_the_setting_was_not_in_effect(self, tmp_path):
+        """The "present only when active" convention the release schema's
+        own 1.3 blocks follow, which is what keeps a release document
+        produced without these settings unchanged.
+
+        Note the flag has to be turned *off* explicitly: public-surface
+        scoping is on by default for a directory/package comparison, so the
+        scope block is legitimately present on a default run -- asserting
+        otherwise tested the harness's premise rather than the code.
+        """
+        old_dir, new_dir = self._dirs(tmp_path)
+        lib = self._json(
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--no-scope-public-headers",
+                "-o",
+                "json=-",
+            ]
+        )["libraries"][0]
+        assert "surface_scope" not in lib
+        # No `--suppress` document and nothing suppressed.
+        assert "suppression" not in lib
+
+    def test_present_on_a_default_release_run_because_scoping_is_the_default(
+        self, tmp_path
+    ):
+        """The complement, stated so the previous test cannot be "fixed" by
+        making the block conditional on something it should not be: a plain
+        directory comparison scopes by default, so it discloses by default."""
+        old_dir, new_dir = self._dirs(tmp_path)
+        lib = self._json(["compare", str(old_dir), str(new_dir), "-o", "json=-"])[
+            "libraries"
+        ][0]
+        assert lib["surface_scope"]["out_of_surface_changes"]

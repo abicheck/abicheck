@@ -853,3 +853,101 @@ class TestSourceTemplateFindingsKeepTheirDeclarationKind:
         from abicheck.buildsource.source_extractors.clang import _TEMPLATE_NODE_KINDS
 
         assert set(_ENTITY_FOR_TEMPLATE_KIND) == set(_TEMPLATE_NODE_KINDS)
+
+
+class TestASymbolTableFactIsNotClaimedAsAFunction:
+    """`consumer_required_symbol_removed` rests on a consumer binary's
+    dynamic-symbol table, and that evidence carries no function/variable
+    discriminator: `AppRequirements.undefined_symbols` is a bare `set[str]`,
+    and the PE/Mach-O collectors retain no symbol type either. Declaring
+    FUNCTION therefore hid a required *data* symbol from
+    `--view show=variables` and serialized an entity the evidence cannot
+    support (Codex review, PR #1284).
+
+    Stated as a rule over the evidence rather than as one kind's expected
+    value: any finding whose only operand is an undiscriminated symbol name
+    belongs to the BINARY dimension, which is what its exact structural
+    sibling `imported_symbol_removed` already declares.
+    """
+
+    def _entity(self, kind_name):
+        from abicheck.change_registry import REGISTRY
+        from abicheck.checker_policy import ChangeKind
+
+        return REGISTRY.entity_for(ChangeKind(kind_name))
+
+    def test_consumer_required_symbol_removed_is_a_binary_finding(self):
+        from abicheck.model.change_catalog.dimensions import ChangeEntity
+
+        assert self._entity("consumer_required_symbol_removed") is ChangeEntity.BINARY
+
+    def test_it_agrees_with_its_structural_sibling(self):
+        assert self._entity("consumer_required_symbol_removed") == self._entity(
+            "imported_symbol_removed"
+        )
+
+    def test_the_evidence_really_discards_the_symbol_type(self):
+        """The premise, asserted rather than assumed -- if `undefined_symbols`
+        ever grows a type, BINARY stops being the honest answer and this test
+        is where that should be noticed."""
+        from dataclasses import fields
+
+        from abicheck.appcompat import AppRequirements
+
+        undefined = {f.name: f for f in fields(AppRequirements)}["undefined_symbols"]
+        assert "set[str]" in str(undefined.type).replace(" ", "")
+
+
+class TestAPersistingCallableWithAChangedSignatureIsModified:
+    """A parameter is not an entity in this vocabulary, so a parameter-level
+    change is a *modification of the function that persists*, whatever the
+    kind's name ends in. `python_api_parameter_removed` was the one
+    parameter-level kind declared REMOVED, which put it in
+    `--view show=removed` and hid it from `show=changed` (Codex review,
+    PR #1284).
+
+    Stated over the whole parameter-level family, so the next one added
+    cannot drift the same way -- and this is exactly the case the retired
+    name-suffix derivation got wrong by construction.
+    """
+
+    def _operation(self, kind_name):
+        from abicheck.change_registry import REGISTRY
+        from abicheck.checker_policy import ChangeKind
+
+        return REGISTRY.operation_for(ChangeKind(kind_name))
+
+    def test_every_parameter_level_kind_is_a_modification(self):
+        from abicheck.model.change_catalog.dimensions import ChangeOperation
+
+        family = [
+            "python_api_parameter_added",
+            "python_api_parameter_removed",
+            "python_api_parameter_renamed",
+            "python_api_parameter_kind_changed",
+            "python_api_parameter_type_changed",
+            "param_default_value_removed",
+        ]
+        disagreeing = {
+            k: self._operation(k)
+            for k in family
+            if self._operation(k) is not ChangeOperation.MODIFIED
+        }
+        assert not disagreeing, disagreeing
+
+    def test_the_family_is_not_empty(self):
+        """Vacuity guard: an oracle that silently selects nothing passes the
+        sweep above while asserting nothing."""
+        from abicheck.checker_policy import ChangeKind
+
+        assert ChangeKind("python_api_parameter_removed")
+
+    def test_the_view_filter_follows(self):
+        """The consequence a user actually sees, not just the declared
+        value: `show=changed` lists it and `show=removed` does not."""
+        changed = ShowOnlyFilter(frozenset(), frozenset(), frozenset({"changed"}))
+        removed = ShowOnlyFilter(frozenset(), frozenset(), frozenset({"removed"}))
+        assert changed._check_action("python_api_parameter_removed", changed.actions)
+        assert not removed._check_action(
+            "python_api_parameter_removed", removed.actions
+        )

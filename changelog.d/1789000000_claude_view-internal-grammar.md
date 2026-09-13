@@ -78,3 +78,35 @@
   `demangled_symbol` is now resolved for any Itanium-mangled finding, not
   only an `ELF_ONLY`-visibility one, and each finding carries its declared
   `entity` beside the `operation` field it already had (report schema 5.0).
+
+- **A release report now carries its disposition ledgers, not just its
+  counts.** A directory/package `compare` captured each library's
+  suppression and public-surface-scope ledgers as text and echoed them to
+  stderr, so the requested JSON artifact named neither the rule that fired
+  nor the finding it disposed of — a passing release report could hide every
+  break in it, and a terminal log is not a report. Each `libraries[]` entry
+  now carries the `suppression` and `surface_scope` blocks a single-pair
+  report already had, built by the same two functions so both cardinalities
+  read one shape (`release_schema_version` 1.4; present only when the
+  setting was in effect, so a document produced without them is unchanged).
+
+### Fixed
+
+- **`to_junit_xml_multi` validates its report mode.** The multi-library JUnit
+  entry point reached the testsuite builder directly, so a retired or unknown
+  `report_mode` silently rendered a full document instead of erroring.
+
+- **Both JUnit entry points batch-demangle once.** Neither prewarmed the
+  demangle cache, so on a host without the in-process `cxxfilt` package a
+  large report forked a `c++filt` subprocess per distinct C++ symbol. SARIF
+  and the shared document builder already prewarmed.
+
+- **`consumer_required_symbol_removed` is a binary-surface finding, not a
+  function one.** The evidence is a consumer's dynamic-symbol table, which
+  carries no function/variable discriminator, so a required *data* symbol was
+  hidden from `--view show=variables` and serialized as `entity: "function"`.
+
+- **`python_api_parameter_removed` is a modification.** The function persists
+  with a changed signature — a parameter is not an entity — so the finding
+  belongs to `--view show=changed`, matching every sibling parameter-level
+  kind. It was the only one declared as a removal.

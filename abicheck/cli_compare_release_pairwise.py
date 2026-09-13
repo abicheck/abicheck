@@ -53,7 +53,7 @@ from .cli_resolve import _normalize_binary_input
 from .frontends.cli.release_member_errors import member_error_entry
 from .frontends.cli.runtime import _safe_write_output
 from .model import AbiSnapshot
-from .reporter import to_json
+from .reporter import disposition_ledger_blocks, to_json
 from .workflows.contracts import CompareResult
 
 if TYPE_CHECKING:
@@ -426,6 +426,9 @@ def _compare_one_library(
                 else {}
             ),
         }
+        # ADR-067's structured half: both ledgers reach the report entry, not
+        # only the stderr echoes below (Codex review, PR #1284).
+        entry.update(disposition_ledger_blocks(result))
         if pattern_modulations_text is not None:
             entry["_pattern_modulations_text"] = pattern_modulations_text
         # ADR-067: a passing release report may not hide which breaking
@@ -512,12 +515,9 @@ def _compare_one_library(
             # aggregated into the release-level scope block by the formatter.
             entry["scope_resolved"] = result.scope_resolved
             entry["filtered_internal_count"] = result.out_of_surface_count
-            # A count alone does not say *what* was excluded or why, so a
-            # release whose entire breaking set was scoped out could pass
-            # while explaining nothing -- ADR-067 again, the same gap the
-            # suppression audit had (Codex review, PR #1284). Captured as
-            # text and echoed in order by the caller, like the audit and
-            # the pattern ledger, so parallel libraries cannot interleave.
+            # ADR-067 again: a count alone does not say *what* was excluded
+            # or why. Echoed in order by the caller, like the audit and the
+            # pattern ledger, so parallel libraries cannot interleave.
             if result.out_of_surface_changes:
                 from .cli_audit import ledger_lines_for
 

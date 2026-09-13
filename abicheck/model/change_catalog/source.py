@@ -110,7 +110,17 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "load, or crash the first time it calls the symbol, with no "
         "recompilation involved.",
         description_template="Consumer '{name}' requires symbol '{symbol}', which the new library no longer exports",
-        entity=_ENT.FUNCTION,
+        # BINARY, not FUNCTION (Codex review, PR #1284): the evidence behind
+        # this finding is a consumer's dynamic-symbol table, and
+        # `AppRequirements.undefined_symbols` is a bare `set[str]` -- the ELF
+        # symbol type is discarded at collection, and the PE/Mach-O paths
+        # retain no function/variable discriminator either. A required *data*
+        # symbol is therefore indistinguishable from a required function
+        # here, so declaring FUNCTION hid such findings from `--view
+        # show=variables` and serialized an entity the evidence does not
+        # support. BINARY is the symbol-table-level fallback its exact
+        # structural sibling `imported_symbol_removed` already uses.
+        entity=_ENT.BINARY,
         operation=_OP.REMOVED,
     ),
     _E(
