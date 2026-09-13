@@ -126,7 +126,12 @@
   never presented as a complete one -- and a stored baseline dumped under one
   set of exclusions is refused against a differently-scoped candidate by the
   existing ADR-050 `scope_fingerprint` check rather than silently reporting
-  the asymmetry as change.
+  the asymmetry as change. A *loaded* snapshot keeps the patterns it was
+  really dumped under -- this run parsed no headers for it, so this run's
+  patterns say nothing about it. `--exclude-header` with `--dump-manifest`
+  is rejected rather than silently ignored: a manifest dump parses the
+  translation units the manifest declares, not the `-H` list the pattern
+  narrows (see `docs/contribute/known-gaps.md`).
 - **A note when a plain snapshot is large.** `--compression auto` infers the
   storage envelope from the output suffix, so a `.json` name stays
   uncompressed however large it grows -- correct, and undiscoverable at the

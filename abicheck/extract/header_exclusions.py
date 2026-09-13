@@ -37,6 +37,8 @@ from __future__ import annotations
 from fnmatch import fnmatch
 from typing import TYPE_CHECKING
 
+from ..errors import ValidationError
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
@@ -129,14 +131,61 @@ def apply_header_exclusions_to_inputs(
 
 
 def record_header_exclusions(
-    snapshot: AbiSnapshot, exclude_headers: Sequence[str]
+    snapshot: AbiSnapshot,
+    exclude_headers: Sequence[str],
+    *,
+    extracted_now: bool = True,
 ) -> AbiSnapshot:
     """*snapshot* carrying the ``--exclude-header`` patterns it was built under.
 
     Returns it unchanged when there were none, so every run that does not use
     the flag produces a byte-identical snapshot to before this existed.
+
+    *extracted_now* is ``False`` for an operand this run **loaded** rather
+    than extracted. Such a snapshot parsed no headers in this invocation, so
+    this run's patterns say nothing about it -- and it already carries the
+    patterns it was really built under. Stamping anyway overwrote that
+    provenance with an unrelated request: a snapshot dumped under
+    ``original.h``, loaded under ``--exclude-header current.h``, came back
+    claiming ``current.h`` (Codex review, reproduced). Worse than a wrong
+    label, it can make an asymmetric pair look symmetric -- which is exactly
+    the comparison the recorded patterns exist to expose.
     """
-    if not exclude_headers:
+    if not exclude_headers or not extracted_now:
         return snapshot
     snapshot.excluded_header_patterns = tuple(exclude_headers)
     return snapshot
+
+
+def reject_exclusions_against_a_manifest(
+    exclude_headers: Sequence[str],
+    dump_manifest: object | None,
+) -> None:
+    """Refuse ``--exclude-header`` together with ``--dump-manifest``.
+
+    A manifest dump parses ``translation_units[]`` and
+    ``public_header_paths`` from the manifest document, never the ``-H``
+    header list this filter narrows -- so the patterns would match nothing,
+    change nothing, and still be recorded on the snapshot and reported as
+    headers omitted. That is a request recorded as achieved when it was not,
+    which is the single failure this whole area exists to stop (Codex
+    review).
+
+    Rejected rather than applied, deliberately. A manifest is an exact,
+    self-describing extraction contract (ADR-050 D3): narrowing it from the
+    command line would contradict the document the run was told to honour,
+    and the roots it declares are matched exactly by
+    ``dumper_scoping.dump_manifest_header_roots``. Excluding a header from a
+    manifest dump is a real capability, but it belongs in the manifest --
+    recorded in ``docs/contribute/known-gaps.md`` rather than approximated
+    here.
+    """
+    if not exclude_headers or dump_manifest is None:
+        return
+    raise ValidationError(
+        "--exclude-header cannot be combined with --dump-manifest: a manifest "
+        "dump parses the translation units and public headers the manifest "
+        "itself declares, not the -H header list --exclude-header narrows, so "
+        "the pattern would match nothing while still being recorded as an "
+        "omission. Remove the header from the manifest instead."
+    )

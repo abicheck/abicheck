@@ -57,6 +57,7 @@ from ..errors import AbicheckError, SnapshotError, ValidationError
 from ..extract.header_exclusions import (
     apply_header_exclusions_to_inputs,
     record_header_exclusions,
+    reject_exclusions_against_a_manifest,
 )
 from ..model import AbiSnapshot, Function
 from ..serialization import load_snapshot
@@ -444,8 +445,12 @@ def resolve_input(
     It is idempotent, which matters because the body re-enters this wrapper
     for a symlink/alias target.
     """
+    exclude_headers = tuple(kwargs.get("exclude_headers") or ())
+    reject_exclusions_against_a_manifest(exclude_headers, kwargs.get("dump_manifest"))
     snapshot = _resolve_input_impl(path, headers, includes, version, lang, **kwargs)
-    return record_header_exclusions(snapshot, kwargs.get("exclude_headers") or ())
+    return record_header_exclusions(
+        snapshot, exclude_headers, extracted_now=not is_stored_snapshot_operand(path)
+    )
 
 
 def _resolve_input_impl(

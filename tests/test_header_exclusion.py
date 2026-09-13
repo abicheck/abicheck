@@ -349,3 +349,107 @@ class TestAnExclusionIsRecordedAsReducedEvidence:
         d = snapshot_to_dict(self._snap())
         d.pop("excluded_header_patterns", None)
         assert snapshot_from_dict(d).excluded_header_patterns == ()
+
+
+class TestAStoredSnapshotKeepsItsOwnExclusions:
+    """A stored operand's recorded patterns are provenance, not a slot.
+
+    Loading a snapshot parses no headers, so *this* run's patterns say
+    nothing about it -- and it already carries the patterns it was really
+    built under. Stamping anyway overwrote that: a snapshot dumped under
+    `original.h` and loaded under `--exclude-header current.h` came back
+    claiming `current.h` (Codex review). Worse than a wrong label, it can
+    make an asymmetric pair look symmetric, which is the comparison the
+    recorded patterns exist to expose.
+    """
+
+    @staticmethod
+    def _stored(tmp_path, patterns):
+        from abicheck.model.snapshot import AbiSnapshot
+        from abicheck.serialization import save_snapshot
+
+        path = tmp_path / "stored.abi.json"
+        save_snapshot(
+            AbiSnapshot(
+                library="libfoo.so",
+                version="1.0",
+                excluded_header_patterns=tuple(patterns),
+            ),
+            path,
+        )
+        return path
+
+    def test_a_different_request_does_not_overwrite_them(self, tmp_path) -> None:
+        from abicheck.workflows.input_resolution import resolve_input
+
+        stored = self._stored(tmp_path, ("original.h",))
+        loaded = resolve_input(stored, exclude_headers=("current.h",))
+        assert loaded.excluded_header_patterns == ("original.h",)
+
+    def test_a_request_does_not_invent_them_either(self, tmp_path) -> None:
+        """The empty-provenance case: a snapshot dumped with no exclusions
+        must not acquire this run's."""
+        from abicheck.workflows.input_resolution import resolve_input
+
+        stored = self._stored(tmp_path, ())
+        loaded = resolve_input(stored, exclude_headers=("current.h",))
+        assert loaded.excluded_header_patterns == ()
+
+    def test_a_live_operand_is_still_stamped(self, tmp_path) -> None:
+        """The negative control. Skipping the stamp for *everything* would
+        satisfy both assertions above and silently undo the recording this
+        field exists for."""
+        from abicheck.extract.header_exclusions import record_header_exclusions
+        from abicheck.model.snapshot import AbiSnapshot
+
+        fresh = AbiSnapshot(library="libfoo.so", version="1.0")
+        stamped = record_header_exclusions(fresh, ("a.h",), extracted_now=True)
+        assert stamped.excluded_header_patterns == ("a.h",)
+
+        # And the rule itself, stated directly rather than only through
+        # `resolve_input`: the same call for a loaded operand records nothing.
+        loaded = AbiSnapshot(library="libfoo.so", version="1.0")
+        assert (
+            record_header_exclusions(
+                loaded, ("a.h",), extracted_now=False
+            ).excluded_header_patterns
+            == ()
+        )
+
+
+class TestExclusionsAreRefusedAgainstAManifest:
+    """A pattern that cannot match anything is not silently recorded.
+
+    A manifest dump parses the translation units and public headers the
+    manifest declares, never the `-H` list this filter narrows -- so
+    `--exclude-header` matched nothing while still being recorded on the
+    snapshot and reported as an omission: a request recorded as achieved
+    when it was not, which is the failure this whole area exists to stop
+    (Codex review).
+    """
+
+    def test_the_combination_is_rejected(self) -> None:
+        from abicheck.errors import ValidationError
+        from abicheck.extract.header_exclusions import (
+            reject_exclusions_against_a_manifest,
+        )
+
+        with pytest.raises(ValidationError, match="--dump-manifest"):
+            reject_exclusions_against_a_manifest(("a.h",), object())
+
+    @pytest.mark.parametrize(
+        ("patterns", "manifest"),
+        [
+            ((), object()),  # a manifest dump with no exclusions
+            (("a.h",), None),  # exclusions with no manifest
+            ((), None),  # neither
+        ],
+    )
+    def test_every_other_combination_is_allowed(self, patterns, manifest) -> None:
+        """Only the pair is refused. Rejecting more would break a manifest
+        dump that never asked for an exclusion."""
+        from abicheck.extract.header_exclusions import (
+            reject_exclusions_against_a_manifest,
+        )
+
+        reject_exclusions_against_a_manifest(patterns, manifest)
