@@ -36,15 +36,10 @@ def _entry(*args: object, **kwargs: object) -> ChangeKindMeta:
     """A ``ChangeKindMeta`` with the two display dimensions filled in.
 
     Plan slice 7o made ``entity``/``operation`` mandatory on any entry that
-    reaches a registry (``_validate_entry`` rejects one without them, which
-    is what makes "a kind added tomorrow lands in the right dimension with
-    no second registration" true). Every construction in this module is
-    testing something *else* about the catalog -- policy overrides,
-    templates, immutability, pickling -- so each supplies a neutral pair
-    here rather than restating them 30 times. The mandatory-ness itself is
-    asserted in ``tests/test_view_internal_grammar.py``, and a caller that
-    wants to check a specific dimension passes its own.
-    """
+    reaches a registry. Every construction in this module tests something
+    *else* (overrides, templates, immutability, pickling), so each supplies
+    a neutral pair rather than restating them 30 times; the mandatory-ness
+    itself is asserted in ``tests/test_view_internal_grammar.py``."""
     kwargs.setdefault("entity", ChangeEntity.FUNCTION)
     kwargs.setdefault("operation", ChangeOperation.MODIFIED)
     return ChangeKindMeta(*args, **kwargs)  # type: ignore[arg-type]

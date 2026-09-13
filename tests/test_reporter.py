@@ -8,21 +8,13 @@ from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.reporter import to_json, to_markdown, to_review_digest, to_stat_json
 
 
-def _findings(doc: dict) -> list[dict]:
-    """Every finding a ``--view root-cause`` document exposes, flattened.
-
-    The `leaf` report mode these assertions were originally written against
-    retired in plan slice 7o (measured against `root-cause` over 129 real
-    library pairs: identical finding sets in all 93 with findings). The
-    claims themselves -- that a *root type* change carries the same
-    per-finding fields as any other -- transfer unchanged; only the
-    document that carries it differs.
-    """
-    return [f for group in doc.get("root_causes", []) for f in group["findings"]]
-
-
 def _first_finding(doc: dict) -> dict:
-    findings = _findings(doc)
+    """The first finding a ``--view root-cause`` document exposes.
+
+    The `leaf` mode these assertions were written against retired in plan
+    slice 7o (measured identical to `root-cause` over 129 real library
+    pairs); the claims transfer unchanged, only the document differs."""
+    findings = [f for g in doc.get("root_causes", []) for f in g["findings"]]
     assert findings, doc
     return findings[0]
 

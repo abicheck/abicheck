@@ -1897,6 +1897,19 @@ mechanism* first and an option count second:
      test_presentation_analysis_separation.py`'s own vacuity guard on the
      space size is what keeps that shrink honest rather than silent.
 
+  **Verification.** `scripts/verify.py --profile pr` passes all 21 non-unit
+  steps, and the `unit-pr` lane reports **47,447 passed** with the 95%
+  line+branch floor held at **96.25%**. Its 45 remaining failures are all
+  pre-existing in this environment, not this slice's: 43 of them reproduce
+  name-for-name on the parent commit (the git/workflow-harness families --
+  `test_protect_committed_baseline_workflow`, `test_changelog_fragment_gate`,
+  `test_bugfix_test_contract`, `test_agent_evals`,
+  `test_backend_capability_matrix`, `test_classify_perf_paths`,
+  `test_subprocess_bash_is_resolved`, `test_model_package_surface`,
+  `test_l2_real_profiles`, `test_real_world_false_positives`), and the
+  remaining two pass when run individually -- `-n auto` cross-test
+  interference in two files whose siblings are in that same pre-existing set.
+
   The surviving parsing primitive gets the treatment AGENTS.md requires:
   `TestParseViewTokensProperties` (`tests/test_view_internal_grammar.py`)
   states `parse_view_tokens`'s contract as invariants — last mode wins under
