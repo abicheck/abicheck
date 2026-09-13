@@ -186,6 +186,11 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
     outputs["_stdout"] = proc.stdout
     outputs["_exit"] = proc.returncode
     outputs["_summary"] = summary_bytes.decode("utf-8", errors="replace")
+    # Published so a test can assert the run left no scratch file behind in its
+    # own private `$RUNNER_TEMP`, without seeing another test's (or the
+    # system's) temp files. Carried over from the duplicate `_run_action` in
+    # `test_action_coverage_verdict.py`, which this now replaces.
+    outputs["_runner_temp"] = str(runner_temp)
     return outputs
 
 
