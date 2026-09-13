@@ -34,6 +34,7 @@ import itertools
 
 import pytest
 
+from abicheck.buildsource import cross_source_checks as _crosschecks
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.checker import compare
@@ -540,9 +541,22 @@ class TestResolvedExcludedFromTheGate:
         assert gate_contribution_for_change(leaks[0], None) == 0
         assert result.verdict == Verdict.NO_CHANGE
 
-    def test_persistent_leak_still_gates_normally(self) -> None:
-        # Negative control: this exclusion is specific to RESOLVED, not a
-        # blanket exemption for every cross-source finding.
+    def test_persistent_leak_is_reported_but_does_not_drive_the_verdict(
+        self,
+    ) -> None:
+        """A hygiene problem present on *both* sides is pre-existing debt,
+        not something this release did, so it stays fully reported and
+        contributes nothing to the pairwise verdict.
+
+        This used to assert ``COMPATIBLE_WITH_RISK`` as a negative control
+        for the RESOLVED exclusion. The control it was providing -- "the
+        exclusion is state-specific, not a blanket exemption for every
+        cross-source finding" -- is what ``test_introduced_leak_still_gates_
+        normally`` below states, and states better: an INTRODUCED finding is
+        the one this release is actually answerable for. What the two
+        exclusions share is that neither hides anything, which is what the
+        ``in result.changes`` assertion here pins.
+        """
         from abicheck.checker_policy import Verdict
 
         old = _phl_isolated_snapshot(leaked=True)
@@ -551,7 +565,11 @@ class TestResolvedExcludedFromTheGate:
         leaks = [c for c in result.changes if c.kind == ChangeKind.PRIVATE_HEADER_LEAK]
         assert len(leaks) == 1
         assert leaks[0].cross_source_evolution == CrossSourceEvolution.PERSISTENT
-        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+        # Reported, with its own kind and category untouched ...
+        assert leaks[0] in result.changes
+        assert leaks[0].kind == ChangeKind.PRIVATE_HEADER_LEAK
+        # ... and not charged to this release's verdict.
+        assert result.verdict == Verdict.NO_CHANGE
 
     def test_introduced_leak_still_gates_normally(self) -> None:
         # Negative control, the other direction.
@@ -622,9 +640,17 @@ class TestResolvedExcludedFromEveryVerdictRecompute:
         # already-fixed leak into the verdict just because the recompute ran.
         assert result.verdict == Verdict.NO_CHANGE
 
-    def test_surface_metrics_recompute_still_gates_a_persistent_leak(self) -> None:
-        # Negative control: the exclusion is RESOLVED-specific, not a side
-        # effect of `--surface-metrics` recomputing at all.
+    def test_surface_metrics_recompute_also_excludes_a_persistent_leak(
+        self,
+    ) -> None:
+        """The persistent-hygiene exclusion has to survive the same opt-in
+        recomputations the RESOLVED one does.
+
+        Both exclusions are applied at ``checker._compute_verdict_for``, the
+        single chokepoint every recompute routes through, precisely so a
+        step that rebuilds the scored population cannot reintroduce what an
+        earlier pass excluded -- the omission round 13 found for RESOLVED.
+        """
         from abicheck.checker_policy import Verdict
 
         old = _phl_isolated_snapshot_with_addition(leaked=True)
@@ -633,7 +659,8 @@ class TestResolvedExcludedFromEveryVerdictRecompute:
         leaks = [c for c in result.changes if c.kind == ChangeKind.PRIVATE_HEADER_LEAK]
         assert len(leaks) == 1
         assert leaks[0].cross_source_evolution == CrossSourceEvolution.PERSISTENT
-        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+        assert leaks[0] in result.changes
+        assert result.verdict == Verdict.NO_CHANGE
 
 
 # --------------------------------------------------------------------------- #
@@ -1127,3 +1154,16 @@ class TestFourChecksNotEvaluatedCrux:
             CrossSourceEvolution.INTRODUCED,
             CrossSourceEvolution.RESOLVED,
         )
+
+
+#: Every cross-source hygiene check's ``ChangeKind``, read off the check
+#: registry rather than hand-listed, so a newly registered check joins the
+#: category-scoping tests below automatically.
+_CROSS_SOURCE_KINDS = tuple(
+    ChangeKind(name)
+    for name in sorted(
+        v
+        for k, v in vars(_crosschecks).items()
+        if k.startswith("CHECK_") and isinstance(v, str)
+    )
+)

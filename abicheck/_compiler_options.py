@@ -5,6 +5,10 @@ from __future__ import annotations
 
 import os
 import shlex
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 #: Matches ``shlex.shlex``'s own POSIX-mode default (space/tab/CR/LF) --
 #: kept as an explicit constant so :func:`_split_gcc_options_windows`'s
@@ -128,6 +132,28 @@ def split_gcc_options(text: str) -> list[str]:
     if os.name == "nt":
         return _split_gcc_options_windows(text)
     return shlex.split(text, posix=True)
+
+
+def join_gcc_options(tokens: Sequence[str]) -> str:
+    """The inverse of :func:`split_gcc_options`, for a caller that must hand
+    tokens across a string-typed boundary.
+
+    Quoting is not optional here: an ``<include_paths>`` value may contain a
+    space (a Windows SDK under ``C:\\Program Files``), and every consumer of
+    a ``gcc_options`` *string* splits it again with the shlex-derived rule
+    above -- so an unquoted ``-I/some path`` arrives as two nonexistent
+    paths. Round-trip stability is the contract:
+    ``split_gcc_options(join_gcc_options(t)) == list(t)``.
+
+    ``shlex.quote`` on POSIX; on Windows, double quotes, because
+    :func:`_split_gcc_options_windows` treats a single quote as a literal
+    character and would hand back the quotes themselves.
+    """
+    if os.name == "nt":
+        return " ".join(
+            f'"{t}"' if (not t or any(c.isspace() for c in t)) else t for t in tokens
+        )
+    return " ".join(shlex.quote(t) for t in tokens)
 
 
 def _split_gcc_options_windows(text: str) -> list[str]:

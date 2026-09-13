@@ -934,6 +934,13 @@ _ARTIFACT_NAMES = frozenset(
 #:       ``not_evaluated`` where a pre-4.5 run reported ``introduced``/
 #:       ``resolved`` from the current runner's filesystem. No verdict,
 #:       severity, or exit code moves -- this block never reached any of them.
+#: 4.6 -- additive per-finding ``library``: the DSO a finding was attributed
+#:       to in a multi-library ``compat`` run (``compat/multi_library.py``).
+#:       Absent -- not ``null`` -- for every scalar comparison, which is
+#:       every pre-4.6 report. ``finding_id`` folds it in when present, so
+#:       two paired DSOs producing an otherwise-identical finding no longer
+#:       collide on one id; a scalar comparison's ids are bit-for-bit
+#:       unchanged, since the field is absent there.
 #: 5.0 -- BREAKING (Codex review, PR #1284): plan slice 7o (`--view`'s
 #:       internal grammar). A MAJOR bump, not the 4.6 this first carried:
 #:       the policy above reserves MAJOR for removing a key, and a

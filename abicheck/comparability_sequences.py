@@ -41,11 +41,14 @@ from .comparability_json import (
 # too, since profile_fingerprint tracks declared-header ORDER as a genuine
 # extraction-context fact distinct from scope_fingerprint's order-independent
 # declared SET -- see compute_extraction_contract's docstring) is allowed to
-# treat as non-fatal, and only when the new sequence extends the old one with
-# new entries strictly TRAILING the old sequence, unchanged -- proving every
-# EXISTING header's preprocessing context (the headers parsed before it) is
-# byte-for-byte identical to before, not merely that existing headers keep
-# their relative order to each other.
+# waive, and only for growth `_header_sequence_is_scope_confirmed_growth`
+# accepts: the new sequence is the old one with scope-confirmed new entries
+# added and every EXISTING header keeping its relative order, whether those
+# entries trail the old sequence or sort into the middle of it. The waiver was
+# trailing-append-only for two releases; see that function's own docstring for
+# the measurement that retired the distinction, and for what stays refused (an
+# existing header that MOVED, growth the declared surface does not confirm as
+# new, and every other profile field).
 _HEADER_SEQUENCE_FIELDS = frozenset({"header_sequence"})
 
 
@@ -406,23 +409,36 @@ def _header_sequence_is_interior_insertion(
     ``[b.h, a.h]`` is not, and neither is a growth whose extra entries the
     declared *surface* never confirms as new.
 
-    **This is not a comparability waiver and must never be used as one.**
-    A trailing append proves every existing header's preprocessing context
-    is byte-for-byte what it was; an interior insertion proves only that no
-    existing header MOVED relative to another -- ``log.h`` is now parsed
-    with ``json.h``'s macros/pragmas already in effect, which can genuinely
-    change its AST. What this shape does establish is that the divergence is
-    a header ADDITION rather than a reordering or an unrelated compile-
-    context drift, which is what lets
-    ``comparability_profile._check_profile_fingerprint_comparable`` record it
-    as a bounded, dimension-scoped assurance reduction on a comparison that
-    still runs, instead of refusing to produce any verdict at all. See that
-    function's own ``fatal=False`` branch for the reasoning.
+    **What this shape establishes, and what it does not.** A trailing append
+    proves every existing header's preprocessing context is byte-for-byte
+    what it was; an interior insertion proves only that no existing header
+    MOVED relative to another -- ``log.h`` is now parsed with ``json.h``'s
+    macros/pragmas already in effect, which can in principle change its AST.
+    What it does establish is that the divergence is a header ADDITION rather
+    than a reordering or an unrelated compile-context drift.
+
+    This docstring used to say the shape "is not a comparability waiver and
+    must never be used as one", and for two releases it was not: the
+    divergence first refused the comparison outright, then (PR #1274) bounded
+    it to a ``fatal=False`` assurance reduction on the declaration/layout
+    dimensions. Both priced a hazard this contract does not price anywhere
+    else -- a declared header's *content* is not part of
+    ``profile_fingerprint`` at all, so an EXISTING header that gains a
+    ``#define``/``#pragma pack`` does the same thing to every header after it
+    and is compared at full assurance by design. So this predicate is now one
+    half of :func:`_header_sequence_is_scope_confirmed_growth`, the waiver the
+    ``header_sequence`` carve-out is stated over, and the bounded branch is
+    deleted rather than left as a second path. That function's docstring
+    carries the full reasoning and the condition under which this would
+    genuinely reopen (header content joining the fingerprint --
+    ``tests/test_comparability_gate_header_insertion.py``'s
+    ``test_an_existing_headers_leaking_edit_is_compared_at_full_assurance``
+    fails the day it does).
 
     Returns False for a pure trailing append too (``new_list[:len(old)] ==
-    old_list``): that is the full-assurance waiver's own shape, already
-    handled upstream, and reporting it here as well would degrade a pair
-    that needs no degrading.
+    old_list``): that is :func:`_header_sequence_is_additive_reorder_free`'s
+    own shape, and the two predicates partition the growth shapes between
+    them so their union has no overlap to make an outcome order-dependent.
     """
     if old_value is None or new_value is None:
         return False
@@ -452,28 +468,51 @@ def _header_sequence_is_interior_insertion(
     return (set(new_list) - set(old_list)) <= scope_new_headers
 
 
-def inserted_header_entries(old_value: str | None, new_value: str | None) -> list[str]:
-    """The ``header_sequence`` entries present in *new_value* and not in
-    *old_value*, in their new-side order.
+def _header_sequence_is_scope_confirmed_growth(
+    old_value: str | None, new_value: str | None, scope_new_headers: set[str] | None
+) -> bool:
+    """Whether the declared-header sequence grew by nothing but headers the
+    declared *surface* independently confirms as new -- whether they landed
+    after the old sequence (:func:`_header_sequence_is_additive_reorder_free`)
+    or inside it (:func:`_header_sequence_is_interior_insertion`).
 
-    What a caller should NAME when reporting an insertion (CodeRabbit
-    review, PR #1274). ``_scope_newly_added_headers`` answers a different
-    question -- every header newly added to the declared *surface* -- and
-    :func:`_header_sequence_is_interior_insertion` only requires the
-    sequence's own additions to be a SUBSET of that set. A header declared
-    public but never fed to the L2 frontend is in one and not the other, so
-    reporting the scope set would name a header that was not inserted
-    anywhere.
+    This is the predicate the ``header_sequence`` carve-out is stated in
+    terms of, and it deliberately does **not** distinguish the two
+    placements. The distinction was load-bearing for one release (PR #1274
+    granted a trailing append full assurance and bounded an interior
+    insertion to reduced ``declaration``/``layout`` assurance) and is not
+    sound, because the hazard it prices -- "``log.h`` is now parsed with
+    ``json.h``'s macros/pragmas already in effect" -- is neither specific to
+    an insertion nor something this contract prices anywhere else:
 
-    Empty when either side is absent or undecodable: a caller that has
-    already established the insertion shape should fall back to its own
-    wording rather than assert a list it cannot derive.
+    * A declared header's **content** is not part of ``profile_fingerprint``
+      at all (:func:`abicheck.comparability_fields._header_identities` keys a
+      header by its root-relative path, never its bytes). So an existing
+      ``data.h`` that gains a ``#define`` or a ``#pragma pack`` between two
+      versions changes the parse context of *every* header after it, and is
+      compared at FULL assurance today, by design -- that is what "the
+      declared surface's content is the subject of the comparison, not
+      evidence about the extraction environment" means. Adding those same
+      declarations as a new file instead is the same fact in a different
+      shape; pricing one and not the other is an inconsistency, not a
+      safeguard.
+    * The added header's own position is an incidental product of the
+      project's discovered, sorted public-header set -- ``json.h`` sorts
+      between ``data.h`` and ``log.h`` -- not an extraction-configuration
+      choice anyone made. Making assurance depend on it makes it depend on
+      the new header's spelling.
+    * The scope axis already treats the very same addition as ordinary
+      evolution at full assurance
+      (:func:`abicheck.comparability._scope_field_is_additive_superset`).
+
+    What stays refused is unchanged and is what the order fact exists for:
+    an EXISTING header that moved relative to another, growth whose extra
+    entries the scope fingerprint does not confirm as newly declared, a
+    duplicate/sentinel/undecodable sequence, and -- because this predicate
+    only ever removes ``header_sequence`` from the caller's working set --
+    any other profile field (compiler, standard, macros, target, include
+    topology) diverging alongside it.
     """
-    if old_value is None or new_value is None:
-        return []
-    old_list = _json_load_str_list(old_value)
-    new_list = _json_load_str_list(new_value)
-    if old_list is None or new_list is None:
-        return []
-    old_entries = set(old_list)
-    return [entry for entry in new_list if entry not in old_entries]
+    return _header_sequence_is_additive_reorder_free(
+        old_value, new_value, scope_new_headers
+    ) or _header_sequence_is_interior_insertion(old_value, new_value, scope_new_headers)

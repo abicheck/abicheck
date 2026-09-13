@@ -472,6 +472,50 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         operation=_OP.REMOVED,
     ),
     _E(
+        "func_added_elf_only",
+        _C,
+        is_addition=True,
+        impact="An exported function symbol appeared in the new binary that no "
+        "public header declares on either side. Existing consumers are "
+        "unaffected -- it is an addition, and the release needs a MINOR bump "
+        "like any other -- but the evidence for it is the export table alone, "
+        "so nothing is known about its signature. The weaker-evidence "
+        "counterpart of func_removed_elf_only, and the reason it exists: a "
+        "header-aware comparison builds its function map from the header AST, "
+        "so an export with no declaration never entered that map and its "
+        "addition was invisible. The same release reported Additions (1) at "
+        "--depth binary and Additions (0) with -H. Orthogonal to "
+        "exported_not_public, which asks whether the export *should* be "
+        "undeclared; this one only reports that the export set grew.",
+        description_template="New exported symbol not declared in any public header: {name}",
+        # Merged from main: this kind arrived while slice 7o was in flight, so
+        # it had no display dimensions. FUNCTION/ADDED matches its own sibling
+        # `func_removed_elf_only` and is corroborated by `workflows/history.py`,
+        # which already maps it to ENTITY_KIND_FUNCTION.
+        entity=_ENT.FUNCTION,
+        operation=_OP.ADDED,
+    ),
+    _E(
+        "var_added_elf_only",
+        _C,
+        is_addition=True,
+        impact="An exported data symbol (STT_OBJECT/STT_TLS/STT_COMMON) "
+        "appeared in the new binary that no public header declares on either "
+        "side. The data counterpart of func_added_elf_only, and it exists for "
+        "the same reason: a header-aware comparison builds its variable map "
+        "from the header AST, so an undeclared export never entered that map "
+        "and _diff_variables could not report VAR_ADDED for it -- the "
+        "addition disappeared entirely rather than being reported weakly. "
+        "Existing consumers are unaffected, but the evidence is the export "
+        "table alone, so nothing is known about the object's type or size.",
+        description_template="New exported data symbol not declared in any public header: {name}",
+        # Merged from main, same as its function counterpart above:
+        # VARIABLE/ADDED matches `var_removed_elf_only` and `workflows/
+        # history.py`'s own ENTITY_KIND_VARIABLE mapping for this kind.
+        entity=_ENT.VARIABLE,
+        operation=_OP.ADDED,
+    ),
+    _E(
         "func_removed_elf_only",
         _B,
         impact="Exported function symbol removed from the binary; old binaries that link or dlsym() it can fail even without header evidence.",

@@ -1018,8 +1018,20 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
     "func_removed": "func_removal",
     "func_removed_elf_only": "func_removal",
     "func_added": "func_addition",
+    # The addition counterpart of the `func_removed`/`func_removed_elf_only`
+    # pair above, and paired for the identical reason: which of the two a
+    # symbol gets depends only on which evidence tier observed it (a header
+    # declaration vs. the export table alone), not on what happened. A
+    # `finding_id:` suppression written against one must keep matching when a
+    # later run has header evidence it did not, or vice versa.
+    "func_added_elf_only": "func_addition",
     "var_removed": "var_removal",
     "var_added": "var_addition",
+    # The data counterpart of the `func_added`/`func_added_elf_only` pair
+    # above, for the identical reason: which of the two an exported data
+    # symbol gets depends only on whether a public header declared it, not on
+    # what the release did.
+    "var_added_elf_only": "var_addition",
     "symbol_version_node_removed": "version_def_removal",
     "symbol_version_defined_removed": "version_def_removal",
     "struct_size_changed": "type_size_change",
@@ -1801,6 +1813,16 @@ def report_finding_id(c: object) -> str:
     disambiguator = getattr(c, "disambiguator", None)
     if disambiguator:
         parts.append(str(disambiguator))
+    # `library` under the same conditional rule, for the same reason: it is
+    # `None` for every scalar comparison, so every id this function has ever
+    # produced is unchanged. Two paired DSOs in one multi-library `compat`
+    # run routinely produce findings with an identical kind/symbol/value/
+    # location/description -- a shared symbol removed from both -- which
+    # hashed to one id, so a consumer indexing by `finding_id` kept one and
+    # dropped the other (Codex review).
+    library = getattr(c, "library", None)
+    if library:
+        parts.append(str(library))
     key = "\x1f".join(parts)
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 

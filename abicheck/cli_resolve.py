@@ -532,6 +532,9 @@ def _resolve_compare_snapshots(
     lang_explicit: bool = False,
     changed_paths: tuple[str, ...] = (),  # ADR-068 Phase 2c: ADR-043 D7 POI scoping
     config_public_header_dirs: list[Path] | None = None,
+    # Appended, never inserted: this signature is long and has positional
+    # callers (`api.positional_slot_rebinding`, tests/regressions/manifest.py).
+    exclude_headers: tuple[str, ...] = (),
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info.
 
@@ -631,6 +634,7 @@ def _resolve_compare_snapshots(
         old=_request_inputs.InputSpec(
             path=old_input,
             headers=tuple(old_h),
+            exclude_headers=tuple(exclude_headers or ()),
             includes=tuple(old_inc),
             version=old_version,
             pdb=old_pdb_path if old_pdb_path else pdb_path,
@@ -645,6 +649,7 @@ def _resolve_compare_snapshots(
         new=_request_inputs.InputSpec(
             path=new_input,
             headers=tuple(new_h),
+            exclude_headers=tuple(exclude_headers or ()),
             includes=tuple(new_inc),
             version=new_version,
             pdb=new_pdb_path if new_pdb_path else pdb_path,

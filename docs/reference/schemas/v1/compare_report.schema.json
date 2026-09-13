@@ -2622,6 +2622,10 @@
         "kind": {
           "type": "string"
         },
+        "library": {
+          "type": "string",
+          "description": "Schema 4.6: the DSO this finding was attributed to in a multi-library compat run (an ABICC descriptor naming several <libs>, paired per SONAME stem). Absent -- never null -- for a scalar comparison, which is every pre-4.6 report. finding_id folds this value in when present, so two paired DSOs producing an otherwise-identical finding do not collide on one id."
+        },
         "symbol": {
           "type": "string"
         },

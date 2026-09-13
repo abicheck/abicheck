@@ -114,7 +114,9 @@ _PROGRESS_SUMMARY = re.compile(r"🙁\s*(\d+)")
 #: left unchecked — i.e. the run reached its final render. Anchored to a line
 #: that also carries a status emoji so an unrelated ``3/4`` in prose cannot be
 #: read as one.
-_PROGRESS_COUNTER = re.compile(r"^\D*?(\d+)\s*/\s*(\d+)\s.*?[🎉🙁🫥⏰🤔🔇🧙]", re.MULTILINE)
+_PROGRESS_COUNTER = re.compile(
+    r"^\D*?(\d+)\s*/\s*(\d+)\s.*?[🎉🙁🫥⏰🤔🔇🧙]", re.MULTILINE
+)
 
 #: Emoji counters for the unresolved statuses, read from a summary render when
 #: there is no per-mutant listing to count instead. As with the survivor

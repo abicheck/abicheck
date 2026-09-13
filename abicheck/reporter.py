@@ -1506,6 +1506,13 @@ def _change_to_dict(
     }
     if reclassified_by:
         d["reclassified_by"] = reclassified_by
+    # Which library produced this finding, present only when the run compared
+    # more than one (`compat check` over a multi-library descriptor). Omitted
+    # otherwise, where the report's own top-level `library` already answers
+    # it -- so every single-library report is byte-identical to before.
+    finding_library = getattr(c, "library", None)
+    if finding_library:
+        d["library"] = finding_library
     # Two per-declaration blocks, omitted when absent (see their own field
     # docs on Change): `demangled_symbol`, a readable name for a finding whose
     # old-side declaration is export-table-only (`symbol`/`old_value` stay raw

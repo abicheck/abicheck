@@ -13,24 +13,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""A declared-header INSERTION bounds a comparison; it never refuses one.
+"""A declared-header addition is ordinary evolution, wherever it sorts.
 
-Bug class: an *incidental* extraction-ordering fact was treated as a fatal
-comparability contract. ``header_sequence`` records declared-header order
-because the aggregate driver TU parses headers sequentially, and the only
-waiver was a strict trailing append. Directory-discovered headers arrive
+Bug class: an *incidental* extraction-ordering fact was treated as evidence
+about the extraction environment. ``header_sequence`` records declared-header
+order because the aggregate driver TU parses headers sequentially, and the
+only waiver was a strict trailing append. Directory-discovered headers arrive
 sorted, so adding one public header whose name sorts into the middle
-(``data.h, log.h`` -> ``data.h, json.h, log.h``) produced
+(``data.h, log.h`` -> ``data.h, json.h, log.h``) first produced
 ``profile_fingerprint mismatch; differing fields: header_sequence`` and NO
-verdict at all -- from an ordinary public-header addition.
+verdict at all, and then (PR #1274) a verdict whose ``declaration``/``layout``
+assurance was marked unverified -- which reads through to
+``analysis_assurance.status = "partial"`` and floors the exit code of every
+run configured with ``assurance.require_complete``. Both dispositions price
+the added header's *sort position*, which no one chose, and neither is
+consistent with the same contract comparing an EXISTING header's edited
+content -- an identical macro/pragma-leak hazard -- at full assurance, since
+a declared header's content is not part of ``profile_fingerprint`` at all.
 
 The invariant these tests state is not "the json.h case now passes". It is:
 
   *For any* declared-header growth that preserves every existing header's
   relative order and adds only headers the scope fingerprint independently
-  confirms as new, the pair stays comparable, with the residual risk
-  recorded as a dimension-scoped assurance reduction -- while *any* growth
-  that reorders an existing header, adds an unconfirmed header, or rides
+  confirms as new, the pair is comparable at FULL assurance and the outcome
+  does not depend on where the new headers sort -- while *any* growth that
+  reorders an existing header, adds an unconfirmed header, or rides
   alongside another unexplained profile field stays a hard refusal.
 
 Both halves are exercised over generated inputs (every insertion position,
@@ -47,14 +54,13 @@ from pathlib import Path
 import pytest
 
 from abicheck.comparability import (
-    ComparabilityMismatch,
     check_contracts_comparable,
     compute_extraction_contract,
-    dimension_assurance,
 )
 from abicheck.comparability_sequences import (
     _header_sequence_is_additive_reorder_free,
     _header_sequence_is_interior_insertion,
+    _header_sequence_is_scope_confirmed_growth,
 )
 from abicheck.errors import ProfileMismatchError
 from abicheck.model import AbiSnapshot
@@ -94,13 +100,13 @@ def _snap(root: Path, names, version: str) -> AbiSnapshot:
 # ---------------------------------------------------------------------------
 
 
-def test_middle_sorting_public_header_addition_is_bounded_not_refused(tmp_path):
+def test_middle_sorting_public_header_addition_is_fully_comparable(tmp_path):
     """The reported repro: one added public header sorting into the middle."""
     old = _snap(tmp_path / "old", _OLD_HEADERS, "1.3")
     new = _snap(tmp_path / "new", (*_OLD_HEADERS, "json.h"), "1.4")
 
     # The order really is an insertion, not an append -- i.e. this pair is the
-    # shape the pre-existing trailing-append waiver declines.
+    # shape the original trailing-append-only waiver declined.
     assert json.loads(new.contract.profile_fields["header_sequence"]) == [
         "data.h",
         "json.h",
@@ -113,16 +119,54 @@ def test_middle_sorting_public_header_addition_is_bounded_not_refused(tmp_path):
         {"json.h"},
     )
 
-    result = check_contracts_comparable(old, new)
-    assert isinstance(result, ComparabilityMismatch)
-    assert result.fatal is False  # returned, never raised
-    assert result.dimensions == frozenset({"declaration", "layout"})
-    assert "json.h" in result.reason
-    # The symbol dimension -- the binary's own exported-symbol identity -- is
-    # untouched by a header insertion and must stay trusted; that conclusion
-    # being discarded wholesale was half the cost of the refusal.
-    assert dimension_assurance(result)["symbol"] == "trusted"
-    assert dimension_assurance(result)["declaration"] == "unverified"
+    assert check_contracts_comparable(old, new) is None
+
+
+def test_an_existing_headers_leaking_edit_is_compared_at_full_assurance(tmp_path):
+    """The symmetry that decides how an addition may be priced.
+
+    The hazard an interior insertion carries is that a header parsed after it
+    in the aggregate driver TU now sees macros/pragmas it did not see before.
+    That hazard is NOT specific to an insertion: an EXISTING declared header
+    that gains ``#define LEAK`` and ``#pragma pack(push, 1)`` between two
+    versions does the same thing to every header after it -- and this contract
+    compares that at full assurance, deliberately, because a declared header's
+    content is not part of ``profile_fingerprint`` at all
+    (``comparability_fields._header_identities`` keys a header by its
+    root-relative path, never its bytes).
+
+    This test states that as an executable fact rather than a claim in a
+    docstring: as long as it passes, pricing an ADDED header's sort position
+    as reduced assurance is an inconsistency, not a safeguard -- it would make
+    assurance depend on the new header's spelling while the strictly larger
+    hazard next door goes unpriced. If this test ever fails because header
+    content joins the fingerprint, the insertion question genuinely reopens
+    and this file's waiver should be revisited with it.
+    """
+    leaky = "#define LEAK 1\n#pragma pack(push, 1)\nint a(int);\n"
+    old_root = tmp_path / "old"
+    new_root = tmp_path / "new"
+    old_headers = _headers(old_root, _OLD_HEADERS)
+    new_headers = _headers(new_root, _OLD_HEADERS)
+    # The FIRST declared header, so its leak reaches every header after it.
+    new_headers[0].write_text(leaky, encoding="utf-8")
+
+    def _snapshot(headers, version):
+        return AbiSnapshot(
+            library="libpvxs.so",
+            version=version,
+            contract=compute_extraction_contract(
+                l2_frontend_ran=True,
+                declared_headers=headers,
+                public_header_paths=headers,
+                depfile_resolved_paths=headers,
+            ),
+        )
+
+    old = _snapshot(old_headers, "1.3")
+    new = _snapshot(new_headers, "1.4")
+    assert old.contract.profile_fingerprint == new.contract.profile_fingerprint
+    assert check_contracts_comparable(old, new) is None
 
 
 def test_trailing_append_keeps_full_assurance(tmp_path):
@@ -138,12 +182,12 @@ def test_trailing_append_keeps_full_assurance(tmp_path):
 def test_any_insertion_position_is_comparable(tmp_path, added):
     """Generalization guard: the outcome must not depend on WHERE the new
     header sorts. Before the fix, exactly one of these five positions
-    (``zzz.h``, the trailing one) was comparable and the other four refused --
-    a difference with no bearing on whether the library's ABI changed."""
+    (``zzz.h``, the trailing one) was comparable at full assurance and the
+    other four were refused (and later, bounded to reduced assurance) -- a
+    difference with no bearing on whether the library's ABI changed."""
     old = _snap(tmp_path / f"old{added}", _OLD_HEADERS, "1.3")
     new = _snap(tmp_path / f"new{added}", (*_OLD_HEADERS, added), "1.4")
-    result = check_contracts_comparable(old, new)
-    assert result is None or result.fatal is False
+    assert check_contracts_comparable(old, new) is None
 
 
 def test_reordering_an_existing_header_still_refuses(tmp_path):
@@ -298,9 +342,9 @@ class TestInteriorInsertionProperties:
         )
 
     def test_is_disjoint_from_the_trailing_append_waiver(self):
-        """The two predicates must never both accept the same pair: one grants
-        full assurance, the other a reduction, and an overlap would make which
-        one a pair gets depend on evaluation order."""
+        """The two predicates partition the growth shapes between them: each
+        placement is accepted by exactly one, so the composite below is a
+        union with no overlap to make the outcome order-dependent."""
         both = []
         for pos in range(len(self._BASE) + 1):
             new = [*self._BASE[:pos], "new.h", *self._BASE[pos:]]
@@ -314,11 +358,104 @@ class TestInteriorInsertionProperties:
 
 
 # ---------------------------------------------------------------------------
+# The composite predicate the carve-out is actually stated in terms of
+# ---------------------------------------------------------------------------
+
+
+class TestScopeConfirmedGrowthProperties:
+    """`_header_sequence_is_scope_confirmed_growth` is the union of the two
+    placement predicates, and the union is what the gate may act on.
+
+    The oracle here is deliberately independent of the implementation's
+    ``or``: growth is acceptable iff every old entry survives in its original
+    relative order and every entry the new sequence added is one the declared
+    surface confirms as new. Nothing in that statement mentions placement --
+    which is the whole point of the change.
+    """
+
+    _BASE = ["a.h", "b.h", "c.h", "d.h"]
+
+    @staticmethod
+    def _oracle(old: list[str], new: list[str], scope_new: set[str] | None) -> bool:
+        if scope_new is None:
+            return False
+        if len(set(old)) != len(old) or len(set(new)) != len(new):
+            return False
+        if len(new) <= len(old):
+            return False
+        if not _is_order_preserving_supersequence(old, new):
+            return False
+        return set(new) - set(old) <= scope_new and set(old) <= set(new)
+
+    def test_agrees_with_the_oracle_over_every_single_insertion_position(self):
+        disagreeing = []
+        for pos in range(len(self._BASE) + 1):
+            new = [*self._BASE[:pos], "new.h", *self._BASE[pos:]]
+            got = _header_sequence_is_scope_confirmed_growth(
+                _seq(self._BASE), _seq(new), {"new.h"}
+            )
+            expected = self._oracle(self._BASE, new, {"new.h"})
+            if got != expected:
+                disagreeing.append((pos, got, expected))
+        assert not disagreeing
+
+    def test_accepts_every_position_including_the_trailing_one(self):
+        """The property the whole fix is about: the verdict does not depend on
+        where the added header sorts."""
+        rejected = [
+            pos
+            for pos in range(len(self._BASE) + 1)
+            if not _header_sequence_is_scope_confirmed_growth(
+                _seq(self._BASE),
+                _seq([*self._BASE[:pos], "new.h", *self._BASE[pos:]]),
+                {"new.h"},
+            )
+        ]
+        assert not rejected
+
+    def test_agrees_with_the_oracle_over_every_permutation_and_placement(self):
+        disagreeing = []
+        for perm in itertools.permutations(self._BASE):
+            for pos in range(len(perm) + 1):
+                new = [*list(perm)[:pos], "new.h", *list(perm)[pos:]]
+                got = _header_sequence_is_scope_confirmed_growth(
+                    _seq(self._BASE), _seq(new), {"new.h"}
+                )
+                expected = self._oracle(self._BASE, new, {"new.h"})
+                if got != expected:
+                    disagreeing.append((new, got, expected))
+        assert not disagreeing
+
+    def test_the_oracle_is_not_vacuous(self):
+        """A constant oracle would make both agreement tests above pass while
+        asserting nothing."""
+        assert self._oracle(["a.h"], ["a.h", "x.h"], {"x.h"})
+        assert not self._oracle(["a.h", "b.h"], ["b.h", "x.h", "a.h"], {"x.h"})
+
+    @pytest.mark.parametrize(
+        "old_list,new_list,scope_new",
+        [
+            (["a.h", "b.h"], ["a.h", "x.h", "b.h"], set()),
+            (["a.h", "b.h"], ["a.h", "b.h", "x.h"], set()),
+            (["a.h", "b.h"], ["a.h", "x.h", "b.h"], None),
+            (["a.h", "b.h", "c.h"], ["a.h", "c.h"], {"x.h"}),
+            (["a.h", "b.h"], ["b.h", "a.h", "x.h"], {"x.h"}),
+            (["a.h", "b.h"], ["a.h", "x.h", "b.h", "b.h"], {"x.h"}),
+            (["<single-header>"], ["a.h", "x.h"], {"x.h"}),
+        ],
+    )
+    def test_fails_closed_on_unusable_evidence(self, old_list, new_list, scope_new):
+        assert not _header_sequence_is_scope_confirmed_growth(
+            _seq(old_list), _seq(new_list), scope_new
+        )
+
+
+# ---------------------------------------------------------------------------
 # checker.compare(): the disposition the whole change is about
 # ---------------------------------------------------------------------------
 
 
-class TestCompareRecordsRatherThanRefuses:
+class TestCompareTreatsTheAdditionAsEvolution:
     def _pair(self, tmp_path):
         return (
             _snap(tmp_path / "old", _OLD_HEADERS, "1.3"),
@@ -331,157 +468,50 @@ class TestCompareRecordsRatherThanRefuses:
         old, new = self._pair(tmp_path)
         assert compare(old, new).verdict is not None
 
-    def test_assurance_none_is_not_stamped(self, tmp_path):
-        """``assurance: "none"`` means "forced through a refusal with
-        --diagnostic-comparison, do not trust this". Nothing was forced here,
-        so stamping it would misreport a bounded result as an override."""
+    def test_no_assurance_reduction_is_recorded(self, tmp_path):
+        """`comparability_assurance` is `None` only when no mismatch was found
+        at all -- so this asserts the pair is comparable, not merely that the
+        reduction is small."""
         from abicheck.checker import compare
 
         old, new = self._pair(tmp_path)
-        assert compare(old, new).assurance is None
-
-    def test_the_reduction_is_recorded_per_dimension(self, tmp_path):
-        from abicheck.checker import compare
-
-        old, new = self._pair(tmp_path)
-        assurance = compare(old, new).comparability_assurance
-        assert assurance == {
-            "declaration": "unverified",
-            "layout": "unverified",
-            "runtime": "trusted",
-            "source": "trusted",
-            "symbol": "trusted",
-        }
-
-    def test_the_reason_is_disclosed_not_swallowed(self, tmp_path):
-        """ "Record before disposing": a consumer must be able to see WHY
-        assurance dropped, not just that it did."""
-        from abicheck.checker import compare
-
-        old, new = self._pair(tmp_path)
-        warnings = compare(old, new).coverage_warnings
-        assert any("inserted into the declared header sequence" in w for w in warnings)
-
-    def test_an_unchanged_pair_records_nothing(self, tmp_path):
-        """Vacuity guard on the three assertions above: an identical pair must
-        produce no mismatch, no dimension breakdown and no warning, or they
-        would pass for reasons unrelated to the insertion."""
-        from abicheck.checker import compare
-
-        old = _snap(tmp_path / "old", _OLD_HEADERS, "1.3")
-        same = _snap(tmp_path / "same", _OLD_HEADERS, "1.4")
-        result = compare(old, same)
+        result = compare(old, new)
         assert result.comparability_assurance is None
+        assert result.assurance is None
+
+    def test_no_comparability_warning_is_emitted(self, tmp_path):
+        from abicheck.checker import compare
+
+        old, new = self._pair(tmp_path)
         assert not any(
-            "declared header sequence" in w for w in result.coverage_warnings
+            "header sequence" in w or "profile_fingerprint" in w
+            for w in compare(old, new).coverage_warnings
         )
 
+    def test_an_appended_header_is_treated_identically(self, tmp_path):
+        """Vacuity/consistency guard: the trailing-append case -- comparable at
+        full assurance before this change and after it -- must now be
+        indistinguishable from the interior one on every field the insertion
+        used to move."""
+        from abicheck.checker import compare
 
-# ---------------------------------------------------------------------------
-# The bounded path's own boundaries (Codex review, PR #1274)
-# ---------------------------------------------------------------------------
-
-
-class TestOnlyAHeaderSequenceDivergenceIsBounded:
-    """`unexplained` must be EXACTLY `{"header_sequence"}`.
-
-    `_unexplained_profile_fields` has already removed every field a carve-out
-    verified, so anything still in that set is by construction a divergence
-    NO carve-out could corroborate. An `include_sequence` surviving there is a
-    changed `-I` topology (two include roots swapped, say), and include-search
-    order decides which dependency header an `#include` resolves to — a
-    different, unbounded hazard from the declared-header insertion this branch
-    reasons about, and one nothing here corroborates.
-
-    Tested at the guard itself rather than through a fixture: every other
-    precondition is held identically to the bounded case (real contracts from
-    the real insertion pair), so `unexplained` is the only variable.
-    """
-
-    def _contracts(self, tmp_path):
         old = _snap(tmp_path / "old", _OLD_HEADERS, "1.3")
-        new = _snap(tmp_path / "new", (*_OLD_HEADERS, "json.h"), "1.4")
-        return old.contract, new.contract
-
-    def _call(self, tmp_path, unexplained):
-        from abicheck.comparability_profile import (
-            _declared_header_insertion_mismatch,
+        inserted = compare(
+            old, _snap(tmp_path / "mid", (*_OLD_HEADERS, "json.h"), "1.4")
         )
-
-        old_contract, new_contract = self._contracts(tmp_path)
-        return _declared_header_insertion_mismatch(
-            old_contract,
-            new_contract,
-            unknown_differing=set(),
-            differing=set(unexplained),
-            unexplained=set(unexplained),
+        appended = compare(
+            old, _snap(tmp_path / "end", (*_OLD_HEADERS, "zzz.h"), "1.4")
         )
-
-    def test_header_sequence_alone_is_bounded(self, tmp_path):
-        """Vacuity guard for the whole class: the accepted set really is
-        accepted here, so the rejections below mean something."""
-        got = self._call(tmp_path, {"header_sequence"})
-        assert got is not None and got.fatal is False
-
-    @pytest.mark.parametrize(
-        "unexplained",
-        [
-            # The reported P1: a header insertion riding alongside an
-            # include-topology change no carve-out could explain.
-            {"header_sequence", "include_sequence"},
-            # An include_sequence-only divergence carries no insertion at all.
-            {"include_sequence"},
-            # Any other profile field alongside it is a genuine, uncorroborated
-            # compile-context difference.
-            {"header_sequence", "compiler_family"},
-            {"header_sequence", "language_standard"},
-            {"header_sequence", "macro_ops"},
-            {"header_sequence", "target_triple"},
-            {"header_sequence", "include_sequence", "macro_ops"},
-            # Nothing unexplained at all is not this function's case.
-            set(),
-        ],
-    )
-    def test_anything_else_stays_fatal(self, tmp_path, unexplained):
-        assert self._call(tmp_path, unexplained) is None
-
-    def test_an_unrecognized_field_is_never_bounded(self, tmp_path):
-        """Fail-closed: a field this build does not recognize, and an
-        absent/malformed `profile_fields` (empty `differing`), are the two
-        cases `_profile_mismatch_reason` answers first and neither has a
-        verified shape to reason from."""
-        assert (
-            self._call_raw(
-                tmp_path, unknown={"future_field"}, differing={"header_sequence"}
-            )
-            is None
-        )
-        assert self._call_raw(tmp_path, unknown=set(), differing=set()) is None
-
-    def _call_raw(self, tmp_path, unknown, differing):
-        from abicheck.comparability_profile import (
-            _declared_header_insertion_mismatch,
-        )
-
-        old_contract, new_contract = self._contracts(tmp_path)
-        return _declared_header_insertion_mismatch(
-            old_contract,
-            new_contract,
-            unknown_differing=unknown,
-            differing=differing,
-            unexplained={"header_sequence"},
+        assert (inserted.comparability_assurance, inserted.assurance) == (
+            appended.comparability_assurance,
+            appended.assurance,
         )
 
 
-class TestBoundedMismatchReachesTheAssuranceRollup:
-    """`compute_analysis_assurance` must not report `complete` for a run whose
-    own `comparability_assurance` says a dimension is unverified.
-
-    It previously special-cased only `assurance == "none"`, so the two
-    assurance fields of one report contradicted each other and
-    `assurance.require_complete` declined to gate a run that is, by its own
-    account, not complete.
-    """
+class TestTheAssuranceRollupReadsComplete:
+    """The reported symptom: `analysis_assurance.status = "partial"` with
+    "extraction contexts were not provably identical", which floors the exit
+    code of a run configured with `assurance.require_complete`."""
 
     def _assurance(self, tmp_path, new_names):
         from abicheck.analysis_assurance import compute_analysis_assurance
@@ -491,113 +521,124 @@ class TestBoundedMismatchReachesTheAssuranceRollup:
         new = _snap(tmp_path / "new", new_names, "1.4")
         return compute_analysis_assurance(compare(old, new), old, new)
 
-    def test_an_insertion_reports_partial(self, tmp_path):
-        assert self._assurance(tmp_path, (*_OLD_HEADERS, "json.h")).status == "partial"
-
-    def test_the_note_names_the_unverified_dimensions(self, tmp_path):
+    def test_no_comparability_note_is_added(self, tmp_path):
+        """Asserted on the NOTE, not on `status`: these fixtures carry no
+        binary, so an unchanged pair already reads `partial` on an unrelated
+        axis ("public surface could not be resolved") -- `status` alone would
+        prove nothing about this change either way."""
         notes = self._assurance(tmp_path, (*_OLD_HEADERS, "json.h")).notes
-        assert any(
-            "declaration" in n and "layout" in n and "reduced assurance" in n
-            for n in notes
-        )
+        assert not any("reduced assurance" in n for n in notes)
+        assert not any("provably identical" in n for n in notes)
 
-    def test_it_is_partial_not_not_comparable(self, tmp_path):
-        """A verdict WAS produced and every other axis was genuinely computed;
-        only some dimensions carry reduced assurance. Collapsing that to
-        `not_comparable` would discard the axes this run did establish."""
-        assert self._assurance(tmp_path, (*_OLD_HEADERS, "json.h")).status != (
-            "not_comparable"
-        )
-
-    def test_an_unchanged_pair_carries_no_comparability_note(self, tmp_path):
-        """Vacuity guard, and it earned its place: these fixtures carry no
-        binary, so an UNCHANGED pair already reads `partial` on an unrelated
-        axis ("public surface could not be resolved"). `status == "partial"`
-        alone therefore proves nothing about this change — the note is what
-        distinguishes the two, so it is the note this class asserts on, and
-        the note must be absent when there is no insertion."""
-        assurance = self._assurance(tmp_path, _OLD_HEADERS)
-        assert not any("reduced assurance" in n for n in assurance.notes)
-
-    def test_the_insertion_is_what_adds_the_note(self, tmp_path):
-        """The two runs differ by exactly the inserted header, so the note
-        appearing in one and not the other attributes it to the insertion
-        rather than to any axis both runs share."""
-        with_insertion = self._assurance(tmp_path, (*_OLD_HEADERS, "json.h")).notes
+    def test_the_addition_changes_no_note_at_all(self, tmp_path):
+        """Stronger than the absence above: the run with the added header must
+        contribute no assurance note the identical run without it doesn't."""
+        with_addition = self._assurance(tmp_path, (*_OLD_HEADERS, "json.h")).notes
         without = self._assurance(tmp_path, _OLD_HEADERS).notes
-        added = [n for n in with_insertion if n not in without]
-        assert any("reduced assurance" in n for n in added)
+        assert [n for n in with_addition if n not in without] == []
+
+    def test_the_note_machinery_is_not_vacuous(self, tmp_path):
+        """Guard on the two tests above: `bounded_comparability_notes` must
+        still produce the note it is there to produce, or their absence
+        assertions would pass against a rollup that can no longer report
+        anything."""
+        from abicheck.analysis_assurance_comparability import (
+            bounded_comparability_notes,
+        )
+
+        assert any(
+            "reduced assurance" in n
+            for n in bounded_comparability_notes(
+                {"declaration": "unverified", "symbol": "trusted"}
+            )
+        )
 
 
-class TestTheReasonNamesOnlyWhatWasInserted:
-    """The reported set is the SEQUENCE's own additions.
+# ---------------------------------------------------------------------------
+# What must still refuse (the safety half)
+# ---------------------------------------------------------------------------
 
-    `_header_sequence_is_interior_insertion` only requires those additions to
-    be a *subset* of `_scope_newly_added_headers`, so the two sets are not
-    interchangeable: a header declared public but never fed to the L2
-    frontend is in the scope set and in no insertion. Naming the scope set
-    would report a header that was not inserted anywhere — a finding about a
-    file nothing happened to.
+
+def _contract_with(tmp_path, names, **profile):
+    headers = _headers(tmp_path, names)
+    return AbiSnapshot(
+        library="libpvxs.so",
+        version="1.4",
+        contract=compute_extraction_contract(
+            l2_frontend_ran=True,
+            declared_headers=headers,
+            public_header_paths=headers,
+            **profile,
+        ),
+    )
+
+
+class TestAnotherDivergingProfileFieldStillRefuses:
+    """The carve-out only ever removes `header_sequence` from the working set.
+
+    A genuine compile-context difference riding alongside the addition
+    therefore stays unexplained and stays a hard refusal -- the property that
+    keeps this waiver from masking an ABI-affecting context mismatch. Every
+    field below names one of the classes the reported requirement calls out:
+    compiler target, language mode, ABI-affecting flags.
     """
 
     @pytest.mark.parametrize(
-        "old_entries,new_entries,expected",
+        "profile",
         [
-            (["a.h", "c.h"], ["a.h", "b.h", "c.h"], ["b.h"]),
-            (["a.h"], ["x.h", "a.h", "y.h"], ["x.h", "y.h"]),
-            (["a.h", "b.h"], ["a.h", "b.h"], []),
-            # New-side order is preserved, not sorted.
-            (["m.h"], ["z.h", "m.h", "a.h"], ["z.h", "a.h"]),
-            # A removal is not an addition.
-            (["a.h", "b.h"], ["b.h"], []),
+            {"compiler_family": "clang"},
+            {"compiler_version": "gcc 13.2.0"},
+            {"language_standard": "c++20"},
+            {"target_triple": "aarch64-linux-gnu"},
+            {"pointer_width": 32},
+            {"endianness": "big"},
+            {"abi_dialect": "itanium-v2"},
+            {"macro_ops": (("D", "NDEBUG"),)},
+            {"pass_through_flags": ("-include forced.h",)},
         ],
     )
-    def test_entries_come_from_the_sequence_diff(
-        self, old_entries, new_entries, expected
-    ):
-        from abicheck.comparability_sequences import inserted_header_entries
+    @pytest.mark.parametrize("added", ["aaa.h", "json.h", "zzz.h"])
+    def test_it_refuses_at_every_insertion_position(self, tmp_path, profile, added):
+        old = _contract_with(tmp_path / "old", _OLD_HEADERS)
+        new = _contract_with(tmp_path / "new", (*_OLD_HEADERS, added), **profile)
+        with pytest.raises(ProfileMismatchError):
+            check_contracts_comparable(old, new)
 
-        assert inserted_header_entries(_seq(old_entries), _seq(new_entries)) == expected
+    def test_the_same_pair_without_the_extra_field_is_comparable(self, tmp_path):
+        """Vacuity guard: the refusals above must come from the extra profile
+        field, not from the header addition the fix is supposed to waive."""
+        old = _contract_with(tmp_path / "old", _OLD_HEADERS)
+        new = _contract_with(tmp_path / "new", (*_OLD_HEADERS, "json.h"))
+        assert check_contracts_comparable(old, new) is None
 
-    @pytest.mark.parametrize(
-        "old_value,new_value",
-        [(None, "[]"), ("[]", None), ("not-json", "[]"), ("[]", "not-json")],
+
+def test_an_unconfirmed_sequence_entry_still_refuses(tmp_path):
+    """A header fed to the L2 frontend on the new side only, while the declared
+    public surface is unchanged, is not scope-confirmed growth: the old
+    snapshot never parsed its content, so a removal inside it would be
+    invisible. The shape looks identical to the waived one."""
+    old_headers = _headers(tmp_path / "old", _OLD_HEADERS)
+    new_root = tmp_path / "new"
+    new_declared = _headers(new_root, (*_OLD_HEADERS, "json.h"))
+    old = AbiSnapshot(
+        library="libpvxs.so",
+        version="1.3",
+        contract=compute_extraction_contract(
+            l2_frontend_ran=True,
+            declared_headers=old_headers,
+            # json.h is already public on the old side -- only the L2 frontend
+            # never saw it, so scope_fields["headers"] does not grow.
+            public_header_paths=_headers(tmp_path / "old", (*_OLD_HEADERS, "json.h")),
+        ),
     )
-    def test_undecodable_sides_report_nothing(self, old_value, new_value):
-        """Rather than asserting a list it cannot derive."""
-        from abicheck.comparability_sequences import inserted_header_entries
-
-        assert inserted_header_entries(old_value, new_value) == []
-
-    def test_a_declared_but_unparsed_header_is_not_reported_as_inserted(self, tmp_path):
-        """End to end: `unparsed.h` joins the public surface without being fed
-        to the frontend, so it is in `scope_fields["headers"]` and in no
-        `header_sequence` position. Only `json.h` was inserted."""
-        old_root = tmp_path / "old"
-        new_root = tmp_path / "new"
-        old_headers = _headers(old_root, _OLD_HEADERS)
-        new_declared = _headers(new_root, (*_OLD_HEADERS, "json.h"))
-        new_public = _headers(new_root, (*_OLD_HEADERS, "json.h", "unparsed.h"))
-
-        old = AbiSnapshot(
-            library="libpvxs.so",
-            version="1.3",
-            contract=compute_extraction_contract(
-                l2_frontend_ran=True,
-                declared_headers=old_headers,
-                public_header_paths=old_headers,
-            ),
-        )
-        new = AbiSnapshot(
-            library="libpvxs.so",
-            version="1.4",
-            contract=compute_extraction_contract(
-                l2_frontend_ran=True,
-                declared_headers=new_declared,
-                public_header_paths=new_public,
-            ),
-        )
-        result = check_contracts_comparable(old, new)
-        assert isinstance(result, ComparabilityMismatch) and result.fatal is False
-        assert "json.h" in result.reason
-        assert "unparsed.h" not in result.reason
+    new = AbiSnapshot(
+        library="libpvxs.so",
+        version="1.4",
+        contract=compute_extraction_contract(
+            l2_frontend_ran=True,
+            declared_headers=new_declared,
+            public_header_paths=new_declared,
+        ),
+    )
+    with pytest.raises(ProfileMismatchError):
+        check_contracts_comparable(old, new)

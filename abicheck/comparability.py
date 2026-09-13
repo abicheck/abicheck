@@ -839,12 +839,22 @@ class ComparabilityMismatch:
     ``dimensions`` named (``checker.compare`` carries it into
     ``DiffResult.comparability_assurance`` and ``coverage_warnings``)
     rather than disposed of as a refusal. Only a divergence whose SHAPE is
-    itself positive evidence about what changed may be non-fatal -- see
-    ``comparability_profile``'s declared-header-insertion branch, the only
-    producer today. This is the product rule "weaker evidence narrows
-    conclusions" applied literally: an ordinary public-header addition
-    lowers assurance on the declaration/layout axes, it does not make two
-    snapshots incomparable.
+    itself positive evidence about what changed may be non-fatal. This is
+    the product rule "weaker evidence narrows conclusions" applied
+    literally.
+
+    **No axis produces one today.** The single producer was
+    ``comparability_profile``'s declared-header-INSERTION branch, which
+    priced an added public header's incidental sort position as reduced
+    ``declaration``/``layout`` assurance; that branch was wrong (a declared
+    header's *content* is not part of ``profile_fingerprint`` at all, so
+    the macro/pragma-leak hazard it priced is compared at full assurance
+    whenever an existing header's content evolves) and is gone -- the
+    growth is now waived outright by the ``header_sequence`` carve-out, see
+    :func:`comparability_sequences._header_sequence_is_scope_confirmed_growth`.
+    The machinery here stays because the rule it expresses is general: a
+    future axis whose divergence is bounded rather than disqualifying sets
+    ``fatal=False`` and is priced per dimension, with no further wiring.
 
     ``assurance: "none"`` stays reserved for a fatal mismatch forced
     through with ``--diagnostic-comparison``; a non-fatal one never sets
@@ -922,6 +932,31 @@ def _check_dependency_scope_comparable(
     return ComparabilityMismatch(
         kind="dependency_scope", reason=reason, dimensions=_DEPENDENCY_SCOPE_DIMENSIONS
     )
+
+
+def _check_header_exclusions_comparable(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> ComparabilityMismatch | None:
+    """Refuse a pair whose ``--exclude-header`` patterns differ (schema v47).
+
+    A sibling of :func:`_check_dependency_scope_comparable` for the same
+    structural reason: a post-parse narrowing the fingerprints cannot always
+    observe. The rule itself lives with the rest of the exclusion rules in
+    ``extract.header_exclusions`` -- see
+    :func:`~abicheck.extract.header_exclusions.exclusion_asymmetry_reason`
+    for why a contract-less baseline makes this check load-bearing rather
+    than redundant with ``scope_fingerprint``, and why no pre-v47 ambiguity
+    carve-out is needed.
+    """
+    from .extract.header_exclusions import exclusion_asymmetry_reason
+
+    reason = exclusion_asymmetry_reason(
+        getattr(old, "excluded_header_patterns", ()) or (),
+        getattr(new, "excluded_header_patterns", ()) or (),
+    )
+    if reason is None:
+        return None
+    return ComparabilityMismatch(kind="scope", reason=reason)
 
 
 #: Every key set :func:`compute_extraction_contract` may have hashed a
@@ -1265,20 +1300,17 @@ def check_contracts_comparable(
     case would otherwise still raise ``ProfileMismatchError`` immediately
     after the scope carve-out waives it. A ``profile_fingerprint`` mismatch
     confined to ``header_sequence`` does not raise when the new sequence is
-    the old sequence, byte-for-byte unchanged, with new entries appended
-    STRICTLY AFTER it (see :func:`_header_sequence_is_additive_reorder_free`)
-    — proving every *existing* header's own preprocessing context (the
-    headers parsed before it) is identical to before, not merely that
-    existing headers keep their relative order to each other. A new header
-    inserted before or between existing ones (Codex review, PR #641
-    follow-up, seventh P1) still raises even though it superficially looks
-    additive, since it changes what an existing header downstream of the
-    insertion point is parsed after — the same "reorder of existing headers"
-    risk this carve-out was always meant to exclude, just reached via
-    insertion rather than a literal swap. A reorder of existing headers
-    entangled with growth (the same genuine profile-relevant risk) still
-    raises too, same as any other profile drift this carve-out doesn't
-    cover. **Also requires
+    the old sequence with scope-confirmed new entries added, every existing
+    header keeping its relative order — whether the new entries were
+    appended after the old sequence or sorted into the middle of it (see
+    :func:`comparability_sequences._header_sequence_is_scope_confirmed_growth`,
+    which also records why the insertion case may not be priced differently
+    from the append case: a header's *content* is not fingerprinted at all,
+    so the macro/pragma-leak hazard an insertion carries is the same one an
+    edit to an existing header carries, and that one is compared at full
+    assurance by design). A reorder of an EXISTING header — with or without
+    growth alongside it — still raises, same as any other profile drift
+    this carve-out doesn't cover. **Also requires
     :func:`_scope_growth_corroborated` (Codex review, PR #641 follow-up,
     P1):** an additive-shaped ``header_sequence`` on its own is not
     sufficient — a header already declared identically on both sides via
@@ -1395,6 +1427,7 @@ def check_contracts_comparable(
     # already answered.
     checks: tuple[Callable[[], ComparabilityMismatch | None], ...] = (
         lambda: _check_dependency_scope_comparable(old, new),
+        lambda: _check_header_exclusions_comparable(old, new),
         lambda: _check_scope_fingerprint_comparable(old.contract, new.contract),
         lambda: _check_profile_fingerprint_comparable(old, new),
     )
