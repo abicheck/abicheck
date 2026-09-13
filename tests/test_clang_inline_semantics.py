@@ -53,14 +53,19 @@ emitted. See ``docs/contribute/known-gaps.md``'s linkage-blind-removal entry.
 
 from __future__ import annotations
 
+import itertools
 import json
+import os
 import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
 import pytest
+from click.testing import CliRunner
 
+from abicheck.cli import main
+from abicheck.dumper import _CastxmlParser, _ClangAstParser
 from abicheck.extract.headers.clang.inline_semantics import (
     encloses_class_scope,
     is_effectively_inline,
@@ -195,24 +200,27 @@ def test_exhaustive_domain_sweep_has_both_outcomes_and_is_order_free():
     compiler's, not ours).
     """
     seen = set()
-    for kind in ("FunctionDecl",) + _MEMBER_KINDS:
-        for scope in ((), _NAMESPACE, _RECORD, _NESTED):
-            for inline in (None, True):
-                for constexpr in (None, True):
-                    for body in (False, True):
-                        for defaulted in (None, "default", "deleted"):
-                            attrs = {"body": body}
-                            if inline:
-                                attrs["inline"] = True
-                            if constexpr:
-                                attrs["constexpr"] = True
-                            if defaulted:
-                                attrs["explicitlyDefaulted"] = defaulted
-                            node = _node(kind, **attrs)
-                            got = is_effectively_inline(node, scope)
-                            seen.add(got)
-                            reversed_node = dict(reversed(list(node.items())))
-                            assert is_effectively_inline(reversed_node, scope) is got
+    domain = itertools.product(
+        ("FunctionDecl",) + _MEMBER_KINDS,
+        ((), _NAMESPACE, _RECORD, _NESTED),
+        (None, True),
+        (None, True),
+        (False, True),
+        (None, "default", "deleted"),
+    )
+    for kind, scope, inline, constexpr, body, defaulted in domain:
+        attrs: dict[str, object] = {"body": body}
+        if inline:
+            attrs["inline"] = True
+        if constexpr:
+            attrs["constexpr"] = True
+        if defaulted:
+            attrs["explicitlyDefaulted"] = defaulted
+        node = _node(kind, **attrs)
+        got = is_effectively_inline(node, scope)
+        seen.add(got)
+        reversed_node = dict(reversed(list(node.items())))
+        assert is_effectively_inline(reversed_node, scope) is got
     assert seen == {True, False}
 
 
@@ -256,8 +264,6 @@ _LINUX_ONLY = pytest.mark.skipif(
 
 
 def _clang_functions(header):
-    from abicheck.dumper import _ClangAstParser
-
     out = subprocess.run(
         [
             "clang++",
@@ -282,8 +288,6 @@ def _clang_functions(header):
 
 
 def _castxml_functions(header, tmp_path):
-    from abicheck.dumper import _CastxmlParser
-
     xml = tmp_path / "cx.xml"
     subprocess.run(
         ["castxml", "--castxml-output=1", "-std=c++20", "-o", str(xml), str(header)],
@@ -378,10 +382,6 @@ def test_header_defined_members_raise_no_export_obligation_end_to_end(tmp_path):
     ``Confidence.HIGH``. ``exported_impl``/``real_api`` are exported and must
     stay unflagged, so the run cannot pass by disabling the check.
     """
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-
     (tmp_path / "svs.hpp").write_text(_E2E_HEADER)
     (tmp_path / "svs.cpp").write_text(_E2E_SOURCE)
     lib = tmp_path / "libsvs.so"
@@ -400,9 +400,6 @@ def test_header_defined_members_raise_no_export_obligation_end_to_end(tmp_path):
         capture_output=True,
     )
     report = tmp_path / "out.json"
-
-    import os
-
     env = dict(os.environ, ABICHECK_AST_FRONTEND="clang")
     runner = CliRunner(env=env)
     result = runner.invoke(

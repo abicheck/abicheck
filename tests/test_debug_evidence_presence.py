@@ -52,6 +52,7 @@ from abicheck.diff_helpers import typedef_flat_map_is_dwarf_qualified
 from abicheck.model import AbiSnapshot, debug_info_present
 from abicheck.model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
 from abicheck.model.elf_facts import ElfMetadata
+from abicheck.service import run_dump
 from abicheck.surface_graph import _evidence_tier
 
 # Every way a debug-metadata slot can be filled, and -- independently of this
@@ -239,8 +240,6 @@ def test_real_library_l1_row_matches_its_actual_debug_info(
         check=True,
         capture_output=True,
     )
-
-    from abicheck.service import run_dump
 
     snap = run_dump(lib, "elf")
 
