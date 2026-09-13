@@ -68,11 +68,22 @@ def _diff_undeclared_exports(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
     new_elf = getattr(new, "elf", None)
     if old_elf is None or new_elf is None:
         return []
-    if not getattr(old_elf, "symbols", None) or not getattr(new_elf, "symbols", None):
-        # One side's export table was never captured. "Not observed" is not
-        # "empty": treating it as empty would report every export in the
-        # other side as newly added (ADR-028/049 -- missing evidence never
-        # fabricates a finding).
+    # "Not observed" is not "empty", and the two have to be told apart from
+    # something other than the symbol list, which is a plain `list` that a
+    # default/parse-failed `ElfMetadata()` and a real zero-export library
+    # both leave empty. `machine` is the repo's existing capture signal: a
+    # real parsed ELF always sets it, a default/header-only/parse-failed one
+    # has `""` (see `diff_platform_elf_dynamic`'s identical guard).
+    #
+    # Keying on emptiness instead -- the first version -- suppressed the
+    # detector for a library that genuinely exports nothing, so the first
+    # undeclared export it ever gained went unreported: the ordinary function
+    # diff cannot see an undeclared symbol either, so nothing reported it at
+    # all (Codex review). The asymmetry matters and is why this guard stays
+    # strict rather than being dropped: an *uncaptured* OLD table would make
+    # every export in NEW read as gained, which is the fabricated finding
+    # ADR-028/049 forbids.
+    if not getattr(old_elf, "machine", "") or not getattr(new_elf, "machine", ""):
         return []
     # A headerless NEW already reports these through the ordinary function
     # diff, because `dumper_elf_fallback` puts export-only records in

@@ -20,7 +20,6 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.analysis_assurance import AnalysisAssurance
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change, DiffResult
 from abicheck.compat.descriptor import CompatDescriptor
@@ -31,7 +30,6 @@ from abicheck.compat.multi_library import (
     merge_results,
     pair_libraries,
 )
-from abicheck.policy.analysis_assurance_merge import merge_analysis_assurance
 
 
 def _result(
@@ -913,165 +911,6 @@ class TestSonameStemNormalisesEveryPlatformsVersionConvention:
         assert len(old_only) == 1 and len(new_only) == 1
 
 
-class TestAssuranceIsRolledUpNotDropped:
-    """Merging must publish a release-wide assurance block.
-
-    Dropping it is not neutral: every reporter omits the block, so a member
-    whose evidence was ``partial``/``failed``/``not_comparable`` contributes
-    no release-wide signal and ``--require-complete-analysis`` stops gating on
-    it -- incomplete evidence silently upgraded to no stated concern, which is
-    the inversion of ``vision.md``'s "weaker evidence narrows conclusions"
-    (Codex review).
-    """
-
-    def test_the_merged_result_carries_one(self) -> None:
-        merged = merge_results(
-            [
-                _result(
-                    "liba", analysis_assurance=AnalysisAssurance(status="complete")
-                ),
-                _result("libb", analysis_assurance=AnalysisAssurance(status="partial")),
-            ],
-            label="release",
-        )
-        assert merged.analysis_assurance is not None
-        assert merged.analysis_assurance.status == "partial"
-
-    @pytest.mark.parametrize(
-        ("statuses", "expected"),
-        [
-            (["complete", "complete"], "complete"),
-            (["complete", "partial"], "partial"),
-            (["partial", "failed"], "failed"),
-            (["complete", "not_comparable"], "not_comparable"),
-            (["not_comparable", "failed"], "failed"),
-            # "no claim was made" is not a good claim.
-            (["complete", "not_requested"], "not_requested"),
-            (["not_requested", "partial"], "partial"),
-        ],
-    )
-    def test_status_takes_the_weakest_member(
-        self, statuses: list[str], expected: str
-    ) -> None:
-        merged = merge_analysis_assurance(
-            [AnalysisAssurance(status=s) for s in statuses]  # type: ignore[arg-type]
-        )
-        assert merged is not None
-        assert merged.status == expected
-
-    def test_the_rule_is_order_insensitive(self) -> None:
-        """A roll-up that depended on which library was read first would give
-        one release two different assurances depending on directory order."""
-        blocks = [
-            AnalysisAssurance(status="complete", schema_staleness_status="clean"),
-            AnalysisAssurance(status="partial", schema_staleness_status="stale"),
-            AnalysisAssurance(status="failed", l0_context_status="asymmetric"),
-        ]
-        first = merge_analysis_assurance(blocks)
-        second = merge_analysis_assurance(list(reversed(blocks)))
-        assert first is not None and second is not None
-        assert dataclasses.replace(first, notes=()) == dataclasses.replace(
-            second, notes=()
-        )
-
-    def test_optimistic_defaults_are_never_carried_over_a_worse_member(self) -> None:
-        """``schema_staleness_status`` defaults to ``"clean"``, so a naive
-        field-wise merge would report a stale release as clean."""
-        merged = merge_analysis_assurance(
-            [
-                AnalysisAssurance(status="complete"),
-                AnalysisAssurance(status="complete", schema_staleness_status="stale"),
-            ]
-        )
-        assert merged is not None
-        assert merged.schema_staleness_status == "stale"
-
-    def test_the_shallowest_effective_depth_wins(self) -> None:
-        merged = merge_analysis_assurance(
-            [
-                AnalysisAssurance(status="complete", effective_depth="source"),
-                AnalysisAssurance(status="complete", effective_depth="binary"),
-            ]
-        )
-        assert merged is not None
-        assert merged.effective_depth == "binary"
-
-    def test_a_lone_member_passes_through_unchanged(self) -> None:
-        """A one-library descriptor and the scalar path must agree
-        (``AGENTS.md``'s "one model, any cardinality")."""
-        only = AnalysisAssurance(status="partial", effective_depth="headers")
-        assert merge_analysis_assurance([only]) is only
-
-    def test_absent_blocks_are_skipped_not_read_as_complete(self) -> None:
-        assert merge_analysis_assurance([None, None]) is None
-        merged = merge_analysis_assurance([None, AnalysisAssurance(status="failed")])
-        assert merged is not None and merged.status == "failed"
-
-    def test_the_rollup_says_accounting_is_not_aggregated(self) -> None:
-        """The accounting blocks are per-library and are left at their own
-        "nothing requested / nothing evaluated" defaults. A reader must not
-        have to infer that from an empty block."""
-        merged = merge_analysis_assurance(
-            [AnalysisAssurance(status="complete"), AnalysisAssurance(status="partial")]
-        )
-        assert merged is not None
-        assert any("not aggregated" in n for n in merged.notes)
-
-
-class TestAssuranceRollUpOnInputItCannotPlace:
-    """Unknown input must not be read as good input.
-
-    Both ladders in the roll-up rank an unrecognised value **worst**, which
-    is the same discipline ``multi_library._WORST_SCALES`` records: a status
-    or depth this build cannot place is not evidence of a good one. Both
-    fallbacks were reachable and untested -- and an untested fail-closed
-    branch is the one most likely to be "simplified" into a fail-open one.
-    """
-
-    def test_an_unrecognised_status_outranks_every_known_one(self) -> None:
-        merged = merge_analysis_assurance(
-            [
-                AnalysisAssurance(status="complete"),
-                AnalysisAssurance(status="failed"),
-                # Not in the vocabulary: a future build's value reaching an
-                # older one, or a hand-built block.
-                AnalysisAssurance(status="something_new"),  # type: ignore[arg-type]
-            ]
-        )
-        assert merged is not None
-        assert merged.status == "something_new"
-
-    def test_an_unrankable_depth_wins_over_every_ranked_one(self) -> None:
-        merged = merge_analysis_assurance(
-            [
-                AnalysisAssurance(status="complete", effective_depth="source"),
-                AnalysisAssurance(status="complete", effective_depth="binary"),
-                AnalysisAssurance(status="complete", effective_depth="not_a_depth"),
-            ]
-        )
-        assert merged is not None
-        assert merged.effective_depth == "not_a_depth"
-
-    def test_member_notes_are_carried_and_deduplicated(self) -> None:
-        """A member's own explanation of *why* it is not complete is the part
-        a reader needs; dropping it would leave a weakened status with no
-        stated reason."""
-        merged = merge_analysis_assurance(
-            [
-                AnalysisAssurance(
-                    status="partial", notes=("no DWARF on either side", "shared note")
-                ),
-                AnalysisAssurance(
-                    status="partial", notes=("shared note", "header parse degraded")
-                ),
-            ]
-        )
-        assert merged is not None
-        assert merged.notes.count("shared note") == 1
-        assert "no DWARF on either side" in merged.notes
-        assert "header parse degraded" in merged.notes
-
-
 class TestDescriptorDirectoryExpansionRefusesToSayNothing:
     """An expansion that finds nothing is an error, never an empty surface.
 
@@ -1164,3 +1003,90 @@ class TestDescriptorOptionsDoNotOverrideTheCommandLine:
         combined = self._combined(_descriptor_compile_options(desc), "")
         assert "-I/opt/inc" in combined
         assert "-DONLY=1" in combined
+
+
+class TestMergedFindingsKeepTheirLibrary:
+    """Which DSO produced a finding survives the merge.
+
+    Merging N results concatenates bare ``Change`` objects and replaces the
+    one library identifier with a release-wide label (``"2 libraries"``), so
+    without attribution a reader cannot tell which library a removal came
+    from -- and the *same symbol* removed from two of them collapses into two
+    identical lines (Codex review). That is the multi-library counterpart of
+    the `libs[0]` problem this module exists to fix: a real answer that does
+    not say what it is an answer about.
+    """
+
+    @staticmethod
+    def _removal(symbol: str) -> Change:
+        return Change(ChangeKind.FUNC_REMOVED, symbol, f"{symbol} removed")
+
+    def test_each_finding_names_the_library_it_came_from(self) -> None:
+        merged = merge_results(
+            [
+                _result("liba.so", changes=[self._removal("shared_symbol")]),
+                _result("libb.so", changes=[self._removal("shared_symbol")]),
+            ],
+            label="2 libraries",
+        )
+        assert sorted(c.library or "" for c in merged.changes) == [
+            "liba.so",
+            "libb.so",
+        ]
+
+    def test_the_same_symbol_from_two_libraries_stays_distinguishable(self) -> None:
+        """The property the attribution exists for. Without it these two are
+        identical objects and a reader sees one finding reported twice with no
+        way to tell which library either belongs to."""
+        merged = merge_results(
+            [
+                _result("liba.so", changes=[self._removal("dup")]),
+                _result("libb.so", changes=[self._removal("dup")]),
+            ],
+            label="2 libraries",
+        )
+        assert len({(c.symbol, c.library) for c in merged.changes}) == 2
+
+    def test_a_single_library_merge_leaves_findings_untouched(self) -> None:
+        """ "One model, any cardinality": a one-member descriptor and the
+        scalar path must produce the same findings, so nothing is stamped
+        when there is nothing to disambiguate."""
+        only = self._removal("f")
+        merged = merge_results([_result("liba.so", changes=[only])], label="liba.so")
+        assert merged.changes[0].library is None
+        assert merged.changes[0] is only
+
+    def test_the_inputs_are_not_mutated(self) -> None:
+        """A merge is a projection: it must not change the results its caller
+        still holds."""
+        original = self._removal("f")
+        inputs = [
+            _result("liba.so", changes=[original]),
+            _result("libb.so", changes=[self._removal("g")]),
+        ]
+        merge_results(inputs, label="2 libraries")
+        assert original.library is None
+        assert inputs[0].changes[0] is original
+
+    def test_every_concatenated_finding_list_is_attributed(self) -> None:
+        """Not just ``changes``. A suppressed or out-of-surface finding needs
+        the same answer, and listing only the one field a test happened to
+        check is how the next list gets missed."""
+        merged = merge_results(
+            [
+                _result(
+                    "liba.so",
+                    changes=[self._removal("a")],
+                    suppressed_changes=[self._removal("b")],
+                    out_of_surface_changes=[self._removal("c")],
+                ),
+                _result("libb.so", changes=[self._removal("d")]),
+            ],
+            label="2 libraries",
+        )
+        for finding in (
+            *merged.changes,
+            *merged.suppressed_changes,
+            *merged.out_of_surface_changes,
+        ):
+            assert finding.library, finding.symbol

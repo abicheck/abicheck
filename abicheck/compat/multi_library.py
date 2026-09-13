@@ -40,7 +40,7 @@ import dataclasses
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..checker_types import DiffResult
+from ..checker_types import Change, DiffResult
 from ..policy.analysis_assurance_merge import merge_analysis_assurance
 
 if TYPE_CHECKING:
@@ -181,6 +181,61 @@ def pair_libraries(
         sorted(still_unmatched_old, key=lambda p: p.name),
         sorted(new_only, key=lambda p: p.name),
     )
+
+
+def _attribute_findings_to_their_library(
+    results: Sequence[DiffResult],
+) -> list[DiffResult]:
+    """*results* with every ``Change`` stamped with its own library.
+
+    The merge concatenates bare ``Change`` objects and then replaces the one
+    library identifier with a release-wide label (``"2 libraries"``), so
+    without this the reports cannot say which DSO produced a removal, and the
+    same symbol removed from two of them collapses into two identical lines
+    (Codex review).
+
+    Copies rather than mutating: ``merge_results`` is handed results its
+    caller still holds, and a merge is a projection -- it must not change
+    what it was given. A single-library merge is left untouched, so the
+    scalar path and a one-member descriptor still produce byte-identical
+    findings (``AGENTS.md``'s "one model, any cardinality").
+
+    Only ``Change`` lists are stamped; a field holding anything else is
+    passed through, since the library question only means something for a
+    finding.
+    """
+    if len(results) <= 1:
+        return list(results)
+    attributed: list[DiffResult] = []
+    for result in results:
+        replacements: dict[str, list[Change]] = {}
+        for f in dataclasses.fields(DiffResult):
+            if _FIELD_POLICY.get(f.name) != "concat":
+                continue
+            value = getattr(result, f.name)
+            if not isinstance(value, list) or not value:
+                continue
+            if not all(isinstance(item, Change) for item in value):
+                continue
+            replacements[f.name] = [
+                dataclasses.replace(item, library=item.library or result.library)
+                for item in value
+            ]
+        if not replacements:
+            attributed.append(result)
+            continue
+        # A field-name-keyed copy, not `dataclasses.replace(result, **map)`.
+        # `tests/test_fact_bridged_replace_guard.py` rejects the starred
+        # spelling outright, and the reason is worth honouring rather than
+        # allowlisting: it hides from a static scan *which* fields a call
+        # sets, which is exactly how a `Fact`-bridged field once got written
+        # without its sibling being synced. Copying first and assigning by
+        # name keeps every field this function touches visible to that scan.
+        copied = dataclasses.replace(result)
+        for name, findings in replacements.items():
+            setattr(copied, name, findings)
+        attributed.append(copied)
+    return attributed
 
 
 def _concat(values: Sequence[object]) -> list[object]:
@@ -413,6 +468,7 @@ def merge_results(results: Sequence[DiffResult], *, label: str) -> DiffResult:
     """
     if not results:
         raise ValueError("merge_results requires at least one result")
+    results = _attribute_findings_to_their_library(results)
     merged: dict[str, object] = {}
     for f in dataclasses.fields(DiffResult):
         policy = _FIELD_POLICY.get(f.name)

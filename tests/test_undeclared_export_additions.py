@@ -35,10 +35,17 @@ def _snap(
     """
     elf = (
         ElfMetadata(
+            # `machine` is what says the table was *captured*, and the
+            # detector keys on it: the symbol list is a plain list that a
+            # default/parse-failed `ElfMetadata()` and a real zero-export
+            # library both leave empty, so emptiness cannot tell them apart.
+            # A real parsed ELF always sets `machine`; a fixture that omits
+            # it is not standing in for one.
+            machine="x86_64",
             symbols=[
                 ElfSymbol(name=n, visibility="default", sym_type="func")
                 for n in exports
-            ]
+            ],
         )
         if with_table
         else ElfMetadata()
@@ -253,3 +260,33 @@ class TestTheDetectorIsActuallyRegistered:
         registry.ensure_loaded()
         names = set(registry.detector_names)
         assert "undeclared_exports" in names, sorted(names)
+
+
+class TestACapturedEmptyTableIsNotMissingEvidence:
+    """Zero exports observed is evidence; an unparsed table is not.
+
+    Both leave `ElfMetadata.symbols` empty, so a guard keyed on emptiness
+    conflates them -- and it conflated them in the direction that loses a
+    real finding: a library that genuinely exports nothing had the detector
+    switched off, so the first undeclared export it ever gained went
+    unreported by anything at all, since the ordinary function diff cannot
+    see an undeclared symbol either (Codex review).
+    """
+
+    def test_the_first_export_a_library_ever_gains_is_reported(self) -> None:
+        old = _snap([])  # captured, and genuinely exports nothing
+        new = _snap(["first"])
+        assert [c.symbol for c in _diff_undeclared_exports(old, new)] == ["first"]
+
+    def test_an_unparsed_table_still_fabricates_nothing(self) -> None:
+        """The other direction, and the reason the guard is not simply
+        dropped: an *uncaptured* OLD table would make every export in NEW
+        read as gained."""
+        old = _snap([], with_table=False)
+        new = _snap(["a", "b", "c"])
+        assert _diff_undeclared_exports(old, new) == []
+
+    def test_both_sides_empty_and_captured_report_nothing(self) -> None:
+        """Vacuity guard: the first assertion above must not be satisfiable
+        by a detector that reports on any empty OLD table."""
+        assert _diff_undeclared_exports(_snap([]), _snap([])) == []

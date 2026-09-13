@@ -119,6 +119,16 @@ def _format_change_md(c: object, impact: str | None = None) -> str:
         old_new = f" (`{new_val}`)"
     line = f"- **{kind_val}**: {desc}{old_new}"
 
+    # Which library, when the run compared more than one. Absent for every
+    # single-library comparison, where the report's own header already says
+    # it -- so those reports render exactly as before. Without it a
+    # multi-library `compat check` report cannot say which DSO a removal came
+    # from, and the same symbol removed from two of them renders as two
+    # identical lines (Codex review).
+    finding_library = getattr(c, "library", None)
+    if finding_library:
+        line += f" — in `{finding_library}`"
+
     # Source location
     if loc:
         line += f" — `{loc}`"
