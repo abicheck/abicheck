@@ -51,8 +51,14 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from abicheck.checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from abicheck.cli import main
 from abicheck.header_utils import iter_directory_headers
+
+#: Every kind the engine itself classifies as an ABI or API break -- read off
+#: `checker_policy`'s own partitions, never restated here, so this test cannot
+#: drift from the taxonomy it is asserting against.
+_NON_COMPATIBLE_KIND_VALUES = {k.value for k in (*BREAKING_KINDS, *API_BREAK_KINDS)}
 
 # The reported inventory. `json.h` sorts between `data.h` and `log.h`, so a
 # sorted directory expansion places it INTERIOR -- the shape a trailing-only
@@ -159,7 +165,24 @@ def test_reported_invocation_reports_the_added_api(tmp_path: Path) -> None:
     assert "header_sequence" not in result.output
 
     report = json.loads(out.read_text(encoding="utf-8"))
-    assert report["verdict"] == "COMPATIBLE", report["verdict"]
+    # Not `== "COMPATIBLE"`. That spelling asserted the absence of every RISK
+    # finding, which is a claim about the whole fixture rather than about the
+    # header addition, and it is false on a non-ELF host: `g++ -shared` there
+    # produces a Mach-O whose own platform facts raise the verdict to
+    # COMPATIBLE_WITH_RISK, so this test failed on the macOS integration lane
+    # from the day it landed (it fails identically on `main`). The claim that
+    # belongs here is that nothing BREAKING or API-breaking was reported --
+    # derived from the engine's own partitions rather than from a hand-listed
+    # verdict string, so a new breaking kind is covered the day it is added.
+    breaking = [
+        c
+        for c in report.get("changes", [])
+        if c.get("kind") in _NON_COMPATIBLE_KIND_VALUES
+    ]
+    assert not breaking, breaking
+    assert report["verdict"] in {"COMPATIBLE", "COMPATIBLE_WITH_RISK"}, report[
+        "verdict"
+    ]
     # The rendered report, not just the exit code: the added API is REPORTED.
     added = [c for c in report.get("changes", []) if c.get("kind") == "func_added"]
     assert any("pvxs_json" in str(c.get("symbol", "")) for c in added), report.get(
@@ -169,6 +192,46 @@ def test_reported_invocation_reports_the_added_api(tmp_path: Path) -> None:
     # must not manufacture findings against the headers it was inserted among.
     removed = [c for c in report.get("changes", []) if c.get("kind") == "func_removed"]
     assert not removed, removed
+
+
+def test_the_rendered_report_claims_no_reduced_assurance(tmp_path: Path) -> None:
+    """The reported SYMPTOM, at the surface the user reads it from.
+
+    A verdict alone was never the whole ask: the run that prompted this was
+    configured with `assurance.require_complete`, and a
+    `comparability_assurance` marking `declaration`/`layout` unverified reads
+    through to `analysis_assurance.status = "partial"` ("extraction contexts
+    were not provably identical"), which floors the exit code to 1. So the
+    report must carry no comparability reduction at all -- not merely a
+    verdict alongside one.
+    """
+    old_so = _build(tmp_path / "old", _OLD_HEADERS)
+    new_so = _build(tmp_path / "new", _NEW_HEADERS)
+    out = tmp_path / "report.json"
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(old_so),
+            str(new_so),
+            "--header",
+            f"old={tmp_path / 'old' / 'pvxs'}",
+            "--header",
+            f"new={tmp_path / 'new' / 'pvxs'}",
+            "-o",
+            f"json={out}",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+    report = json.loads(out.read_text(encoding="utf-8"))
+    # Present only when a mismatch was found at all, so its absence is the
+    # assertion that the pair compared cleanly rather than tolerably.
+    assert "comparability_assurance" not in report, report["comparability_assurance"]
+    notes = report.get("analysis_assurance", {}).get("notes", [])
+    assert not any("provably identical" in n for n in notes), notes
+    assert not any("reduced assurance" in n for n in notes), notes
 
 
 def test_a_reordered_header_surface_still_refuses_through_the_cli(

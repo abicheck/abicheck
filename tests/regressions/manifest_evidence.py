@@ -494,12 +494,15 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "context; a growth that preserves every existing header's "
             "relative order and adds only headers the scope fingerprint "
             "independently confirms as new is an ADDITION, and an addition "
-            "bounds a comparison (a dimension-scoped assurance reduction, "
-            "recorded with its reason) instead of refusing to produce any "
-            "verdict. The outcome must not depend on WHERE the added header "
-            "sorts, and the invariant is stated over every insertion "
-            "position and every permutation — not over the one reported "
-            "header name."
+            "is ordinary evolution: the pair stays comparable at FULL "
+            "assurance, neither refused nor priced as reduced "
+            "declaration/layout assurance. The outcome must not depend on "
+            "WHERE the added header sorts, and the invariant is stated over "
+            "every insertion position and every permutation — not over the "
+            "one reported header name. What the order fact still refuses is "
+            "unchanged: an EXISTING header that moved, growth the declared "
+            "surface does not confirm as new, and any other diverging "
+            "profile field alongside it."
         ),
         # Real integration evidence: a project whose public headers are
         # discovered by a sorted directory sweep added one header named
@@ -509,7 +512,7 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # header_sequence`, no verdict, and no findings on ANY axis — the
         # binary's own exported-symbol conclusions included, which a header
         # insertion cannot touch at all.
-        fixed_by=(1274,),
+        fixed_by=(1274, 1276),
         seed_tests=(
             "tests/test_comparability_gate_header_insertion.py",
             "tests/test_cli_compare_added_public_header_live.py",
@@ -553,21 +556,24 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
             KnownGap(
                 description=(
-                    "A bounded run's findings are still scored by ordinary "
-                    "policy: `comparability_assurance` marks declaration and "
-                    "layout unverified, but no per-finding assurance wiring "
-                    "exists (ADR-050 E-S2 defers it), so if an inserted "
-                    "header's macros/pragmas did hide a later declaration, "
-                    "the resulting finding would score a normal verdict. It "
-                    "cannot become a silent clean pass -- the reduction is in "
-                    "`coverage_warnings`, `comparability_assurance`, and "
-                    "`AnalysisAssurance.status == 'partial'`, which "
-                    "`assurance.require_complete` gates on -- and the "
-                    "pre-change behavior (a hard refusal) failed such a run "
-                    "too, so no run that previously passed can now fail. "
-                    "Closing it needs per-finding dimension attribution."
+                    "The intermediate disposition -- a non-fatal "
+                    "`ComparabilityMismatch` pricing the insertion as "
+                    "reduced `declaration`/`layout` assurance -- was itself "
+                    "removed: it read through to `analysis_assurance.status "
+                    "== 'partial'`, which `assurance.require_complete` "
+                    "gates on, so a correct public-header addition still "
+                    "failed a correctly-configured run. It was unsound as "
+                    "well as inconvenient: a declared header's CONTENT is "
+                    "not part of `profile_fingerprint` at all, so an "
+                    "existing header that gains a `#define`/`#pragma pack` "
+                    "carries the identical macro-leak hazard and is "
+                    "compared at full assurance by design. The residual "
+                    "this leaves is the same one the entry above names -- "
+                    "the sequential aggregate TU -- not a missing "
+                    "per-finding assurance wiring for a bounded path that "
+                    "no longer has a producer."
                 ),
-                reference="PR #1274 (Codex review, second P1)",
+                reference="docs/contribute/known-gaps.md",
                 canary_test=None,
             ),
         ),
