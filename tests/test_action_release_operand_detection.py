@@ -33,6 +33,8 @@ the shell table did.
 
 from __future__ import annotations
 
+import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -68,6 +70,29 @@ def _function_source() -> str:
     )
 
 
+def _sh(value: Path | str) -> str:
+    """A path as a bash *word*: quoted, and separator-converted on Windows.
+
+    Every path this module injects into a generated script goes through
+    here. Interpolating one raw is what turned the windows-latest lane red
+    after PR #1259: `sys.executable` and the safe directory arrived as
+    `D:\\a\\...`, whose backslashes bash ate as escapes, so `$_PY_BIN`
+    named nothing, the probe never ran, and every shape that needs it
+    (tar, wheel, conda -- but not rpm/deb, which the magic check answers
+    without it) reported "not a package".
+
+    Two separate defects, so two separate fixes: `shlex.quote` for the
+    quoting, and `as_posix()` for the separator -- the latter only where
+    the separator actually differs, since a backslash is a legal filename
+    character on POSIX and rewriting one unconditionally would corrupt a
+    real path (`_workflow_exec.py` states the same rule at its own
+    `bash <script>` boundary, for the same reason).
+    """
+    return shlex.quote(
+        value.as_posix() if isinstance(value, Path) and os.name == "nt" else str(value)
+    )
+
+
 def _ask(
     path: Path | str,
     *,
@@ -84,7 +109,8 @@ def _ask(
     """
     require_bash()
     env_setup = (
-        f"_PY_BIN_HAS_ABICHECK=true\n_PY_BIN={sys.executable}\n_PY_SAFE_DIR={cwd}\n"
+        f"_PY_BIN_HAS_ABICHECK=true\n_PY_BIN={_sh(sys.executable)}\n"
+        f"_PY_SAFE_DIR={_sh(cwd)}\n"
         if abicheck_available
         else "_PY_BIN_HAS_ABICHECK=false\n"
     )
@@ -147,6 +173,77 @@ class TestAgreementWithTheRealPredicate:
         assert not is_package(d)
         assert _ask(d, abicheck_available=True, cwd=tmp_path)
         assert _ask(d, abicheck_available=False, cwd=tmp_path)
+
+
+class TestEveryInjectedPathSurvivesTheShell:
+    """A path interpolated into a generated script is a *bash word*.
+
+    This module builds its script by string interpolation, so every path it
+    injects is re-parsed by bash. Raw interpolation reddened windows-latest
+    after PR #1259 -- `D:\\a\\...` lost its backslashes to bash's escape
+    handling -- but the defect is not Windows-specific: a space, a quote or
+    a `$` in the path does the same thing on Linux, and no CI lane would
+    have caught it either, because every path in play happened to be tame.
+
+    So the contract is stated over the primitive (`_sh`), against an oracle
+    that is not `shlex` -- what bash itself reports receiving -- and swept
+    over names chosen to break naive interpolation, rather than pinned to
+    the one spelling that broke. The end-to-end case then proves the
+    primitive is actually *used* on the path that failed, since a correct
+    helper nothing calls fixes nothing.
+    """
+
+    AWKWARD = (
+        "plain",
+        "with space",
+        "with'single",
+        'with"double',
+        "with$dollar",
+        "with`backtick",
+        "with;semi",
+        "with*glob",
+        "with\\backslash",
+        "with\nnewline",
+        "with|pipe",
+        "-leading-dash",
+    )
+
+    @staticmethod
+    def _echo_through_bash(word: str) -> str:
+        """What bash actually receives for this word -- the oracle."""
+        require_bash()
+        completed = subprocess.run(  # noqa: S603
+            [bash_executable(), "-c", f"printf '%s' {word}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        return completed.stdout
+
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="these names are legal on POSIX; NTFS rejects most of them",
+    )
+    @pytest.mark.parametrize("name", AWKWARD)
+    def test_a_path_round_trips_through_the_generated_script(
+        self, tmp_path: Path, name: str
+    ) -> None:
+        target = tmp_path / name
+        assert self._echo_through_bash(_sh(target)) == str(target)
+
+    @pytest.mark.skipif(
+        os.name == "nt", reason="POSIX-legal name; NTFS rejects the backslash"
+    )
+    def test_the_probe_still_answers_from_an_awkwardly_named_safe_dir(
+        self, tmp_path: Path
+    ) -> None:
+        """End to end, on the very path whose raw interpolation broke CI."""
+        safe_dir = tmp_path / "safe dir\\with odd $chars"
+        safe_dir.mkdir()
+        operand = _make_tar_mode(tmp_path / "operand", "w:gz")
+        assert is_package(operand)
+        assert _ask(operand, abicheck_available=True, cwd=safe_dir)
 
 
 class TestTheProbeResolvesTheOperandNotTheSafeDirectory:
@@ -250,9 +347,9 @@ class TestTheProbeAnchorsExactlyWhatTheSharedPredicateSays:
             (
                 f"_RUNNING_ON_WINDOWS={'true' if on_windows else 'false'}",
                 "_PY_BIN_HAS_ABICHECK=true",
-                f'_PY_BIN="{stub}"',
-                f'_PY_SAFE_DIR="{workdir}"',
-                f'RECORD="{recorder}"; export RECORD',
+                f"_PY_BIN={_sh(stub)}",
+                f"_PY_SAFE_DIR={_sh(workdir)}",
+                f"RECORD={_sh(recorder)}; export RECORD",
                 _function_source(),
                 '_is_release_style_operand "$1"',
             )
