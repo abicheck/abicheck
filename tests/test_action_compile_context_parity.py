@@ -54,6 +54,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _action_run_sh_harness import annotation_helpers_source
 from _workflow_exec import bash_executable, require_bash
 
 from abicheck._compiler_options import split_gcc_options
@@ -318,6 +319,13 @@ def _run_bash_script(
     ``test_action_run_sh_severity_summary.py``'s ``_run()`` and
     ``test_action_run_sh_py_safe_path.py``."""
     require_bash()
+    # Every `::error::`/`::warning::` in an extracted region routes through
+    # run.sh's own annotation helpers (they are what stops an input value
+    # forging a workflow command). A fragment that does not define them
+    # fails with `command not found` and prints nothing to stdout, so the
+    # region's real messages silently vanish -- prepended here, once, rather
+    # than at each of this module's many extraction sites.
+    script = annotation_helpers_source() + "\n" + script
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
     ) as f:
