@@ -358,13 +358,16 @@ class TestDemanglingIsAutomatic:
         assert _GONE_DEMANGLED in rendered
 
     def test_a_machine_format_is_never_demangled_in_place(self, tmp_path):
-        from abicheck.cli_compare_options import HUMAN_FORMATS, _resolve_demangle
+        from abicheck.service_render import (
+            HUMAN_FORMATS,
+            resolve_demangle_for_format,
+        )
 
         for fmt in ("json", "sarif", "junit"):
-            assert _resolve_demangle(fmt) is False
+            assert resolve_demangle_for_format(fmt) is False
             assert fmt not in HUMAN_FORMATS
         for fmt in ("markdown", "review", "html", "text", "oneline"):
-            assert _resolve_demangle(fmt) is True
+            assert resolve_demangle_for_format(fmt) is True
 
 
 # ── Deliverable 4: leaf retired against root-cause ──────────────────────────
@@ -829,3 +832,133 @@ class TestCatalogDimensionsAreKeywordOnly:
         restored = pickle.loads(pickle.dumps(entry))
         assert restored.entity is entry.entity
         assert restored.operation is entry.operation
+
+
+# ── Review round 2 (Codex, PR #1284) ────────────────────────────────────────
+
+
+class TestMachOSymbolsResolveTheirDemangledName:
+    """A Mach-O finding must not lose the readable name to a prefix.
+
+    clang's own `mangledName` carries the platform global-symbol prefix on
+    macOS, so a finding's symbol can read `__ZN3lib4goneEi`. `demangle()`
+    rejects that spelling before consulting the cache unless the caller
+    opts in -- so the prewarm (which does opt in) warmed a name the
+    per-finding resolution then refused, and every machine projection
+    silently omitted `demangled_symbol` for the whole platform.
+    """
+
+    class _Finding:
+        demangled_symbol = None
+
+        def __init__(self, symbol: str) -> None:
+            self.symbol = symbol
+
+    def test_the_macho_spelling_resolves(self):
+        from abicheck.reporter import resolve_demangled_symbol
+
+        if not _demangler_available():
+            pytest.skip("no demangler available")
+        assert (
+            resolve_demangled_symbol(self._Finding(f"_{_GONE_MANGLED}"))
+            == _GONE_DEMANGLED
+        )
+
+    def test_the_elf_spelling_still_resolves(self):
+        from abicheck.reporter import resolve_demangled_symbol
+
+        if not _demangler_available():
+            pytest.skip("no demangler available")
+        assert resolve_demangled_symbol(self._Finding(_GONE_MANGLED)) == _GONE_DEMANGLED
+
+    def test_an_msvc_decorated_symbol_still_resolves_to_nothing(self):
+        """The documented limitation, asserted so the opt-in above cannot
+        quietly turn into "demangle anything that looks mangled"."""
+        from abicheck.reporter import resolve_demangled_symbol
+
+        assert resolve_demangled_symbol(self._Finding("?gone@lib@@YAXH@Z")) is None
+
+    def test_a_real_macho_finding_carries_both_names(self, tmp_path):
+        if not _demangler_available():
+            pytest.skip("no demangler available")
+        old, new = _build_pair(tmp_path, "x86_64-apple-macos11", ".dylib")
+        doc = _json_doc(_compare(old, new).diff)
+        removals = [c for c in doc["changes"] if c.get("demangled_symbol")]
+        assert removals, [c["symbol"] for c in doc["changes"]]
+        for change in removals:
+            assert change["symbol"] != change["demangled_symbol"]
+
+
+class TestTheTypedApiDemanglesAutomaticallyToo:
+    """Automatic means automatic for the *documented Python API*, not only
+    for the CLI wrapper in front of it -- otherwise a direct
+    `render_output("markdown", ...)` caller keeps getting raw-only output
+    while the identical CLI request does not."""
+
+    def _render(self, fmt, **kwargs):
+        from abicheck.checker import Verdict
+        from abicheck.checker_types import Change, DiffResult
+        from abicheck.model import AbiSnapshot
+        from abicheck.service_render import render_output
+
+        result = DiffResult(
+            old_version="1",
+            new_version="2",
+            library="lib",
+            changes=[Change(ChangeKind.FUNC_REMOVED, _GONE_MANGLED, "removed")],
+            verdict=Verdict.BREAKING,
+        )
+        return render_output(
+            fmt, result, AbiSnapshot(library="lib", version="1"), **kwargs
+        )
+
+    def test_a_human_format_demangles_without_being_asked(self):
+        if not _demangler_available():
+            pytest.skip("no demangler available")
+        out = self._render("markdown")
+        assert _GONE_DEMANGLED in out
+        assert _GONE_MANGLED in out
+
+    def test_a_machine_format_still_keeps_the_raw_symbol(self):
+        out = self._render("json")
+        assert f'"symbol": "{_GONE_MANGLED}"' in out
+
+    def test_an_explicit_choice_still_wins(self):
+        """The resolution is a *default*, not a policy the caller cannot
+        override -- `demangle=False` is what the report-level tests that
+        pin raw text rely on."""
+        if not _demangler_available():
+            pytest.skip("no demangler available")
+        assert _GONE_DEMANGLED not in self._render("markdown", demangle=False)
+
+    def test_there_is_exactly_one_owner_of_the_resolution(self):
+        """Front-end parity by construction, not by asserting one table
+        twice: the CLI has no resolution of its own left to drift from the
+        typed API's -- both go through
+        `service_render.resolve_demangle_for_format`, which is why this
+        slice moved it out of `cli_compare_options` (Codex review, PR
+        #1284)."""
+        import abicheck.cli_compare_options as cli_options
+        from abicheck.cli_compare_helpers import resolve_demangle_for_format as via_cli
+        from abicheck.service_render import resolve_demangle_for_format
+
+        assert not hasattr(cli_options, "_resolve_demangle")
+        assert not hasattr(cli_options, "HUMAN_FORMATS")
+        assert via_cli is resolve_demangle_for_format
+
+
+class TestAnonymousFieldChangesAreTypeFindings:
+    """`anon_field_changed` compares anonymous members of a matched record
+    and carries the containing record's identity, so `--view show=types`
+    must show it and `show=functions` must not."""
+
+    def test_declared_as_a_type_entity(self):
+        assert entity_for_kind("anon_field_changed") == ChangeEntity.TYPE.value
+
+    def test_shown_by_the_types_token_and_not_the_functions_token(self):
+        types_filter = ShowOnlyFilter(frozenset(), frozenset({"types"}), frozenset())
+        functions_filter = ShowOnlyFilter(
+            frozenset(), frozenset({"functions"}), frozenset()
+        )
+        assert types_filter._check_element("anon_field_changed")
+        assert not functions_filter._check_element("anon_field_changed")

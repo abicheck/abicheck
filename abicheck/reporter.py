@@ -1316,7 +1316,17 @@ def resolve_demangled_symbol(c: Any) -> str | None:
         return None
     from .demangle import demangle
 
-    demangled = demangle(symbol)
+    # ``accept_macho_prefix=True`` (Codex review, PR #1284): clang's own
+    # ``mangledName`` carries the platform global-symbol prefix on macOS, so a
+    # Mach-O finding's symbol can read ``__ZN3lib4goneEi``. The strict default
+    # rejects that spelling *before* consulting the cache, so a Mach-O run
+    # warmed the batch cache (``prewarm_change_demangling`` opts in) and then
+    # emitted no ``demangled_symbol`` at all -- exactly the gap this field
+    # exists to close. This is report-only resolution, which is the case
+    # ``_is_itanium_mangled``'s own docstring names as the one that may opt
+    # in; the correctness-critical symbol-matching callers keep the strict
+    # default.
+    demangled = demangle(symbol, accept_macho_prefix=True)
     return demangled if demangled and demangled != symbol else None
 
 

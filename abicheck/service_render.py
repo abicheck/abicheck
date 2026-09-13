@@ -73,7 +73,7 @@ def render_output(
     report_mode: str = "full",
     show_impact: bool = False,
     severity_config: SeverityConfig | None = None,
-    demangle: bool = False,
+    demangle: bool | None = None,
     contract_evaluation: bool = False,
     show_recommendation: bool = True,
     require_complete_analysis: bool = False,
@@ -89,7 +89,8 @@ def render_output(
     downstream tooling can match on them. This function's own default
     (``False``) is for a direct Tier-2 caller with no CLI in front of it;
     the CLI itself resolves the per-format default via
-    ``cli_compare_options._resolve_demangle`` before calling here.
+    ``resolve_demangle_for_format`` -- which this function now does itself
+    when the argument is omitted.
 
     The release recommendation is included in every human-facing format
     (markdown/review) and in JSON's own ``summary`` block. ``show_recommendation``
@@ -135,6 +136,13 @@ def render_output(
         return to_stat(result, severity_config=severity_config)
 
     _reject_unsupported_format(fmt)
+    # Plan slice 7o (Codex review, PR #1284): `None` -- the default -- means
+    # "resolve it from the format", which is what makes automatic demangling
+    # true for this public entry point and not only for the CLI in front of
+    # it. An explicit True/False still wins, for a caller that wants the
+    # other answer.
+    if demangle is None:
+        demangle = resolve_demangle_for_format(fmt)
     _reject_unsupported_report_mode(report_mode)
     envelope = build_report_envelope(
         result,
@@ -161,6 +169,42 @@ def render_output(
 _SUPPORTED_FORMATS = frozenset(
     {"json", "sarif", "html", "junit", "markdown", "md", "review"}
 )
+
+
+#: Every format whose output a person reads. Plan slice 7o: demangling is
+#: resolved from this set alone -- there is no user-facing
+#: ``--view demangle``/``no-demangle`` decision any more, because there is no
+#: longer a reason to make one (see :func:`~abicheck.demangle.demangle_text`:
+#: a demangled name carries its exact mangled spelling with it, and every
+#: machine projection carries both names).
+HUMAN_FORMATS: frozenset[str] = frozenset(
+    {"markdown", "review", "html", "text", ONELINE_FORMAT}
+)
+
+
+def resolve_demangle_for_format(fmt: str) -> bool:
+    """Whether *fmt*'s rendered output demangles C++ symbols.
+
+    ON for every human-facing format, OFF for the machine formats
+    (json/sarif/junit) whose consumers match on the raw mangled symbol --
+    those carry the demangled name in their own ``demangled_symbol`` field
+    instead, so nothing is hidden from them either.
+
+    Owned here rather than in the CLI (Codex review, PR #1284): "which
+    formats demangle" is a property of the rendering, so the typed API has
+    to resolve it the same way the CLI does or a direct
+    :func:`render_output` caller keeps getting raw-only human output while
+    the CLI's identical request does not -- the front-end divergence
+    ``render_output``'s own ``show_recommendation`` docstring already
+    records one instance of. ``cli_compare_options`` re-exports it under its
+    historical private name; the dependency may not run the other way
+    (ADR-061's engine/CLI boundary).
+
+    Still resolved *per format* rather than once per run: a machine primary
+    format paired with a human ``-o`` destination must not inherit the
+    other's answer.
+    """
+    return fmt in HUMAN_FORMATS
 
 
 def _reject_unsupported_format(fmt: str) -> None:

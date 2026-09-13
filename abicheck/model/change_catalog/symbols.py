@@ -71,7 +71,7 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "struct/union) is simply gone, so source referencing any of "
         "them fails to compile against the new headers too — "
         "recompilation does not make this case safe.",
-        entity=_ENT.FUNCTION,
+        entity=_ENT.TYPE,
         operation=_OP.MODIFIED,
     ),
     _E(

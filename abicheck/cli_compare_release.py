@@ -1155,7 +1155,7 @@ def compare_release_cmd(
             # ["policy.env_matrix"]` are correct regardless of how many
             # library comparisons actually completed.
             from .checker import env_matrix_content_digest
-            from .cli_compare_options import _resolve_demangle
+            from .service_render import resolve_demangle_for_format
 
             env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
 
@@ -1203,7 +1203,7 @@ def compare_release_cmd(
                     scope_public_headers=scope_public_headers,
                     scope_terms=scope_terms,
                     assurance_terms=assurance_terms,
-                    demangle=_resolve_demangle(secondary_fmt),
+                    demangle=resolve_demangle_for_format(secondary_fmt),
                     show_only=show_only,
                     env_matrix_source_sha256=env_matrix_source_sha256,
                     require_complete_analysis=require_complete_analysis,
@@ -1238,7 +1238,7 @@ def compare_release_cmd(
                 scope_public_headers=scope_public_headers,
                 scope_terms=scope_terms,
                 assurance_terms=assurance_terms,
-                demangle=_resolve_demangle(fmt),
+                demangle=resolve_demangle_for_format(fmt),
                 show_only=show_only,
                 env_matrix_source_sha256=env_matrix_source_sha256,
                 require_complete_analysis=require_complete_analysis,

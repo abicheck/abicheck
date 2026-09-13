@@ -226,7 +226,7 @@ class TestCompareHtml:
         assert "<html" in result.output.lower()
 
 
-# ── _resolve_demangle (shared by the primary and --write renders) ────────
+# ── resolve_demangle_for_format (shared by every export destination) ─────
 
 
 class TestResolveDemangle:
@@ -236,7 +236,9 @@ class TestResolveDemangle:
         _symbol_cell/_changes_table always demangle BEFORE html.escape,
         never the reverse, so there is no injection risk to avoid by
         defaulting it off the way the machine formats correctly are."""
-        from abicheck.cli_compare_helpers import _resolve_demangle
+        from abicheck.service_render import (
+            resolve_demangle_for_format as _resolve_demangle,
+        )
 
         assert _resolve_demangle("markdown") is True
         assert _resolve_demangle("review") is True
@@ -250,7 +252,9 @@ class TestResolveDemangle:
 
     @pytest.mark.parametrize("fmt", ["json", "sarif", "junit"])
     def test_defaults_off_for_machine_formats(self, fmt):
-        from abicheck.cli_compare_helpers import _resolve_demangle
+        from abicheck.service_render import (
+            resolve_demangle_for_format as _resolve_demangle,
+        )
 
         assert _resolve_demangle(fmt) is False
 
@@ -261,7 +265,9 @@ class TestResolveDemangle:
         both names, so there is nothing a caller could want to override."""
         import inspect
 
-        from abicheck.cli_compare_helpers import _resolve_demangle
+        from abicheck.service_render import (
+            resolve_demangle_for_format as _resolve_demangle,
+        )
 
         assert list(inspect.signature(_resolve_demangle).parameters) == ["fmt"]
 

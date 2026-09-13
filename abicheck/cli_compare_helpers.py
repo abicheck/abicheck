@@ -46,7 +46,6 @@ from .cli_compare_options import (
     _reject_bundle_facts_out_for_single_pair,
     _reject_debug_format_for_non_elf,
     _resolve_debug_roots,
-    _resolve_demangle,
     _warn_force_public_ignored,
     echo_coverage_warnings,
 )
@@ -109,7 +108,7 @@ from .frontends.cli.runtime import (
     _write_or_echo,
 )
 from .serialization import run_scoped_digest_cache
-from .service_render import ONELINE_FORMAT
+from .service_render import ONELINE_FORMAT, resolve_demangle_for_format
 from .workflows.public_header_boundary import (
     project_config_public_header_dirs,
 )
@@ -229,7 +228,7 @@ def _normalize_compare_options(
     # passed through verbatim.
     effective_debug_format = resolve_dump_debug_format(debug_format_opt)
 
-    demangle_resolved = _resolve_demangle(fmt)
+    demangle_resolved = resolve_demangle_for_format(fmt)
 
     # --report-mode impact is sugar for a "full" report with the impact table
     # on -- the one way to ask for that table (the separate --show-impact flag
@@ -1072,7 +1071,7 @@ def _report_compare_result(
     # disposition/suppression accounting plus a `show_only_filter`/
     # `filtered_summary` block stating exactly what the filter did.
     #
-    # `demangle` stays resolved *per format* (`_resolve_demangle`) -- that is
+    # `demangle` stays resolved *per format* (`resolve_demangle_for_format`) -- that is
     # not a per-target grammar but a property of the format itself (human
     # formats demangle, machine formats keep raw mangled symbols so tooling
     # can match on them), and it is exactly what the primary target's own
@@ -1097,7 +1096,7 @@ def _report_compare_result(
                 report_mode=report_mode,
                 show_impact=show_impact,
                 severity_config=report_severity,
-                demangle=_resolve_demangle(target_fmt),
+                demangle=resolve_demangle_for_format(target_fmt),
                 contract_evaluation=contract_evaluation,
                 require_complete_analysis=require_complete_analysis,
             )

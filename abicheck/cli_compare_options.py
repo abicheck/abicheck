@@ -345,37 +345,6 @@ class _NormalizedCompareOptions(NamedTuple):
     show_impact: bool
 
 
-#: Every format whose output a person reads. Plan slice 7o: demangling is
-#: resolved from this set alone -- there is no longer a user-facing
-#: ``--view demangle``/``no-demangle`` decision, because there is no longer
-#: a reason to make one (see :func:`~abicheck.demangle.demangle_text`: a
-#: demangled name now carries its exact mangled spelling with it, and every
-#: machine projection carries both names).
-HUMAN_FORMATS: frozenset[str] = frozenset(
-    {"markdown", "review", "html", "text", "oneline"}
-)
-
-
-def _resolve_demangle(fmt: str) -> bool:
-    """Whether *fmt*'s rendered output demangles C++ symbols.
-
-    ON for every human-facing format, OFF for the machine formats
-    (json/sarif/junit) whose consumers match on the raw mangled symbol --
-    those carry the demangled name in their own ``demangled_symbol`` field
-    instead, so nothing is hidden from them either.
-
-    HTML demangles safely because ``report.render_html.abbr_symbol_text``/
-    ``render_changes_table`` always run ``demangle_text`` BEFORE
-    ``html.escape`` -- never the reverse -- so a demangled signature's own
-    ``<``/``>``/``&`` are escaped like any other text, not injected raw.
-
-    Still resolved *per format* rather than once per run (plan slice 7m
-    makes every export request repeatable): a machine primary format paired
-    with a human ``-o`` destination must not inherit the other's answer.
-    """
-    return fmt in HUMAN_FORMATS
-
-
 def _reject_debug_format_for_non_elf(
     effective_debug_format: str | None,
     old_fmt: str | None,
