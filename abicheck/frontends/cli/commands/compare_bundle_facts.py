@@ -903,7 +903,18 @@ def _render_json(
     assurance_decision: ReleaseAssuranceDecision | None = None,
 ) -> str:
     from ....report.run_outcome import run_outcome_dict_for_diff_result
-    from ....reporter import to_json
+    from ....reporter import (
+        prewarm_change_demangling,
+        resolve_demangled_symbol as _resolve_demangled_symbol,
+        to_json,
+    )
+
+    # One batched demangle for the whole findings list, the same reason
+    # `report.build` prewarms per-library findings: without it a host with
+    # no in-process `cxxfilt` forks a subprocess per distinct symbol.
+    prewarm_change_demangling(
+        type("_Findings", (), {"changes": list(result.bundle_findings)})()
+    )
 
     _require = bool(assurance_decision and assurance_decision.require_complete)
     libraries = {
@@ -929,10 +940,22 @@ def _render_json(
         "bundle_verdict": result.bundle_verdict.value,
         **json_scope_fields(terms, run_outcome, result),
         "libraries": libraries,
+        # `demangled_symbol` beside the exact `symbol`, resolved through the
+        # same `reporter.resolve_demangled_symbol` every other machine
+        # projection uses: this aggregate document is a machine projection
+        # too, and "every machine projection carries both names" is not a
+        # per-format promise (Codex review, PR #1284). Omitted rather than
+        # null when the symbol is not Itanium-mangled, matching
+        # `_change_to_dict`.
         "bundle_findings": [
             {
                 "kind": f.kind.value,
                 "symbol": f.symbol,
+                **(
+                    {"demangled_symbol": demangled}
+                    if (demangled := _resolve_demangled_symbol(f))
+                    else {}
+                ),
                 "consumer_library": f.consumer_library,
                 "provider_library": f.provider_library,
                 "description": f.description,

@@ -37,6 +37,10 @@
   Markdown output still rendering raw mangled names, which the retired
   `--view demangle` token left with no override.
 
+- **The aggregate stored-bundle JSON carries both symbol names too**, and
+  `typedef_version_sentinel` is a removal rather than a modification, as its
+  own description always said.
+
 - **Every public rendering entry point rejects the retired `leaf` mode.**
   `reporter.to_json` and `report.to_markdown` shared none of
   `render_output`'s check, so a caller passing `report_mode="leaf"` to

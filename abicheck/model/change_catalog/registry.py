@@ -243,16 +243,18 @@ class ChangeKindMeta:
         # two paths stay genuinely independent: asdict()'s field-level
         # copy stays a plain dict, while copy.deepcopy() of the whole
         # entry stays immutable.
-        new = ChangeKindMeta(
-            kind=self.kind,
-            default_verdict=self.default_verdict,
-            impact=self.impact,
-            entity=self.entity,
-            operation=self.operation,
-            is_addition=self.is_addition,
-            policy_overrides=dict(self.policy_overrides),
-            description_template=self.description_template,
-        )
+        #
+        # Built from ``fields(self)`` rather than a hand-written keyword
+        # list: the hand-written one silently dropped every newly added
+        # field, which is not hypothetical -- it lost ``entity_from_field``
+        # the moment that field was introduced, turning a polymorphic entry
+        # back into a statically-classified one on any deep copy (Codex
+        # review, PR #1284). ``policy_overrides`` is the one field that
+        # needs its own treatment, and it gets it by being passed as a
+        # plain dict for ``__post_init__`` to re-wrap.
+        values = {f.name: getattr(self, f.name) for f in fields(self)}
+        values["policy_overrides"] = dict(self.policy_overrides)
+        new = ChangeKindMeta(**values)
         memo[id(self)] = new
         return new
 

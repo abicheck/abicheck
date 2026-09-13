@@ -186,9 +186,13 @@ class TestAPolymorphicKindTakesItsEntityFromTheFinding:
     failure AGENTS.md names). A synthetic finding cannot state this claim.
     """
 
+    #: Every kind declared polymorphic. Derived from the catalog rather
+    #: than restated, so a kind made polymorphic later is covered here or
+    #: fails the monomorphic assertion below -- never silently neither.
     POLYMORPHIC = (
         "experimental_graduated",
         "experimental_removed_without_replacement",
+        "mandatory_template_param_added",
     )
 
     @staticmethod
@@ -217,6 +221,16 @@ class TestAPolymorphicKindTakesItsEntityFromTheFinding:
             ("experimental_removed_without_replacement", "function"): removed_fn,
             ("experimental_removed_without_replacement", "type"): removed_type,
         }
+
+    def test_this_list_is_the_catalog_s_own(self):
+        """A kind made polymorphic later must land in one of these two
+        assertions rather than in neither."""
+        declared = {
+            k.value
+            for k in ChangeKind
+            if REGISTRY.entity_from_field_for(k.value) is not None
+        }
+        assert declared == set(self.POLYMORPHIC)
 
     def test_each_polymorphic_kind_declares_where_its_entity_comes_from(self):
         for kind in self.POLYMORPHIC:
@@ -426,3 +440,155 @@ class TestADeclaredEntityAgreesWithItsOwnRegistration:
         for kind, reason in self.ACCEPTED_DISAGREEMENTS.items():
             assert REGISTRY.entity_for(kind) is not None, kind
             assert len(reason) > 40, kind
+
+
+class TestSiblingEntriesSharingATemplateAgree:
+    """Two kinds whose `description_template` is character-identical describe
+    the same shape of change, so they may not disagree on a dimension.
+
+    A third oracle alongside the two above, and the one that found
+    `type_field_added` declared `MODIFIED` while `type_field_added_compatible`,
+    `union_field_added` and `type_field_removed` -- same template shape --
+    were all `ADDED`/`REMOVED`. Measured before being adopted: the catalog
+    has 7 shared-template groups and exactly one disagreed, so this is a
+    low-noise rule rather than a heuristic that needs an allowlist.
+
+    A *verb*-based oracle over the template ("... removed" implies REMOVED)
+    was measured and rejected in the same pass: it flagged 29 kinds, of
+    which 27 were correct as declared, because "gained `final`", "no longer
+    trivially copyable" and every `[[deprecated]]` sibling legitimately read
+    as an addition or removal in a sentence while being a trait change of a
+    persisting entity. A gate with a 93% false-positive rate is not a gate.
+    """
+
+    def _groups(self):
+        from collections import defaultdict
+
+        groups = defaultdict(list)
+        for kind in ChangeKind:
+            template = REGISTRY.description_template_for(kind.value)
+            if template:
+                groups[template].append(kind.value)
+        return {t: ks for t, ks in groups.items() if len(ks) > 1}
+
+    def test_there_are_shared_template_groups_to_check(self):
+        """Vacuity guard."""
+        assert len(self._groups()) >= 5
+
+    def test_they_agree_on_operation_and_entity(self):
+        disagreeing = {
+            template: [
+                (k, REGISTRY.operation_for(k).value, REGISTRY.entity_for(k).value)
+                for k in kinds
+            ]
+            for template, kinds in self._groups().items()
+            if len({REGISTRY.operation_for(k) for k in kinds}) > 1
+            or len({REGISTRY.entity_for(k) for k in kinds}) > 1
+        }
+        assert not disagreeing, disagreeing
+
+
+class TestDeepCopyPreservesEveryDeclaredField:
+    """`ChangeKindMeta.__deepcopy__` must not silently drop a field.
+
+    It reconstructed the entry from a hand-written keyword list, so it lost
+    `entity_from_field` the moment that field was added -- turning a
+    polymorphic entry back into a statically-classified one on any deep copy
+    (Codex review, PR #1284). The fix is structural (`fields(self)`), and
+    this states the invariant over *every* field so the next added one
+    cannot repeat it.
+    """
+
+    def test_every_field_survives(self):
+        import copy
+        import dataclasses
+
+        for kind in ("experimental_graduated", "func_removed", "type_size_changed"):
+            entry = REGISTRY._entries[kind]
+            clone = copy.deepcopy(entry)
+            mismatched = [
+                f.name
+                for f in dataclasses.fields(entry)
+                if getattr(clone, f.name) != getattr(entry, f.name)
+            ]
+            assert not mismatched, (kind, mismatched)
+
+    def test_the_polymorphic_field_specifically_survives(self):
+        import copy
+
+        entry = REGISTRY._entries["experimental_graduated"]
+        assert entry.entity_from_field is not None
+        assert copy.deepcopy(entry).entity_from_field == entry.entity_from_field
+
+    def test_the_immutability_guarantee_still_holds(self):
+        """The reason `__deepcopy__` exists at all (PR #882) is unchanged by
+        rebuilding it from `fields()`."""
+        import copy
+
+        from abicheck.model.change_catalog._immutable_mapping import _ImmutableDict
+
+        entry = REGISTRY._entries["func_removed"]
+        assert isinstance(copy.deepcopy(entry).policy_overrides, _ImmutableDict)
+
+
+class TestARemovedTypedefIsARemoval:
+    """`typedef_version_sentinel` fires when a version-stamped typedef
+    *disappears* -- its own description says so -- so `--view show=removed`
+    must list it. Its compatible verdict is an orthogonal axis and does not
+    make the removal a modification (Codex review, PR #1284)."""
+
+    def test_declared_as_a_removal(self):
+        assert (
+            REGISTRY.operation_for("typedef_version_sentinel")
+            is ChangeOperation.REMOVED
+        )
+
+    def test_shown_by_removed_and_not_by_changed(self):
+        removed = ShowOnlyFilter(frozenset(), frozenset(), frozenset({"removed"}))
+        changed = ShowOnlyFilter(frozenset(), frozenset(), frozenset({"changed"}))
+        assert removed._check_action("typedef_version_sentinel", removed.actions)
+        assert not changed._check_action("typedef_version_sentinel", changed.actions)
+
+
+class TestAClassTemplateFindingIsATypeFinding:
+    """`mandatory_template_param_added` pools function templates and class
+    templates under one stem, so the entity is a property of the finding.
+
+    Run through the real detector, not a synthetic object -- the lesson from
+    the namespace kinds' own first attempt.
+    """
+
+    @staticmethod
+    def _changes(*, funcs=(), types=()):
+        from abicheck.diff_templates import detect_mandatory_template_param_added
+        from tests.test_diff_namespaces import _fn, _rec, _snap
+
+        old = _snap(
+            funcs=[_fn(n) for n in funcs[:1]], types=[_rec(n) for n in types[:1]]
+        )
+        new = _snap(
+            funcs=[_fn(n) for n in funcs[1:]], types=[_rec(n) for n in types[1:]]
+        )
+        return detect_mandatory_template_param_added(old, new)
+
+    def test_a_class_template_only_stem_is_a_type_finding(self):
+        changes = self._changes(types=("ns::vec<int>", "ns::vec<int, A>"))
+        assert changes, "vacuity guard: the detector produced nothing"
+        for c in changes:
+            assert c.entity_discriminator == "type"
+            assert entity_for_change(c, c.kind.value) == ChangeEntity.TYPE.value
+
+    def test_a_function_template_only_stem_is_a_function_finding(self):
+        changes = self._changes(funcs=("ns::sort<int>", "ns::sort<int, A>"))
+        assert changes, "vacuity guard: the detector produced nothing"
+        for c in changes:
+            assert c.entity_discriminator == "function"
+            assert entity_for_change(c, c.kind.value) == ChangeEntity.FUNCTION.value
+
+    def test_the_view_filter_follows(self):
+        types_only = self._changes(types=("ns::vec<int>", "ns::vec<int, A>"))
+        functions = ShowOnlyFilter(frozenset(), frozenset({"functions"}), frozenset())
+        types = ShowOnlyFilter(frozenset(), frozenset({"types"}), frozenset())
+        for c in types_only:
+            assert types._check_element(c, c.kind.value)
+            assert not functions._check_element(c, c.kind.value)

@@ -582,6 +582,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "instantiation tuple differs.",
         description_template="Template '{name}' minimum effective argument count grew from {old} to {new}. Consumers that wrote '{name}<...{old} args...>' without supplying the new parameter no longer compile.",
         entity=_ENT.FUNCTION,
+        entity_from_field="entity_discriminator",
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -956,7 +957,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         impact="New field shifts subsequent fields; old code reads wrong offsets for all fields after insertion point.",
         description_template="Field added: {name}::{detail}",
         entity=_ENT.TYPE,
-        operation=_OP.MODIFIED,
+        operation=_OP.ADDED,
     ),
     _E(
         "type_field_added_compatible",
@@ -1109,7 +1110,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "it is never exported as an ELF symbol and does not affect binary ABI.",
         description_template="Version-stamped typedef removed (compile-time sentinel, not an ABI break): {name}",
         entity=_ENT.TYPE,
-        operation=_OP.MODIFIED,
+        operation=_OP.REMOVED,
     ),
     _E(
         "union_field_added",

@@ -1045,3 +1045,70 @@ class TestOneEnvelopeProjectsCorrectlyIntoEveryFormat:
             options=RenderOptions(demangle=explicit),
         )
         assert ("lib::gone(int)" in render_envelope("markdown", envelope)) is explicit
+
+
+class TestEveryCollectionThatSerializesIsPrewarmed:
+    """The demangle prewarm has to cover every collection whose entries reach
+    `_change_to_dict`, not only `result.changes`.
+
+    `scoped_only_changes` is the one that was missed: `apply_scoped_gate`
+    synthesizes it *after* the document is built, for a `--used-by` /
+    `--required-symbol` run, and serializes it through the same path -- so
+    on a host without the in-process `cxxfilt` package every
+    consumer-required C++ symbol went back to one `c++filt` subprocess each,
+    which is the whole cost this function exists to avoid (Codex review, PR
+    #1284).
+
+    Asserted as the invariant over the collections rather than against one
+    name, and by observing the batch the prewarm actually submits.
+    """
+
+    #: Every attribute on a result whose entries are serialized as findings.
+    SERIALIZED_COLLECTIONS = (
+        "changes",
+        "suppressed_changes",
+        "out_of_surface_changes",
+        "scoped_only_changes",
+    )
+
+    def _result_with_a_distinct_symbol_per_collection(self):
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_types import Change, DiffResult
+        from abicheck.model.change_catalog.kinds import ChangeKind as CK
+
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
+        )
+        expected = set()
+        for i, attr in enumerate(self.SERIALIZED_COLLECTIONS):
+            symbol = f"_ZN3lib{len(attr)}q{i}Ev"
+            expected.add(symbol)
+            setattr(
+                result,
+                attr,
+                [Change(kind=CK.FUNC_REMOVED, symbol=symbol, description="d")],
+            )
+        return result, expected
+
+    def test_every_collection_reaches_the_batch(self):
+        from unittest import mock
+
+        from abicheck.reporter import prewarm_change_demangling
+
+        result, expected = self._result_with_a_distinct_symbol_per_collection()
+        with mock.patch("abicheck.demangle.prewarm_demangle_batch") as batch:
+            prewarm_change_demangling(result)
+        assert batch.call_count == 1
+        submitted = {c.symbol for c in batch.call_args.args[0]}
+        missing = expected - submitted
+        assert not missing, missing
+
+    def test_the_guard_would_fail_if_a_collection_were_dropped(self):
+        """Vacuity guard: each collection contributes a *distinct* symbol, so
+        omitting any one of them is detectable."""
+        _, expected = self._result_with_a_distinct_symbol_per_collection()
+        assert len(expected) == len(self.SERIALIZED_COLLECTIONS)

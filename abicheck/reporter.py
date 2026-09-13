@@ -1291,9 +1291,16 @@ def prewarm_change_demangling(result: Any) -> None:
     """
     from .demangle import prewarm_demangle_batch
 
+    # Every collection whose entries reach `_change_to_dict`, not only the
+    # headline one. `scoped_only_changes` is the one that is easy to miss:
+    # `apply_scoped_gate` synthesizes it *after* the document is built, for
+    # a `--used-by`/`--required-symbol` run, and serializes it through the
+    # same path -- so leaving it out put every consumer-required C++ symbol
+    # back on the per-symbol subprocess it is the point of this function to
+    # avoid (Codex review, PR #1284).
     changes = list(getattr(result, "changes", ()) or ())
-    changes += list(getattr(result, "suppressed_changes", ()) or ())
-    changes += list(getattr(result, "out_of_surface_changes", ()) or ())
+    for attr in ("suppressed_changes", "out_of_surface_changes", "scoped_only_changes"):
+        changes += list(getattr(result, attr, ()) or ())
     if changes:
         prewarm_demangle_batch(changes, attrs=("symbol",))
 
