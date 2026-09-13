@@ -40,6 +40,8 @@ from abicheck.buildsource.project_targets import (
 from abicheck.buildsource.run_plan import (
     RUN_PLAN_KIND_BUNDLE,
     RUN_PLAN_KIND_TARGET,
+    SKIP_CHECKS_DECLARED_NONE_RESOLVED,
+    SKIP_NO_CHECKS_DECLARED,
     RunPlan,
     RunPlanCheck,
     _compose_gcc_options,
@@ -326,8 +328,14 @@ class TestLibraryRedirect:
         existence on a profile is gated on the *library*'s presence there."""
         config = _parsed(self._RAW)
         plan, report = generate_run_plan(config, {"linux": _bo("some-other-lib")})
-        assert report.ok
         assert not plan.checks
+        # The redirect itself raises no error -- the only error is the
+        # zero-checks one every declared-but-unresolved plan gets since plan
+        # slice 7r (which is also what the retired --allow-empty used to
+        # wave through).
+        assert [e for e in report.errors if "zero checks" not in e] == []
+        assert plan.skipped is not None
+        assert plan.skipped.reason == SKIP_CHECKS_DECLARED_NONE_RESOLVED
 
 
 class TestBundleChecks:
@@ -381,8 +389,12 @@ class TestBundleChecks:
     ) -> None:
         config = _parsed(self._RAW)
         plan, report = generate_run_plan(config, {"linux": _bo("libpvxs")})
-        assert report.ok
         assert not plan.checks
+        # The missing member raises no error of its own; only the
+        # zero-checks classification does (plan slice 7r).
+        assert [e for e in report.errors if "zero checks" not in e] == []
+        assert plan.skipped is not None
+        assert plan.skipped.reason == SKIP_CHECKS_DECLARED_NONE_RESOLVED
 
     def test_bundle_check_errors_when_a_member_is_missing_and_profile_is_explicit(
         self,
@@ -1525,44 +1537,72 @@ class TestRunPlanGenerateCli:
         result = CliRunner().invoke(main, ["project", "plan", str(config)])
         assert result.exit_code == 64
 
-    # ── --allow-empty (ADR-054: fail-closed by default on zero checks) ──────
+    # ── the empty-plan outcomes (plan slice 7r retired --allow-empty) ──────
 
-    def test_empty_run_plan_exits_one_by_default(self, tmp_path: Path) -> None:
+    def test_no_checks_declared_is_an_explained_skipped_plan(
+        self, tmp_path: Path
+    ) -> None:
+        """The bootstrap case: nothing declared, nothing to resolve. It
+        succeeds on its own now -- and says why, in the artifact, rather
+        than needing a human to assert it with a bypass flag."""
         config = _write_config(tmp_path, {"targets": {}})
         result = CliRunner().invoke(main, ["project", "plan", str(config)])
-        assert result.exit_code == 1, result.output
-        assert "--allow-empty" in result.output
-        # The run-plan artifact is still emitted (an empty checks: list),
-        # even though the command signals failure via exit code.
-        assert '"checks": []' in result.stdout
-
-    def test_empty_run_plan_exits_zero_with_allow_empty(self, tmp_path: Path) -> None:
-        config = _write_config(tmp_path, {"targets": {}})
-        result = CliRunner().invoke(
-            main, ["project", "plan", str(config), "--allow-empty"]
-        )
         assert result.exit_code == 0, result.output
-        assert '"checks": []' in result.stdout
+        data = json.loads(result.stdout)
+        assert data["checks"] == []
+        assert data["schema"] == "abicheck.run-plan/v3"
+        assert data["skipped"]["reason"] == SKIP_NO_CHECKS_DECLARED
+        assert data["skipped"]["declared_checks"] == 0
+        # Bootstrap validation routes to `project validate`, which is where
+        # the config's own well-formedness is actually answered.
+        assert "project validate" in data["skipped"]["explanation"]
+        assert "project validate" in result.output
 
-    def test_non_empty_run_plan_ignores_allow_empty(self, tmp_path: Path) -> None:
-        """--allow-empty only relaxes the zero-checks case -- a resolved,
-        non-empty run-plan is unaffected either way."""
+    def test_declared_checks_resolving_to_nothing_still_exits_one(
+        self, tmp_path: Path
+    ) -> None:
+        """The dangerous case keeps failing, and now has no bypass at all --
+        this is the capability --allow-empty provided, deliberately removed
+        rather than renamed."""
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        result = CliRunner().invoke(main, ["project", "plan", str(config)])
+        assert result.exit_code == 1, result.output
+        data = json.loads(result.stdout)
+        assert data["checks"] == []
+        assert data["skipped"]["reason"] == SKIP_CHECKS_DECLARED_NONE_RESOLVED
+        assert data["skipped"]["declared_checks"] >= 1
+        assert "--build-output" in result.output
+
+    def test_retired_allow_empty_spelling_is_a_usage_error(
+        self, tmp_path: Path
+    ) -> None:
+        """No hidden alias: the old spelling is a usage error (64), on both
+        the plan it used to rescue and one it never affected."""
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        empty = _write_config(tmp_path / "a", {"targets": {}})
+        declared = _write_config(tmp_path / "b", _SINGLE_PROFILE_LIBRARY_RAW)
+        for config in (empty, declared):
+            result = CliRunner().invoke(
+                main, ["project", "plan", str(config), "--allow-empty"]
+            )
+            assert result.exit_code == 64, result.output
+            assert "--allow-empty" in result.output
+
+    def test_a_resolved_plan_declares_no_skip_at_all(self, tmp_path: Path) -> None:
         config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
         build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])
         result = CliRunner().invoke(
             main,
-            [
-                "project",
-                "plan",
-                str(config),
-                "--build-output",
-                f"linux={build_dir}",
-                "--allow-empty",
-            ],
+            ["project", "plan", str(config), "--build-output", f"linux={build_dir}"],
         )
         assert result.exit_code == 0, result.output
         data = json.loads(result.stdout)
         assert len(data["checks"]) == 1
+        assert "skipped" not in data
+        # ... and keeps the unbumped schema, so the v3 stamp really is
+        # scoped to the one new capability.
+        assert data["schema"] == "abicheck.run-plan/v1"
 
 
 def _write_bindings_file(tmp_path: Path, bindings: dict) -> Path:

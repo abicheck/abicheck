@@ -185,9 +185,22 @@ RUN_PLAN_SCHEMA = "abicheck.run-plan/v1"
 #: version-everything policy.
 RUN_PLAN_SCHEMA_GATE = "abicheck.run-plan/v2"
 
-#: Highest ``vN`` suffix this reader understands, parsed from either schema
-#: constant above.
-_RUN_PLAN_SCHEMA_MAX_SUPPORTED = 2
+#: Schema discriminator stamped instead of the two above whenever a plan
+#: carries a ``skipped`` block (plan slice 7r: a legitimately empty
+#: selection is now an *explained skipped plan* rather than an error a
+#: ``--allow-empty`` bypass switch had to wave through). Same MAJOR-bump
+#: reasoning as :data:`RUN_PLAN_SCHEMA_GATE`: a consumer that cannot read
+#: ``skipped`` sees only ``checks: []`` and has no way to tell a deliberate,
+#: explained skip from a plan whose every check failed to resolve -- which
+#: is exactly the distinction this slice exists to make, so it must fail
+#: loudly rather than read the artifact as the other case. A plan carrying
+#: checks keeps its existing ``v1``/``v2`` spelling; the bump is
+#: additive-only and scoped to this one capability.
+RUN_PLAN_SCHEMA_SKIPPED = "abicheck.run-plan/v3"
+
+#: Highest ``vN`` suffix this reader understands, parsed from the schema
+#: constants above.
+_RUN_PLAN_SCHEMA_MAX_SUPPORTED = 3
 
 #: ``kind`` discriminator for a :class:`RunPlanCheck` cell.
 RUN_PLAN_KIND_TARGET = "target"
@@ -542,6 +555,67 @@ class RunPlanCheck:
         )
 
 
+#: ``skipped.reason``: CONFIG declares no ``checks[]`` at all, so there was
+#: nothing to resolve. A real, supported state (a project bootstrapping its
+#: ``.abicheck.yml`` before declaring targets), reported as a skip rather
+#: than as a failure.
+SKIP_NO_CHECKS_DECLARED = "no_checks_declared"
+
+#: ``skipped.reason``: CONFIG declares ``checks[]`` that resolved to no cell
+#: at all -- every implicit sweep matched nothing, usually because no
+#: ``--build-output`` was supplied for the profiles they name. **Not** a
+#: legitimate skip: this is the "a CI matrix silently gates nothing" case,
+#: so it is a generation error and the run-plan is not usable.
+SKIP_CHECKS_DECLARED_NONE_RESOLVED = "checks_declared_none_resolved"
+
+
+@dataclass(frozen=True)
+class RunPlanSkip:
+    """Why a generated plan holds no checks (plan slice 7r).
+
+    An empty plan used to be indistinguishable from a broken one, which is
+    why accepting one needed a ``--allow-empty`` bypass switch on the CLI:
+    the artifact said nothing about *why* it was empty, so the only
+    available answers were "fail always" or "a human asserts it is fine".
+    Recording the reason makes the two cases separable, which is what lets
+    the legitimate one succeed on its own and the dangerous one fail with
+    no bypass at all.
+    """
+
+    reason: str
+    #: How many ``checks[]`` entries CONFIG declared, across targets and
+    #: bundles -- the fact the classification rests on, carried so a
+    #: consumer can see the evidence rather than trust the label.
+    declared_checks: int
+    #: One sentence a human can act on, including where to look next.
+    explanation: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "reason": self.reason,
+            "declared_checks": self.declared_checks,
+            "explanation": self.explanation,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> RunPlanSkip:
+        from ..workflows.aggregate import AggregateError
+
+        reason = _opt_str(d.get("reason"))
+        if not reason:
+            raise AggregateError("run-plan 'skipped' requires a 'reason' string")
+        declared = d.get("declared_checks", 0)
+        if not isinstance(declared, int) or isinstance(declared, bool) or declared < 0:
+            raise AggregateError(
+                "run-plan 'skipped.declared_checks' must be a non-negative integer"
+            )
+        return cls(
+            reason=reason,
+            declared_checks=declared,
+            explanation=_opt_str(d.get("explanation")),
+        )
+
+
 @dataclass
 class RunPlan:
     """The full ordered list of checks a run derives (ADR-047 §5)."""
@@ -553,7 +627,8 @@ class RunPlan:
     #: The aggregate fan-in's gate policy (CLI cleanup phase two, PR 2),
     #: carried on the plan so `to_aggregate_manifest()` can project it into
     #: the manifest's own `gate` block -- the same mechanism a hand-authored
-    #: `--manifest` uses, so `--run-plan`/`--manifest` never diverge in what
+    #: `--manifest` uses, so a run-plan and a hand-authored manifest never
+    #: diverge in what
     #: they can express. Raw, unvalidated strings here (validated once, at
     #: `ExpectedTargets.from_manifest_data()`, the same place a hand-authored
     #: manifest's `gate` block is validated) -- this module stays free of an
@@ -564,6 +639,11 @@ class RunPlan:
     #: in this dataclass.
     gate_missing_required: str | None = None
     gate_unexpected_target: str | None = None
+    #: Why this plan holds no checks, when it holds none (plan slice 7r).
+    #: ``None`` for every plan with at least one check -- and for a plan an
+    #: older abicheck generated, which is the one case a reader must not
+    #: read as "this skip was never explained".
+    skipped: RunPlanSkip | None = None
 
     def _validated_gate(self) -> tuple[str | None, str | None]:
         """Validate :attr:`gate_missing_required`/:attr:`gate_unexpected_target`
@@ -607,9 +687,24 @@ class RunPlan:
         # set, regardless of whatever self.schema was constructed with --
         # this is a discriminator an old reader must see, not a caller-
         # overridable label (see RUN_PLAN_SCHEMA_GATE's own docstring).
-        d: dict[str, Any] = {
-            "schema": RUN_PLAN_SCHEMA_GATE if has_gate else self.schema
-        }
+        if self.skipped is not None and self.checks:
+            from ..workflows.aggregate import AggregateError
+
+            raise AggregateError(
+                "a RunPlan carrying checks cannot also declare `skipped` -- "
+                f"{len(self.checks)} check(s) resolved"
+            )
+        # Stamped in descending order of what an old reader must reject:
+        # `skipped` is unreadable to a pre-v3 reader in a way that changes
+        # what the artifact means (see RUN_PLAN_SCHEMA_SKIPPED), and a
+        # skipped plan has no checks for a `gate` policy to apply to.
+        if self.skipped is not None:
+            schema = RUN_PLAN_SCHEMA_SKIPPED
+        elif has_gate:
+            schema = RUN_PLAN_SCHEMA_GATE
+        else:
+            schema = self.schema
+        d: dict[str, Any] = {"schema": schema}
         if self.project:
             d["project"] = self.project
         if self.head_sha:
@@ -621,6 +716,8 @@ class RunPlan:
             if gate_unexpected_target is not None:
                 gate["unexpected_target"] = gate_unexpected_target
             d["gate"] = gate
+        if self.skipped is not None:
+            d["skipped"] = self.skipped.to_dict()
         d["checks"] = [c.to_dict() for c in self.checks]
         return d
 
@@ -642,6 +739,22 @@ class RunPlan:
                 f"supports (max v{_RUN_PLAN_SCHEMA_MAX_SUPPORTED}); upgrade "
                 "abicheck"
             )
+        skipped = None
+        if "skipped" in d:
+            from ..workflows.aggregate import AggregateError
+
+            if version is None or version < 3:
+                raise AggregateError(
+                    "run-plan 'skipped' requires 'schema' >= "
+                    f"'abicheck.run-plan/v3' (got {schema!r}); a pre-v3 reader "
+                    "would see only an empty checks[] and could not tell a "
+                    "deliberate, explained skip from a plan whose every check "
+                    "failed to resolve"
+                )
+            raw_skip = d["skipped"]
+            if not isinstance(raw_skip, dict):
+                raise AggregateError("run-plan 'skipped' must be an object")
+            skipped = RunPlanSkip.from_dict(raw_skip)
         gate_missing_required, gate_unexpected_target = _parse_run_plan_gate(d)
         if "gate" in d and (version is None or version < 2):
             from ..workflows.aggregate import AggregateError
@@ -659,6 +772,7 @@ class RunPlan:
             checks=checks,
             gate_missing_required=gate_missing_required,
             gate_unexpected_target=gate_unexpected_target,
+            skipped=skipped,
         )
 
 
@@ -1068,20 +1182,80 @@ def generate_run_plan(
                 "to be unique. Remove the duplicate checks[] entry, or give "
                 "it a distinct channel/depth/profile/id."
             )
-    if not checks and report.ok:
-        report.warnings.append(
-            "run-plan is empty -- no targets:/bundles: checks[] resolved to any "
-            "profile (nothing declared, or every profile is missing from "
-            "build_outputs)."
-        )
+    skipped = _classify_empty_plan(config, checks, report) if not checks else None
     plan = RunPlan(
         project=project,
         head_sha=head_sha,
         checks=checks,
         gate_missing_required=gate_missing_required,
         gate_unexpected_target=gate_unexpected_target,
+        skipped=skipped,
     )
     return plan, report
+
+
+def declared_check_count(config: ProjectTargetsConfig) -> int:
+    """How many ``checks[]`` entries *config* declares, across targets and
+    bundles. The evidence :func:`_classify_empty_plan` classifies on."""
+    return sum(len(t.checks) for t in config.targets.values()) + sum(
+        len(b.checks) for b in config.bundles.values()
+    )
+
+
+def _classify_empty_plan(
+    config: ProjectTargetsConfig,
+    checks: list[RunPlanCheck],
+    report: RunPlanGenerationReport,
+) -> RunPlanSkip:
+    """Say why a plan resolved to no checks, and whether that is acceptable.
+
+    Plan slice 7r. Two empty plans mean opposite things and used to be one
+    error with one ``--allow-empty`` bypass past both:
+
+    * **Nothing was declared.** A project bootstrapping its
+      ``.abicheck.yml`` before it has ``targets:``/``bundles:`` ``checks[]``
+      has nothing to resolve, and a run-plan generator is the wrong place to
+      object -- the config's own well-formedness is ``project validate``'s
+      question, and the explanation points there. An explained *skipped
+      plan*, exit 0, no bypass switch needed.
+    * **Checks were declared and none resolved.** Every downstream matrix
+      and aggregate step is then silently skipped while the workflow
+      reports success -- the exact failure the fail-closed default existed
+      for. That stays a generation error with **no** way to wave it
+      through: ``--allow-empty`` used to accept it, which is precisely the
+      capability this slice removes rather than renames.
+
+    The classification is recorded on the plan either way (a reader of the
+    artifact alone can tell the two apart), and the error is added only for
+    the second, and only when nothing else already failed -- a plan that is
+    empty *because* an explicit profile selector failed already says so.
+    """
+    declared = declared_check_count(config)
+    if declared == 0:
+        explanation = (
+            "CONFIG declares no targets:/bundles: checks[], so this run-plan "
+            "resolves no checks and every downstream matrix/aggregate step is "
+            "skipped. This is a complete, valid plan for a project that has "
+            "not declared any checks yet -- run `abicheck project validate "
+            "CONFIG` to confirm the config itself is well formed, and add a "
+            "checks[] entry when there is something to check."
+        )
+        report.warnings.append(f"run-plan is empty: {explanation}")
+        return RunPlanSkip(SKIP_NO_CHECKS_DECLARED, declared, explanation)
+
+    explanation = (
+        f"CONFIG declares {declared} checks[] entr"
+        f"{'y' if declared == 1 else 'ies'}, and none of them resolved to a "
+        "(target, profile) cell -- usually no --build-output was supplied for "
+        "the profiles they name, or a profile id does not match the one in "
+        "its build-output.json. Every downstream matrix/aggregate step would "
+        "be skipped, so this run-plan is not usable; supply the missing "
+        "--build-output, or run `abicheck project validate CONFIG` to check "
+        "the declarations themselves."
+    )
+    if report.ok:
+        report.errors.append(f"run-plan resolved to zero checks: {explanation}")
+    return RunPlanSkip(SKIP_CHECKS_DECLARED_NONE_RESOLVED, declared, explanation)
 
 
 def to_aggregate_manifest(
@@ -1111,7 +1285,8 @@ def to_aggregate_manifest(
         manifest["head_sha"] = resolved_head_sha
     # CLI cleanup phase two, PR 2: project the plan's own gate policy into
     # the manifest's `gate` block -- the same field `--manifest` reads,
-    # so `--run-plan`/`--manifest` express identical policy shapes.
+    # so a run-plan and a hand-authored manifest express identical policy
+    # shapes.
     # _validated_gate() rejects a bogus value the same way to_dict() does
     # (CodeRabbit review, fresh evidence) -- both persistence paths off one
     # RunPlan must agree on whether its gate fields are well-formed, not

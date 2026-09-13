@@ -82,9 +82,10 @@ self-checkout (including the local Action executed afterward).
 
 Three jobs, always in this order:
 
-1. **`plan`** — generates `run-plan.json` (`abicheck project plan
-   --allow-empty`, deferring the empty-plan guard to the `no-checks` job
-   below rather than the command's own fail-closed default) from
+1. **`plan`** — generates `run-plan.json` (`abicheck project plan`, which
+   answers an empty plan by what the config declared: no `checks[]` at all
+   is an explained skipped plan that reaches the `no-checks` job below,
+   while declared-but-unresolved fails this step outright) from
    `inputs.config-path` (default `.abicheck.yml`) plus every downloaded
    `<build-output-artifact-prefix><profile-id>` artifact, uploads it under
    `inputs.run-plan-artifact-name`, and exposes its `checks[]` as a matrix

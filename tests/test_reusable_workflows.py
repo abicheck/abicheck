@@ -429,10 +429,11 @@ class TestCheckProjectStepOrdering:
 
 
 class TestCheckProjectFailsLoudOnEmptyRunPlan:
-    """`abicheck project plan` is fail-closed by default on an empty
-    checks[] (ADR-054), but this workflow's plan step passes --allow-empty
-    so it degrades to a WARNING instead -- `check`/`aggregate` are both
-    gated on has-checks == 'true', so an empty run would otherwise skip
+    """`abicheck project plan` distinguishes the two empty plans itself
+    (plan slice 7r): a CONFIG declaring no checks[] is an explained skipped
+    plan that exits 0 and reaches this workflow, while declared-but-
+    unresolved fails the plan step outright. `check`/`aggregate` are both
+    gated on has-checks == 'true', so a skipped plan would otherwise skip
     both and report the whole workflow as a success having gated nothing.
     The `no-checks` job exists to fail that case loud instead (self-review
     finding, not from an external review round)."""
@@ -473,7 +474,10 @@ class TestCheckProjectMatrixWiring:
         plan_step = next(s for s in steps if s.get("name") == "Generate run-plan.json")
         run = plan_step["run"]
         assert "project plan" in run
-        assert "--allow-empty" in run
+        # Plan slice 7r retired --allow-empty: the plan step distinguishes
+        # the two empty plans itself, so a workflow still passing the flag
+        # would exit 64 here.
+        assert "--allow-empty" not in run
         assert "plan.get('checks'" in run or "checks = plan.get" in run
 
 
