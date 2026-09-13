@@ -32,6 +32,9 @@ body (``int get() const {…}``)   ``inner``, and a record enclosing scope
 hidden friend defined in the     nothing either, and it is not even a
 class (``friend bool             member node: clang emits a plain
 operator==(…) { … }``)           ``FunctionDecl`` under a ``FriendDecl``
+in-class function-try-block      a ``CXXTryStmt``, not a ``CompoundStmt``
+(``void f() try { … }
+catch (...) { … }``)
 ===============================  ===========================================
 
 Measured against clang 18.1.3 (``-std=c++20``); the castxml backend
@@ -115,11 +118,21 @@ def encloses_class_scope(scope_path: ScopePath) -> bool:
     )
 
 
-def _has_compound_body(node: dict[str, Any]) -> bool:
+#: Clang statement kinds that are a function *body*. Closed by the grammar,
+#: not a heuristic: C++ [dcl.fct.def.general] gives ``function-body`` as either
+#: a (ctor-initializer'd) compound-statement or a **function-try-block** --
+#: ``void f() try { … } catch (...) { … }``, which clang emits as a
+#: ``CXXTryStmt`` with no ``CompoundStmt`` of its own at this level. The
+#: remaining two productions, ``= default`` and ``= delete``, carry no body
+#: node at all and are handled separately by :func:`is_effectively_inline`.
+_FUNCTION_BODY_KINDS = frozenset({"CompoundStmt", "CXXTryStmt"})
+
+
+def _has_body(node: dict[str, Any]) -> bool:
     """Whether *node* carries a real function body in its ``inner`` list."""
     inner = node.get("inner") or []
     return any(
-        isinstance(child, dict) and child.get("kind") == "CompoundStmt"
+        isinstance(child, dict) and child.get("kind") in _FUNCTION_BODY_KINDS
         for child in inner
     )
 
@@ -165,4 +178,4 @@ def is_effectively_inline(
         return False
     if node.get("kind") not in _MEMBER_KINDS and not in_friend:
         return False
-    return _has_compound_body(node) or node.get("explicitlyDefaulted") == "default"
+    return _has_body(node) or node.get("explicitlyDefaulted") == "default"

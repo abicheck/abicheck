@@ -85,12 +85,15 @@ _MEMBER_KINDS = (
     "CXXConversionDecl",
 )
 _BODY = {"kind": "CompoundStmt", "inner": []}
+_TRY_BODY = {"kind": "CXXTryStmt", "inner": []}
 
 
 def _node(kind, **attrs):
     node = {"kind": kind, "name": "f"}
-    if attrs.pop("body", False):
-        node["inner"] = [{"kind": "ParmVarDecl"}, _BODY]
+    body = attrs.pop("body", False)
+    if body:
+        tail = _TRY_BODY if body == "try" else _BODY
+        node["inner"] = [{"kind": "ParmVarDecl"}, tail]
     node.update(attrs)
     return node
 
@@ -158,6 +161,18 @@ def test_member_defined_in_class_body_is_implicitly_inline(kind):
     """The shape a ``constexpr``-only fix misses: no ``inline``, no ``constexpr``."""
     assert is_effectively_inline(_node(kind, body=True), _RECORD) is True
     assert is_effectively_inline(_node(kind, body=True), _NESTED) is True
+
+
+@pytest.mark.parametrize("kind", _MEMBER_KINDS)
+def test_function_try_block_body_counts_as_a_definition(kind):
+    """`void f() try { … } catch (...) { … }` -- the other `function-body`
+    production in the C++ grammar. Clang emits a `CXXTryStmt` with no
+    `CompoundStmt` at this level, so matching only `CompoundStmt` left such a
+    definition non-inline. castxml reports it inline (checked against 0.7.0).
+    """
+    assert is_effectively_inline(_node(kind, body="try"), _RECORD) is True
+    # Still bounded by scope: the same node out of line is not inline.
+    assert is_effectively_inline(_node(kind, body="try"), ()) is False
 
 
 @pytest.mark.parametrize("kind", _MEMBER_KINDS)
@@ -269,7 +284,7 @@ def test_exhaustive_domain_sweep_has_both_outcomes_and_is_order_free():
         ((), _NAMESPACE, _RECORD, _NESTED, _ANON_RECORD, _ANON_NAMESPACE),
         (None, True),
         (None, True),
-        (False, True),
+        (False, True, "try"),
         (None, "default", "deleted"),
         (False, True),
     )
@@ -300,6 +315,7 @@ public:
   constexpr bool cget() const { return v_; }
   int get() const { return v_; }
   int get_ref() const noexcept { return v_; }
+  void try_body() try { } catch (...) { }
   W() = default;
   ~W() = default;
   W(const W&) = default;
@@ -364,7 +380,9 @@ def _castxml_functions(header, tmp_path):
         check=True,
     )
     parser = _CastxmlParser(
-        ET.parse(xml).getroot(),
+        # Not untrusted input: castxml produced this file moments ago from a
+        # header this test itself wrote into tmp_path.
+        ET.parse(xml).getroot(),  # nosec B314  # noqa: S314
         set(),
         set(),
         public_header_paths=[str(header)],
