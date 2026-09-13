@@ -134,6 +134,14 @@ def _lib(tmp_path: Path, name: str) -> str:
 
 def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict:
     require_bash()
+    # Resolved here, in the function that just guarded, rather than inside the
+    # `_run` closure below: `tests/test_subprocess_bash_is_resolved.py`'s
+    # `TestEveryResolvedCallSiteGuardsFirst` requires the function calling
+    # `bash_executable()` to be the one that called `require_bash()` first, so
+    # that on a runner whose only bash is the WSL launcher stub the call site
+    # skips instead of executing it. Hoisting the resolution keeps that
+    # pairing inside one function instead of splitting it across a closure.
+    bash = bash_executable()
     out = tmp_path / "github_output"
     summary = tmp_path / "step_summary"
     runner_temp = tmp_path / "runner_temp"
@@ -167,7 +175,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
     # cannot make, so it does not opt in.
     def _run() -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [bash_executable(), str(RUN_SH)],
+            [bash, str(RUN_SH)],
             capture_output=True,
             text=True,
             env=env,

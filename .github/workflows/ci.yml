@@ -299,6 +299,44 @@ jobs:
           python-version: ${{ matrix.python-version }}
           allow-prereleases: ${{ matrix.allow-prereleases }}
           cache: 'pip'
+      - name: Keep this job's temporary files off the shared /tmp
+        # Evidence, from one run (34778392930, `unit-tests (ubuntu-latest,
+        # 3.14)`): three unrelated consumers each lost a file under `/tmp`
+        # while still using it.
+        #   * an xdist worker's whole basetemp -- `.../popen-gw0: MISSING`,
+        #     reported by the harness guard added for exactly this;
+        #   * `action/run.sh`'s own `mktemp -d` scratch directory --
+        #     `cd: /tmp/tmp.r4jnmBWtyh: No such file or directory`;
+        #   * gcc's own intermediate object, mid-link --
+        #     `ld: cannot find /tmp/ccQIceDH.o: No such file or directory`.
+        # No test touches the second or third, so this is not test-owned
+        # state being mishandled: something prunes `/tmp` on these runners
+        # while the job is running. That had been surfacing as a handful of
+        # unattributable `FileNotFoundError`s per lane, a different set each
+        # time, none reproducible locally.
+        #
+        # `$RUNNER_TEMP` is job-private and not under `/tmp`, so pointing
+        # `TMPDIR` at it moves all three at once: `tempfile.gettempdir()`
+        # (hence pytest's own basetemp), `mktemp`, and the compilers. One
+        # variable rather than a per-consumer fix, because the consumers
+        # have nothing in common except the directory they were using.
+        #
+        # Written to `$GITHUB_ENV` from a step rather than set in this job's
+        # own `env:` block: the `runner` context is NOT available at
+        # `jobs.<id>.env`, so `${{ runner.temp }}` there is a workflow
+        # *validation* error -- GitHub rejects the whole file before any
+        # matrix cell starts, taking every job in it offline. Observed, not
+        # theorised: run 34779552374 completed "failure" with zero jobs one
+        # second after creation, and the run is titled by path rather than
+        # by the workflow's `name:`, because the file never parsed. Inside a
+        # step `$RUNNER_TEMP` is an ordinary environment variable and needs
+        # no context at all. Found in review by Codex on PR #1294.
+        #
+        # `shell: bash` so the one spelling works on the Windows lane too;
+        # `TMPDIR` is what Python's `tempfile` and bash's `mktemp` both
+        # read, on all three platforms.
+        shell: bash
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
