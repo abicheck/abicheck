@@ -47,14 +47,17 @@ are anchored to a real ``g++`` build whose debug info is settled by ``-g`` vs
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 
 import pytest
+from click.testing import CliRunner
 
 from abicheck.buildsource.evidence_report import intrinsic_coverage
 from abicheck.buildsource.model import CoverageStatus, LayerConfidence
 from abicheck.checker import compare
+from abicheck.cli import main
 from abicheck.diff_helpers import typedef_flat_map_is_dwarf_qualified
 from abicheck.model import AbiSnapshot, debug_info_present
 from abicheck.model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
@@ -282,3 +285,74 @@ def test_real_library_l1_row_matches_its_actual_debug_info(
     # The production dump attaches a metadata object either way -- the precise
     # condition that made the original predicate wrong.
     assert snap.dwarf is not None
+
+
+@_NEEDS_GPP
+@pytest.mark.parametrize("debug_flag,expect_present", [("-g0", False), ("-g", True)])
+def test_compare_json_layer_coverage_matches_actual_debug_info(
+    tmp_path, debug_flag, expect_present
+):
+    """The public surface the report came from, not an internal helper.
+
+    The defect was read off ``compare``'s emitted JSON -- ``{"layer": "L1",
+    "status": "present", "confidence": "high", "detail": "DWARF"}`` on a
+    library with no ``.debug_info``. Every other test in this module stops at
+    ``intrinsic_coverage()``, which is one projection short of that: it cannot
+    catch a regression in how the row is carried through
+    ``service_compare_pipeline`` -> ``reporter``, and it is not the artifact a
+    user reads. This runs the real CLI and asserts on the real report.
+
+    Parametrized both ways so "always not_collected" fails, and the ground
+    truth is settled by ``g++ -g``/``-g0`` plus an independent look for the
+    section in the file's own bytes.
+    """
+    header = tmp_path / "lib.hpp"
+    header.write_text(
+        "#pragma once\nnamespace lib { struct S { int a; }; int f(S); }\n"
+    )
+    src = tmp_path / "lib.cpp"
+    src.write_text('#include "lib.hpp"\nnamespace lib { int f(S s){return s.a;} }\n')
+    lib = tmp_path / "libx.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", debug_flag, "-o", str(lib), str(src)],
+        check=True,
+        capture_output=True,
+    )
+    assert (b".debug_info" in lib.read_bytes()) is expect_present
+
+    # `--header` is what activates the evidence-coverage section, and it also
+    # matches the shape the defect was reported from (a real library compared
+    # against its own public headers).
+    report = tmp_path / "out.json"
+    result = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(lib),
+            str(lib),
+            "--header",
+            str(header),
+            "-o",
+            f"json={report}",
+        ],
+    )
+    assert report.exists(), result.output
+
+    rows = {r["layer"]: r for r in json.loads(report.read_text())["layer_coverage"]}
+    l1 = rows["L1"]
+    # All three fields together: the report claimed all three at once, so a fix
+    # that corrected only `status` would leave a reader just as misled.
+    if expect_present:
+        assert (l1["status"], l1["confidence"], l1["detail"]) == (
+            "present",
+            "high",
+            "DWARF",
+        )
+    else:
+        assert (l1["status"], l1["confidence"], l1["detail"]) == (
+            "not_collected",
+            "unknown",
+            "",
+        )
+    # L0 stays independent -- the binary is there in both runs.
+    assert rows["L0"]["status"] == "present"
