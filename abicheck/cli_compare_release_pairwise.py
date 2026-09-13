@@ -428,6 +428,18 @@ def _compare_one_library(
         }
         if pattern_modulations_text is not None:
             entry["_pattern_modulations_text"] = pattern_modulations_text
+        # ADR-067: a passing release report may not hide which breaking
+        # findings a rule disposed of. Captured as text and echoed by the
+        # caller, the same shape `_pattern_modulations_text` uses, so
+        # parallel libraries cannot interleave their sections.
+        if result.suppression_audit is not None:
+            from .cli_compare_fold import _fold_suppression_audit_into_text
+
+            section = _fold_suppression_audit_into_text(
+                "", "markdown", result.suppression_audit, demangle=True
+            )
+            if section.strip():
+                entry["_suppression_audit_text"] = f"\n### {old_path.name}{section}"
         if collect_diff_results:
             # See this function's own docstring (CodeRabbit review #798;
             # full- vs. compact-evidence split, G38 Phase 9).
@@ -816,6 +828,9 @@ def _compare_release_libraries(
         pattern_modulations_text = entry.pop("_pattern_modulations_text", None)
         if pattern_modulations_text is not None:
             click.echo(pattern_modulations_text, err=True)
+        suppression_audit_text = entry.pop("_suppression_audit_text", None)
+        if suppression_audit_text is not None:
+            click.echo(suppression_audit_text, err=True)
         v = str(entry["verdict"])
         if v == "ERROR":
             if "error" in entry:

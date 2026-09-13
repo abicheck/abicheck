@@ -176,10 +176,13 @@ def _reject_set_input_flags(
     # Plan slice 7o retired `--view suppressions`: the suppression audit is
     # unconditional now, so there is no per-run *request* for it left to
     # reject here. `--suppress` itself stays supported on a release
-    # comparison exactly as it was without the token; what the per-library
-    # fan-out still does not do is render an audit section per library,
-    # which is a missing feature of the release renderer rather than a flag
-    # conflict (recorded in the plan's 7o section).
+    # comparison exactly as it was without the token -- and the per-library
+    # fan-out now *does* disclose an audit section per library
+    # (`cli_compare_release_pairwise`), which it did not when this rejection
+    # was first removed. Dropping the rejection without that would have let
+    # a passing release report hide which breaking findings a rule disposed
+    # of, which ADR-067 makes part of the result rather than a display
+    # preference (Codex review, PR #1284).
     if include_labels:
         raise click.UsageError(
             "A labeled --include (old:LABEL=PATH/new:LABEL=PATH/"

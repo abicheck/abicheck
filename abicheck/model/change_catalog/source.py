@@ -690,6 +690,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "instantiate the template pick up the new body on recompile. A "
         "source-visible risk surfaced only by source replay.",
         entity=_ENT.FUNCTION,
+        entity_from_field="entity_discriminator",
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -714,6 +715,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "compiles; there is no binary footprint, so only source replay sees "
         "it. A source/API break.",
         entity=_ENT.FUNCTION,
+        entity_from_field="entity_discriminator",
         operation=_OP.REMOVED,
     ),
     _E(

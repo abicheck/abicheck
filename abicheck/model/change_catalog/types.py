@@ -155,7 +155,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "default parameter changes (NO_CHANGE), template default arguments "
         "ARE part of the substituted type and affect mangling.",
         description_template="Template instantiation '{name}' substitutes to different arguments than its surviving sibling '{detail}'. This is consistent with a change to a default template argument in the declaring header: consumer source compiles unchanged, but the substituted mangled symbol differs. Consumers built against the old default get unresolved symbols.",
-        entity=_ENT.TYPE,
+        entity=_ENT.FUNCTION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -535,6 +535,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "when the library ships no .so).",
         description_template="Inline namespace version bumped: '{old}' → '{new}' (version segment changed from {detail}); mangled names change so old and new TUs of the same program ODR-violate.",
         entity=_ENT.TYPE,
+        entity_from_field="entity_discriminator",
         operation=_OP.MODIFIED,
     ),
     _E(

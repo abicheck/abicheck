@@ -37,6 +37,15 @@
   Markdown output still rendering raw mangled names, which the retired
   `--view demangle` token left with no override.
 
+- **A directory/package comparison discloses its suppression audit.** The
+  release fan-out rendered no audit section at all, so a passing release
+  report could hide which breaking findings a rule disposed of — ADR-067
+  makes that part of the result, not a display preference.
+
+- **The two unconditional stderr ledgers demangle** (filtered-surface and
+  build-context-reconciled), so a human ledger no longer reads raw while
+  the report beside it reads `Readable [mangled]`.
+
 - **The aggregate stored-bundle JSON carries both symbol names too**, and
   `typedef_version_sentinel` is a removal rather than a modification, as its
   own description always said.

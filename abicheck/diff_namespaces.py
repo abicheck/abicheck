@@ -1171,20 +1171,25 @@ def detect_inline_namespace_version_bump(
 
 
 def _index_versioned(
-    items: list[tuple[str, bool]],
-) -> dict[tuple[str, ...], list[tuple[str, int, bool]]]:
-    """Map version-stripped segments → list of ``(qualified, version_int, is_public)``."""
-    out: dict[tuple[str, ...], list[tuple[str, int, bool]]] = {}
-    for qname, is_public in items:
+    items: list[tuple[str, bool, str]],
+) -> dict[tuple[str, ...], list[tuple[str, int, bool, str]]]:
+    """Map version-stripped segments → ``(qualified, version_int, is_public, entity)``.
+
+    The trailing entity is carried because this index pools functions and
+    record types (see :func:`_collect_versioned_entries`), so the kind is a
+    property of the finding, not of the ChangeKind.
+    """
+    out: dict[tuple[str, ...], list[tuple[str, int, bool, str]]] = {}
+    for qname, is_public, entity in items:
         segs = _segments(qname)
         stripped, ver = _version_strip_segments(segs)
         if ver is None:
             continue
-        out.setdefault(stripped, []).append((qname, ver, is_public))
+        out.setdefault(stripped, []).append((qname, ver, is_public, entity))
     return out
 
 
-def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, bool]]:
+def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, bool, str]]:
     """Return ``[(qualified_name, is_reliably_public), …]`` for *snap*.
 
     A function entry is reliably public because it was filtered to the
@@ -1199,30 +1204,30 @@ def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, bool]]:
     from .model import ScopeOrigin
 
     demangled = _batch_demangle_public(snap)
-    items: list[tuple[str, bool]] = []
+    items: list[tuple[str, bool, str]] = []
     for f in snap.functions:
         if not in_source_declaration_index(f):
             continue
         qname = _qualified_function_name(f.name, f.mangled, demangled)
         if qname:
-            items.append((qname, True))
+            items.append((qname, True, "function"))
     for t in snap.types:
         if t.name:
-            items.append((t.name, t.origin == ScopeOrigin.PUBLIC_HEADER))
+            items.append((t.name, t.origin == ScopeOrigin.PUBLIC_HEADER, "type"))
     return items
 
 
 def _emit_version_bumps(
-    old_idx: dict[tuple[str, ...], list[tuple[str, int, bool]]],
-    new_idx: dict[tuple[str, ...], list[tuple[str, int, bool]]],
+    old_idx: dict[tuple[str, ...], list[tuple[str, int, bool, str]]],
+    new_idx: dict[tuple[str, ...], list[tuple[str, int, bool, str]]],
 ) -> list[Change]:
     changes: list[Change] = []
     for stripped, old_list in old_idx.items():
         new_list = new_idx.get(stripped, [])
         if not new_list:
             continue
-        old_versions = {v for _, v, _ in old_list}
-        new_versions = {v for _, v, _ in new_list}
+        old_versions = {v for _, v, _, _ in old_list}
+        new_versions = {v for _, v, _, _ in new_list}
         if old_versions == new_versions:
             continue
         if max(new_versions) <= max(old_versions):
@@ -1242,10 +1247,16 @@ def _emit_version_bumps(
         # only covers one side), so requiring both sides publicly-tagged
         # let a genuine old-consumer break stay untagged and suppressible.
         subject_is_public = old_list[0][2] or new_list[0][2]
+        # Polymorphic: the pooled index holds functions and record types
+        # alike; unstated when the two sides disagree.
+        entities = {old_list[0][3], new_list[0][3]}
         changes.append(
             make_change(
                 ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED,
                 symbol=new_q,
+                entity_discriminator=(
+                    next(iter(entities)) if len(entities) == 1 else None
+                ),
                 old=old_q,
                 new=new_q,
                 detail=f"{sorted(old_versions)} to {sorted(new_versions)}",

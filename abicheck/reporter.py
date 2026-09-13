@@ -1299,7 +1299,12 @@ def prewarm_change_demangling(result: Any) -> None:
     # back on the per-symbol subprocess it is the point of this function to
     # avoid (Codex review, PR #1284).
     changes = list(getattr(result, "changes", ()) or ())
-    for attr in ("suppressed_changes", "out_of_surface_changes", "scoped_only_changes"):
+    for attr in (
+        "suppressed_changes",
+        "out_of_surface_changes",
+        "scoped_only_changes",
+        "reconciled_changes",
+    ):
         changes += list(getattr(result, attr, ()) or ())
     if changes:
         prewarm_demangle_batch(changes, attrs=("symbol",))

@@ -173,3 +173,57 @@ class TestStoredBundleJsonCarriesBothSymbolNames:
         finding = self._findings("plain_c_function", tmp_path)[0]
         assert finding["symbol"] == "plain_c_function"
         assert "demangled_symbol" not in finding
+
+
+class TestTheHumanLedgersDemangleToo:
+    """The unconditional stderr ledgers are human output, so they demangle
+    like every other human renderer.
+
+    Plan slice 7o made both ledgers unconditional and made demangling a
+    property of the format — but both still sent `c.symbol` through raw, so
+    the main report read `Readable [mangled]` while the ledger beside it
+    stayed mangled, with the override token gone (Codex review, PR #1284).
+    Asserted against `demangle_text` itself, the shared pass, rather than a
+    hand-written expected string.
+    """
+
+    def _change(self, symbol: str):
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+
+        return Change(kind=ChangeKind.FUNC_REMOVED, symbol=symbol, description="d")
+
+    def _line(self, symbol: str) -> str:
+        from abicheck.cli_audit import _ledger_line
+
+        return _ledger_line(self._change(symbol), False)
+
+    def test_a_mangled_symbol_is_readable_in_the_ledger(self):
+        from abicheck.demangle import demangle_text
+
+        symbol = "_ZN3lib4goneEi"
+        assert demangle_text(symbol) in self._line(symbol)
+
+    def test_the_exact_symbol_is_still_there(self):
+        from abicheck.demangle import demangle
+
+        symbol = "_ZN3lib4goneEi"
+        if demangle(symbol) is None:
+            pytest.skip("no demangler available in this environment")
+        line = self._line(symbol)
+        assert "lib::gone(int)" in line
+        assert symbol in line
+
+    def test_both_ledgers_share_one_builder(self):
+        """They had the same body twice, which is why both were missed.
+        Asserted structurally so a future edit to one cannot silently
+        diverge from the other."""
+        import inspect
+
+        from abicheck import cli_audit
+
+        for fn in (cli_audit.echo_filtered_surface, cli_audit.echo_reconciled):
+            assert "_ledger_line(" in inspect.getsource(fn), fn.__name__
+
+    def test_an_unmangled_symbol_is_untouched(self):
+        assert "plain_c_function" in self._line("plain_c_function")

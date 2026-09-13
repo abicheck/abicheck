@@ -189,11 +189,13 @@ class TestAPolymorphicKindTakesItsEntityFromTheFinding:
     #: Every kind declared polymorphic. Derived from the catalog rather
     #: than restated, so a kind made polymorphic later is covered here or
     #: fails the monomorphic assertion below -- never silently neither.
+    #: The subset this class drives through a real detector. The catalog's
+    #: *full* polymorphic set is pinned by
+    #: `TestPolymorphicKindsRealDetectorCoverage` below; the others have
+    #: their own classes in this file.
     POLYMORPHIC = (
         "experimental_graduated",
         "experimental_removed_without_replacement",
-        "mandatory_template_param_added",
-        "cpo_kind_changed",
     )
 
     @staticmethod
@@ -222,16 +224,6 @@ class TestAPolymorphicKindTakesItsEntityFromTheFinding:
             ("experimental_removed_without_replacement", "function"): removed_fn,
             ("experimental_removed_without_replacement", "type"): removed_type,
         }
-
-    def test_this_list_is_the_catalog_s_own(self):
-        """A kind made polymorphic later must land in one of these two
-        assertions rather than in neither."""
-        declared = {
-            k.value
-            for k in ChangeKind
-            if REGISTRY.entity_from_field_for(k.value) is not None
-        }
-        assert declared == set(self.POLYMORPHIC)
 
     def test_each_polymorphic_kind_declares_where_its_entity_comes_from(self):
         for kind in self.POLYMORPHIC:
@@ -320,16 +312,20 @@ class TestAPolymorphicKindTakesItsEntityFromTheFinding:
             assert change.entity_discriminator is None
             assert entity_for_change(change, kind) == entity_for_kind(kind)
 
-    def test_a_monomorphic_kind_declares_no_discriminator(self):
-        """The escape hatch is opt-in per kind."""
-        unaffected = [
+    def test_the_escape_hatch_stays_opt_in(self):
+        """Only a handful of kinds are polymorphic; the rest declare none."""
+        polymorphic = [
             k.value
             for k in ChangeKind
-            if k.value not in self.POLYMORPHIC and REGISTRY.entity_for(k.value)
+            if REGISTRY.entity_from_field_for(k.value) is not None
         ]
-        assert len(unaffected) > 100, "vacuity guard"
-        for kind in unaffected:
-            assert REGISTRY.entity_from_field_for(kind) is None, kind
+        monomorphic = [
+            k.value
+            for k in ChangeKind
+            if REGISTRY.entity_for(k.value) and k.value not in polymorphic
+        ]
+        assert len(monomorphic) > 100, "vacuity guard"
+        assert len(polymorphic) < 20, polymorphic
 
 
 class TestADeclaredEntityAgreesWithItsOwnRegistration:
@@ -673,3 +669,123 @@ class TestABinaryEntityIsNotADeclarationFinding:
     def test_every_reason_says_something(self):
         for kind, reason in self.REVIEWED_BINARY_KINDS.items():
             assert len(reason) > 25, kind
+
+
+class TestPolymorphicKindsRealDetectorCoverage:
+    """Every kind declared polymorphic must be *reachable* with each entity it
+    claims — a declaration nothing can produce is worse than a static one.
+
+    Rounds 3 through 6 of review each found another kind a detector emits for
+    more than one entity type. What makes that recurrence stop is not another
+    entry in a list: it is that the catalog's polymorphic set and the
+    detectors' behaviour are checked against each other, and that every one
+    of them is exercised through a finding the detector actually produced.
+    """
+
+    def test_the_catalog_and_this_file_agree(self):
+        declared = {
+            k.value
+            for k in ChangeKind
+            if REGISTRY.entity_from_field_for(k.value) is not None
+        }
+        # Kept as an explicit list so adding a polymorphic kind is a visible
+        # decision; the assertion is that neither side drifts.
+        assert declared == {
+            "experimental_graduated",
+            "experimental_removed_without_replacement",
+            "mandatory_template_param_added",
+            "cpo_kind_changed",
+            "inline_namespace_version_bumped",
+            "template_body_changed",
+            "uninstantiated_template_removed",
+        }
+
+    def test_every_polymorphic_kind_names_a_real_change_field(self):
+        import dataclasses
+
+        from abicheck.checker_types import Change
+
+        fields = {f.name for f in dataclasses.fields(Change)}
+        for kind in ChangeKind:
+            field = REGISTRY.entity_from_field_for(kind.value)
+            if field is not None:
+                assert field in fields, kind.value
+
+    def test_every_polymorphic_kind_falls_back_rather_than_vanishing(self):
+        """A finding that states nothing keeps the declared entity, so it is
+        never dropped from every element filter."""
+        from abicheck.checker_types import Change
+
+        for kind in ChangeKind:
+            if REGISTRY.entity_from_field_for(kind.value) is None:
+                continue
+            change = Change(kind=kind, symbol="x", description="d")
+            assert entity_for_change(change, kind.value) == entity_for_kind(kind.value)
+
+
+class TestInlineNamespaceVersionBumpTakesItsEntityFromTheFinding:
+    """`_collect_versioned_entries` pools functions and record types, so a
+    versioned inline namespace containing a function was reported as a type
+    (Codex review, PR #1284). Driven by the real detector."""
+
+    @staticmethod
+    def _changes(*, funcs=(), types=()):
+        """Through the real pipeline stage, the way the existing
+        `inline_namespace_version_bumped` tests reach this detector."""
+        from abicheck.post_processing import DetectNamespacePatterns, PipelineContext
+        from tests.test_diff_namespaces import _fn, _rec, _snap
+
+        old = _snap(
+            funcs=[_fn(n) for n in funcs[:1]], types=[_rec(n) for n in types[:1]]
+        )
+        new = _snap(
+            funcs=[_fn(n) for n in funcs[1:]], types=[_rec(n) for n in types[1:]]
+        )
+        out = DetectNamespacePatterns().run([], PipelineContext(old=old, new=new))
+        return [c for c in out if c.kind.value == "inline_namespace_version_bumped"]
+
+    def test_a_function_only_bump_is_a_function_finding(self):
+        changes = self._changes(funcs=("ns::v1::sort", "ns::v2::sort"))
+        assert changes, "vacuity guard: the detector produced nothing"
+        for c in changes:
+            assert entity_for_change(c, c.kind.value) == ChangeEntity.FUNCTION.value
+
+    def test_a_type_only_bump_is_a_type_finding(self):
+        changes = self._changes(types=("ns::v1::queue", "ns::v2::queue"))
+        assert changes, "vacuity guard: the detector produced nothing"
+        for c in changes:
+            assert entity_for_change(c, c.kind.value) == ChangeEntity.TYPE.value
+
+
+class TestSourceTemplateFindingsKeepTheirDeclarationKind:
+    """The L4 extractor routes `FunctionTemplateDecl` and `ClassTemplateDecl`
+    into one bucket under `kind="template"`, but it already records which in
+    `relations["template_kind"]` — the diff simply never read it (Codex
+    review, PR #1284)."""
+
+    def _entity(self, template_kind):
+        from abicheck.buildsource.source_diff import _template_entity
+
+        return _template_entity(
+            type("_E", (), {"relations": {"template_kind": template_kind}})()
+        )
+
+    def test_a_class_template_is_a_type(self):
+        assert self._entity("ClassTemplateDecl") == ChangeEntity.TYPE.value
+
+    def test_a_function_template_is_a_function(self):
+        assert self._entity("FunctionTemplateDecl") == ChangeEntity.FUNCTION.value
+
+    def test_an_unrecorded_kind_falls_back(self):
+        """A producer that records no template_kind leaves the declared
+        entity, rather than guessing one."""
+        assert self._entity("") is None
+        assert self._entity("SomethingElse") is None
+
+    def test_the_extractor_really_records_it(self):
+        """The claim this rests on: the mapping's keys are the spellings the
+        extractor actually writes, not ones invented here."""
+        from abicheck.buildsource.source_diff import _ENTITY_FOR_TEMPLATE_KIND
+        from abicheck.buildsource.source_extractors.clang import _TEMPLATE_NODE_KINDS
+
+        assert set(_ENTITY_FOR_TEMPLATE_KIND) == set(_TEMPLATE_NODE_KINDS)

@@ -48,6 +48,25 @@ def _contract_tag(c: Change, contract_evaluation: bool) -> str:
     return tag + "]"
 
 
+def _ledger_line(c: Change, contract_evaluation: bool) -> str:
+    """One ledger row: the finding, with its symbol demangled.
+
+    Shared by both ledgers below because they had the same body twice and
+    both were missed when demangling became a property of the output format
+    rather than a token a user types -- the main report showed
+    ``Readable [mangled]`` while these human-facing ledgers stayed raw
+    (Codex review, PR #1284). ``demangle_text`` keeps the exact mangled
+    spelling beside the readable name, so nothing a user might paste into
+    ``nm`` or a suppression selector is lost.
+    """
+    from .demangle import demangle_text
+
+    loc = f" [{c.source_location}]" if c.source_location else ""
+    reason = f" ({c.surface_exclusion_reason})" if c.surface_exclusion_reason else ""
+    tag = _contract_tag(c, contract_evaluation)
+    return f"  - {c.kind.value}: {demangle_text(c.symbol)}{loc}{reason}{tag}"
+
+
 def echo_filtered_surface(
     result: DiffResult, *, contract_evaluation: bool = False
 ) -> None:
@@ -59,12 +78,7 @@ def echo_filtered_surface(
         err=True,
     )
     for c in result.out_of_surface_changes:
-        loc = f" [{c.source_location}]" if c.source_location else ""
-        reason = (
-            f" ({c.surface_exclusion_reason})" if c.surface_exclusion_reason else ""
-        )
-        tag = _contract_tag(c, contract_evaluation)
-        click.echo(f"  - {c.kind.value}: {c.symbol}{loc}{reason}{tag}", err=True)
+        click.echo(_ledger_line(c, contract_evaluation), err=True)
 
 
 def echo_reconciled(result: DiffResult, *, contract_evaluation: bool = False) -> None:
@@ -80,12 +94,7 @@ def echo_reconciled(result: DiffResult, *, contract_evaluation: bool = False) ->
         err=True,
     )
     for c in result.reconciled_changes:
-        loc = f" [{c.source_location}]" if c.source_location else ""
-        reason = (
-            f" ({c.surface_exclusion_reason})" if c.surface_exclusion_reason else ""
-        )
-        tag = _contract_tag(c, contract_evaluation)
-        click.echo(f"  - {c.kind.value}: {c.symbol}{loc}{reason}{tag}", err=True)
+        click.echo(_ledger_line(c, contract_evaluation), err=True)
 
 
 def render_pattern_modulations(result: DiffResult) -> str:
