@@ -47,6 +47,7 @@ from __future__ import annotations
 
 from .bug_class_schema import BugClass, KnownGap
 from .manifest_classification import CLASSIFICATION_BUG_CLASSES
+from .manifest_config import CONFIG_BUG_CLASSES
 from .manifest_evidence import EVIDENCE_BUG_CLASSES
 from .manifest_guards import GUARD_BUG_CLASSES
 from .manifest_performance import PERFORMANCE_BUG_CLASSES
@@ -378,49 +379,6 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "PR's registry/generator-registration work."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
-            ),
-        ),
-    ),
-    BugClass(
-        id="config.env_flag_value_domain",
-        invariant=(
-            "Every ABICHECK_* boolean environment knob answers the same "
-            "value domain: 1/true/yes/on is on, 0/false/no/off is off "
-            "(case- and whitespace-insensitive) whichever way the knob's own "
-            "default points, and unset/empty/unrecognized resolves to that "
-            "default -- never to its opposite. One registered parser, no "
-            "per-call-site token set."
-        ),
-        fixed_by=(1278,),
-        seed_tests=("tests/test_env_flags.py",),
-        axes={
-            "default_polarity": ("opt-in", "opt-out"),
-            "value": (
-                "unset",
-                "empty",
-                "whitespace",
-                "1/true/yes/on",
-                "0/false/no/off",
-                "mixed-case",
-                "arbitrary-text",
-            ),
-        },
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "Two ABICHECK_* booleans (ALLOW_AST_FALLBACK, "
-                    "ALLOW_UNSUPPORTED_CASTXML) are ALSO reachable as Click "
-                    "`envvar=` flags, where Click's own BOOL conversion -- "
-                    "not this parser -- reads them, and it rejects an "
-                    "unrecognized value as a usage error instead of falling "
-                    "back to the default. The two agree on all ten tokens; "
-                    "they diverge only on arbitrary text, and only on the "
-                    "commands still registering those flags. Unifying means "
-                    "a custom Click ParamType, which is a change to the "
-                    "option layer rather than to the readers this class "
-                    "covers."
-                ),
-                reference="docs/contribute/plans/one-comparison-product.md#phase-7l",
             ),
         ),
     ),
@@ -1458,6 +1416,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
 BUG_CLASSES: tuple[BugClass, ...] = (
     _ANALYSIS_BUG_CLASSES
     + CLASSIFICATION_BUG_CLASSES
+    + CONFIG_BUG_CLASSES
     + EVIDENCE_BUG_CLASSES
     + PERFORMANCE_BUG_CLASSES
     + GUARD_BUG_CLASSES

@@ -605,6 +605,29 @@ class TestDefaultedEnvironmentRoot:
         for rendered in (stack_to_markdown(chosen), stack_to_html(chosen)):
             assert DEFAULTED_ROOT_NOTE not in rendered
 
+    def test_single_environment_report_states_it_too(self, tmp_path) -> None:
+        """A `deps tree` has one root on both sides, so the two env values
+        are necessarily equal -- the differing-roots test alone made the
+        note unreachable in Markdown and HTML, leaving it only in JSON and
+        the plan (Codex review, PR #1278)."""
+        from abicheck.report.stack import DEFAULTED_ROOT_NOTE
+        from abicheck.stack_html import stack_to_html
+        from abicheck.stack_report import stack_to_markdown
+
+        defaulted = _make_result("/app", baseline_env="/", candidate_env="/")
+        defaulted.baseline_env_defaulted = True
+        defaulted.candidate_env_defaulted = True
+        for rendered in (stack_to_markdown(defaulted), stack_to_html(defaulted)):
+            assert DEFAULTED_ROOT_NOTE in rendered
+            # One root, reported once -- not as a baseline/candidate pair
+            # that would read as two environments.
+            assert rendered.count(DEFAULTED_ROOT_NOTE) == 1
+            assert "Baseline" not in rendered
+
+        chosen = _make_result("/app", baseline_env="/img", candidate_env="/img")
+        for rendered in (stack_to_markdown(chosen), stack_to_html(chosen)):
+            assert DEFAULTED_ROOT_NOTE not in rendered
+
     def test_deps_tree_plan_states_the_defaulted_sysroot(self, tmp_path) -> None:
         from abicheck.report.stack import DEFAULTED_ROOT_NOTE
 

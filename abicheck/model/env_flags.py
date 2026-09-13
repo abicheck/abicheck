@@ -49,10 +49,14 @@ The rules, stated once:
   its default), so unifying on it changes no behaviour beyond the token
   sets themselves and the ``ABICHECK_CC_DISABLE`` bug.
 
-A leaf module with no first-party imports (the shape ``snapshot_io.py``
-already establishes), so ``extract``/``workflows``/``buildsource``/the
-``abicheck-cc`` wrapper can all reach it without an ADR-061 direction
-problem.
+Lives in ``model`` (ADR-061's innermost ring, importing nothing) because
+every layer reads these knobs -- ``extract``, ``workflows``, ``buildsource``
+and the ``abicheck-cc`` wrapper alike -- and ``model`` is the one layer all
+of them may import. What it owns is a shared vocabulary, in the same sense
+the fact/enum modules beside it are: which names are boolean knobs, and what
+a value means. It is not a flat-root leaf for the same reason (`root-module`
+in ``scripts/check_architecture.py``): an undeclared root module has no
+owner, and this one has an obvious one.
 """
 
 from __future__ import annotations

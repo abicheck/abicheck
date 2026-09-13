@@ -108,9 +108,27 @@ def bindings_summary(bindings: list[SymbolBinding]) -> dict[str, int]:
 #: the whole defect: the analysis is unchanged, what it was run *against*
 #: was a fallback, and the report has to say so.
 DEFAULTED_ROOT_NOTE = (
-    "defaulted -- the current host filesystem, not a chosen deployment "
-    "environment"
+    "defaulted -- the current host filesystem, not a chosen deployment environment"
 )
+
+
+def show_environment_section(result: StackCheckResult) -> bool:
+    """Whether a human projection should render the environments block.
+
+    Two differing roots, as before -- **or** a defaulted one. A single-
+    environment `deps tree` has one root on both sides, so the differing-
+    roots test alone skipped the block entirely and the defaulted-root note
+    was unreachable in Markdown and HTML: the annotation existed only in
+    JSON and the resolved plan (Codex review, PR #1278). One predicate so
+    the two renderers cannot answer this differently.
+    """
+    if result.baseline_env_defaulted or result.candidate_env_defaulted:
+        return True
+    return bool(
+        result.baseline_env
+        and result.candidate_env
+        and result.baseline_env != result.candidate_env
+    )
 
 
 def environment_root_label(path: str, defaulted: bool) -> str:

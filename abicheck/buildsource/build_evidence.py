@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 #: Build-evidence schema version, independent of the pack/snapshot versions.
-from ..env_flags import env_flag
+from ..model.env_flags import env_flag
 from .comdat_groups import ComdatScan, collect_vague_linkage_symbols
 
 BUILD_EVIDENCE_VERSION: int = 1

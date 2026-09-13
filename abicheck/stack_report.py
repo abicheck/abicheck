@@ -34,6 +34,7 @@ from .report.stack import (
     DEFAULTED_ROOT_NOTE,
     bindings_summary as _bindings_summary,
     compute_stack_report_document,
+    show_environment_section,
 )
 from .resolver import DependencyGraph
 from .stack_checker import StackChange, StackCheckResult, StackVerdict
@@ -162,20 +163,36 @@ def stack_to_markdown(result: StackCheckResult) -> str:
         "",
     ]
 
-    if (
-        result.baseline_env
-        and result.candidate_env
-        and result.baseline_env != result.candidate_env
-    ):
+    if show_environment_section(result):
+        single_env = result.baseline_env == result.candidate_env
         lines += [
             "## Environments",
             "",
-            f"- **Baseline**: `{result.baseline_env}`"
-            + (f" ({DEFAULTED_ROOT_NOTE})" if result.baseline_env_defaulted else ""),
-            f"- **Candidate**: `{result.candidate_env}`"
-            + (f" ({DEFAULTED_ROOT_NOTE})" if result.candidate_env_defaulted else ""),
-            "",
         ]
+        if single_env:
+            # One root, reported once rather than as a baseline/candidate
+            # pair that would read as two environments.
+            lines += [
+                f"- **Root**: `{result.baseline_env}`"
+                + (
+                    f" ({DEFAULTED_ROOT_NOTE})" if result.baseline_env_defaulted else ""
+                ),
+                "",
+            ]
+        else:
+            lines += [
+                f"- **Baseline**: `{result.baseline_env}`"
+                + (
+                    f" ({DEFAULTED_ROOT_NOTE})" if result.baseline_env_defaulted else ""
+                ),
+                f"- **Candidate**: `{result.candidate_env}`"
+                + (
+                    f" ({DEFAULTED_ROOT_NOTE})"
+                    if result.candidate_env_defaulted
+                    else ""
+                ),
+                "",
+            ]
 
     graph = result.candidate_graph
     lines += ["## Dependency Tree", ""]

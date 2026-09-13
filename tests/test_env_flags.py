@@ -47,7 +47,7 @@ import pytest
 
 from abicheck import cc_wrapper
 from abicheck.buildsource import build_evidence, preprocessor_facts
-from abicheck.env_flags import BOOLEAN_ENV_FLAGS, env_flag, parse_env_flag
+from abicheck.model.env_flags import BOOLEAN_ENV_FLAGS, env_flag, parse_env_flag
 
 #: The value domain, and what each value means — written out literally,
 #: independent of the parser under test. `None` means "resolves to the

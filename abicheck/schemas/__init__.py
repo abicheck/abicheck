@@ -982,15 +982,19 @@ def current(name: str) -> str | int:
         from ..buildsource.build_output import BUILD_OUTPUT_SCHEMA
 
         return BUILD_OUTPUT_SCHEMA
-    # RUN_PLAN_SCHEMA_GATE, not the base RUN_PLAN_SCHEMA -- a run-plan.json
-    # is stamped one of two schema strings depending on whether it carries a
-    # `gate` block, so there is no single fixed "the" version this artifact
-    # always emits. The highest version abicheck can produce is the
-    # truthful answer a doc generator needs to be prepared to parse, not
-    # the lower, conditionally-emitted one (Codex review).
-    from ..buildsource.run_plan import RUN_PLAN_SCHEMA_GATE
+    # The *highest* of the three conditional stamps, not the base
+    # RUN_PLAN_SCHEMA -- a run-plan.json declares one of
+    # RUN_PLAN_SCHEMA/`_GATE`/`_SKIPPED` depending on whether it carries a
+    # `gate` block or a `skipped` block, so there is no single fixed "the"
+    # version this artifact always emits. The highest version abicheck can
+    # produce is the truthful answer a doc generator needs to be prepared to
+    # parse, not a lower, conditionally-emitted one (Codex review; raised to
+    # v3 with plan slice 7r's `skipped` block, since a registry still saying
+    # v2 tells a consumer it need only support v2 against a build that can
+    # emit v3).
+    from ..buildsource.run_plan_schema import RUN_PLAN_SCHEMA_SKIPPED
 
-    return RUN_PLAN_SCHEMA_GATE
+    return RUN_PLAN_SCHEMA_SKIPPED
 
 
 __all__ = [

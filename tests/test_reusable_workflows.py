@@ -429,14 +429,12 @@ class TestCheckProjectStepOrdering:
 
 
 class TestCheckProjectFailsLoudOnEmptyRunPlan:
-    """`abicheck project plan` distinguishes the two empty plans itself
-    (plan slice 7r): a CONFIG declaring no checks[] is an explained skipped
-    plan that exits 0 and reaches this workflow, while declared-but-
-    unresolved fails the plan step outright. `check`/`aggregate` are both
-    gated on has-checks == 'true', so a skipped plan would otherwise skip
-    both and report the whole workflow as a success having gated nothing.
-    The `no-checks` job exists to fail that case loud instead (self-review
-    finding, not from an external review round)."""
+    """A skipped plan (slice 7r: CONFIG declares no checks[]) exits 0 and
+    reaches this workflow, where `check`/`aggregate` are both gated on
+    has-checks == 'true' -- so it would skip both and report the whole
+    workflow as a success having gated nothing. The `no-checks` job fails
+    that case loud instead (self-review finding, not an external review
+    round). Declared-but-unresolved fails the plan step, never reaching here."""
 
     def test_no_checks_job_exists_and_depends_on_plan(self) -> None:
         data = _load(CHECK_PROJECT)
@@ -474,21 +472,16 @@ class TestCheckProjectMatrixWiring:
         plan_step = next(s for s in steps if s.get("name") == "Generate run-plan.json")
         run = plan_step["run"]
         assert "project plan" in run
-        # Plan slice 7r retired --allow-empty: the plan step distinguishes
-        # the two empty plans itself, so a workflow still passing the flag
-        # would exit 64 here.
-        assert "--allow-empty" not in run
+        assert "--allow-empty" not in run  # slice 7r: passing it exits 64
         assert "plan.get('checks'" in run or "checks = plan.get" in run
 
 
 class TestCheckProjectAggregateManifestProjection:
     """ADR-047 §5's required sub-task: aggregate matches reports by each
-    check's own check_id, not the bare target name -- via `abicheck
-    aggregate --manifest run-plan.json`, which recognizes the run-plan by
-    its own schema and projects it to the expected-target set internally
-    (ADR-054; plan slice 7q folded the separate --run-plan flag into
-    --manifest), no separate projection step or intermediate manifest
-    file."""
+    check's own check_id, not the bare target name -- via `abicheck aggregate
+    --manifest run-plan.json`, which recognizes the run-plan by its own schema
+    and projects it internally (ADR-054; slice 7q folded the separate flag
+    in), no intermediate manifest file."""
 
     def test_aggregate_command_consumes_run_plan_directly(self) -> None:
         data = _load(CHECK_PROJECT)
@@ -500,9 +493,7 @@ class TestCheckProjectAggregateManifestProjection:
         aggregate_step = next(s for s in steps if s.get("name") == "Run aggregate")
         run = aggregate_step["run"]
         assert "--manifest run-plan.json" in run
-        # The retired spelling would exit 64 at this step, so it is not a
-        # cosmetic difference the workflow may drift back to.
-        assert "--run-plan" not in run
+        assert "--run-plan" not in run  # the retired spelling exits 64
         assert "aggregate-manifest.json" not in run
 
 

@@ -31,6 +31,8 @@ import json
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
+from test_aggregate import _write_report  # the CLI fixtures this shares
 
 from abicheck.workflows.aggregate.expected_input import (
     ExpectedInputError,
@@ -161,3 +163,92 @@ class TestRejections:
             classify_expected_input(bad)
         with pytest.raises(ExpectedInputError, match="cannot read"):
             classify_expected_input(tmp_path / "missing.json")
+
+
+class TestRunPlanDocumentThroughManifest:
+    """The CLI half of the same claim: a run-plan reaches `aggregate` through
+    `--manifest`, recognized by its own content (plan slice 7q, which retired
+    the separate `--run-plan` flag).
+
+    Here rather than in `tests/test_aggregate.py`, which carries an
+    `architecture/debt.yaml` no-growth baseline -- and these belong beside
+    the classifier's own property suite anyway.
+    """
+
+    LINUX = "linux-x86_64"
+
+    def _run(self, args):
+        from abicheck.cli import main
+
+        return CliRunner().invoke(main, ["aggregate", *args])
+
+    def test_run_plan_document(self, tmp_path: Path):
+        _write_report(tmp_path, self.LINUX, "COMPATIBLE")
+        run_plan_path = tmp_path / "run-plan.json"
+        run_plan_path.write_text(
+            json.dumps({"checks": [{"check_id": self.LINUX, "required": True}]})
+        )
+        res = self._run(["--manifest", str(run_plan_path), str(tmp_path)])
+        assert res.exit_code == 0, res.output
+
+    def test_tagged_run_plan_document(self, tmp_path: Path):
+        """The tagged shape `project plan` actually writes."""
+        _write_report(tmp_path, self.LINUX, "COMPATIBLE")
+        run_plan_path = tmp_path / "anything.json"
+        run_plan_path.write_text(
+            json.dumps(
+                {
+                    "schema": "abicheck.run-plan/v1",
+                    "checks": [{"check_id": self.LINUX, "required": True}],
+                }
+            )
+        )
+        res = self._run(["--manifest", str(run_plan_path), str(tmp_path)])
+        assert res.exit_code == 0, res.output
+
+    def test_run_plan_document_conflicts_with_discovered_only(self, tmp_path: Path):
+        _write_report(tmp_path, self.LINUX, "COMPATIBLE")
+        run_plan_path = tmp_path / "run-plan.json"
+        run_plan_path.write_text(
+            json.dumps({"checks": [{"check_id": self.LINUX, "required": True}]})
+        )
+        res = self._run(
+            ["--manifest", str(run_plan_path), "--discovered-only", str(tmp_path)]
+        )
+        assert res.exit_code == 64
+
+    def test_ambiguous_document_declaring_both_shapes_is_rejected(self, tmp_path: Path):
+        _write_report(tmp_path, self.LINUX, "COMPATIBLE")
+        both = tmp_path / "both.json"
+        both.write_text(
+            json.dumps(
+                {
+                    "checks": [{"check_id": self.LINUX, "required": True}],
+                    "targets": [{"id": self.LINUX, "required": True}],
+                }
+            )
+        )
+        res = self._run(["--manifest", str(both), str(tmp_path)])
+        assert res.exit_code == 64
+        assert "both" in res.output
+
+    def test_run_plan_document_missing_required_exits_1(self, tmp_path: Path):
+        run_plan_path = tmp_path / "run-plan.json"
+        run_plan_path.write_text(
+            json.dumps({"checks": [{"check_id": self.LINUX, "required": True}]})
+        )
+        res = self._run(["--manifest", str(run_plan_path), str(tmp_path)])
+        assert res.exit_code == 1
+
+    def test_run_plan_document_empty_checks_is_usage_error(self, tmp_path: Path):
+        _write_report(tmp_path, self.LINUX, "COMPATIBLE")
+        run_plan_path = tmp_path / "run-plan.json"
+        run_plan_path.write_text(json.dumps({"checks": []}))
+        res = self._run(["--manifest", str(run_plan_path), str(tmp_path)])
+        assert res.exit_code == 64
+
+    def test_run_plan_document_malformed_json_is_usage_error(self, tmp_path: Path):
+        run_plan_path = tmp_path / "run-plan.json"
+        run_plan_path.write_text("not json")
+        res = self._run(["--manifest", str(run_plan_path), str(tmp_path)])
+        assert res.exit_code == 64
