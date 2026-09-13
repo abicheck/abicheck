@@ -72,4 +72,61 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="perf.shared_resource_gate_keyed_on_a_per_caller_value",
+        invariant=(
+            "A process-wide bound on a scarce resource must be one object "
+            "whose accounting cannot be replaced while a holder is still "
+            "using it, and must be sized from the *host* budget alone — "
+            "never from a value that varies per caller (a unit count, a "
+            "per-request worker request). The guard is a count of the "
+            "resource actually held concurrently while two callers that "
+            "resolve to *different* sizes overlap; a single-caller test, or "
+            "one where both callers happen to resolve the same size, passes "
+            "against a gate that is no gate at all. Two corollaries, each "
+            "its own defect found on the same gate: every path that takes "
+            "the resource goes through it -- a *serial* path is one holder, "
+            "not none, and exempting it admits one over the cap -- and "
+            "waiting for it is bounded by whatever deadlines bound the work "
+            "itself, or one caller's long hold makes another overrun a "
+            "budget it was supposed to be held to. And the bound must be "
+            "re-read, not cached in the object: a limit baked in at "
+            "construction cannot notice the budget it came from shrinking, "
+            "so in a long-lived process every caller narrows itself "
+            "correctly while the stale gate keeps admitting the old number."
+        ),
+        # Found in review on the PR that introduced the bounded-parallel
+        # `clang -M` include-map pass. The gate was keyed on each pool's own
+        # resolved worker count and rebuilt whenever that differed — and the
+        # pool size is `min(host_limit, unit_count)`, so the ordinary case of
+        # two sides with differing header counts (`service.compare` resolves
+        # old and new concurrently) rebuilt it mid-flight: the first pool kept
+        # an orphaned semaphore and both admitted their full quota at once, a
+        # 2-slot plus a 4-slot gate against an intended cap of 4. Every test
+        # written for the feature passed, because each drove one extractor, or
+        # two whose unit counts matched.
+        fixed_by=(1275,),
+        seed_tests=("tests/test_include_graph_parallel.py",),
+        public_surfaces=("cli", "python-api"),
+        axes={
+            "caller_count": ("one-pool", "two-concurrent-pools"),
+            "resolved_size": ("equal-sizes", "differing-sizes"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The invariant is enforced for the `clang -M` "
+                    "include-map gate only. The other concurrent pools in "
+                    "this codebase (L4 source replay, the L5 call/type "
+                    "graph passes, the per-TU manifest dump) each size "
+                    "themselves from the same host probe but hold no shared "
+                    "gate at all, so two of *those* running concurrently "
+                    "still oversubscribe — the pre-existing hazard "
+                    "`service_compare_pipeline.resolve_sides_sequentially` "
+                    "documents rather than bounds."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+        ),
+    ),
 )

@@ -24,10 +24,8 @@ from pathlib import Path
 from ._compiler_options import has_explicit_std, split_gcc_options
 from .dumper_ast_config_cpp20 import _preprocessed_header_content
 from .dumper_clang import _needs_sycl_host_only
-from .header_utils import (
-    drop_include_tokens_duplicating_paths,
-    iter_cache_header_files,
-)
+from .extract.cache_header_scan import iter_cache_header_files
+from .header_utils import drop_include_tokens_duplicating_paths
 
 #: Bumped once (Codex review, fresh evidence, P2): a pre-existing on-disk
 #: entry an OLDER binary wrote for a self-healed C-to-C++ dump was stored

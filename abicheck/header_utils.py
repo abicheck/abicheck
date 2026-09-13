@@ -62,7 +62,10 @@ HEADER_SUFFIXES = frozenset(
 #: so it also covers the ``.inl``/``.tcc`` template-implementation includes that
 #: headers commonly pull in but that are never standalone TUs. Decoupling the two
 #: lets the walk catch a ``.inl``/``.tcc`` edit without making ``-H <dir>`` try to
-#: parse those files (#454).
+#: parse those files (#454). The walk itself is
+#: :func:`abicheck.extract.cache_header_scan.iter_cache_header_files` -- a
+#: filesystem-reading extractor, so it lives in ``extract``; this module keeps
+#: only the vocabulary it filters on.
 CACHE_HEADER_SUFFIXES = HEADER_SUFFIXES | frozenset({".inl", ".tcc"})
 
 #: Compiler flags that contribute an include *search directory*. Their presence
@@ -1070,16 +1073,3 @@ def cache_relevant_operand_paths(tokens: Sequence[str]) -> tuple[Path, ...]:
     directory to search.
     """
     return include_operand_dirs(tokens) + forced_include_operand_paths(tokens)
-
-
-def iter_cache_header_files(directory: Path) -> list[Path]:
-    """Header-like files under *directory* whose edits should bust the AST cache.
-
-    Recurses *directory* and returns the files whose suffix is in
-    :data:`CACHE_HEADER_SUFFIXES` (the generous superset — includes ``.inl``/
-    ``.tcc`` template bodies), sorted for a deterministic cache key. Used by
-    ``dumper._cache_key``'s include-dir mtime walk.
-    """
-    return sorted(
-        p for p in directory.rglob("*") if p.suffix.lower() in CACHE_HEADER_SUFFIXES
-    )
