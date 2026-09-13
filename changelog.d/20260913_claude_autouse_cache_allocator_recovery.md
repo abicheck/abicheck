@@ -8,3 +8,8 @@
   `FileNotFoundError` naming a different freshly-generated bucket — two Linux
   unit lanes reported 20,867 and 29,164 such errors from one root cause. Bug
   class: `test_infra.autouse_allocator_cannot_recover`.
+  The recovery recreates each level with pytest's own guarantees -- mode `0o700`,
+  a refusal on a symlinked or foreign-owned level, and the same loose-mode fixup
+  -- since these paths are predictable and sit on a temp root shared between
+  users, so a `parents=True` recreate under the process umask would leave the
+  hierarchy traversable and accept a path planted in the deletion window.

@@ -34,6 +34,7 @@ session-wide cache directory -- the obvious way to make this "even faster"
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -226,6 +227,80 @@ class TestTheAllocatorSurvivesItsDirectoryTreeVanishing:
         basetemp = tmp_path / "pytest-0" / "popen-gw0"
         basetemp.mkdir(parents=True)
         assert self._allocate(basetemp) == self._allocate(basetemp)
+
+
+class TestRecoveryKeepsPytestsPrivacyGuarantees:
+    """Recreating the tree must not be a weaker act than creating it was.
+
+    These paths are predictable (`/tmp/pytest-of-<user>/pytest-N/popen-gwM`) on a
+    temp root shared between users, and pytest creates every level `0o700`,
+    refuses a symlinked or foreign-owned level, and tightens loose modes. A
+    `mkdir(parents=True, exist_ok=True)` recovery would have recreated the
+    hierarchy with the process umask (commonly world-traversable `0o755`) and
+    accepted a path planted in the window between the deletion and the recovery
+    (Codex review). Each property is asserted separately, because a single
+    "recovery works" test passes while any one of them is absent.
+    """
+
+    @staticmethod
+    def _allocate(basetemp: Path) -> Path:
+        import conftest
+
+        return conftest._snapshot_cache_bucket(_FactoryStub(basetemp))
+
+    def test_every_recreated_level_is_private(self, tmp_path: Path) -> None:
+        """Not just the leaf: an open ancestor makes the leaf reachable."""
+        root = tmp_path / "pytest-of-someone"
+        basetemp = root / "pytest-0" / "popen-gw0"
+        self._allocate(basetemp)
+        for level in (root, root / "pytest-0", basetemp):
+            mode = level.stat().st_mode & 0o777
+            assert mode & 0o077 == 0, f"{level} is group/other-accessible ({mode:#o})"
+
+    def test_a_symlinked_level_is_refused(self, tmp_path: Path) -> None:
+        """The planted-path case: a symlink where a directory is expected."""
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        root = tmp_path / "pytest-of-someone"
+        root.symlink_to(elsewhere, target_is_directory=True)
+        with pytest.raises(OSError, match="symbolic link"):
+            self._allocate(root / "pytest-0" / "popen-gw0")
+
+    @pytest.mark.skipif(
+        not hasattr(os, "getuid") or os.getuid() != 0,
+        reason="needs root to create a directory owned by another user",
+    )
+    def test_a_foreign_owned_level_is_refused(self, tmp_path: Path) -> None:
+        """Ownership, not just mode: a 0700 directory someone else owns is theirs."""
+        root = tmp_path / "pytest-of-someone"
+        root.mkdir(mode=0o700)
+        os.chown(root, 1, 1)
+        with pytest.raises(OSError, match="owned by another user"):
+            self._allocate(root / "pytest-0" / "popen-gw0")
+
+    def test_a_loose_mode_on_an_existing_level_is_tightened(
+        self, tmp_path: Path
+    ) -> None:
+        """pytest performs this same fixup rather than failing, so recovery does too."""
+        root = tmp_path / "pytest-of-someone"
+        root.mkdir(mode=0o755)
+        self._allocate(root / "pytest-0" / "popen-gw0")
+        assert root.stat().st_mode & 0o077 == 0
+
+    def test_the_umask_cannot_loosen_a_recreated_level(self, tmp_path: Path) -> None:
+        """`mkdir`'s mode is umask-masked, so the chmod after it is load-bearing.
+
+        Under a permissive umask a mode-only `mkdir` still yields a private
+        directory, so this sets the hostile case explicitly: umask 0 is what
+        distinguishes `mkdir(mode=0o700)` alone from `mkdir` plus `chmod`.
+        """
+        previous = os.umask(0)
+        try:
+            basetemp = tmp_path / "pytest-of-someone" / "pytest-0" / "popen-gw0"
+            self._allocate(basetemp)
+            assert basetemp.stat().st_mode & 0o077 == 0
+        finally:
+            os.umask(previous)
 
 
 class _FactoryStub:

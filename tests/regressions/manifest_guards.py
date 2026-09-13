@@ -336,7 +336,12 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
             "one lost directory reads as tens of thousands of unrelated "
             "errors. Recovery must also stay idempotent -- a version that "
             "heals by allocating a fresh directory on every call silently "
-            "discards the per-process reuse the allocator exists for."
+            "discards the per-process reuse the allocator exists for -- and it "
+            "must not be a WEAKER act than the original creation was: these "
+            "paths are predictable and sit on a temp root shared between "
+            "users, so every level it recreates carries the same private mode, "
+            "symlink refusal and ownership check the framework applied when it "
+            "created them, or the recovery is itself the vulnerability."
         ),
         # Runs 34729579282: `unit-tests (ubuntu-latest, 3.12)` reported 2
         # failed + 20,867 errors and 3.14 reported 29,164, every one of them
@@ -358,6 +363,8 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
         axes={
             "removed_level": ("bucket", "basetemp", "ancestor"),
             "recovery": ("fresh_directory", "empty", "reused_when_intact"),
+            "privacy": ("mode_0700", "symlink_refused", "foreign_uid_refused"),
+            "hostile_environment": ("permissive_umask", "loose_existing_mode"),
             "oracle": ("unfixed_allocator_reproduction",),
         },
         known_gaps=(
