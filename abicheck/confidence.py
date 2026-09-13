@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 from .checker_policy import Confidence, EvidenceTier
 from .detectors import DetectorResult
 from .model import AbiSnapshot
+from .model.header_exclusion_record import exclusions_are_symmetric
 
 if TYPE_CHECKING:
     from .checker_types import DiffResult
@@ -316,19 +317,30 @@ def header_exclusion_warnings(old: AbiSnapshot | None, new: AbiSnapshot) -> list
     new_patterns = tuple(getattr(new, "excluded_header_patterns", ()) or ())
     if not old_patterns and not new_patterns:
         return []
-    if old is not None and old_patterns != new_patterns:
+    # The *same* comparison the comparability gate makes
+    # (`model.header_exclusion_record.exclusions_are_symmetric`), not a second
+    # one. This compared tuples while the gate compared sets, so a native
+    # run's CLI order against a compat path's sorted record was accepted by
+    # the gate and then reported here as differing exclusions whose findings
+    # might be scope artefacts -- a false reduced-confidence diagnostic on a
+    # pair the tool had just declared comparable (Codex review).
+    #
+    # Rendered sorted for the same reason the comparison ignores order: two
+    # runs that excluded the same headers should not read differently.
+    if old is not None and not exclusions_are_symmetric(old_patterns, new_patterns):
         return [
             f"Header exclusions differ between the two sides "
             f"({HEADER_EXCLUSION_WARNING_MARKER}): old "
-            + (", ".join(old_patterns) or "(none)")
+            + (", ".join(sorted(old_patterns)) or "(none)")
             + "; new "
-            + (", ".join(new_patterns) or "(none)")
+            + (", ".join(sorted(new_patterns)) or "(none)")
             + ". Anything only an excluded header declared was not observed "
             "on that side, so a difference reported here may be the "
             "asymmetry rather than a change."
         ]
     return [
-        f"Headers matching {', '.join(new_patterns)} were excluded from the "
+        f"Headers matching {', '.join(sorted(new_patterns))} were excluded from "
+        f"the "
         f"parsed surface ({HEADER_EXCLUSION_WARNING_MARKER}); anything only "
         f"they declared was not observed, on either side."
     ]

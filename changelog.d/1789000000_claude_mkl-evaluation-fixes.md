@@ -269,3 +269,13 @@
   rule could achieve is recorded now, and a wildcard in a descriptor skip is
   reported as ineffective rather than silently doing nothing. Whether real
   ABICC globs there is an open parity question (`docs/contribute/known-gaps.md`).
+- **The exclusion gate and its warning no longer contradict each other.** The
+  comparability check compared exclusion *sets* while the coverage warning
+  compared *tuples*, so a native run's CLI order against a compat path's
+  sorted record was accepted as comparable and then reported as having
+  differing exclusions whose findings might be scope artefacts -- a false
+  reduced-confidence diagnostic on a pair the tool had just declared
+  comparable. Both now call one predicate
+  (`model.header_exclusion_record.exclusions_are_symmetric`), and the message
+  renders its patterns sorted, for the same reason the comparison ignores
+  order.

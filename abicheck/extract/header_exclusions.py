@@ -38,6 +38,7 @@ from fnmatch import fnmatch
 from typing import TYPE_CHECKING
 
 from ..errors import ValidationError
+from ..model.header_exclusion_record import exclusions_are_symmetric
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -191,10 +192,10 @@ def exclusion_asymmetry_reason(
     surface identically. Only a genuine difference in what was excluded is
     a difference in what was compared.
     """
+    if exclusions_are_symmetric(old_patterns, new_patterns):
+        return None
     old_set = frozenset(old_patterns)
     new_set = frozenset(new_patterns)
-    if old_set == new_set:
-        return None
 
     def _render(patterns: frozenset[str]) -> str:
         return ", ".join(sorted(patterns)) if patterns else "none"

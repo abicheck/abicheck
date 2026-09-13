@@ -102,3 +102,26 @@ def exact_match_patterns_only(patterns: Sequence[str]) -> tuple[str, ...]:
     Recorded in ``docs/contribute/known-gaps.md`` instead.
     """
     return tuple(p for p in patterns if not (_GLOB_METACHARACTERS & set(p)))
+
+
+def exclusions_are_symmetric(
+    old_patterns: Sequence[str], new_patterns: Sequence[str]
+) -> bool:
+    """Whether two sides were narrowed by the same set of patterns.
+
+    The one comparison of this field, shared rather than reimplemented. The
+    comparability gate (``extract.header_exclusions.
+    exclusion_asymmetry_reason``) and the coverage warning
+    (``confidence.header_exclusion_warnings``) each had their own, and they
+    disagreed: the gate compared sets and the warning compared *tuples*, so a
+    native run's CLI order against a compat path's sorted record accepted the
+    pair and then told the reader its exclusions differed and its findings
+    might be scope artefacts (Codex review). A false reduced-confidence
+    diagnostic on a pair the tool had just declared comparable.
+
+    Sets, because the patterns are a filter: stating one twice, or in the
+    other order, narrows the surface identically. Callers rendering the
+    patterns for a human should sort them for the same reason -- two runs
+    that did the same thing should not read differently.
+    """
+    return frozenset(old_patterns) == frozenset(new_patterns)
