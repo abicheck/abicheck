@@ -49,6 +49,23 @@ EXACT_MATCHING = "exact"
 #: set of headers (Codex review). Unprovable is not the same as native.
 UNKNOWN_MATCHING = "unknown"
 
+#: Every rule this build can reason about. A snapshot naming anything else --
+#: a hand-edited file, or one written by a build that knows a rule this one
+#: does not -- is read as :data:`UNKNOWN_MATCHING` rather than taken at its
+#: word: two sides both claiming ``"regex"`` would otherwise compare equal and
+#: be approved, though this reader cannot establish what either excluded
+#: (Codex review). Recognising a name is not the same as implementing it.
+KNOWN_MATCHING_RULES: frozenset[str] = frozenset(
+    {GLOB_MATCHING, EXACT_MATCHING, UNKNOWN_MATCHING}
+)
+
+
+def normalize_matching(value: object) -> str:
+    """*value* if this build can reason about it, else ``"unknown"``."""
+    text = str(value or "").strip()
+    return text if text in KNOWN_MATCHING_RULES else UNKNOWN_MATCHING
+
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -143,3 +160,39 @@ def exclusions_are_symmetric(
     if UNKNOWN_MATCHING in (old_matching, new_matching):
         return False
     return old_matching == new_matching
+
+
+#: fnmatch's own metacharacters -- the ones that make a native
+#: ``--exclude-header`` pattern a glob, and that an exact basename-or-path
+#: membership test can never match.
+_GLOB_METACHARACTERS = frozenset("*?[")
+
+
+def patterns_achievable_under(
+    patterns: Sequence[str], matching: str
+) -> tuple[str, ...]:
+    """*patterns* minus any that cannot have excluded anything under *matching*.
+
+    Under :data:`EXACT_MATCHING` a pattern containing a glob metacharacter
+    matches no header at all, so it narrowed nothing and is not part of the
+    achieved scope. Recording it anyway makes the snapshot claim a narrowing
+    that did not happen: the coverage warning then reports headers omitted,
+    and the comparability gate refuses an otherwise identical unexcluded
+    snapshot -- ineffective configuration persisted as achieved reduced
+    evidence (Codex review).
+
+    This filter and the recorded *rule* are complements, not alternatives,
+    and conflating them is how it came to be dropped: an earlier round used
+    the metacharacter test to decide *comparability*, which was wrong (a
+    plain ``include/foo.h`` still means different things under the two
+    rules), so it was removed when the rule began to be recorded. But it was
+    never wrong as a *what did this run actually achieve* test, which is a
+    different question. The rule makes two sides comparable or not; this
+    keeps each side's own record honest.
+
+    Under :data:`GLOB_MATCHING` every pattern is achievable by construction,
+    so the native path passes through untouched.
+    """
+    if matching != EXACT_MATCHING:
+        return tuple(patterns)
+    return tuple(p for p in patterns if not (_GLOB_METACHARACTERS & set(p)))

@@ -306,3 +306,15 @@
   already described it. The set is now derived from `SymbolType` itself
   (`elf_symbol_filter.ALL_SYMBOL_TYPES`), so a type added to the enum later is
   covered without another round.
+- **An unrecognised matching rule is not taken at its word, and an
+  unachievable pattern is not recorded.** A snapshot naming a rule this build
+  cannot reason about (a hand-edited `"regex"`, say) reads as `unknown` rather
+  than being compared as a known rule -- two sides claiming the same
+  unimplemented name are not equal evidence. And a descriptor skip containing
+  a wildcard, which matches nothing under exact membership, is no longer
+  persisted as an achieved narrowing: recording it made the snapshot claim a
+  reduced surface it did not have, which the coverage warning then reported
+  and the comparability gate then refused against an identical unexcluded
+  snapshot. The recorded rule and that filter answer different questions --
+  the rule decides whether two sides are comparable, the filter keeps each
+  side's own record honest.
