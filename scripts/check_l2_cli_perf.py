@@ -158,6 +158,20 @@ from l2_cli_model import (  # noqa: E402
     Step as Step,
 )
 
+# ── observation (what an observed native-invocation count proves) ──────────────
+# The fifth `file-size` split, and an inward one: these take a `CommandRun` and a
+# `Step` contract and reach nothing else, so they live below both.
+from l2_cli_observation import (  # noqa: E402
+    _check_extraction as _check_extraction,
+    _extraction_counts as _extraction_counts,
+    _include_pass_problems as _include_pass_problems,
+    _live_extraction_problems as _live_extraction_problems,
+    _no_native_invocation_problems as _no_native_invocation_problems,
+    _requested_header_count as _requested_header_count,
+    _warm_cache_problems as _warm_cache_problems,
+    uncalibrated_contracts as uncalibrated_contracts,
+)
+
 # ── validation (always outside the timed window) ───────────────────────────────
 # Split into `l2_cli_validation.py` once this file crossed the AI-readiness
 # `file-size` gate's 2000-line hard cap -- a mechanical extraction, unchanged
@@ -174,207 +188,6 @@ from l2_cli_validation import (  # noqa: E402
     _validate_snapshot as _validate_snapshot,
     _validate_unchanged as _validate_unchanged,
 )
-
-
-def _check_extraction(
-    run: CommandRun, expectation: str, *, one_side: int | None
-) -> list[str]:
-    """Assert a step's observed header-extraction count against its contract.
-
-    *one_side* is the **independently calibrated** cost of extracting a single
-    operand -- taken from a setup step that really did extract exactly one side
-    -- or ``None`` when no such calibration exists for this scenario.
-
-    That distinction is load-bearing and was a real soundness bug in the first
-    version of this harness: ``one_side`` was seeded from the measured step's
-    *own* observed count, so the "not more than one side" comparison reduced to
-    ``observed > observed`` and could never fail. A self-calibrating assertion
-    is not an assertion. With no calibration available, the upper-bound half is
-    now explicitly **not checked** (and reported as unchecked by the caller)
-    rather than checked against a number derived from the thing under test.
-
-    The lower-bound half needs no calibration and is always checked, because it
-    is the "faster because it stopped working" direction: a stored/live
-    comparison that extracts *nothing* never looked at its live side at all.
-    """
-    observed = (run.native_invocations or {}).get("header_extraction")
-    if observed is None:
-        return ["no native-invocation observation recorded (spy not installed?)"]
-    if expectation == "forbidden":
-        return _no_native_invocation_problems(run)
-    if expectation in ("one_side", "both_sides"):
-        return _live_extraction_problems(
-            observed, expectation, one_side=one_side, run=run
-        )
-    return []
-
-
-def _live_extraction_problems(
-    observed: int, expectation: str, *, one_side: int | None, run: CommandRun
-) -> list[str]:
-    """The two live-operand contracts: a lower bound always, an upper bound when calibrated.
-
-    The lower bound ("something was extracted") needs no calibration and is the
-    "faster because it stopped working" direction. The count bound is checked only
-    against an *independently* calibrated single-side cost; with none available it
-    is deliberately left unchecked and reported as such, rather than checked
-    against a number derived from the step under test.
-    """
-    sides = 1 if expectation == "one_side" else 2
-    if observed == 0:
-        subject = "the live side" if sides == 1 else "neither operand"
-        verb = "was never extracted" if sides == 1 else "was extracted"
-        return [f"zero header extractions: {subject} {verb}"]
-    problems = _include_pass_problems(run, sides)
-    if problems or one_side is None:
-        return problems
-    if sides == 1 and observed > one_side:
-        return [
-            f"{observed} header extraction(s) observed, but one side costs "
-            f"{one_side} (calibrated from this scenario's own setup dump) -- "
-            "the stored operand appears to have been re-extracted"
-        ]
-    if sides == 2 and observed < one_side * 2:
-        return [
-            f"{observed} header extraction(s) observed, expected at least "
-            f"{one_side * 2} for two live operands (one side costs "
-            f"{one_side}, calibrated from a setup dump)"
-        ]
-    return []
-
-
-def _include_pass_problems(run: CommandRun, sides: int) -> list[str]:
-    """A live L2 run must also have run its include-graph pass, once per side.
-
-    Header-AST extraction is not the whole of the measured L2 work: the compare
-    path also runs an always-on `clang -M` include/dependency pass, which the spy
-    classifies as ``include_pass``. Checking only ``header_extraction`` let a
-    regression that stops running that pass read as a *performance improvement* --
-    the run is shorter, the evidence depth still resolves to ``headers``, and the
-    deliberate break is still found, so nothing else notices (Codex review).
-
-    The bound is one pass per live side, which is what every observed run does:
-    a one-side scenario reports 1, a both-sides scenario 2, and the count scales
-    with the header count above that (8 headers x 2 sides -> 16, 32 -> 64). So it
-    is a floor derived from observation rather than a guess, and it is
-    deliberately not an equality: how many passes the product *should* run per
-    side is its business, while running none is the regression.
-    """
-    observed = (run.native_invocations or {}).get("include_pass")
-    if observed is None:
-        return []
-    if observed < sides:
-        return [
-            f"{observed} include/dependency pass(es) observed for {sides} live "
-            f"side(s), expected at least one each -- the include-graph pass did "
-            "not run, so the run is shorter by skipping measured L2 work"
-        ]
-    return []
-
-
-def _no_native_invocation_problems(run: CommandRun) -> list[str]:
-    """The ``forbidden`` contract: an absolute zero over EVERY invocation kind.
-
-    Needs no calibration, and deliberately is not limited to the extraction
-    bucket. A stored-operand path claims no compiler ran *at all*, so an
-    ``include_pass``, a ``--version`` probe, or anything classified ``other``
-    falsifies the claim exactly as an AST extraction does. Checking only
-    ``header_extraction`` let a regression that starts spawning ``clang++ -M`` or
-    ``g++ --version`` while loading two stored snapshots pass the one scenario
-    whose entire point is that it spawns nothing.
-    """
-    nonzero = {
-        kind: count for kind, count in (run.native_invocations or {}).items() if count
-    }
-    if not nonzero:
-        return []
-    detail = ", ".join(f"{kind}={count}" for kind, count in sorted(nonzero.items()))
-    return [
-        f"native compiler invocation(s) observed ({detail}) on a "
-        "stored-operand path that must perform none -- the stored "
-        "snapshot was re-extracted, or the path grew a new native call"
-    ]
-
-
-def uncalibrated_contracts(steps: list[Step], one_side: int | None) -> list[str]:
-    """Which extraction contracts could only be partially checked.
-
-    Reported so the receipt never implies a stronger claim than was made: a
-    ``one_side``/``both_sides`` contract with no independent single-side
-    calibration has had its lower bound checked (extraction happened at all) but
-    not its upper bound (it was not more than one side's worth).
-    """
-    if one_side is not None:
-        return []
-    return [
-        f"step {step.name}: contract {step.extraction!r} checked for >0 only -- no "
-        "setup step in this scenario extracts exactly one side, so there is no "
-        "independent calibration for the count bound"
-        for step in steps
-        if step.extraction in ("one_side", "both_sides")
-    ]
-
-
-def _extraction_counts(batch: list[CommandRun]) -> list[int | None]:
-    """Observed header-extraction count per run, or ``None`` where unobserved.
-
-    ``None``, never ``0``, when the spy is off: under ``--no-spy`` every
-    ``native_invocations`` is empty, and reading the absent key as zero made the
-    cache validators conclude "the cold run extracted nothing" and "the cache
-    served stale evidence" -- so the supported instrumentation-overhead
-    configuration failed deterministically rather than measuring anything (Codex
-    review). Absent is not zero; it is unknown, which is the same rule
-    `_check_extraction` and `_include_pass_problems` already follow.
-    """
-    return [(run.native_invocations or {}).get("header_extraction") for run in batch]
-
-
-def _warm_cache_problems(runs: dict[str, list[CommandRun]]) -> list[str]:
-    """Every cold/warm repetition must individually show the cache serving.
-
-    Per repetition, deliberately, and paired by index -- repetition *i* runs
-    cold then warm against one cache lifecycle, so `runs["cold"][i]` and
-    `runs["warm"][i]` are the two halves of one observation.
-
-    The first version reduced each batch with `min()` and compared the two
-    numbers. That let ONE warm repetition hitting the cache certify the whole
-    scenario while the others re-extracted in full -- so the gated median could
-    describe an uncached run while the receipt reported a served cache, which is
-    a mislabelled benchmark rather than a missed one (Codex review). A reduction
-    across repetitions cannot express "each repetition was warm", so there is no
-    reducer that fixes this: the comparison has to be per pair.
-    """
-    cold = runs.get("cold") or []
-    warm = runs.get("warm") or []
-    if not cold or not warm:
-        return ["cold/warm runs missing"]
-    if len(cold) != len(warm):
-        return [
-            f"{len(cold)} cold vs {len(warm)} warm repetition(s) -- cannot pair "
-            "them, so no repetition's cache state is established"
-        ]
-    cold_counts = _extraction_counts(cold)
-    warm_counts = _extraction_counts(warm)
-    if any(n is None for n in (*cold_counts, *warm_counts)):
-        # Unobserved, not zero. With the spy off this claim cannot be checked at
-        # all, so it is left unchecked and reported as such by the caller rather
-        # than failed -- `cache_claim_unverified` exists for exactly this.
-        return []
-    problems: list[str] = []
-    for index, (cold_n, warm_n) in enumerate(zip(cold_counts, warm_counts)):
-        if cold_n == 0:
-            problems.append(
-                f"repetition {index}: the cold run performed no header extraction "
-                "at all -- the cache root was not actually fresh, so nothing here "
-                "measures a cold state"
-            )
-        elif warm_n >= cold_n:
-            problems.append(
-                f"repetition {index}: warm extracted {warm_n} vs cold {cold_n} -- no "
-                "cache served, so this repetition is not the warm state it is "
-                "labelled as"
-            )
-    return problems
 
 
 # ── scenarios ─────────────────────────────────────────────────────────────────

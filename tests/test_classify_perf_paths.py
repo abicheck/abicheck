@@ -30,6 +30,7 @@ from pathlib import Path
 import pytest
 
 _PATH = Path(__file__).resolve().parent.parent / "scripts" / "classify_perf_paths.py"
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 _spec = importlib.util.spec_from_file_location("classify_perf_paths", _PATH)
 assert _spec and _spec.loader
 classify = importlib.util.module_from_spec(_spec)
@@ -698,3 +699,50 @@ class TestTheHeaderGraphGateRequiresAllMetrics:
         )
         assert '"--require-all-metrics"' in source
         assert "args.require_all_metrics and ungated" in source
+
+
+class TestTheCanonicalOwnerIsClassifiedNotJustTheFacade:
+    """A re-export is not the thing that does the work.
+
+    `abicheck/service.py` names `_attach_header_graph`, but only re-exports it
+    from `service_header_graph_attach.py` for import stability. Classifying the
+    facade alone meant a PR changing the actual attach implementation -- code the
+    in-process header-graph benchmark and every full-CLI live dump execute --
+    skipped every performance job (Codex review). The family is now swept by
+    glob, and these tests state *why* rather than restating the glob.
+    """
+
+    def test_the_header_graph_attach_owner_is_perf_sensitive(self) -> None:
+        assert classify.changed_files_are_perf_sensitive(
+            ["abicheck/service_header_graph_attach.py"]
+        )
+
+    def test_the_facade_only_re_exports_the_owner(self) -> None:
+        """The premise: if this stops holding, the test above is about the wrong file."""
+        facade = (_REPO_ROOT / "abicheck" / "service.py").read_text()
+        assert "from .service_header_graph_attach import _attach_header_graph" in facade
+        owner = (_REPO_ROOT / "abicheck" / "service_header_graph_attach.py").read_text()
+        assert "def _attach_header_graph(" in owner
+
+    def test_every_service_module_is_covered_not_an_enumerated_list(self) -> None:
+        """Derived from the tree, so a newly-added `service_*.py` cannot be missed.
+
+        The per-file list this replaced is exactly what went stale: four entries
+        were listed and `service_header_graph_attach.py` was not one of them.
+        """
+        modules = sorted(
+            p.relative_to(_REPO_ROOT).as_posix()
+            for p in (_REPO_ROOT / "abicheck").glob("service*.py")
+        )
+        assert len(modules) > 5, modules
+        unclassified = [
+            m for m in modules if not classify.changed_files_are_perf_sensitive([m])
+        ]
+        assert unclassified == []
+
+    def test_the_glob_is_not_a_blanket_over_abicheck(self) -> None:
+        """Vacuity guard: a pattern matching everything would pass the test above."""
+        assert not classify.changed_files_are_perf_sensitive(["abicheck/errors.py"])
+        assert not classify.changed_files_are_perf_sensitive(
+            ["abicheck/annotations.py"]
+        )

@@ -65,9 +65,11 @@ def ast_unparse(node) -> str:
     return ast.unparse(node)
 
 
-def _run(native_invocations: dict[str, int]) -> object:
+def _run(
+    native_invocations: dict[str, int], *, argv: list[str] | None = None
+) -> object:
     return receipt_mod.CommandRun(
-        argv=["x"],
+        argv=argv if argv is not None else ["x"],
         exit_code=0,
         wall_seconds=1.0,
         user_cpu_seconds=0.5,
@@ -1109,3 +1111,80 @@ class TestTheInvalidationSetupStepsDeclareTheirOutputs:
             "inv_cold.abi.json",
             "inv_warm.abi.json",
         ], names
+
+
+class TestIncludePassesScaleWithTheHeaderCount:
+    """One include pass per header, not one per side.
+
+    A flat per-side floor accepted 2 passes for the `simple-h8` and `simple-h32`
+    arms, which really perform 16 and 64 (measured). So a regression processing
+    only the first top-level header of each side stayed under the floor while
+    `effective_depth` still read `headers` and the deliberate break -- which
+    lives in `part0.h` -- was still found, meaning every other check agreed
+    while most of the include-graph work had stopped happening (Codex review).
+
+    The expectation is derived from the measured argv rather than a fixture
+    table, so the inputs here are argv shapes, generated across the real header
+    counts rather than pinned to the one reported case.
+    """
+
+    @staticmethod
+    def _argv(headers_per_side: int, sides: int) -> list[str]:
+        argv = ["python", "-m", "abicheck", "compare", "old.so", "new.so"]
+        for side in ("old", "new")[:sides]:
+            for i in range(headers_per_side):
+                argv += ["--header", f"{side}=part{i}.h"]
+        return argv
+
+    @pytest.mark.parametrize("headers", [1, 2, 8, 32])
+    @pytest.mark.parametrize("sides", [1, 2])
+    def test_one_pass_per_named_header_is_accepted(
+        self, headers: int, sides: int
+    ) -> None:
+        run = _run({"include_pass": headers * sides}, argv=self._argv(headers, sides))
+        assert harness._include_pass_problems(run, sides) == []
+
+    @pytest.mark.parametrize("headers", [2, 8, 32])
+    @pytest.mark.parametrize("sides", [1, 2])
+    def test_one_pass_short_of_the_header_count_is_rejected(
+        self, headers: int, sides: int
+    ) -> None:
+        """The boundary, not just an obviously-too-low number."""
+        run = _run(
+            {"include_pass": headers * sides - 1}, argv=self._argv(headers, sides)
+        )
+        problems = harness._include_pass_problems(run, sides)
+        assert problems, (headers, sides)
+        assert str(headers * sides) in problems[0]
+
+    @pytest.mark.parametrize("headers", [8, 32])
+    def test_the_per_side_floor_alone_no_longer_passes_a_multi_header_run(
+        self, headers: int
+    ) -> None:
+        """The exact regression the old floor let through: one header per side."""
+        run = _run({"include_pass": 2}, argv=self._argv(headers, 2))
+        assert harness._include_pass_problems(run, 2)
+
+    def test_a_dump_spells_its_headers_with_minus_h(self) -> None:
+        """`dump` takes `-H PATH`; `compare` takes `--header SIDE=PATH`."""
+        argv = ["python", "-m", "abicheck", "dump", "lib.so", "-H", "a.h", "-H", "b.h"]
+        assert harness._requested_header_count(argv) == 2
+        assert harness._include_pass_problems(_run({"include_pass": 1}, argv=argv), 1)
+        assert (
+            harness._include_pass_problems(_run({"include_pass": 2}, argv=argv), 1)
+            == []
+        )
+
+    def test_an_argv_naming_no_header_keeps_the_per_side_floor(self) -> None:
+        """Unknown is not zero here either: no `--header` means fall back, not pass."""
+        argv = ["python", "-m", "abicheck", "compare", "old.json", "new.json"]
+        assert harness._requested_header_count(argv) == 0
+        assert harness._include_pass_problems(_run({"include_pass": 1}, argv=argv), 2)
+        assert (
+            harness._include_pass_problems(_run({"include_pass": 2}, argv=argv), 2)
+            == []
+        )
+
+    def test_an_unobserved_counter_is_still_unknown_not_a_failure(self) -> None:
+        run = _run({}, argv=self._argv(8, 2))
+        assert harness._include_pass_problems(run, 2) == []
