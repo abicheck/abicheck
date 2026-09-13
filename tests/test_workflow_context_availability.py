@@ -67,6 +67,36 @@ _JOB_LEVEL_EXPRESSION_KEYS = (
 )
 
 
+def _without_string_literals(expression: str) -> str:
+    """*expression* with every single-quoted literal blanked out.
+
+    A context name inside a literal is text, not a reference:
+    `contains(github.event.pull_request.body, 'runner.os')` names no context
+    at all. GitHub escapes a quote by doubling it, and the pattern consumes
+    `''` inside a literal for that reason (Codex review, PR #1294).
+    """
+    return re.sub(r"'(?:[^']|'')*'", "''", expression)
+
+
+def _root_contexts(expression: str) -> set[str]:
+    """The context names *expression* references at the ROOT of a path.
+
+    Only the first segment selects a context: `github.event.inputs.runner.os`
+    is rooted in `github` -- which is permitted at job level -- and `runner`
+    there is an input's property name that GitHub never resolves as a context.
+    Matching any dotted occurrence would fail that workflow even though GitHub
+    accepts it, so a preceding `.` (or an identifier character, for a name
+    like `my_runner`) disqualifies the match.
+    """
+    stripped = _without_string_literals(expression)
+    return {
+        m.group(1)
+        for m in re.finditer(
+            r"(?<![A-Za-z0-9_.$-])([A-Za-z_][A-Za-z0-9_-]*)\s*\.", stripped
+        )
+    }
+
+
 def _expressions(value: object) -> list[str]:
     """Every `${{ ... }}` body anywhere inside *value*, recursively."""
     if isinstance(value, str):
@@ -87,12 +117,13 @@ def _job_level_violations(document: dict) -> list[str]:
             if key not in job:
                 continue
             for expression in _expressions(job[key]):
-                for context in _JOB_LEVEL_FORBIDDEN:
-                    if re.search(rf"\b{context}\s*\.", expression):
-                        found.append(
-                            f"jobs.{job_name}.{key} uses the '{context}' "
-                            f"context: ${{{{{expression}}}}}"
-                        )
+                for context in sorted(
+                    _root_contexts(expression) & set(_JOB_LEVEL_FORBIDDEN)
+                ):
+                    found.append(
+                        f"jobs.{job_name}.{key} uses the '{context}' "
+                        f"context: ${{{{{expression}}}}}"
+                    )
     return found
 
 
@@ -145,3 +176,71 @@ def test_the_same_expression_inside_a_step_is_accepted() -> None:
         "        run: echo linux\n"
     )
     assert _job_level_violations(accepted) == []
+
+
+class TestOnlyARootContextReferenceCounts:
+    """A dotted name is not automatically a context reference.
+
+    Only the FIRST segment of a path selects a context, and a name inside a
+    string literal selects nothing at all. A checker that searches for the
+    substring `runner.` fails workflows GitHub accepts -- which is worse than
+    not having the checker, since the false positive blocks a valid change and
+    the obvious way to silence it is to delete the gate. Both cases below were
+    raised by Codex on PR #1294 against exactly that first implementation.
+    """
+
+    def _job(self, expression: str) -> dict:
+        return {"jobs": {"j": {"if": expression, "steps": [{"run": "true"}]}}}
+
+    def test_a_property_named_like_a_context_is_not_one(self) -> None:
+        """`github.event.inputs.runner.os` is rooted in the permitted `github`."""
+
+        document = self._job("${{ github.event.inputs.runner.os == 'linux' }}")
+        assert _job_level_violations(document) == []
+
+    def test_a_context_name_inside_a_string_literal_is_text(self) -> None:
+        document = self._job(
+            "${{ contains(github.event.pull_request.body, 'runner.os') }}"
+        )
+        assert _job_level_violations(document) == []
+
+    def test_an_escaped_quote_inside_a_literal_does_not_end_it(self) -> None:
+        """`''` is GitHub's escape, so the literal continues past it."""
+
+        document = self._job("${{ contains(github.head_ref, 'it''s runner.os') }}")
+        assert _job_level_violations(document) == []
+
+    def test_a_name_merely_ending_in_a_context_name_is_not_one(self) -> None:
+        document = self._job("${{ vars.my_runner.os == 'linux' }}")
+        assert _job_level_violations(document) == []
+
+    @pytest.mark.parametrize(
+        "expression",
+        (
+            "${{ runner.temp }}",
+            "${{ runner.os == 'Linux' }}",
+            "${{ !cancelled() && runner.os != 'Windows' }}",
+            "${{ format('{0}', runner.arch) }}",
+        ),
+        ids=("bare", "comparison", "after-operator", "as-argument"),
+    )
+    def test_a_real_root_reference_is_still_caught(self, expression: str) -> None:
+        """The narrowing must not cost the detection it exists for."""
+
+        assert _job_level_violations(self._job(expression)) != []
+
+    def test_the_naive_substring_rule_would_fail_these(self) -> None:
+        """Vacuity guard: the cases above must actually distinguish the two rules.
+
+        Without this, the class could pass against a checker that never looked
+        for contexts at all -- and it pins that the false positives are real
+        rather than hypothetical, by reproducing the rejected implementation.
+        """
+
+        naive = [
+            "${{ github.event.inputs.runner.os == 'linux' }}",
+            "${{ contains(github.event.pull_request.body, 'runner.os') }}",
+        ]
+        for expression in naive:
+            assert re.search(r"\brunner\s*\.", expression), expression
+            assert _job_level_violations(self._job(expression)) == [], expression
