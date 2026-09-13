@@ -477,7 +477,7 @@ def test_identity_attrs_are_normalized_alongside_label() -> None:
     assert old_node.attrs["name"] == new_node.attrs["name"]
     assert old_node.attrs["qualified_name"] == new_node.attrs["qualified_name"]
 
-    from abicheck.buildsource import entity_identity
+    from abicheck.model import entity_identity
 
     old_identity = entity_identity.resolve_identity_for_node(old_node)
     new_identity = entity_identity.resolve_identity_for_node(new_node)

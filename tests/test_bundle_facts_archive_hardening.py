@@ -127,10 +127,10 @@ class TestBundleFactsArchiveResourceLimits:
         review, fresh evidence: ~150MB RSS from a 6MB payload of ~2M empty
         objects). A small monkeypatched budget makes this fast to exercise
         without actually allocating at that scale."""
-        import abicheck.storage.bundle_facts_archive as bundle_facts_module
+        import abicheck.model.bundle_facts as bundle_facts_model
         from abicheck.storage.bundle_archive import BundleArchiveWriter
 
-        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_JSON_OBJECT_NODES", 100)
+        monkeypatch.setattr(bundle_facts_model, "DEFAULT_MAX_JSON_OBJECT_NODES", 100)
         out = tmp_path / "wide-object-blob.bundlefacts.archive.zip"
         payload = b'{"library":"a.so","version":"1","junk":[' + (b"{}," * 500) + b"{}]}"
         with BundleArchiveWriter(out) as writer:
@@ -160,10 +160,10 @@ class TestBundleFactsArchiveResourceLimits:
         `storage.json_budget` pre-scan counts both container shapes into
         one combined budget, so this must raise the identical way the
         object-node test above does."""
-        import abicheck.storage.bundle_facts_archive as bundle_facts_module
+        import abicheck.model.bundle_facts as bundle_facts_model
         from abicheck.storage.bundle_archive import BundleArchiveWriter
 
-        monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_JSON_OBJECT_NODES", 100)
+        monkeypatch.setattr(bundle_facts_model, "DEFAULT_MAX_JSON_OBJECT_NODES", 100)
         out = tmp_path / "wide-array-blob.bundlefacts.archive.zip"
         payload = b'{"library":"a.so","version":"1","junk":[' + (b"[]," * 500) + b"[]]}"
         with BundleArchiveWriter(out) as writer:

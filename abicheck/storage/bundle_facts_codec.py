@@ -359,14 +359,17 @@ def load_bundle_facts(
     """Load a BundleFacts; see ``storage.bundle_facts_validation.load_bundle_facts_dispatch``
     for the ``format="auto"``/G40-archive dispatch and the ``max_json_object_nodes`` budget
     override."""
-    from ..model.bundle_facts import DEFAULT_MAX_JSON_OBJECT_NODES
+    from ..model import bundle_facts as bundle_facts_model
     from ..serialization import snapshot_from_dict
     from ..snapshot_io import read_snapshot_text
     from . import bundle_facts_archive
     from .bundle_facts_validation import load_bundle_facts_dispatch
 
+    # Read the default off the owning module at call time (not bound at
+    # import): the decode budget is a security ceiling a test must be able to
+    # shrink to exercise the guard without allocating at real scale.
     budget = (
-        DEFAULT_MAX_JSON_OBJECT_NODES
+        bundle_facts_model.DEFAULT_MAX_JSON_OBJECT_NODES
         if max_json_object_nodes is None
         else max_json_object_nodes
     )
