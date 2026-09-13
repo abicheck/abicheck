@@ -115,7 +115,8 @@ PLATFORM_ENTRIES: list[ChangeKindMeta] = [
         "treatment, so old code reads/writes the value with the wrong "
         "width.",
         description_template="_BitInt change on {name}: {detail} ({old} → {new}). The bit width determines storage size and ABI treatment.",
-        entity=_ENT.BINARY,
+        entity=_ENT.TYPE,
+        entity_from_field="entity_discriminator",
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -169,7 +170,8 @@ PLATFORM_ENTRIES: list[ChangeKindMeta] = [
         "resolution and name mangling, so the mangled symbol changes and "
         "old binaries fail to resolve it.",
         description_template="char8_t migration ({detail}) on {name}: {old} → {new}. char8_t is a distinct C++20 type that changes overload identity and name mangling.",
-        entity=_ENT.BINARY,
+        entity=_ENT.TYPE,
+        entity_from_field="entity_discriminator",
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -392,7 +394,7 @@ PLATFORM_ENTRIES: list[ChangeKindMeta] = [
         "against the old headers may use aligned loads (SIMD) that now "
         "fault or fall back to slow paths.",
         description_template="Exported object alignment reduced: {name} ({old} → {new} bytes)",
-        entity=_ENT.VARIABLE,  # producer gates on OBJECT/COMMON/TLS
+        entity=_ENT.VARIABLE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -1003,7 +1005,7 @@ PLATFORM_ENTRIES: list[ChangeKindMeta] = [
         "Proven from DWARF/ABI facts, so BREAKING; the flag-only signal stays "
         "as the generic abi_relevant_build_flag_changed (RISK).",
         policy_overrides={"plugin_abi": _C},
-        entity=_ENT.FUNCTION,  # emitted per public function name
+        entity=_ENT.FUNCTION,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -1333,7 +1335,7 @@ PLATFORM_ENTRIES: list[ChangeKindMeta] = [
         "there, not ruled out. A caller compiled against the old "
         "trait should be treated as at risk.",
         policy_overrides={"plugin_abi": _C},
-        entity=_ENT.BINARY,
+        entity=_ENT.FUNCTION,
         operation=_OP.MODIFIED,
     ),
     _E(

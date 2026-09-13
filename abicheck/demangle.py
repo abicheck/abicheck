@@ -578,7 +578,7 @@ def prewarm_demangle_from_json_value(value: object) -> None:
         demangle_batch(sorted(tokens), accept_macho_prefix=True)
 
 
-def demangle_text(text: str) -> str:
+def demangle_text(text: str, *, escape_table_pipes: bool = False) -> str:
     """Demangle every Itanium-mangled symbol token embedded in *text*.
 
     Tokens that are not valid C++ mangled names, or that cannot be demangled
@@ -609,9 +609,34 @@ def demangle_text(text: str) -> str:
 
     def _repl(m: re.Match[str]) -> str:
         tok = m.group(0)
+        # Idempotence: this function annotates as `name [tok]`, so a token
+        # already sitting inside those brackets has been annotated already and
+        # must be left alone. Without this a second pass produced
+        # `bar() [bar() [_Z3barv]]` -- which is exactly what happened when a
+        # renderer's own `demangle` default was flipped while the CLI still
+        # demangled at its own boundary (Codex review, PR #1284). Cheap, and
+        # it makes the double application harmless rather than merely
+        # unlikely.
+        start, end = m.start(), m.end()
+        if (
+            start > 0
+            and text[start - 1] == "["
+            and end < len(text)
+            and text[end] == "]"
+        ):
+            return tok
         demangled = mapping.get(tok)
         if not demangled or demangled == tok:
             return tok
+        if escape_table_pipes:
+            # A demangled name can *contain* a pipe -- `_ZN3FooorERKS_` is
+            # `Foo::operator|(Foo const&)` -- and this substitution runs over
+            # an already-rendered document, so a caller that escaped its cells
+            # beforehand cannot have escaped a delimiter this pass introduces
+            # (CodeRabbit review, PR #1284). Escaping here is the only point
+            # that can: GFM renders `\|` as a literal pipe, so a bullet or
+            # paragraph reads identically while a table row keeps its columns.
+            demangled = demangled.replace("|", "\\|")
         return f"{demangled} [{tok}]"
 
     return _MANGLED_TOKEN_RE.sub(_repl, text)

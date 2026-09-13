@@ -553,3 +553,138 @@ class TestTheDispositionLedgersWarmTheirOwnDemangleCache:
         reporter.disposition_ledger_blocks(result)
         assert len(calls) == 1, "the ledger builder must warm the cache exactly once"
         assert calls[0] is result
+
+
+class TestTheDisposedFindingsTableSurvivesHostileCells:
+    """Two independent ways a cell can break this table, and escaping the
+    cells only covers one of them.
+
+    A free-form suppression reason or a symbol can contain a raw `|`. And a
+    symbol that contains none can *acquire* one: `_ZN3FooorERKS_` demangles to
+    `Foo::operator|(Foo const&)`, and the release Markdown runs the demangle
+    pass over the already-rendered document -- so a delimiter appears in a row
+    that was correctly escaped when it was built (CodeRabbit review,
+    PR #1284).
+
+    The property is column count, not appearance: whatever the cell holds, a
+    reader (and any consumer parsing the table) must still see five columns.
+    """
+
+    HEADER = "| Library | Disposition | Kind | Symbol | Rule / reason |"
+
+    def _render(self, symbol, reason):
+        from abicheck.cli_compare_release_helpers import _release_md_disposed_findings
+        from abicheck.demangle import demangle_text
+
+        lib = {
+            "library": "libfoo.so",
+            "suppression": {
+                "suppressed_changes": [
+                    {
+                        "kind": "func_removed",
+                        "symbol": symbol,
+                        "rule": {"reason": reason},
+                    }
+                ]
+            },
+        }
+        lines = _release_md_disposed_findings([lib])
+        # The same whole-document pass `_format_release_markdown` applies.
+        return demangle_text("\n".join(lines), escape_table_pipes=True)
+
+    def _data_row(self, rendered):
+        rows = [
+            ln
+            for ln in rendered.splitlines()
+            if ln.startswith("|") and "---" not in ln and ln != self.HEADER
+        ]
+        assert len(rows) == 1, rendered
+        return rows[0]
+
+    def _columns(self, row):
+        # Split on unescaped pipes only, the way a GFM parser does.
+        import re
+
+        inner = row.strip().strip("|")
+        return re.split(r"(?<!\\)\|", inner)
+
+    def test_a_baseline_row_has_five_columns(self):
+        """Vacuity guard: fix the expected width against a benign row first,
+        so the hostile cases below are compared to something real."""
+        row = self._data_row(self._render("plain_symbol", "a plain reason"))
+        assert len(self._columns(row)) == 5, row
+
+    def test_a_raw_pipe_in_the_reason_does_not_add_a_column(self):
+        row = self._data_row(self._render("plain_symbol", "broke | the table"))
+        assert len(self._columns(row)) == 5, row
+
+    def test_a_symbol_that_demangles_to_operator_pipe_keeps_its_columns(self):
+        """The case escaping-before-rendering cannot catch: the pipe does not
+        exist until the demangle pass runs over the finished document."""
+        row = self._data_row(self._render("_ZN3FooorERKS_", "a plain reason"))
+        assert "operator" in row, row
+        assert len(self._columns(row)) == 5, row
+
+    def test_a_newline_in_the_reason_does_not_add_a_row(self):
+        rendered = self._render("plain_symbol", "first line\nsecond line")
+        self._data_row(rendered)  # asserts exactly one data row
+
+
+class TestDemanglingIsIdempotentAndReachesEveryHumanPath:
+    """Two halves of the same promise, and one nearly broke the other.
+
+    `to_markdown`'s `demangle` default stayed `False` because the CLI applies
+    demangling once at the `service_render` boundary; flipping it made the
+    native path demangle twice and render `bar() [bar() [_Z3barv]]`, because
+    `demangle_text` annotates as `name [tok]` and used to re-annotate its own
+    output. So: the function is now idempotent, *and* the two human paths that
+    bypass `service_render` pass `demangle=True` explicitly (Codex review,
+    PR #1284).
+    """
+
+    def test_demangle_text_is_idempotent(self):
+        from abicheck.demangle import demangle_text
+
+        for text in (
+            "Removed: _Z3barv",
+            "Removed: _ZN3FooorERKS_ and _ZN3lib4goneEi",
+            "no symbols here",
+        ):
+            once = demangle_text(text)
+            assert demangle_text(once) == once, text
+
+    def test_the_native_markdown_path_demangles_exactly_once(self):
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_types import Change, DiffResult
+        from abicheck.model import AbiSnapshot
+        from abicheck.service import render_output
+
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so",
+            changes=[
+                Change(
+                    kind=__import__(
+                        "abicheck.checker_policy", fromlist=["ChangeKind"]
+                    ).ChangeKind.FUNC_REMOVED,
+                    symbol="_Z3barv",
+                    description="removed",
+                )
+            ],
+            verdict=Verdict.BREAKING,
+        )
+        md = render_output(
+            "markdown", result, AbiSnapshot(library="libfoo.so", version="1.0")
+        )
+        assert "bar() [_Z3barv]" in md
+        assert "bar() [bar()" not in md, "demangled twice"
+
+    def test_the_two_bypassing_human_paths_ask_for_demangling(self):
+        """`compat/cli.py` and `annotations_step_summary.py` never reach
+        `service_render`, so nothing else would apply it for them."""
+        import pathlib
+
+        for rel in ("compat/cli.py", "annotations_step_summary.py"):
+            src = pathlib.Path("abicheck", rel).read_text(encoding="utf-8")
+            assert "demangle=True" in src, rel

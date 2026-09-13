@@ -153,3 +153,28 @@
   both of which now exit 64. `skills-src/` has joined the retired-surface sweep
   so the next retirement cannot leave that tree stale — it is the highest-stakes
   place for it, since an agent runs those commands rather than reading them.
+
+- **A pattern rule's disposition reaches the report, not just the terminal.**
+  When an ADR-027 pattern rule changes a finding's verdict, the Markdown report
+  now names the rule and its reason. The canonical report document already
+  carried the ledger — only the projection was missing — so an accepted result
+  could be rendered without explaining why it was accepted, and retiring
+  `--view patterns` had removed the last way to ask.
+
+- **Demangling is idempotent, and reaches the human paths that bypass the CLI.**
+  `demangle_text` annotates as `name [tok]` and used to re-annotate its own
+  output, so two passes produced `bar() [bar() [_Z3barv]]`. `compat check`'s
+  written Markdown report and the GitHub step summary now demangle too; neither
+  passes through the renderer boundary that applies it for the native CLI.
+
+- **The release Markdown tables survive hostile cells.** A suppression reason
+  containing `|`, or a symbol that *becomes* `Foo::operator|(...)` when the
+  whole-document demangle pass runs after the row was built, no longer adds a
+  column.
+
+- **Three more findings reach the right display filter.** `atomic_qualifier_changed`,
+  `bit_int_width_changed` and `char8t_migration` are each emitted for both
+  function-owned slots (a parameter or return type) and record-owned slots (a
+  field), so one fixed entity was wrong for one owner by construction; the
+  producing branch now states which. `value_abi_trait_changed` is emitted once
+  per function, like the sibling return-convention finding.

@@ -105,6 +105,15 @@ def _release_md_disposed_findings(
     the *counts* and rule provenance, and this carries the findings those
     counts stand for.
     """
+    # Two independent ways a cell can break this table, so both are handled:
+    # a *raw* pipe in a free-form suppression reason or a symbol, escaped here
+    # by `md_cell`; and a pipe that does not exist yet at this point because
+    # the whole-document demangle pass introduces it later
+    # (`Foo::operator|`), handled by that pass's own `escape_table_pipes`
+    # (CodeRabbit review, PR #1284). Escaping here alone cannot cover the
+    # second, which is the subtlety worth naming.
+    from .markdown_text import md_cell
+
     rows: list[str] = []
     for lib in library_results:
         name = lib["library"]
@@ -115,8 +124,8 @@ def _release_md_disposed_findings(
             rule = cast("dict[str, object]", entry.get("rule") or {})
             why = rule.get("reason") or rule.get("id") or "suppressed"
             rows.append(
-                f"| `{name}` | suppressed | `{entry.get('kind', '?')}` "
-                f"| `{entry.get('symbol', '?')}` | {why} |"
+                f"| `{md_cell(name)}` | suppressed | `{md_cell(entry.get('kind', '?'))}` "
+                f"| `{md_cell(entry.get('symbol', '?'))}` | {md_cell(why)} |"
             )
         scope = cast("dict[str, object]", lib.get("surface_scope") or {})
         for entry in cast(
@@ -124,8 +133,8 @@ def _release_md_disposed_findings(
         ):
             why = entry.get("reason") or "outside the public surface"
             rows.append(
-                f"| `{name}` | scoped out | `{entry.get('kind', '?')}` "
-                f"| `{entry.get('symbol', '?')}` | {why} |"
+                f"| `{md_cell(name)}` | scoped out | `{md_cell(entry.get('kind', '?'))}` "
+                f"| `{md_cell(entry.get('symbol', '?'))}` | {md_cell(why)} |"
             )
     if not rows:
         return []

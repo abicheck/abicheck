@@ -55,6 +55,7 @@ def _diff_char8t(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             make_change(
                 ChangeKind.CHAR8T_MIGRATION,
                 symbol=ch.symbol,
+                entity_discriminator=ch.owner,
                 name=f"{ch.slot} of '{ch.symbol}'",
                 detail=direction,
                 old=ch.old_type,

@@ -1063,7 +1063,10 @@ def _format_release_summary(
     if demangle:
         from .demangle import demangle_text
 
-        md = demangle_text(md)
+        # `escape_table_pipes`: this document contains real tables (the
+        # library summary, the disposed-findings ledger), and demangling can
+        # introduce a `|` into a cell after the row was built.
+        md = demangle_text(md, escape_table_pipes=True)
     return md
 
 

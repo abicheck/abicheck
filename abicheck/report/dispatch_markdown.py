@@ -63,6 +63,11 @@ def to_markdown(
     show_impact: bool = False,
     severity_config: SeverityConfig | None = None,
     show_recommendation: bool = False,
+    # Stays `False`: the CLI demangles *once*, at the `service_render`
+    # boundary, so flipping this default made the native path demangle twice
+    # and render `bar() [bar() [_Z3barv]]`. The two direct callers that
+    # genuinely needed it (`compat/cli.py`, `annotations_step_summary.py`)
+    # now pass it explicitly (Codex review, PR #1284).
     demangle: bool = False,
     contract_evaluation: bool = False,
     report_document: ReportDocument | None = None,

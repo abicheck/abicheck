@@ -107,6 +107,7 @@ from .disposition_audit import (
 )
 from .document import ReportDocument
 from .envelope import ReportEnvelope, resolved_document
+from .pattern_modulations_markdown import render_pattern_modulations_from_mapping
 from .render_markdown import (
     ConfidenceSection,
     EnvironmentDriftEntry,
@@ -662,6 +663,7 @@ def build_markdown_document(
             if shared_disposition_audit is not None
             else compute_disposition_audit(result, severity_config).to_dict()
         ),
+        "pattern_modulations": list(getattr(result, "pattern_modulations", ()) or ()),
         # Workstream G S1's "what changed / review actions" section: same
         # already-resolved findings the severity groups above use, projected
         # as additions/removals/modifications so a compatible run still
@@ -805,6 +807,7 @@ def render_markdown_document(doc: ReportDocument) -> str:
     if d["empty_message"] is not None:
         lines.append(d["empty_message"])
     lines += _render_disposition_audit_from_mapping(d.get("disposition_audit"))
+    lines += render_pattern_modulations_from_mapping(d.get("pattern_modulations"))
     lines += _render_surface_changes_from_mapping(d.get("surface_changes"))
     lines += render_redundancy_note(
         None if d["redundancy_note"] is None else RedundancyNote(**d["redundancy_note"])
