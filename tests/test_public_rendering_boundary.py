@@ -1031,3 +1031,104 @@ class TestNormalizeReportModeProperties:
 
         with pytest.raises(ValidationError):
             self._fn()(mode)
+
+
+class TestEveryMarkdownDemanglePassEscapesTablePipes:
+    """A demangled `operator|` never adds a column, on *any* Markdown path.
+
+    This is the third place the same hazard appeared, which is why it is
+    stated as a sweep over the passes rather than a test per pass. A
+    whole-document demangle runs *after* the rows were built and correctly
+    escaped, so the pipe inside `Foo::operator|(Foo const&)` does not exist
+    yet when `md_cell` sees the cell — escaping the raw value cannot protect
+    a delimiter that demangling introduces later.
+
+    `report.dispatch_markdown` and the release renderer were fixed first;
+    `service_render._demangled` is the one every CLI and typed
+    `render_output("markdown", ...)` actually goes through, and it still
+    called `demangle_text()` unescaped. Measured before the fix: four
+    columns in a three-column table (Codex review, PR #1284).
+
+    The oracle is GFM's own rule — split on unescaped pipes and count — not
+    a fixed expected string, so the test states the property (a row keeps
+    its column count) rather than one rendering of it.
+    """
+
+    #: Demangles to `Foo::operator|(Foo const&)`, verified in the vacuity
+    #: guard below rather than assumed from the mangling.
+    PIPE_SYMBOL = "_ZN3FooorERKS_"
+
+    def _result(self):
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_types import DiffResult
+        from abicheck.pattern_verdicts import PatternModulation
+
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so",
+            changes=[],
+            verdict=Verdict.COMPATIBLE,
+        )
+        result.pattern_modulations = [
+            PatternModulation(
+                symbol=self.PIPE_SYMBOL,
+                original_category="abi_breaking",
+                new_category="quality",
+                rule_id="r1",
+                reason="internal",
+                evidence_tier="header",
+                edges_matched=("a->b",),
+            ).to_dict()
+        ]
+        return result
+
+    @staticmethod
+    def _columns(row: str) -> int:
+        """How many cells a GFM parser reads from *row*."""
+        import re
+
+        return len(re.split(r"(?<!\\)\|", row)) - 2
+
+    def test_the_symbol_really_demangles_to_a_pipe(self):
+        """Vacuity guard: without this the whole class proves nothing."""
+        from abicheck.demangle import demangle_text
+
+        assert "|" in demangle_text(self.PIPE_SYMBOL)
+
+    def test_the_service_markdown_path_keeps_its_column_count(self):
+        from abicheck.service_render import render_output
+
+        md = render_output("markdown", self._result(), _snapshot(), _snapshot())
+        rows = [
+            line
+            for line in md.splitlines()
+            if line.startswith("|") and "operator" in line
+        ]
+        assert rows, "vacuity guard: no modulation row rendered"
+        for row in rows:
+            assert self._columns(row) == 3, f"{self._columns(row)} columns: {row}"
+
+    def test_the_direct_markdown_renderer_keeps_its_column_count(self):
+        """The sibling pass, so a future edit cannot fix one and drop the
+        other back to the broken spelling."""
+        from abicheck.report.dispatch_markdown import to_markdown
+
+        md = to_markdown(self._result(), demangle=True)
+        rows = [
+            line
+            for line in md.splitlines()
+            if line.startswith("|") and "operator" in line
+        ]
+        assert rows, "vacuity guard: no modulation row rendered"
+        for row in rows:
+            assert self._columns(row) == 3, f"{self._columns(row)} columns: {row}"
+
+    def test_the_readable_name_survives_the_escaping(self):
+        """Escaping must protect the table without corrupting the symbol:
+        the reader still sees `operator|`, just delimiter-safe."""
+        from abicheck.service_render import render_output
+
+        md = render_output("markdown", self._result(), _snapshot(), _snapshot())
+        assert "operator\\|" in md, md
+        assert self.PIPE_SYMBOL in md, "the mangled spelling is kept beside it"

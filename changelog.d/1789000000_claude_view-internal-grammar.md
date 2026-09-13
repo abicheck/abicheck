@@ -222,3 +222,10 @@
   the existing "present only when active" convention, so a release produced
   without them is byte-identical and a pre-1.5 consumer reads nothing
   differently.
+
+- **The CLI's own Markdown demangle pass escapes table pipes too.** It was the
+  third and last whole-document pass with this hazard, and the one every CLI
+  and typed `render_output("markdown", ...)` render actually goes through: a
+  symbol only becomes `Foo::operator|(Foo const&)` during that pass, so the
+  pipe lands inside a row that was already built and correctly escaped, and a
+  GFM parser read a fourth column in a three-column table.

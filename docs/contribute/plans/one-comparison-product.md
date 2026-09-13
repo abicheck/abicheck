@@ -2086,6 +2086,21 @@ mechanism* first and an option count second:
   and the test asserts both halves: one H2 in the release section, and the
   scalar document keeping its own.
 
+  **Round 16 found the third instance of one hazard, which is the lesson.**
+  A whole-document demangle pass runs *after* rows are built and escaped, so
+  the pipe inside `Foo::operator|(Foo const&)` does not exist when `md_cell`
+  sees the cell -- escaping the raw value cannot protect a delimiter that
+  demangling introduces later. The release renderer was fixed first, then the
+  scalar `dispatch_markdown` pass; `service_render._demangled` is the third,
+  and the one every CLI and typed `render_output("markdown", ...)` actually
+  goes through (`_project_markdown` calls `to_markdown` *without* `demangle=`,
+  so that function's own escaped pass never runs on this path). Measured
+  before the fix: four columns in a three-column table. The regression test is
+  therefore written as a sweep over the passes with GFM's own rule as the
+  oracle -- split on unescaped pipes, count cells -- rather than one test per
+  pass against a fixed expected string, because "fixed here, missed there" is
+  precisely how this reached a third round.
+
   The surviving parsing primitive gets the treatment AGENTS.md requires:
   `TestParseViewTokensProperties` (`tests/test_view_internal_grammar.py`)
   states `parse_view_tokens`'s contract as invariants — last mode wins under

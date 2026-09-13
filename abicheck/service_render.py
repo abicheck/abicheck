@@ -433,12 +433,28 @@ def _project_markdown(envelope: ReportEnvelope) -> str:
 
 
 def _demangled(text: str, envelope: ReportEnvelope) -> str:
-    """Apply the human-facing ``demangle`` presentation option to *text*."""
+    """Apply the human-facing ``demangle`` presentation option to *text*.
+
+    ``escape_table_pipes=True`` because both callers render Markdown
+    (:func:`_project_markdown` and :func:`_project_review`) and this is a
+    *whole-document* pass over rows that were already built and correctly
+    escaped: a symbol only becomes ``Foo::operator|(Foo const&)`` here, so
+    the pipe it introduces lands inside a finished table cell and GFM reads
+    an extra column. Measured before the fix, a modulation row rendered
+    through ``render_output("markdown", ...)`` had four columns in a
+    three-column table (Codex review, PR #1284).
+
+    The sibling passes in ``report.dispatch_markdown`` and the release
+    renderer already escape; this one is the third, and the one every CLI
+    and typed ``render_output`` Markdown render actually goes through --
+    ``to_markdown`` is called from :func:`_project_markdown` without
+    ``demangle=``, so its own escaped pass never runs on this path.
+    """
     if not envelope.options.demangle:
         return text
     from .demangle import demangle_text
 
-    return demangle_text(text)
+    return demangle_text(text, escape_table_pipes=True)
 
 
 _PROJECTIONS: dict[str, Callable[[ReportEnvelope], str]] = {
