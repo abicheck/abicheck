@@ -7615,6 +7615,147 @@ that point drop the skip and go back to an unconditional comparison so a
 *future* regression on this field is caught structurally rather than by an
 absent key silently reading as "no divergence".
 
+## L2 performance bottlenecks found by the full-CLI harness (measured, not fixed)
+
+Found while building `scripts/check_l2_cli_perf.py`. Recorded here rather than
+acted on: that work was explicitly measurement-only, and each of these is a
+production behaviour change needing its own design and its own evidence that the
+change is worth it. Every number below is a real local measurement (gcc 13.3.0 /
+castxml 0.7.0 / clang 18.1.3, 4 CPUs, Linux), reproducible with
+`python scripts/check_l2_cli_perf.py --suite extended`.
+
+### Interpreter startup dominates a small-input CLI run
+
+`abicheck --version` — interpreter plus import plus Click tree construction,
+before any work at all — costs **0.56–0.66 s**. A stored-snapshot/stored-snapshot
+`compare` of a small fixture costs ~1.05 s end to end, so roughly **60% of it is
+startup**. `compare --dry-run` (startup plus config and input resolution, diff
+never run) costs 0.60–0.79 s, which bounds resolution itself at well under
+0.2 s.
+
+Consequences worth knowing before optimizing anything else: a change that halves
+the actual L2 comparison work would move that run's wall time by under 20%, and
+the full-CLI lane's absolute noise floor has to be set around this cost rather
+than around the comparison's (hence `--regress-min-delta-seconds 0.5` by
+default there, where the in-process gates use 0). A warm-cache `dump` is
+*not measurably faster* than a cold one on a small fixture for the same
+reason — see below.
+
+Not investigated: which imports dominate, and whether lazy-importing the heavy
+ones is feasible without breaking the registration-by-import-side-effect pattern
+the CLI is built on.
+
+### The `clang -M` include-graph pass is per-header, per-side, and never cached
+
+Measured on the header-count axis (one library, N top-level public headers over
+one shared `detail/` dependency closure, live/live comparison):
+
+| top-level headers | observed `include_pass` invocations | wall |
+|---:|---:|---:|
+| 1 | 2 | 1.10 s |
+| 8 | 16 | 2.48 s |
+| 32 | 64 | 10.40 s |
+
+Two separate things show up here. The invocation count is exactly
+`headers × 2 sides` — one `clang -M` subprocess per top-level header per side,
+with no batching across headers that share a dependency closure. And the wall
+time grows **superlinearly** in header count (8x the headers costs ~9.5x the
+time going 1→32), so this is not merely a constant per-header cost.
+
+The separate cache finding: on a warm AST cache the header *extraction* count
+drops to zero (the AST cache serves it) while the `include_pass` count stays
+unchanged. The include graph is recomputed on every run regardless of cache
+state. Combined with the startup cost above, that is why a fully warm small
+`dump` measures ~0.93 s against a cold ~0.88 s — within noise, i.e. the cache
+hit buys nothing observable at that scale even though it demonstrably happened
+(proved by the counters, not the clock).
+
+### A set of libraries pays full cost per library, and a shared header context does not reduce it
+
+Five libraries compared as five per-library `compare` invocations (the only
+supported shape — there is no declarative L2 bundle comparison), cost ~1.15–1.50 s
+each and **4 header extractions each**, for a set total of ~6.3 s. That figure is
+the same whether the five libraries share one dependency header or each have
+their own:
+
+| arm | resolved dependency headers | extractions (5 libraries) |
+|---|---:|---:|
+| shared context | 1 | 20 |
+| distinct contexts | 5 | 20 |
+
+The mechanism, which is the actually useful part: the header-frontend invocation
+count is driven by the **top-level** headers, not by their dependencies, so
+sharing a dependency header cannot reduce it. Each library still needs its own
+parse of its own public header, and that parse pulls the shared dependency in
+regardless of whether another library already parsed it.
+
+**This claim was previously unsupported and is worth flagging as such.** The
+first version of the fixture gave every library its own byte-identical copy of
+`detail/core.h` under its own `libN/include/` path — and the AST cache keys on
+each header's *resolved path*, so the "shared" arm shared nothing. The two arms
+were both distinct-path workloads, and comparing them could only ever have
+produced "no difference". The fixture now resolves the shared arm through one
+physical file at a common include root, `header_contexts` is counted from the
+resolved paths actually built rather than from the flag that requested them, and
+the numbers above are from that corrected fixture. The conclusion happens to be
+the same; the evidence for it did not exist before.
+
+Recorded as a measurement of current behaviour, deliberately not as a claim that
+cross-library sharing *should* be implemented: whether a cross-library
+header-AST cache is worth its invalidation complexity is a real design question,
+and `scripts/l2_real_profiles.py`'s oneDAL profile (five header-bearing
+libraries across two compile contexts) is the realistic case to judge it
+against.
+
+### ~~`compare --format` repeated silently keeps only the last format~~ — CLOSED by the export grammar
+
+Recorded while building the full-CLI harness against `main` at `f6aa2aae`, where
+`compare --format json --format markdown -o out` exited 0 and wrote markdown
+only, with no way to get both artifacts from one invocation. ADR-068's slices
+7m/7n landed before this branch merged and closed it outright: `--format` is gone
+and `-o FORMAT=DESTINATION` is repeatable, with every export rendered from the
+one completed analysis.
+
+Kept as a closed entry rather than deleted because the *measurement* survives and
+is worth knowing: `check_l2_cli_perf.py`'s `compare_two_formats` scenario now
+verifies that promise rather than trusting it. A single `compare` exporting both
+`json=` and `markdown=` over a stored-old/live-new pair performs **2 header
+extractions — exactly one side's worth**, so the second renderer demonstrably
+does not re-run the analysis. (Stored/stored would have been the easier operand
+pair and a useless test: the count is zero either way, so it could not
+distinguish one analysis from two.)
+
+### The `clang -M` include pass is unaffected by a warm AST cache — confirmed at `--repeat 3`
+
+Re-confirmed after the cache-lifecycle fix below, now that a multi-repetition run
+actually works: across three repetitions of the cold/warm sequence the header
+*extraction* count goes 2 → 0 (the AST cache serves it) while `include_pass`
+stays at 1 every time. The include graph is recomputed on every run regardless of
+cache state, which is the same finding as the per-header scaling above seen from
+the cache side.
+
+### A labelled side-scoped `--include` appeared to suppress unlabelled global include roots
+
+Observed once, on a real PVXS comparison, and **not yet reduced to a minimal
+reproduction** — recorded so the next person does not lose the observation.
+Invoking:
+
+```
+compare old.so new.so --include old:public=OLD_INC --include new:public=NEW_INC \
+  --include EPICS_INC --include EPICS_INC/os/Linux --include EPICS_INC/compiler/gcc ...
+```
+
+failed with `fatal error: 'epicsTime.h' file not found`, despite `EPICS_INC`
+being passed as an unlabelled (both-sides) include root and genuinely containing
+that header. The same roots passed to a bare `dump` worked. Re-expressing every
+root in the per-side labelled form made the comparison succeed.
+
+So either unlabelled roots are dropped once any labelled side-scoped root is
+given for that side, or they are ordered such that castxml does not see them.
+`--include`'s own help text documents the two forms as composable, so if this
+reproduces it is a defect rather than a usage error. Next step: a minimal
+two-header fixture mixing one labelled and one unlabelled root.
+
 ## `--crosscheck KEY=LEVEL`'s engine half outlives its retirement ruling
 
 ADR-068's second 2026-09-09 amendment rules `--crosscheck KEY=error`'s

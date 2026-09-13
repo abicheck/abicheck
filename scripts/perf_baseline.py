@@ -40,7 +40,16 @@ from typing import Protocol
 # caller that doesn't go through benchmark_scaling.py first would need to do
 # the same setup itself (the same pattern tests/test_perf_measurement.py
 # already uses to load perf_measurement.py standalone).
-from perf_measurement import combined_regression_threshold
+from perf_measurement import GateThreshold, combined_regression_threshold
+
+#: The CLI-wide regression-gate defaults for ``benchmark_scaling.py``. They
+#: live here, next to the resolver that applies them, rather than as
+#: ``argparse`` ``default=`` values: those flags default to ``None`` so that
+#: "the caller asked for 0.5" can be told apart from "0.5 is the fallback",
+#: which is the distinction :func:`resolve_scenario_threshold` needs to stop a
+#: built-in per-scenario exception from outranking an explicit threshold.
+DEFAULT_REGRESS_TOLERANCE = 0.5
+DEFAULT_REGRESS_MIN_DELTA_SECONDS = 0.0
 
 
 class _TimedPoint(Protocol):
@@ -81,7 +90,7 @@ def baseline_points_from_report(
 
 
 def load_baseline(
-    baseline_path: Path, regress_tolerance: float
+    baseline_path: Path, regress_tolerance: float | None
 ) -> dict[tuple[str, int], float]:
     """Load baseline scaling JSON and return its (scenario, size) -> seconds mapping.
 
@@ -89,8 +98,16 @@ def load_baseline(
     dict when the file cannot be read or parsed. The caller (``main()``) is
     responsible for treating an empty result as a hard failure when
     ``--baseline`` was explicitly given -- this function only loads, never gates.
+
+    *regress_tolerance* is the caller's CLI value, ``None`` when unstated, and is
+    resolved here via :func:`stated_or_default` rather than at the call site: the
+    call site used ``value or DEFAULT``, under which an explicit
+    ``--regress-tolerance 0`` printed the 50% default while the gate itself used
+    the stated 0.0.
     """
     import json
+
+    regress_tolerance = stated_or_default(regress_tolerance, DEFAULT_REGRESS_TOLERANCE)
 
     try:
         points = baseline_points_from_report(json.loads(baseline_path.read_text()))
@@ -171,3 +188,132 @@ def check_regressions(
                 f"{min_delta_seconds:.3f}s))"
             )
     return msgs
+
+
+def resolve_scenario_threshold(
+    *,
+    scenario: str,
+    cli_tolerance: float | None,
+    cli_min_delta: float | None,
+    default_tolerance: float,
+    default_min_delta: float,
+    spec_tolerance: float | None = None,
+    spec_min_delta: float | None = None,
+) -> GateThreshold:
+    """The effective threshold for *scenario*, with correct precedence.
+
+    The rule, and the bug it replaces:
+
+    ``benchmark_scaling.py``'s ``Scenario.regress_tolerance`` was a built-in
+    per-scenario exception that won **unconditionally** -- it was consulted
+    first, and the CLI value was used only when it was ``None``. So
+    ``--regress-tolerance 0.1``, an explicit request for a *stricter* gate,
+    ran the ``serialize`` scenario at ``1.3`` and still printed ``OK``. A
+    built-in allowance silently outranking an explicitly stated stricter
+    threshold is not a tunable default; it is a gate that lies about what it
+    enforced, and nothing in the run's own output revealed it.
+
+    Here the order is: an explicitly-given CLI value wins over everything
+    (``source="explicit"``); otherwise a built-in per-scenario exception
+    applies (``source="scenario_default"``); otherwise the CLI default
+    (``source="default"``). The distinction a bare ``float`` default cannot
+    express -- "the user typed 0.5" vs. "0.5 is the default" -- is why the
+    caller passes ``None`` for "not stated" and supplies the default
+    separately.
+
+    The returned value is recorded in the report, so a reader can always see
+    which of the three sources produced the number that gated them.
+    """
+    if cli_tolerance is not None or cli_min_delta is not None:
+        return GateThreshold(
+            tolerance=(
+                cli_tolerance
+                if cli_tolerance is not None
+                else (
+                    spec_tolerance if spec_tolerance is not None else default_tolerance
+                )
+            ),
+            min_delta=(
+                cli_min_delta
+                if cli_min_delta is not None
+                else (
+                    spec_min_delta if spec_min_delta is not None else default_min_delta
+                )
+            ),
+            source="explicit",
+        )
+    if spec_tolerance is not None or spec_min_delta is not None:
+        return GateThreshold(
+            tolerance=spec_tolerance
+            if spec_tolerance is not None
+            else default_tolerance,
+            min_delta=spec_min_delta
+            if spec_min_delta is not None
+            else default_min_delta,
+            source=f"scenario_default:{scenario}",
+        )
+    return GateThreshold(
+        tolerance=default_tolerance, min_delta=default_min_delta, source="default"
+    )
+
+
+def apply_regression_gate(
+    current: Sequence[_TimedPoint],
+    scenario: str,
+    baseline: dict[tuple[str, int], float],
+    *,
+    cli_tolerance: float | None,
+    cli_min_delta: float | None,
+    spec_tolerance: float | None = None,
+    spec_min_delta: float | None = None,
+    record_into: dict[str, object] | None = None,
+    floor_seconds: float = 0.05,
+) -> list[str]:
+    """Resolve *scenario*'s effective threshold, record it, and gate on it.
+
+    One function rather than three steps at the call site, because the three
+    have to stay together to be correct: a threshold that is resolved but not
+    recorded is a gate whose own output cannot be audited, and a threshold that
+    is recorded but then not the one passed to :func:`check_regressions` is
+    worse than none at all. Keeping them adjacent in the caller is a
+    convention; keeping them in one function is an invariant.
+
+    *record_into* is the scenario's own report dict; the resolved threshold
+    lands there under ``effective_threshold``. ``None`` skips recording, for a
+    caller with no report to write (a test, or a gate run with no ``--json``).
+    """
+    threshold = resolve_scenario_threshold(
+        scenario=scenario,
+        cli_tolerance=cli_tolerance,
+        cli_min_delta=cli_min_delta,
+        default_tolerance=DEFAULT_REGRESS_TOLERANCE,
+        default_min_delta=DEFAULT_REGRESS_MIN_DELTA_SECONDS,
+        spec_tolerance=spec_tolerance,
+        spec_min_delta=spec_min_delta,
+    )
+    if record_into is not None:
+        record_into["effective_threshold"] = threshold.as_dict()
+    print(
+        f"  (gate threshold: tolerance={threshold.tolerance} "
+        f"min_delta_seconds={threshold.min_delta} source={threshold.source})"
+    )
+    return check_regressions(
+        current,
+        scenario,
+        baseline,
+        threshold.tolerance,
+        floor_seconds=floor_seconds,
+        min_delta_seconds=threshold.min_delta,
+    )
+
+
+def stated_or_default(value: float | None, default: float) -> float:
+    """*value* unless it was never stated, in which case *default*.
+
+    Exists because ``value or default`` is wrong for a threshold: ``0.0`` is
+    falsy, so an explicit ``--regress-tolerance 0`` silently became the 0.5
+    default in the one place that *printed* the tolerance, while the code that
+    actually gated the run used the stated ``0.0``. The printed number then
+    contradicted the number that judged the run.
+    """
+    return default if value is None else value

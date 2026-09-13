@@ -119,12 +119,38 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "abicheck/storage/snapshot_encode.py",
     "abicheck/storage/snapshot_decode_declarations.py",
     "abicheck/storage/snapshot_reliability_flags.py",
+    # Every flat binary/debug parser `dumper.py` calls, not just the two that
+    # happened to be listed: `parse_elf_metadata` is the first thing an ELF dump
+    # does and `dwarf_*` is what an L1 fallback reads, so an ELF/DWARF parsing
+    # regression skipped every perf job -- including the full-CLI L2 gate, whose
+    # fixture is an ELF workload (Codex review). Derived set, checked by
+    # `test_every_parser_dumper_imports_is_covered`.
+    "abicheck/elf_metadata.py",
     "abicheck/pe_metadata.py",
     "abicheck/macho_metadata.py",
+    "abicheck/dwarf_metadata.py",
+    "abicheck/dwarf_advanced.py",
+    "abicheck/dwarf_unified.py",
+    "abicheck/dwarf_snapshot.py",
+    "abicheck/dwarf_utils.py",
+    # Binary file helpers `dumper.py` reaches for on every artifact it opens;
+    # surfaced by the derived test rather than by inspection.
+    "abicheck/binary_utils.py",
     "abicheck/dumper.py",
     "abicheck/dwarf_presence.py",
     "abicheck/service.py",
     "scripts/benchmark_scaling.py",
+    # The harnesses themselves, by prefix rather than by name: the full-CLI
+    # harness has already been split twice under the file-size cap
+    # (`l2_cli_validation.py`, `l2_cli_gating.py`), and a split that moves the
+    # validation or gating logic out of a classified file and into an
+    # unclassified one silently stops a PR weakening it from being measured.
+    "scripts/l2_cli_*.py",
+    "scripts/check_l2_cli_perf.py",
+    "scripts/check_header_graph_perf.py",
+    "scripts/perf_measurement.py",
+    "scripts/perf_baseline.py",
+    "scripts/perf_receipt.py",
     "tests/test_performance.py",
     "tests/test_perf_dump_scaling.py",
     "tests/test_benchmark_scaling.py",
@@ -176,6 +202,87 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "scripts/classify_perf_paths.py",
     "tests/test_classify_perf_paths.py",
     ".github/workflows/performance.yml",
+    # The full-CLI L2 harness (scripts/check_l2_cli_perf.py) and its own
+    # measurement layer. Listed because a change to any of them changes what the
+    # perf lane measures, and an unmeasured harness change is how a lane comes
+    # to report a pass it never earned.
+    "scripts/check_l2_cli_perf.py",
+    "scripts/l2_cli_fixture.py",
+    "scripts/perf_receipt.py",
+    "scripts/l2_real_profiles.py",
+    "tests/test_l2_cli_perf_gate.py",
+    "tests/test_perf_receipt.py",
+    "tests/test_l2_real_profiles.py",
+    # The full-CLI L2 harness exercises the real `dump` and `compare` commands
+    # end to end, so the CLI entry points, their option/config resolution, the
+    # orchestration the commands route through, the report renderers the run
+    # writes with, and the storage codec the stored-operand scenarios load
+    # through are all inside the window it measures. Previously none of these
+    # were listed: the pattern list predates a full-CLI level existing, and was
+    # written for two in-process harnesses that never start an interpreter or
+    # render a report.
+    #
+    # Listed per real dependency rather than by directory name (AGENTS.md: "не
+    # разделяй jobs по названиям каталогов без проверки реальных зависимостей"),
+    # and verified against what the harness's own scenarios actually invoke --
+    # `abicheck dump`, `abicheck compare` (live/live, stored/live,
+    # stored/stored, --no-baseline, --dry-run, json and markdown renderers).
+    "abicheck/cli.py",
+    "abicheck/frontends/cli/**",
+    "abicheck/cli_compare*.py",
+    "abicheck/cli_dump*.py",
+    "abicheck/cli_options.py",
+    "abicheck/reporter.py",
+    "abicheck/reporter_markdown.py",
+    "abicheck/report/**",
+    "abicheck/workflows/**",
+    "abicheck/storage/**",
+    "abicheck/comparability.py",
+    "abicheck/snapshot_io.py",
+    # The L2 *extraction* layer. Omitting it was a real hole in the extension
+    # above, which covered the frontend, renderer, orchestration and storage
+    # paths but not the stage that actually produces L2 evidence: a PR touching
+    # only `extract/semantic_normalizer.py` or `dumper_manifest.py` classified as
+    # not-perf-sensitive, so none of the perf jobs -- including the full-CLI L2
+    # gate, whose whole subject is this path -- would have measured it.
+    #
+    # Verified against the real import graph rather than assumed from the
+    # directory name: `dumper.py` imports `extract.export_symbol_identity`,
+    # `extract.header_ast_backend` and `extract.header_ast_fields` at module
+    # scope, and resolves `dumper_manifest.resolve_header_ast_result` and
+    # `dumper_hybrid.run_hybrid_dump` lazily on the dump path.
+    "abicheck/extract/**",
+    # Every `dumper_*` sibling `dumper.py` actually imports. Six of these were
+    # missing and were found by deriving the set from `dumper.py`'s own imports in
+    # `tests/test_classify_perf_paths.py` rather than listing them by hand --
+    # which is the same omission, one layer down, that the extract/ hole was.
+    # That test now fails if `dumper.py` starts importing a sibling no pattern
+    # here covers.
+    "abicheck/dumper_manifest.py",
+    "abicheck/dumper_hybrid.py",
+    "abicheck/dumper_castxml_probe.py",
+    "abicheck/dumper_contract.py",
+    "abicheck/dumper_debug.py",
+    "abicheck/dumper_elf_fallback.py",
+    "abicheck/dumper_elf_symbols.py",
+    "abicheck/dumper_layout_backfill.py",
+    # The module entry point. Every measured command is launched as
+    # `python -m abicheck`, which executes BOTH of these before reaching cli.py --
+    # so the full-CLI lane, whose largest single cost is interpreter startup and
+    # import, was skipped for a change to the exact startup path it measures.
+    "abicheck/__main__.py",
+    "abicheck/__init__.py",
+    # ADR-061's innermost ring. Every object the measured L2 pipeline passes
+    # between stages is defined here: extraction constructs them, storage
+    # encodes and decodes them, comparison walks them, reporting projects them.
+    # So a change to one of their layouts or to a shared normalization
+    # primitive (`signature_normalization`, `semantic_ir`, `snapshot`) can
+    # regress the whole full-CLI workload without touching a single file the
+    # list above names -- and every perf job was skipped for it (Codex review).
+    # Whole-subtree, not a file list: the dependency is on the ring, not on the
+    # particular modules today's pipeline happens to touch, and a file list
+    # here would go stale exactly the way the pre-`extract/**` one did.
+    "abicheck/model/**",
 )
 
 
