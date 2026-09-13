@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -582,8 +583,6 @@ class TestEveryStepGetsAPrivateTmpdir:
         a future refactor that points `$TMPDIR` back at the shared temp
         would still satisfy "it is a directory somebody allocated".
         """
-        import tempfile
-
         workspace = make_workspace(tmp_path)
         result = run_step(self._tmpdir_probe(), workspace=workspace)
 
