@@ -618,20 +618,12 @@ class TestAStepsOwnTemporaryFilesStayTestOwned:
         )
 
     @pytest.mark.skipif(
-        sys.platform == "darwin",
-        reason=(
-            "macOS's mktemp resolves its own directory via "
-            "confstr(_CS_DARWIN_USER_TEMP_DIR) and ignores $TMPDIR entirely "
-            "(documented in tests/test_action_run_sh_py_safe_path.py), so a "
-            "bare `mktemp -d` there is not expected to honour it"
-        ),
-    )
-    @pytest.mark.skipif(
         os.name == "nt",
         reason=(
-            "the value handed to Git Bash is a native Windows path, so where "
-            "MSYS's mktemp places its result is a separate question from the "
-            "reaped-/tmp bug this guards, which is Linux-only"
+            "the value handed to Git Bash is a native Windows path while "
+            "MSYS's mktemp answers in a POSIX one, so neither outcome of the "
+            "prefix test below means what it says -- and the reaped-/tmp bug "
+            "this guards is Linux-only anyway"
         ),
     )
     def test_a_bare_mktemp_lands_in_it(self, tmp_path: Path) -> None:
@@ -656,6 +648,30 @@ class TestAStepsOwnTemporaryFilesStayTestOwned:
         )
 
         assert result.returncode == 0, result.stderr
+
+        if sys.platform == "darwin":
+            # Asserted rather than skipped, on Codex's review point: skipping
+            # would leave this platform's real behaviour permanently
+            # unstated, and a skip cannot tell us if it ever changes.
+            #
+            # macOS's mktemp resolves its own directory via
+            # `confstr(_CS_DARWIN_USER_TEMP_DIR)` and never reads $TMPDIR
+            # (first-hand evidence:
+            # tests/test_action_run_sh_py_safe_path.py's own note, where a
+            # $TMPDIR override was silently ignored by the real binary). The
+            # harness cannot override that from the environment, so the honest
+            # thing is to pin what does happen. It is not the bug this guards:
+            # _CS_DARWIN_USER_TEMP_DIR is a per-user, per-boot directory, not
+            # the shared /tmp whose mid-job pruning is what reaped these files
+            # on the Linux runners. If this assertion ever fails, macOS has
+            # started honouring $TMPDIR and the branch should collapse into
+            # the `inside=yes` case below.
+            assert result.output_lines[:1] != ["inside=yes"], (
+                "macOS's mktemp now honours $TMPDIR -- delete this branch and "
+                "let the cross-platform assertion below cover darwin too"
+            )
+            return
+
         assert result.output_lines == ["inside=yes"], (
             "a bare `mktemp -d` escaped the step's own TMPDIR, so on a runner "
             f"that prunes the shared temp directory it can vanish mid-step: {result.output_lines}"
