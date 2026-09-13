@@ -450,3 +450,30 @@ def _header_sequence_is_interior_insertion(
     if scope_new_headers is None:
         return False
     return (set(new_list) - set(old_list)) <= scope_new_headers
+
+
+def inserted_header_entries(old_value: str | None, new_value: str | None) -> list[str]:
+    """The ``header_sequence`` entries present in *new_value* and not in
+    *old_value*, in their new-side order.
+
+    What a caller should NAME when reporting an insertion (CodeRabbit
+    review, PR #1274). ``_scope_newly_added_headers`` answers a different
+    question -- every header newly added to the declared *surface* -- and
+    :func:`_header_sequence_is_interior_insertion` only requires the
+    sequence's own additions to be a SUBSET of that set. A header declared
+    public but never fed to the L2 frontend is in one and not the other, so
+    reporting the scope set would name a header that was not inserted
+    anywhere.
+
+    Empty when either side is absent or undecodable: a caller that has
+    already established the insertion shape should fall back to its own
+    wording rather than assert a list it cannot derive.
+    """
+    if old_value is None or new_value is None:
+        return []
+    old_list = _json_load_str_list(old_value)
+    new_list = _json_load_str_list(new_value)
+    if old_list is None or new_list is None:
+        return []
+    old_entries = set(old_list)
+    return [entry for entry in new_list if entry not in old_entries]

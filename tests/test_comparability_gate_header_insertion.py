@@ -527,3 +527,77 @@ class TestBoundedMismatchReachesTheAssuranceRollup:
         without = self._assurance(tmp_path, _OLD_HEADERS).notes
         added = [n for n in with_insertion if n not in without]
         assert any("reduced assurance" in n for n in added)
+
+
+class TestTheReasonNamesOnlyWhatWasInserted:
+    """The reported set is the SEQUENCE's own additions.
+
+    `_header_sequence_is_interior_insertion` only requires those additions to
+    be a *subset* of `_scope_newly_added_headers`, so the two sets are not
+    interchangeable: a header declared public but never fed to the L2
+    frontend is in the scope set and in no insertion. Naming the scope set
+    would report a header that was not inserted anywhere — a finding about a
+    file nothing happened to.
+    """
+
+    @pytest.mark.parametrize(
+        "old_entries,new_entries,expected",
+        [
+            (["a.h", "c.h"], ["a.h", "b.h", "c.h"], ["b.h"]),
+            (["a.h"], ["x.h", "a.h", "y.h"], ["x.h", "y.h"]),
+            (["a.h", "b.h"], ["a.h", "b.h"], []),
+            # New-side order is preserved, not sorted.
+            (["m.h"], ["z.h", "m.h", "a.h"], ["z.h", "a.h"]),
+            # A removal is not an addition.
+            (["a.h", "b.h"], ["b.h"], []),
+        ],
+    )
+    def test_entries_come_from_the_sequence_diff(
+        self, old_entries, new_entries, expected
+    ):
+        from abicheck.comparability_sequences import inserted_header_entries
+
+        assert inserted_header_entries(_seq(old_entries), _seq(new_entries)) == expected
+
+    @pytest.mark.parametrize(
+        "old_value,new_value",
+        [(None, "[]"), ("[]", None), ("not-json", "[]"), ("[]", "not-json")],
+    )
+    def test_undecodable_sides_report_nothing(self, old_value, new_value):
+        """Rather than asserting a list it cannot derive."""
+        from abicheck.comparability_sequences import inserted_header_entries
+
+        assert inserted_header_entries(old_value, new_value) == []
+
+    def test_a_declared_but_unparsed_header_is_not_reported_as_inserted(self, tmp_path):
+        """End to end: `unparsed.h` joins the public surface without being fed
+        to the frontend, so it is in `scope_fields["headers"]` and in no
+        `header_sequence` position. Only `json.h` was inserted."""
+        old_root = tmp_path / "old"
+        new_root = tmp_path / "new"
+        old_headers = _headers(old_root, _OLD_HEADERS)
+        new_declared = _headers(new_root, (*_OLD_HEADERS, "json.h"))
+        new_public = _headers(new_root, (*_OLD_HEADERS, "json.h", "unparsed.h"))
+
+        old = AbiSnapshot(
+            library="libpvxs.so",
+            version="1.3",
+            contract=compute_extraction_contract(
+                l2_frontend_ran=True,
+                declared_headers=old_headers,
+                public_header_paths=old_headers,
+            ),
+        )
+        new = AbiSnapshot(
+            library="libpvxs.so",
+            version="1.4",
+            contract=compute_extraction_contract(
+                l2_frontend_ran=True,
+                declared_headers=new_declared,
+                public_header_paths=new_public,
+            ),
+        )
+        result = check_contracts_comparable(old, new)
+        assert isinstance(result, ComparabilityMismatch) and result.fatal is False
+        assert "json.h" in result.reason
+        assert "unparsed.h" not in result.reason

@@ -62,6 +62,7 @@ from .comparability_sequences import (
     _header_sequence_is_interior_insertion,
     _include_sequence_is_additive_owned_growth,
     _scope_newly_added_headers,
+    inserted_header_entries,
 )
 from .model import AbiSnapshot, ExtractionContract, FactStatus
 
@@ -426,7 +427,17 @@ def _declared_header_insertion_mismatch(
         scope_new_headers,
     ):
         return None
-    inserted = ", ".join(sorted(scope_new_headers or ()))
+    # The SEQUENCE's own additions, not `scope_new_headers` (CodeRabbit
+    # review, PR #1274): the predicate above only requires the former to be a
+    # subset of the latter, so a header declared public but never fed to the
+    # L2 frontend is in the scope set and in no insertion -- naming it here
+    # would report a header that was not inserted anywhere.
+    inserted = ", ".join(
+        inserted_header_entries(
+            old_contract.profile_fields.get("header_sequence"),
+            new_contract.profile_fields.get("header_sequence"),
+        )
+    )
     return ComparabilityMismatch(
         kind="profile",
         reason=(
