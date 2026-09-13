@@ -356,7 +356,7 @@ Render comparison result in the requested output format.
 | `report_mode` | `str` | `'full'` |
 | `show_impact` | `bool` | `False` |
 | `severity_config` | `SeverityConfig \| None` | `None` |
-| `demangle` | `bool` | `False` |
+| `demangle` | `bool \| None` | `None` |
 | `contract_evaluation` | `bool` | `False` |
 | `show_recommendation` | `bool` | `True` |
 | `require_complete_analysis` | `bool` | `False` |
