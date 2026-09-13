@@ -496,7 +496,20 @@ def base_name(symbol: str) -> str:
 # captured and replaced as one span -- matching only its ``_Z...`` suffix
 # left the extra leading underscore glued onto the demangled text (Codex
 # review, fresh evidence: ``__ZN3Foo3barEv`` rendered as ``_Foo::bar()``).
-_MANGLED_TOKEN_RE = re.compile(r"_{1,2}Z[A-Za-z0-9_$]+(?:\.[A-Za-z0-9_$]+)*")
+# The leading `(?<!...)` is a *left* token boundary, and it is load-bearing
+# rather than defensive: without it the scan happily starts mid-identifier, so
+# a legitimate C or assembler export that merely contains a mangled-looking
+# suffix -- `my_Z3foov` -- matched `_Z3foov` inside itself and rendered as
+# `myfoo() [_Z3foov]`, with the real symbol `my_Z3foov` appearing nowhere in
+# the output and unrecoverable from it (Codex review, PR #1284; reproduced
+# directly). This slice retires `--view no-demangle` and makes every human
+# format demangle, which is what turned a latent corruption into an
+# unavoidable one and makes it this PR's to fix. The right edge needs no such
+# guard: `[A-Za-z0-9_$]+` is greedy, so a trailing run is swallowed into the
+# token and simply fails to demangle, leaving the text untouched.
+_MANGLED_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9_$.])_{1,2}Z[A-Za-z0-9_$]+(?:\.[A-Za-z0-9_$]+)*"
+)
 
 
 def extract_mangled_tokens(text: str) -> set[str]:

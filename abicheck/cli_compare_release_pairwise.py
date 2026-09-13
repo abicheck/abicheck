@@ -426,15 +426,12 @@ def _compare_one_library(
                 else {}
             ),
         }
-        # ADR-067's structured half: both ledgers reach the report entry, not
-        # only the stderr echoes below (Codex review, PR #1284).
+        # ADR-067's structured half; see `reporter.disposition_ledger_blocks`.
         entry.update(disposition_ledger_blocks(result))
         if pattern_modulations_text is not None:
             entry["_pattern_modulations_text"] = pattern_modulations_text
         # ADR-067: a passing release report may not hide which breaking
-        # findings a rule disposed of. Captured as text and echoed by the
-        # caller, the same shape `_pattern_modulations_text` uses, so
-        # parallel libraries cannot interleave their sections.
+        # findings a rule disposed of. Echoed by the caller, in order.
         if result.suppression_audit is not None:
             from .cli_compare_fold import _fold_suppression_audit_into_text
 
@@ -515,9 +512,9 @@ def _compare_one_library(
             # aggregated into the release-level scope block by the formatter.
             entry["scope_resolved"] = result.scope_resolved
             entry["filtered_internal_count"] = result.out_of_surface_count
-            # ADR-067 again: a count alone does not say *what* was excluded
-            # or why. Echoed in order by the caller, like the audit and the
-            # pattern ledger, so parallel libraries cannot interleave.
+            # ADR-067: a count alone does not say *what* was excluded or
+            # why. Echoed in order by the caller so libraries cannot
+            # interleave under the parallel fan-out.
             if result.out_of_surface_changes:
                 from .cli_audit import ledger_lines_for
 
@@ -680,6 +677,9 @@ def _suppress_lockstep_soname_findings(
         entry["disposition_audit"] = compute_disposition_audit(
             result, severity_config
         ).to_dict()
+        # ...and the ledger blocks, snapshotted before this pass ran and so
+        # naming neither this rule nor what it hid (Codex review, PR #1284).
+        entry.update(disposition_ledger_blocks(result))
         # Recompute the cached per-library counts via `build_summary`,
         # same as above (Codex review, findings-fixes round 10/11).
         from .report_summary import build_summary

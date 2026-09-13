@@ -762,6 +762,11 @@ class TestPolymorphicKindsRealDetectorCoverage:
             "inline_namespace_version_bumped",
             "template_body_changed",
             "uninstantiated_template_removed",
+            # Round 9: `detect_call_graph_leaks` triggers on any
+            # BREAKING_KINDS change whose subject is the internal decl, and
+            # `var_removed` is one -- so this overlay is emitted for
+            # variables as well as functions.
+            "internal_symbol_required_by_public_api",
         }
 
     def test_every_polymorphic_kind_names_a_real_change_field(self):
@@ -951,3 +956,124 @@ class TestAPersistingCallableWithAChangedSignatureIsModified:
         assert not removed._check_action(
             "python_api_parameter_removed", removed.actions
         )
+
+
+class TestAnOverlayKindTakesItsEntityFromWhatTriggeredIt:
+    """`internal_symbol_required_by_public_api` is emitted for whatever the
+    triggering breaking change was about — `func_removed` on an internal
+    function, but equally `var_removed` on an internal global that a public
+    inline function references. A fixed FUNCTION entity hid the latter from
+    `--view show=variables` and serialized it as a function (Codex review,
+    PR #1284).
+
+    The rule is unanimous-or-fall-back, not first-wins: a decl that changed
+    several ways at once has no single honest entity, and the declared
+    fallback is a coarse answer rather than a wrong one.
+    """
+
+    def _entity(self, kinds):
+        from abicheck.internal_leak import _unanimous_trigger_entity
+
+        return _unanimous_trigger_entity(kinds)
+
+    def test_a_variable_trigger_yields_a_variable_finding(self):
+        assert self._entity(["var_removed"]) == "variable"
+
+    def test_a_function_trigger_yields_a_function_finding(self):
+        assert self._entity(["func_removed"]) == "function"
+
+    def test_a_mixed_trigger_falls_back_rather_than_guessing(self):
+        assert self._entity(["func_removed", "var_removed"]) is None
+        assert self._entity([]) is None
+
+    def test_it_agrees_with_the_registry_for_every_breaking_kind(self):
+        """The oracle is the catalog itself, swept over every kind that can
+        actually trigger this detector -- so the helper cannot drift from
+        what the registry says about those same kinds."""
+        from abicheck.change_registry import REGISTRY
+        from abicheck.policy.classification import BREAKING_KINDS
+
+        disagreeing = {}
+        for kind in BREAKING_KINDS:
+            declared = REGISTRY.entity_for(kind.value)
+            expected = None if declared is None else declared.value
+            got = self._entity([kind.value])
+            if got != expected:
+                disagreeing[kind.value] = (got, expected)
+        assert not disagreeing, disagreeing
+
+    def test_the_sweep_is_not_vacuous(self):
+        from abicheck.policy.classification import BREAKING_KINDS
+
+        assert len(BREAKING_KINDS) > 50
+
+    def test_the_catalog_declares_the_kind_polymorphic(self):
+        """Without this the discriminator the detector sets is ignored."""
+        from abicheck.change_registry import REGISTRY
+
+        assert (
+            REGISTRY.entity_from_field_for("internal_symbol_required_by_public_api")
+            == "entity_discriminator"
+        )
+
+
+class TestJUnitClassnamesComeFromTheCatalog:
+    """JUnit kept a fourth name-prefix taxonomy (`func_`/`var_`/`type_`/
+    `union_`/`enum_`) after every other projection moved to the catalog, so
+    it answered `metadata` for kinds the catalog declares as real elements
+    and could not classify a polymorphic kind at all — JUnit disagreed with
+    JSON and `--view show=` about the same finding (Codex review, PR #1284).
+    """
+
+    def _classname(self, kind_value, **kw):
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+        from abicheck.junit_report import _classname_for
+
+        return _classname_for(
+            Change(kind=ChangeKind(kind_value), symbol="s", description="d", **kw)
+        )
+
+    def test_kinds_the_prefix_table_called_metadata_are_classified_now(self):
+        assert self._classname("constant_added") == "variables"
+        assert self._classname("calling_convention_changed") == "functions"
+
+    def test_the_obvious_cases_are_unchanged(self):
+        assert self._classname("func_removed") == "functions"
+        assert self._classname("var_removed") == "variables"
+        assert self._classname("type_size_changed") == "types"
+
+    def test_a_non_element_entity_keeps_the_metadata_bucket(self):
+        """Existing consumers' grouping is unchanged for everything the old
+        table already got right."""
+        assert self._classname("soname_changed") == "metadata"
+
+    def test_junit_agrees_with_the_view_filter_for_every_kind(self):
+        """The claim worth pinning: one taxonomy, not two that happen to
+        agree today. Swept over the whole catalog against the same resolver
+        `--view show=` uses."""
+        from abicheck.change_registry import REGISTRY
+        from abicheck.checker_policy import ChangeKind
+
+        mapping = {
+            "function": "functions",
+            "variable": "variables",
+            "type": "types",
+            "enum": "enums",
+        }
+        disagreeing = {}
+        for kind in ChangeKind:
+            entity = REGISTRY.entity_for(kind.value)
+            expected = mapping.get(getattr(entity, "value", ""), "metadata")
+            got = self._classname(kind.value)
+            if got != expected:
+                disagreeing[kind.value] = (got, expected)
+        assert not disagreeing, disagreeing
+
+    def test_that_sweep_reaches_every_bucket(self):
+        """Vacuity guard: a mapping reduced to a constant would satisfy the
+        sweep above while asserting nothing."""
+        from abicheck.checker_policy import ChangeKind
+
+        seen = {self._classname(k.value) for k in ChangeKind}
+        assert seen == {"functions", "variables", "types", "enums", "metadata"}

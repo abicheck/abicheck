@@ -450,3 +450,66 @@ class TestTheReleaseReportCarriesItsDispositionLedgers:
             "libraries"
         ][0]
         assert lib["surface_scope"]["out_of_surface_changes"]
+
+
+class TestASymbolIsNeverCorruptedByDemangling:
+    """`demangle_text` scanned for mangled tokens with no *left* boundary, so
+    a legitimate C or assembler export merely containing a mangled-looking
+    suffix was rewritten into something that does not contain it:
+    `my_Z3foov` rendered as `myfoo() [_Z3foov]` (Codex review, PR #1284).
+
+    This slice is what makes it unavoidable rather than latent — retiring
+    `--view no-demangle` means every human format applies the transformation
+    — so the invariant worth pinning is not "this one input is handled" but
+    *the original symbol always survives into the output*.
+    """
+
+    def _demangled(self, text):
+        from abicheck.demangle import demangle_text
+
+        return demangle_text(text)
+
+    @pytest.mark.parametrize(
+        "symbol",
+        [
+            "my_Z3foov",
+            "x_Z3foov",
+            "a__ZN3Foo3barEv",
+            "prefix_Z3foov_suffix",
+            "_my_Z3foov",
+            "SOME_Z3foov",
+        ],
+    )
+    def test_a_non_mangled_symbol_survives_verbatim(self, symbol):
+        assert symbol in self._demangled(f"Removed: {symbol} from libfoo.so")
+
+    @pytest.mark.parametrize(
+        "symbol", ["_Z3foov", "__Z3foov", "_ZN3lib4goneEi", "_ZNK3Foo3barEv"]
+    )
+    def test_a_real_mangled_symbol_still_demangles_and_is_kept(self, symbol):
+        """The other half — a boundary that also suppressed real demangling
+        would pass the test above while destroying the feature."""
+        out = self._demangled(f"Removed: {symbol} from libfoo.so")
+        assert symbol in out, out
+        assert out != f"Removed: {symbol} from libfoo.so", (
+            f"{symbol} was not demangled at all"
+        )
+
+    def test_the_original_text_is_always_recoverable(self):
+        """Stated as the general invariant rather than per input: whatever
+        the transformation does, every token it consumed is still present."""
+        from abicheck.demangle import extract_mangled_tokens
+
+        for text in (
+            "my_Z3foov and _Z3foov and a__Z3foov",
+            "plain text with no symbols at all",
+            "_ZN3lib4goneEi, my_ZN3lib4goneEi",
+        ):
+            out = self._demangled(text)
+            for token in extract_mangled_tokens(text):
+                assert token in out, (text, token, out)
+            for word in text.replace(",", " ").split():
+                assert (
+                    word.strip(".,") in out.replace("(", " ").replace(")", " ")
+                    or word in out
+                ), (text, word, out)

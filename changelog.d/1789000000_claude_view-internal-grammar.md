@@ -110,3 +110,31 @@
   with a changed signature — a parameter is not an entity — so the finding
   belongs to `--view show=changed`, matching every sibling parameter-level
   kind. It was the only one declared as a removal.
+
+- **A symbol is never corrupted by demangling.** The mangled-token scan had no
+  left boundary, so a C or assembler export merely *containing* a mangled-looking
+  suffix was rewritten into text that no longer contained it — `my_Z3foov`
+  rendered as `myfoo() [_Z3foov]`. Retiring `no-demangle` is what made this
+  unavoidable rather than latent, since every human format now demangles.
+
+- **JUnit classnames come from the change catalog.** JUnit kept a fourth
+  name-prefix taxonomy after every other projection moved to the catalog, so it
+  answered `metadata` for kinds the catalog declares as real elements
+  (`constant_added` is a variable, `calling_convention_changed` a function) and
+  could not classify a polymorphic kind at all — JUnit disagreed with JSON and
+  with `--view show=` about the same finding.
+
+- **A release's disposed findings are named in Markdown too, not only JSON.**
+  The Markdown artifact carried aggregate disposition *counts* but never said
+  which findings a rule or scoping decision disposed of, leaving that detail
+  only in a transient stderr echo.
+
+- **`internal_symbol_required_by_public_api` takes its entity from what
+  triggered it.** The detector fires on any breaking change whose subject is the
+  internal declaration — `var_removed` included — so a public inline function
+  referencing a removed internal global produced a *variable* finding that a
+  fixed entity hid from `--view show=variables`.
+
+- **A release's ledger blocks survive lockstep SONAME suppression.** They were
+  snapshotted before that release-wide pass ran, so a superseded member named
+  neither the `lockstep_soname_bump` rule nor the finding it hid.

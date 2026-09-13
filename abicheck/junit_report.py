@@ -47,7 +47,6 @@ from typing import TYPE_CHECKING
 
 from .checker_types import Change, DiffResult
 from .junit_coverage_warnings import append_coverage_warnings_suite
-from .model.change_catalog.kinds import ChangeKind
 from .policy.classification import Verdict
 from .policy.contract_finding_relevance import is_evaluated
 from .report.envelope import resolved_document as _resolved_document
@@ -81,25 +80,40 @@ if TYPE_CHECKING:
 # Classname mapping — groups symbols/types by element kind
 # ---------------------------------------------------------------------------
 
-_FUNC_KINDS = frozenset(k for k in ChangeKind if k.value.startswith("func_"))
-_VAR_KINDS = frozenset(k for k in ChangeKind if k.value.startswith("var_"))
-_TYPE_KINDS = frozenset(
-    k for k in ChangeKind if k.value.startswith("type_") or k.value.startswith("union_")
-)
-_ENUM_KINDS = frozenset(k for k in ChangeKind if k.value.startswith("enum_"))
+#: JUnit's classname groups, keyed by the catalog's own entity dimension.
+#: Only the four element entities have a group; every other entity
+#: (``binary``/``build``/``source``/``analysis``) keeps the historical
+#: ``metadata`` bucket, so an existing consumer's grouping is unchanged for
+#: every kind that was already classified correctly.
+_ENTITY_TO_CLASSNAME: dict[str, str] = {
+    "function": "functions",
+    "variable": "variables",
+    "type": "types",
+    "enum": "enums",
+}
 
 
 def _classname_for(change: Change) -> str:
-    """Determine the JUnit classname group for a change."""
-    if change.kind in _FUNC_KINDS:
-        return "functions"
-    if change.kind in _VAR_KINDS:
-        return "variables"
-    if change.kind in _TYPE_KINDS:
-        return "types"
-    if change.kind in _ENUM_KINDS:
-        return "enums"
-    return "metadata"
+    """The JUnit classname group for a change, read off the change catalog.
+
+    Was a fourth name-prefix taxonomy (``func_``/``var_``/``type_``/
+    ``union_``/``enum_`` string prefixes over every ``ChangeKind``), which is
+    the exact derivation plan slice 7o deleted everywhere else: it answered
+    ``metadata`` for kinds the catalog declares as real elements
+    (``constant_added`` is a variable, ``calling_convention_changed`` a
+    function), and it cannot classify a *polymorphic* kind at all, since the
+    entity is a property of the finding rather than of its name. JUnit
+    therefore disagreed with JSON and with ``--view show=`` about the same
+    finding (Codex review, PR #1284).
+
+    Resolved through :func:`~abicheck.reporter_markdown.entity_for_change`,
+    the one resolver every other projection uses, so a kind added tomorrow
+    lands in the right group from its single catalog registration.
+    """
+    from .reporter_markdown import entity_for_change
+
+    entity = entity_for_change(change, change.kind.value)
+    return _ENTITY_TO_CLASSNAME.get(entity or "", "metadata")
 
 
 # ---------------------------------------------------------------------------

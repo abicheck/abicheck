@@ -614,6 +614,7 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "cannot see (no field/base/signature evidence, only a call "
         "edge).",
         entity=_ENT.FUNCTION,
+        entity_from_field="entity_discriminator",  # var_removed -> variable
         operation=_OP.MODIFIED,
     ),
     _E(
