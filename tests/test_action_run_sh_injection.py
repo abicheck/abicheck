@@ -142,6 +142,12 @@ _SITES = {
 
 
 def _run(env_extra: dict[str, str], bash_options: list[str] | None = None):
+    """Execute `run.sh` with a clean `INPUT_*` slate and throwaway outputs.
+
+    `bash_options` go to the interpreter itself (e.g. `["-O", "xpg_echo"]`),
+    so a test can exercise the script under a shell configured the way a
+    real runner's might be.
+    """
     require_bash()
     env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
     env.update(

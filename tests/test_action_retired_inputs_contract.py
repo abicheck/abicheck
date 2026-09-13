@@ -189,6 +189,12 @@ def _meaningful_value(spec: dict) -> str:
 
 
 def _run_script(script: Path, env_extra: dict[str, str]) -> subprocess.CompletedProcess:
+    """Run one of the Action's shell scripts with a clean `INPUT_*` slate.
+
+    Every `INPUT_*` the test process itself inherited is stripped, so an
+    ambient value cannot stand in for the one under test nor mask a missing
+    rejection by tripping an unrelated guard first.
+    """
     require_bash()
     env = {
         k: v

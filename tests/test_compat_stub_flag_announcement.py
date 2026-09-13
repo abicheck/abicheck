@@ -74,11 +74,13 @@ def _combined(result) -> str:
 
 
 def _hidden_params(command_name: str) -> list:
+    """Every hidden (accepted-but-undocumented) parameter of one command."""
     command = compat_group.commands[command_name]
     return [param for param in command.params if getattr(param, "hidden", False)]
 
 
 def _all_hidden() -> list[tuple[str, object]]:
+    """`(command, parameter)` for every hidden option across all commands."""
     return [
         (command_name, param)
         for command_name in sorted(compat_group.commands)
@@ -226,8 +228,13 @@ def test_quiet_suppresses_the_stub_warnings_but_not_the_acceptance(
     quiet = runner.invoke(
         compat_group, ["check", *base, "-quiet", "-quick"], catch_exceptions=False
     )
-    assert "-quick" in loud.output
-    assert "-quick: quick analysis" not in quiet.output
+    # Asserted by option *spelling* over both streams, not by the current
+    # warning text: a reworded announcement that still leaks `-quick` under
+    # `-quiet` would slip past a message-shaped assertion, and `_do_echo`
+    # routes through Click, which can send announcements to stderr
+    # (CodeRabbit review).
+    assert "-quick" in _combined(loud)
+    assert "-quick" not in _combined(quiet)
     # Neither run may fail *because of* the stub flag: both get as far as the
     # same missing-input error, so acceptance is verbosity-independent.
     assert "no such option" not in (loud.output + quiet.output).lower()
@@ -299,6 +306,7 @@ _EXPECTED_HIDDEN_SPELLINGS = {
 
 
 def _declared_spellings(command_name: str) -> set[str]:
+    """Every spelling (alias included) the command's hidden options accept."""
     return {
         spelling for param in _hidden_params(command_name) for spelling in param.opts
     }
