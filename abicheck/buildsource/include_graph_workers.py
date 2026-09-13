@@ -33,6 +33,7 @@ import os
 import subprocess  # noqa: S404 - depfile probes shell out to clang (never shell=True)
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
@@ -66,40 +67,85 @@ _JOB_MEM_DEFAULT_GIB = 0.5
 #: ``clang -M`` invocation *order* observable for callers that assert on it.
 _PARALLEL_MIN_UNITS = 3
 
-#: Process-wide cap on concurrently spawned ``clang -M`` children, shared by
-#: every :func:`run_probes` pool in this process -- see :func:`run_probes` for
-#: why a per-pool bound is not enough.
-#:
-#: Built once and **never replaced**, and sized by :func:`host_job_limit`
-#: (which deliberately knows nothing about how many units any one caller has).
-#: Both halves of that are load-bearing, and an earlier revision got it wrong:
-#: it keyed the semaphore on each pool's own resolved worker count and rebuilt
-#: it whenever that changed. ``service.compare`` resolves the old and new sides
-#: concurrently, and :func:`resolve_jobs` clamps to ``min(..., unit_count)`` --
-#: so two sides whose header/unit counts differ resolve *different* worker
-#: counts, and the second one's rebuild left the first pool holding a
-#: now-orphaned semaphore. Both gates then admitted their full quota at once
-#: (a 2-slot and a 4-slot gate = six concurrent children against an intended
-#: cap of four), which is exactly the CPU/RAM clamp this exists to enforce
-#: being defeated on a constrained runner (Codex review, PR #1275).
-_clang_slots_lock = threading.Lock()
-_clang_slots_state: threading.Semaphore | None = None
 
+class _ProbeGate:
+    """Admission control on concurrently spawned ``clang -M`` children.
 
-def _clang_slots() -> threading.Semaphore:
-    """The one process-wide ``clang -M`` concurrency gate.
+    One of these exists per process (:data:`_PROBE_GATE`), shared by every
+    :func:`run_probes` pool -- see that function for why a per-pool bound is
+    not enough.
 
-    Sized on first use from :func:`host_job_limit` alone, and kept for the life
-    of the process: a gate that could be replaced while a pool still held the
-    previous one would not be a cap at all (see :data:`_clang_slots_state`).
-    A later caller's larger ``jobs`` request therefore widens its own pool but
-    never this bound -- the pool then simply queues on it.
+    Deliberately **not** a ``BoundedSemaphore`` sized once from the host
+    budget, which is what three separate review rounds on this gate each
+    found a different hole in:
+
+    * A semaphore keyed on a *pool's* own worker count gets rebuilt whenever
+      that count changes, and ``resolve_jobs`` clamps to
+      ``min(host_limit, unit_count)`` -- so two concurrent sides with
+      differing header counts each ended up holding their own semaphore and
+      admitting a full quota apiece.
+    * A semaphore sized once and kept cannot notice the budget it was sized
+      from *shrinking*. Each pool re-reads the budget and correctly narrows
+      itself, while the stale, wider gate keeps admitting the old number --
+      overcommitting exactly the constrained host the memory clamp exists
+      for. Resizing it instead requires knowing when every previous holder
+      has drained, which is a lock-ordering problem in its own right.
+
+    A counter plus a condition variable has neither hole, because the limit
+    is not baked into an object at all: it is **re-read on every admission
+    attempt**, so a shrunk budget takes effect at the next probe and a grown
+    one at the next wakeup. Holders already running are never interrupted --
+    they cannot be -- so a budget that drops below the current in-flight count
+    simply admits nobody new until it recovers, which is the safe direction.
+
+    The per-attempt cost is :func:`host_job_limit`'s few small
+    ``/proc``/cgroup reads, against a probe that spawns a compiler: not worth
+    caching, and caching is what created the staleness above.
     """
-    global _clang_slots_state
-    with _clang_slots_lock:
-        if _clang_slots_state is None:
-            _clang_slots_state = threading.BoundedSemaphore(host_job_limit())
-        return _clang_slots_state
+
+    def __init__(self, limit: Callable[[], int]) -> None:
+        self._limit = limit
+        self._cond = threading.Condition()
+        self._in_flight = 0
+
+    @property
+    def in_flight(self) -> int:
+        """Children currently admitted (for tests and diagnostics)."""
+        with self._cond:
+            return self._in_flight
+
+    def acquire(self, timeout: float) -> bool:
+        """Admit one child within *timeout* seconds, or return ``False``.
+
+        Waits in short slices rather than one long one so a budget that *grows*
+        while this caller is queued is noticed promptly, not only when a
+        current holder happens to release.
+        """
+        ends_at = time.monotonic() + timeout
+        with self._cond:
+            while True:
+                if self._in_flight < self._limit():
+                    self._in_flight += 1
+                    return True
+                left = ends_at - time.monotonic()
+                if left <= 0:
+                    return False
+                self._cond.wait(timeout=min(left, _GATE_POLL_SECONDS))
+
+    def release(self) -> None:
+        with self._cond:
+            self._in_flight -= 1
+            self._cond.notify()
+
+
+#: Longest a queued probe waits before re-reading the host budget, so a budget
+#: that *grows* is picked up without waiting for a holder to release.
+_GATE_POLL_SECONDS = 0.5
+
+#: The one process-wide gate. A plain module-level instance, not lazily built:
+#: it holds no copy of the budget to go stale, so there is nothing to build
+#: late or replace (see :class:`_ProbeGate`).
+_PROBE_GATE = _ProbeGate(lambda: host_job_limit())
 
 
 @dataclass(frozen=True)
@@ -140,8 +186,8 @@ def host_job_limit(
 
     Deliberately independent of how many units any one caller has: this is the
     *host* budget, which is what makes it a safe size for the one shared gate
-    in :func:`_clang_slots` (a limit derived from one caller's unit count would
-    differ between two concurrent callers -- see that state's own docstring for
+    in :class:`_ProbeGate` (a limit derived from one caller's unit count would
+    differ between two concurrent callers -- see that class's own docstring for
     what that cost).
 
     *jobs* (the caller's explicit request) wins when set; otherwise
@@ -193,7 +239,7 @@ def resolve_jobs(
 
     Note this is a *pool* size, not a concurrency guarantee: total concurrent
     children across every pool in the process is bounded by
-    :func:`_clang_slots`, which is sized from the host budget alone.
+    :data:`_PROBE_GATE`, which admits against the host budget alone.
     """
     if unit_count < _PARALLEL_MIN_UNITS:
         return 1
@@ -224,7 +270,7 @@ def run_probes(
     """
     aggregate_deadline = time.monotonic() + aggregate_timeout_s
     resolved_jobs = resolve_jobs(len(planned), jobs=jobs, diagnostics=diagnostics)
-    slots = _clang_slots()
+    slots = _PROBE_GATE
     if resolved_jobs <= 1:
         # Still gated. A serial pool is one child rather than none, and
         # `service.compare` runs the two sides concurrently: a side whose unit
@@ -244,8 +290,8 @@ def run_probes(
     # `service_compare_pipeline.resolve_sides_sequentially` documents for
     # manifest dumps. The semaphore bounds *concurrently spawned clang
     # processes* across the request; the pools above it can stay
-    # independent. Sized from the host budget alone and never replaced -- see
-    # `_clang_slots_state` for the concrete way a per-pool size defeated it.
+    # independent. Admits against the live host budget, never a per-pool size
+    # or a cached one -- see `_ProbeGate` for the holes both of those had.
     deadline_ts = deadline.current_deadline_ts()
     with ThreadPoolExecutor(max_workers=resolved_jobs) as pool:
         futures = [
@@ -267,7 +313,7 @@ def _run_probe_in_worker(
     unit: DepfileProbe,
     aggregate_deadline: float,
     per_unit_timeout_s: float,
-    slots: threading.Semaphore,
+    slots: _ProbeGate,
 ) -> ProbeOutcome:
     """Pool-worker entry: re-establish the scan deadline, then run.
 
@@ -281,9 +327,7 @@ def _run_probe_in_worker(
         return _run_probe(unit, aggregate_deadline, per_unit_timeout_s, slots)
 
 
-def _acquire_slot(
-    slots: threading.Semaphore, aggregate_deadline: float
-) -> ProbeOutcome | None:
+def _acquire_slot(slots: _ProbeGate, aggregate_deadline: float) -> ProbeOutcome | None:
     """Take a slot in the process-wide gate, or say why this probe gives up.
 
     ``None`` means the slot is held and the caller must release it. Otherwise
@@ -325,7 +369,7 @@ def _run_probe(
     unit: DepfileProbe,
     aggregate_deadline: float,
     per_unit_timeout_s: float,
-    slots: threading.Semaphore,
+    slots: _ProbeGate,
 ) -> ProbeOutcome:
     """Run one planned ``clang -M``, reporting the outcome as data.
 

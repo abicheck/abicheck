@@ -31,8 +31,8 @@
   shared CPU/RAM sizing (`process_resources`) and is overridable with
   `ABICHECK_INCLUDE_MAP_JOBS` (`1` restores the sequential pass);
   concurrently spawned `clang -M` children are additionally capped
-  process-wide by a single gate sized from the host budget alone -- the
-  serial path included -- so a `compare` resolving both sides at once cannot
+  process-wide by a single gate that re-reads the host budget on every
+  admission -- the serial path included -- so a `compare` resolving both sides at once cannot
   oversubscribe the host even when the two sides' header counts (and so their
   pool sizes) differ. Waiting for that gate is itself bounded by the run's
   aggregate and `--budget` deadlines, so a short-budget request never blocks

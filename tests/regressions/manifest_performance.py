@@ -89,7 +89,11 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "not none, and exempting it admits one over the cap -- and "
             "waiting for it is bounded by whatever deadlines bound the work "
             "itself, or one caller's long hold makes another overrun a "
-            "budget it was supposed to be held to."
+            "budget it was supposed to be held to. And the bound must be "
+            "re-read, not cached in the object: a limit baked in at "
+            "construction cannot notice the budget it came from shrinking, "
+            "so in a long-lived process every caller narrows itself "
+            "correctly while the stale gate keeps admitting the old number."
         ),
         # Found in review on the PR that introduced the bounded-parallel
         # `clang -M` include-map pass. The gate was keyed on each pool's own

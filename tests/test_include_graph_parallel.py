@@ -36,6 +36,7 @@ from __future__ import annotations
 import subprocess
 import threading
 import time
+from collections.abc import Iterator
 
 import pytest
 
@@ -191,15 +192,17 @@ def test_worker_count_actually_bounds_concurrency(
 
 
 @pytest.fixture
-def _fresh_gate(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Start from an unbuilt process-wide gate.
+def _fresh_gate() -> Iterator[None]:
+    """Assert the shared gate is drained before and after the test.
 
-    The gate is built once per process and kept, so a test that wants to
-    observe its sizing must clear it rather than expect a rebuild -- that
-    "rebuild when the size changes" behaviour is exactly the bug the tests
-    below pin.
+    The gate is one module-level object holding a live in-flight count rather
+    than a cached limit, so there is nothing to rebuild -- but a test that
+    leaked a holder would silently narrow every later test's admissions, so
+    the balance is checked rather than assumed.
     """
-    monkeypatch.setattr(igw, "_clang_slots_state", None)
+    assert igw._PROBE_GATE.in_flight == 0
+    yield
+    assert igw._PROBE_GATE.in_flight == 0
 
 
 @pytest.mark.usefixtures("_fresh_gate")
@@ -322,15 +325,14 @@ def test_waiting_for_a_slot_is_bounded_by_the_aggregate_budget(
     compiler = _FakeCompiler(8)
     monkeypatch.setattr(igw.deadline, "run_bounded", compiler)
 
-    held = igw._clang_slots()
-    assert held.acquire(timeout=1)
+    assert igw._PROBE_GATE.acquire(timeout=1)
     try:
         extractor = ClangIncludeExtractor(jobs=4, aggregate_timeout_s=0.3)
         started = time.monotonic()
         out = extractor.extract_from_build(_build(6))
         elapsed = time.monotonic() - started
     finally:
-        held.release()
+        igw._PROBE_GATE.release()
 
     assert out == {}
     assert compiler.calls == [], "no probe may run while the gate is full"
@@ -353,8 +355,7 @@ def test_waiting_for_a_slot_is_bounded_by_the_scan_deadline(
     compiler = _FakeCompiler(8)
     monkeypatch.setattr(igw.deadline, "run_bounded", compiler)
 
-    held = igw._clang_slots()
-    assert held.acquire(timeout=1)
+    assert igw._PROBE_GATE.acquire(timeout=1)
     try:
         extractor = ClangIncludeExtractor(jobs=4, aggregate_timeout_s=60.0)
         started = time.monotonic()
@@ -362,7 +363,7 @@ def test_waiting_for_a_slot_is_bounded_by_the_scan_deadline(
             out = extractor.extract_from_build(_build(6))
         elapsed = time.monotonic() - started
     finally:
-        held.release()
+        igw._PROBE_GATE.release()
 
     assert out == {}
     assert compiler.calls == []
@@ -371,16 +372,70 @@ def test_waiting_for_a_slot_is_bounded_by_the_scan_deadline(
 
 
 @pytest.mark.usefixtures("_fresh_gate")
-def test_the_gate_is_never_replaced_once_built(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Whatever a later caller asks for, the existing gate object survives.
+def test_the_gate_re_reads_the_budget_instead_of_caching_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A host budget that *shrinks* takes effect at the next admission.
 
-    The identity check is the point: a replaced gate is not a cap, because the
-    pool still holding the previous one keeps its own independent quota.
+    Regression test for a defect found in review. A gate sized once from the
+    budget cannot notice that budget dropping -- and in a long-lived process
+    (the typed API, not the CLI) it does drop: `MemAvailable` or the cgroup
+    headroom falls, every pool correctly re-reads it and narrows itself to one
+    worker, and the stale wider gate keeps admitting the old number, which is
+    the memory clamp defeated on exactly the constrained host it exists for.
+
+    Resizing a semaphore once its holders drain was the suggested repair;
+    re-reading the limit per admission removes the staleness instead, with no
+    drain to detect. Asserted through admissions rather than by inspecting any
+    size, so a future rewrite bounding it another way still passes.
     """
-    monkeypatch.setattr(igw, "host_job_limit", lambda **_kw: 2)
-    first = igw._clang_slots()
-    monkeypatch.setattr(igw, "host_job_limit", lambda **_kw: 16)
-    assert igw._clang_slots() is first
+    limit = {"value": 4}
+    monkeypatch.setattr(igw, "host_job_limit", lambda **_kw: limit["value"])
+
+    assert igw._PROBE_GATE.acquire(timeout=1) is True
+    try:
+        limit["value"] = 1
+        assert igw._PROBE_GATE.acquire(timeout=0.2) is False, (
+            "a shrunk budget must stop admitting, not honour the size it was built with"
+        )
+        limit["value"] = 4
+        assert igw._PROBE_GATE.acquire(timeout=1) is True
+        igw._PROBE_GATE.release()
+    finally:
+        igw._PROBE_GATE.release()
+
+
+@pytest.mark.usefixtures("_fresh_gate")
+def test_a_grown_budget_admits_a_queued_probe_without_a_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Waiting probes re-check the budget on their own, not only on a release.
+
+    The other direction of the same property: a caller queued behind a full
+    gate must notice headroom returning even though no holder released, or the
+    poll interval is decoration.
+    """
+    limit = {"value": 1}
+    monkeypatch.setattr(igw, "host_job_limit", lambda **_kw: limit["value"])
+    assert igw._PROBE_GATE.acquire(timeout=1) is True
+    admitted: list[bool] = []
+
+    def waiter() -> None:
+        admitted.append(igw._PROBE_GATE.acquire(timeout=5))
+
+    thread = threading.Thread(target=waiter)
+    thread.start()
+    try:
+        time.sleep(0.1)
+        assert admitted == [], "must still be queued while the budget is one"
+        limit["value"] = 2  # headroom returns; nobody releases
+        thread.join(timeout=5)
+        assert admitted == [True]
+    finally:
+        if admitted:
+            igw._PROBE_GATE.release()
+        igw._PROBE_GATE.release()
+        thread.join(timeout=5)
 
 
 class TestResolveJobs:

@@ -932,7 +932,14 @@ component figures, not an end-to-end speedup claim.
   ungated one alongside the other side's full quota is `host_limit + 1` -- and
   the wait for a slot must be bounded by the run's aggregate and `--budget`
   deadlines, or a short-budget request blocks past its own budget behind an
-  unrelated request's long probe and reports the overrun only afterwards. One
+  unrelated request's long probe and reports the overrun only afterwards. The
+  third round is why the gate is a counter plus a condition variable rather
+  than a `BoundedSemaphore` at all: a semaphore holds a *size*, and a size
+  cached at construction cannot notice the host budget shrinking under a
+  long-lived process -- every pool re-reads the budget and narrows itself
+  while the stale gate keeps admitting the old number. Re-reading the limit on
+  each admission removes the staleness instead of resizing around it, which
+  would need to detect when every previous holder had drained. One
   thing that is *not* a valid shortcut here, and was ruled out with a real
   clang: replacing the per-header probes with a single umbrella TU. A header
   with an include guard that a *previous* header in the umbrella already
