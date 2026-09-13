@@ -26,11 +26,30 @@ import re
 from typing import Any
 
 from .checker_types import Change
+from .compare import export_transition as _export_transition
+from .compare.elf_only_demangle import (
+    elf_only_demangled_name as _elf_only_demangled_name,
+)
 from .compare.fact_comparison import compare_facts
-from .diff_helpers import make_change
-from .model import AccessLevel, Variable
+from .diff_helpers import bool_transition, make_change
+from .diff_symbols_renames import _should_filter_transitive_runtime_symbols
+from .elf_symbol_filter import (
+    exported_symbol_names,
+    is_abi_relevant_elf_symbol,
+)
+from .model import AbiSnapshot, AccessLevel, Variable
 from .model.change_catalog.kinds import ChangeKind
-from .name_classification import _find_matching_close
+from .model.surface_facts import (
+    is_abi_visible,
+    is_export_table_only_record,
+    surface_fact_summary,
+)
+from .name_classification import (
+    _find_matching_close,
+    canonicalize_type_name,
+    func_signature_cv_only_differ,
+    is_local_rtti_symbol,
+)
 
 
 def _is_access_narrowing(old_access: Any, new_access: Any) -> bool:
@@ -314,3 +333,169 @@ def _without_top_level_const(canonical_type: str) -> str:
         return _strip_trailing_declarator_const(canonical_type)
     stripped = _LEADING_CONST_TOKEN_RE.sub("", canonical_type)
     return _TRAILING_CONST_RE.sub("", stripped)
+
+
+_UNKNOWN_TYPE = "?"
+
+
+def _type_unknown(type_name: str | None) -> bool:
+    """An unresolved type spelling -- a stripped side's placeholder, not a
+    real type. Mirrors ``diff_symbols``' own predicate of the same name; the
+    two are independent one-liners over the same sentinel rather than a
+    cross-module import between two modules that already import one way."""
+    return type_name is None or type_name.strip() == _UNKNOWN_TYPE
+
+
+def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
+    """A public variable with no peer in the NEW side's public surface.
+
+    Both surfaces are evidence-gap-reconciled before any detector runs
+    (:mod:`abicheck.compare.surface_reconcile`), so a key that is still
+    missing here is genuinely absent rather than merely unestablished --
+    which is why this function needs no evidence guard of its own.
+    """
+    return [
+        make_change(
+            ChangeKind.VAR_REMOVED,
+            symbol=mangled,
+            name=v_old.name,
+            # See Change.symbol_binding's docstring - None when not captured.
+            symbol_binding=v_old.elf_binding.value if v_old.elf_binding else None,
+            entity_id=v_old.entity_id,
+            demangled_symbol=_elf_only_demangled_name(mangled, v_old.visibility),
+            # See _check_removed_function's identical stamp.
+            surface_facts=surface_fact_summary(v_old),
+        )
+    ]
+
+
+def _var_added(mangled: str, v_new: Variable) -> list[Change]:
+    """The mirror of :func:`_var_removed`, and reconciled the same way."""
+    return [
+        make_change(
+            ChangeKind.VAR_ADDED,
+            symbol=mangled,
+            name=v_new.name,
+            entity_id=v_new.entity_id,
+        )
+    ]
+
+
+def _observed_exports(snap: AbiSnapshot, types: frozenset[str]) -> frozenset[str]:
+    """The names *snap*'s own export table carries (empty when it has none).
+
+    The removal paths cross-check against this rather than trusting a
+    declaration's own, possibly legacy-bridged, ``binary_exported`` fact --
+    see ``export_transition.surface_exit_is_evidence_gap``.
+    """
+    return frozenset(
+        exported_symbol_names(
+            getattr(snap, "elf", None),
+            types,
+            abi_relevant_only=True,
+            filter_transitive_runtime_symbols=(
+                _should_filter_transitive_runtime_symbols(snap)
+            ),
+        )
+    )
+
+
+def _public_variables(snap: AbiSnapshot) -> dict[str, Variable]:
+    """Return public/ELF-only variables from *snap*.
+
+    Excludes RTTI/vtable symbols of function-local types (lambda closures and
+    other in-function types): they are not nameable public ABI and only churn
+    across builds (RD2-4).
+    """
+    filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(snap)
+    return {
+        k: v
+        for k, v in snap.variable_map.items()
+        if (
+            is_abi_visible(v)
+            and (
+                not is_export_table_only_record(v)
+                or is_abi_relevant_elf_symbol(
+                    k,
+                    filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
+                )
+            )
+            and not is_local_rtti_symbol(k)
+        )
+    }
+
+
+def _check_variable(
+    mangled: str, v_old: Variable, v_new: Variable, *, cv_facts_reliable: bool = True
+) -> list[Change]:
+    """Compare a matched pair of public variables.
+
+    *cv_facts_reliable* mirrors ``diff_types._field_type_genuinely_changed``:
+    a pre-v9 CastXML snapshot silently dropped ``volatile`` from a variable's
+    type spelling (no dedicated ``is_volatile`` fact to fall back on, unlike
+    ``TypeField``), so an unchanged legacy-vs-fresh pair would otherwise
+    misreport a breaking ``VAR_TYPE_CHANGED`` (Codex review, PR #582).
+    """
+    changes = _check_variable_alignment(mangled, v_old, v_new)
+    # The export axis is independent of every type/qualifier comparison below
+    # and must survive their early returns -- an unknown "?" type on a
+    # stripped side says nothing about whether the symbol is still exported --
+    # so it is folded in first (compare/export_transition.py).
+    changes += _export_transition.check_variable(mangled, v_old, v_new)
+    # RD2-5: a stripped side reports type "?"; unknown is not a type change.
+    if _type_unknown(v_old.type) or _type_unknown(v_new.type):
+        return changes
+    canon_old = canonicalize_type_name(v_old.type)
+    canon_new = canonicalize_type_name(v_new.type)
+    if canon_old != canon_new:
+        # A pure TOP-LEVEL const-qualifier flip is a real, common case where
+        # the type strings differ (the dumper bakes "const" into the type
+        # text) but the base type is otherwise identical — that's a const
+        # transition (below), not a base-type change. Only the trailing
+        # (top-level) const is stripped for this comparison — a pointee-level
+        # const (e.g. `int *` -> `const int *`) must still fall through to
+        # VAR_TYPE_CHANGED, since the pointer itself didn't become const.
+        is_pure_const_flip = (
+            v_old.is_const != v_new.is_const
+            and _without_top_level_const(canon_old)
+            == _without_top_level_const(canon_new)
+        )
+        if not is_pure_const_flip:
+            if not cv_facts_reliable and func_signature_cv_only_differ(
+                canon_old, canon_new
+            ):
+                # Legacy-snapshot cv noise: the type-string difference itself
+                # is untrustworthy (see this function's docstring), so don't
+                # fall through to the const-transition check below either —
+                # is_const may be equally unreliable for the same reason,
+                # and falling through would just resurface the same false
+                # positive as VAR_BECAME_CONST/VAR_LOST_CONST instead of
+                # VAR_TYPE_CHANGED (Codex review, PR #589).
+                return changes
+            return changes + [
+                make_change(
+                    ChangeKind.VAR_TYPE_CHANGED,
+                    symbol=mangled,
+                    name=v_old.name,
+                    old=v_old.type,
+                    new=v_new.type,
+                    entity_id=v_old.entity_id or v_new.entity_id,
+                )
+            ]
+    # const-qualification transitions only matter when the type is unchanged.
+    return changes + bool_transition(
+        v_old.is_const,
+        v_new.is_const,
+        mangled,
+        added=(
+            ChangeKind.VAR_BECAME_CONST,
+            f"Variable became const-qualified: {v_old.name} (writes now → SIGSEGV)",
+        ),
+        added_values=("non-const", "const"),
+        removed=(
+            ChangeKind.VAR_LOST_CONST,
+            f"Variable lost const qualifier: {v_old.name} (ODR / inlining break)",
+        ),
+        removed_values=("const", "non-const"),
+        entity_id=v_old.entity_id or v_new.entity_id,
+    )

@@ -349,6 +349,16 @@ def test_the_repository_files_tests_read_are_copied_into_mutants() -> None:
         ".agents",
         ".claude",
         ".gemini",
+        # `test_changekind_stub.py` runs the real `ruff format --check
+        # abicheck/` in the tree it finds itself in, and its claim is about
+        # what this file's `force-exclude` + `[format] exclude` do to the
+        # generated stub. Absent, ruff resolves the exclusion against
+        # whatever root it walks up to, reports the sandbox's own stub
+        # unformatted, and the stats-collection run aborts before a single
+        # mutant is measured -- a dead lane, which is exactly what this
+        # test's "pin the directory, the failure mode is a dead lane"
+        # reasoning is for.
+        "ruff.toml",
     }
     missing = required - also_copy
     assert not missing, (

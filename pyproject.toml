@@ -412,6 +412,17 @@ also_copy = [
     ".claude",
     ".gemini",
     "validation",
+    # Root ruff configuration. `test_changekind_stub.py::test_the_formatter_
+    # leaves_the_generated_stub_alone_on_an_explicit_path` runs the real
+    # `ruff format --check abicheck/` in this tree, and its whole claim is
+    # about what this file's `force-exclude` + `[format] exclude` do to the
+    # generated `kinds.pyi`. Without the file copied, ruff walks up to
+    # whatever config it finds and resolves the exclusion against *that*
+    # root, so the sandbox's own stub matches nothing and is reported
+    # unformatted -- the assertion failed, the stats-collection run mutmut
+    # does before mutating aborted under `-x`, and the whole gate exited
+    # having evaluated zero mutants. Copy-only, same rule as the rest.
+    "ruff.toml",
 ]
 only_mutate = [
     "abicheck/diff_symbols.py",  # function/variable/parameter detectors

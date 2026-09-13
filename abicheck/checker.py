@@ -32,6 +32,7 @@ from .checker_types import (  # noqa: F401
     LibraryMetadata,
 )
 from .comparability import check_contracts_comparable, comparability_outcome
+from .compare.surface_reconcile import releases_reconciliation
 from .confidence import _compute_confidence
 from .contract_pipeline import (
     ContractEvaluationStage,
@@ -872,6 +873,7 @@ def env_matrix_content_digest(env_matrix: EnvironmentMatrix | None) -> str | Non
     return "sha256:" + content_digest(env_matrix.to_dict())
 
 
+@releases_reconciliation
 def compare(
     old: AbiSnapshot | None,
     new: AbiSnapshot,

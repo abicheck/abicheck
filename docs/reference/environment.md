@@ -60,6 +60,7 @@ and [Build & source data](../learn/build-source-data.md).
 | `ABICHECK_PATTERN_SCAN_JOBS` | `auto`, `0`, `1`, or a positive integer | unset / `auto` → `min(cpu, 8)` above a 256-file floor, else serial | Worker count for the lexical (compiler-free) ABI-risk pattern pre-scan. `0`/`1` force serial (CI/test determinism, constrained sandboxes); `N` caps at `N` (still serial below the file floor). Always serial inside a daemonic process. | `buildsource/pattern_facts.py` (`_resolve_scan_jobs`) |
 | `ABICHECK_CALL_GRAPH_JOBS` | positive integer | unset → `min(n_units, cpu, 8)` | Overrides the CPU-derived worker count for the best-effort L5 clang call-graph pass. Capped by `min(n_units, N, max(8, 2×cpu))` and by the shared L4 memory cap (`ABICHECK_L4_JOB_MEM_GIB`). An unparsable value falls back to `1`. | `buildsource/call_graph.py` (`_call_graph_jobs`) |
 | `ABICHECK_INCLUDE_MAP_JOBS` | positive integer (`1` forces serial), `0` → auto | unset / `0` → auto: `min(n_units, max(2, cpu))` | Worker count for the per-compile-unit `clang -M` include-map probes (also what the L2 per-header include closure drives, one synthetic unit per header). Serial below 3 units regardless. An explicit value is clamped to the oversubscription ceiling **and** the available-memory cap; an unparsable value falls back to the auto default and records an extractor diagnostic. Concurrently spawned `clang -M` children are additionally capped process-wide, so two sides resolving at once cannot oversubscribe the host. | `buildsource/include_graph_workers.py` (`resolve_jobs`) |
+| `ABICHECK_RELEASE_JOB_MEM_GIB` | float GiB (floored at `0.25`) | depth-dependent: `1.0` at binary depth, `4.0` at `headers`, `6.0` at `build`/`source` | Per-worker RAM budget for the release fan-out's auto worker count (a directory/package `compare`). The default varies by the run's `--depth` because a worker's real footprint does: at binary depth it holds two snapshots, at header depth it also runs that member's own header-AST parse and holds two much larger snapshots (a measured six-member toolkit bundle peaked at 20.4 GiB, ~3.4 GiB per member). An explicit value here wins at every depth. Skipped entirely when RAM cannot be probed. | `workflows/release_jobs.py` (`release_job_mem_budget_gib`) |
 | `ABICHECK_INCLUDE_MAP_JOB_MEM_GIB` | float GiB (floored at `0.25`) | `0.5` | Per-worker RAM budget for the include-map pool's memory cap. Much smaller than the L4 default because `clang -M` is preprocess-only — it builds no AST. Same `min(MemAvailable, cgroup headroom)` probe as L4 (Linux only). | `buildsource/include_graph_workers.py` (`resolve_jobs`) |
 
 ---
@@ -82,6 +83,25 @@ therefore configured entirely by environment. See
 > Fact extraction is best-effort and never fails the build: a missing front-end
 > or a parse error degrades to a warning on stderr and preserves the compiler's
 > exit code.
+
+---
+
+## Snapshot storage limits
+
+Decompression-bomb ceilings applied when reading a stored snapshot envelope
+(plain / gzip / zstd). Both are public knobs: a real bundle member's snapshot
+can legitimately exceed the default, and the ceiling is a process-level
+property of the *read*, so it is set in the environment rather than in
+`.abicheck.yml` (the sibling node budget, `resource_limits.max_bundle_facts_decode_nodes`,
+is a config key because it is resolved per comparison). The legacy
+underscore-prefixed spellings (`_ABICHECK_SNAPSHOT_MAX_DECODED_BYTES`,
+`_ABICHECK_SNAPSHOT_MAX_STORED_BYTES`) are still honoured and take precedence
+when both are set.
+
+| Variable | Values | Default | Effect | Module |
+|----------|--------|---------|--------|--------|
+| `ABICHECK_SNAPSHOT_MAX_DECODED_BYTES` | positive integer (bytes); a malformed or non-positive value is ignored | `DEFAULT_MAX_DECODED_BYTES` | Ceiling on the *decoded* size of a snapshot envelope, enforced incrementally during decompression — a stream that exceeds it is rejected rather than buffered. Raise it to read a legitimately large snapshot (e.g. a big bundle member at header depth). | `snapshot_io.py` (`_max_decoded_bytes`) |
+| `ABICHECK_SNAPSHOT_MAX_STORED_BYTES` | positive integer (bytes); same parsing rule | `DEFAULT_MAX_STORED_BYTES` | Ceiling on the *stored* (on-disk) size abicheck will buffer before decoding at all, applied to a **gzip or zstd** envelope only — a plain (uncompressed) file's stored size equals its decoded size, so it is checked against the decoded ceiling above instead. Deliberately independent of that ceiling: a valid multi-member gzip stream's overhead scales with member count, not payload size, so raising the decoded ceiling must not widen this one. | `snapshot_io.py` (`_max_stored_bytes`, `read_snapshot_bytes`) |
 
 ---
 

@@ -57,7 +57,7 @@ from .diff_platform_templates import (
     _split_top_level_args as _split_top_level_args,
     _template_outer as _template_outer,
 )
-from .diff_symbols import _public_functions, _should_filter_transitive_runtime_symbols
+from .diff_symbols import _should_filter_transitive_runtime_symbols
 from .diff_types import _RESERVED_FIELD_RE
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import (
@@ -1927,10 +1927,11 @@ def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
     old_elf_names: set[str] = {s.name for s in old_elf.symbols}
     new_elf_names: set[str] = {s.name for s in new_elf.symbols}
 
-    # Get all new-snapshot functions keyed by mangled name
     new_func_map = new.function_map
 
-    old_pub = _public_functions(old)
+    from .diff_symbols import _reconciled_function_surfaces
+
+    old_pub, _new_pub = _reconciled_function_surfaces(old, new)  # reconciled, not raw
 
     for mangled, f_old in old_pub.items():
         # Must be present in old ELF (this was a real exported symbol)

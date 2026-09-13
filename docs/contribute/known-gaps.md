@@ -44,19 +44,28 @@ looked like the obvious fix and wasn't.
   `member-snapshots-dir`/`member-header-evidence` outputs
   (`stage-member-snapshots: true`). `BUNDLE_CHECK_DEPTHS` and
   `actions/check-target/validate-inputs.sh` are deliberately **unchanged**:
-  the restriction is a false-clean guard, and two parts of the evidence path
-  are still missing, either of which alone would re-create the very
-  silent-miss it prevents.
+  the restriction is a false-clean guard, and parts of the evidence path
+  are still missing, any of which alone would re-create the very
+  silent-miss it prevents (updated 2026-09-13: (a)'s stated blocker is
+  gone, its routing is not).
   (a) **`check-target` still routes the bundle compare at `binaries-dir`.**
-  Switching it to the staged snapshots directory is not a one-line change,
-  because the cross-library bundle graph (`abicheck/bundle.py`'s
-  `build_bundle_snapshot()`) builds from real ELF binaries and skips
-  snapshots -- so the old side would gain header evidence and lose its
-  bundle-graph evidence, trading one silent narrowing for another. The
-  likely shape is a baseline-time bundle-facts document staged alongside the
-  member snapshots (the auto-classified `BundleFacts` operand already
-  exists), so both kinds of old-side evidence survive; that is a separate
-  slice.
+  The *reason* recorded here through 2026-09-12 -- that the cross-library
+  bundle graph skips snapshots, so the old side would trade header evidence
+  for bundle-graph evidence -- **no longer holds**, and this entry said so
+  for longer than it was true. `abicheck/bundle.py` now reads a stored
+  member as bundle-graph evidence on both shapes: a directory-backed
+  `ProjectSnapshot` sub-package (`_stored_elf_metadata`) and a loose,
+  file-backed snapshot, content-sniffed rather than recognized by suffix
+  (`_stored_file_snapshot_evidence`, which also recovers the member's real
+  on-disk filename from `AbiSnapshot.library` so a sibling's `DT_NEEDED`
+  still resolves). A directory of loose per-member snapshots staged by
+  `actions/resolve-baseline` (`stage-member-snapshots: true`) is therefore
+  a usable old-side operand that keeps *both* kinds of evidence -- measured
+  on a real six-member bundle: bundle layer present, no phantom
+  `bundle_library_added`, per-member findings matching the single-pair
+  control leg. What remains is the routing itself (`check-target` passing
+  `member-snapshots-dir` instead of `binaries-dir`), plus (b) below, plus
+  the cost calibration in (c).
   (b) **The candidate side still has no per-member header selection.**
   `check-project.yml` carries one project-wide `header:` input, and the
   release fan-out resolves headers run-wide
@@ -64,7 +73,59 @@ looked like the obvious fix and wasn't.
   pair) rather than per member. A bundle whose members have disjoint public
   header sets would therefore parse each member's candidate side against
   the union.
-  Until both land, a bundle check stays binary-depth, and staging is
+  (c) **Header-depth bundle cost still does not fit the runner.** The
+  per-worker *memory budget* half of this is closed:
+  `release_job_mem_budget_gib(depth)` now defaults to 4.0 GiB at `headers`
+  (6.0 at `build`/`source`) instead of the binary-depth 1.0 GiB, so the
+  fan-out clamps its worker count instead of overcommitting. What remains
+  is the total: the measured six-member run took ~84 min wall and 20.4 GiB
+  peak RSS, past both the 45-minute job timeout and the 16 GB runner the
+  L2 job budgets for. A correct per-worker budget makes the run *fit in
+  memory by running fewer members at once* -- which costs wall-clock on a
+  job that is already over its timeout. Routing a bundle check at header
+  depth needs a runner/timeout decision, not another budget constant.
+
+  One further hole in the same budget is **open and deliberately not closed
+  here**: the depth a worker reaches is inferred from `--depth` and from
+  whether header roots were supplied, and a release whose members are
+  *already-serialized snapshots* answers neither -- such a run types no depth
+  and supplies no roots, so it is budgeted as binary depth while each worker
+  holds two possibly deep-evidence snapshots resident.
+
+  The conservative fix -- size such a run at the table's largest rung, since
+  the captured depth is not cheaply legible (reading it means decoding the
+  very snapshots whose size is the problem, once per member, before the
+  fan-out that would have loaded them lazily) -- was implemented twice and
+  reverted twice, and the second attempt is the one worth recording, because
+  the first revert was argued from a bad measurement. The claim then was that
+  it "moved 75 tests from passing to failing"; that number came from a run
+  racing concurrent local test sessions, and a clean run of the same suite
+  gives 8 failures against `main`'s 13, none in the affected family. So the
+  measurement was noise and the reasoning that rested on it was wrong.
+
+  Re-measured properly, serially, the change still moves **21** release tests
+  from passing to failing, for a real reason rather than load: at a 6.0 GiB
+  per-worker budget an ordinary host clamps the fan-out from 4 workers to 1
+  for *every* stored-baseline comparison -- the most common workflow this
+  tool has -- and the clamp notice that then appears changes the command's
+  output. That is a defensible trade against an OOM-killed job and a bad one
+  against a package of small snapshots, and it is not this PR's trade to
+  make: it belongs in its own change, where the worker-count reduction, the
+  21 tests' expectations, and a *measured* encoded-to-resident expansion
+  factor (the accurate signal is a member's resident cost, for which on-disk
+  size is the cheap proxy, but the budget model is depth-keyed) can be
+  reviewed together.
+  (d) **No first-party Action emits a bundle-facts document.** The
+  producer itself exists and is reachable -- `compare`'s release fan-out
+  takes `--bundle-facts-out`, forwardable today through the root Action's
+  `extra-args` -- but no Action declares it as an *output*, so the
+  stored-OLD-side bundle route has no supported CI producer to pair with
+  its (fully wired) consumer. Deliberately not closed by adding a root
+  command: "write this pipeline stage's artifact" is precisely the shape
+  ADR-054's admission bar rejects (`AGENTS.md`, "Adding a new top-level
+  command", items 3 and 5). The right slice is an output on the Action
+  that already runs the fan-out, not new CLI surface.
+  Until these land, a bundle check stays binary-depth, and staging is
   additive: it changes no existing outcome, and every pre-existing
   invocation (which does not pass `stage-member-snapshots`) is unaffected.
   Covered by `tests/test_bundle_member_baseline_staging.py`, whose central

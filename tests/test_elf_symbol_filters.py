@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.diff_symbols import _public_functions, _public_variables
+from abicheck.diff_symbols import _public_functions
+from abicheck.diff_symbols_variables import _public_variables
 from abicheck.dumper import _elf_classify_symbols, _is_abi_relevant_symbol
 from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType

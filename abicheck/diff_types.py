@@ -38,7 +38,7 @@ from .diff_helpers import (
     typedef_diff_maps as _typedef_diff_maps,
 )
 from .diff_symbols import (
-    _public_functions,
+    _reconciled_function_surfaces,
     _should_filter_transitive_runtime_symbols,
 )
 from .diff_types_abicc_parity import (
@@ -407,8 +407,7 @@ def _diff_overload_additions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
     uniqueness test is per scope: ``A::size`` stays distinct from ``B::size``
     even when the dumper recorded both as the leaf ``size``.
     """
-    old_map = _public_functions(old)
-    new_map = _public_functions(new)
+    old_map, new_map = _reconciled_function_surfaces(old, new)
 
     old_by_key: dict[str, list[Function]] = {}
     for f in old_map.values():
@@ -1327,8 +1326,7 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     to find cross-qualifier pairs in the removed/added sets.
     """
     changes: list[Change] = []
-    old_by_mangled = _public_functions(old)
-    new_by_mangled = _public_functions(new)
+    old_by_mangled, new_by_mangled = _reconciled_function_surfaces(old, new)
 
     # --- Same-mangled checks: pure_virtual and is_static don't change mangling ---
     # is_static: Itanium ABI does NOT encode static-ness in the mangled name
