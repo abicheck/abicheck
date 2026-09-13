@@ -48,7 +48,9 @@ def _meta(
 ) -> ElfMetadata:
     syms = [ElfSymbol(name=name, visibility="default") for name in exports or []]
     imps = [ElfImport(name=name) for name in imports or []]
-    return ElfMetadata(soname=soname or "", needed=needed or [], symbols=syms, imports=imps)
+    return ElfMetadata(
+        soname=soname or "", needed=needed or [], symbols=syms, imports=imps
+    )
 
 
 def _per_library_snapshots(metadata: dict[str, ElfMetadata]) -> dict[str, AbiSnapshot]:
@@ -77,7 +79,11 @@ class TestCompareStoredBundleFactsPair:
             elf=_meta(soname="libcore.so", exports=["core_fn"]),
             functions=[fn],
         )
-        kwargs = {} if variant_fingerprint is None else {"variant_fingerprint": variant_fingerprint}
+        kwargs = (
+            {}
+            if variant_fingerprint is None
+            else {"variant_fingerprint": variant_fingerprint}
+        )
         facts = capture_bundle_facts({"libcore.so": snapshot}, **kwargs)
         path = tmp_path / name
         save_bundle_facts(facts, path)
@@ -312,7 +318,10 @@ class TestCompareStoredBundleFactsPair:
             tmp_path, "old.bundlefacts.json", "old", Visibility.PUBLIC
         )
         fn = Function(
-            name="core_fn", mangled="core_fn", return_type="int", visibility=Visibility.PUBLIC
+            name="core_fn",
+            mangled="core_fn",
+            return_type="int",
+            visibility=Visibility.PUBLIC,
         )
         new_snapshot = AbiSnapshot(
             library="libcore.so",
@@ -360,7 +369,9 @@ class TestCompareStoredBundleFactsPair:
 
         import abicheck.policy.depth_projection as depth_projection_module
 
-        real_project_snapshot_to_depth = depth_projection_module.project_snapshot_to_depth
+        real_project_snapshot_to_depth = (
+            depth_projection_module.project_snapshot_to_depth
+        )
         calls: list[tuple[object, str | None]] = []
 
         def _fake_project_snapshot_to_depth(snap, depth):
@@ -495,7 +506,9 @@ class TestSurfaceMetricsReachesStoredStoredPair:
             elf=_meta(soname="libcore.so", exports=["core_fn"]),
             functions=[
                 Function(
-                    name="core_fn", mangled="core_fn", return_type="int",
+                    name="core_fn",
+                    mangled="core_fn",
+                    return_type="int",
                     visibility=Visibility.PUBLIC,
                 )
             ],
@@ -541,7 +554,9 @@ class TestSurfaceMetricsReachesStoredStoredPair:
             elf=_meta(soname="libcore.so", exports=["core_fn"]),
             functions=[
                 Function(
-                    name="core_fn", mangled="core_fn", return_type="int",
+                    name="core_fn",
+                    mangled="core_fn",
+                    return_type="int",
                     visibility=Visibility.PUBLIC,
                 )
             ],
@@ -552,11 +567,15 @@ class TestSurfaceMetricsReachesStoredStoredPair:
             elf=_meta(soname="libcore.so", exports=["core_fn", "new_fn"]),
             functions=[
                 Function(
-                    name="core_fn", mangled="core_fn", return_type="int",
+                    name="core_fn",
+                    mangled="core_fn",
+                    return_type="int",
                     visibility=Visibility.PUBLIC,
                 ),
                 Function(
-                    name="new_fn", mangled="new_fn", return_type="int",
+                    name="new_fn",
+                    mangled="new_fn",
+                    return_type="int",
                     visibility=Visibility.PUBLIC,
                 ),
             ],
@@ -632,13 +651,21 @@ class TestCompareStoredBundleFactsPairEnvMatrixDigestWithNoCompletedComparison:
         new_path = tmp_path / "new.bundlefacts.json"
         save_bundle_facts(
             capture_bundle_facts(
-                {"libfoo.so": AbiSnapshot(library="libfoo.so", version="old", elf=old_elf)}
+                {
+                    "libfoo.so": AbiSnapshot(
+                        library="libfoo.so", version="old", elf=old_elf
+                    )
+                }
             ),
             old_path,
         )
         save_bundle_facts(
             capture_bundle_facts(
-                {"libbar.so": AbiSnapshot(library="libbar.so", version="new", elf=new_elf)}
+                {
+                    "libbar.so": AbiSnapshot(
+                        library="libbar.so", version="new", elf=new_elf
+                    )
+                }
             ),
             new_path,
         )
@@ -657,13 +684,21 @@ class TestCompareStoredBundleFactsPairEnvMatrixDigestWithNoCompletedComparison:
         new_path = tmp_path / "new.bundlefacts.json"
         save_bundle_facts(
             capture_bundle_facts(
-                {"libfoo.so": AbiSnapshot(library="libfoo.so", version="old", elf=old_elf)}
+                {
+                    "libfoo.so": AbiSnapshot(
+                        library="libfoo.so", version="old", elf=old_elf
+                    )
+                }
             ),
             old_path,
         )
         save_bundle_facts(
             capture_bundle_facts(
-                {"libbar.so": AbiSnapshot(library="libbar.so", version="new", elf=new_elf)}
+                {
+                    "libbar.so": AbiSnapshot(
+                        library="libbar.so", version="new", elf=new_elf
+                    )
+                }
             ),
             new_path,
         )

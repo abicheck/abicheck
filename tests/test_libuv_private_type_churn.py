@@ -38,18 +38,31 @@ from abicheck.model import AbiSnapshot, Function, Param, Visibility
 
 
 def _fn(name: str, params: list[Param]) -> Function:
-    return Function(name=name, mangled=name, return_type="int",
-                    params=params, visibility=Visibility.PUBLIC)
+    return Function(
+        name=name,
+        mangled=name,
+        return_type="int",
+        params=params,
+        visibility=Visibility.PUBLIC,
+    )
 
 
 def test_param_rename_is_source_level_not_binary_breaking():
     # from_headers=True: parameter renames are only reported as source-level API
     # breaks when both snapshots are header-derived (DWARF-only param names are
     # unreliable build-to-build noise and are intentionally suppressed).
-    old = AbiSnapshot(library="libuv.so.1", version="1", from_headers=True,
-                      functions=[_fn("uv_tcp_keepalive", [Param(name="enable", type="int")])])
-    new = AbiSnapshot(library="libuv.so.1", version="2", from_headers=True,
-                      functions=[_fn("uv_tcp_keepalive", [Param(name="on", type="int")])])
+    old = AbiSnapshot(
+        library="libuv.so.1",
+        version="1",
+        from_headers=True,
+        functions=[_fn("uv_tcp_keepalive", [Param(name="enable", type="int")])],
+    )
+    new = AbiSnapshot(
+        library="libuv.so.1",
+        version="2",
+        from_headers=True,
+        functions=[_fn("uv_tcp_keepalive", [Param(name="on", type="int")])],
+    )
     r = compare(old, new)
     assert ChangeKind.PARAM_RENAMED in {c.kind for c in r.changes}
     # Source-level break, not a hard binary ABI break.
@@ -59,14 +72,24 @@ def test_param_rename_is_source_level_not_binary_breaking():
 
 def test_private_struct_field_pointee_const_change_is_neutral():
     # uv_cpu_info_s::model char* -> const char* under stable struct layout.
-    old_s = StructLayout(name="uv_cpu_info_s", byte_size=24, fields=[
-        FieldInfo(name="model", type_name="char *", byte_offset=0, byte_size=8),
-        FieldInfo(name="speed", type_name="int", byte_offset=8, byte_size=4),
-    ])
-    new_s = StructLayout(name="uv_cpu_info_s", byte_size=24, fields=[
-        FieldInfo(name="model", type_name="const char *", byte_offset=0, byte_size=8),
-        FieldInfo(name="speed", type_name="int", byte_offset=8, byte_size=4),
-    ])
+    old_s = StructLayout(
+        name="uv_cpu_info_s",
+        byte_size=24,
+        fields=[
+            FieldInfo(name="model", type_name="char *", byte_offset=0, byte_size=8),
+            FieldInfo(name="speed", type_name="int", byte_offset=8, byte_size=4),
+        ],
+    )
+    new_s = StructLayout(
+        name="uv_cpu_info_s",
+        byte_size=24,
+        fields=[
+            FieldInfo(
+                name="model", type_name="const char *", byte_offset=0, byte_size=8
+            ),
+            FieldInfo(name="speed", type_name="int", byte_offset=8, byte_size=4),
+        ],
+    )
     old = AbiSnapshot(library="libuv.so.1", version="1")
     new = AbiSnapshot(library="libuv.so.1", version="2")
     old.dwarf = DwarfMetadata(has_dwarf=True, structs={"uv_cpu_info_s": old_s})  # type: ignore[attr-defined]

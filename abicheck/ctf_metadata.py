@@ -33,6 +33,7 @@ parse_ctf_metadata(elf_path)
 has_ctf_section(elf_path)
     → bool  (quick check without full parse)
 """
+
 from __future__ import annotations
 
 import logging
@@ -85,7 +86,7 @@ CTF_INT_BOOL = 0x04
 CTF_F_COMPRESS = 0x01
 
 # Size thresholds for large vs small type encoding
-_CTF_V2_LSTRUCT_THRESH = 0x1FFF   # vlen threshold for v2 "large" members
+_CTF_V2_LSTRUCT_THRESH = 0x1FFF  # vlen threshold for v2 "large" members
 _CTF_V3_LSTRUCT_THRESH = 0x1FFF
 
 # Header sizes
@@ -98,9 +99,11 @@ _CTF_V3_HEADER_SIZE = 36
 # Data model
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CtfType:
     """Raw parsed CTF type entry."""
+
     type_id: int
     name_off: int
     info: int
@@ -127,6 +130,7 @@ class CtfMetadata:
     Implements the same interface as DwarfMetadata so the checker's
     detectors work without modification (TypeMetadataSource protocol).
     """
+
     structs: dict[str, StructLayout] = field(default_factory=dict)
     enums: dict[str, EnumInfo] = field(default_factory=dict)
     func_protos: dict[str, FuncProto] = field(default_factory=dict)
@@ -164,10 +168,12 @@ class CtfMetadata:
 # CTF section reader
 # ---------------------------------------------------------------------------
 
+
 def has_ctf_section(elf_path: Path) -> bool:
     """Quick check: does the ELF file have a .ctf section?"""
     try:
         from elftools.elf.elffile import ELFFile
+
         with open(elf_path, "rb") as f:
             elf = ELFFile(f)  # type: ignore[no-untyped-call]
             # CTF can be in .ctf or .SUNW_ctf sections
@@ -182,6 +188,7 @@ def has_ctf_section(elf_path: Path) -> bool:
 def _read_ctf_section(elf_path: Path) -> bytes | None:
     """Read raw .ctf section data from an ELF file."""
     from elftools.elf.elffile import ELFFile
+
     with open(elf_path, "rb") as f:
         elf = ELFFile(f)  # type: ignore[no-untyped-call]
         section = elf.get_section_by_name(".ctf")  # type: ignore[no-untyped-call]
@@ -196,9 +203,11 @@ def _read_ctf_section(elf_path: Path) -> bytes | None:
 # CTF header parsing
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CtfHeader:
     """Parsed CTF header."""
+
     magic: int
     version: int
     flags: int
@@ -226,16 +235,29 @@ def _parse_header(data: bytes) -> CtfHeader:
     if len(data) < _CTF_V3_HEADER_SIZE:
         raise ValueError(f"CTF header truncated ({len(data)} bytes)")
 
-    (parent_label, parent_name,
-     label_off, object_off, func_off, type_off,
-     str_off, str_len) = struct.unpack_from("<IIIIIIII", data, 4)
+    (
+        parent_label,
+        parent_name,
+        label_off,
+        object_off,
+        func_off,
+        type_off,
+        str_off,
+        str_len,
+    ) = struct.unpack_from("<IIIIIIII", data, 4)
 
     return CtfHeader(
-        magic=magic, version=version, flags=flags,
-        parent_label=parent_label, parent_name=parent_name,
-        label_off=label_off, object_off=object_off,
-        func_off=func_off, type_off=type_off,
-        str_off=str_off, str_len=str_len,
+        magic=magic,
+        version=version,
+        flags=flags,
+        parent_label=parent_label,
+        parent_name=parent_name,
+        label_off=label_off,
+        object_off=object_off,
+        func_off=func_off,
+        type_off=type_off,
+        str_off=str_off,
+        str_len=str_len,
     )
 
 
@@ -247,7 +269,9 @@ def _decompress_if_needed(data: bytes, header: CtfHeader) -> bytes:
     # caps the output to prevent a zip-bomb DoS.
     try:
         decompressor = zlib.decompressobj()
-        decompressed = decompressor.decompress(data[_CTF_PREAMBLE_SIZE:], _MAX_DECOMPRESS)
+        decompressed = decompressor.decompress(
+            data[_CTF_PREAMBLE_SIZE:], _MAX_DECOMPRESS
+        )
         if decompressor.unconsumed_tail:
             limit_mib = _MAX_DECOMPRESS // (1024 * 1024)
             raise ValueError(f"CTF decompressed data exceeds {limit_mib} MiB limit")
@@ -261,6 +285,7 @@ def _decompress_if_needed(data: bytes, header: CtfHeader) -> bytes:
 # CTF string table
 # ---------------------------------------------------------------------------
 
+
 def _read_string(str_data: bytes, offset: int) -> str:
     """Read a null-terminated string from the CTF string table."""
     return read_null_terminated_string(str_data, offset)
@@ -269,6 +294,7 @@ def _read_string(str_data: bytes, offset: int) -> str:
 # ---------------------------------------------------------------------------
 # CTF type parsing
 # ---------------------------------------------------------------------------
+
 
 def _parse_info_v2(info: int) -> tuple[int, int, bool]:
     """Parse v2 ctt_info: kind(5 bits), isroot(1 bit), vlen(10 bits)."""
@@ -287,12 +313,11 @@ def _parse_info_v3(info: int) -> tuple[int, int, bool]:
 
 
 def _parse_types(
-    type_data: bytes, version: int,
+    type_data: bytes,
+    version: int,
 ) -> list[CtfType]:
     """Parse all CTF type entries from the type section."""
-    types: list[CtfType] = [
-        CtfType(type_id=0, name_off=0, info=0, size_or_type=0)
-    ]
+    types: list[CtfType] = [CtfType(type_id=0, name_off=0, info=0, size_or_type=0)]
 
     parse_info = _parse_info_v3 if version >= CTF_VERSION_3 else _parse_info_v2
 
@@ -343,16 +368,18 @@ def _parse_types(
             log.warning("CTF type %d (kind=%d) truncated", type_id, kind)
             break
 
-        extra = type_data[pos:pos + extra_size]
+        extra = type_data[pos : pos + extra_size]
         pos += extra_size
 
-        types.append(CtfType(
-            type_id=type_id,
-            name_off=name_off,
-            info=info,
-            size_or_type=size_or_type,
-            extra=extra,
-        ))
+        types.append(
+            CtfType(
+                type_id=type_id,
+                name_off=name_off,
+                info=info,
+                size_or_type=size_or_type,
+                extra=extra,
+            )
+        )
         type_id += 1
 
     return types
@@ -393,6 +420,7 @@ def _extra_data_size(kind: int, vlen: int, version: int, size_or_type: int) -> i
 # ---------------------------------------------------------------------------
 # Type resolution
 # ---------------------------------------------------------------------------
+
 
 class _TypeResolver:
     """Resolves CTF type references to names and sizes."""
@@ -470,7 +498,9 @@ class _TypeResolver:
         CTF_K_RESTRICT: "restrict",
     }
 
-    def _resolve_name_simple(self, kind: int, tname: str, size_or_type: int) -> str | None:
+    def _resolve_name_simple(
+        self, kind: int, tname: str, size_or_type: int
+    ) -> str | None:
         """Handle simple/named kinds; return None if kind is not handled here."""
         if kind == CTF_K_INTEGER:
             return tname if tname else "int"
@@ -559,9 +589,12 @@ class _TypeResolver:
 # High-level extraction
 # ---------------------------------------------------------------------------
 
+
 def _extract_structs(
-    types: list[CtfType], resolver: _TypeResolver,
-    str_data: bytes, version: int,
+    types: list[CtfType],
+    resolver: _TypeResolver,
+    str_data: bytes,
+    version: int,
 ) -> dict[str, StructLayout]:
     """Extract struct/union layouts from CTF types."""
     structs: dict[str, StructLayout] = {}
@@ -619,14 +652,16 @@ def _extract_structs(
             byte_offset = m_offset // 8
             bit_offset = m_offset % 8
 
-            fields.append(FieldInfo(
-                name=m_name,
-                type_name=resolver.name(m_type),
-                byte_offset=byte_offset,
-                byte_size=resolver.size(m_type),
-                bit_offset=bit_offset if bit_offset else 0,
-                bit_size=0,  # CTF doesn't encode bitfield size directly
-            ))
+            fields.append(
+                FieldInfo(
+                    name=m_name,
+                    type_name=resolver.name(m_type),
+                    byte_offset=byte_offset,
+                    byte_size=resolver.size(m_type),
+                    bit_offset=bit_offset if bit_offset else 0,
+                    bit_size=0,  # CTF doesn't encode bitfield size directly
+                )
+            )
 
         layout = StructLayout(
             name=name,
@@ -643,7 +678,8 @@ def _extract_structs(
 
 
 def _extract_enums(
-    types: list[CtfType], str_data: bytes,
+    types: list[CtfType],
+    str_data: bytes,
 ) -> dict[str, EnumInfo]:
     """Extract enum types from CTF."""
     enums: dict[str, EnumInfo] = {}
@@ -677,7 +713,9 @@ def _extract_enums(
 
 
 def _extract_typedefs(
-    types: list[CtfType], resolver: _TypeResolver, str_data: bytes,
+    types: list[CtfType],
+    resolver: _TypeResolver,
+    str_data: bytes,
 ) -> dict[str, str]:
     """Extract typedef mappings."""
     typedefs: dict[str, str] = {}
@@ -697,6 +735,7 @@ def _extract_typedefs(
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def parse_ctf_metadata(elf_path: Path) -> CtfMetadata:
     """Parse CTF section from an ELF file and return CtfMetadata.
 
@@ -707,7 +746,9 @@ def parse_ctf_metadata(elf_path: Path) -> CtfMetadata:
     try:
         raw = _read_ctf_section(elf_path)
     except Exception as exc:  # noqa: BLE001
-        log.warning("parse_ctf_metadata: failed to read .ctf from %s: %s", elf_path, exc)
+        log.warning(
+            "parse_ctf_metadata: failed to read .ctf from %s: %s", elf_path, exc
+        )
         return empty
 
     if raw is None:
@@ -742,7 +783,9 @@ def parse_ctf_from_bytes(data: bytes) -> CtfMetadata:
 
     hdr_size = _CTF_V3_HEADER_SIZE
     type_start = hdr_size + header.type_off
-    type_end = hdr_size + header.str_off  # type section ends where string section begins
+    type_end = (
+        hdr_size + header.str_off
+    )  # type section ends where string section begins
     str_start = hdr_size + header.str_off
     str_end = str_start + header.str_len
 

@@ -571,11 +571,13 @@ class TestUnmangledCtorSyntheticKeyCvStability:
         param change on the SAME (matched) constructor, not a
         remove-and-add pair."""
         old_snap = AbiSnapshot(
-            library="libtest.so.1", version="1.0",
+            library="libtest.so.1",
+            version="1.0",
             functions=_make_parser(_CTOR_INT_ARG_XML).parse_functions(),
         )
         new_snap = AbiSnapshot(
-            library="libtest.so.1", version="2.0",
+            library="libtest.so.1",
+            version="2.0",
             functions=_make_parser(_CTOR_VOLATILE_INT_ARG_XML).parse_functions(),
         )
         r = compare(old_snap, new_snap)

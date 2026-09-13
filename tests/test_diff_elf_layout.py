@@ -227,14 +227,14 @@ class TestRttiInheritance:
     @pytest.mark.parametrize(
         "sym",
         [
-            "_ZTIi",     # int
-            "_ZTIc",     # char
-            "_ZTId",     # double
-            "_ZTIPc",    # char*
-            "_ZTIPKc",   # const char*
-            "_ZTIKi",    # const int
-            "_ZTIRi",    # int&
-            "_ZTIDn",    # std::nullptr_t
+            "_ZTIi",  # int
+            "_ZTIc",  # char
+            "_ZTId",  # double
+            "_ZTIPc",  # char*
+            "_ZTIPKc",  # const char*
+            "_ZTIKi",  # const int
+            "_ZTIRi",  # int&
+            "_ZTIDn",  # std::nullptr_t
         ],
     )
     def test_fundamental_and_compound_rtti_ignored(self, sym: str) -> None:

@@ -1,6 +1,7 @@
 """Tests for new CLI features: --verbose, --lang, cross-compilation flags,
 compat group structure, and dataclasses.replace() paths.
 """
+
 from __future__ import annotations
 
 import json
@@ -14,16 +15,31 @@ from abicheck.serialization import snapshot_to_json
 
 # ── helpers ──────────────────────────────────────────────────────────────
 
+
 def _write_snapshots(tmp_path: Path) -> tuple[Path, Path]:
     old = AbiSnapshot(
-        library="libtest.so", version="1.0",
-        functions=[Function(name="foo", mangled="_Z3foov", return_type="int",
-                            visibility=Visibility.PUBLIC)],
+        library="libtest.so",
+        version="1.0",
+        functions=[
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+        ],
     )
     new = AbiSnapshot(
-        library="libtest.so", version="2.0",
-        functions=[Function(name="foo", mangled="_Z3foov", return_type="int",
-                            visibility=Visibility.PUBLIC)],
+        library="libtest.so",
+        version="2.0",
+        functions=[
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+        ],
     )
     old_p = tmp_path / "old.json"
     new_p = tmp_path / "new.json"
@@ -33,6 +49,7 @@ def _write_snapshots(tmp_path: Path) -> tuple[Path, Path]:
 
 
 # ── --verbose/-v on compare ──────────────────────────────────────────────
+
 
 class TestCompareVerbose:
     def test_verbose_flag_accepted(self, tmp_path):
@@ -50,6 +67,7 @@ class TestCompareVerbose:
 
 # ── --verbose/-v on dump ─────────────────────────────────────────────────
 
+
 class TestDumpVerbose:
     def test_verbose_flag_accepted(self, tmp_path, monkeypatch):
         so_path = tmp_path / "libfoo.so"
@@ -58,19 +76,32 @@ class TestDumpVerbose:
         header.write_text("int foo();\n", encoding="utf-8")
         out = tmp_path / "snap.json"
 
-        monkeypatch.setattr("abicheck.dumper.dump",
-                            lambda **_: AbiSnapshot(library="libfoo.so", version="1.0"))
+        monkeypatch.setattr(
+            "abicheck.dumper.dump",
+            lambda **_: AbiSnapshot(library="libfoo.so", version="1.0"),
+        )
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "dump", str(so_path), "-H", str(header), "--version", "1.0",
-            "-o", str(out), "-v",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "dump",
+                str(so_path),
+                "-H",
+                str(header),
+                "--version",
+                "1.0",
+                "-o",
+                str(out),
+                "-v",
+            ],
+        )
         assert result.exit_code == 0
         assert out.exists()
 
 
 # ── debug format on non-ELF binaries ─────────────────────────────────────
+
 
 class TestDumpDebugFormatValidation:
     def test_debug_format_btf_rejected_for_pe_binary(self, tmp_path, monkeypatch):
@@ -86,7 +117,10 @@ class TestDumpDebugFormatValidation:
         result = runner.invoke(main, ["dump", str(dll), "--config", str(cfg)])
 
         assert result.exit_code != 0
-        assert "--debug-format btf is only supported for ELF binaries, not PE" in result.output
+        assert (
+            "--debug-format btf is only supported for ELF binaries, not PE"
+            in result.output
+        )
 
     def test_debug_format_ctf_rejected_for_macho_binary(self, tmp_path, monkeypatch):
         cfg = tmp_path / ".abicheck.yml"
@@ -98,7 +132,10 @@ class TestDumpDebugFormatValidation:
         result = runner.invoke(main, ["dump", str(dylib), "--config", str(cfg)])
 
         assert result.exit_code != 0
-        assert "--debug-format ctf is only supported for ELF binaries, not MACHO" in result.output
+        assert (
+            "--debug-format ctf is only supported for ELF binaries, not MACHO"
+            in result.output
+        )
 
     def test_debug_format_flag_deleted_outright(self, tmp_path):
         # Phase 7c: --debug-format itself has no CLI spelling any more.
@@ -124,6 +161,7 @@ class TestDumpDebugFormatValidation:
 
 # ── --lang on compare ────────────────────────────────────────────────────
 
+
 class TestCompareLang:
     """Phase 7 (one-comparison-product.md §4.1): --lang is gone from
     compare's CLI entirely -- compile.lang is its only spelling now (default
@@ -132,9 +170,16 @@ class TestCompareLang:
     def test_lang_flag_deleted_outright(self, tmp_path):
         old_p, new_p = _write_snapshots(tmp_path)
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--lang", "c",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--lang",
+                "c",
+            ],
+        )
         assert result.exit_code == 64
         assert "No such option" in result.output
 
@@ -167,9 +212,16 @@ class TestCompareLang:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_so), str(new_so), "-H", str(header),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_so),
+                str(new_so),
+                "-H",
+                str(header),
+            ],
+        )
         assert result.exit_code == 0
         # Both old and new sides should have lang="c" forwarded. A header-scoped
         # compare also fires the L0 hard-removal fold-in (case97 fix), which
@@ -193,6 +245,7 @@ class TestCompareLang:
 
 # ── per-side --ast-frontend old= / --ast-frontend new= on compare ───────
 
+
 class TestPerSideHeaderBackend:
     def _two_elf(self, tmp_path):
         old_so = tmp_path / "old.so"
@@ -214,9 +267,17 @@ class TestPerSideHeaderBackend:
             ["--ast-frontend", "old=castxml", "--ast-frontend", "new=clang"],
             ["--ast-frontend", "clang"],
         ):
-            result = CliRunner().invoke(main, [
-                "compare", str(old_so), str(new_so), "-H", str(header), *args,
-            ])
+            result = CliRunner().invoke(
+                main,
+                [
+                    "compare",
+                    str(old_so),
+                    str(new_so),
+                    "-H",
+                    str(header),
+                    *args,
+                ],
+            )
             assert result.exit_code == 64
             assert "No such option" in result.output
 
@@ -224,7 +285,9 @@ class TestPerSideHeaderBackend:
         """compile.frontend: clang reaches both sides via dump() (the
         pre-existing config key --ast-frontend already deferred to)."""
         monkeypatch.chdir(tmp_path)
-        Path(".abicheck.yml").write_text("compile:\n  frontend: clang\n", encoding="utf-8")
+        Path(".abicheck.yml").write_text(
+            "compile:\n  frontend: clang\n", encoding="utf-8"
+        )
         old_so, new_so, header = self._two_elf(tmp_path)
         calls = []
 
@@ -233,9 +296,16 @@ class TestPerSideHeaderBackend:
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
-        result = CliRunner().invoke(main, [
-            "compare", str(old_so), str(new_so), "-H", str(header),
-        ])
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_so),
+                str(new_so),
+                "-H",
+                str(header),
+            ],
+        )
         assert result.exit_code == 0
         header_calls = [c for c in calls if c.get("headers")]
         assert len(header_calls) == 2
@@ -272,13 +342,28 @@ class TestPerSideHeaderBackend:
 
         monkeypatch.setattr(_input_resolution, "resolve_input", fake_resolve_input)
         old, new = cli_resolve._resolve_compare_snapshots(
-            Path("old.json"), Path("new.json"), None, None,
-            [], [], [], [], "1.0", "2.0", "c++",
-            None, None, None, False, None,
-            False, (), "",
+            Path("old.json"),
+            Path("new.json"),
+            None,
+            None,
+            [],
+            [],
+            [],
+            [],
+            "1.0",
+            "2.0",
+            "c++",
+            None,
+            None,
+            None,
+            False,
+            None,
+            False,
+            (),
+            "",
             header_backend="castxml",
-            old_header_backend=None,        # inherits castxml
-            new_header_backend="clang",     # overrides
+            old_header_backend=None,  # inherits castxml
+            new_header_backend="clang",  # overrides
         )
         # Old side: no override, so nothing pins a per-side frontend and the
         # shared "castxml" is what it parses with. New side: the override is
@@ -288,6 +373,7 @@ class TestPerSideHeaderBackend:
 
 
 # ── --lang on dump ───────────────────────────────────────────────────────
+
 
 class TestDumpLang:
     """Phase 7c (one-comparison-product.md §4.2): --lang is gone from dump's
@@ -299,9 +385,17 @@ class TestDumpLang:
         header = tmp_path / "foo.h"
         header.write_text("int foo();\n", encoding="utf-8")
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "dump", str(so_path), "-H", str(header), "--lang", "c",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "dump",
+                str(so_path),
+                "-H",
+                str(header),
+                "--lang",
+                "c",
+            ],
+        )
         assert result.exit_code == 64
         assert "No such option" in result.output
 
@@ -314,6 +408,7 @@ class TestDumpLang:
         header.write_text("int foo();\n", encoding="utf-8")
 
         captured = {}
+
         def fake_dump(**kwargs):
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
@@ -321,7 +416,9 @@ class TestDumpLang:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)])
+        result = runner.invoke(
+            main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)]
+        )
         assert result.exit_code == 0
         # When compile.lang: c is configured, compiler should be "cc"
         assert captured.get("compiler") == "cc"
@@ -335,6 +432,7 @@ class TestDumpLang:
         header.write_text("int foo();\n", encoding="utf-8")
 
         captured = {}
+
         def fake_dump(**kwargs):
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
@@ -342,7 +440,9 @@ class TestDumpLang:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)])
+        result = runner.invoke(
+            main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)]
+        )
         assert result.exit_code == 0
         assert captured.get("compiler") == "c++"
 
@@ -354,6 +454,7 @@ class TestDumpLang:
         header.write_text("int foo();\n", encoding="utf-8")
 
         captured = {}
+
         def fake_dump(**kwargs):
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
@@ -445,9 +546,17 @@ class TestDumpLang:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "dump", str(so_path), "-H", str(header), "--build-info", str(compile_db),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "dump",
+                str(so_path),
+                "-H",
+                str(header),
+                "--build-info",
+                str(compile_db),
+            ],
+        )
         assert result.exit_code == 0, result.output
         # Build context's -I comes first in gcc_option_tokens (searched
         # first); the inferred -isystem root for the -H umbrella comes after
@@ -480,9 +589,17 @@ class TestDumpLang:
 
         runner = CliRunner()
         # User passes the umbrella's parent (include/oneapi) explicitly via -I.
-        result = runner.invoke(main, [
-            "dump", str(so_path), "-H", str(header), "-I", str(nested),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "dump",
+                str(so_path),
+                "-H",
+                str(header),
+                "-I",
+                str(nested),
+            ],
+        )
         assert result.exit_code == 0, result.output
         extra = captured.get("extra_includes", [])
         # the user -I stays, exactly once (not re-added by the inferred pass)
@@ -495,6 +612,7 @@ class TestDumpLang:
 
 
 # ── Cross-compilation flags on dump ──────────────────────────────────────
+
 
 class TestDumpCrossCompilation:
     """Phase 7b (one-comparison-product.md §4.2, ADR-037 D8.1): --compiler/
@@ -516,11 +634,15 @@ class TestDumpCrossCompilation:
             ("--compiler-option", "-march=armv8-a"),
             ("--sysroot", str(tmp_path)),
         ):
-            result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), flag, value])
+            result = runner.invoke(
+                main, ["dump", str(so_path), "-H", str(header), flag, value]
+            )
             assert result.exit_code == 64, flag
             assert "No such option" in result.output, flag
         for flag in ("--nostdinc", "--no-nostdinc"):
-            result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), flag])
+            result = runner.invoke(
+                main, ["dump", str(so_path), "-H", str(header), flag]
+            )
             assert result.exit_code == 64, flag
             assert "No such option" in result.output, flag
 
@@ -535,6 +657,7 @@ class TestDumpCrossCompilation:
         header.write_text("int foo();\n", encoding="utf-8")
 
         captured = {}
+
         def fake_dump(**kwargs):
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
@@ -542,7 +665,9 @@ class TestDumpCrossCompilation:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)])
+        result = runner.invoke(
+            main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)]
+        )
         assert result.exit_code == 0
         assert captured.get("gcc_path") == "/usr/bin/aarch64-linux-gnu-g++"
 
@@ -550,15 +675,14 @@ class TestDumpCrossCompilation:
         # compile.compiler ending in "-" is the merged spelling of the
         # former --compiler-prefix.
         cfg = tmp_path / ".abicheck.yml"
-        cfg.write_text(
-            "compile:\n  compiler: aarch64-linux-gnu-\n", encoding="utf-8"
-        )
+        cfg.write_text("compile:\n  compiler: aarch64-linux-gnu-\n", encoding="utf-8")
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         header = tmp_path / "foo.h"
         header.write_text("int foo();\n", encoding="utf-8")
 
         captured = {}
+
         def fake_dump(**kwargs):
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
@@ -566,21 +690,22 @@ class TestDumpCrossCompilation:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)])
+        result = runner.invoke(
+            main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)]
+        )
         assert result.exit_code == 0
         assert captured.get("gcc_prefix") == "aarch64-linux-gnu-"
 
     def test_compiler_options_forwarded_via_config(self, tmp_path, monkeypatch):
         cfg = tmp_path / ".abicheck.yml"
-        cfg.write_text(
-            "compile:\n  options:\n    - -march=armv8-a\n", encoding="utf-8"
-        )
+        cfg.write_text("compile:\n  options:\n    - -march=armv8-a\n", encoding="utf-8")
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         header = tmp_path / "foo.h"
         header.write_text("int foo();\n", encoding="utf-8")
 
         captured = {}
+
         def fake_dump(**kwargs):
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
@@ -588,7 +713,9 @@ class TestDumpCrossCompilation:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)])
+        result = runner.invoke(
+            main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)]
+        )
         assert result.exit_code == 0
         assert captured.get("gcc_option_tokens") == ("-march=armv8-a",)
 
@@ -596,15 +723,14 @@ class TestDumpCrossCompilation:
         sysroot_dir = tmp_path / "sysroot"
         sysroot_dir.mkdir()
         cfg = tmp_path / ".abicheck.yml"
-        cfg.write_text(
-            f"compile:\n  sysroot: {sysroot_dir}\n", encoding="utf-8"
-        )
+        cfg.write_text(f"compile:\n  sysroot: {sysroot_dir}\n", encoding="utf-8")
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         header = tmp_path / "foo.h"
         header.write_text("int foo();\n", encoding="utf-8")
 
         captured = {}
+
         def fake_dump(**kwargs):
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
@@ -612,7 +738,9 @@ class TestDumpCrossCompilation:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)])
+        result = runner.invoke(
+            main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)]
+        )
         assert result.exit_code == 0
         assert captured.get("sysroot") == sysroot_dir
 
@@ -625,6 +753,7 @@ class TestDumpCrossCompilation:
         header.write_text("int foo();\n", encoding="utf-8")
 
         captured = {}
+
         def fake_dump(**kwargs):
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
@@ -632,7 +761,9 @@ class TestDumpCrossCompilation:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)])
+        result = runner.invoke(
+            main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)]
+        )
         assert result.exit_code == 0
         assert captured.get("nostdinc") is True
 
@@ -652,6 +783,7 @@ class TestDumpCrossCompilation:
         header.write_text("int foo();\n", encoding="utf-8")
 
         captured = {}
+
         def fake_dump(**kwargs):
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
@@ -659,7 +791,9 @@ class TestDumpCrossCompilation:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)])
+        result = runner.invoke(
+            main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)]
+        )
         assert result.exit_code == 0
         assert captured.get("gcc_prefix") == "aarch64-linux-gnu-"
         assert captured.get("gcc_option_tokens") == ("-march=armv8-a",)
@@ -667,6 +801,7 @@ class TestDumpCrossCompilation:
 
 
 # ── compat group structure ───────────────────────────────────────────────
+
 
 class TestCompatGroupStructure:
     def test_compat_help_lists_subcommands(self):
@@ -705,15 +840,26 @@ class TestCompatGroupStructure:
         # -o should not appear as alias for -old in the help
         # (it was removed to avoid collision with -o/--output)
 
-    def test_compat_check_missing_descriptor_uses_internal_error_handling(self, tmp_path):
+    def test_compat_check_missing_descriptor_uses_internal_error_handling(
+        self, tmp_path
+    ):
         """Missing descriptor files should be handled by _compat_fail, not Click's exists=True."""
         missing_old = tmp_path / "missing_old.xml"
         missing_new = tmp_path / "missing_new.xml"
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compat", "check", "-lib", "foo",
-            "-old", str(missing_old), "-new", str(missing_new),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compat",
+                "check",
+                "-lib",
+                "foo",
+                "-old",
+                str(missing_old),
+                "-new",
+                str(missing_new),
+            ],
+        )
         # Should exit with compat error code (4 = file access error), not Click's
         # generic exit code 2 from exists=True validation
         assert result.exit_code != 2
@@ -721,6 +867,7 @@ class TestCompatGroupStructure:
 
 
 # ── compat dump CLI-level test ───────────────────────────────────────────
+
 
 class TestCompatDumpCmd:
     def test_compat_dump_missing_lib_exits_nonzero(self):
@@ -739,15 +886,26 @@ class TestCompatDumpCmd:
             encoding="utf-8",
         )
 
-        monkeypatch.setattr("abicheck.compat.cli.dump",
-                            lambda **_: AbiSnapshot(library="libfoo.so", version="1.0"))
+        monkeypatch.setattr(
+            "abicheck.compat.cli.dump",
+            lambda **_: AbiSnapshot(library="libfoo.so", version="1.0"),
+        )
 
         dump_out = tmp_path / "out.json"
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compat", "dump", "-lib", "foo", "-dump", str(desc),
-            "-dump-path", str(dump_out),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compat",
+                "dump",
+                "-lib",
+                "foo",
+                "-dump",
+                str(desc),
+                "-dump-path",
+                str(dump_out),
+            ],
+        )
         # May fail if descriptor parse needs real files, but should not crash
         # with an application traceback.  Ignore logging infrastructure errors
         # ("Logging error" / "I/O operation on closed file") that can appear in
@@ -761,6 +919,7 @@ class TestCompatDumpCmd:
 
 
 # ── dataclasses.replace() via -vnum override ─────────────────────────────
+
 
 class TestVnumOverride:
     def test_compat_check_vnum_overrides_version(self, tmp_path, monkeypatch):
@@ -776,26 +935,43 @@ class TestVnumOverride:
             AbiSnapshot(library="libfoo.so", version="1.0"),
             AbiSnapshot(library="libfoo.so", version="2.0"),
         ]
-        monkeypatch.setattr("abicheck.compat.cli._load_descriptor_or_dump",
-                            lambda *_a, **_k: snaps.pop(0))
+        monkeypatch.setattr(
+            "abicheck.compat.cli._load_descriptor_or_dump",
+            lambda *_a, **_k: snaps.pop(0),
+        )
 
         captured_snaps = []
 
         def fake_compare(old, new, **kwargs):
             captured_snaps.append((old.version, new.version))
             return DiffResult(
-                old_version=old.version, new_version=new.version,
-                library="libfoo.so", verdict=Verdict.NO_CHANGE, changes=[],
+                old_version=old.version,
+                new_version=new.version,
+                library="libfoo.so",
+                verdict=Verdict.NO_CHANGE,
+                changes=[],
             )
 
         monkeypatch.setattr("abicheck.compat.cli.compare", fake_compare)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compat", "check", "-lib", "foo",
-            "-old", str(old_desc), "-new", str(new_desc),
-            "-v1", "10.0", "-v2", "20.0",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compat",
+                "check",
+                "-lib",
+                "foo",
+                "-old",
+                str(old_desc),
+                "-new",
+                str(new_desc),
+                "-v1",
+                "10.0",
+                "-v2",
+                "20.0",
+            ],
+        )
         assert result.exit_code == 0
         # Verify the version was overridden via dataclasses.replace()
         assert len(captured_snaps) == 1
@@ -803,6 +979,7 @@ class TestVnumOverride:
 
 
 # ── compare exit codes documented ────────────────────────────────────────
+
 
 class TestCompareExitCodeDocs:
     def test_compare_help_documents_exit_codes(self):
@@ -815,6 +992,7 @@ class TestCompareExitCodeDocs:
 
 
 # ── dump error handling uses ClickException ──────────────────────────────
+
 
 class TestDumpClickException:
     def test_dump_error_exits_64_not_2(self, tmp_path):
@@ -846,6 +1024,7 @@ class TestDumpClickException:
 
 # ── elf_only_mode: FUNC_REMOVED_ELF_ONLY path ───────────────────────────────
 
+
 class TestElfOnlyModeRemoved:
     """Verify checker uses FUNC_REMOVED_ELF_ONLY when both snapshots are elf_only."""
 
@@ -855,15 +1034,21 @@ class TestElfOnlyModeRemoved:
         from abicheck.checker_policy import ChangeKind
 
         old = AbiSnapshot(
-            library="lib.so", version="1.0",
+            library="lib.so",
+            version="1.0",
             functions=[
-                Function(name="foo", mangled="_Z3foov", return_type="void",
-                         visibility=Visibility.ELF_ONLY),
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="void",
+                    visibility=Visibility.ELF_ONLY,
+                ),
             ],
             elf_only_mode=True,
         )
         new = AbiSnapshot(
-            library="lib.so", version="2.0",
+            library="lib.so",
+            version="2.0",
             functions=[],
             elf_only_mode=True,
         )
@@ -878,10 +1063,15 @@ class TestElfOnlyModeRemoved:
         from abicheck.checker_policy import ChangeKind
 
         old = AbiSnapshot(
-            library="lib.so", version="1.0",
+            library="lib.so",
+            version="1.0",
             functions=[
-                Function(name="foo", mangled="_Z3foov", return_type="void",
-                         visibility=Visibility.PUBLIC),
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                ),
             ],
         )
         new = AbiSnapshot(library="lib.so", version="2.0", functions=[])
@@ -900,11 +1090,25 @@ class TestElfOnlyModePeMacho:
         from abicheck.checker_policy import ChangeKind
         from abicheck.pe_metadata import PeExport, PeMetadata
 
-        old_pe = PeMetadata(machine="x86_64", exports=[PeExport(name="FooExport", ordinal=1)])
+        old_pe = PeMetadata(
+            machine="x86_64", exports=[PeExport(name="FooExport", ordinal=1)]
+        )
         new_pe = PeMetadata(machine="x86_64", exports=[])
 
-        old = AbiSnapshot(library="foo.dll", version="1.0", pe=old_pe, platform="pe", elf_only_mode=True)
-        new = AbiSnapshot(library="foo.dll", version="2.0", pe=new_pe, platform="pe", elf_only_mode=True)
+        old = AbiSnapshot(
+            library="foo.dll",
+            version="1.0",
+            pe=old_pe,
+            platform="pe",
+            elf_only_mode=True,
+        )
+        new = AbiSnapshot(
+            library="foo.dll",
+            version="2.0",
+            pe=new_pe,
+            platform="pe",
+            elf_only_mode=True,
+        )
 
         result = compare(old, new)
         kinds = [c.kind for c in result.changes]
@@ -920,8 +1124,20 @@ class TestElfOnlyModePeMacho:
         old_macho = MachoMetadata(exports=[MachoExport(name="_foo_func")])
         new_macho = MachoMetadata(exports=[])
 
-        old = AbiSnapshot(library="libfoo.dylib", version="1.0", macho=old_macho, platform="macho", elf_only_mode=True)
-        new = AbiSnapshot(library="libfoo.dylib", version="2.0", macho=new_macho, platform="macho", elf_only_mode=True)
+        old = AbiSnapshot(
+            library="libfoo.dylib",
+            version="1.0",
+            macho=old_macho,
+            platform="macho",
+            elf_only_mode=True,
+        )
+        new = AbiSnapshot(
+            library="libfoo.dylib",
+            version="2.0",
+            macho=new_macho,
+            platform="macho",
+            elf_only_mode=True,
+        )
 
         result = compare(old, new)
         kinds = [c.kind for c in result.changes]

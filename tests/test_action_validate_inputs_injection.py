@@ -189,9 +189,7 @@ class TestAnnotationInjection:
         reads that way: a real newline *and* a literal `%` in one value must
         both be neutralized, with the collapse's replacement never carrying
         a `%` the escape has already passed over."""
-        result = _run_validate(
-            {"INPUT_MODE": "compare", "INPUT_JOBS": "a%b\nc"}
-        )
+        result = _run_validate({"INPUT_MODE": "compare", "INPUT_JOBS": "a%b\nc"})
 
         assert result.returncode == 0, result.stdout + result.stderr
         emitted = [ln for ln in result.stdout.splitlines() if ln.startswith("::")]

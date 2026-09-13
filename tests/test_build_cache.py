@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """ADR-033 D5 — content-addressed L3 BuildEvidence cache."""
+
 from __future__ import annotations
 
 import json
@@ -31,20 +32,27 @@ def _cdb(tree: Path, arg: str = "-c") -> Path:
     tree.mkdir(parents=True, exist_ok=True)
     (tree / "f.cpp").write_text("int f(){return 0;}\n")
     db = tree / "compile_commands.json"
-    db.write_text(json.dumps([{
-        "directory": str(tree), "file": "f.cpp",
-        "arguments": ["c++", arg, "f.cpp"],
-    }]))
+    db.write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(tree),
+                    "file": "f.cpp",
+                    "arguments": ["c++", arg, "f.cpp"],
+                }
+            ]
+        )
+    )
     return db
 
 
 def test_cache_roundtrip_and_rate(tmp_path):
     cache = BuildEvidenceCache(tmp_path / "c")
     assert cache.hit_rate is None
-    assert cache.get("k") is None          # miss
+    assert cache.get("k") is None  # miss
     cache.put("k", BuildEvidence())
-    assert cache.get("k") is not None      # hit
-    assert cache.get(None) is None         # uncacheable, not counted
+    assert cache.get("k") is not None  # hit
+    assert cache.get(None) is None  # uncacheable, not counted
     assert (cache.hits, cache.misses) == (1, 1)
     assert cache.hit_rate == 0.5
 
@@ -52,9 +60,9 @@ def test_cache_roundtrip_and_rate(tmp_path):
 def test_key_is_content_addressed(tmp_path):
     db = _cdb(tmp_path / "a")
     k1 = compute_build_cache_key(db, "generic")
-    db.write_text(db.read_text() + " ")    # any content change
+    db.write_text(db.read_text() + " ")  # any content change
     k2 = compute_build_cache_key(db, "generic")
-    assert k1 and k2 and k1 != k2          # edit ⇒ different key ⇒ miss
+    assert k1 and k2 and k1 != k2  # edit ⇒ different key ⇒ miss
     assert compute_build_cache_key(tmp_path / "missing.json", "generic") is None
 
 
@@ -87,7 +95,9 @@ def test_put_with_no_key_is_noop(tmp_path):
     cache = BuildEvidenceCache(tmp_path / "c")
     cache.put(None, BuildEvidence())
     cache.put("", BuildEvidence())
-    assert not (tmp_path / "c").exists() or not list((tmp_path / "c").glob("build-*.json"))
+    assert not (tmp_path / "c").exists() or not list(
+        (tmp_path / "c").glob("build-*.json")
+    )
 
 
 def test_non_dict_json_entry_is_a_miss(tmp_path):
@@ -145,9 +155,13 @@ def test_inline_collection_uses_cache(tmp_path):
     tree = tmp_path / "src"
     _cdb(tree)
     cache_dir = tmp_path / "bc"
-    collect_inline_pack(sources=tree, build_info=None, layers=("L3",),
-                        build_cache_dir=cache_dir)
-    pack = collect_inline_pack(sources=tree, build_info=None, layers=("L3",),
-                               build_cache_dir=cache_dir)
-    details = [e.detail for e in pack.manifest.extractors if e.name == "compile_commands"]
+    collect_inline_pack(
+        sources=tree, build_info=None, layers=("L3",), build_cache_dir=cache_dir
+    )
+    pack = collect_inline_pack(
+        sources=tree, build_info=None, layers=("L3",), build_cache_dir=cache_dir
+    )
+    details = [
+        e.detail for e in pack.manifest.extractors if e.name == "compile_commands"
+    ]
     assert any("cached" in d for d in details)

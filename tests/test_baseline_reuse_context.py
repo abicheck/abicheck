@@ -155,13 +155,16 @@ class TestBaselineReuseContract:
         hint = BaselineReuseContext(
             baseline_includes=(Path("b"), Path("a")),
         )
-        assert resolve_baseline_compile_context(
-            hint,
-            folded=FOLDED,
-            unfolded=UNFOLDED,
-            headers=HDRS,
-            effective_includes=[Path("a"), Path("b")],
-        ) is UNFOLDED
+        assert (
+            resolve_baseline_compile_context(
+                hint,
+                folded=FOLDED,
+                unfolded=UNFOLDED,
+                headers=HDRS,
+                effective_includes=[Path("a"), Path("b")],
+            )
+            is UNFOLDED
+        )
 
 
 # `TestScanRoutesThroughTheSharedRule` used to live here: it pinned that

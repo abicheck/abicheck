@@ -586,10 +586,14 @@ class TestDebuginfodResolver:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
-        monkeypatch.setattr(Path, "home", lambda: (_ for _ in ()).throw(RuntimeError("no home")))
+        monkeypatch.setattr(
+            Path, "home", lambda: (_ for _ in ()).throw(RuntimeError("no home"))
+        )
         monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
 
-        assert DebuginfodResolver._default_cache() == tmp_path / "abicheck" / "debuginfod"
+        assert (
+            DebuginfodResolver._default_cache() == tmp_path / "abicheck" / "debuginfod"
+        )
 
 
 # ---------------------------------------------------------------------------

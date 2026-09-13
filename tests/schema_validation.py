@@ -33,6 +33,7 @@ keying on a dict's identity would do the same after a test mutates one in
 place (both are things this suite really does — see
 `tests/test_schema_validation_helper.py`, which states those as invariants).
 """
+
 from __future__ import annotations
 
 import copy

@@ -122,13 +122,12 @@ class TestExplicitCtor:
         snap = snapshot_from_dict(d)
         assert snap.functions[0].is_explicit is None
 
-    def test_castxml_converter_fallback_reads_multiline_explicit_operator(self, tmp_path) -> None:
+    def test_castxml_converter_fallback_reads_multiline_explicit_operator(
+        self, tmp_path
+    ) -> None:
         source = tmp_path / "v2.h"
         source.write_text(
-            "struct Token {\n"
-            "    explicit\n"
-            "    operator int() const;\n"
-            "};\n",
+            "struct Token {\n    explicit\n    operator int() const;\n};\n",
             encoding="utf-8",
         )
         root = Element("GCC_XML")
@@ -143,13 +142,12 @@ class TestExplicitCtor:
         assert parser._source_line_has_explicit(None, declaration_el) is True
         assert str(source) in parser._source_lines_cache
 
-    def test_castxml_converter_parse_functions_reads_operator_line_fallback(self, tmp_path) -> None:
+    def test_castxml_converter_parse_functions_reads_operator_line_fallback(
+        self, tmp_path
+    ) -> None:
         source = tmp_path / "v2.h"
         source.write_text(
-            "struct Token {\n"
-            "    explicit\n"
-            "    operator int() const;\n"
-            "};\n",
+            "struct Token {\n    explicit\n    operator int() const;\n};\n",
             encoding="utf-8",
         )
         root = Element("GCC_XML")
@@ -165,7 +163,9 @@ class TestExplicitCtor:
                 mangled="_ZNK5TokencviEv",
             )
         )
-        parser = _CastxmlParser(root, exported_dynamic={"_ZNK5TokencviEv"}, exported_static=set())
+        parser = _CastxmlParser(
+            root, exported_dynamic={"_ZNK5TokencviEv"}, exported_static=set()
+        )
 
         funcs = parser.parse_functions()
 
@@ -173,17 +173,35 @@ class TestExplicitCtor:
         assert funcs[0].name == "operator int"
         assert funcs[0].is_explicit is True
 
-    def test_castxml_converter_fallback_preserves_unknown_on_missing_source(self) -> None:
+    def test_castxml_converter_fallback_preserves_unknown_on_missing_source(
+        self,
+    ) -> None:
         root = Element("GCC_XML")
         root.append(Element("File", id="_1", name=""))
         root.append(Element("File", id="_2", name="/does/not/exist.h"))
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
 
         assert parser._source_line_has_explicit(None) is None
-        assert parser._source_line_has_explicit(Element("Location", file="_missing", line="1")) is None
-        assert parser._source_line_has_explicit(Element("Location", file="_1", line="1")) is None
-        assert parser._source_line_has_explicit(Element("Location", file="_2", line="not-int")) is None
-        assert parser._source_line_has_explicit(Element("Location", file="_2", line="1")) is None
+        assert (
+            parser._source_line_has_explicit(
+                Element("Location", file="_missing", line="1")
+            )
+            is None
+        )
+        assert (
+            parser._source_line_has_explicit(Element("Location", file="_1", line="1"))
+            is None
+        )
+        assert (
+            parser._source_line_has_explicit(
+                Element("Location", file="_2", line="not-int")
+            )
+            is None
+        )
+        assert (
+            parser._source_line_has_explicit(Element("Location", file="_2", line="1"))
+            is None
+        )
 
 
 def _snap_with_types(
@@ -226,9 +244,7 @@ class TestCtorOverloadAmbiguityRisk:
 
     def test_second_converting_ctor_added_is_risk(self) -> None:
         cls = RecordType(name="Widget", kind="class")
-        old = _snap_with_types(
-            "1.0", [_conv_ctor("Widget", "c1", "int")], [cls]
-        )
+        old = _snap_with_types("1.0", [_conv_ctor("Widget", "c1", "int")], [cls])
         new = _snap_with_types(
             "2.0",
             [
@@ -238,9 +254,7 @@ class TestCtorOverloadAmbiguityRisk:
             [cls],
         )
         r = compare(old, new)
-        assert any(
-            c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
-        )
+        assert any(c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes)
         assert ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK in RISK_KINDS
         assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
 
@@ -261,17 +275,13 @@ class TestCtorOverloadAmbiguityRisk:
             [cls],
         )
         r = compare(old, new)
-        assert any(
-            c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
-        )
+        assert any(c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes)
 
     def test_first_converting_ctor_is_not_flagged(self) -> None:
         """0 -> 1 converting constructor cannot be ambiguous by itself."""
         cls = RecordType(name="Widget", kind="class")
         old = _snap_with_types("1.0", [], [cls])
-        new = _snap_with_types(
-            "2.0", [_conv_ctor("Widget", "c1", "int")], [cls]
-        )
+        new = _snap_with_types("2.0", [_conv_ctor("Widget", "c1", "int")], [cls])
         r = compare(old, new)
         assert not any(
             c.kind == ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK for c in r.changes
@@ -280,9 +290,7 @@ class TestCtorOverloadAmbiguityRisk:
     def test_new_explicit_ctor_is_not_flagged(self) -> None:
         """An explicit constructor never participates in implicit conversion."""
         cls = RecordType(name="Widget", kind="class")
-        old = _snap_with_types(
-            "1.0", [_conv_ctor("Widget", "c1", "int")], [cls]
-        )
+        old = _snap_with_types("1.0", [_conv_ctor("Widget", "c1", "int")], [cls])
         new = _snap_with_types(
             "2.0",
             [
@@ -299,9 +307,7 @@ class TestCtorOverloadAmbiguityRisk:
     def test_new_copy_ctor_is_not_flagged(self) -> None:
         """The copy constructor is infrastructure, not a converting overload."""
         cls = RecordType(name="Widget", kind="class")
-        old = _snap_with_types(
-            "1.0", [_conv_ctor("Widget", "c1", "int")], [cls]
-        )
+        old = _snap_with_types("1.0", [_conv_ctor("Widget", "c1", "int")], [cls])
         new = _snap_with_types(
             "2.0",
             [
@@ -320,16 +326,12 @@ class TestCtorOverloadAmbiguityRisk:
         site (Codex review #556), so it cannot create the implicit-conversion
         collision this heuristic looks for."""
         cls = RecordType(name="Widget", kind="class")
-        old = _snap_with_types(
-            "1.0", [_conv_ctor("Widget", "c1", "int")], [cls]
-        )
+        old = _snap_with_types("1.0", [_conv_ctor("Widget", "c1", "int")], [cls])
         new = _snap_with_types(
             "2.0",
             [
                 _conv_ctor("Widget", "c1", "int"),
-                _conv_ctor(
-                    "Widget", "c2", "double", access=AccessLevel.PRIVATE
-                ),
+                _conv_ctor("Widget", "c2", "double", access=AccessLevel.PRIVATE),
             ],
             [cls],
         )
@@ -341,16 +343,12 @@ class TestCtorOverloadAmbiguityRisk:
     def test_new_protected_ctor_is_not_flagged(self) -> None:
         """Same reasoning as private — only derived classes can call it."""
         cls = RecordType(name="Widget", kind="class")
-        old = _snap_with_types(
-            "1.0", [_conv_ctor("Widget", "c1", "int")], [cls]
-        )
+        old = _snap_with_types("1.0", [_conv_ctor("Widget", "c1", "int")], [cls])
         new = _snap_with_types(
             "2.0",
             [
                 _conv_ctor("Widget", "c1", "int"),
-                _conv_ctor(
-                    "Widget", "c2", "double", access=AccessLevel.PROTECTED
-                ),
+                _conv_ctor("Widget", "c2", "double", access=AccessLevel.PROTECTED),
             ],
             [cls],
         )
@@ -364,9 +362,7 @@ class TestCtorOverloadAmbiguityRisk:
         (Codex review #556) — `volatile` must be stripped alongside `const`/`&`
         before the self-type check, or it's mistaken for a converting ctor."""
         cls = RecordType(name="Widget", kind="class")
-        old = _snap_with_types(
-            "1.0", [_conv_ctor("Widget", "c1", "int")], [cls]
-        )
+        old = _snap_with_types("1.0", [_conv_ctor("Widget", "c1", "int")], [cls])
         new = _snap_with_types(
             "2.0",
             [
@@ -383,9 +379,7 @@ class TestCtorOverloadAmbiguityRisk:
     def test_unknown_explicitness_is_not_flagged(self) -> None:
         """Tri-state: unknown is_explicit on the new ctor must not fire."""
         cls = RecordType(name="Widget", kind="class")
-        old = _snap_with_types(
-            "1.0", [_conv_ctor("Widget", "c1", "int")], [cls]
-        )
+        old = _snap_with_types("1.0", [_conv_ctor("Widget", "c1", "int")], [cls])
         new = _snap_with_types(
             "2.0",
             [
@@ -447,9 +441,7 @@ class TestCtorOverloadAmbiguityRisk:
         """A `= delete`d overload can never be called, so it can't create
         ambiguity."""
         cls = RecordType(name="Widget", kind="class")
-        old = _snap_with_types(
-            "1.0", [_conv_ctor("Widget", "c1", "int")], [cls]
-        )
+        old = _snap_with_types("1.0", [_conv_ctor("Widget", "c1", "int")], [cls])
         deleted = _conv_ctor("Widget", "c2", "double")
         deleted.is_deleted = True
         new = _snap_with_types(

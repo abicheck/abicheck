@@ -470,7 +470,9 @@ def _compare_one_library(
         # read behind them, are `stamp_member_assurance`'s (see its docstring).
         from .workflows.release_assurance_members import stamp_member_assurance
 
-        stamp_member_assurance(entry, result, require_complete=require_complete_analysis)
+        stamp_member_assurance(
+            entry, result, require_complete=require_complete_analysis
+        )
         if contract_evaluation:
             # ADR-049 Phase 7's orthogonal contract-coverage floor (0/1),
             # read off this library's own persisted contract context --
@@ -517,7 +519,11 @@ def _compare_one_library(
                 lib_report_path,
                 # ADR-071 (Codex P2): without this an incomplete member's own
                 # `{library}.json` said `exit.code: 0` for a run it floored to `1`.
-                to_json(result, severity_config=severity_config, require_complete_analysis=require_complete_analysis),
+                to_json(
+                    result,
+                    severity_config=severity_config,
+                    require_complete_analysis=require_complete_analysis,
+                ),
             )
             # The unambiguous index a truncated machine document owes its
             # reader: this member's *complete*, uncapped report, by path.
@@ -663,7 +669,11 @@ def _suppress_lockstep_soname_findings(
             _safe_write_output(
                 lib_report_path,
                 # Same ADR-071 threading as the first write above.
-                to_json(result, severity_config=severity_config, require_complete_analysis=require_complete_analysis),
+                to_json(
+                    result,
+                    severity_config=severity_config,
+                    require_complete_analysis=require_complete_analysis,
+                ),
             )
     return suppressed
 

@@ -173,9 +173,7 @@ class TestReleaseJsonEnvMatrixDigestWithNoCompletedComparison:
         _write_snap(zp_new / "libbar.json", _snap(library="libbar.so"))
         (zero_pair_work / ".abicheck.yml").write_text(deployment_yaml)
         monkeypatch.chdir(zero_pair_work)
-        _, zero_pair_out = _invoke(
-            "compare", str(zp_old), str(zp_new), "-o", "json=-"
-        )
+        _, zero_pair_out = _invoke("compare", str(zp_old), str(zp_new), "-o", "json=-")
         zero_pair_digest = json.loads(zero_pair_out)["env_matrix_source_sha256"]
 
         matched_work = tmp_path / "matched"
@@ -257,9 +255,7 @@ class TestReleaseMarkdownEnvMatrixDigest:
         )
         monkeypatch.chdir(work)
 
-        code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "markdown=-"
-        )
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "markdown=-")
         assert code == 0, out
         assert "Deployment floor digest:" in out
         assert "`sha256:" in out
@@ -277,9 +273,7 @@ class TestReleaseMarkdownEnvMatrixDigest:
         _write_snap(new_dir / "libfoo.json", _snap())
         monkeypatch.chdir(work)
 
-        code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "markdown=-"
-        )
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "markdown=-")
         assert code == 0, out
         assert "Deployment floor digest:" not in out
 
@@ -321,7 +315,9 @@ class TestReleaseJunitEnvMatrixDigest:
 
         root = ET.fromstring(out)
         deployment_suite = next(
-            ts for ts in root.findall("testsuite") if ts.get("name") == "abicheck.deployment"
+            ts
+            for ts in root.findall("testsuite")
+            if ts.get("name") == "abicheck.deployment"
         )
         assert deployment_suite.get("tests") == "0"
         assert deployment_suite.get("errors") == "0"
@@ -369,7 +365,9 @@ class TestReleaseJunitEnvMatrixDigest:
         # digest genuinely comes from the dedicated release-level suite,
         # not incidentally from a library comparison that happened anyway.
         library_suites = [
-            ts for ts in root.findall("testsuite") if ts.get("name") != "abicheck.deployment"
+            ts
+            for ts in root.findall("testsuite")
+            if ts.get("name") != "abicheck.deployment"
         ]
         for ts in library_suites:
             props = ts.find("properties")

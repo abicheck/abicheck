@@ -18,6 +18,7 @@
 Compiler-free: the report times the pure-Python inline collection path and
 reuses the FP-rate gate metrics, so it runs in the default fast lane.
 """
+
 from __future__ import annotations
 
 import importlib.util

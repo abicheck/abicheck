@@ -7,6 +7,7 @@ system temp dir when the preferred location cannot be created. These cover the
 Windows branch (unreachable on the Linux CI host without monkeypatching
 ``sys.platform``) and the OSError fallback, since both are pure-Python paths.
 """
+
 from __future__ import annotations
 
 import json
@@ -200,7 +201,9 @@ def test_atomic_write_swallows_unlink_failure_during_cleanup(
     target.parent.mkdir(parents=True)
 
     monkeypatch.setattr(
-        os, "replace", lambda *_a, **_k: (_ for _ in ()).throw(OSError("replace failed"))
+        os,
+        "replace",
+        lambda *_a, **_k: (_ for _ in ()).throw(OSError("replace failed")),
     )
     monkeypatch.setattr(
         os, "unlink", lambda *_a, **_k: (_ for _ in ()).throw(OSError("unlink failed"))
@@ -217,7 +220,9 @@ def test_atomic_write_json_swallows_unlink_failure_during_cleanup(
     target.parent.mkdir(parents=True)
 
     monkeypatch.setattr(
-        os, "replace", lambda *_a, **_k: (_ for _ in ()).throw(OSError("replace failed"))
+        os,
+        "replace",
+        lambda *_a, **_k: (_ for _ in ()).throw(OSError("replace failed")),
     )
     monkeypatch.setattr(
         os, "unlink", lambda *_a, **_k: (_ for _ in ()).throw(OSError("unlink failed"))
@@ -307,7 +312,9 @@ def test_atomic_copy_swallows_unlink_failure_during_cleanup(
     dst.parent.mkdir(parents=True)
 
     monkeypatch.setattr(
-        os, "replace", lambda *_a, **_k: (_ for _ in ()).throw(OSError("replace failed"))
+        os,
+        "replace",
+        lambda *_a, **_k: (_ for _ in ()).throw(OSError("replace failed")),
     )
     monkeypatch.setattr(
         os, "unlink", lambda *_a, **_k: (_ for _ in ()).throw(OSError("unlink failed"))

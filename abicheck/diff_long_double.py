@@ -49,6 +49,7 @@ formats requires the L3 build flag (``-mabi=ibmlongdouble`` vs
 detector operates on. The unequal-width ppc64 modes and the x87↔__float128
 transitions (which DO change size or mangling) are covered above.
 """
+
 from __future__ import annotations
 
 from .checker_types import Change

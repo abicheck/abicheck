@@ -194,16 +194,12 @@ def _elf_with_sections(
     name_off = 1
     for (name, sh_type, _c), (off, size) in zip(sections, offsets, strict=True):
         shdrs.append(
-            struct.pack(
-                "<IIQQQQIIQQ", name_off, sh_type, 0, 0, off, size, 0, 0, 1, 0
-            )
+            struct.pack("<IIQQQQIIQQ", name_off, sh_type, 0, 0, off, size, 0, 0, 1, 0)
         )
         name_off += len(name) + 1
     # The .shstrtab section itself, last, as the header's shstrndx says.
     shdrs.append(
-        struct.pack(
-            "<IIQQQQIIQQ", 0, 3, 0, 0, shstrtab_off, len(shstrtab), 0, 0, 1, 0
-        )
+        struct.pack("<IIQQQQIIQQ", 0, 3, 0, 0, shstrtab_off, len(shstrtab), 0, 0, 1, 0)
     )
     path.write_bytes(bytes(header) + bytes(body) + b"".join(shdrs))
     return path
@@ -311,9 +307,7 @@ class TestTransportClassificationIsContentOnly:
         self, tmp_path: Path, name: str
     ) -> None:
         path = _write_compile_db(tmp_path / name)
-        assert (
-            classify_build_info_transport(path) is BuildInfoTransport.COMPILE_CONTEXT
-        )
+        assert classify_build_info_transport(path) is BuildInfoTransport.COMPILE_CONTEXT
 
     @pytest.mark.parametrize("name", MISLEADING_NAMES)
     def test_a_directory_is_always_the_searchable_transport(
@@ -346,15 +340,11 @@ class TestTransportClassificationIsContentOnly:
     ) -> None:
         path = tmp_path / "m.json"
         path.write_text(json.dumps({"library": "libfoo.so", "version": "1.0"}))
-        assert (
-            classify_build_info_transport(path) is BuildInfoTransport.COMPILE_CONTEXT
-        )
+        assert classify_build_info_transport(path) is BuildInfoTransport.COMPILE_CONTEXT
 
     def test_a_binary_operand_is_not_a_matrix(self, tmp_path: Path) -> None:
         path = _elf_with_sections(tmp_path / "libfoo.so", [".text"])
-        assert (
-            classify_build_info_transport(path) is BuildInfoTransport.COMPILE_CONTEXT
-        )
+        assert classify_build_info_transport(path) is BuildInfoTransport.COMPILE_CONTEXT
 
     def test_a_detached_debug_file_without_debug_sections_is_not_one(
         self, tmp_path: Path
@@ -457,9 +447,7 @@ class TestSplitterPreservesDestinationsAndSides:
         root.mkdir()
         sidecar = _elf_with_sections(tmp_path / "sidecar", [".debug_info"])
         pkg = _write_rpm(tmp_path / "dbg-blob")
-        out = split_debug_evidence(
-            [("both", root), ("old", sidecar), ("new", pkg)]
-        )
+        out = split_debug_evidence([("both", root), ("old", sidecar), ("new", pkg)])
         assert out["debug_roots"] == (root,)
         assert out["debug_roots_old"] == (sidecar,)
         assert out["debug_roots_new"] == ()
@@ -564,18 +552,24 @@ class TestDetachedDebugResolution:
         """
         from abicheck.extract.detached_debug import DetachedDebugFileResolver
 
-        binary = _elf_with_sections(tmp_path / "libfoo.so", [".text"], build_id="ab" * 10)
+        binary = _elf_with_sections(
+            tmp_path / "libfoo.so", [".text"], build_id="ab" * 10
+        )
         sidecar = _elf_with_sections(
             tmp_path / "other", [".debug_info"], build_id="cd" * 10
         )
         resolver = DetachedDebugFileResolver()
-        assert resolver.resolve(binary, build_id="ab" * 10, debug_roots=[sidecar]) is None
+        assert (
+            resolver.resolve(binary, build_id="ab" * 10, debug_roots=[sidecar]) is None
+        )
 
     def test_a_matching_build_id_is_accepted(self, tmp_path: Path) -> None:
         """The negative control: the check refuses a mismatch, not everything."""
         from abicheck.extract.detached_debug import DetachedDebugFileResolver
 
-        binary = _elf_with_sections(tmp_path / "libfoo.so", [".text"], build_id="ab" * 10)
+        binary = _elf_with_sections(
+            tmp_path / "libfoo.so", [".text"], build_id="ab" * 10
+        )
         sidecar = _elf_with_sections(
             tmp_path / "s", [".debug_info"], build_id="ab" * 10
         )
@@ -635,9 +629,7 @@ class TestDocumentClassificationDegradesGracefully:
     ) -> None:
         path = tmp_path / "operand"
         path.write_bytes(content)
-        assert (
-            classify_build_info_transport(path) is BuildInfoTransport.COMPILE_CONTEXT
-        )
+        assert classify_build_info_transport(path) is BuildInfoTransport.COMPILE_CONTEXT
 
     def test_an_unopenable_document_is_not_a_matrix(self, tmp_path: Path) -> None:
         """The OSError path, reached portably: a dangling symlink. (A
@@ -645,9 +637,7 @@ class TestDocumentClassificationDegradesGracefully:
         what CI runs in.)"""
         path = tmp_path / "operand"
         path.symlink_to(tmp_path / "nothing-here")
-        assert (
-            classify_build_info_transport(path) is BuildInfoTransport.COMPILE_CONTEXT
-        )
+        assert classify_build_info_transport(path) is BuildInfoTransport.COMPILE_CONTEXT
 
 
 class TestUnconsumableTransportsAreRefused:
@@ -705,9 +695,11 @@ class TestUnconsumableTransportsAreRefused:
             _elf_with_sections(artifact, [".debug_info.dwo"])
         old = _snapshot(tmp_path / "old.json", funcs=["foo"], version="1.0")
         new = _snapshot(tmp_path / "new.json", funcs=["foo"], version="2.0")
-        operands = [str(old), str(new)] if command == "compare" else [
-            str(_elf_with_sections(tmp_path / "libfoo.so", [".text"]))
-        ]
+        operands = (
+            [str(old), str(new)]
+            if command == "compare"
+            else [str(_elf_with_sections(tmp_path / "libfoo.so", [".text"]))]
+        )
         res = _run(command, *operands, "--debug-info", str(artifact))
         assert res.exit_code == 64, res.output
         assert "silently ignored" in res.output
@@ -722,9 +714,14 @@ class TestUnconsumableTransportsAreRefused:
         (root / "libfoo.pdb").write_bytes(b"Microsoft C/C++ MSF 7.00")
         old = _snapshot(tmp_path / "old.json", funcs=["foo"], version="1.0")
         new = _snapshot(tmp_path / "new.json", funcs=["foo"], version="2.0")
-        operands = [str(old), str(new)] if command == "compare" else [
-            str(_elf_with_sections(tmp_path / "libfoo.so", [".text"])), "--dry-run"
-        ]
+        operands = (
+            [str(old), str(new)]
+            if command == "compare"
+            else [
+                str(_elf_with_sections(tmp_path / "libfoo.so", [".text"])),
+                "--dry-run",
+            ]
+        )
         res = _run(command, *operands, "--debug-info", str(root))
         assert res.exit_code != 64, res.output
 
@@ -751,9 +748,7 @@ class TestContentSniffsDegradeGracefully:
         assert not looks_like_tar_container(path)
         assert not is_package(path)
 
-    def test_a_real_zstd_tar_is_recognized_under_any_name(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_real_zstd_tar_is_recognized_under_any_name(self, tmp_path: Path) -> None:
         """The negative control for the two above: the codec `tarfile` has
         none for is still detected, and from content rather than `.tar.zst`."""
         pytest.importorskip("zstandard")
@@ -878,7 +873,9 @@ class TestClassificationHasNoPositionalWindow:
             ),
             encoding="utf-8",
         )
-        assert path.stat().st_size > 512 * 1024, "fixture must exceed any plausible window"
+        assert path.stat().st_size > 512 * 1024, (
+            "fixture must exceed any plausible window"
+        )
         assert classify_build_info_transport(path) is BuildInfoTransport.PROBE_MATRIX
 
     def test_a_huge_compile_database_is_still_not_a_matrix(
@@ -887,7 +884,9 @@ class TestClassificationHasNoPositionalWindow:
         """The negative control: a top-level array is ruled out on sight."""
         path = tmp_path / "compile_commands.json"
         path.write_text(
-            json.dumps([{"directory": "/b", "command": "cc -c a.c", "file": "a.c"}] * 20000),
+            json.dumps(
+                [{"directory": "/b", "command": "cc -c a.c", "file": "a.c"}] * 20000
+            ),
             encoding="utf-8",
         )
         assert classify_build_info_transport(path) is BuildInfoTransport.COMPILE_CONTEXT
@@ -968,12 +967,12 @@ class TestMergedInputsEndToEnd:
         old, new = _release_pair(tmp_path)
         pkg = _write_tar(
             tmp_path / "evidence",
-            {"usr/include/foo.h": b"int foo(void);\n",
-             "usr/lib/debug/libfoo.so.debug": b"\x7fELF"},
+            {
+                "usr/include/foo.h": b"int foo(void);\n",
+                "usr/lib/debug/libfoo.so.debug": b"\x7fELF",
+            },
         )
-        res = _run(
-            "compare", str(old), str(new), flag, f"new={pkg}", "-o", "json=-"
-        )
+        res = _run("compare", str(old), str(new), flag, f"new={pkg}", "-o", "json=-")
         assert not isinstance(res.exception, ExtractionSecurityError), res.output
         assert res.exit_code == 4, res.output
 
@@ -987,8 +986,13 @@ class TestMergedInputsEndToEnd:
         sidecar = _elf_with_sections(tmp_path / "sidecar-no-suffix", [".debug_info"])
         for value in (root, sidecar):
             res = _run(
-                "compare", str(old), str(new), "--debug-info", f"old={value}",
-                "-o", "json=-",
+                "compare",
+                str(old),
+                str(new),
+                "--debug-info",
+                f"old={value}",
+                "-o",
+                "json=-",
             )
             assert res.exit_code == 4, res.output
 
@@ -1004,11 +1008,17 @@ class TestMergedInputsEndToEnd:
         build_dir = tmp_path / "b"
         build_dir.mkdir()
         res = _run(
-            "compare", str(old), str(new),
-            "--build-info", f"old={old_matrix}",
-            "--build-info", f"new={new_matrix}",
-            "--build-info", f"old={build_dir}",
-            "-o", "json=-",
+            "compare",
+            str(old),
+            str(new),
+            "--build-info",
+            f"old={old_matrix}",
+            "--build-info",
+            f"new={new_matrix}",
+            "--build-info",
+            f"old={build_dir}",
+            "-o",
+            "json=-",
         )
         assert res.exit_code in (0, 2, 4), res.output
         kinds = _finding_kinds(res)
@@ -1018,9 +1028,7 @@ class TestMergedInputsEndToEnd:
         old = _snapshot(tmp_path / "old.json", funcs=["foo"], version="1.0")
         new = _snapshot(tmp_path / "new.json", funcs=["foo"], version="2.0")
         matrix = _write_probe_matrix(tmp_path / "m.json")
-        res = _run(
-            "compare", str(old), str(new), "--build-info", f"old={matrix}"
-        )
+        res = _run("compare", str(old), str(new), "--build-info", f"old={matrix}")
         assert res.exit_code != 0
         assert "needs both sides" in res.output
 
@@ -1052,9 +1060,7 @@ class TestMergedInputsEndToEnd:
         assert res.exit_code == 64, res.output
         assert "compare --debug-info" in res.output
 
-    def test_dump_accepts_a_directory_and_a_detached_file(
-        self, tmp_path: Path
-    ) -> None:
+    def test_dump_accepts_a_directory_and_a_detached_file(self, tmp_path: Path) -> None:
         binary = _elf_with_sections(tmp_path / "libfoo.so", [".text"])
         root = tmp_path / "dbg"
         root.mkdir()
@@ -1109,9 +1115,15 @@ class TestTransportEquivalence:
             )
             runs.append(
                 _run(
-                    "compare", str(old), str(new),
-                    "--build-info", f"old={om}", "--build-info", f"new={nm}",
-                    "-o", "json=-",
+                    "compare",
+                    str(old),
+                    str(new),
+                    "--build-info",
+                    f"old={om}",
+                    "--build-info",
+                    f"new={nm}",
+                    "-o",
+                    "json=-",
                 )
             )
         assert runs[0].exit_code == runs[1].exit_code
@@ -1127,7 +1139,9 @@ class TestTransportEquivalence:
         members = {"usr/include/foo.h": b"int foo(void);\n"}
         conventional = _write_tar(tmp_path / "libfoo-dev.tar.gz", members)
         renamed = _write_tar(tmp_path / "evidence", members)
-        a = _run("compare", str(old), str(new), "-H", f"new={conventional}", "-o", "json=-")
+        a = _run(
+            "compare", str(old), str(new), "-H", f"new={conventional}", "-o", "json=-"
+        )
         b = _run("compare", str(old), str(new), "-H", f"new={renamed}", "-o", "json=-")
         assert a.exit_code == b.exit_code
         assert _finding_kinds(a) == _finding_kinds(b)

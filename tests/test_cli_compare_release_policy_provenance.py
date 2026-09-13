@@ -306,7 +306,11 @@ class TestReleaseSummaryCarriesProjectConfigOverrides:
         _write_snap(new_dir / "libfoo.json", new_foo)
 
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "json=-",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
         )
         assert code == 4, out  # undemoted FUNCTION_REMOVED -> BREAKING
         fields = json.loads(out)["effective_config_fields"]
@@ -385,9 +389,7 @@ class TestReleaseSummaryCarriesProjectConfigOverrides:
         )
         assert code == 0, out
         release_fields = json.loads(out)["effective_config_fields"]
-        per_library = json.loads(
-            (out_dir / "libfoo.json").read_text(encoding="utf-8")
-        )
+        per_library = json.loads((out_dir / "libfoo.json").read_text(encoding="utf-8"))
         library_fields = per_library["effective_config_fields"]
         assert release_fields["policy.overrides"] == library_fields["policy.overrides"]
         assert "func_removed=" in release_fields["policy.overrides"]

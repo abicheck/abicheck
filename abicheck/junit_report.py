@@ -109,27 +109,41 @@ _VERDICT_TO_JUNIT_TYPE: dict[Verdict, str] = {
 
 
 def _resolved_verdict(
-    change: Change, result: DiffResult, kind_sets: KindSets, finding: ReportFinding | None
+    change: Change,
+    result: DiffResult,
+    kind_sets: KindSets,
+    finding: ReportFinding | None,
 ) -> Verdict:
     """*finding*'s verdict if resolved (ADR-061 Phase 2 item 4b), else the
     direct resolver call every caller used before ``findings_by_id``."""
     if finding is not None:
         return finding.verdict
     from .severity import effective_verdict_for_change
+
     return effective_verdict_for_change(
-        change, policy=result.policy, kind_sets=kind_sets, policy_file=result.policy_file
+        change,
+        policy=result.policy,
+        kind_sets=kind_sets,
+        policy_file=result.policy_file,
     )
 
 
 def _resolved_category(
-    change: Change, result: DiffResult, kind_sets: KindSets, finding: ReportFinding | None
+    change: Change,
+    result: DiffResult,
+    kind_sets: KindSets,
+    finding: ReportFinding | None,
 ) -> IssueCategory:
     """Category counterpart of :func:`_resolved_verdict`."""
     if finding is not None:
         return finding.category
     from .severity import classify_effective_change
+
     return classify_effective_change(
-        change, policy=result.policy, kind_sets=kind_sets, policy_file=result.policy_file
+        change,
+        policy=result.policy,
+        kind_sets=kind_sets,
+        policy_file=result.policy_file,
     )
 
 
@@ -380,8 +394,12 @@ def _count_failures(
     symbols_with_failure: set[str] = set()
     for c in changes:
         if _is_failure(
-            c, result, kind_sets, severity_config,
-            relevant_ids=relevant_ids, findings_by_id=findings_by_id,
+            c,
+            result,
+            kind_sets,
+            severity_config,
+            relevant_ids=relevant_ids,
+            findings_by_id=findings_by_id,
         ):
             symbols_with_failure.add(c.symbol)
     return len(symbols_with_failure)
@@ -412,9 +430,16 @@ def _emit_testcases(
             tc.set("classname", classname)
             if sym in change_by_symbol:
                 _maybe_add_failure(
-                    tc, change_by_symbol[sym], result, kind_sets, severity_config,
-                    relevant_ids=relevant_ids, root_cause_lookup=root_cause_lookup,
-                    findings_by_id=findings_by_id, today=today)
+                    tc,
+                    change_by_symbol[sym],
+                    result,
+                    kind_sets,
+                    severity_config,
+                    relevant_ids=relevant_ids,
+                    root_cause_lookup=root_cause_lookup,
+                    findings_by_id=findings_by_id,
+                    today=today,
+                )
     else:
         # No snapshot — only emit changed symbols
         for sym, c in sorted(change_by_symbol.items()):
@@ -422,9 +447,16 @@ def _emit_testcases(
             tc.set("name", sym)
             tc.set("classname", _classname_for(c))
             _maybe_add_failure(
-                tc, c, result, kind_sets, severity_config,
-                relevant_ids=relevant_ids, root_cause_lookup=root_cause_lookup,
-                findings_by_id=findings_by_id, today=today)
+                tc,
+                c,
+                result,
+                kind_sets,
+                severity_config,
+                relevant_ids=relevant_ids,
+                root_cause_lookup=root_cause_lookup,
+                findings_by_id=findings_by_id,
+                today=today,
+            )
 
 
 def _append_extra_failures(
@@ -467,14 +499,24 @@ def _append_extra_failures(
     for c in extra_changes:
         _add_correlation_property_if_testcase_found(ts, c)
         if _is_failure(
-            c, result, kind_sets, severity_config,
-            relevant_ids=relevant_ids, findings_by_id=findings_by_id,
+            c,
+            result,
+            kind_sets,
+            severity_config,
+            relevant_ids=relevant_ids,
+            findings_by_id=findings_by_id,
         ):
             for tc in ts:
                 if tc.get("name") == c.symbol:
                     _add_failure(
-                        tc, c, result, kind_sets, severity_config,
-                        root_cause_lookup=root_cause_lookup, findings_by_id=findings_by_id)
+                        tc,
+                        c,
+                        result,
+                        kind_sets,
+                        severity_config,
+                        root_cause_lookup=root_cause_lookup,
+                        findings_by_id=findings_by_id,
+                    )
                     break
 
 
@@ -503,7 +545,9 @@ def _build_testsuite(
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
-    report_mode: str = "full", report_document: ReportDocument | None = None, envelope: ReportEnvelope | None = None,
+    report_mode: str = "full",
+    report_document: ReportDocument | None = None,
+    envelope: ReportEnvelope | None = None,
 ) -> ET.Element:
     """Build a ``<testsuite>`` element from a single DiffResult.
 
@@ -553,7 +597,10 @@ def _build_testsuite(
         envelope.findings_for(changes)
         if envelope is not None
         else build_report_findings(
-            changes, policy=result.policy, kind_sets=kind_sets, policy_file=result.policy_file
+            changes,
+            policy=result.policy,
+            kind_sets=kind_sets,
+            policy_file=result.policy_file,
         )
     )
 
@@ -563,8 +610,12 @@ def _build_testsuite(
     # run also supplied a --used-by/--required-symbol consumer.
     relevant_ids = getattr(result, "scoped_relevant_finding_ids", None)
     failure_count = _count_failures(
-        changes, result, kind_sets, severity_config,
-        relevant_ids=relevant_ids, findings_by_id=findings_by_id,
+        changes,
+        result,
+        kind_sets,
+        severity_config,
+        relevant_ids=relevant_ids,
+        findings_by_id=findings_by_id,
     )
     missing_labels = getattr(result, "scoped_missing_labels", ()) or ()
     # The missing-contract failure decision must follow the same severity
@@ -611,9 +662,16 @@ def _build_testsuite(
     # ADR-067 audit rows are appended into the same element rather than a
     # second one beside it.
     props = ET.SubElement(ts, "properties")
-    _add_disposition_audit_properties(props, result, severity_config, report_document=_resolved_document(envelope, report_document))
+    _add_disposition_audit_properties(
+        props,
+        result,
+        severity_config,
+        report_document=_resolved_document(envelope, report_document),
+    )
     _add_scoped_properties(props, result)
-    _add_env_matrix_property(props, result, report_document=_resolved_document(envelope, report_document))
+    _add_env_matrix_property(
+        props, result, report_document=_resolved_document(envelope, report_document)
+    )
 
     # G29 Phase 3 (ADR-052 follow-up): --report-mode root-cause adds
     # rootCauseId/rootCause attributes to each <failure> rather than
@@ -627,13 +685,25 @@ def _build_testsuite(
     )
 
     _emit_testcases(
-        ts, all_symbols, change_by_symbol, result, kind_sets, severity_config,
-        relevant_ids=relevant_ids, root_cause_lookup=root_cause_lookup,
-        findings_by_id=findings_by_id, today=resolved_today,
+        ts,
+        all_symbols,
+        change_by_symbol,
+        result,
+        kind_sets,
+        severity_config,
+        relevant_ids=relevant_ids,
+        root_cause_lookup=root_cause_lookup,
+        findings_by_id=findings_by_id,
+        today=resolved_today,
     )
     _append_extra_failures(
-        ts, extra_changes, result, kind_sets, severity_config,
-        relevant_ids=relevant_ids, root_cause_lookup=root_cause_lookup,
+        ts,
+        extra_changes,
+        result,
+        kind_sets,
+        severity_config,
+        relevant_ids=relevant_ids,
+        root_cause_lookup=root_cause_lookup,
         findings_by_id=findings_by_id,
     )
     _emit_missing_contract_testcases(
@@ -691,10 +761,13 @@ def _emit_missing_contract_testcases(
                     fail.set("rootCause", entry[1])
 
 
-def _add_env_matrix_property(props: ET.Element, result: DiffResult, report_document: ReportDocument | None = None) -> None:
+def _add_env_matrix_property(
+    props: ET.Element, result: DiffResult, report_document: ReportDocument | None = None
+) -> None:
     """Mirrors no_baseline_render.py's env_matrix_source_sha256 property; omitted, not an empty-string property, when no matrix was declared.
     *report_document* (ADR-061 gap C), when given, is read instead of the mutable *result* (Codex review, fresh evidence)."""
     from .report.envelope import env_matrix_digest_reusing_document
+
     digest = env_matrix_digest_reusing_document(result, report_document)
     if digest is None:
         return
@@ -789,12 +862,21 @@ def _maybe_add_failure(
     _add_contract_properties(tc, change, result, severity_config, today=today)
     _add_correlation_property(tc, change)
     if _is_failure(
-        change, result, kind_sets, severity_config,
-        relevant_ids=relevant_ids, findings_by_id=findings_by_id,
+        change,
+        result,
+        kind_sets,
+        severity_config,
+        relevant_ids=relevant_ids,
+        findings_by_id=findings_by_id,
     ):
         _add_failure(
-            tc, change, result, kind_sets, severity_config,
-            root_cause_lookup=root_cause_lookup, findings_by_id=findings_by_id,
+            tc,
+            change,
+            result,
+            kind_sets,
+            severity_config,
+            root_cause_lookup=root_cause_lookup,
+            findings_by_id=findings_by_id,
         )
 
 
@@ -989,7 +1071,9 @@ def to_junit_xml(
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
-    report_mode: str = "full", report_document: ReportDocument | None = None, envelope: ReportEnvelope | None = None,
+    report_mode: str = "full",
+    report_document: ReportDocument | None = None,
+    envelope: ReportEnvelope | None = None,
 ) -> str:
     """Convert a single DiffResult to a JUnit XML string.
 
@@ -1032,8 +1116,13 @@ def to_junit_xml(
     root.set("name", "abicheck")
 
     ts = _build_testsuite(
-        result, old_snapshot, show_only=show_only, severity_config=severity_config,
-        report_mode=report_mode, report_document=report_document, envelope=envelope,
+        result,
+        old_snapshot,
+        show_only=show_only,
+        severity_config=severity_config,
+        report_mode=report_mode,
+        report_document=report_document,
+        envelope=envelope,
     )
     root.append(ts)
 

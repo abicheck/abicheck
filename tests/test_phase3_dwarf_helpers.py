@@ -1,4 +1,5 @@
 """Phase 3 DWARF confidence tests for helper/edge-case behavior."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -13,7 +14,13 @@ class _Attr:
 
 
 class _Die:
-    def __init__(self, tag: str, attrs: dict[str, object] | None = None, children=None, offset: int = 0):
+    def __init__(
+        self,
+        tag: str,
+        attrs: dict[str, object] | None = None,
+        children=None,
+        offset: int = 0,
+    ):
         self.tag = tag
         self.attributes = attrs or {}
         self._children = list(children or [])
@@ -44,7 +51,11 @@ def test_dwarf_metadata_resolve_ref_handles_relative_and_absolute_forms():
 
 def test_dwarf_metadata_die_to_type_info_depth_limit_and_cache():
     cu = SimpleNamespace(cu_offset=1)
-    die = _Die("DW_TAG_base_type", {"DW_AT_name": _Attr("int"), "DW_AT_byte_size": _Attr(4)}, offset=9)
+    die = _Die(
+        "DW_TAG_base_type",
+        {"DW_AT_name": _Attr("int"), "DW_AT_byte_size": _Attr(4)},
+        offset=9,
+    )
     cache: dict[tuple[int, int], tuple[str, int]] = {}
 
     assert dm._die_to_type_info(die, cu, depth=9, cache=cache) == ("...", 0)
@@ -56,9 +67,17 @@ def test_dwarf_metadata_die_to_type_info_depth_limit_and_cache():
     assert cache[(1, 9)] == ("int", 4)
 
 
-def test_dwarf_metadata_compute_type_info_pointer_fallback_on_resolution_error(monkeypatch):
-    die = _Die("DW_TAG_pointer_type", {"DW_AT_type": _Attr(3), "DW_AT_byte_size": _Attr(8)})
-    monkeypatch.setattr(dm, "_resolve_ref", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("bad")))
+def test_dwarf_metadata_compute_type_info_pointer_fallback_on_resolution_error(
+    monkeypatch,
+):
+    die = _Die(
+        "DW_TAG_pointer_type", {"DW_AT_type": _Attr(3), "DW_AT_byte_size": _Attr(8)}
+    )
+    monkeypatch.setattr(
+        dm,
+        "_resolve_ref",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("bad")),
+    )
 
     out = dm._compute_type_info(die, SimpleNamespace(cu_offset=0), 0, {})
     assert out == ("void *", 8)
@@ -82,8 +101,14 @@ def test_dwarf_advanced_decode_member_location_forms():
 
 
 def test_dwarf_advanced_get_type_align_follows_typedef_chain_and_alignment_attr():
-    base = _Die("DW_TAG_base_type", {"DW_AT_alignment": _Attr(8), "DW_AT_byte_size": _Attr(8)}, offset=30)
-    typedef = _Die("DW_TAG_typedef", {"DW_AT_type": _Attr(30, "DW_FORM_ref_addr")}, offset=20)
+    base = _Die(
+        "DW_TAG_base_type",
+        {"DW_AT_alignment": _Attr(8), "DW_AT_byte_size": _Attr(8)},
+        offset=30,
+    )
+    typedef = _Die(
+        "DW_TAG_typedef", {"DW_AT_type": _Attr(30, "DW_FORM_ref_addr")}, offset=20
+    )
     member = _Die("DW_TAG_member", {"DW_AT_type": _Attr(20, "DW_FORM_ref_addr")})
 
     class _CU:
@@ -97,7 +122,9 @@ def test_dwarf_advanced_get_type_align_follows_typedef_chain_and_alignment_attr(
 
 def test_dwarf_advanced_extract_calling_convention_external_and_unknown():
     meta = da.AdvancedDwarfMetadata(has_dwarf=True)
-    hidden = _Die("DW_TAG_subprogram", {"DW_AT_external": _Attr(0), "DW_AT_name": _Attr("f")})
+    hidden = _Die(
+        "DW_TAG_subprogram", {"DW_AT_external": _Attr(0), "DW_AT_name": _Attr("f")}
+    )
     da._extract_calling_convention(hidden, meta, CU=SimpleNamespace(cu_offset=0))
     assert meta.calling_conventions == {}
 
@@ -114,8 +141,15 @@ def test_dwarf_advanced_extract_calling_convention_external_and_unknown():
 
 
 def test_dwarf_advanced_check_packed_detects_misaligned_field(monkeypatch):
-    member = _Die("DW_TAG_member", {"DW_AT_data_member_location": _Attr(2), "DW_AT_bit_size": _Attr(0)})
-    struct_die = _Die("DW_TAG_structure_type", {"DW_AT_name": _Attr("S"), "DW_AT_byte_size": _Attr(8)}, [member])
+    member = _Die(
+        "DW_TAG_member",
+        {"DW_AT_data_member_location": _Attr(2), "DW_AT_bit_size": _Attr(0)},
+    )
+    struct_die = _Die(
+        "DW_TAG_structure_type",
+        {"DW_AT_name": _Attr("S"), "DW_AT_byte_size": _Attr(8)},
+        [member],
+    )
 
     monkeypatch.setattr(da, "_get_type_align", lambda *_args, **_kwargs: 4)
 
@@ -130,6 +164,7 @@ def test_dwarf_advanced_check_packed_detects_misaligned_field(monkeypatch):
 # has_real_dwarf_info — strict DWARF detection (excludes .eh_frame)
 # ---------------------------------------------------------------------------
 
+
 class _FakeElf:
     """Minimal ELFFile stand-in exposing get_section_by_name."""
 
@@ -142,20 +177,24 @@ class _FakeElf:
 
 def test_has_real_dwarf_info_true_with_debug_info():
     from abicheck.dwarf_utils import has_real_dwarf_info
+
     assert has_real_dwarf_info(_FakeElf({".debug_info", ".eh_frame"})) is True
 
 
 def test_has_real_dwarf_info_true_with_compressed_zdebug_info():
     from abicheck.dwarf_utils import has_real_dwarf_info
+
     assert has_real_dwarf_info(_FakeElf({".zdebug_info"})) is True
 
 
 def test_has_real_dwarf_info_false_when_only_eh_frame():
     """A stripped binary keeps .eh_frame but no .debug_* — must read as no DWARF."""
     from abicheck.dwarf_utils import has_real_dwarf_info
+
     assert has_real_dwarf_info(_FakeElf({".eh_frame"})) is False
 
 
 def test_has_real_dwarf_info_false_when_no_sections():
     from abicheck.dwarf_utils import has_real_dwarf_info
+
     assert has_real_dwarf_info(_FakeElf(set())) is False

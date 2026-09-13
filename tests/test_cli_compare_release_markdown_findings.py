@@ -99,8 +99,11 @@ class TestReleaseMarkdownCarriesSymbolNames:
         _write_snap(new_dir / "libfoo.json", new_foo)
 
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--view", "no-demangle",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--view",
+            "no-demangle",
         )
         assert code == 4, out
         assert "_Z3foov" in out
@@ -201,9 +204,7 @@ class TestReleaseMarkdownCarriesSymbolNames:
         _write_snap(old_dir / "libfoo.json", old_snap)
         _write_snap(new_dir / "libfoo.json", new_snap)
 
-        code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "json=-"
-        )
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert code == 4, out
         data = json.loads(out)
         entry = next(

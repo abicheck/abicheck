@@ -434,4 +434,3 @@ class TestDumpAndScanHelpAllDisclosure:
         # the point is that Click accepts the (curated-hidden)
         # --dump-manifest flag at all, rather than "no such option".
         assert "no such option" not in result.output.lower()
-

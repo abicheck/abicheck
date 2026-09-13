@@ -92,8 +92,6 @@ if TYPE_CHECKING:
     from .workflows.gate import SeverityConfig
 
 
-
-
 #: Release *input resolution* -- package/debug/devel extraction, library
 #: discovery, stored-``ProjectSnapshot`` variant materialization,
 #: ``--dso-only`` classification, per-side headers/includes and key matching
@@ -486,10 +484,6 @@ from .report import release_display_limits as _display_limits  # noqa: E402
 # Plain assignment (mypy's `no_implicit_reexport`), for the same reason the
 # release-input re-exports below give.
 _MAX_RELEASE_FINDINGS_PER_LIBRARY = _display_limits.MAX_RELEASE_FINDINGS_PER_LIBRARY
-
-
-
-
 
 
 def _release_change_kind_str(c: Any) -> str:
@@ -932,5 +926,3 @@ def _strip_diff_results_and_adjust_verdict(
     ) < _RELEASE_VERDICT_ORDER.get("COMPATIBLE_WITH_RISK", 0):
         worst_verdict = "COMPATIBLE_WITH_RISK"
     return worst_verdict
-
-

@@ -104,17 +104,33 @@ _VALID_BINDING: frozenset[str] = frozenset(b.value for b in SymbolBinding)
 _VALID_CHANGE_KINDS: frozenset[str] = frozenset(ck.value for ck in ChangeKind)
 
 # ChangeKind values that represent type-level changes (matched by type_pattern).
-_TYPE_CHANGE_KINDS: frozenset[str] = frozenset({
-    "type_size_changed", "type_alignment_changed", "type_field_removed",
-    "type_field_added", "type_field_offset_changed", "type_field_type_changed",
-    "type_base_changed", "type_vtable_changed", "type_added", "type_removed",
-    "type_field_added_compatible", "type_became_opaque", "type_visibility_changed",
-    "enum_member_removed", "enum_member_added", "enum_member_value_changed",
-    "enum_last_member_value_changed", "enum_member_renamed",
-    "enum_underlying_size_changed",
-    "typedef_removed", "typedef_base_changed",
-    "struct_field_type_changed", "union_field_type_changed",
-})
+_TYPE_CHANGE_KINDS: frozenset[str] = frozenset(
+    {
+        "type_size_changed",
+        "type_alignment_changed",
+        "type_field_removed",
+        "type_field_added",
+        "type_field_offset_changed",
+        "type_field_type_changed",
+        "type_base_changed",
+        "type_vtable_changed",
+        "type_added",
+        "type_removed",
+        "type_field_added_compatible",
+        "type_became_opaque",
+        "type_visibility_changed",
+        "enum_member_removed",
+        "enum_member_added",
+        "enum_member_value_changed",
+        "enum_last_member_value_changed",
+        "enum_member_renamed",
+        "enum_underlying_size_changed",
+        "typedef_removed",
+        "typedef_base_changed",
+        "struct_field_type_changed",
+        "union_field_type_changed",
+    }
+)
 
 
 class SelectorMatchable(Protocol):
@@ -197,7 +213,6 @@ def _validate_selectors(
         )
 
 
-
 # Matches abicheck/internal_leak.py's own `_TEMPLATE_ARG_RE`/
 # `_strip_template_args` exactly, but is not imported from there:
 # internal_leak.py pulls in `checker_types.py`/`buildsource/*` transitively,
@@ -251,7 +266,9 @@ def _ns_match(pat: _SegmentGlobMatcher, name: str | None) -> bool:
     return any(pat.matches_any_ancestor(_strip_template_args(form)) for form in forms)
 
 
-def _matches_source_location(compiled: re.Pattern[str], change: SelectorMatchable) -> bool:
+def _matches_source_location(
+    compiled: re.Pattern[str], change: SelectorMatchable
+) -> bool:
     """Return False if *change*'s source path does not match *compiled*."""
     src = change.source_location or ""
     src_path = re.sub(r":\d+(?::\d+)?$", "", src)
@@ -301,7 +318,9 @@ def _matches_finding_id(finding_id: str, canonical_finding_id: str | None) -> bo
     return canonical_finding_id is not None and canonical_finding_id == finding_id
 
 
-def _matches_entity_namespace(compiled: _SegmentGlobMatcher, change: SelectorMatchable) -> bool:
+def _matches_entity_namespace(
+    compiled: _SegmentGlobMatcher, change: SelectorMatchable
+) -> bool:
     """Return True if the change's *own* symbol/qualified_name lies in the namespace.
 
     ADR-044 D3: deliberately does **not** consult ``change.caused_by_type`` —
@@ -312,10 +331,14 @@ def _matches_entity_namespace(compiled: _SegmentGlobMatcher, change: SelectorMat
     detail silently suppress an unrelated finding on a *public* symbol merely
     because its documented cause happens to live in that namespace.
     """
-    return _ns_match(compiled, change.symbol) or _ns_match(compiled, change.qualified_name)
+    return _ns_match(compiled, change.symbol) or _ns_match(
+        compiled, change.qualified_name
+    )
 
 
-def _matches_cause_namespace(compiled: _SegmentGlobMatcher, change: SelectorMatchable) -> bool:
+def _matches_cause_namespace(
+    compiled: _SegmentGlobMatcher, change: SelectorMatchable
+) -> bool:
     """Return True if the change's ``caused_by_type`` lies in the namespace.
 
     ADR-044 D3: the counterpart to :func:`_matches_entity_namespace` — matches
@@ -332,7 +355,9 @@ def _matches_type_pattern(
     """Return True if *change* is a type-level change matching *compiled*."""
     if change.kind.value not in _TYPE_CHANGE_KINDS:
         return False
-    match_symbol = change.symbol.rsplit("::", 1)[0] if "::" in change.symbol else change.symbol
+    match_symbol = (
+        change.symbol.rsplit("::", 1)[0] if "::" in change.symbol else change.symbol
+    )
     if not compiled.fullmatch(match_symbol):
         return False
     if change_kind_filter is not None and change.kind.value != change_kind_filter:
@@ -387,10 +412,18 @@ class SelectorSet:
     binding: str | None = None
     finding_id: str | None = None
     expires: date | None = None
-    _compiled_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
-    _compiled_type_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
-    _compiled_member_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
-    _compiled_source_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
+    _compiled_pattern: re.Pattern[str] | None = field(
+        default=None, init=False, repr=False
+    )
+    _compiled_type_pattern: re.Pattern[str] | None = field(
+        default=None, init=False, repr=False
+    )
+    _compiled_member_pattern: re.Pattern[str] | None = field(
+        default=None, init=False, repr=False
+    )
+    _compiled_source_pattern: re.Pattern[str] | None = field(
+        default=None, init=False, repr=False
+    )
     _compiled_entity_namespace_pattern: _SegmentGlobMatcher | None = field(
         default=None, init=False, repr=False
     )
@@ -413,7 +446,9 @@ class SelectorSet:
         if isinstance(self.expires, datetime):
             self.expires = self.expires.date()
         effective_entity_ns = (
-            self.entity_namespace if self.entity_namespace is not None else self.namespace
+            self.entity_namespace
+            if self.entity_namespace is not None
+            else self.namespace
         )
         _validate_selectors(
             has_symbol=self.symbol is not None,
@@ -421,16 +456,23 @@ class SelectorSet:
             has_type_pattern=self.type_pattern is not None,
             has_member_name=self.member_name is not None,
             has_source_location=self.source_location is not None,
-            has_namespace=effective_entity_ns is not None or self.cause_namespace is not None,
+            has_namespace=effective_entity_ns is not None
+            or self.cause_namespace is not None,
             has_finding_id=self.finding_id is not None,
             has_binding=self.binding is not None,
         )
         # Compile regex eagerly — malformed patterns fail at construction
         # time, not match time. Fullmatch semantics throughout.
         self._compiled_pattern = _compile_pattern(self.symbol_pattern, "symbol_pattern")
-        self._compiled_type_pattern = _compile_pattern(self.type_pattern, "type_pattern")
-        self._compiled_member_pattern = _compile_pattern(self.member_name, "member_name")
-        self._compiled_source_pattern = _compile_glob(self.source_location, "source_location")
+        self._compiled_type_pattern = _compile_pattern(
+            self.type_pattern, "type_pattern"
+        )
+        self._compiled_member_pattern = _compile_pattern(
+            self.member_name, "member_name"
+        )
+        self._compiled_source_pattern = _compile_glob(
+            self.source_location, "source_location"
+        )
         self._compiled_entity_namespace_pattern = _compile_namespace_glob(
             effective_entity_ns, "namespace"
         )
@@ -440,8 +482,7 @@ class SelectorSet:
         if self.change_kind is not None and self.change_kind not in _VALID_CHANGE_KINDS:
             valid = ", ".join(sorted(_VALID_CHANGE_KINDS))
             raise ValueError(
-                f"Unknown change_kind {self.change_kind!r}. "
-                f"Valid values: {valid}"
+                f"Unknown change_kind {self.change_kind!r}. Valid values: {valid}"
             )
         if self.binding is not None and (
             # isinstance check first: a YAML value neither field's own
@@ -450,8 +491,7 @@ class SelectorSet:
             # would raise TypeError instead of this constructor's
             # documented ValueError contract — see Suppression's own
             # pre-existing identical guard, moved here unchanged.
-            not isinstance(self.binding, str)
-            or self.binding not in _VALID_BINDING
+            not isinstance(self.binding, str) or self.binding not in _VALID_BINDING
         ):
             raise ValueError(
                 f"Invalid binding {self.binding!r}. "
@@ -505,13 +545,19 @@ class SelectorSet:
             if not _matches_finding_id(self.finding_id, canonical_finding_id):
                 return False
         if self._compiled_entity_namespace_pattern is not None:
-            if not _matches_entity_namespace(self._compiled_entity_namespace_pattern, change):
+            if not _matches_entity_namespace(
+                self._compiled_entity_namespace_pattern, change
+            ):
                 return False
         if self._compiled_cause_namespace_pattern is not None:
-            if not _matches_cause_namespace(self._compiled_cause_namespace_pattern, change):
+            if not _matches_cause_namespace(
+                self._compiled_cause_namespace_pattern, change
+            ):
                 return False
         if self._compiled_type_pattern is not None:
-            return _matches_type_pattern(self._compiled_type_pattern, self.change_kind, change)
+            return _matches_type_pattern(
+                self._compiled_type_pattern, self.change_kind, change
+            )
         if not _matches_symbol(self.symbol, self._compiled_pattern, change):
             return False
         if self.change_kind is not None and change.kind.value != self.change_kind:

@@ -120,7 +120,9 @@ class TestParseBundleFactsLibraryOverrides:
         bare integer); the unrecognized-key check's own ``sorted(unknown)``
         would otherwise raise a raw ``TypeError`` comparing ``str`` to
         ``int`` instead of ``BundleFactsLibraryOverridesError``."""
-        with pytest.raises(BundleFactsLibraryOverridesError, match="keys must be strings"):
+        with pytest.raises(
+            BundleFactsLibraryOverridesError, match="keys must be strings"
+        ):
             parse_bundle_facts_library_overrides({"libfoo.so": {"bogus": 1, 2: 3}})
 
     def test_a_library_name_outside_known_libraries_is_rejected(self) -> None:
@@ -380,7 +382,9 @@ class TestLoadBundleFactsLibraryOverrides:
         manifest = tmp_path / "manifest.yaml"
         manifest.write_bytes(b"libreal.so:\n  headers:\n    - \xff\xfe invalid utf-8\n")
 
-        with pytest.raises(BundleFactsLibraryOverridesError, match="cannot decode as UTF-8"):
+        with pytest.raises(
+            BundleFactsLibraryOverridesError, match="cannot decode as UTF-8"
+        ):
             load_bundle_facts_library_overrides(manifest)
 
     def test_deeply_nested_manifest_is_a_clean_error_not_a_raw_recursionerror(
@@ -416,7 +420,9 @@ class TestValidateMatchedLibraryOverrides:
         )
 
     def test_an_unmatched_headers_key_is_rejected(self) -> None:
-        with pytest.raises(BundleFactsLibraryOverridesError, match="per_library_headers"):
+        with pytest.raises(
+            BundleFactsLibraryOverridesError, match="per_library_headers"
+        ):
             validate_matched_library_overrides(
                 per_library_headers={"libextra.so": [Path("x")]},
                 per_library_includes=None,
@@ -425,7 +431,9 @@ class TestValidateMatchedLibraryOverrides:
             )
 
     def test_an_unmatched_compile_key_is_rejected(self) -> None:
-        with pytest.raises(BundleFactsLibraryOverridesError, match="per_library_compile"):
+        with pytest.raises(
+            BundleFactsLibraryOverridesError, match="per_library_compile"
+        ):
             validate_matched_library_overrides(
                 per_library_headers=None,
                 per_library_includes=None,

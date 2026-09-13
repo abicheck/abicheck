@@ -29,6 +29,7 @@ compatibility (see the extensive existing coverage in
 ``test_reachability_aware_suppression.py``, none of which this file
 duplicates).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -53,18 +54,27 @@ def _snap(*, functions=None, types=None, enums=None, build_source=None) -> AbiSn
 
 def _public_fn(name: str, ret: str = "void") -> Function:
     return Function(
-        name=name, mangled=name, return_type=ret, params=[], visibility=Visibility.PUBLIC
+        name=name,
+        mangled=name,
+        return_type=ret,
+        params=[],
+        visibility=Visibility.PUBLIC,
     )
 
 
 def _needs_evidence_suppression() -> SuppressionList:
-    return SuppressionList([
-        Suppression(namespace="__never_matches__::*", reason="evidence trigger only")
-    ])
+    return SuppressionList(
+        [Suppression(namespace="__never_matches__::*", reason="evidence trigger only")]
+    )
 
 
 def _graph_snap(
-    functions, *, nodes, edges, degraded_passes=None, extractor_passes=None,
+    functions,
+    *,
+    nodes,
+    edges,
+    degraded_passes=None,
+    extractor_passes=None,
 ) -> AbiSnapshot:
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_graph import (
@@ -86,12 +96,14 @@ def _graph_snap(
             nodes.append(GraphNode(id=hdr_id, kind="header", label=hdr_id, attrs={}))
             edges.append(GraphEdge(src=hdr_id, dst=n.id, kind="SOURCE_DECLARES"))
     graph = SourceGraphSummary(
-        nodes=nodes, edges=edges,
+        nodes=nodes,
+        edges=edges,
         degraded_passes=dict(degraded_passes or {}),
         extractor_passes=dict(extractor_passes or {}),
     )
     return AbiSnapshot(
-        library="libtest.so", version="1.0",
+        library="libtest.so",
+        version="1.0",
         functions=list(functions),
         build_source=BuildSourcePack(root="", source_graph=graph),
     )
@@ -100,7 +112,9 @@ def _graph_snap(
 def _decl_node(node_id: str, label: str, visibility: str):
     from abicheck.buildsource.source_graph import GraphNode
 
-    return GraphNode(id=node_id, kind="source_decl", label=label, attrs={"visibility": visibility})
+    return GraphNode(
+        id=node_id, kind="source_decl", label=label, attrs={"visibility": visibility}
+    )
 
 
 class TestMarkReachabilityTriState:
@@ -132,7 +146,9 @@ class TestMarkReachabilityTriState:
         assert found[0].public_reachable is True
         assert found[0].reachability_state == ReachabilityState.PROVEN_REACHABLE
 
-    def test_unreachable_change_examined_by_layout_walk_is_proven_unreachable(self) -> None:
+    def test_unreachable_change_examined_by_layout_walk_is_proven_unreachable(
+        self,
+    ) -> None:
         """A change embedded only through a pointer (layout walk *does*
         examine it — it appears in reachable_types — but demotes it to
         not-consumer-visible) is conclusively PROVEN_UNREACHABLE, not
@@ -141,19 +157,31 @@ class TestMarkReachabilityTriState:
         from abicheck.model import Param
 
         old = _snap(
-            functions=[Function(
-                name="use", mangled="use", return_type="void",
-                params=[Param(name="h", type="ns::detail::Hidden*", pointer_depth=1)],
-                visibility=Visibility.PUBLIC,
-            )],
+            functions=[
+                Function(
+                    name="use",
+                    mangled="use",
+                    return_type="void",
+                    params=[
+                        Param(name="h", type="ns::detail::Hidden*", pointer_depth=1)
+                    ],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
             types=[RecordType(name="ns::detail::Hidden", kind="struct", size_bits=32)],
         )
         new = _snap(
-            functions=[Function(
-                name="use", mangled="use", return_type="void",
-                params=[Param(name="h", type="ns::detail::Hidden*", pointer_depth=1)],
-                visibility=Visibility.PUBLIC,
-            )],
+            functions=[
+                Function(
+                    name="use",
+                    mangled="use",
+                    return_type="void",
+                    params=[
+                        Param(name="h", type="ns::detail::Hidden*", pointer_depth=1)
+                    ],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
             types=[RecordType(name="ns::detail::Hidden", kind="struct", size_bits=64)],
         )
         raw_change = Change(
@@ -190,7 +218,10 @@ class TestMarkReachabilityTriState:
             enums=[
                 EnumType(
                     name="ns::detail::Status",
-                    members=[EnumMember(name="OK", value=0), EnumMember(name="ERR", value=1)],
+                    members=[
+                        EnumMember(name="OK", value=0),
+                        EnumMember(name="ERR", value=1),
+                    ],
                 ),
             ],
         )
@@ -260,13 +291,15 @@ class TestMarkReachabilityTriState:
             symbol="ns::Status::detail",
             description="member removed",
         )
-        suppression = SuppressionList([
-            Suppression(
-                namespace="ns::*",
-                reachability="proven-unreachable-only",
-                reason="would wrongly suppress a real public enum-member break",
-            )
-        ])
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    namespace="ns::*",
+                    reachability="proven-unreachable-only",
+                    reason="would wrongly suppress a real public enum-member break",
+                )
+            ]
+        )
         ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
         found = [c for c in ctx.kept if c.kind == ChangeKind.ENUM_MEMBER_REMOVED]
         assert len(found) == 1
@@ -298,13 +331,15 @@ class TestMarkReachabilityTriState:
             symbol="ns::detail::PublicAlias",
             description="removed",
         )
-        suppression = SuppressionList([
-            Suppression(
-                namespace="ns::detail::*",
-                reachability="proven-unreachable-only",
-                reason="would wrongly suppress a real public typedef removal",
-            )
-        ])
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    namespace="ns::detail::*",
+                    reachability="proven-unreachable-only",
+                    reason="would wrongly suppress a real public typedef removal",
+                )
+            ]
+        )
         ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
         found = [c for c in ctx.kept if c.kind == ChangeKind.PUBLIC_TYPEDEF_REMOVED]
         assert len(found) == 1
@@ -346,13 +381,15 @@ class TestMarkReachabilityTriState:
         raw_change = Change(
             kind=kind, symbol="ns::detail::PublicThing", description="changed"
         )
-        suppression = SuppressionList([
-            Suppression(
-                namespace="ns::detail::*",
-                reachability="proven-unreachable-only",
-                reason="would wrongly suppress a real public source/API break",
-            )
-        ])
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    namespace="ns::detail::*",
+                    reachability="proven-unreachable-only",
+                    reason="would wrongly suppress a real public source/API break",
+                )
+            ]
+        )
         ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
         found = [c for c in ctx.kept if c.kind == kind]
         assert len(found) == 1
@@ -429,7 +466,9 @@ class TestMarkReachabilityTriState:
             ],
         )
         raw_change = Change(
-            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Hidden", description="size changed"
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="Hidden",
+            description="size changed",
         )
         DEFAULT_PIPELINE.run(
             [raw_change], old, new, suppression=_needs_evidence_suppression()
@@ -450,11 +489,15 @@ class TestMarkReachabilityTriState:
             functions=[_public_fn("foo", "int")],
             types=[
                 RecordType(
-                    name="Hidden", kind="class", size_bits=64,
+                    name="Hidden",
+                    kind="class",
+                    size_bits=64,
                     qualified_name="ns::api::Hidden",
                 ),
                 RecordType(
-                    name="Hidden", kind="class", size_bits=8,
+                    name="Hidden",
+                    kind="class",
+                    size_bits=8,
                     qualified_name="ns::detail::Hidden",
                 ),
             ],
@@ -463,17 +506,23 @@ class TestMarkReachabilityTriState:
             functions=[_public_fn("foo", "int")],
             types=[
                 RecordType(
-                    name="Hidden", kind="class", size_bits=128,
+                    name="Hidden",
+                    kind="class",
+                    size_bits=128,
                     qualified_name="ns::api::Hidden",
                 ),
                 RecordType(
-                    name="Hidden", kind="class", size_bits=8,
+                    name="Hidden",
+                    kind="class",
+                    size_bits=8,
                     qualified_name="ns::detail::Hidden",
                 ),
             ],
         )
         raw_change = Change(
-            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Hidden", description="size changed"
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="Hidden",
+            description="size changed",
         )
         DEFAULT_PIPELINE.run(
             [raw_change], old, new, suppression=_needs_evidence_suppression()
@@ -499,14 +548,18 @@ class TestMarkReachabilityTriState:
             functions=[_public_fn("foo", "int")],
             types=[
                 RecordType(
-                    name="Status", kind="class",
+                    name="Status",
+                    kind="class",
                     qualified_name="ns::detail::Status",
                 ),
             ],
             enums=[
                 EnumType(
                     name="Status",
-                    members=[EnumMember(name="OK", value=0), EnumMember(name="ERR", value=1)],
+                    members=[
+                        EnumMember(name="OK", value=0),
+                        EnumMember(name="ERR", value=1),
+                    ],
                 ),
             ],
         )
@@ -514,7 +567,8 @@ class TestMarkReachabilityTriState:
             functions=[_public_fn("foo", "int")],
             types=[
                 RecordType(
-                    name="Status", kind="class",
+                    name="Status",
+                    kind="class",
                     qualified_name="ns::detail::Status",
                 ),
             ],
@@ -546,7 +600,9 @@ class TestMarkReachabilityTriState:
                 _decl_node("decl://pub", "pubFn", "public_header"),
                 _decl_node("decl://other", "ns::detail::other", "source"),
             ],
-            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+            edges=[
+                GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")
+            ],
             degraded_passes={"call_graph": True},
         )
         new = _graph_snap(
@@ -627,19 +683,31 @@ class TestMarkReachabilityImpactAssessmentCache:
         from abicheck.model import Param
 
         old = _snap(
-            functions=[Function(
-                name="use", mangled="use", return_type="void",
-                params=[Param(name="h", type="ns::detail::Hidden*", pointer_depth=1)],
-                visibility=Visibility.PUBLIC,
-            )],
+            functions=[
+                Function(
+                    name="use",
+                    mangled="use",
+                    return_type="void",
+                    params=[
+                        Param(name="h", type="ns::detail::Hidden*", pointer_depth=1)
+                    ],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
             types=[RecordType(name="ns::detail::Hidden", kind="struct", size_bits=32)],
         )
         new = _snap(
-            functions=[Function(
-                name="use", mangled="use", return_type="void",
-                params=[Param(name="h", type="ns::detail::Hidden*", pointer_depth=1)],
-                visibility=Visibility.PUBLIC,
-            )],
+            functions=[
+                Function(
+                    name="use",
+                    mangled="use",
+                    return_type="void",
+                    params=[
+                        Param(name="h", type="ns::detail::Hidden*", pointer_depth=1)
+                    ],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
             types=[RecordType(name="ns::detail::Hidden", kind="struct", size_bits=64)],
         )
         raw_change = Change(
@@ -796,13 +864,15 @@ def _degraded_call_graph_scenario():
 class TestSuppressionReachabilityUnknownDiagnostic:
     def test_pipeline_keeps_change_and_emits_diagnostic(self) -> None:
         old, new, raw_change = _degraded_call_graph_scenario()
-        suppression = SuppressionList([
-            Suppression(
-                namespace="ns::detail::*",
-                reachability="proven-unreachable-only",
-                reason="wants proof",
-            )
-        ])
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    namespace="ns::detail::*",
+                    reachability="proven-unreachable-only",
+                    reason="wants proof",
+                )
+            ]
+        )
         ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
         assert raw_change not in ctx.suppressed
         kinds = [c.kind for c in ctx.kept]
@@ -823,13 +893,15 @@ class TestSuppressionReachabilityUnknownDiagnostic:
 
         old, new, raw_change = _degraded_call_graph_scenario()
         finding_id = report_canonical_finding_id(raw_change)
-        suppression = SuppressionList([
-            Suppression(
-                finding_id=finding_id,
-                reachability="proven-unreachable-only",
-                reason="wants proof",
-            )
-        ])
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    finding_id=finding_id,
+                    reachability="proven-unreachable-only",
+                    reason="wants proof",
+                )
+            ]
+        )
         ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
         diag = next(
             c for c in ctx.kept if c.kind == ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN
@@ -839,17 +911,21 @@ class TestSuppressionReachabilityUnknownDiagnostic:
 
     def test_allow_unknown_reachability_suppresses_with_no_diagnostic(self) -> None:
         old, new, raw_change = _degraded_call_graph_scenario()
-        suppression = SuppressionList([
-            Suppression(
-                namespace="ns::detail::*",
-                reachability="proven-unreachable-only",
-                allow_unknown_reachability=True,
-                reason="reviewed, safe",
-            )
-        ])
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    namespace="ns::detail::*",
+                    reachability="proven-unreachable-only",
+                    allow_unknown_reachability=True,
+                    reason="reviewed, safe",
+                )
+            ]
+        )
         ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
         assert raw_change in ctx.suppressed
-        assert ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN not in [c.kind for c in ctx.kept]
+        assert ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN not in [
+            c.kind for c in ctx.kept
+        ]
 
 
 class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
@@ -867,8 +943,11 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             functions=[
                 _public_fn("foo", "int"),
                 Function(
-                    name="ns::detail::helper", mangled="ns::detail::helper",
-                    return_type="void", params=[], visibility=Visibility.PUBLIC,
+                    name="ns::detail::helper",
+                    mangled="ns::detail::helper",
+                    return_type="void",
+                    params=[],
+                    visibility=Visibility.PUBLIC,
                 ),
             ],
         )
@@ -915,16 +994,20 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             symbol="ns::detail::Hidden",
             description="size changed",
         )
-        suppression = SuppressionList([
-            Suppression(
-                namespace="ns::detail::*",
-                reachability="proven-unreachable-only",
-                reason="wants proof",
-            )
-        ])
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    namespace="ns::detail::*",
+                    reachability="proven-unreachable-only",
+                    reason="wants proof",
+                )
+            ]
+        )
         ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
         assert raw_change in ctx.suppressed
-        assert ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN not in [c.kind for c in ctx.kept]
+        assert ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN not in [
+            c.kind for c in ctx.kept
+        ]
 
     def test_public_type_absent_from_internal_only_walk_stays_unknown(self) -> None:
         """Codex review, seventh pass: compute_leak_paths only ever records
@@ -950,13 +1033,15 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             symbol="ns::Widget",
             description="size changed",
         )
-        suppression = SuppressionList([
-            Suppression(
-                namespace="ns::*",
-                reachability="proven-unreachable-only",
-                reason="would wrongly suppress a real public-type break",
-            )
-        ])
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    namespace="ns::*",
+                    reachability="proven-unreachable-only",
+                    reason="would wrongly suppress a real public-type break",
+                )
+            ]
+        )
         ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
         found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
         assert len(found) == 1
@@ -992,7 +1077,9 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
                 _decl_node("decl://pub", "pubFn", "public_header"),
                 _decl_node("decl://other", "ns::detail::other", "source"),
             ],
-            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+            edges=[
+                GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")
+            ],
             extractor_passes={"call_graph": True, "type_graph": True},
         )
         new = _graph_snap(
@@ -1030,15 +1117,18 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
         graph = SourceGraphSummary(
             nodes=[
                 GraphNode(
-                    id="decl://other", kind="source_decl",
-                    label="ns::detail::other", attrs={"visibility": "source"},
+                    id="decl://other",
+                    kind="source_decl",
+                    label="ns::detail::other",
+                    attrs={"visibility": "source"},
                 ),
             ],
             edges=[],
             extractor_passes={"call_graph": True, "type_graph": True},
         )
         old = AbiSnapshot(
-            library="libtest.so", version="1.0",
+            library="libtest.so",
+            version="1.0",
             functions=[_public_fn("pubFn")],
             build_source=BuildSourcePack(root="", source_graph=graph),
         )
@@ -1076,17 +1166,22 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             nodes=[
                 GraphNode(id="hdr://priv.h", kind="header", label="priv.h", attrs={}),
                 GraphNode(
-                    id="decl://priv", kind="source_decl",
-                    label="ns::detail::PrivHelper", attrs={"visibility": "private_header"},
+                    id="decl://priv",
+                    kind="source_decl",
+                    label="ns::detail::PrivHelper",
+                    attrs={"visibility": "private_header"},
                 ),
             ],
             edges=[
-                GraphEdge(src="hdr://priv.h", dst="decl://priv", kind="SOURCE_DECLARES"),
+                GraphEdge(
+                    src="hdr://priv.h", dst="decl://priv", kind="SOURCE_DECLARES"
+                ),
             ],
             extractor_passes={"call_graph": True, "type_graph": True},
         )
         old = AbiSnapshot(
-            library="libtest.so", version="1.0",
+            library="libtest.so",
+            version="1.0",
             functions=[_public_fn("pubFn")],
             build_source=BuildSourcePack(root="", source_graph=graph),
         )
@@ -1118,7 +1213,9 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
                 _decl_node("decl://pub", "pubFn", "public_header"),
                 _decl_node("decl://other", "ns::detail::other", "source"),
             ],
-            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+            edges=[
+                GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")
+            ],
         )
         new = _graph_snap(
             [_public_fn("pubFn")],
@@ -1153,7 +1250,11 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
                 _decl_node("decl://pub", "pubFn", "public_header"),
                 _decl_node("decl://other", "ns::detail::other", "source"),
             ],
-            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_REFERENCES_DECL")],
+            edges=[
+                GraphEdge(
+                    src="decl://pub", dst="decl://other", kind="DECL_REFERENCES_DECL"
+                )
+            ],
             extractor_passes={"type_graph": True},
         )
         new = _graph_snap(
@@ -1192,7 +1293,9 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
                 _decl_node("decl://pub", "pubFn", "public_header"),
                 _decl_node("decl://other", "ns::detail::other", "source"),
             ],
-            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+            edges=[
+                GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")
+            ],
             extractor_passes={"call_graph": True, "type_graph": True},
         )
         new = _snap(functions=[_public_fn("pubFn")])
@@ -1224,7 +1327,9 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
                 _decl_node("decl://pub", "pubFn", "public_header"),
                 _decl_node("decl://other", "ns::detail::other", "source"),
             ],
-            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+            edges=[
+                GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")
+            ],
             extractor_passes={"call_graph": True, "type_graph": True},
         )
         raw_change = Change(
@@ -1252,7 +1357,9 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
                 _decl_node("decl://pub", "pubFn", "public_header"),
                 _decl_node("decl://other", "ns::detail::other", "source"),
             ],
-            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+            edges=[
+                GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")
+            ],
             extractor_passes={"call_graph": True, "type_graph": True},
         )
         new = _graph_snap(
@@ -1261,7 +1368,9 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
                 _decl_node("decl://pub", "pubFn", "public_header"),
                 _decl_node("decl://other", "ns::detail::other", "source"),
             ],
-            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+            edges=[
+                GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")
+            ],
         )
         raw_change = Change(
             kind=ChangeKind.FUNC_RETURN_CHANGED,
@@ -1289,10 +1398,12 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
         each side instead of the kind name's suffix."""
         from abicheck.buildsource.source_graph import GraphEdge
 
-        old = _snap(functions=[
-            _public_fn("pubFn"),
-            _public_fn("ns::detail::Thing::unrelated_and_never_called"),
-        ])
+        old = _snap(
+            functions=[
+                _public_fn("pubFn"),
+                _public_fn("ns::detail::Thing::unrelated_and_never_called"),
+            ]
+        )
         new = _graph_snap(
             [
                 _public_fn("pubFn"),
@@ -1302,7 +1413,9 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
                 _decl_node("decl://pub", "pubFn", "public_header"),
                 _decl_node("decl://other", "ns::detail::other", "source"),
             ],
-            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+            edges=[
+                GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")
+            ],
             extractor_passes={"call_graph": True, "type_graph": True},
         )
         raw_change = Change(
@@ -1340,7 +1453,9 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
                 _decl_node("decl://pub", "pubFn", "public_header"),
                 _decl_node("decl://other", "ns::detail::other", "source"),
             ],
-            edges=[GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")],
+            edges=[
+                GraphEdge(src="decl://pub", dst="decl://other", kind="DECL_CALLS_DECL")
+            ],
             extractor_passes={"call_graph": True, "type_graph": True},
         )
         new = _graph_snap(
@@ -1353,13 +1468,15 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             symbol="acme::PublicApi::doThing",
             description="removed",
         )
-        suppression = SuppressionList([
-            Suppression(
-                namespace="acme::**",
-                reachability="proven-unreachable-only",
-                reason="would wrongly suppress a real API removal",
-            )
-        ])
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    namespace="acme::**",
+                    reachability="proven-unreachable-only",
+                    reason="would wrongly suppress a real API removal",
+                )
+            ]
+        )
         ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
@@ -1393,16 +1510,20 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             symbol="ns::detail::Alias",
             description="typedef removed",
         )
-        suppression = SuppressionList([
-            Suppression(
-                namespace="ns::detail::*",
-                reachability="proven-unreachable-only",
-                reason="wants proof",
-            )
-        ])
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    namespace="ns::detail::*",
+                    reachability="proven-unreachable-only",
+                    reason="wants proof",
+                )
+            ]
+        )
         ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
         assert raw_change in ctx.suppressed
-        assert ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN not in [c.kind for c in ctx.kept]
+        assert ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN not in [
+            c.kind for c in ctx.kept
+        ]
 
 
 class TestCheckerFilterSuppressedChangesUnknownDiagnostic:
@@ -1422,24 +1543,30 @@ class TestCheckerFilterSuppressedChangesUnknownDiagnostic:
             symbol="libfoo.so.1",
             description="soname bumped unnecessarily",
         )
-        suppression = SuppressionList([
-            Suppression(
-                symbol="libfoo.so.1",
-                reachability="proven-unreachable-only",
-                reason="wants proof",
-            )
-        ])
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    symbol="libfoo.so.1",
+                    reachability="proven-unreachable-only",
+                    reason="wants proof",
+                )
+            ]
+        )
         suppressed: list[Change] = []
         visible = _filter_suppressed_changes([change], suppression, suppressed)
         assert change in visible
         assert not suppressed
-        assert any(c.kind == ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN for c in visible)
+        assert any(
+            c.kind == ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN for c in visible
+        )
 
     def test_filter_pattern_synthetic_emits_unknown_diagnostic(self) -> None:
         from abicheck.checker import _filter_pattern_synthetic
 
         pre_existing = Change(
-            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="pre", description="pre-existing",
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="pre",
+            description="pre-existing",
         )
         synthetic = Change(
             kind=ChangeKind.OPAQUE_INVARIANT_BROKEN,
@@ -1448,13 +1575,15 @@ class TestCheckerFilterSuppressedChangesUnknownDiagnostic:
             modulation_rule="opaque-rule",
         )
         kept = [pre_existing, synthetic]
-        suppression = SuppressionList([
-            Suppression(
-                symbol="ns::detail::Opaque",
-                reachability="proven-unreachable-only",
-                reason="wants proof",
-            )
-        ])
+        suppression = SuppressionList(
+            [
+                Suppression(
+                    symbol="ns::detail::Opaque",
+                    reachability="proven-unreachable-only",
+                    reason="wants proof",
+                )
+            ]
+        )
         suppressed: list[Change] = []
         new_kept, pattern_modulations = _filter_pattern_synthetic(
             kept, 1, suppression, suppressed, []
@@ -1527,13 +1656,16 @@ class TestYamlLoadAllowUnknownReachability:
             reachability_state=ReachabilityState.PROVEN_UNREACHABLE,
         )
         strict_rule = Suppression(
-            namespace="ns::detail::*", reachability="proven-unreachable-only",
+            namespace="ns::detail::*",
+            reachability="proven-unreachable-only",
             reason="strict",
         )
         assert strict_rule.matches(change) is False
         assert strict_rule.matches(proven) is True
         lenient_rule = Suppression(
-            namespace="ns::detail::*", reachability="proven-unreachable-only",
-            allow_unknown_reachability=True, reason="lenient",
+            namespace="ns::detail::*",
+            reachability="proven-unreachable-only",
+            allow_unknown_reachability=True,
+            reason="lenient",
         )
         assert lenient_rule.matches(change) is True

@@ -68,8 +68,11 @@ _SCOPES = (None, "used_by", "required_symbol", "anything_else")
 
 def _diff_result(verdict: Verdict) -> DiffResult:
     return DiffResult(
-        old_version="1.0", new_version="2.0", library="libtest.so",
-        changes=[], verdict=verdict,
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest.so",
+        changes=[],
+        verdict=verdict,
     )
 
 
@@ -104,9 +107,7 @@ class TestExitDecisionInvariantToConsumerScope:
     def test_compatibility_contribution_ignores_consumer_scope_stamp(
         self, verdict: Verdict, stamp: dict[str, object]
     ) -> None:
-        baseline = resolve_compare_exit_decision(
-            _diff_result(verdict), None, "legacy"
-        )
+        baseline = resolve_compare_exit_decision(_diff_result(verdict), None, "legacy")
 
         stamped = _diff_result(verdict)
         for key, value in stamp.items():
@@ -141,13 +142,17 @@ class TestExitDecisionInvariantToConsumerScope:
 
 def _snap(version: str, funcs: list[Function] | None = None) -> AbiSnapshot:
     return AbiSnapshot(
-        library="libfoo.so", version=version, functions=funcs or [],
+        library="libfoo.so",
+        version=version,
+        functions=funcs or [],
     )
 
 
 def _fn(name: str, mangled: str) -> Function:
     return Function(
-        name=name, mangled=mangled, return_type="void",
+        name=name,
+        mangled=mangled,
+        return_type="void",
         visibility=Visibility.PUBLIC,
     )
 
@@ -185,8 +190,11 @@ class TestCliExitCodeInvariantToConsumerScope:
         consumer_missing=st.booleans(),
     )
     def test_exit_code_matches_the_unscoped_run(
-        self, tmp_path_factory,
-        removed: bool, consumer_verdict: Verdict, consumer_missing: bool,
+        self,
+        tmp_path_factory,
+        removed: bool,
+        consumer_verdict: Verdict,
+        consumer_missing: bool,
     ) -> None:
         """For a fixed OLD/NEW pair (real removal, or none), the exit code
         `compare --used-by app` reports is exactly what plain `compare`
@@ -209,10 +217,14 @@ class TestCliExitCodeInvariantToConsumerScope:
 
         app, old, new = self._write_binaries(tmp_path_factory.mktemp("scoped"))
         consumer_result = AppCompatResult(
-            app_path=str(app), old_lib_path=str(old), new_lib_path=str(new),
-            required_symbols={"_Z3foov"}, required_symbol_count=1,
+            app_path=str(app),
+            old_lib_path=str(old),
+            new_lib_path=str(new),
+            required_symbols={"_Z3foov"},
+            required_symbol_count=1,
             missing_symbols=(["needed_elsewhere"] if consumer_missing else []),
-            verdict=consumer_verdict, symbol_coverage=0.0,
+            verdict=consumer_verdict,
+            symbol_coverage=0.0,
         )
         with (
             patch(
@@ -229,7 +241,8 @@ class TestCliExitCodeInvariantToConsumerScope:
             scoped = _invoke("compare", str(old), str(new), "--used-by", str(app))
 
         assert scoped.exit_code == unscoped.exit_code, (
-            unscoped.output, scoped.output,
+            unscoped.output,
+            scoped.output,
         )
 
 
@@ -262,12 +275,18 @@ class TestConsumerImpactSummary:
 
         results_by_app = {
             str(app1): AppCompatResult(
-                app_path=str(app1), old_lib_path=str(old), new_lib_path=str(new),
-                verdict=Verdict.BREAKING, symbol_coverage=0.0,
+                app_path=str(app1),
+                old_lib_path=str(old),
+                new_lib_path=str(new),
+                verdict=Verdict.BREAKING,
+                symbol_coverage=0.0,
             ),
             str(app2): AppCompatResult(
-                app_path=str(app2), old_lib_path=str(old), new_lib_path=str(new),
-                verdict=Verdict.COMPATIBLE, symbol_coverage=100.0,
+                app_path=str(app2),
+                old_lib_path=str(old),
+                new_lib_path=str(new),
+                verdict=Verdict.COMPATIBLE,
+                symbol_coverage=100.0,
             ),
         }
 
@@ -295,7 +314,7 @@ class TestConsumerImpactSummary:
         assert result.exit_code in (0, 2, 4), result.output
         # A missing-header warning may precede the JSON payload on stdout;
         # the payload itself is always the trailing `{...}` document.
-        payload = json_mod.loads(result.output[result.output.index("{"):])
+        payload = json_mod.loads(result.output[result.output.index("{") :])
         summary = payload["consumer_impact_summary"]
         assert summary["total"] == 2
         assert summary["evaluated"] == 2

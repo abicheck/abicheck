@@ -19,6 +19,7 @@ so the clean control comparison resolves to PASS. Stock ``cc`` only (no
 castxml); self-skips when ``cc`` is absent. GNU ld ``-Wl,-soname`` and
 the ELF dependency walk make this Linux-only.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -68,15 +69,37 @@ def _build_sysroots(tmp_path: Path) -> tuple[Path, Path]:
         libdir.mkdir(parents=True)
         dep_c = tmp_path / f"dep_{root.name}.c"
         dep_c.write_text(dep_src, encoding="utf-8")
-        _run([cc, "-shared", "-fPIC", "-g", "-Wl,-soname,libdep.so.1",
-              str(dep_c), "-o", str(libdir / "libdep.so.1")])
+        _run(
+            [
+                cc,
+                "-shared",
+                "-fPIC",
+                "-g",
+                "-Wl,-soname,libdep.so.1",
+                str(dep_c),
+                "-o",
+                str(libdir / "libdep.so.1"),
+            ]
+        )
 
     app_c = tmp_path / "app.c"
     app_c.write_text(APP_SRC, encoding="utf-8")
     app_so = baseline / "usr" / "lib" / "libapp.so.1"
-    _run([cc, "-shared", "-fPIC", "-nostdlib", "-g", str(app_c),
-          str(baseline / "usr" / "lib" / "libdep.so.1"),
-          "-o", str(app_so), "-Wl,-soname,libapp.so.1", "-Wl,--no-as-needed"])
+    _run(
+        [
+            cc,
+            "-shared",
+            "-fPIC",
+            "-nostdlib",
+            "-g",
+            str(app_c),
+            str(baseline / "usr" / "lib" / "libdep.so.1"),
+            "-o",
+            str(app_so),
+            "-Wl,-soname,libapp.so.1",
+            "-Wl,--no-as-needed",
+        ]
+    )
     shutil.copy(app_so, candidate / "usr" / "lib" / "libapp.so.1")
     return baseline, candidate
 
@@ -113,8 +136,15 @@ def test_stack_check_cli_reports_fail(tmp_path: Path) -> None:
     baseline, candidate = _build_sysroots(tmp_path)
     result = CliRunner().invoke(
         main,
-        ["deps", "compare", str(ROOT_REL),
-         "--old-root", str(baseline), "--new-root", str(candidate)],
+        [
+            "deps",
+            "compare",
+            str(ROOT_REL),
+            "--old-root",
+            str(baseline),
+            "--new-root",
+            str(candidate),
+        ],
     )
     # FAIL → exit code 4 (see cli_stack.py).
     assert result.exit_code == 4, result.output

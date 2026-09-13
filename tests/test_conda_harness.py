@@ -121,7 +121,9 @@ def test_evaluate_pair_preserves_manifest_channel_for_url_fallback(
 
     monkeypatch.setattr(mod, "fetch_file", fake_fetch)
     monkeypatch.setattr(mod, "extract_sos", lambda pkg, into: {"libx": str(pkg)})
-    monkeypatch.setattr(mod, "run_abicheck", lambda old, new, ov, nv: {"verdict": "COMPATIBLE"})
+    monkeypatch.setattr(
+        mod, "run_abicheck", lambda old, new, ov, nv: {"verdict": "COMPATIBLE"}
+    )
 
     verdict = mod.evaluate_pair(
         {
@@ -259,9 +261,21 @@ def test_scope_sensitive_breaking_only_true_for_internal_symbol_removal() -> Non
     data = {
         "verdict": "BREAKING",
         "changes": [
-            {"kind": "func_removed_elf_only", "symbol": "_TIFFNoFixupTags", "severity": "breaking"},
-            {"kind": "symbol_size_changed", "symbol": "TIFFFaxBlackTable", "severity": "breaking"},
-            {"kind": "soname_bump_recommended", "symbol": "DT_SONAME", "severity": "compatible"},
+            {
+                "kind": "func_removed_elf_only",
+                "symbol": "_TIFFNoFixupTags",
+                "severity": "breaking",
+            },
+            {
+                "kind": "symbol_size_changed",
+                "symbol": "TIFFFaxBlackTable",
+                "severity": "breaking",
+            },
+            {
+                "kind": "soname_bump_recommended",
+                "symbol": "DT_SONAME",
+                "severity": "compatible",
+            },
         ],
     }
     assert mod.scope_sensitive_breaking_only(data) is True
@@ -279,8 +293,16 @@ def test_scope_sensitive_breaking_only_false_for_param_change() -> None:
     data = {
         "verdict": "BREAKING",
         "changes": [
-            {"kind": "func_removed_elf_only", "symbol": "_nettle_cnd_swap", "severity": "breaking"},
-            {"kind": "func_params_changed", "symbol": "_nettle_ecc_mod", "severity": "breaking"},
+            {
+                "kind": "func_removed_elf_only",
+                "symbol": "_nettle_cnd_swap",
+                "severity": "breaking",
+            },
+            {
+                "kind": "func_params_changed",
+                "symbol": "_nettle_ecc_mod",
+                "severity": "breaking",
+            },
         ],
     }
     assert mod.scope_sensitive_breaking_only(data) is False
@@ -293,8 +315,16 @@ def test_scope_sensitive_breaking_only_false_for_type_level_break() -> None:
     data = {
         "verdict": "BREAKING",
         "changes": [
-            {"kind": "func_removed_elf_only", "symbol": "_internal", "severity": "breaking"},
-            {"kind": "type_size_changed", "symbol": "PublicStruct", "severity": "breaking"},
+            {
+                "kind": "func_removed_elf_only",
+                "symbol": "_internal",
+                "severity": "breaking",
+            },
+            {
+                "kind": "type_size_changed",
+                "symbol": "PublicStruct",
+                "severity": "breaking",
+            },
         ],
     }
     assert mod.scope_sensitive_breaking_only(data) is False
@@ -302,9 +332,12 @@ def test_scope_sensitive_breaking_only_false_for_type_level_break() -> None:
 
 def test_scope_sensitive_breaking_only_false_when_no_breaking() -> None:
     mod = _load_module()
-    data = {"verdict": "COMPATIBLE", "changes": [
-        {"kind": "func_added", "symbol": "x", "severity": "compatible"},
-    ]}
+    data = {
+        "verdict": "COMPATIBLE",
+        "changes": [
+            {"kind": "func_added", "symbol": "x", "severity": "compatible"},
+        ],
+    }
     assert mod.scope_sensitive_breaking_only(data) is False
 
 

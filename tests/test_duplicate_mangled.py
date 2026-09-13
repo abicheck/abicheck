@@ -15,13 +15,16 @@ This is safe because:
 abi-dumper #41: the original tool did not deduplicate and could produce
 unstable diffs when template instantiations appeared in multiple TUs.
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.model import AbiSnapshot, Function, Visibility
 
 
-def _func(name: str, mangled: str, return_type: str = "void", **kwargs: object) -> Function:
+def _func(
+    name: str, mangled: str, return_type: str = "void", **kwargs: object
+) -> Function:
     defaults: dict[str, object] = dict(visibility=Visibility.PUBLIC)
     defaults.update(kwargs)
     return Function(name=name, mangled=mangled, return_type=return_type, **defaults)  # type: ignore[arg-type]
@@ -39,7 +42,9 @@ class TestDuplicateMangledSymbols:
         """
         mangled = "_Z3foov"
         f1 = _func("foo", mangled, return_type="void")
-        f2 = _func("foo_alt", mangled, return_type="int")  # same mangled, different name
+        f2 = _func(
+            "foo_alt", mangled, return_type="int"
+        )  # same mangled, different name
 
         snap = AbiSnapshot(library="lib.so", version="1.0", functions=[f1, f2])
         # first-wins: f1 takes precedence
@@ -77,8 +82,10 @@ class TestDuplicateMangledSymbols:
         mangled = "_Z4funcEv"
         f = _func("func", mangled, return_type="int")
 
-        old = AbiSnapshot(library="lib.so", version="1.0", functions=[f, f])  # duplicate
-        new = AbiSnapshot(library="lib.so", version="2.0", functions=[f])     # single
+        old = AbiSnapshot(
+            library="lib.so", version="1.0", functions=[f, f]
+        )  # duplicate
+        new = AbiSnapshot(library="lib.so", version="2.0", functions=[f])  # single
 
         result = compare(old, new)
         # The function is still present — no removal
@@ -88,8 +95,10 @@ class TestDuplicateMangledSymbols:
     def test_duplicate_mangled_first_wins_for_comparison(self) -> None:
         """First-wins: when two functions share mangled name, first signature is used."""
         mangled = "_Z6updatev"
-        f1_old = _func("update", mangled, return_type="void")       # first → wins
-        f2_old = _func("update_extra", mangled, return_type="int")  # duplicate → skipped
+        f1_old = _func("update", mangled, return_type="void")  # first → wins
+        f2_old = _func(
+            "update_extra", mangled, return_type="int"
+        )  # duplicate → skipped
 
         # New snapshot has return_type="void" — same as first (first-wins) in old
         f1_new = _func("update", mangled, return_type="void")
@@ -127,6 +136,7 @@ class TestDuplicateMangledSymbols:
     def test_duplicate_logs_warning(self) -> None:
         """Inserting duplicate mangled symbol: first-wins and warning is logged."""
         import logging
+
         mangled = "_Z3dupv"
         f1 = _func("dup", mangled, return_type="void")
         f2 = _func("dup2", mangled, return_type="int")
@@ -195,7 +205,8 @@ class TestDuplicateMangledSymbols:
         from abicheck.model import RecordType
 
         snap = AbiSnapshot(
-            library="lib.so", version="1.0",
+            library="lib.so",
+            version="1.0",
             types=[
                 RecordType(name="Dup", kind="struct"),
                 RecordType(name="Dup", kind="struct"),

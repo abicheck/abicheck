@@ -181,9 +181,7 @@ def _diff_elf_symbol_versioning(old_elf: Any, new_elf: Any) -> list[Change]:
                 )
             )
         if not lib_is_new:
-            changes.extend(
-                _runtime_floor_changes(lib, old_vers, new_vers, new_elf)
-            )
+            changes.extend(_runtime_floor_changes(lib, old_vers, new_vers, new_elf))
     return changes
 
 
@@ -250,9 +248,7 @@ def _runtime_floor_changes(
     of) the per-node findings, mirroring the dual-ABI-flip collapse pattern.
     """
     changes: list[Change] = []
-    prefixes = {
-        v.rsplit("_", 1)[0] for v in (old_vers | new_vers) if "_" in v
-    }
+    prefixes = {v.rsplit("_", 1)[0] for v in (old_vers | new_vers) if "_" in v}
     for prefix in sorted(prefixes):
         old_max, old_tag = _max_parseable_tag(old_vers, prefix)
         new_max, new_tag = _max_parseable_tag(new_vers, prefix)
@@ -433,11 +429,14 @@ def _check_binding_change(sym_name: str, s_old: Any, s_new: Any) -> list[Change]
     # than the generic GLOBAL/WEAK strengthen/weaken pair (G23-A4).
     if s_new.binding == SymbolBinding.UNIQUE and s_old.binding != SymbolBinding.UNIQUE:
         kind = ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE
-    elif s_old.binding == SymbolBinding.UNIQUE and s_new.binding != SymbolBinding.UNIQUE:
+    elif (
+        s_old.binding == SymbolBinding.UNIQUE and s_new.binding != SymbolBinding.UNIQUE
+    ):
         kind = ChangeKind.SYMBOL_BINDING_LOST_UNIQUE
     else:
         is_weakening = (
-            s_old.binding == SymbolBinding.GLOBAL and s_new.binding == SymbolBinding.WEAK
+            s_old.binding == SymbolBinding.GLOBAL
+            and s_new.binding == SymbolBinding.WEAK
         )
         kind = (
             ChangeKind.SYMBOL_BINDING_CHANGED
@@ -820,6 +819,7 @@ def _diff_allocator_replacement(old_elf: Any, new_elf: Any) -> list[Change]:
         return []
     old_syms = getattr(old_elf, "symbols", None) or []
     new_syms = getattr(new_elf, "symbols", None) or []
+
     def _is_global_allocator(name: str) -> bool:
         return name.startswith(_ALLOCATOR_MANGLING_PREFIXES) and not (
             _PLACEMENT_OPERATOR_RE.match(name)

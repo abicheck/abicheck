@@ -31,6 +31,7 @@ Extended form (multiple headers/libs):
     <libs>/usr/lib/libfoo.so</libs>
     <libs>/usr/lib/libfoo_extra.so</libs>
 """
+
 from __future__ import annotations
 
 import logging
@@ -48,6 +49,7 @@ log = logging.getLogger(__name__)
 @dataclass
 class CompatDescriptor:
     """Parsed ABICC XML descriptor."""
+
     version: str
     headers: list[Path]
     libs: list[Path]
@@ -87,7 +89,9 @@ def parse_descriptor(path: Path, *, relpath: str | None = None) -> CompatDescrip
         # findall() — direct children only; avoids capturing nested tags
         # (root.iter() would recurse into sub-elements, silently picking up
         # nested <version> or <libs> inside other tags)
-        vals = [el.text.strip() for el in root.findall(tag) if el.text and el.text.strip()]
+        vals = [
+            el.text.strip() for el in root.findall(tag) if el.text and el.text.strip()
+        ]
         # Replace {RELPATH} macros if relpath is provided (ABICC feature)
         if relpath:
             vals = [v.replace("{RELPATH}", relpath) for v in vals]
@@ -111,8 +115,13 @@ def parse_descriptor(path: Path, *, relpath: str | None = None) -> CompatDescrip
     header_strs = _get_all("headers")
     headers = [_resolve(s, resolve_base) for s in header_strs]
 
-    log.debug("Parsed descriptor %s: version=%s, %d lib(s), %d header dir(s)",
-              path, version, len(libs), len(headers))
+    log.debug(
+        "Parsed descriptor %s: version=%s, %d lib(s), %d header dir(s)",
+        path,
+        version,
+        len(libs),
+        len(headers),
+    )
 
     return CompatDescriptor(version=version, headers=headers, libs=libs, path=path)
 

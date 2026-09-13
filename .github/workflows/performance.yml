@@ -713,7 +713,19 @@ jobs:
             --json-out reports/perf/l2_cli_base.json > base_l2.log 2>&1 \
             || base_status=$?
           echo "base measurement exited ${base_status}" | tee -a base_l2.log
-          if [ -s reports/perf/l2_cli_base.json ]; then
+          # Whether to gate is decided by asking the gate's own rule how many
+          # baseline points this receipt can supply -- not by the file being
+          # non-empty, and not by base_status. Both approximations are wrong in
+          # opposite directions: a run that failed every scenario still writes a
+          # full diagnostic receipt (so `-s` passed and the head run then failed
+          # for zero overlap, turning an unmeasurable base into a failed PR),
+          # while requiring base_status == 0 would throw away six perfectly good
+          # baselines because a seventh scenario failed -- which `gated_points`
+          # already drops on its own.
+          base_points=$(python scripts/check_l2_cli_perf.py \
+            --count-gateable-points reports/perf/l2_cli_base.json 2>>base_l2.log)
+          echo "base receipt supplies ${base_points} gateable point(s)" | tee -a base_l2.log
+          if [ "${base_points:-0}" -gt 0 ]; then
             # Interleaved re-measurement of head AFTER base, so the gated
             # comparison is not a completed base sweep against a later head
             # sweep with whatever drift accumulated between them (an A-B-B-A
@@ -726,7 +738,7 @@ jobs:
               --json-out reports/perf/l2_cli_gated.json \
               --markdown | tee reports/perf/l2_cli_regression.txt
           else
-            echo "No base measurement available (exit ${base_status}) -- report-only." \
+            echo "No usable base baseline (exit ${base_status}, ${base_points:-0} gateable points) -- report-only." \
               | tee reports/perf/l2_cli_regression.txt
             cat base_l2.log >> reports/perf/l2_cli_regression.txt
           fi

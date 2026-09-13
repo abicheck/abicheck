@@ -452,6 +452,20 @@ built rather than from the flag that asked for them; an earlier version gave eac
 library its own byte-identical copy, which (the AST cache keying on resolved
 path) made the "shared" arm a second distinct-path workload.
 
+The multi-library set is measured as **one cache lifecycle** — reset once before
+the set, not before each member — since otherwise each library's comparison
+starts from an empty cache and cross-library reuse is unobservable by
+construction, which is the only thing separating the shared arm from the distinct
+one. With that in place the measurement says something it previously could not:
+at `--repeat 2` every member of both arms performs **4 header extractions and 2
+include passes**, identical in the shared and distinct arms, so **no cross-library
+reuse happens today** even when five libraries resolve one physical dependency
+header through a common include root. That is an observation about the product,
+not a harness gap, and it is recorded here rather than acted on: this work
+deliberately changes no caching strategy (see "Scope" above). It is the
+cross-library half of the ⚠️ row for bundle/multi-library orchestration in the
+coverage table below.
+
 **One comparison, two artifacts.** `-o FORMAT=DESTINATION` is repeatable and
 every export renders the one completed analysis (ADR-068 slices 7m/7n), so a
 JSON report and a human report come from a single `compare`. The harness

@@ -13,6 +13,7 @@ Usage:
   pytest tests/test_golden_review_digest.py
   pytest tests/test_golden_review_digest.py --update-goldens
 """
+
 from __future__ import annotations
 
 import difflib

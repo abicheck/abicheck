@@ -937,9 +937,7 @@ class TestCompareSnapshotsContractModeValidation:
 
         old, new = self._snaps()
         with pytest.raises(ValidationError, match="unsupported contract mode"):
-            compare_snapshots(
-                old, new, contract_mode="bogus", contract_evaluation=True
-            )
+            compare_snapshots(old, new, contract_mode="bogus", contract_evaluation=True)
 
     def test_a_valid_pair_is_accepted(self) -> None:
         from abicheck.service import compare_snapshots

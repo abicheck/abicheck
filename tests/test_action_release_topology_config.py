@@ -70,6 +70,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from _action_run_sh_harness import annotation_helpers_source
 from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
@@ -236,6 +237,12 @@ def _run_bash_script(
     into a test that isn't deliberately exercising the merge.
     """
     require_bash()
+    # Every `::error::`/`::warning::` in an extracted region routes through
+    # run.sh's own annotation helpers; a fragment that does not define them
+    # fails with `command not found` and prints nothing, so the region's
+    # real messages silently vanish. Prepended here, once, rather than at
+    # each of this module's many extraction sites.
+    script = annotation_helpers_source() + "\n" + script
     with tempfile.NamedTemporaryFile(
         "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
     ) as f:

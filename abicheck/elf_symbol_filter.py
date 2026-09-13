@@ -14,6 +14,7 @@
 # limitations under the License.
 
 """ELF ABI-relevance filtering shared by symbol and DWARF paths."""
+
 from __future__ import annotations
 
 from collections.abc import Collection
@@ -41,8 +42,8 @@ _GCC_INTERNAL_PREFIXES = (
     "x86_64_",
     "__cpu_model",
     "__cpu_features",
-    "_ZGV",          # GCC SIMD vector variants (e.g. _ZGVbN2v_sin)
-    "__svml_",       # Intel Short Vector Math Library
+    "_ZGV",  # GCC SIMD vector variants (e.g. _ZGVbN2v_sin)
+    "__svml_",  # Intel Short Vector Math Library
     "__libm_sse2_",
     "__libm_avx_",
 )
@@ -50,13 +51,15 @@ _GCC_INTERNAL_PREFIXES = (
 # ELF lifecycle entry/exit stubs and linker-defined section boundary symbols are
 # emitted by toolchains/linkers rather than by the library's public ABI contract.
 # Treat exact names only as non-ABI.
-_ELF_LINKER_ARTIFACTS = frozenset({
-    "_init",
-    "_fini",
-    "__bss_start",
-    "_edata",
-    "_end",
-})
+_ELF_LINKER_ARTIFACTS = frozenset(
+    {
+        "_init",
+        "_fini",
+        "__bss_start",
+        "_edata",
+        "_end",
+    }
+)
 
 # Prefixes that identify transitive C++ standard-library symbols which may
 # appear in .dynsym via weak linkage (libstdc++ / libc++).
@@ -66,20 +69,21 @@ _STDLIB_PREFIXES = (
     "__gnu_debug::",
     "__cxxabiv1::",
     "__cxx11::",
-    "_ZNSt",              # std:: namespace members (libstdc++)
-    "_ZNKSt",             # const std:: methods
-    "_ZNVSt",             # volatile std:: methods
-    "_ZNRSt",             # ref-qualified std:: methods
-    "_ZNKRSt",            # const/ref-qualified std:: methods
-    "_ZNVRSt",            # volatile/ref-qualified std:: methods
-    "_ZNSt3__1",          # libc++ inline-namespace __1
-    "_ZdlPv",             # operator delete(void*)
-    "_ZnwSt",             # operator new(std::size_t)
-    "_ZnaSt",             # operator new[](std::size_t)
-    "_ZdaPv",             # operator delete[](void*)
-    "_ZTVN10__cxxabiv",   # vtables for RTTI (typeinfo infrastructure)
-    "_ZSt",               # std:: global symbols (e.g. _ZSt4cout)
+    "_ZNSt",  # std:: namespace members (libstdc++)
+    "_ZNKSt",  # const std:: methods
+    "_ZNVSt",  # volatile std:: methods
+    "_ZNRSt",  # ref-qualified std:: methods
+    "_ZNKRSt",  # const/ref-qualified std:: methods
+    "_ZNVRSt",  # volatile/ref-qualified std:: methods
+    "_ZNSt3__1",  # libc++ inline-namespace __1
+    "_ZdlPv",  # operator delete(void*)
+    "_ZnwSt",  # operator new(std::size_t)
+    "_ZnaSt",  # operator new[](std::size_t)
+    "_ZdaPv",  # operator delete[](void*)
+    "_ZTVN10__cxxabiv",  # vtables for RTTI (typeinfo infrastructure)
+    "_ZSt",  # std:: global symbols (e.g. _ZSt4cout)
 )
+
 
 def is_abi_relevant_elf_symbol(
     name: str,

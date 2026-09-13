@@ -3,6 +3,7 @@
 These tests exercise unusual and extreme inputs that may occur in production
 but are not typically covered by standard integration tests.
 """
+
 from __future__ import annotations
 
 import io
@@ -176,10 +177,17 @@ class TestEmptySnapshots:
     def test_compare_empty_snapshot_with_types_only(self) -> None:
         """Snapshots with no functions but types should still yield NO_CHANGE."""
         from abicheck.model import RecordType
-        old = AbiSnapshot(library="libfoo.so", version="1.0",
-                          types=[RecordType(name="T", kind="struct", size_bits=8)])
-        new = AbiSnapshot(library="libfoo.so", version="2.0",
-                          types=[RecordType(name="T", kind="struct", size_bits=8)])
+
+        old = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            types=[RecordType(name="T", kind="struct", size_bits=8)],
+        )
+        new = AbiSnapshot(
+            library="libfoo.so",
+            version="2.0",
+            types=[RecordType(name="T", kind="struct", size_bits=8)],
+        )
         result = compare(old, new)
         assert result.verdict == Verdict.NO_CHANGE
 
@@ -350,7 +358,9 @@ class TestCheckerExtremeInputs:
         result = compare(old, new)
         assert isinstance(result, DiffResult)
         # Size changed from 0 to 8 — should detect a type change
-        assert any(c.symbol == "Empty" or "Empty" in c.description for c in result.changes)
+        assert any(
+            c.symbol == "Empty" or "Empty" in c.description for c in result.changes
+        )
 
     def test_type_with_negative_alignment(self) -> None:
         from abicheck.model import RecordType
@@ -372,7 +382,9 @@ class TestCheckerExtremeInputs:
         result = compare(old, new)
         assert isinstance(result, DiffResult)
         # Alignment changed from -1 to 32 — should detect a type change
-        assert any(c.symbol == "Weird" or "Weird" in c.description for c in result.changes)
+        assert any(
+            c.symbol == "Weird" or "Weird" in c.description for c in result.changes
+        )
 
 
 # ---------------------------------------------------------------------------

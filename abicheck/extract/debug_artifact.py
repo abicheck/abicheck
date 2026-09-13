@@ -97,6 +97,7 @@ def _is_valid_build_id(build_id: str | None) -> bool:
 # Build-id extraction
 # ---------------------------------------------------------------------------
 
+
 def extract_build_id(binary_path: Path) -> str | None:
     """Extract the build-id from an ELF binary's .note.gnu.build-id section.
 

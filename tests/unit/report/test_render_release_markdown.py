@@ -94,8 +94,12 @@ class TestRendererDoesNotFilter:
         assert "Bundle (Cross-Library) Findings" not in "\n".join(lines_empty)
 
     def test_matrix_renderer_renders_exactly_the_given_changes(self) -> None:
-        change_a = Change(kind=ChangeKind.FUNC_REMOVED, symbol="a", description="a gone")
-        change_b = Change(kind=ChangeKind.FUNC_REMOVED, symbol="b", description="b gone")
+        change_a = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="a", description="a gone"
+        )
+        change_b = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="b", description="b gone"
+        )
         matrix_result = DiffResult(
             old_version="1",
             new_version="2",

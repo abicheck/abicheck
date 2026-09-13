@@ -567,7 +567,9 @@ class TestCompareKeepsWhatItDoesNotScore:
         """No opt-in means no excluded findings in the summary."""
         report = self._scan(tmp_path)
         assert report["summary"]["breaking"] == 1
-        assert all("compatibility_evaluation_status" not in f for f in report["changes"])
+        assert all(
+            "compatibility_evaluation_status" not in f for f in report["changes"]
+        )
 
 
 class TestReleaseFanoutKeepsWhatItDoesNotScore:
@@ -595,12 +597,8 @@ class TestReleaseFanoutKeepsWhatItDoesNotScore:
         new_dir = tmp_path / "new"
         new_dir.mkdir()
         old, new = _removal_pair()
-        (old_dir / "libfoo.json").write_text(
-            snapshot_to_json(old), encoding="utf-8"
-        )
-        (new_dir / "libfoo.json").write_text(
-            snapshot_to_json(new), encoding="utf-8"
-        )
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
         result = CliRunner().invoke(
             main,
             [
@@ -669,9 +667,13 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
     def _run(self, tmp_path: Path, *extra: str) -> int:
         old_p, new_p = self._changed_signature_pair(tmp_path)
         argv = [
-            "compare", str(old_p), str(new_p),
-            "--required-symbol", "_Z5pub_bi",
-            "--severity-preset", "default",
+            "compare",
+            str(old_p),
+            str(new_p),
+            "--required-symbol",
+            "_Z5pub_bi",
+            "--severity-preset",
+            "default",
             *extra,
         ]
         return CliRunner().invoke(main, argv).exit_code
@@ -682,9 +684,7 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
         """`exports` cannot resolve this pair, but the user explicitly
         declared the symbol part of the contract — which outranks the
         missing export evidence."""
-        assert (
-            self._run(tmp_path, "--contract", "exports") == 4
-        )
+        assert self._run(tmp_path, "--contract", "exports") == 4
 
     @pytest.mark.parametrize(
         "extra",
@@ -747,7 +747,10 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
 
     @pytest.mark.parametrize(
         "extra_flags",
-        [pytest.param((), id="legacy"), pytest.param(("--severity-preset", "default"), id="severity")],
+        [
+            pytest.param((), id="legacy"),
+            pytest.param(("--severity-preset", "default"), id="severity"),
+        ],
     )
     def test_a_missing_label_carries_the_whole_canonical_shape(
         self, tmp_path: Path, extra_flags: tuple[str, ...]
@@ -811,7 +814,9 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
             if c["kind"].endswith("required_symbol_missing")
         ], [c["kind"] for c in report["changes"]]
         missing = [
-            c for c in report["changes"] if c["kind"] == "consumer_required_symbol_removed"
+            c
+            for c in report["changes"]
+            if c["kind"] == "consumer_required_symbol_removed"
         ]
         assert missing, [c["kind"] for c in report["changes"]]
         for entry in missing:

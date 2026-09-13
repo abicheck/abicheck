@@ -23,6 +23,7 @@ concurrent reader — another xdist worker's test, a parallel session, a
 restarted worker — observes the tree absent. Under xdist the old hook ran
 that rewrite once per worker plus once in the controller.
 """
+
 from __future__ import annotations
 
 import sys
@@ -40,7 +41,9 @@ from tests.conftest import _materialize_generated_skill_trees  # noqa: E402
 def test_no_write_when_the_trees_already_match(monkeypatch: pytest.MonkeyPatch) -> None:
     """The steady state of every worker after the first, and of every rerun."""
     writes: list[dict[str, str]] = []
-    monkeypatch.setattr(gen, "write_trees", lambda rendered, *a, **k: writes.append(rendered))
+    monkeypatch.setattr(
+        gen, "write_trees", lambda rendered, *a, **k: writes.append(rendered)
+    )
 
     # The session's own conftest hook already materialized the trees, so this
     # call sees them current.
@@ -48,13 +51,17 @@ def test_no_write_when_the_trees_already_match(monkeypatch: pytest.MonkeyPatch) 
     assert writes == []
 
 
-def test_repeated_calls_never_write_more_than_once(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_repeated_calls_never_write_more_than_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Idempotence over repeated invocations, whatever the starting state:
     the first call may or may not need to write, every later one must not."""
     real_write = gen.write_trees
     writes: list[int] = []
 
-    def counting_write(rendered: dict[str, str], *args: object, **kwargs: object) -> None:
+    def counting_write(
+        rendered: dict[str, str], *args: object, **kwargs: object
+    ) -> None:
         writes.append(1)
         real_write(rendered, *args, **kwargs)  # type: ignore[arg-type]
 
@@ -64,7 +71,9 @@ def test_repeated_calls_never_write_more_than_once(monkeypatch: pytest.MonkeyPat
     assert len(writes) <= 1
 
 
-def test_the_staleness_oracle_is_content_keyed_not_existence_keyed(tmp_path: Path) -> None:
+def test_the_staleness_oracle_is_content_keyed_not_existence_keyed(
+    tmp_path: Path,
+) -> None:
     """The decision rests on `check_trees`, which compares bytes. Exercised
     over every way a tree can be wrong — missing, truncated, byte-modified,
     carrying an extra generated file — not just the absent case, so a
@@ -87,7 +96,9 @@ def test_the_staleness_oracle_is_content_keyed_not_existence_keyed(tmp_path: Pat
         if corruption == original:
             continue
         target.write_text(corruption, encoding="utf-8")
-        assert gen.check_trees(rendered, roots), f"byte drift not detected: {corruption[:40]!r}"
+        assert gen.check_trees(rendered, roots), (
+            f"byte drift not detected: {corruption[:40]!r}"
+        )
         target.write_text(original, encoding="utf-8")
         assert gen.check_trees(rendered, roots) == []
 
@@ -141,7 +152,9 @@ def test_a_concurrent_writer_does_not_abort_pytest_configuration(
     assert calls == ["check", "check"]
 
 
-def test_a_real_interleaving_is_survived(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_a_real_interleaving_is_survived(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """The same property against the real `check_trees` walking a tree that is
     genuinely disappearing under it, rather than a raised stand-in."""
     rendered = gen.render_all()

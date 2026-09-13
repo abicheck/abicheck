@@ -19,6 +19,7 @@ Real-world motivation: for C++ libraries built without -fvisibility=hidden
 internal-namespace symbols rather than genuine public-API breaks. The report
 should quantify that split so the headline number is not misleading.
 """
+
 from __future__ import annotations
 
 import json
@@ -33,8 +34,11 @@ from abicheck.reporter import to_json, to_markdown
 
 def _result(changes, verdict=Verdict.BREAKING):
     return DiffResult(
-        old_version="1.0", new_version="2.0", library="libtest.so.1",
-        changes=changes, verdict=verdict,
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest.so.1",
+        changes=changes,
+        verdict=verdict,
     )
 
 
@@ -78,12 +82,24 @@ class TestSurfaceBreakdown:
 
 class TestReporterSurfacing:
     def _churny_result(self):
-        return _result([
-            Change(ChangeKind.VAR_REMOVED, "_ZTIN4daal3FooE", "typeinfo removed"),
-            Change(ChangeKind.VAR_REMOVED, "_ZTSN4daal3FooE", "typeinfo name removed"),
-            Change(ChangeKind.FUNC_REMOVED, "_ZN4daal8internal3barEv", "internal removed"),
-            Change(ChangeKind.FUNC_REMOVED, "_ZN6oneapi3dal7computeEv", "public removed"),
-        ])
+        return _result(
+            [
+                Change(ChangeKind.VAR_REMOVED, "_ZTIN4daal3FooE", "typeinfo removed"),
+                Change(
+                    ChangeKind.VAR_REMOVED, "_ZTSN4daal3FooE", "typeinfo name removed"
+                ),
+                Change(
+                    ChangeKind.FUNC_REMOVED,
+                    "_ZN4daal8internal3barEv",
+                    "internal removed",
+                ),
+                Change(
+                    ChangeKind.FUNC_REMOVED,
+                    "_ZN6oneapi3dal7computeEv",
+                    "public removed",
+                ),
+            ]
+        )
 
     def test_markdown_banner_present_with_churn(self):
         md = to_markdown(self._churny_result())
@@ -101,12 +117,23 @@ class TestReporterSurfacing:
     def test_json_breakdown_present_with_churn(self):
         d = json.loads(to_json(self._churny_result()))
         bd = d["abi_surface_breakdown"]
-        assert bd == {"breaking_total": 4, "public": 1, "rtti_churn": 2, "internal_churn": 1}
+        assert bd == {
+            "breaking_total": 4,
+            "public": 1,
+            "rtti_churn": 2,
+            "internal_churn": 1,
+        }
 
     def test_no_banner_or_key_for_purely_public_breaks(self):
-        result = _result([
-            Change(ChangeKind.FUNC_REMOVED, "_ZN6oneapi3dal7computeEv", "public removed"),
-        ])
+        result = _result(
+            [
+                Change(
+                    ChangeKind.FUNC_REMOVED,
+                    "_ZN6oneapi3dal7computeEv",
+                    "public removed",
+                ),
+            ]
+        )
         md = to_markdown(result)
         assert "internal/RTTI churn" not in md
         d = json.loads(to_json(result))

@@ -580,7 +580,9 @@ class TestSnapshotFromCompatInputMultiLib:
 
         def _fake_dump(*_a, **_kw):
             observed.append(streaming_prune_suppressed())
-            return AbiSnapshot(library="a", version="1.0", functions=[], variables=[], types=[])
+            return AbiSnapshot(
+                library="a", version="1.0", functions=[], variables=[], types=[]
+            )
 
         with patch("abicheck.compat.cli.dump", side_effect=_fake_dump):
             assert not streaming_prune_suppressed()  # not leaked before the call

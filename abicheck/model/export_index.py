@@ -279,7 +279,9 @@ def pe_export_ids_with_ordinal_placeholder(index: RawExportIndex) -> frozenset[s
     exactly in sync with that formula is what lets a raw-export-id set built
     here still line up with the suppression/matching keys those two emit.
     """
-    return frozenset(e.name if e.name else f"ordinal:{e.ordinal}" for e in index.entries)
+    return frozenset(
+        e.name if e.name else f"ordinal:{e.ordinal}" for e in index.entries
+    )
 
 
 def ordinal_only_pe_exports(index: RawExportIndex) -> frozenset[int]:

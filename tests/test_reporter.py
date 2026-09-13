@@ -185,9 +185,7 @@ class TestAnalysisAssuranceExitContributionPersistence:
         r = _result(Verdict.BREAKING, changes=[c])
         r.analysis_assurance = AnalysisAssurance(status="partial")
         for mode in ("leaf", "root-cause"):
-            d = json.loads(
-                to_json(r, report_mode=mode, require_complete_analysis=True)
-            )
+            d = json.loads(to_json(r, report_mode=mode, require_complete_analysis=True))
             assert d["analysis_assurance_exit_contribution"] == 1, mode
 
     def test_stat_forwards_severity_config(self):
@@ -1193,7 +1191,9 @@ class TestMarkdownReporter:
     def test_demangle_rewrites_mangled_names_when_enabled(self, monkeypatch):
         import abicheck.demangle as dm
 
-        monkeypatch.setattr(dm, "demangle_batch", lambda syms, **kw: {"_Z3foov": "foo()"})
+        monkeypatch.setattr(
+            dm, "demangle_batch", lambda syms, **kw: {"_Z3foov": "foo()"}
+        )
         c = Change(
             ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: _Z3foov"
         )
@@ -1210,7 +1210,9 @@ class TestMarkdownReporter:
         from abicheck.model import AbiSnapshot
         from abicheck.service import render_output
 
-        monkeypatch.setattr(dm, "demangle_batch", lambda syms, **kw: {"_Z3foov": "foo()"})
+        monkeypatch.setattr(
+            dm, "demangle_batch", lambda syms, **kw: {"_Z3foov": "foo()"}
+        )
         result = _result(
             Verdict.BREAKING,
             [Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed _Z3foov")],

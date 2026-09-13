@@ -48,7 +48,9 @@ def _contract_tag(c: Change, contract_evaluation: bool) -> str:
     return tag + "]"
 
 
-def echo_filtered_surface(result: DiffResult, *, contract_evaluation: bool = False) -> None:
+def echo_filtered_surface(
+    result: DiffResult, *, contract_evaluation: bool = False
+) -> None:
     """Print the public-surface audit ledger (ADR-024 §D5 traceability)."""
     n = result.out_of_surface_count
     click.echo(

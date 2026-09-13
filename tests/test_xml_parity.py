@@ -11,6 +11,7 @@ Two levels of checking:
 
 Requires: abi-compliance-checker, gcc, castxml (for abicc-marked tests).
 """
+
 from __future__ import annotations
 
 import shutil
@@ -34,8 +35,11 @@ def _make_result(
     verdict: Verdict = Verdict.NO_CHANGE,
 ) -> DiffResult:
     return DiffResult(
-        old_version="1.0", new_version="2.0", library="libtest",
-        changes=changes or [], verdict=verdict,
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest",
+        changes=changes or [],
+        verdict=verdict,
     )
 
 
@@ -49,12 +53,17 @@ class TestXmlSchemaValidation:
     def test_abi_tracker_navigation_paths(self):
         """Verify all XPath queries that abi-tracker uses work on our XML."""
         changes = [
-            Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov",
-                   description="removed"),
-            Change(kind=ChangeKind.FUNC_ADDED, symbol="_Z3barv",
-                   description="added"),
-            Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="MyStruct",
-                   description="size changed", old_value="8", new_value="16"),
+            Change(
+                kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="removed"
+            ),
+            Change(kind=ChangeKind.FUNC_ADDED, symbol="_Z3barv", description="added"),
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="MyStruct",
+                description="size changed",
+                old_value="8",
+                new_value="16",
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
         xml = generate_xml_report(result, lib_name="libfoo", old_symbol_count=10)
@@ -113,8 +122,13 @@ class TestXmlSchemaValidation:
     def test_problem_details_have_effect(self):
         """abi-tracker may read <effect> elements for display."""
         changes = [
-            Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="S",
-                   description="size changed", old_value="4", new_value="8"),
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="S",
+                description="size changed",
+                old_value="4",
+                new_value="8",
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
         xml = generate_xml_report(result, old_symbol_count=5)
@@ -139,8 +153,16 @@ def _compile_so(src: str, out: Path, lang: str = "c") -> None:
     src_file = out.with_suffix(ext)
     src_file.write_text(textwrap.dedent(src).strip(), encoding="utf-8")
     compiler = "gcc" if lang == "c" else "g++"
-    cmd = [compiler, "-shared", "-fPIC", "-g", "-fvisibility=default",
-           "-o", str(out), str(src_file)]
+    cmd = [
+        compiler,
+        "-shared",
+        "-fPIC",
+        "-g",
+        "-fvisibility=default",
+        "-o",
+        str(out),
+        str(src_file),
+    ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     if r.returncode != 0:
         pytest.fail(f"Compilation failed: {r.stderr[:200]}")
@@ -179,15 +201,32 @@ class TestXmlCrossToolParity:
         # Generate ABICC XML report
         old_desc = tmp_path / "old.xml"
         new_desc = tmp_path / "new.xml"
-        old_desc.write_text(f"<version>1.0</version>\n<headers>{h1}</headers>\n<libs>{v1_so}</libs>")
-        new_desc.write_text(f"<version>2.0</version>\n<headers>{h2}</headers>\n<libs>{v2_so}</libs>")
+        old_desc.write_text(
+            f"<version>1.0</version>\n<headers>{h1}</headers>\n<libs>{v1_so}</libs>"
+        )
+        new_desc.write_text(
+            f"<version>2.0</version>\n<headers>{h2}</headers>\n<libs>{v2_so}</libs>"
+        )
 
         abicc_xml = tmp_path / "abicc_report.xml"
-        abicc_result = subprocess.run([
-            "abi-compliance-checker", "-lib", "libtest",
-            "-old", str(old_desc), "-new", str(new_desc),
-            "-report-format", "xml", "-report-path", str(abicc_xml),
-        ], capture_output=True, text=True, timeout=60)
+        abicc_result = subprocess.run(
+            [
+                "abi-compliance-checker",
+                "-lib",
+                "libtest",
+                "-old",
+                str(old_desc),
+                "-new",
+                str(new_desc),
+                "-report-format",
+                "xml",
+                "-report-path",
+                str(abicc_xml),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
         # ABICC returns 1 for incompatible (expected for func_removed)
         assert abicc_result.returncode in (0, 1), (
             f"ABICC failed unexpectedly (rc={abicc_result.returncode}):\n"
@@ -211,8 +250,10 @@ class TestXmlCrossToolParity:
         # unscoped to keep the established XML/abicc verdicts apples-to-apples.
         result = compare(old_snap, new_snap, scope_to_public_surface=False)
         abicheck_xml_str = generate_xml_report(
-            result, lib_name="libtest",
-            old_version="1.0", new_version="2.0",
+            result,
+            lib_name="libtest",
+            old_version="1.0",
+            new_version="2.0",
             old_symbol_count=2,
         )
 
@@ -241,9 +282,8 @@ class TestXmlCrossToolParity:
                 abicc_root = xml_fromstring(f"<wrapper>{abicc_content}</wrapper>")
 
             # Find ABICC's binary report
-            cc_binary = (
-                abicc_root.find("report[@kind='binary']")
-                or abicc_root.find(".//report[@kind='binary']")
+            cc_binary = abicc_root.find("report[@kind='binary']") or abicc_root.find(
+                ".//report[@kind='binary']"
             )
             if cc_binary is not None:
                 cc_verdict = cc_binary.find("test_results/verdict")
@@ -279,8 +319,10 @@ class TestXmlCrossToolParity:
             new_snap = dump(v2_so, headers=[h], version="1.0", compiler="cc")
         result = compare(old_snap, new_snap, scope_to_public_surface=False)
         xml_str = generate_xml_report(
-            result, lib_name="libtest",
-            old_version="1.0", new_version="1.0",
+            result,
+            lib_name="libtest",
+            old_version="1.0",
+            new_version="1.0",
             old_symbol_count=1,
         )
 

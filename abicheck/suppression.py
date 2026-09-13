@@ -29,6 +29,7 @@ genuinely specific to *suppression* — the reachability/``allow_public_break``
 gates (ADR-044 D2) that decide whether a selector match actually suppresses
 the finding, YAML loading, audit/reporting, and suggestion generation.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -47,13 +48,27 @@ from .policy.selectors import _TYPE_CHANGE_KINDS, SelectorSet
 from .suppression_yaml import parse_finding_id, raw_finding_ids_by_index
 
 # Keys allowed in a suppression entry — unknown keys are rejected
-_KNOWN_ENTRY_KEYS: frozenset[str] = frozenset({
-    "symbol", "symbol_pattern", "type_pattern", "member_name",
-    "change_kind", "reason", "label", "source_location", "expires",
-    "namespace", "entity_namespace", "cause_namespace", "binding",
-    "reachability", "allow_public_break", "allow_unknown_reachability",
-    "finding_id",
-})
+_KNOWN_ENTRY_KEYS: frozenset[str] = frozenset(
+    {
+        "symbol",
+        "symbol_pattern",
+        "type_pattern",
+        "member_name",
+        "change_kind",
+        "reason",
+        "label",
+        "source_location",
+        "expires",
+        "namespace",
+        "entity_namespace",
+        "cause_namespace",
+        "binding",
+        "reachability",
+        "allow_public_break",
+        "allow_unknown_reachability",
+        "finding_id",
+    }
+)
 
 # ADR-044 D2: valid values for Suppression.reachability.
 # "proven-unreachable-only" (impact-analysis-layer P0) is a stricter variant
@@ -61,9 +76,14 @@ _KNOWN_ENTRY_KEYS: frozenset[str] = frozenset({
 # Change.reachability_state is UNKNOWN (graph coverage insufficient to prove
 # unreachability), rather than treating UNKNOWN the same as proven-unreachable
 # the way the original boolean-only "unreachable-only" gate does.
-_VALID_REACHABILITY: frozenset[str] = frozenset({
-    "unreachable-only", "any", "public-only", "proven-unreachable-only",
-})
+_VALID_REACHABILITY: frozenset[str] = frozenset(
+    {
+        "unreachable-only",
+        "any",
+        "public-only",
+        "proven-unreachable-only",
+    }
+)
 
 
 @dataclass
@@ -239,7 +259,11 @@ class Suppression:
         # bypassed this entirely, silently creating a rule that can never
         # match anything real (Codex review).
         self.finding_id = parse_finding_id(self.finding_id)
-        effective_entity_ns = self.entity_namespace if self.entity_namespace is not None else self.namespace
+        effective_entity_ns = (
+            self.entity_namespace
+            if self.entity_namespace is not None
+            else self.namespace
+        )
         # Every selector-grammar validation (namespace/entity_namespace
         # mutual exclusivity, "at least one selector", malformed glob/
         # regex, unknown change_kind, malformed binding) happens inside
@@ -260,7 +284,10 @@ class Suppression:
             finding_id=self.finding_id,
             expires=self.expires,
         )
-        if self.reachability is not None and self.reachability not in _VALID_REACHABILITY:
+        if (
+            self.reachability is not None
+            and self.reachability not in _VALID_REACHABILITY
+        ):
             raise ValueError(
                 f"Invalid reachability {self.reachability!r}. "
                 f"Valid values: {sorted(_VALID_REACHABILITY)}"
@@ -317,7 +344,9 @@ class Suppression:
             or self.cause_namespace is not None
             or self.source_location is not None
         )
-        self._is_broad_selector = has_broad_shaped_selector and not has_primary_narrow_selector
+        self._is_broad_selector = (
+            has_broad_shaped_selector and not has_primary_narrow_selector
+        )
         self._resolved_reachability = self.reachability or (
             "unreachable-only" if self._is_broad_selector else "any"
         )
@@ -416,7 +445,9 @@ class Suppression:
         """
         if not self._selector_match(change, today):
             return False
-        return self._passes_reachability_gate(change) and self._passes_public_break_gate(change)
+        return self._passes_reachability_gate(
+            change
+        ) and self._passes_public_break_gate(change)
 
     def selector_matches(self, change: Change, today: date | None = None) -> bool:
         """Return True if this rule's selectors alone match *change*.
@@ -454,7 +485,10 @@ class Suppression:
         """
         if not self._selector_match(change, today):
             return False
-        if not (change.public_reachable and (change.kind in BREAKING_KINDS or change.kind in API_BREAK_KINDS)):
+        if not (
+            change.public_reachable
+            and (change.kind in BREAKING_KINDS or change.kind in API_BREAK_KINDS)
+        ):
             return False
         return not self._passes_public_break_gate(change)
 
@@ -644,7 +678,9 @@ class SuppressionList:
         return None
 
     @classmethod
-    def load(cls, path: Path, *, require_justification: bool = False) -> SuppressionList:
+    def load(
+        cls, path: Path, *, require_justification: bool = False
+    ) -> SuppressionList:
         """Load suppression rules from a YAML file.
 
         If *require_justification* is True, every rule must have a non-empty
@@ -678,7 +714,9 @@ class SuppressionList:
 
         version = data.get("version")
         if version != 1:
-            raise ValueError(f"Unsupported suppression file version: {version!r} (expected 1)")
+            raise ValueError(
+                f"Unsupported suppression file version: {version!r} (expected 1)"
+            )
 
         raw_suppressions = data.get("suppressions")
         if raw_suppressions is None:
@@ -702,7 +740,9 @@ class SuppressionList:
                 )
             # Parse expires date
             expires = _parse_expires(item.get("expires"), i)
-            allow_public_break = _parse_allow_public_break(item.get("allow_public_break"), i)
+            allow_public_break = _parse_allow_public_break(
+                item.get("allow_public_break"), i
+            )
             allow_unknown_reachability = _parse_allow_unknown_reachability(
                 item.get("allow_unknown_reachability"), i
             )
@@ -920,7 +960,9 @@ class SuppressionList:
                 from .severity import effective_verdict_for_change
 
                 is_breaking = (
-                    effective_verdict_for_change(c, policy_file=policy_file, today=today)
+                    effective_verdict_for_change(
+                        c, policy_file=policy_file, today=today
+                    )
                     == Verdict.BREAKING
                 )
             else:
@@ -940,7 +982,8 @@ class SuppressionList:
         expired = self.expired_rules(today)
 
         near_expiry = [
-            s for s in self._suppressions
+            s
+            for s in self._suppressions
             if s.expires is not None
             and not s.is_expired(today)
             and s.expires <= near_expiry_cutoff
@@ -955,7 +998,9 @@ class SuppressionList:
             total_rules=len(self._suppressions),
         )
 
-    def check_expired_strict(self, today: date | None = None) -> list[tuple[int, Suppression]]:
+    def check_expired_strict(
+        self, today: date | None = None
+    ) -> list[tuple[int, Suppression]]:
         """Return ``(index, rule)`` pairs for all expired rules.
 
         Used by ``--strict-suppressions`` to enumerate expired rules with
@@ -963,8 +1008,7 @@ class SuppressionList:
         """
         check_date = today or date.today()
         return [
-            (i, s) for i, s in enumerate(self._suppressions)
-            if s.is_expired(check_date)
+            (i, s) for i, s in enumerate(self._suppressions) if s.is_expired(check_date)
         ]
 
     def __len__(self) -> int:
@@ -977,6 +1021,7 @@ class SuppressionList:
 @dataclass
 class SuppressionAudit:
     """Result of auditing suppression rules against detected changes."""
+
     stale_rules: list[Suppression]
     """Rules that matched zero changes (likely stale or misconfigured)."""
     high_risk_matches: list[tuple[Suppression, Change]]
@@ -1018,7 +1063,9 @@ class SuppressionAudit:
             # below.
             lines.append(f"  ⚠ {len(self.stale_rules)} stale rule(s) matched nothing")
         if self.high_risk_matches:
-            lines.append(f"  ⚠ {len(self.high_risk_matches)} suppression(s) matched BREAKING changes")
+            lines.append(
+                f"  ⚠ {len(self.high_risk_matches)} suppression(s) matched BREAKING changes"
+            )
             for _sup, change in self.high_risk_matches[:5]:
                 lines.append(f"    - {change.kind.value}: {change.symbol}")
         if self.expired_rules:

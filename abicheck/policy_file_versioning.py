@@ -51,7 +51,9 @@ _VERSIONING_KNOWN_KEYS = frozenset(
 )
 
 
-def _reject_unknown_keys(raw: dict[str, Any], known: frozenset[str], where: str) -> None:
+def _reject_unknown_keys(
+    raw: dict[str, Any], known: frozenset[str], where: str
+) -> None:
     """Hard-error when *raw* carries a key outside *known*.
 
     A key need not be a string at all -- YAML happily parses ``1: foo`` at

@@ -202,6 +202,24 @@ LARGE_FILE_ALLOWLIST: frozenset[str] = frozenset(
         "tests/test_cross_source_checks.py",
         "tests/test_dwarf_coverage_gaps.py",
         "tests/test_package.py",
+        # The six below crossed 2000 lines in the one-time `ruff format` pass
+        # that made `fmt-check` a real CI gate (docs/contribute/known-gaps.md).
+        # They are the same shape as the entries above -- already past the cap
+        # the moment the measurement changed, not files this change grew. No
+        # statement was added to any of them: the formatter only rewrapped call
+        # sites and expanded magic trailing commas, verified by comparing
+        # `ast.dump` before and after. Splitting six modules is exactly the
+        # "reviewed split pass, not one rushed through as a side effect of an
+        # unrelated change" this comment already warns against, so each keeps
+        # its WARN and its own no-growth entry in `architecture/debt.yaml` --
+        # which is the stronger gate: allowlisted here means "not an ERROR at
+        # today's size", while the debt baseline still refuses the next line.
+        "abicheck/cli_compare_helpers.py",
+        "abicheck/compatibility_evaluation_frontend.py",
+        "abicheck/dumper.py",
+        "abicheck/reporter.py",
+        "abicheck/reporter_markdown.py",
+        "tests/test_dumper_unit.py",
     }
 )
 

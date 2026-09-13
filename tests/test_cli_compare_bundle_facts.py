@@ -499,7 +499,9 @@ class TestCompareOldBundleFacts:
         assert code == 64
         assert "--fail-on-removed-library" in out
 
-    def test_gate_fail_on_removed_library_config_is_rejected(self, tmp_path: Path) -> None:
+    def test_gate_fail_on_removed_library_config_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
         """Phase 7d: gate.fail_on_removed_library is a project-wide
         .abicheck.yml setting now, not a per-invocation flag -- a project
         that sets it still gets this dispatch's own out-of-scope
@@ -1039,11 +1041,16 @@ class TestBundleFactsRendererCarriesEnvMatrixDigest:
         from abicheck.checker_types import DiffResult
 
         diff = DiffResult(
-            old_version="old", new_version="new", library="libfoo.so",
-            changes=[], verdict=Verdict.NO_CHANGE,
+            old_version="old",
+            new_version="new",
+            library="libfoo.so",
+            changes=[],
+            verdict=Verdict.NO_CHANGE,
         )
         return BundleDiffResult(
-            old_root=Path("/old"), new_root=Path("/new"), per_library=[diff],
+            old_root=Path("/old"),
+            new_root=Path("/new"),
+            per_library=[diff],
             env_matrix_source_sha256=env_matrix_source_sha256,
         )
 

@@ -55,7 +55,11 @@ BUNDLE_FACTS_BASE_SCHEMA_VERSION = 2
 
 def document_schema_version(facts: BundleFacts) -> int:
     """The ``schema_version`` a writer declares for *facts* (see above)."""
-    return BUNDLE_FACTS_SCHEMA_VERSION if facts.degraded_members else BUNDLE_FACTS_BASE_SCHEMA_VERSION
+    return (
+        BUNDLE_FACTS_SCHEMA_VERSION
+        if facts.degraded_members
+        else BUNDLE_FACTS_BASE_SCHEMA_VERSION
+    )
 
 
 #: Self-describing document-type marker; see `storage.bundle_facts_codec.
@@ -120,7 +124,9 @@ class BundleFacts:
     construction so every reader and capture path shares the one rule."""
 
     def __post_init__(self) -> None:
-        require_degraded_members_known(self.degraded_members, self.per_library_snapshots)
+        require_degraded_members_known(
+            self.degraded_members, self.per_library_snapshots
+        )
 
     schema_version: int = BUNDLE_FACTS_BASE_SCHEMA_VERSION
     variant_fingerprint: str = DEFAULT_VARIANT_FINGERPRINT

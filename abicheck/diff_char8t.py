@@ -20,6 +20,7 @@ mangling (Itanium mangling code ``Du``), changing a public parameter, return,
 or field type between a char-family spelling and ``char8_t`` changes the mangled
 symbol: an old binary fails to resolve it.
 """
+
 from __future__ import annotations
 
 import re
@@ -50,12 +51,14 @@ def _diff_char8t(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if old_c8 == new_c8:
             continue
         direction = "char-family → char8_t" if new_c8 else "char8_t → char-family"
-        changes.append(make_change(
-            ChangeKind.CHAR8T_MIGRATION,
-            symbol=ch.symbol,
-            name=f"{ch.slot} of '{ch.symbol}'",
-            detail=direction,
-            old=ch.old_type,
-            new=ch.new_type,
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.CHAR8T_MIGRATION,
+                symbol=ch.symbol,
+                name=f"{ch.slot} of '{ch.symbol}'",
+                detail=direction,
+                old=ch.old_type,
+                new=ch.new_type,
+            )
+        )
     return changes

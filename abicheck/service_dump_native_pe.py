@@ -283,4 +283,3 @@ def _dump_macho(
         platform="macho",
         scope_fallback=scope_fallback,
     )
-

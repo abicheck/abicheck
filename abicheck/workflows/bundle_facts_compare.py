@@ -73,7 +73,11 @@ def compare_bundle_from_facts(
 
     old_snapshot = bundle_snapshot_from_facts(old_facts)
     effective_manifest = manifest if manifest is not None else old_facts.manifest
-    effective_old_evidence = old_facts.per_library_snapshots if old_signature_evidence is None else old_signature_evidence
+    effective_old_evidence = (
+        old_facts.per_library_snapshots
+        if old_signature_evidence is None
+        else old_signature_evidence
+    )
     return analyze_bundle(
         old_snapshot,
         new_snapshot,

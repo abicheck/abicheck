@@ -150,9 +150,7 @@ def test_mirror_dir_candidate_cache_with_prefix() -> None:
 
 def test_mirror_dir_candidate_cache_without_prefix() -> None:
     """for_cache=True, prefix=None returns the plain include dir (line 219)."""
-    result = m._mirror_dir_candidate(
-        "inc", Path("/build/inc"), None, for_cache=True
-    )
+    result = m._mirror_dir_candidate("inc", Path("/build/inc"), None, for_cache=True)
 
     assert result == str(Path("/build/inc"))
 
@@ -245,7 +243,9 @@ def test_equivalent_public_roots_promotes_on_single_match_only_for_file_roots(
 
     dir_roots = [str(install)]
     promoted_dir = [
-        r for r in m._equivalent_public_roots_for_unit(dir_roots, cu) if r not in dir_roots
+        r
+        for r in m._equivalent_public_roots_for_unit(dir_roots, cu)
+        if r not in dir_roots
     ]
     assert promoted_dir == []
 

@@ -29,6 +29,7 @@ The byte/string parsing is split into pure helpers (``parse_gcc_command_line``,
 ``parse_producer``) so it is testable without a compiled fixture; the ELF
 wrapper degrades gracefully (diagnostic, empty evidence) on any read failure.
 """
+
 from __future__ import annotations
 
 import os
@@ -88,9 +89,13 @@ def parse_producer(producer: str) -> Toolchain | None:
         compiler_id = producer.split()[0]
     m = _VERSION_RE.search(producer)
     version = m.group(1) if m else ""
-    language = "CXX" if "C++" in producer else ("C" if re.search(r"\bC\d", producer) else "")
+    language = (
+        "CXX" if "C++" in producer else ("C" if re.search(r"\bC\d", producer) else "")
+    )
     tid = f"toolchain://{compiler_id}-{version or 'unknown'}-dwarf".lower()
-    return Toolchain(id=tid, compiler_id=compiler_id, version=version, language=language)
+    return Toolchain(
+        id=tid, compiler_id=compiler_id, version=version, language=language
+    )
 
 
 def extract_compiler_record(
@@ -113,7 +118,9 @@ def extract_compiler_record(
             _collect_command_line(elf, ev, red)
             _collect_producer(elf, ev)
     except (OSError, ELFError) as exc:
-        ev.diagnostics.append(f"compiler-record: cannot read {red.path(str(path))} as ELF: {exc}")
+        ev.diagnostics.append(
+            f"compiler-record: cannot read {red.path(str(path))} as ELF: {exc}"
+        )
         return ev
 
     if ev.toolchains or ev.compile_units or ev.build_options:
@@ -182,7 +189,9 @@ def _collect_producer(elf: Any, ev: BuildEvidence) -> None:
         if attr is None:
             continue
         value = attr.value
-        producer = value.decode("utf-8", "replace") if isinstance(value, bytes) else str(value)
+        producer = (
+            value.decode("utf-8", "replace") if isinstance(value, bytes) else str(value)
+        )
         toolchain = parse_producer(producer)
         if toolchain is not None and toolchain.id not in seen:
             ev.toolchains.append(toolchain)

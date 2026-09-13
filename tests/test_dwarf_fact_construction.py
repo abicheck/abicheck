@@ -27,6 +27,7 @@ different class. The typed-parameter branch shares the identical
 ``Fact.unsupported()`` literal and is exercised end-to-end by the
 `integration`-marked DWARF test suite against real compiled binaries.
 """
+
 from __future__ import annotations
 
 from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder

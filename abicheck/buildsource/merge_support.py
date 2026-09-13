@@ -6,6 +6,7 @@ Split out of ``cli_buildsource.py`` to keep it under the 2000-line cap. Holds
 ``_combine_packs`` (fold per-layer facts from build-info / sources / embedded
 packs) and the A2 merge-layer-conflict detection that ``merge`` uses.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -31,6 +32,7 @@ _BUILD_QUERY_DIAG_NAMES = ("build_query", "build_query_auto")
 def _layer_value(layer: object) -> str:
     return layer.value if hasattr(layer, "value") else str(layer)
 
+
 def _filter_pack_layers(
     pack: BuildSourcePack | None, layers: tuple[str, ...]
 ) -> BuildSourcePack | None:
@@ -48,6 +50,7 @@ def _filter_pack_layers(
         pack.source_graph = None
     return pack
 
+
 def _payload_empty(attr: str, payload: Any) -> bool:
     """True when a non-``None`` layer payload carries no real facts.
 
@@ -59,9 +62,13 @@ def _payload_empty(attr: str, payload: Any) -> bool:
     if payload is None:
         return True
     if attr == "build_evidence":
-        return not (getattr(payload, "targets", None) or getattr(payload, "compile_units", None))
+        return not (
+            getattr(payload, "targets", None) or getattr(payload, "compile_units", None)
+        )
     if attr == "source_abi":
-        buckets = payload.reachable_buckets() if hasattr(payload, "reachable_buckets") else {}
+        buckets = (
+            payload.reachable_buckets() if hasattr(payload, "reachable_buckets") else {}
+        )
         return not any(buckets.values())
     if attr == "source_graph":
         return not getattr(payload, "nodes", None)
@@ -123,11 +130,7 @@ def _coverage_row_for_present_layer(
     — we embed the payload and have no more precise statement to make."""
     if supplier is not None:
         row = next(
-            (
-                c
-                for c in supplier.manifest.coverage
-                if _layer_value(c.layer) == layer
-            ),
+            (c for c in supplier.manifest.coverage if _layer_value(c.layer) == layer),
             None,
         )
         if row is not None:
@@ -157,9 +160,11 @@ def _coverage_row_for_absent_layer(
         if cand is None:
             continue
         hit = next(
-            (c for c in cand.manifest.coverage
-             if _layer_value(c.layer) == layer
-             and c.status == CoverageStatus.PARTIAL),
+            (
+                c
+                for c in cand.manifest.coverage
+                if _layer_value(c.layer) == layer and c.status == CoverageStatus.PARTIAL
+            ),
             None,
         )
         if hit is not None:
@@ -310,7 +315,9 @@ def _build_combined_provenance(
     for p in (bi_pack, src_pack, embedded):
         if p is None:
             continue
-        _accumulate_pack_provenance(p, chosen_ids, artifacts, extractors, seen_extractors)
+        _accumulate_pack_provenance(
+            p, chosen_ids, artifacts, extractors, seen_extractors
+        )
 
     _append_chosen_payload_digests(chosen, artifacts)
 
@@ -417,6 +424,7 @@ def _combine_packs(
         source_graph=source_graph,  # type: ignore[arg-type]
     )
 
+
 _MERGE_LAYER_ATTRS: dict[str, str] = {
     DataLayer.L3_BUILD.value: "build_evidence",
     DataLayer.L4_SOURCE_ABI.value: "source_abi",
@@ -439,11 +447,17 @@ _LATEST_WINS_LAYERS: frozenset[str] = frozenset(
 # reorder is not a false conflict (Codex review).
 _ORDERED_LIST_KEYS = frozenset(
     {
-        "argv", "linker_argv", "command", "inputs", "defines", "undefines",
+        "argv",
+        "linker_argv",
+        "command",
+        "inputs",
+        "defines",
+        "undefines",
         # -I / -isystem order is compiler-visible: swapping two include dirs can
         # select different headers and change the source ABI, so these stay
         # order-sensitive (Codex).
-        "include_paths", "system_include_paths",
+        "include_paths",
+        "system_include_paths",
         # abi_relevant_flags is a replay input (source_replay joins it in order
         # for the cache key, _argv appends it in order); last-wins pairs like
         # -fexceptions/-fno-exceptions or -frtti/-fno-rtti change the parsed ABI
@@ -479,6 +493,7 @@ def _canonicalize(obj: Any, key: str | None = None) -> Any:
         return sorted(items, key=lambda x: json.dumps(x, sort_keys=True, default=str))
     return obj
 
+
 def _canonical_layer_digest(payload_dict: dict[str, Any]) -> str:
     """Digest of one layer's facts that is independent of *fact* ordering (even
     nested fact arrays) but preserves *ordered* scalar fields (A2)."""
@@ -486,6 +501,7 @@ def _canonical_layer_digest(payload_dict: dict[str, Any]) -> str:
         _canonicalize(payload_dict), sort_keys=True, separators=(",", ":"), default=str
     )
     return "sha256:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
 
 def _detect_merge_layer_conflicts(
     snaps: list[tuple[Path, AbiSnapshot]],
@@ -518,6 +534,7 @@ def _detect_merge_layer_conflicts(
             conflicts[layer] = entries
     return conflicts
 
+
 def _resolve_conflict_winners(
     combined: BuildSourcePack, conflicts: dict[str, list[tuple[str, str]]]
 ) -> dict[str, str]:
@@ -545,6 +562,7 @@ def _resolve_conflict_winners(
                 winners[layer] = name
                 break
     return winners
+
 
 def _record_merge_conflicts(
     combined: BuildSourcePack,

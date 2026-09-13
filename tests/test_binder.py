@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Tests for abicheck.binder — symbol binding simulation."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -63,11 +64,15 @@ def _make_graph(
     return graph
 
 
-def _sym(name: str, version: str = "", is_default: bool = True, vis: str = "default") -> ElfSymbol:
+def _sym(
+    name: str, version: str = "", is_default: bool = True, vis: str = "default"
+) -> ElfSymbol:
     return ElfSymbol(name=name, version=version, is_default=is_default, visibility=vis)
 
 
-def _imp(name: str, version: str = "", binding: ElfSymbolBinding = ElfSymbolBinding.GLOBAL) -> ElfImport:
+def _imp(
+    name: str, version: str = "", binding: ElfSymbolBinding = ElfSymbolBinding.GLOBAL
+) -> ElfImport:
     return ElfImport(name=name, version=version, binding=binding)
 
 
@@ -153,7 +158,11 @@ class TestVersionedSymbols:
         graph = _make_graph(
             {
                 "/app": (["libfoo.so"], [], [_imp("foo_init")]),
-                "/lib/libfoo.so": ([], [_sym("foo_init", version="FOO_1.0", is_default=True)], []),
+                "/lib/libfoo.so": (
+                    [],
+                    [_sym("foo_init", version="FOO_1.0", is_default=True)],
+                    [],
+                ),
             },
             edges=[("/app", "/lib/libfoo.so")],
         )
@@ -170,7 +179,11 @@ class TestWeakSymbols:
     def test_weak_unresolved_is_ok(self):
         graph = _make_graph(
             {
-                "/app": ([], [], [_imp("__gmon_start__", binding=ElfSymbolBinding.WEAK)]),
+                "/app": (
+                    [],
+                    [],
+                    [_imp("__gmon_start__", binding=ElfSymbolBinding.WEAK)],
+                ),
             },
         )
         bindings = compute_bindings(graph)
@@ -179,7 +192,11 @@ class TestWeakSymbols:
     def test_weak_resolved_when_available(self):
         graph = _make_graph(
             {
-                "/app": (["libfoo.so"], [], [_imp("optional_func", binding=ElfSymbolBinding.WEAK)]),
+                "/app": (
+                    ["libfoo.so"],
+                    [],
+                    [_imp("optional_func", binding=ElfSymbolBinding.WEAK)],
+                ),
                 "/lib/libfoo.so": ([], [_sym("optional_func")], []),
             },
             edges=[("/app", "/lib/libfoo.so")],
@@ -243,7 +260,11 @@ class TestInterposition:
         """If an earlier provider has the same version, it's real interposition."""
         graph = _make_graph(
             {
-                "/app": (["libinterp.so", "libfoo.so"], [], [_imp("sym", version="V1")]),
+                "/app": (
+                    ["libinterp.so", "libfoo.so"],
+                    [],
+                    [_imp("sym", version="V1")],
+                ),
                 "/lib/libinterp.so": ([], [_sym("sym", version="V1")], []),
                 "/lib/libfoo.so": ([], [_sym("sym", version="V1")], []),
             },
@@ -302,6 +323,7 @@ class TestRealBinary:
     @pytest.fixture(scope="class")
     def bindings():
         from abicheck.resolver import resolve_dependencies
+
         candidates = [Path("/usr/bin/python3"), Path("/usr/bin/ls"), Path("/bin/ls")]
         for p in candidates:
             if p.exists():

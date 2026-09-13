@@ -570,9 +570,7 @@ class TestReleaseScopeAxesReachTheRealDigest:
     def test_fail_on_removed_library_changes_the_release_digest(
         self, tmp_path: Path
     ) -> None:
-        off = self._run(
-            tmp_path, "off", "gate:\n  fail_on_removed_library: false\n"
-        )
+        off = self._run(tmp_path, "off", "gate:\n  fail_on_removed_library: false\n")
         on = self._run(tmp_path, "on", "gate:\n  fail_on_removed_library: true\n")
         off_fields = off["effective_config_fields"]
         on_fields = on["effective_config_fields"]

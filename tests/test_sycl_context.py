@@ -510,9 +510,7 @@ def test_from_path_rejects_truncated_document_with_tiny_chunk_size(
     ast_path = tmp_path / "ast_dump.json"
     ast_path.write_text('{"kind": "TranslationUnitDecl", "inner": [', encoding="utf-8")
     with pytest.raises(SnapshotError, match="truncated or malformed"):
-        decode_and_select_frontend_context_from_path(
-            ast_path, "", "host", chunk_size=4
-        )
+        decode_and_select_frontend_context_from_path(ast_path, "", "host", chunk_size=4)
 
 
 def test_from_path_rejects_non_utf8_bytes_as_snapshot_error(tmp_path: Path) -> None:
@@ -614,7 +612,9 @@ def test_fused_select_rejects_malformed_sole_match() -> None:
 
 def test_from_path_rejects_document_count_mismatch(tmp_path: Path) -> None:
     ast_path = tmp_path / "ast_dump.json"
-    ast_path.write_text('{"kind": "TranslationUnitDecl", "inner": []}', encoding="utf-8")
+    ast_path.write_text(
+        '{"kind": "TranslationUnitDecl", "inner": []}', encoding="utf-8"
+    )
     with pytest.raises(SnapshotError, match="cannot correlate"):
         decode_and_select_frontend_context_from_path(ast_path, "", "host")
 

@@ -588,6 +588,7 @@ def render_rtti_note(note: RttiNote | None) -> list[str]:
         "",
     ]
 
+
 # ---------------------------------------------------------------------------
 # Analysis confidence section
 # ---------------------------------------------------------------------------
@@ -796,7 +797,10 @@ def render_review_digest(digest: ReviewDigest) -> str:
         "",
     ]
     if digest.env_matrix_source_sha256 is not None:
-        lines += [f"**Deployment floor digest:** `{digest.env_matrix_source_sha256}`", ""]
+        lines += [
+            f"**Deployment floor digest:** `{digest.env_matrix_source_sha256}`",
+            "",
+        ]
 
     # ADR-067 D3: the digest is the summary a reviewer approves a merge from,
     # so the counts table above must not be the whole story -- what was

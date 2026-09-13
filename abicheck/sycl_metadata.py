@@ -44,6 +44,7 @@ or runtime needed — pure static analysis of ELF binaries.
 
 See ADR-020b for design rationale.
 """
+
 from __future__ import annotations
 
 import logging
@@ -76,27 +77,29 @@ _PI_PLUGIN_NAME_RE = re.compile(r"^libpi_(\w+)\.so")
 _UR_PLUGIN_NAME_RE = re.compile(r"^libur_adapter_(\w+)\.so")
 
 # Well-known PI entry points that must be present for a valid PI plugin.
-PI_REQUIRED_ENTRYPOINTS: frozenset[str] = frozenset({
-    "piPluginInit",
-    "piPlatformsGet",
-    "piPlatformGetInfo",
-    "piDevicesGet",
-    "piDeviceGetInfo",
-    "piContextCreate",
-    "piContextRelease",
-    "piQueueCreate",
-    "piQueueRelease",
-    "piMemBufferCreate",
-    "piMemRelease",
-    "piProgramCreate",
-    "piProgramBuild",
-    "piProgramRelease",
-    "piKernelCreate",
-    "piKernelRelease",
-    "piEnqueueKernelLaunch",
-    "piEventsWait",
-    "piEventRelease",
-})
+PI_REQUIRED_ENTRYPOINTS: frozenset[str] = frozenset(
+    {
+        "piPluginInit",
+        "piPlatformsGet",
+        "piPlatformGetInfo",
+        "piDevicesGet",
+        "piDeviceGetInfo",
+        "piContextCreate",
+        "piContextRelease",
+        "piQueueCreate",
+        "piQueueRelease",
+        "piMemBufferCreate",
+        "piMemRelease",
+        "piProgramCreate",
+        "piProgramBuild",
+        "piProgramRelease",
+        "piKernelCreate",
+        "piKernelRelease",
+        "piEnqueueKernelLaunch",
+        "piEventsWait",
+        "piEventRelease",
+    }
+)
 
 # The validity-marker entry point for each of the two UR export shapes
 # (module docstring): the older per-verb-symbol generation, and the current
@@ -110,28 +113,30 @@ _UR_TABLE_ENTRYPOINT = "urGetAdapterProcAddrTable"
 # (per-verb-symbol) UR adapter -- does not apply to the current
 # function-pointer-table generation, which exports none of these directly
 # (see module docstring).
-UR_REQUIRED_ENTRYPOINTS: frozenset[str] = frozenset({
-    "urAdapterGet",
-    "urAdapterRelease",
-    "urPlatformGet",
-    "urPlatformGetInfo",
-    "urDeviceGet",
-    "urDeviceGetInfo",
-    "urContextCreate",
-    "urContextRelease",
-    "urQueueCreate",
-    "urQueueRelease",
-    "urMemBufferCreate",
-    "urMemRelease",
-    "urProgramCreateWithIL",
-    "urProgramBuild",
-    "urProgramRelease",
-    "urKernelCreate",
-    "urKernelRelease",
-    "urEnqueueKernelLaunch",
-    "urEventWait",
-    "urEventRelease",
-})
+UR_REQUIRED_ENTRYPOINTS: frozenset[str] = frozenset(
+    {
+        "urAdapterGet",
+        "urAdapterRelease",
+        "urPlatformGet",
+        "urPlatformGetInfo",
+        "urDeviceGet",
+        "urDeviceGetInfo",
+        "urContextCreate",
+        "urContextRelease",
+        "urQueueCreate",
+        "urQueueRelease",
+        "urMemBufferCreate",
+        "urMemRelease",
+        "urProgramCreateWithIL",
+        "urProgramBuild",
+        "urProgramRelease",
+        "urKernelCreate",
+        "urKernelRelease",
+        "urEnqueueKernelLaunch",
+        "urEventWait",
+        "urEventRelease",
+    }
+)
 
 # Backend type detection from plugin library name.
 _BACKEND_MAP: dict[str, str] = {
@@ -284,7 +289,9 @@ def parse_sycl_plugin(so_path: Path) -> SyclPluginInfo | None:
         plugin_name = pi_match.group(1)
         entry_points = _extract_plugin_symbols(so_path, _PI_SYMBOL_RE)
         if "piPluginInit" not in entry_points:
-            log.warning("Plugin %s missing piPluginInit — not a valid PI plugin", so_path)
+            log.warning(
+                "Plugin %s missing piPluginInit — not a valid PI plugin", so_path
+            )
             return None
         return SyclPluginInfo(
             name=plugin_name,
@@ -326,7 +333,9 @@ def parse_sycl_plugin(so_path: Path) -> SyclPluginInfo | None:
 
 def _is_plugin_candidate(filename: str) -> bool:
     """Check if a filename matches any known plugin naming pattern."""
-    return bool(_PI_PLUGIN_NAME_RE.match(filename) or _UR_PLUGIN_NAME_RE.match(filename))
+    return bool(
+        _PI_PLUGIN_NAME_RE.match(filename) or _UR_PLUGIN_NAME_RE.match(filename)
+    )
 
 
 def discover_sycl_plugins(
@@ -362,15 +371,13 @@ def discover_sycl_plugins(
 def _detect_sycl_implementation(lib_dir: Path) -> str:
     """Heuristic to detect which SYCL implementation is present."""
     # DPC++ ships libsycl.so alongside libpi_*.so plugins
-    if (lib_dir / "libsycl.so").exists() or any(
-        lib_dir.glob("libsycl.so.*")
-    ):
+    if (lib_dir / "libsycl.so").exists() or any(lib_dir.glob("libsycl.so.*")):
         return "dpcpp"
     # AdaptiveCpp uses libacpp-rt.so (or versioned libacpp-rt.so.*)
-    if (lib_dir / "libacpp-rt.so").exists() or any(
-        lib_dir.glob("libacpp-rt.so.*")
-    ) or any(
-        lib_dir.glob("libhipsycl-rt.so*")
+    if (
+        (lib_dir / "libacpp-rt.so").exists()
+        or any(lib_dir.glob("libacpp-rt.so.*"))
+        or any(lib_dir.glob("libhipsycl-rt.so*"))
     ):
         return "adaptivecpp"
     return ""

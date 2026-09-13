@@ -259,7 +259,7 @@ def test_an_unclassified_case_fails_build_taxonomy_instead_of_defaulting():
 
 
 def test_every_case_has_at_least_one_subject():
-    """"What is left" item 2: `subjects` is the one field this taxonomy
+    """ "What is left" item 2: `subjects` is the one field this taxonomy
     generates from a hand-authored manifest (catalog/catalog_subjects.yaml)
     rather than deriving mechanically -- a case with no subject would be the
     same silent-default gap catalog_classification.py's own docstring closes

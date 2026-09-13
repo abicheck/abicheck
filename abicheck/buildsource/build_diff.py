@@ -20,6 +20,7 @@ findings are never ``BREAKING`` on their own: a build change that actually
 breaks the shipped ABI is caught separately by the artifact diff (L0/L1/L2);
 these kinds explain and localize it.
 """
+
 from __future__ import annotations
 
 from ..checker_types import Change
@@ -84,7 +85,10 @@ _MODE_OPTION_FINDINGS: dict[str, tuple[ChangeKind, dict[str, str]]] = {
     # whole-program-vtables / sanitizers have a known default (off / none), so a
     # one-sided flip is a real change; float-abi is target-dependent and needs
     # both sides explicit.
-    "whole_program_vtables": (ChangeKind.WHOLE_PROGRAM_VTABLES_MODE_CHANGED, {"": "off"}),
+    "whole_program_vtables": (
+        ChangeKind.WHOLE_PROGRAM_VTABLES_MODE_CHANGED,
+        {"": "off"},
+    ),
     "sanitizer": (ChangeKind.SANITIZER_MODE_CHANGED, {"": "none"}),
     "float_abi": (ChangeKind.FLOAT_ABI_CHANGED, {}),
 }
@@ -92,11 +96,13 @@ _MODE_OPTION_FINDINGS: dict[str, tuple[ChangeKind, dict[str, str]]] = {
 #: Macro-define option keys (``define:<NAME>``) whose drift is a standard-library
 #: debug/hardening mode flip — routed to a dedicated finding rather than the
 #: generic ABI-flag one, because it changes std:: container layout specifically.
-_STDLIB_DEBUG_DEFINE_KEYS: frozenset[str] = frozenset({
-    "define:_GLIBCXX_DEBUG",
-    "define:_GLIBCXX_ASSERTIONS",
-    "define:_ITERATOR_DEBUG_LEVEL",
-})
+_STDLIB_DEBUG_DEFINE_KEYS: frozenset[str] = frozenset(
+    {
+        "define:_GLIBCXX_DEBUG",
+        "define:_GLIBCXX_ASSERTIONS",
+        "define:_ITERATOR_DEBUG_LEVEL",
+    }
+)
 
 #: For a target-dependent-default mode (``default is None``), the values its
 #: explicit side may name that are *never* the platform default — so an
@@ -227,7 +233,9 @@ def _diff_options(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
                 # (ov != nv already guaranteed by the outer loop.)
                 if not ov or not nv:
                     explicit = nv or ov
-                    never_default = _NEVER_DEFAULT_MODE_VALUES.get(mode_base, frozenset())
+                    never_default = _NEVER_DEFAULT_MODE_VALUES.get(
+                        mode_base, frozenset()
+                    )
                     if not (explicit & never_default):
                         continue
                     old_eff = ov or {"(default)"}
@@ -341,10 +349,13 @@ def _toolchain_compiler_versions(ev: BuildEvidence) -> dict[str, set[str]]:
 
 def _toolchain_identity_display(ev: BuildEvidence) -> str:
     """Human-readable ``"compiler_id version"`` list for a finding's old/new."""
-    return ", ".join(sorted(
-        f"{tc.compiler_id} {tc.version}".strip()
-        for tc in ev.toolchains if tc.compiler_id
-    ))
+    return ", ".join(
+        sorted(
+            f"{tc.compiler_id} {tc.version}".strip()
+            for tc in ev.toolchains
+            if tc.compiler_id
+        )
+    )
 
 
 def _diff_toolchains(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
@@ -389,7 +400,10 @@ def _diff_toolchains(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
             for cid in set(old_c) & set(new_c)
         )
         if compiler_swap or version_drift:
-            old_disp, new_disp = _toolchain_identity_display(old), _toolchain_identity_display(new)
+            old_disp, new_disp = (
+                _toolchain_identity_display(old),
+                _toolchain_identity_display(new),
+            )
             changes.append(
                 Change(
                     kind=ChangeKind.TOOLCHAIN_VERSION_CHANGED,

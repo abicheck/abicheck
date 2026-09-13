@@ -283,7 +283,9 @@ class DispositionLedger:
             counts[record.disposition.value] += 1
         return counts
 
-    def with_gate(self, result: DiffResult, severity_config: object, *, today: date | None = None) -> DispositionLedger:
+    def with_gate(
+        self, result: DiffResult, severity_config: object, *, today: date | None = None
+    ) -> DispositionLedger:
         """A copy of this ledger re-labelled against the *resolved* gate.
 
         A copy, not an in-place relabel: a report projection must not mutate
@@ -470,7 +472,9 @@ class DispositionLedger:
             gate_excluded=False,
         )
 
-    def resolve_verdict_classes(self, result: DiffResult, *, today: date | None = None) -> None:
+    def resolve_verdict_classes(
+        self, result: DiffResult, *, today: date | None = None
+    ) -> None:
         """Fill in the verdict class of every *suppressed* record that had none.
 
         Scoped to the suppressed ones because they are the only records whose
@@ -541,11 +545,14 @@ class DispositionLedger:
                     change,  # type: ignore[arg-type]
                     policy=gate.policy,
                     kind_sets=gate.kind_sets,  # type: ignore[arg-type]
-                    policy_file=gate.policy_file, today=gate.today,
+                    policy_file=gate.policy_file,
+                    today=gate.today,
                 ).value,
             )
 
-    def resolve_reclassifications(self, result: DiffResult, *, today: date | None = None) -> None:
+    def resolve_reclassifications(
+        self, result: DiffResult, *, today: date | None = None
+    ) -> None:
         """Fill in :attr:`DispositionRecord.reclassified_by` (ADR-067 C-S2).
 
         ``Change`` carries no such attribute -- the value is computed on
@@ -568,7 +575,13 @@ class DispositionLedger:
             if record.reclassified_by is not None:
                 continue  # already resolved (e.g. a re-closed scoped record)
             rule = reclassify_rule_for_change(
-                change, gate.policy_file, gate.today,  # type: ignore[arg-type]
+                # `self._anchors` is typed as holding `object`; the ignore
+                # belongs to this argument, not to `gate.today`. It sat on a
+                # three-arguments-on-one-line call until `ruff format` split
+                # it, which is the only reason the mismatch was visible.
+                change,  # type: ignore[arg-type]
+                gate.policy_file,
+                gate.today,
             )
             if rule is None:
                 continue

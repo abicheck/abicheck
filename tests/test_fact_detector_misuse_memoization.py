@@ -112,8 +112,7 @@ _SOURCES: dict[str, str] = {
         "        return fact == other\n"
     ),
     "comprehension_scope": (
-        "def f(recs, other):\n"
-        "    return [r.bases_fact == other for r in recs]\n"
+        "def f(recs, other):\n    return [r.bases_fact == other for r in recs]\n"
     ),
     "lambda_default_scope": (
         "def outer(rec):\n"

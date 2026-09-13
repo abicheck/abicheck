@@ -23,6 +23,7 @@ of hand-rolled f-strings at the call site. These tests lock two things:
   and renders the exact legacy wording for each migrated kind — so the
   migration is byte-identical and golden snapshots do not move.
 """
+
 from __future__ import annotations
 
 import string

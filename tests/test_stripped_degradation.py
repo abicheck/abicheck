@@ -12,6 +12,7 @@ Tests:
 5. Graceful handling of partial metadata (ELF present, DWARF absent)
 6. Degraded evidence tiers reflect available data sources
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
@@ -28,26 +29,45 @@ from abicheck.model import (
 )
 
 
-def _snap(version="1.0", functions=None, variables=None, types=None,
-          enums=None, elf=None, dwarf=None, elf_only_mode=False):
+def _snap(
+    version="1.0",
+    functions=None,
+    variables=None,
+    types=None,
+    enums=None,
+    elf=None,
+    dwarf=None,
+    elf_only_mode=False,
+):
     return AbiSnapshot(
-        library="libtest.so.1", version=version,
-        functions=functions or [], variables=variables or [],
-        types=types or [], enums=enums or [],
-        typedefs={}, elf=elf, dwarf=dwarf,
+        library="libtest.so.1",
+        version=version,
+        functions=functions or [],
+        variables=variables or [],
+        types=types or [],
+        enums=enums or [],
+        typedefs={},
+        elf=elf,
+        dwarf=dwarf,
         elf_only_mode=elf_only_mode,
     )
 
 
 def _pub_func(name, mangled, ret="void", **kwargs):
-    return Function(name=name, mangled=mangled, return_type=ret,
-                    visibility=Visibility.PUBLIC, **kwargs)
+    return Function(
+        name=name,
+        mangled=mangled,
+        return_type=ret,
+        visibility=Visibility.PUBLIC,
+        **kwargs,
+    )
 
 
 def _elf_func(name, mangled):
     """Function visible only via ELF symbol table (no header)."""
-    return Function(name=name, mangled=mangled, return_type="void",
-                    visibility=Visibility.ELF_ONLY)
+    return Function(
+        name=name, mangled=mangled, return_type="void", visibility=Visibility.ELF_ONLY
+    )
 
 
 def _kinds(result):
@@ -57,6 +77,7 @@ def _kinds(result):
 # ═══════════════════════════════════════════════════════════════════════════
 # DWARF Present → Absent (Stripping)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestDwarfStripped:
     """Old binary has DWARF, new binary stripped — DWARF_INFO_MISSING."""
@@ -91,6 +112,7 @@ class TestDwarfStripped:
 # Confidence Degradation
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 class TestConfidenceDegradation:
     """Confidence should degrade when evidence sources are missing."""
 
@@ -98,8 +120,13 @@ class TestConfidenceDegradation:
         """Headers + ELF + DWARF → higher confidence than headers alone."""
         f = _pub_func("api", "_Z3apiv")
         elf = ElfMetadata(
-            symbols=[ElfSymbol(name="_Z3apiv", binding=SymbolBinding.GLOBAL,
-                               sym_type=SymbolType.FUNC)],
+            symbols=[
+                ElfSymbol(
+                    name="_Z3apiv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                )
+            ],
         )
         dwarf = DwarfMetadata(has_dwarf=True)
 
@@ -119,8 +146,13 @@ class TestConfidenceDegradation:
         """ELF without DWARF → lower confidence than ELF + DWARF."""
         f = _pub_func("api", "_Z3apiv")
         elf = ElfMetadata(
-            symbols=[ElfSymbol(name="_Z3apiv", binding=SymbolBinding.GLOBAL,
-                               sym_type=SymbolType.FUNC)],
+            symbols=[
+                ElfSymbol(
+                    name="_Z3apiv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                )
+            ],
         )
         dwarf = DwarfMetadata(has_dwarf=True)
 
@@ -140,6 +172,7 @@ class TestConfidenceDegradation:
 # ═══════════════════════════════════════════════════════════════════════════
 # Header-Only Still Detects Symbol Changes
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestHeaderOnlyDetection:
     """Without DWARF/ELF, header analysis should still catch symbol changes."""
@@ -163,10 +196,12 @@ class TestHeaderOnlyDetection:
         assert ChangeKind.TYPE_SIZE_CHANGED in _kinds(r)
 
     def test_enum_change_detected_without_dwarf(self):
-        e_old = EnumType(name="Status", members=[
-            EnumMember("OK", 0), EnumMember("ERR", 1)])
-        e_new = EnumType(name="Status", members=[
-            EnumMember("OK", 0), EnumMember("ERR", 42)])
+        e_old = EnumType(
+            name="Status", members=[EnumMember("OK", 0), EnumMember("ERR", 1)]
+        )
+        e_new = EnumType(
+            name="Status", members=[EnumMember("OK", 0), EnumMember("ERR", 42)]
+        )
         r = compare(_snap(enums=[e_old]), _snap(enums=[e_new]))
         assert ChangeKind.ENUM_MEMBER_VALUE_CHANGED in _kinds(r)
 
@@ -175,6 +210,7 @@ class TestHeaderOnlyDetection:
 # ELF-Only Mode (No Headers)
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 class TestElfOnlyMode:
     """Snapshots with elf_only_mode=True (no headers, only ELF symbols)."""
 
@@ -182,8 +218,13 @@ class TestElfOnlyMode:
         """ELF-only mode still detects symbol-level changes."""
         f = _elf_func("api", "_Z3apiv")
         old_elf = ElfMetadata(
-            symbols=[ElfSymbol(name="_Z3apiv", binding=SymbolBinding.GLOBAL,
-                               sym_type=SymbolType.FUNC)],
+            symbols=[
+                ElfSymbol(
+                    name="_Z3apiv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                )
+            ],
         )
         new_elf = ElfMetadata(symbols=[])
 
@@ -199,8 +240,13 @@ class TestElfOnlyMode:
         """ELF-only mode should have lower confidence than header+ELF."""
         f = _pub_func("api", "_Z3apiv")
         elf = ElfMetadata(
-            symbols=[ElfSymbol(name="_Z3apiv", binding=SymbolBinding.GLOBAL,
-                               sym_type=SymbolType.FUNC)],
+            symbols=[
+                ElfSymbol(
+                    name="_Z3apiv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                )
+            ],
         )
 
         with_headers = compare(
@@ -214,12 +260,15 @@ class TestElfOnlyMode:
         )
 
         conf_rank = {Confidence.LOW: 0, Confidence.MEDIUM: 1, Confidence.HIGH: 2}
-        assert conf_rank[with_headers.confidence] >= conf_rank[without_headers.confidence]
+        assert (
+            conf_rank[with_headers.confidence] >= conf_rank[without_headers.confidence]
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Partial Metadata Handling
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestPartialMetadata:
     """Graceful handling when metadata is partially available."""
@@ -229,8 +278,13 @@ class TestPartialMetadata:
         f = _pub_func("api", "_Z3apiv")
         elf = ElfMetadata(
             soname="libtest.so.1",
-            symbols=[ElfSymbol(name="_Z3apiv", binding=SymbolBinding.GLOBAL,
-                               sym_type=SymbolType.FUNC)],
+            symbols=[
+                ElfSymbol(
+                    name="_Z3apiv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                )
+            ],
         )
         r = compare(
             _snap(functions=[f], elf=elf),
@@ -250,23 +304,46 @@ class TestPartialMetadata:
         _detect_newly_deleted_functions would flag FUNC_DELETED_DWARF for the
         same symbol. It must be reported once, as the deletion.
         """
-        old_elf = ElfMetadata(symbols=[
-            ElfSymbol(name="_Z7processv", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC),
-            ElfSymbol(name="_Z4keepv", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC),
-        ])
-        new_elf = ElfMetadata(symbols=[
-            ElfSymbol(name="_Z4keepv", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC),
-        ])
+        old_elf = ElfMetadata(
+            symbols=[
+                ElfSymbol(
+                    name="_Z7processv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                ),
+                ElfSymbol(
+                    name="_Z4keepv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                ),
+            ]
+        )
+        new_elf = ElfMetadata(
+            symbols=[
+                ElfSymbol(
+                    name="_Z4keepv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                ),
+            ]
+        )
         old = _snap(
-            functions=[_pub_func("process", "_Z7processv"), _pub_func("keep", "_Z4keepv")],
-            elf=old_elf, dwarf=DwarfMetadata(has_dwarf=True),
+            functions=[
+                _pub_func("process", "_Z7processv"),
+                _pub_func("keep", "_Z4keepv"),
+            ],
+            elf=old_elf,
+            dwarf=DwarfMetadata(has_dwarf=True),
         )
         new = _snap(
             functions=[
                 _pub_func("keep", "_Z4keepv"),
-                _pub_func("process", "_Z7processv", is_deleted=True, deleted_from_dwarf=True),
+                _pub_func(
+                    "process", "_Z7processv", is_deleted=True, deleted_from_dwarf=True
+                ),
             ],
-            elf=new_elf, dwarf=DwarfMetadata(has_dwarf=True),
+            elf=new_elf,
+            dwarf=DwarfMetadata(has_dwarf=True),
         )
         r = compare(old, new)
         process_kinds = {c.kind for c in r.changes if c.symbol == "_Z7processv"}
@@ -290,12 +367,21 @@ class TestPartialMetadata:
         )
         exported = _pub_func("api", "_Z3apiv")
         elf = ElfMetadata(
-            symbols=[ElfSymbol(name="_Z3apiv", binding=SymbolBinding.GLOBAL,
-                               sym_type=SymbolType.FUNC)],
+            symbols=[
+                ElfSymbol(
+                    name="_Z3apiv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                )
+            ],
         )
 
         r = compare(
-            _snap(functions=[internal, exported], elf=elf, dwarf=DwarfMetadata(has_dwarf=True)),
+            _snap(
+                functions=[internal, exported],
+                elf=elf,
+                dwarf=DwarfMetadata(has_dwarf=True),
+            ),
             _snap(functions=[exported], elf=elf, elf_only_mode=True),
         )
 
@@ -313,16 +399,31 @@ class TestPartialMetadata:
         whether some other function happened to be exported.
         """
         internal = _pub_func(
-            "foo::helper", "_ZN3foo6helperEv",
-            is_deleted=True, deleted_from_dwarf=True,
+            "foo::helper",
+            "_ZN3foo6helperEv",
+            is_deleted=True,
+            deleted_from_dwarf=True,
         )
-        data_only_elf = ElfMetadata(symbols=[
-            ElfSymbol(name="g_table", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.OBJECT),
-        ])
+        data_only_elf = ElfMetadata(
+            symbols=[
+                ElfSymbol(
+                    name="g_table",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.OBJECT,
+                ),
+            ]
+        )
         r = compare(
-            _snap(functions=[_pub_func("foo::helper", "_ZN3foo6helperEv")],
-                  elf=data_only_elf, dwarf=DwarfMetadata(has_dwarf=True)),
-            _snap(functions=[internal], elf=data_only_elf, dwarf=DwarfMetadata(has_dwarf=True)),
+            _snap(
+                functions=[_pub_func("foo::helper", "_ZN3foo6helperEv")],
+                elf=data_only_elf,
+                dwarf=DwarfMetadata(has_dwarf=True),
+            ),
+            _snap(
+                functions=[internal],
+                elf=data_only_elf,
+                dwarf=DwarfMetadata(has_dwarf=True),
+            ),
         )
         assert ChangeKind.FUNC_DELETED_DWARF not in _kinds(r)
         assert r.verdict != Verdict.BREAKING
@@ -347,8 +448,13 @@ class TestPartialMetadata:
             deleted_from_dwarf=True,
         )
         elf = ElfMetadata(
-            symbols=[ElfSymbol(name="_Z3apiv", binding=SymbolBinding.GLOBAL,
-                               sym_type=SymbolType.FUNC)],
+            symbols=[
+                ElfSymbol(
+                    name="_Z3apiv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                )
+            ],
         )
 
         r = compare(
@@ -373,21 +479,30 @@ class TestPartialMetadata:
         """Old snapshot has ELF, new has nothing — graceful degradation."""
         f = _pub_func("api", "_Z3apiv")
         old_elf = ElfMetadata(
-            symbols=[ElfSymbol(name="_Z3apiv", binding=SymbolBinding.GLOBAL,
-                               sym_type=SymbolType.FUNC)],
+            symbols=[
+                ElfSymbol(
+                    name="_Z3apiv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                )
+            ],
         )
         r = compare(
             _snap(functions=[f], elf=old_elf),
             _snap(functions=[f]),
         )
         # Asymmetric metadata should degrade gracefully, not crash or break
-        assert r.verdict in (Verdict.NO_CHANGE, Verdict.COMPATIBLE,
-                              Verdict.COMPATIBLE_WITH_RISK)
+        assert r.verdict in (
+            Verdict.NO_CHANGE,
+            Verdict.COMPATIBLE,
+            Verdict.COMPATIBLE_WITH_RISK,
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Evidence Tiers Reflect Available Data
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestEvidenceTiersReflection:
     """Evidence tiers should accurately reflect what data was available."""
@@ -403,8 +518,11 @@ class TestEvidenceTiersReflection:
 
     def test_elf_tier_present_with_elf_metadata(self):
         elf = ElfMetadata(
-            symbols=[ElfSymbol(name="sym", binding=SymbolBinding.GLOBAL,
-                               sym_type=SymbolType.FUNC)],
+            symbols=[
+                ElfSymbol(
+                    name="sym", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC
+                )
+            ],
         )
         r = compare(_snap(elf=elf), _snap(elf=elf))
         assert "elf" in r.evidence_tiers
@@ -422,6 +540,7 @@ class TestEvidenceTiersReflection:
 # Coverage Warnings
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 class TestCoverageWarnings:
     """Coverage warnings should inform users about detection limitations."""
 
@@ -436,8 +555,13 @@ class TestCoverageWarnings:
         """With ELF + DWARF, fewer warnings expected."""
         f = _pub_func("api", "_Z3apiv")
         elf = ElfMetadata(
-            symbols=[ElfSymbol(name="_Z3apiv", binding=SymbolBinding.GLOBAL,
-                               sym_type=SymbolType.FUNC)],
+            symbols=[
+                ElfSymbol(
+                    name="_Z3apiv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                )
+            ],
         )
         dwarf = DwarfMetadata(has_dwarf=True)
 

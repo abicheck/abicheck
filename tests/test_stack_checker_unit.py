@@ -1,4 +1,5 @@
 """Unit tests for abicheck.stack_checker — verdicts, hashing, diffing, full check."""
+
 from __future__ import annotations
 
 import hashlib
@@ -44,7 +45,9 @@ def _make_graph(nodes=None, unresolved=None, root="binary"):
     return g
 
 
-def _make_binding(status=BindingStatus.RESOLVED_OK, provider="/lib/libfoo.so", symbol="sym"):
+def _make_binding(
+    status=BindingStatus.RESOLVED_OK, provider="/lib/libfoo.so", symbol="sym"
+):
     return SymbolBinding(
         consumer="/app/binary",
         symbol=symbol,
@@ -138,14 +141,18 @@ class TestComputeAbiRisk:
         # P1.4: a root only FAILs when the imported symbol is among the
         # DSO's own BREAKING findings — here "sym" is both imported and
         # the symbol the breaking change removed, so this is a confirmed hit.
-        diff = _make_diff_result(Verdict.BREAKING, breaking=[_make_breaking_change("sym")])
+        diff = _make_diff_result(
+            Verdict.BREAKING, breaking=[_make_breaking_change("sym")]
+        )
         binding = _make_binding(symbol="sym")
-        changes = [StackChange(
-            library="libfoo.so",
-            change_type="content_changed",
-            abi_diff=diff,
-            impacted_imports=[binding],
-        )]
+        changes = [
+            StackChange(
+                library="libfoo.so",
+                change_type="content_changed",
+                abi_diff=diff,
+                impacted_imports=[binding],
+            )
+        ]
         assert _compute_abi_risk(changes) == StackVerdict.FAIL
 
     def test_breaking_verdict_with_unrelated_impacted_import_warns_not_fail(self):
@@ -158,12 +165,14 @@ class TestComputeAbiRisk:
             Verdict.BREAKING, breaking=[_make_breaking_change("unrelated_sym")]
         )
         binding = _make_binding(symbol="sym")
-        changes = [StackChange(
-            library="libfoo.so",
-            change_type="content_changed",
-            abi_diff=diff,
-            impacted_imports=[binding],
-        )]
+        changes = [
+            StackChange(
+                library="libfoo.so",
+                change_type="content_changed",
+                abi_diff=diff,
+                impacted_imports=[binding],
+            )
+        ]
         assert _compute_abi_risk(changes) == StackVerdict.WARN
 
     def test_breaking_verdict_multiple_imports_one_matches_fails(self):
@@ -172,13 +181,18 @@ class TestComputeAbiRisk:
         diff = _make_diff_result(
             Verdict.BREAKING, breaking=[_make_breaking_change("broken_sym")]
         )
-        bindings = [_make_binding(symbol="unrelated_a"), _make_binding(symbol="broken_sym")]
-        changes = [StackChange(
-            library="libfoo.so",
-            change_type="content_changed",
-            abi_diff=diff,
-            impacted_imports=bindings,
-        )]
+        bindings = [
+            _make_binding(symbol="unrelated_a"),
+            _make_binding(symbol="broken_sym"),
+        ]
+        changes = [
+            StackChange(
+                library="libfoo.so",
+                change_type="content_changed",
+                abi_diff=diff,
+                impacted_imports=bindings,
+            )
+        ]
         assert _compute_abi_risk(changes) == StackVerdict.FAIL
 
     def test_breaking_type_change_matched_via_affected_symbols_fails(self):
@@ -192,12 +206,14 @@ class TestComputeAbiRisk:
             breaking=[_make_breaking_change("Point", affected_symbols=["foo", "bar"])],
         )
         binding = _make_binding(symbol="foo")
-        changes = [StackChange(
-            library="libfoo.so",
-            change_type="content_changed",
-            abi_diff=diff,
-            impacted_imports=[binding],
-        )]
+        changes = [
+            StackChange(
+                library="libfoo.so",
+                change_type="content_changed",
+                abi_diff=diff,
+                impacted_imports=[binding],
+            )
+        ]
         assert _compute_abi_risk(changes) == StackVerdict.FAIL
 
     def test_breaking_dso_wide_elf_header_change_fails_despite_unrelated_import(self):
@@ -212,41 +228,49 @@ class TestComputeAbiRisk:
             Verdict.BREAKING, breaking=[_make_breaking_change("ELF_HEADER")]
         )
         binding = _make_binding(symbol="totally_unrelated_export")
-        changes = [StackChange(
-            library="libfoo.so",
-            change_type="content_changed",
-            abi_diff=diff,
-            impacted_imports=[binding],
-        )]
+        changes = [
+            StackChange(
+                library="libfoo.so",
+                change_type="content_changed",
+                abi_diff=diff,
+                impacted_imports=[binding],
+            )
+        ]
         assert _compute_abi_risk(changes) == StackVerdict.FAIL
 
     def test_api_break_verdict_with_impacted_imports_warn(self):
         diff = _make_diff_result(Verdict.API_BREAK)
         binding = _make_binding()
-        changes = [StackChange(
-            library="libfoo.so",
-            change_type="content_changed",
-            abi_diff=diff,
-            impacted_imports=[binding],
-        )]
+        changes = [
+            StackChange(
+                library="libfoo.so",
+                change_type="content_changed",
+                abi_diff=diff,
+                impacted_imports=[binding],
+            )
+        ]
         assert _compute_abi_risk(changes) == StackVerdict.WARN
 
     def test_content_changed_no_abi_diff_warn(self):
-        changes = [StackChange(
-            library="libfoo.so",
-            change_type="content_changed",
-            abi_diff=None,
-        )]
+        changes = [
+            StackChange(
+                library="libfoo.so",
+                change_type="content_changed",
+                abi_diff=None,
+            )
+        ]
         assert _compute_abi_risk(changes) == StackVerdict.WARN
 
     def test_breaking_no_impacted_imports_warn(self):
         diff = _make_diff_result(Verdict.BREAKING)
-        changes = [StackChange(
-            library="libfoo.so",
-            change_type="content_changed",
-            abi_diff=diff,
-            impacted_imports=[],
-        )]
+        changes = [
+            StackChange(
+                library="libfoo.so",
+                change_type="content_changed",
+                abi_diff=diff,
+                impacted_imports=[],
+            )
+        ]
         assert _compute_abi_risk(changes) == StackVerdict.WARN
 
 
@@ -394,12 +418,15 @@ class TestRunAbiDiff:
         new_lib.write_bytes(b"new")
 
         monkeypatch.setattr(
-            "abicheck.workflows.input_resolution.detect_binary_format", lambda _path: None
+            "abicheck.workflows.input_resolution.detect_binary_format",
+            lambda _path: None,
         )
 
         assert _run_abi_diff(old_lib, new_lib, "libfoo.so") is None
 
-    def test_reraises_profile_mismatch_instead_of_swallowing(self, monkeypatch, tmp_path):
+    def test_reraises_profile_mismatch_instead_of_swallowing(
+        self, monkeypatch, tmp_path
+    ):
         """ADR-050 D2: a genuine comparability-gate mismatch from compare()
         must propagate, not be swallowed into the generic except-Exception
         None fallback every other compare() failure still uses."""
@@ -412,16 +439,20 @@ class TestRunAbiDiff:
         new_lib.write_bytes(b"new")
 
         monkeypatch.setattr(
-            "abicheck.workflows.input_resolution.detect_binary_format", lambda _path: "elf"
+            "abicheck.workflows.input_resolution.detect_binary_format",
+            lambda _path: "elf",
         )
         monkeypatch.setattr(
-            "abicheck.service_dump_native.run_dump", lambda *_a, **_kw: MagicMock(name="snapshot")
+            "abicheck.service_dump_native.run_dump",
+            lambda *_a, **_kw: MagicMock(name="snapshot"),
         )
 
         def _raise(*_a, **_kw):
             raise ProfileMismatchError("profile drift")
 
-        monkeypatch.setattr("abicheck.workflows.compare_policy.compare_snapshots", _raise)
+        monkeypatch.setattr(
+            "abicheck.workflows.compare_policy.compare_snapshots", _raise
+        )
 
         with pytest.raises(ProfileMismatchError):
             _run_abi_diff(old_lib, new_lib, "libfoo.so")
@@ -437,16 +468,20 @@ class TestRunAbiDiff:
         new_lib.write_bytes(b"new")
 
         monkeypatch.setattr(
-            "abicheck.workflows.input_resolution.detect_binary_format", lambda _path: "elf"
+            "abicheck.workflows.input_resolution.detect_binary_format",
+            lambda _path: "elf",
         )
         monkeypatch.setattr(
-            "abicheck.service_dump_native.run_dump", lambda *_a, **_kw: MagicMock(name="snapshot")
+            "abicheck.service_dump_native.run_dump",
+            lambda *_a, **_kw: MagicMock(name="snapshot"),
         )
 
         def _raise(*_a, **_kw):
             raise RuntimeError("unrelated failure")
 
-        monkeypatch.setattr("abicheck.workflows.compare_policy.compare_snapshots", _raise)
+        monkeypatch.setattr(
+            "abicheck.workflows.compare_policy.compare_snapshots", _raise
+        )
 
         assert _run_abi_diff(old_lib, new_lib, "libfoo.so") is None
 
@@ -487,11 +522,13 @@ class TestRunAbiDiff:
             return sentinel_diff
 
         monkeypatch.setattr(
-            "abicheck.workflows.input_resolution.detect_binary_format", lambda _path: "elf"
+            "abicheck.workflows.input_resolution.detect_binary_format",
+            lambda _path: "elf",
         )
         monkeypatch.setattr("abicheck.service_dump_native.run_dump", _fake_run_dump)
         monkeypatch.setattr(
-            "abicheck.workflows.compare_policy.compare_snapshots", _fake_compare_snapshots
+            "abicheck.workflows.compare_policy.compare_snapshots",
+            _fake_compare_snapshots,
         )
 
         result = _run_abi_diff(old_lib, new_lib, "libfoo.so")
@@ -573,7 +610,10 @@ class TestCheckStack:
     @patch("abicheck.stack_checker.compute_bindings")
     @patch("abicheck.stack_checker.resolve_dependencies")
     def test_absolute_binary_resolved_under_each_sysroot(
-        self, mock_resolve, mock_bindings, tmp_path,
+        self,
+        mock_resolve,
+        mock_bindings,
+        tmp_path,
     ):
         # Regression (CodeRabbit review): an absolute BINARY must resolve
         # under each sysroot (chroot semantics), not escape to the host

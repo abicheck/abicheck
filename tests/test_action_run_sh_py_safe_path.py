@@ -60,6 +60,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from _action_run_sh_harness import annotation_helpers_source
 from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
@@ -120,7 +121,13 @@ def _py_bin_resolution_source() -> str:
     text = RUN_SH.read_text(encoding="utf-8")
     start = text.index(_PY_BIN_RESOLUTION_START)
     end = text.index(_PY_BIN_RESOLUTION_END, start) + len(_PY_BIN_RESOLUTION_END)
-    return _path_qualified_helper_source() + "\n" + text[start:end]
+    return (
+        annotation_helpers_source()
+        + "\n"
+        + _path_qualified_helper_source()
+        + "\n"
+        + text[start:end]
+    )
 
 
 def test_file_fingerprint_uses_python_startup_isolation() -> None:
@@ -144,7 +151,8 @@ def test_file_fingerprint_preserves_relative_report_path_base(tmp_path: Path) ->
     report = tmp_path / "result.json"
     report.write_text("{}", encoding="utf-8")
     script = (
-        _path_qualified_helper_source()
+        annotation_helpers_source()
+        + _path_qualified_helper_source()
         + '\n_PY_BIN="$(command -v python3 || command -v python || true)"\n'
         + '_PY_SAFE_DIR="$(mktemp -d)"\n'
         + helper
@@ -484,7 +492,12 @@ class TestPyBinHasAbicheckFallback:
         # across platforms -- Codex review, fresh evidence), so this test
         # exercises the same control flow the real invocation does.
         script = (
-            '_PY_BIN="'
+            # The region's `::warning::` now routes through run.sh's own
+            # annotation helper (it carries `$_PY_BIN`, so it must be
+            # sanitized); without the definitions the call is "command not
+            # found" and the warning this test asserts silently vanishes.
+            annotation_helpers_source()
+            + '\n_PY_BIN="'
             + str(fake_python3)
             + '"\n'
             + _py_safe_dir_source()

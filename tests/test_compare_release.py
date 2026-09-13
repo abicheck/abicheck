@@ -523,7 +523,12 @@ class TestDirVsDir:
             (("-o", "json={d}/"), "summary.json", "summary.json"),
             (("-o", "json={d}/"), "libfoo.json", "'libfoo.json'"),
         ],
-        ids=["export", "export_other_format", "directory_summary", "directory_per_library"],
+        ids=[
+            "export",
+            "export_other_format",
+            "directory_summary",
+            "directory_per_library",
+        ],
     )
     def test_bundle_facts_out_rejects_output_collisions(
         self,
@@ -791,7 +796,9 @@ class TestDirVsDir:
         assert code == 4
         assert "BREAKING" in out
 
-    def test_fully_disjoint_dirs_is_no_comparison_completed(self, tmp_path: Path) -> None:
+    def test_fully_disjoint_dirs_is_no_comparison_completed(
+        self, tmp_path: Path
+    ) -> None:
         """ADR-065 D7: exit 1, never 0 (see test_release_scope_completeness.py)."""
         old_dir, new_dir = tmp_path / "old", tmp_path / "new"
         old_dir.mkdir()

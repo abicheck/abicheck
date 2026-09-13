@@ -17,6 +17,7 @@
 Uses ``pefile`` (pure Python) for parsing PE headers, export/import tables,
 and version resources from Windows shared libraries (.dll / .lib).
 """
+
 from __future__ import annotations
 
 import logging
@@ -38,7 +39,6 @@ from .model.pe_facts import (
 )
 
 log = logging.getLogger(__name__)
-
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +71,7 @@ def is_pe(path: Path) -> bool:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def parse_pe_metadata(dll_path: Path) -> PeMetadata:
     """Extract PE export/import metadata from *dll_path* using pefile.

@@ -38,6 +38,7 @@ Usage::
         # Parse DWARF from the resolved path
         ...
 """
+
 from __future__ import annotations
 
 import http.client
@@ -92,6 +93,7 @@ class DebugResolverBackend(Protocol):
 # Resolver backends
 # ---------------------------------------------------------------------------
 
+
 class EmbeddedDwarfResolver:
     """Check if the binary itself contains DWARF debug sections."""
 
@@ -127,7 +129,9 @@ class SplitDwarfResolver:
     """Look for split DWARF (.dwo files or .dwp package)."""
 
     @staticmethod
-    def _resolve_dwp_candidate(binary_path: Path, debug_roots: list[Path] | None) -> DebugArtifact | None:
+    def _resolve_dwp_candidate(
+        binary_path: Path, debug_roots: list[Path] | None
+    ) -> DebugArtifact | None:
         dwp_candidates = [
             binary_path.with_suffix(".dwp"),
             binary_path.parent / (binary_path.name + ".dwp"),
@@ -137,16 +141,20 @@ class SplitDwarfResolver:
                 _logger.debug("Found DWP file: %s", dwp)
                 return DebugArtifact(dwp_path=dwp, source="split DWARF (.dwp)")
 
-        for root in (debug_roots or []):
+        for root in debug_roots or []:
             dwp = root / (binary_path.name + ".dwp")
             if dwp.exists():
                 _logger.debug("Found DWP file in debug root: %s", dwp)
-                return DebugArtifact(dwp_path=dwp, source="split DWARF (.dwp) in debug root")
+                return DebugArtifact(
+                    dwp_path=dwp, source="split DWARF (.dwp) in debug root"
+                )
 
         return None
 
     @staticmethod
-    def _collect_dwo_names_and_comp_dirs(binary_path: Path) -> tuple[list[str], set[str]] | None:
+    def _collect_dwo_names_and_comp_dirs(
+        binary_path: Path,
+    ) -> tuple[list[str], set[str]] | None:
         try:
             from elftools.common.exceptions import ELFError
             from elftools.elf.elffile import ELFFile
@@ -182,7 +190,9 @@ class SplitDwarfResolver:
         return dwo_names, comp_dirs
 
     @staticmethod
-    def _search_dirs(binary_path: Path, comp_dirs: set[str], debug_roots: list[Path] | None) -> list[Path]:
+    def _search_dirs(
+        binary_path: Path, comp_dirs: set[str], debug_roots: list[Path] | None
+    ) -> list[Path]:
         dirs = [binary_path.parent]
         for comp_dir in comp_dirs:
             p = Path(comp_dir)
@@ -192,7 +202,9 @@ class SplitDwarfResolver:
         return dirs
 
     @staticmethod
-    def _resolve_dwo_dir(dwo_names: list[str], search_dirs: list[Path]) -> DebugArtifact | None:
+    def _resolve_dwo_dir(
+        dwo_names: list[str], search_dirs: list[Path]
+    ) -> DebugArtifact | None:
         total = len(dwo_names)
         min_required = max(1, (total + 1) // 2)
         for search_dir in search_dirs:
@@ -202,7 +214,9 @@ class SplitDwarfResolver:
             if found_count < total:
                 _logger.warning(
                     "Partial split DWARF: found %d/%d .dwo files in %s",
-                    found_count, total, search_dir,
+                    found_count,
+                    total,
+                    search_dir,
                 )
             else:
                 _logger.debug("Found all %d .dwo files in %s", total, search_dir)
@@ -316,7 +330,8 @@ class DSYMResolver:
         if dwarf_file and dwarf_file.exists():
             _logger.debug("Found dSYM bundle: %s", dsym)
             return DebugArtifact(
-                dwarf_path=dwarf_file, dsym_path=dsym,
+                dwarf_path=dwarf_file,
+                dsym_path=dsym,
                 source="dSYM bundle (adjacent)",
             )
 
@@ -329,18 +344,20 @@ class DSYMResolver:
                 if dwarf_file and dwarf_file.exists():
                     _logger.debug("Found dSYM bundle (framework): %s", dsym)
                     return DebugArtifact(
-                        dwarf_path=dwarf_file, dsym_path=dsym,
+                        dwarf_path=dwarf_file,
+                        dsym_path=dsym,
                         source="dSYM bundle (framework)",
                     )
 
         # Strategy 3: User-specified debug roots
-        for root in (debug_roots or []):
+        for root in debug_roots or []:
             dsym = root / f"{binary_name}.dSYM"
             dwarf_file = self._dsym_dwarf_path(dsym, binary_name)
             if dwarf_file and dwarf_file.exists():
                 _logger.debug("Found dSYM bundle in debug root: %s", dsym)
                 return DebugArtifact(
-                    dwarf_path=dwarf_file, dsym_path=dsym,
+                    dwarf_path=dwarf_file,
+                    dsym_path=dsym,
                     source=f"dSYM bundle ({root})",
                 )
 
@@ -378,7 +395,7 @@ class PDBResolver:
             return DebugArtifact(pdb_path=pdb_adjacent, source="adjacent PDB")
 
         # Try debug roots
-        for root in (debug_roots or []):
+        for root in debug_roots or []:
             pdb_in_root = root / f"{binary_path.stem}.pdb"
             if pdb_in_root.exists():
                 _logger.debug("Found PDB in debug root: %s", pdb_in_root)
@@ -471,7 +488,8 @@ class DebuginfodResolver:
             "Skipping debuginfod URL %s (scheme %r not allowed; "
             "only https is accepted by default, use "
             "--debuginfod-allow-insecure to also allow http)",
-            url, scheme,
+            url,
+            scheme,
         )
         return False
 
@@ -508,7 +526,9 @@ class DebuginfodResolver:
                 pass
             raise
 
-    def _fetch_one_url(self, url: str, build_id: str, cached: Path) -> DebugArtifact | None:
+    def _fetch_one_url(
+        self, url: str, build_id: str, cached: Path
+    ) -> DebugArtifact | None:
         """Try to fetch debug info for *build_id* from *url*; return artifact or None."""
         if not self._url_allowed(url):
             return None
@@ -624,11 +644,14 @@ def resolve_debug_info(
         )
 
     for resolver in resolvers:
-        result = resolver.resolve(binary_path, build_id=build_id, debug_roots=debug_roots)
+        result = resolver.resolve(
+            binary_path, build_id=build_id, debug_roots=debug_roots
+        )
         if result is not None:
             _logger.info(
                 "Debug info resolved for %s: %s",
-                binary_path.name, result.source,
+                binary_path.name,
+                result.source,
             )
             return result
 

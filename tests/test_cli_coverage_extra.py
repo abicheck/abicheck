@@ -4,6 +4,7 @@ Targets uncovered lines in cli.py: PE/Mach-O dump paths, show-only validation,
 stat output, compare error display, check-compat extraction, batch comparison
 error recovery, and stack-check command.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -35,6 +36,7 @@ _ISOLATED_STDOUT_RUNNER_KWARGS = (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_pe_bytes() -> bytes:
     """Create minimal PE bytes (MZ header + PE signature + COFF header)."""
     dos_header = bytearray(64)
@@ -45,17 +47,19 @@ def _make_pe_bytes() -> bytes:
     coff_header = struct.pack(
         "<HHIIIHH",
         0x8664,  # Machine (x86_64)
-        0,       # NumberOfSections
-        0,       # TimeDateStamp
-        0,       # PointerToSymbolTable
-        0,       # NumberOfSymbols
-        0,       # SizeOfOptionalHeader
+        0,  # NumberOfSections
+        0,  # TimeDateStamp
+        0,  # PointerToSymbolTable
+        0,  # NumberOfSymbols
+        0,  # SizeOfOptionalHeader
         0x2000,  # Characteristics (DLL)
     )
     return bytes(dos_header) + pe_sig + coff_header
 
 
-def _make_json_snapshot(path: Path, *, name: str = "lib.so", version: str = "1.0") -> Path:
+def _make_json_snapshot(
+    path: Path, *, name: str = "lib.so", version: str = "1.0"
+) -> Path:
     """Write a minimal valid JSON snapshot file."""
     from abicheck.model import AbiSnapshot
     from abicheck.serialization import snapshot_to_json
@@ -82,10 +86,16 @@ class TestDumpNativeBinary:
         pe_file.write_bytes(_make_pe_bytes())
 
         mock_snap = AbiSnapshot(
-            library="test.dll", version="1.0",
+            library="test.dll",
+            version="1.0",
             functions=[
-                Function(name="TestFunc", mangled="TestFunc", return_type="?",
-                         visibility=Visibility.PUBLIC, is_extern_c=True),
+                Function(
+                    name="TestFunc",
+                    mangled="TestFunc",
+                    return_type="?",
+                    visibility=Visibility.PUBLIC,
+                    is_extern_c=True,
+                ),
             ],
             platform="pe",
         )
@@ -100,15 +110,26 @@ class TestDumpNativeBinary:
         # not `commands.dump._dump_native_binary` -- see
         # `test_compile_context_parity.py`'s `_capture_dump_pe` for the same
         # patch target, established by that migration.
-        with patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"), \
-             patch("abicheck.service_dump_native._dump_pe", return_value=mock_snap):
+        with (
+            patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"),
+            patch("abicheck.service_dump_native._dump_pe", return_value=mock_snap),
+        ):
             runner = CliRunner()
-            result = runner.invoke(main, [
-                "dump", str(pe_file), "--version", "1.0", "--follow-deps",
-            ])
+            result = runner.invoke(
+                main,
+                [
+                    "dump",
+                    str(pe_file),
+                    "--version",
+                    "1.0",
+                    "--follow-deps",
+                ],
+            )
             assert result.exit_code == 0
             # Verify the warning about --follow-deps on PE was emitted
-            combined = (result.output + (result.stderr if hasattr(result, 'stderr') else "")).lower()
+            combined = (
+                result.output + (result.stderr if hasattr(result, "stderr") else "")
+            ).lower()
             assert "follow-deps" in combined, (
                 "--follow-deps on PE should emit a warning"
             )
@@ -139,12 +160,22 @@ class TestDumpNativeBinary:
             captured.update(kwargs)
             return mock_snap
 
-        with patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"), \
-             patch("abicheck.service_dump_native._dump_pe", side_effect=_fake_dump_native):
+        with (
+            patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"),
+            patch(
+                "abicheck.service_dump_native._dump_pe", side_effect=_fake_dump_native
+            ),
+        ):
             runner = CliRunner()
-            result = runner.invoke(main, [
-                "dump", str(pe_file), "--version", "1.0",
-            ])
+            result = runner.invoke(
+                main,
+                [
+                    "dump",
+                    str(pe_file),
+                    "--version",
+                    "1.0",
+                ],
+            )
             assert result.exit_code == 0, result.output
             assert "header_graph" not in captured
             assert "header_graph_includes" not in captured
@@ -158,10 +189,17 @@ class TestDumpNativeBinary:
         pe_file.write_bytes(_make_pe_bytes())
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "dump", str(pe_file), "--version", "1.0",
-            "--header-graph", "--header-graph-includes",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "dump",
+                str(pe_file),
+                "--version",
+                "1.0",
+                "--header-graph",
+                "--header-graph-includes",
+            ],
+        )
         assert result.exit_code == 64, result.output
         assert "No such option" in result.output
 
@@ -175,21 +213,36 @@ class TestDumpNativeBinary:
         from abicheck.model import AbiSnapshot, Function, Visibility
 
         mock_snap = AbiSnapshot(
-            library="test.dll", version="1.0",
+            library="test.dll",
+            version="1.0",
             functions=[
-                Function(name="MyFunc", mangled="MyFunc", return_type="?",
-                         visibility=Visibility.PUBLIC, is_extern_c=True),
+                Function(
+                    name="MyFunc",
+                    mangled="MyFunc",
+                    return_type="?",
+                    visibility=Visibility.PUBLIC,
+                    is_extern_c=True,
+                ),
             ],
             platform="pe",
         )
 
-        with patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"), \
-             patch("abicheck.service_dump_native._dump_pe", return_value=mock_snap):
+        with (
+            patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"),
+            patch("abicheck.service_dump_native._dump_pe", return_value=mock_snap),
+        ):
             runner = CliRunner()
-            result = runner.invoke(main, [
-                "dump", str(pe_file), "--version", "1.0",
-                "-o", str(out_file),
-            ])
+            result = runner.invoke(
+                main,
+                [
+                    "dump",
+                    str(pe_file),
+                    "--version",
+                    "1.0",
+                    "-o",
+                    str(out_file),
+                ],
+            )
             assert result.exit_code == 0
             assert out_file.exists()
             from abicheck.serialization import load_snapshot_document
@@ -212,12 +265,21 @@ class TestShowOnlyValidation:
         new = _make_json_snapshot(tmp_path, name="libnew", version="2.0")
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old), str(new),
-            "--view", "show=invalid_token_xyz",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old),
+                str(new),
+                "--view",
+                "show=invalid_token_xyz",
+            ],
+        )
         assert result.exit_code != 0
-        assert "Unknown --show-only token" in result.output or "Invalid value" in result.output
+        assert (
+            "Unknown --show-only token" in result.output
+            or "Invalid value" in result.output
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -239,13 +301,16 @@ class TestStatOutput:
         new = _make_json_snapshot(tmp_path, name="libnew", version="2.0")
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old),
-            str(new),
-            "-o",
-            "oneline=-",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old),
+                str(new),
+                "-o",
+                "oneline=-",
+            ],
+        )
         assert result.exit_code == 0
         output = result.output.strip()
         assert output  # non-empty
@@ -269,13 +334,16 @@ class TestRenderOutputFormats:
     def test_sarif_output(self, snapshot_pair: tuple[Path, Path]) -> None:
         old, new = snapshot_pair
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old),
-            str(new),
-            "-o",
-            "sarif=-",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old),
+                str(new),
+                "-o",
+                "sarif=-",
+            ],
+        )
         assert result.exit_code == 0
         # Read stdout (not .output) so any stderr warning — e.g. the
         # public-surface scoping fallback — does not corrupt the SARIF payload.
@@ -297,18 +365,37 @@ class TestRenderOutputFormats:
         )
         from abicheck.serialization import snapshot_to_json
 
-        rec = RecordType(name="Pt", kind="struct", size_bits=32, fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-        ])
-        rec_v2 = RecordType(name="Pt", kind="struct", size_bits=64, fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-            TypeField(name="y", type="int", offset_bits=32),
-        ])
-        func = Function(name="draw", mangled="_Z4draw2Pt", return_type="void",
-                        params=[Param(name="p", type="Pt")], visibility=Visibility.PUBLIC)
+        rec = RecordType(
+            name="Pt",
+            kind="struct",
+            size_bits=32,
+            fields=[
+                TypeField(name="x", type="int", offset_bits=0),
+            ],
+        )
+        rec_v2 = RecordType(
+            name="Pt",
+            kind="struct",
+            size_bits=64,
+            fields=[
+                TypeField(name="x", type="int", offset_bits=0),
+                TypeField(name="y", type="int", offset_bits=32),
+            ],
+        )
+        func = Function(
+            name="draw",
+            mangled="_Z4draw2Pt",
+            return_type="void",
+            params=[Param(name="p", type="Pt")],
+            visibility=Visibility.PUBLIC,
+        )
 
-        old_snap = AbiSnapshot(library="lib.so", version="1.0", functions=[func], types=[rec])
-        new_snap = AbiSnapshot(library="lib.so", version="2.0", functions=[func], types=[rec_v2])
+        old_snap = AbiSnapshot(
+            library="lib.so", version="1.0", functions=[func], types=[rec]
+        )
+        new_snap = AbiSnapshot(
+            library="lib.so", version="2.0", functions=[func], types=[rec_v2]
+        )
 
         old_f = tmp_path / "old.json"
         new_f = tmp_path / "new.json"
@@ -334,18 +421,37 @@ class TestRenderOutputFormats:
         )
         from abicheck.serialization import snapshot_to_json
 
-        rec = RecordType(name="Cfg", kind="struct", size_bits=32, fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-        ])
-        rec_v2 = RecordType(name="Cfg", kind="struct", size_bits=64, fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-            TypeField(name="y", type="int", offset_bits=32),
-        ])
-        func = Function(name="init", mangled="_Z4init3Cfg", return_type="void",
-                        params=[Param(name="c", type="Cfg")], visibility=Visibility.PUBLIC)
+        rec = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[
+                TypeField(name="x", type="int", offset_bits=0),
+            ],
+        )
+        rec_v2 = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=64,
+            fields=[
+                TypeField(name="x", type="int", offset_bits=0),
+                TypeField(name="y", type="int", offset_bits=32),
+            ],
+        )
+        func = Function(
+            name="init",
+            mangled="_Z4init3Cfg",
+            return_type="void",
+            params=[Param(name="c", type="Cfg")],
+            visibility=Visibility.PUBLIC,
+        )
 
-        old_snap = AbiSnapshot(library="lib.so", version="1.0", functions=[func], types=[rec])
-        new_snap = AbiSnapshot(library="lib.so", version="2.0", functions=[func], types=[rec_v2])
+        old_snap = AbiSnapshot(
+            library="lib.so", version="1.0", functions=[func], types=[rec]
+        )
+        new_snap = AbiSnapshot(
+            library="lib.so", version="2.0", functions=[func], types=[rec_v2]
+        )
 
         old_f = tmp_path / "old.json"
         new_f = tmp_path / "new.json"
@@ -353,7 +459,9 @@ class TestRenderOutputFormats:
         new_f.write_text(snapshot_to_json(new_snap), encoding="utf-8")
 
         runner = CliRunner()
-        result = runner.invoke(main, ["compare", str(old_f), str(new_f), "--view", "leaf"])
+        result = runner.invoke(
+            main, ["compare", str(old_f), str(new_f), "--view", "leaf"]
+        )
         assert result.exit_code == 4
         assert "leaf-change view" in result.output or "Cfg" in result.output
 
@@ -369,9 +477,14 @@ class TestCompareErrorDisplay:
     def test_nonexistent_old_input(self) -> None:
         """Non-existent old input produces clean error with path message."""
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", "/nonexistent/old.so", "/nonexistent/new.so",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                "/nonexistent/old.so",
+                "/nonexistent/new.so",
+            ],
+        )
         assert result.exit_code != 0
         assert "does not exist" in result.output or "Invalid value" in result.output
 
@@ -379,9 +492,14 @@ class TestCompareErrorDisplay:
         """Non-existent new input produces clean error with path message."""
         old = _make_json_snapshot(tmp_path, name="libold", version="1.0")
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old), "/nonexistent/new.so",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old),
+                "/nonexistent/new.so",
+            ],
+        )
         assert result.exit_code != 0
         assert "does not exist" in result.output or "Invalid value" in result.output
 
@@ -410,27 +528,47 @@ class TestShowRedundant:
         from abicheck.serialization import snapshot_to_json
 
         # A struct that changes size between versions
-        rec = RecordType(name="Cfg", kind="struct", size_bits=32, fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-        ])
-        rec_v2 = RecordType(name="Cfg", kind="struct", size_bits=64, fields=[
-            TypeField(name="x", type="int", offset_bits=0),
-            TypeField(name="y", type="int", offset_bits=32),
-        ])
+        rec = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[
+                TypeField(name="x", type="int", offset_bits=0),
+            ],
+        )
+        rec_v2 = RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=64,
+            fields=[
+                TypeField(name="x", type="int", offset_bits=0),
+                TypeField(name="y", type="int", offset_bits=32),
+            ],
+        )
         # Function whose param type references Cfg — changing from Cfg* to Cfg
         # produces FUNC_PARAMS_CHANGED which the redundancy filter hides because
         # it is caused by the root TYPE_SIZE_CHANGED on Cfg.
-        func_old = Function(name="init", mangled="_Z4initP3Cfg", return_type="void",
-                            params=[Param(name="c", type="Cfg*")],
-                            visibility=Visibility.PUBLIC)
-        func_new = Function(name="init", mangled="_Z4initP3Cfg", return_type="void",
-                            params=[Param(name="c", type="Cfg")],
-                            visibility=Visibility.PUBLIC)
+        func_old = Function(
+            name="init",
+            mangled="_Z4initP3Cfg",
+            return_type="void",
+            params=[Param(name="c", type="Cfg*")],
+            visibility=Visibility.PUBLIC,
+        )
+        func_new = Function(
+            name="init",
+            mangled="_Z4initP3Cfg",
+            return_type="void",
+            params=[Param(name="c", type="Cfg")],
+            visibility=Visibility.PUBLIC,
+        )
 
-        old_snap = AbiSnapshot(library="libtest.so", version="1.0",
-                               functions=[func_old], types=[rec])
-        new_snap = AbiSnapshot(library="libtest.so", version="2.0",
-                               functions=[func_new], types=[rec_v2])
+        old_snap = AbiSnapshot(
+            library="libtest.so", version="1.0", functions=[func_old], types=[rec]
+        )
+        new_snap = AbiSnapshot(
+            library="libtest.so", version="2.0", functions=[func_new], types=[rec_v2]
+        )
 
         old_file = tmp_path / "old.json"
         new_file = tmp_path / "new.json"
@@ -445,9 +583,16 @@ class TestShowRedundant:
         # With scope.show_redundant the hidden derived change is restored
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text("scope:\n  show_redundant: true\n", encoding="utf-8")
-        result = runner.invoke(main, [
-            "compare", str(old_file), str(new_file), "--config", str(cfg),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_file),
+                str(new_file),
+                "--config",
+                str(cfg),
+            ],
+        )
         assert result.exit_code == 4
         assert "init" in result.output  # derived change now visible
 
@@ -463,11 +608,18 @@ class TestStackCheckCommand:
     def test_stack_check_nonexistent_dirs(self) -> None:
         """stack-check with non-existent directories produces descriptive error."""
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "deps", "compare", "usr/bin/test",
-            "--old-root", "/nonexistent/baseline",
-            "--new-root", "/nonexistent/candidate",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "deps",
+                "compare",
+                "usr/bin/test",
+                "--old-root",
+                "/nonexistent/baseline",
+                "--new-root",
+                "/nonexistent/candidate",
+            ],
+        )
         assert result.exit_code != 0
         assert "does not exist" in result.output or "Invalid value" in result.output
 
@@ -493,11 +645,18 @@ class TestStackCheckCommand:
 
         with patch("abicheck.stack_checker.check_stack", return_value=mock_result):
             runner = CliRunner()
-            result = runner.invoke(main, [
-                "deps", "compare", "usr/bin/test",
-                "--old-root", str(baseline),
-                "--new-root", str(candidate),
-            ])
+            result = runner.invoke(
+                main,
+                [
+                    "deps",
+                    "compare",
+                    "usr/bin/test",
+                    "--old-root",
+                    str(baseline),
+                    "--new-root",
+                    str(candidate),
+                ],
+            )
             assert result.exit_code == 0
 
     def test_stack_check_json_format(self, tmp_path: Path) -> None:
@@ -522,17 +681,20 @@ class TestStackCheckCommand:
 
         with patch("abicheck.stack_checker.check_stack", return_value=mock_result):
             runner = CliRunner()
-            result = runner.invoke(main, [
-                "deps",
-                "compare",
-                "usr/bin/test",
-                "--old-root",
-                str(baseline),
-                "--new-root",
-                str(candidate),
-                "-o",
-                "json=-",
-            ])
+            result = runner.invoke(
+                main,
+                [
+                    "deps",
+                    "compare",
+                    "usr/bin/test",
+                    "--old-root",
+                    str(baseline),
+                    "--new-root",
+                    str(candidate),
+                    "-o",
+                    "json=-",
+                ],
+            )
             assert result.exit_code == 0
             data = json.loads(result.output)
             # Check for any expected top-level key from stack report
@@ -561,11 +723,18 @@ class TestStackCheckCommand:
 
         with patch("abicheck.stack_checker.check_stack", return_value=mock_result):
             runner = CliRunner()
-            result = runner.invoke(main, [
-                "deps", "compare", "usr/bin/test",
-                "--old-root", str(baseline),
-                "--new-root", str(candidate),
-            ])
+            result = runner.invoke(
+                main,
+                [
+                    "deps",
+                    "compare",
+                    "usr/bin/test",
+                    "--old-root",
+                    str(baseline),
+                    "--new-root",
+                    str(candidate),
+                ],
+            )
             assert result.exit_code == 4
 
     def test_stack_check_warn_exit_code(self, tmp_path: Path) -> None:
@@ -590,11 +759,18 @@ class TestStackCheckCommand:
 
         with patch("abicheck.stack_checker.check_stack", return_value=mock_result):
             runner = CliRunner()
-            result = runner.invoke(main, [
-                "deps", "compare", "usr/bin/test",
-                "--old-root", str(baseline),
-                "--new-root", str(candidate),
-            ])
+            result = runner.invoke(
+                main,
+                [
+                    "deps",
+                    "compare",
+                    "usr/bin/test",
+                    "--old-root",
+                    str(baseline),
+                    "--new-root",
+                    str(candidate),
+                ],
+            )
             assert result.exit_code == 1
 
     def test_stack_check_to_file(self, tmp_path: Path) -> None:
@@ -620,17 +796,20 @@ class TestStackCheckCommand:
 
         with patch("abicheck.stack_checker.check_stack", return_value=mock_result):
             runner = CliRunner()
-            result = runner.invoke(main, [
-                "deps",
-                "compare",
-                "usr/bin/test",
-                "--old-root",
-                str(baseline),
-                "--new-root",
-                str(candidate),
-                "-o",
-                f"markdown={out_file}",
-            ])
+            result = runner.invoke(
+                main,
+                [
+                    "deps",
+                    "compare",
+                    "usr/bin/test",
+                    "--old-root",
+                    str(baseline),
+                    "--new-root",
+                    str(candidate),
+                    "-o",
+                    f"markdown={out_file}",
+                ],
+            )
             assert result.exit_code == 0
             assert out_file.exists()
 
@@ -649,13 +828,16 @@ class TestCompareOutputToFile:
         out_file = tmp_path / "report.json"
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare",
-            str(old),
-            str(new),
-            "-o",
-            f"json={out_file}",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old),
+                str(new),
+                "-o",
+                f"json={out_file}",
+            ],
+        )
         assert result.exit_code == 0
         assert out_file.exists()
         data = json.loads(out_file.read_text(encoding="utf-8"))

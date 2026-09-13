@@ -18,6 +18,7 @@ Validates that PDB-derived metadata produces the same DwarfMetadata and
 AdvancedDwarfMetadata dataclasses as the DWARF pipeline, ensuring unified
 data model consistency for the checker layer.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -54,42 +55,54 @@ from tests.test_pdb_parser import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def pdb_with_struct_and_enum(tmp_path: Path) -> Path:
     """Create a PDB file with a struct, union, enum, and procedure."""
-    fl_struct = _make_lf_fieldlist([
-        _make_lf_member(0, 0x74, 0, "x"),      # int x at offset 0
-        _make_lf_member(0, 0x74, 4, "y"),      # int y at offset 4
-        _make_lf_member(0, 0x41, 8, "z"),      # double z at offset 8
-    ])
-    fl_union = _make_lf_fieldlist([
-        _make_lf_member(0, 0x74, 0, "i"),      # int i
-        _make_lf_member(0, 0x40, 0, "f"),      # float f
-    ])
-    fl_enum = _make_lf_fieldlist([
-        _make_lf_enumerate(0, 0, "NONE"),
-        _make_lf_enumerate(0, 1, "READ"),
-        _make_lf_enumerate(0, 2, "WRITE"),
-        _make_lf_enumerate(0, 3, "READWRITE"),
-    ])
+    fl_struct = _make_lf_fieldlist(
+        [
+            _make_lf_member(0, 0x74, 0, "x"),  # int x at offset 0
+            _make_lf_member(0, 0x74, 4, "y"),  # int y at offset 4
+            _make_lf_member(0, 0x41, 8, "z"),  # double z at offset 8
+        ]
+    )
+    fl_union = _make_lf_fieldlist(
+        [
+            _make_lf_member(0, 0x74, 0, "i"),  # int i
+            _make_lf_member(0, 0x40, 0, "f"),  # float f
+        ]
+    )
+    fl_enum = _make_lf_fieldlist(
+        [
+            _make_lf_enumerate(0, 0, "NONE"),
+            _make_lf_enumerate(0, 1, "READ"),
+            _make_lf_enumerate(0, 2, "WRITE"),
+            _make_lf_enumerate(0, 3, "READWRITE"),
+        ]
+    )
 
     records = [
-        (LF_FIELDLIST, fl_struct),                                      # 0x1000
+        (LF_FIELDLIST, fl_struct),  # 0x1000
         (LF_STRUCTURE, _make_lf_structure(3, 0, 0x1000, 16, "Vec3")),  # 0x1001
-        (LF_FIELDLIST, fl_union),                                       # 0x1002
-        (LF_UNION, _make_lf_union(2, 0, 0x1002, 4, "Data")),          # 0x1003
-        (LF_FIELDLIST, fl_enum),                                        # 0x1004
-        (LF_ENUM, _make_lf_enum(4, 0, 0x74, 0x1004, "Access")),       # 0x1005
+        (LF_FIELDLIST, fl_union),  # 0x1002
+        (LF_UNION, _make_lf_union(2, 0, 0x1002, 4, "Data")),  # 0x1003
+        (LF_FIELDLIST, fl_enum),  # 0x1004
+        (LF_ENUM, _make_lf_enum(4, 0, 0x74, 0x1004, "Access")),  # 0x1005
         # Procedures with different calling conventions
-        (LF_PROCEDURE, _make_lf_procedure(0x74, 0x00, 2, 0)),         # 0x1006 cdecl
-        (LF_PROCEDURE, _make_lf_procedure(0x74, 0x07, 1, 0)),         # 0x1007 stdcall
-        (LF_PROCEDURE, _make_lf_procedure(0x74, 0x04, 2, 0)),         # 0x1008 fastcall
-        (LF_MFUNCTION, _make_lf_mfunction(0x74, 0x1001, 0, 0x0B, 0, 0)),  # 0x1009 thiscall
-        (LF_PROCEDURE, _make_lf_procedure(0x74, 0x18, 3, 0)),         # 0x100A vectorcall
+        (LF_PROCEDURE, _make_lf_procedure(0x74, 0x00, 2, 0)),  # 0x1006 cdecl
+        (LF_PROCEDURE, _make_lf_procedure(0x74, 0x07, 1, 0)),  # 0x1007 stdcall
+        (LF_PROCEDURE, _make_lf_procedure(0x74, 0x04, 2, 0)),  # 0x1008 fastcall
+        (
+            LF_MFUNCTION,
+            _make_lf_mfunction(0x74, 0x1001, 0, 0x0B, 0, 0),
+        ),  # 0x1009 thiscall
+        (LF_PROCEDURE, _make_lf_procedure(0x74, 0x18, 3, 0)),  # 0x100A vectorcall
     ]
 
     dbi = _build_dbi_stream(
-        machine=0x8664, build_major=14, build_minor=36,
+        machine=0x8664,
+        build_major=14,
+        build_minor=36,
         modules=[("foo.obj", "C:\\src\\foo.cpp")],
     )
 
@@ -102,13 +115,18 @@ def pdb_with_struct_and_enum(tmp_path: Path) -> Path:
 @pytest.fixture()
 def pdb_packed_struct(tmp_path: Path) -> Path:
     """Create a PDB with a packed struct."""
-    fl = _make_lf_fieldlist([
-        _make_lf_member(0, 0x10, 0, "a"),  # signed char at 0
-        _make_lf_member(0, 0x74, 1, "b"),  # int at 1 (packed — no padding)
-    ])
+    fl = _make_lf_fieldlist(
+        [
+            _make_lf_member(0, 0x10, 0, "a"),  # signed char at 0
+            _make_lf_member(0, 0x74, 1, "b"),  # int at 1 (packed — no padding)
+        ]
+    )
     records = [
         (LF_FIELDLIST, fl),
-        (LF_STRUCTURE, _make_lf_structure(2, 0x0800, 0x1000, 5, "Packed")),  # packed flag
+        (
+            LF_STRUCTURE,
+            _make_lf_structure(2, 0x0800, 0x1000, 5, "Packed"),
+        ),  # packed flag
     ]
     pdb_bytes = _build_minimal_pdb(tpi_records=records)
     pdb_file = tmp_path / "packed.pdb"
@@ -122,10 +140,15 @@ def pdb_with_bitfield(tmp_path: Path) -> Path:
     records = [
         (LF_BITFIELD, _make_lf_bitfield(0x74, 3, 0)),  # 0x1000: int:3 at bit 0
         (LF_BITFIELD, _make_lf_bitfield(0x74, 5, 3)),  # 0x1001: int:5 at bit 3
-        (LF_FIELDLIST, _make_lf_fieldlist([
-            _make_lf_member(0, 0x1000, 0, "flags"),
-            _make_lf_member(0, 0x1001, 0, "mode"),
-        ])),                                              # 0x1002
+        (
+            LF_FIELDLIST,
+            _make_lf_fieldlist(
+                [
+                    _make_lf_member(0, 0x1000, 0, "flags"),
+                    _make_lf_member(0, 0x1001, 0, "mode"),
+                ]
+            ),
+        ),  # 0x1002
         (LF_STRUCTURE, _make_lf_structure(2, 0, 0x1002, 4, "BitStruct")),  # 0x1003
     ]
     pdb_bytes = _build_minimal_pdb(tpi_records=records)
@@ -137,6 +160,7 @@ def pdb_with_bitfield(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 # Data model consistency: DwarfMetadata from PDB
 # ---------------------------------------------------------------------------
+
 
 class TestPdbToDwarfMetadata:
     """Verify that PDB-derived DwarfMetadata matches DWARF pipeline's model."""
@@ -241,10 +265,13 @@ class TestPdbToDwarfMetadata:
 # Data model consistency: AdvancedDwarfMetadata from PDB
 # ---------------------------------------------------------------------------
 
+
 class TestPdbToAdvancedDwarfMetadata:
     """Verify that PDB-derived AdvancedDwarfMetadata matches DWARF pipeline's model."""
 
-    def test_calling_conventions_not_populated(self, pdb_with_struct_and_enum: Path) -> None:
+    def test_calling_conventions_not_populated(
+        self, pdb_with_struct_and_enum: Path
+    ) -> None:
         """calling_conventions is intentionally empty — TPI type indices are
         not stable across builds, so per-function matching would cause false
         positives in diff_advanced_dwarf().  Populating this dict requires
@@ -364,6 +391,7 @@ class TestPdbToAdvancedDwarfMetadata:
 # _is_user_visible -- compiler-internal / anonymous name filtering
 # ---------------------------------------------------------------------------
 
+
 class TestIsUserVisible:
     """``_is_user_visible`` must reject a compiler-internal/anonymous name
     wherever it appears in a qualified name, not just as the whole string's
@@ -469,6 +497,7 @@ class TestIsUserVisible:
 # Data model structural consistency
 # ---------------------------------------------------------------------------
 
+
 class TestDataModelConsistency:
     """Verify PDB output is structurally compatible with DWARF output.
 
@@ -477,7 +506,9 @@ class TestDataModelConsistency:
     produces output that these functions can consume without error.
     """
 
-    def test_dwarf_metadata_fields_present(self, pdb_with_struct_and_enum: Path) -> None:
+    def test_dwarf_metadata_fields_present(
+        self, pdb_with_struct_and_enum: Path
+    ) -> None:
         """DwarfMetadata from PDB has all required attributes."""
         meta, _ = parse_pdb_debug_info(pdb_with_struct_and_enum)
 
@@ -519,7 +550,9 @@ class TestDataModelConsistency:
                 assert isinstance(member_name, str)
                 assert isinstance(member_val, int)
 
-    def test_advanced_metadata_fields_present(self, pdb_with_struct_and_enum: Path) -> None:
+    def test_advanced_metadata_fields_present(
+        self, pdb_with_struct_and_enum: Path
+    ) -> None:
         """AdvancedDwarfMetadata from PDB has all required attributes."""
         _, adv = parse_pdb_debug_info(pdb_with_struct_and_enum)
 
@@ -531,7 +564,9 @@ class TestDataModelConsistency:
         assert isinstance(adv.value_abi_traits, dict)
         assert isinstance(adv.frame_registers, dict)
 
-    def test_toolchain_info_fields_present(self, pdb_with_struct_and_enum: Path) -> None:
+    def test_toolchain_info_fields_present(
+        self, pdb_with_struct_and_enum: Path
+    ) -> None:
         """ToolchainInfo from PDB has all required attributes."""
         _, adv = parse_pdb_debug_info(pdb_with_struct_and_enum)
         tc = adv.toolchain
@@ -540,7 +575,9 @@ class TestDataModelConsistency:
         assert isinstance(tc.version, str)
         assert isinstance(tc.abi_flags, set)
 
-    def test_checker_diff_dwarf_compatible(self, pdb_with_struct_and_enum: Path) -> None:
+    def test_checker_diff_dwarf_compatible(
+        self, pdb_with_struct_and_enum: Path
+    ) -> None:
         """Simulate what _diff_dwarf does: iterate structs and enums."""
         meta, _ = parse_pdb_debug_info(pdb_with_struct_and_enum)
 
@@ -558,7 +595,9 @@ class TestDataModelConsistency:
             for member_name, val in info.members.items():
                 assert isinstance(val, int)
 
-    def test_checker_diff_advanced_compatible(self, pdb_with_struct_and_enum: Path) -> None:
+    def test_checker_diff_advanced_compatible(
+        self, pdb_with_struct_and_enum: Path
+    ) -> None:
         """Simulate what _diff_advanced_dwarf does: compare CC, packing, toolchain."""
         _, adv = parse_pdb_debug_info(pdb_with_struct_and_enum)
 
@@ -580,6 +619,7 @@ class TestDataModelConsistency:
 # ---------------------------------------------------------------------------
 # Integration: PDB metadata used in AbiSnapshot comparison
 # ---------------------------------------------------------------------------
+
 
 class TestPdbInAbiSnapshot:
     """Test that PDB metadata integrates into the AbiSnapshot model."""
@@ -689,7 +729,9 @@ class TestPdbInAbiSnapshot:
         assert "Empty" in meta.structs
         assert len(meta.structs["Empty"].fields) == 0
 
-    def test_serialization_round_trip(self, pdb_with_struct_and_enum: Path, tmp_path: Path) -> None:
+    def test_serialization_round_trip(
+        self, pdb_with_struct_and_enum: Path, tmp_path: Path
+    ) -> None:
         """DwarfMetadata from PDB should survive JSON serialization."""
         import json
 

@@ -120,7 +120,10 @@ def _release_config(
     if on_incomplete_scope is not None:
         lines += ["scope:", f"  on_incomplete: {on_incomplete_scope}"]
     if fail_on_removed_library is not None:
-        lines += ["gate:", f"  fail_on_removed_library: {str(fail_on_removed_library).lower()}"]
+        lines += [
+            "gate:",
+            f"  fail_on_removed_library: {str(fail_on_removed_library).lower()}",
+        ]
     if dso_only is not None or include_private_dso is not None:
         lines.append("release:")
         if dso_only is not None:
@@ -224,9 +227,7 @@ class TestTwelveVariantBaseline:
     ) -> None:
         old, new = dirs
         cfg = _release_config(tmp_path, on_incomplete_scope="block")
-        code, doc = _invoke_json(
-            "compare", str(old), str(new), "--config", str(cfg)
-        )
+        code, doc = _invoke_json("compare", str(old), str(new), "--config", str(cfg))
         assert code == 0
         assert doc["exit"]["incomplete_scope_contribution"] == 0
 
@@ -274,9 +275,7 @@ class TestMixedMatrix:
     def test_block_exits_1_naming_the_scope_axis(self, tmp_path: Path) -> None:
         old, new = self._dirs(tmp_path, breaking=False)
         cfg = _release_config(tmp_path, on_incomplete_scope="block")
-        code, doc = _invoke_json(
-            "compare", str(old), str(new), "--config", str(cfg)
-        )
+        code, doc = _invoke_json("compare", str(old), str(new), "--config", str(cfg))
         assert code == 1
         assert doc["exit"]["code"] == 1
         assert doc["exit"]["reasons"] == ["incomplete_scope"]
@@ -290,9 +289,7 @@ class TestMixedMatrix:
     ) -> None:
         old, new = self._dirs(tmp_path, breaking=True)
         cfg = _release_config(tmp_path, on_incomplete_scope=policy)
-        code, doc = _invoke_json(
-            "compare", str(old), str(new), "--config", str(cfg)
-        )
+        code, doc = _invoke_json("compare", str(old), str(new), "--config", str(cfg))
         assert code == 4
         assert doc["exit"]["reasons"] == ["compatibility_gate"]
         assert doc["run_outcome"]["gate"] == "abi_breaking"
@@ -318,9 +315,7 @@ class TestZeroPairRelease:
         _write(old, "liba.json", _snap("liba.so"))
         _write(new, "libb.json", _snap("libb.so"))
         cfg = _release_config(tmp_path, on_incomplete_scope=policy)
-        code, doc = _invoke_json(
-            "compare", str(old), str(new), "--config", str(cfg)
-        )
+        code, doc = _invoke_json("compare", str(old), str(new), "--config", str(cfg))
         assert code == 1
         assert doc["libraries"] == []
         assert doc["run_outcome"]["operational"] == "no_comparison_completed"
@@ -421,9 +416,7 @@ class TestProvenRemoval:
         assert doc["verdict"] == "COMPATIBLE_WITH_RISK"
 
         cfg = _release_config(tmp_path, fail_on_removed_library=True)
-        code, doc = _invoke_json(
-            "compare", str(old), str(new), "--config", str(cfg)
-        )
+        code, doc = _invoke_json("compare", str(old), str(new), "--config", str(cfg))
         assert code == 8
         assert doc["exit"]["reasons"] == ["removed_required_library"]
 
@@ -438,9 +431,7 @@ class TestProvenRemoval:
         new = tmp_path / "new_pkg"
         _write_stored_package(new, {"liba.so": _snap("liba.so")})
         cfg = _release_config(tmp_path, fail_on_removed_library=True)
-        code, doc = _invoke_json(
-            "compare", str(old), str(new), "--config", str(cfg)
-        )
+        code, doc = _invoke_json("compare", str(old), str(new), "--config", str(cfg))
         assert code == 8
         assert doc["comparison_scope"]["selection"] == "all_expected"
         assert doc["comparison_scope"]["proven_removed"] == ["libgone.so.json"]
@@ -1073,9 +1064,7 @@ class TestStoredBaselineGating:
         assert doc["comparison_scope"]["counts"]["failed"] == 1
         assert list(doc["libraries"]) == ["libok.so"]
         cfg = _release_config(tmp_path, on_incomplete_scope="block")
-        code, doc = _invoke_json(
-            "compare", str(old), str(new), "--config", str(cfg)
-        )
+        code, doc = _invoke_json("compare", str(old), str(new), "--config", str(cfg))
         assert code == 1
         assert doc["comparison_scope"]["incomplete_scope_exit_contribution"] == 1
 
@@ -1194,7 +1183,9 @@ class TestJunitScopeProjection:
         from abicheck.cli import main
 
         for policy in ("warn", "block"):
-            cfg = _release_config(tmp_path, on_incomplete_scope=policy, name=f"{policy}.abicheck.yml")
+            cfg = _release_config(
+                tmp_path, on_incomplete_scope=policy, name=f"{policy}.abicheck.yml"
+            )
             result = CliRunner().invoke(
                 main,
                 [

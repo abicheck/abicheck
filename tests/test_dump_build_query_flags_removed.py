@@ -85,7 +85,11 @@ class TestBuildQueryFlagsRemoved:
         result = CliRunner().invoke(
             main,
             [
-                "dump", "--sources", str(tmp_path), "-H", str(header),
+                "dump",
+                "--sources",
+                str(tmp_path),
+                "-H",
+                str(header),
                 "--allow-build-query",
             ],
         )
@@ -124,8 +128,13 @@ class TestBuildQueryFlagsRemoved:
             result = CliRunner().invoke(
                 main,
                 [
-                    "dump", "--sources", str(tmp_path), "-H", str(header),
-                    "--dry-run", *extra,
+                    "dump",
+                    "--sources",
+                    str(tmp_path),
+                    "-H",
+                    str(header),
+                    "--dry-run",
+                    *extra,
                 ],
             )
             assert result.exit_code == 0, (extra, result.output)

@@ -750,9 +750,7 @@ def _strip_inactive_if_zero_blocks(
                 # what the innermost frame's own condition says.
                 out.append(b"")
                 continue
-            out.append(
-                _line_for_open_arm(line, stack[-1], policy)
-            )
+            out.append(_line_for_open_arm(line, stack[-1], policy))
             continue
 
         out.append(line)

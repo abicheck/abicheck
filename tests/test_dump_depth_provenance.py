@@ -48,7 +48,9 @@ def test_evidence_depth_label_build_when_build_evidence_has_facts() -> None:
 
     snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
     snap.build_source = _pack(
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")])
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        )
     )
     assert evidence_depth_label(snap) == "build"
 
@@ -60,7 +62,9 @@ def test_evidence_depth_label_build_when_parsed_with_compile_db_context() -> Non
     is still a legitimate "build" evidence signal, distinct from the
     BuildSourcePack machinery checked above."""
     snap = AbiSnapshot(
-        library="libfoo.so", version="1.0", from_headers=True,
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
         parsed_with_build_context=True,
     )
     assert snap.build_source is None
@@ -144,24 +148,33 @@ def test_check_requested_depth_satisfied_unknown_depth_is_noop() -> None:
 def test_gated_source_label_without_a_pack_falls_back_to_headers_or_binary() -> None:
     from abicheck.cli_dump_helpers import _gated_source_label
 
-    assert _gated_source_label(None, AbiSnapshot(library="libfoo.so", version="1.0")) == "binary"
+    assert (
+        _gated_source_label(None, AbiSnapshot(library="libfoo.so", version="1.0"))
+        == "binary"
+    )
     headers_snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
     assert _gated_source_label(None, headers_snap) == "headers"
 
 
-def test_gated_source_label_without_a_pack_but_with_compile_db_context_is_build() -> None:
+def test_gated_source_label_without_a_pack_but_with_compile_db_context_is_build() -> (
+    None
+):
     """Codex review: -p/--compile-db build context (no BuildSourcePack) must
     still gate as "build", not fall through to "headers"."""
     from abicheck.cli_dump_helpers import _gated_source_label
 
     snap = AbiSnapshot(
-        library="libfoo.so", version="1.0", from_headers=True,
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
         parsed_with_build_context=True,
     )
     assert _gated_source_label(None, snap) == "build"
 
 
-def test_dump_will_attempt_hybrid_l4_extraction_false_for_prebuilt_pack(tmp_path) -> None:
+def test_dump_will_attempt_hybrid_l4_extraction_false_for_prebuilt_pack(
+    tmp_path,
+) -> None:
     from abicheck.buildsource import pack_io
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.cli_dump_helpers import _dump_will_attempt_hybrid_l4_extraction
@@ -171,7 +184,9 @@ def test_dump_will_attempt_hybrid_l4_extraction_false_for_prebuilt_pack(tmp_path
     assert _dump_will_attempt_hybrid_l4_extraction(pack_dir) is False
 
 
-def test_dump_will_attempt_hybrid_l4_extraction_true_for_raw_source_tree(tmp_path) -> None:
+def test_dump_will_attempt_hybrid_l4_extraction_true_for_raw_source_tree(
+    tmp_path,
+) -> None:
     from abicheck.cli_dump_helpers import _dump_will_attempt_hybrid_l4_extraction
 
     tree = tmp_path / "src"
@@ -233,7 +248,9 @@ def test_check_requested_depth_satisfied_build_with_compile_db_context_passes() 
     )
 
     snap = AbiSnapshot(
-        library="libfoo.so", version="1.0", from_headers=True,
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
         parsed_with_build_context=True,
     )
     check_requested_depth_satisfied("build", snap)  # must not raise
@@ -280,7 +297,9 @@ def test_check_requested_depth_satisfied_source_with_empty_payload_fails() -> No
         check_requested_depth_satisfied("source", snap)
 
 
-def test_check_requested_depth_satisfied_header_graph_only_does_not_satisfy_source() -> None:
+def test_check_requested_depth_satisfied_header_graph_only_does_not_satisfy_source() -> (
+    None
+):
     """Codex review: service._attach_header_graph (--header-graph without
     --sources/--build-info) builds a pack whose L5 source_graph is genuinely
     non-empty while L3/L4 coverage rows are explicitly NOT_COLLECTED -- no
@@ -302,9 +321,15 @@ def test_check_requested_depth_satisfied_header_graph_only_does_not_satisfy_sour
         source_graph=SourceGraphSummary(nodes=[GraphNode(id="n1", kind="function")]),
     )
     pack.manifest.coverage = [
-        LayerCoverage(layer=DataLayer.L3_BUILD.value, status=CoverageStatus.NOT_COLLECTED),
-        LayerCoverage(layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED),
-        LayerCoverage(layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.PRESENT),
+        LayerCoverage(
+            layer=DataLayer.L3_BUILD.value, status=CoverageStatus.NOT_COLLECTED
+        ),
+        LayerCoverage(
+            layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED
+        ),
+        LayerCoverage(
+            layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.PRESENT
+        ),
     ]
     snap.build_source = pack
 
@@ -317,7 +342,9 @@ def test_check_requested_depth_satisfied_header_graph_only_does_not_satisfy_sour
         check_requested_depth_satisfied("source", snap)
 
 
-def test_check_requested_depth_satisfied_l3_plus_backfilled_graph_does_not_satisfy_source() -> None:
+def test_check_requested_depth_satisfied_l3_plus_backfilled_graph_does_not_satisfy_source() -> (
+    None
+):
     """Codex review (second finding): cli_buildsource.embed_build_source's
     header-only-graph backfill can graft a --header-graph L5 pack onto an
     otherwise-real, L3-only --build-info pack -- so "L3 present, L4 absent,
@@ -337,13 +364,19 @@ def test_check_requested_depth_satisfied_l3_plus_backfilled_graph_does_not_satis
     snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
     backfilled_pack = BuildSourcePack(
         root=Path(""),
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
         source_graph=SourceGraphSummary(nodes=[GraphNode(id="n1", kind="function")]),
     )
     backfilled_pack.manifest.coverage = [
         LayerCoverage(layer=DataLayer.L3_BUILD.value, status=CoverageStatus.PRESENT),
-        LayerCoverage(layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED),
-        LayerCoverage(layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.PRESENT),
+        LayerCoverage(
+            layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED
+        ),
+        LayerCoverage(
+            layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.PRESENT
+        ),
     ]
     snap.build_source = backfilled_pack
 
@@ -375,7 +408,9 @@ def test_check_requested_depth_satisfied_source_with_real_l4_facts_passes() -> N
     snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
     real_pack = BuildSourcePack(
         root=Path(""),
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
         source_abi=SourceAbiSurface(
             reachable_declarations=[SourceEntity(id="foo", kind="function")]
         ),
@@ -410,7 +445,9 @@ def test_check_requested_depth_satisfied_source_zero_match_no_graph_passes() -> 
     surface.coverage["compile_units_parsed"] = 1
     pack = BuildSourcePack(
         root=Path(""),
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
         source_abi=surface,
     )
     snap.build_source = pack
@@ -441,7 +478,9 @@ def test_fold_dump_provenance_uses_gated_label_for_zero_match_source_case() -> N
     surface.coverage["compile_units_parsed"] = 1
     pack = BuildSourcePack(
         root=Path(""),
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
         source_abi=surface,
     )
     snap.build_source = pack
@@ -468,14 +507,18 @@ def test_fold_dump_provenance_malformed_json_returns_gated_label() -> None:
     snap = AbiSnapshot(library="libfoo.so", version="1.0")
 
     text, resolved_label = fold_dump_provenance_into_json(
-        "not valid json {{{", "binary", snap,
+        "not valid json {{{",
+        "binary",
+        snap,
     )
 
     assert text == "not valid json {{{"
     assert resolved_label == "binary"
 
 
-def test_fold_dump_provenance_falls_back_to_l4_extractor_when_ast_producer_absent() -> None:
+def test_fold_dump_provenance_falls_back_to_l4_extractor_when_ast_producer_absent() -> (
+    None
+):
     """Codex review: a symbol-only ELF dump (no -H headers) returns from
     dumper._build_symbol_only_snapshot before the L2 header-AST pipeline ever
     runs, so ast_producer stays None even when embed_build_source went on to
@@ -500,7 +543,9 @@ def test_fold_dump_provenance_falls_back_to_l4_extractor_when_ast_producer_absen
     surface.coverage["compile_units_parsed"] = 1
     pack = BuildSourcePack(
         root=Path(""),
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
         source_abi=surface,
     )
     pack.manifest.extractors = [
@@ -516,7 +561,9 @@ def test_fold_dump_provenance_falls_back_to_l4_extractor_when_ast_producer_absen
     assert provenance["frontend"] == "clang"
 
 
-def test_fold_dump_provenance_prefers_l4_frontend_over_ast_producer_at_source_depth() -> None:
+def test_fold_dump_provenance_prefers_l4_frontend_over_ast_producer_at_source_depth() -> (
+    None
+):
     """CodeRabbit review: a header snapshot parsed with one backend (e.g.
     castxml/hybrid, recorded as ast_producer) combined with a prebuilt L4
     pack from a *different* extractor (e.g. clang) must record the L4
@@ -534,14 +581,19 @@ def test_fold_dump_provenance_prefers_l4_frontend_over_ast_producer_at_source_de
     from abicheck.cli_dump_helpers import fold_dump_provenance_into_json
 
     snap = AbiSnapshot(
-        library="libfoo.so", version="1.0", from_headers=True, ast_producer="castxml",
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        ast_producer="castxml",
     )
     surface = SourceAbiSurface()
     surface.coverage["compile_units_selected"] = 1
     surface.coverage["compile_units_parsed"] = 1
     pack = BuildSourcePack(
         root=Path(""),
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
         source_abi=surface,
     )
     pack.manifest.extractors = [
@@ -568,13 +620,20 @@ def test_fold_dump_provenance_keeps_ast_producer_below_source_depth() -> None:
     from abicheck.cli_dump_helpers import fold_dump_provenance_into_json
 
     snap = AbiSnapshot(
-        library="libfoo.so", version="1.0", from_headers=True, ast_producer="castxml",
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        ast_producer="castxml",
     )
     pack = BuildSourcePack(
         root=Path(""),
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
     )
-    pack.manifest.extractors = [ExtractorRecord(name="source_abi:clang", status="failed")]
+    pack.manifest.extractors = [
+        ExtractorRecord(name="source_abi:clang", status="failed")
+    ]
     snap.build_source = pack
 
     text, _ = fold_dump_provenance_into_json("{}", "build", snap)
@@ -583,7 +642,9 @@ def test_fold_dump_provenance_keeps_ast_producer_below_source_depth() -> None:
     assert provenance["frontend"] == "castxml"
 
 
-def test_fold_dump_provenance_frontend_none_when_no_l4_replay_and_no_ast_producer() -> None:
+def test_fold_dump_provenance_frontend_none_when_no_l4_replay_and_no_ast_producer() -> (
+    None
+):
     """No header AST and no L4 extractor record at all (e.g. a bare --build-info
     dump with only L3 evidence) -- frontend has no source to fall back to and
     must stay None rather than fabricating a value."""
@@ -597,7 +658,9 @@ def test_fold_dump_provenance_frontend_none_when_no_l4_replay_and_no_ast_produce
     snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=False)
     pack = BuildSourcePack(
         root=Path(""),
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
     )
     pack.manifest.extractors = [ExtractorRecord(name="compile_commands", status="ok")]
     snap.build_source = pack
@@ -622,7 +685,9 @@ def test_fold_dump_provenance_source_scope_none_without_source_abi() -> None:
     snap = AbiSnapshot(library="libfoo.so", version="1.0")
     pack = BuildSourcePack(
         root=Path(""),
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
     )
     snap.build_source = pack
 
@@ -652,7 +717,9 @@ def test_fold_dump_provenance_source_scope_reads_prebuilt_pack_replay_scope() ->
     surface.coverage["replay_scope"] = "changed"
     pack = BuildSourcePack(
         root=Path(""),
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
         source_abi=surface,
     )
     snap.build_source = pack
@@ -680,7 +747,9 @@ def test_l4_source_abi_was_attempted_false_for_unavailable_extractor() -> None:
 
     pack = BuildSourcePack(
         root=Path(""),
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
         # The exact shape _run_inline_source_abi returns when impl.available()
         # is False: a bare SourceAbiSurface() with no coverage dict populated
         # (replay never ran to set compile_units_parsed).
@@ -688,8 +757,12 @@ def test_l4_source_abi_was_attempted_false_for_unavailable_extractor() -> None:
     )
     pack.manifest.coverage = [
         LayerCoverage(layer=DataLayer.L3_BUILD.value, status=CoverageStatus.PRESENT),
-        LayerCoverage(layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.PARTIAL),
-        LayerCoverage(layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED),
+        LayerCoverage(
+            layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.PARTIAL
+        ),
+        LayerCoverage(
+            layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED
+        ),
     ]
 
     assert _l4_source_abi_was_attempted(pack) is False
@@ -713,13 +786,19 @@ def test_l4_source_abi_was_attempted_true_for_zero_linked_but_parsed_tus() -> No
     surface.coverage["compile_units_parsed"] = 1
     pack = BuildSourcePack(
         root=Path(""),
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
         source_abi=surface,
     )
     pack.manifest.coverage = [
         LayerCoverage(layer=DataLayer.L3_BUILD.value, status=CoverageStatus.PRESENT),
-        LayerCoverage(layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.PARTIAL),
-        LayerCoverage(layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED),
+        LayerCoverage(
+            layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.PARTIAL
+        ),
+        LayerCoverage(
+            layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED
+        ),
     ]
 
     assert _l4_source_abi_was_attempted(pack) is True
@@ -740,7 +819,9 @@ def test_l4_source_abi_was_attempted_true_for_coercible_string_count() -> None:
     surface.coverage["compile_units_parsed"] = "1"  # type: ignore[assignment]
     pack = BuildSourcePack(
         root=Path(""),
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
         source_abi=surface,
     )
 
@@ -763,7 +844,9 @@ def test_l4_source_abi_was_attempted_false_for_infinite_count() -> None:
     surface.coverage["compile_units_parsed"] = float("inf")
     pack = BuildSourcePack(
         root=Path(""),
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
         source_abi=surface,
     )
 
@@ -801,7 +884,9 @@ def test_execute_dump_request_does_not_crash_on_malformed_coverage_without_depth
     surface.coverage["compile_units_parsed"] = "unknown"  # type: ignore[assignment]
     pack = BuildSourcePack(
         root=Path(""),
-        build_evidence=BuildEvidence(compile_units=[CompileUnit(id="cu1", source="a.c")]),
+        build_evidence=BuildEvidence(
+            compile_units=[CompileUnit(id="cu1", source="a.c")]
+        ),
         source_abi=surface,
     )
     snap = AbiSnapshot(

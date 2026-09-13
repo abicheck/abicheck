@@ -31,6 +31,7 @@ check-module dependency stays one-directional (no import cycle; CLAUDE.md
 "M1-3"). Neither check reads the ``CrosscheckConfig`` argument, so it is typed
 loosely to avoid importing the config type from ``cross_source_checks``.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -62,7 +63,9 @@ _ABI_FLAG_FAMILIES: tuple[tuple[str, str], ...] = (
 
 #: ``CompileUnit.language`` spellings that mean C++ (the adapter emits ``"CXX"``;
 #: accept common aliases defensively).
-_CPP_LANGUAGES: frozenset[str] = frozenset({"CXX", "C++", "CPP", "OBJC++", "OBJECTIVE-C++"})
+_CPP_LANGUAGES: frozenset[str] = frozenset(
+    {"CXX", "C++", "CPP", "OBJC++", "OBJECTIVE-C++"}
+)
 
 
 def _effective_flag_mode(flags: list[str], pos: str, neg: str) -> str | None:
@@ -152,9 +155,7 @@ def _define_value_conflicts(label: str, units: list[Any]) -> list[Change]:
     return findings
 
 
-def _check_compile_context_conflict(
-    snapshot: AbiSnapshot, cfg: Any
-) -> _CheckOutput:
+def _check_compile_context_conflict(snapshot: AbiSnapshot, cfg: Any) -> _CheckOutput:
     """L3 compile units of one build target carry conflicting ABI contexts, RISK.
 
     Groups the L3 compile units by ``target_id`` (untargeted units share the one
@@ -228,9 +229,7 @@ def _surface_mapped_symbols(surface: Any) -> set[str]:
     return symbols
 
 
-def _check_source_surface_dso_mismatch(
-    snapshot: AbiSnapshot, cfg: Any
-) -> _CheckOutput:
+def _check_source_surface_dso_mismatch(snapshot: AbiSnapshot, cfg: Any) -> _CheckOutput:
     """The linked L4 surface maps to none of this binary's exports, RISK (AC-009).
 
     When a single source surface is folded from every target's sources and reused

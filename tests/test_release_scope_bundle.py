@@ -130,9 +130,7 @@ class TestBundleAnalysisScope:
             tmp_path, "new.bundlefacts.json", {"libalgo.so": libs["libalgo.so"]}
         )
         cfg = _release_config(tmp_path, on_incomplete_scope=policy)
-        code, doc = _invoke_json(
-            "compare", str(old), str(new), "--config", str(cfg)
-        )
+        code, doc = _invoke_json("compare", str(old), str(new), "--config", str(cfg))
         assert _removal_findings(doc) == []
         assert doc["verdict"] != "BREAKING"
         assert doc["comparison_scope"]["unchecked"] == ["libcore.so"]
@@ -674,9 +672,7 @@ class TestStoredPackageDegradedMember:
             _write_stored_package(old, healthy)
             _write_stored_package(new, degraded, degraded=marker)
         cfg = _release_config(tmp_path, on_incomplete_scope=policy)
-        code, doc = _invoke_json(
-            "compare", str(old), str(new), "--config", str(cfg)
-        )
+        code, doc = _invoke_json("compare", str(old), str(new), "--config", str(cfg))
         by_name = {lib["library"].split("-")[0]: lib for lib in doc["libraries"]}
         assert by_name["libfoo.so"]["verdict"] == "failed"
         assert degraded_side.upper() in by_name["libfoo.so"]["reason"]

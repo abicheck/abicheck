@@ -7,6 +7,7 @@
 
 Synthetic ``AbiSnapshot`` fixtures only — no compiler, no castxml.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -50,10 +51,13 @@ def _snap(funcs=None, vars_=None, types=None) -> AbiSnapshot:
     )
 
 
-def _fn(name: str, mangled: str | None = None,
-        return_type: str = "void",
-        params: list[tuple[str, str]] | None = None,
-        visibility: Visibility = Visibility.PUBLIC) -> Function:
+def _fn(
+    name: str,
+    mangled: str | None = None,
+    return_type: str = "void",
+    params: list[tuple[str, str]] | None = None,
+    visibility: Visibility = Visibility.PUBLIC,
+) -> Function:
     return Function(
         name=name,
         mangled=mangled if mangled is not None else f"_Z{name}",
@@ -63,11 +67,18 @@ def _fn(name: str, mangled: str | None = None,
     )
 
 
-def _var(name: str, type_: str = "int",
-         visibility: Visibility = Visibility.PUBLIC,
-         mangled: str | None = None) -> Variable:
-    return Variable(name=name, mangled=mangled if mangled is not None else f"_Z{name}",
-                    type=type_, visibility=visibility)
+def _var(
+    name: str,
+    type_: str = "int",
+    visibility: Visibility = Visibility.PUBLIC,
+    mangled: str | None = None,
+) -> Variable:
+    return Variable(
+        name=name,
+        mangled=mangled if mangled is not None else f"_Z{name}",
+        type=type_,
+        visibility=visibility,
+    )
 
 
 def _rec(name: str) -> RecordType:
@@ -87,38 +98,47 @@ def _rec_public(name: str) -> RecordType:
 
 
 class TestStripTemplateArgs:
-    @pytest.mark.parametrize("name, expected", [
-        ("Foo<int>", "Foo"),
-        ("ns::Foo<int, char>", "ns::Foo"),
-        ("ns::Foo<bar::baz<int>>", "ns::Foo"),
-        ("plain", "plain"),
-        ("", ""),
-    ])
+    @pytest.mark.parametrize(
+        "name, expected",
+        [
+            ("Foo<int>", "Foo"),
+            ("ns::Foo<int, char>", "ns::Foo"),
+            ("ns::Foo<bar::baz<int>>", "ns::Foo"),
+            ("plain", "plain"),
+            ("", ""),
+        ],
+    )
     def test_strips(self, name: str, expected: str) -> None:
         assert _strip_template_args(name) == expected
 
 
 class TestCountTopLevelTemplateArgs:
-    @pytest.mark.parametrize("name, expected", [
-        ("Foo<int>", 1),
-        ("Foo<int, char>", 2),
-        ("Foo<int, std::pair<int, char>>", 2),
-        ("Foo", None),
-        ("", None),
-    ])
+    @pytest.mark.parametrize(
+        "name, expected",
+        [
+            ("Foo<int>", 1),
+            ("Foo<int, char>", 2),
+            ("Foo<int, std::pair<int, char>>", 2),
+            ("Foo", None),
+            ("", None),
+        ],
+    )
     def test_count(self, name: str, expected: int | None) -> None:
         assert _count_top_level_template_args(name) == expected
 
 
 class TestReturnIsUnspecified:
-    @pytest.mark.parametrize("rt, expected", [
-        ("auto", True),
-        ("decltype(auto)", True),
-        ("(anonymous namespace)::T", True),
-        ("ns::Named", False),
-        ("int", False),
-        ("", False),
-    ])
+    @pytest.mark.parametrize(
+        "rt, expected",
+        [
+            ("auto", True),
+            ("decltype(auto)", True),
+            ("(anonymous namespace)::T", True),
+            ("ns::Named", False),
+            ("int", False),
+            ("", False),
+        ],
+    )
     def test_classification(self, rt: str, expected: bool) -> None:
         assert _return_is_unspecified(rt) is expected
 
@@ -140,7 +160,9 @@ class TestStripParamSignature:
         assert _strip_param_signature(sig) == "ns::experimental::C::operator()"
 
     def test_zero_arg_call_operator(self) -> None:
-        assert _strip_param_signature("ns::C::operator()() const") == "ns::C::operator()"
+        assert (
+            _strip_param_signature("ns::C::operator()() const") == "ns::C::operator()"
+        )
 
     def test_plain_function_unaffected(self) -> None:
         assert _strip_param_signature("lib::sort(int*, int*)") == "lib::sort"
@@ -174,6 +196,7 @@ class TestStripParamSignature:
         # consumer) still recovers the correct leaf despite the wrapper
         # prefix surviving in the stripped text.
         from abicheck.diff_namespaces import _segments
+
         assert _segments(result)[-1] == "bar"
 
     def test_call_operator_after_function_pointer_wrapper(self) -> None:
@@ -192,6 +215,7 @@ class TestStripParamSignature:
         sig = "int (ns::C::*ns::experimental::bar<int>(int))()"
         result = _strip_param_signature(sig)
         from abicheck.diff_namespaces import _segments
+
         assert _segments(result)[-1] == "bar"
 
     def test_pointer_parameter_is_not_mistaken_for_a_wrapper(self) -> None:
@@ -208,9 +232,7 @@ class TestStripParamSignature:
         # function-pointer parameter.
         assert _strip_param_signature("lib::apply(void (*)(int))") == "lib::apply"
         # Trailing ordinary parameter after the function-pointer one.
-        assert (
-            _strip_param_signature("lib::apply(void (*)(int), int*)") == "lib::apply"
-        )
+        assert _strip_param_signature("lib::apply(void (*)(int), int*)") == "lib::apply"
         # The whitespace-preceded "(" not first in the list, so a scan that
         # gave up at the first one it saw would still pass without this.
         assert (
@@ -220,8 +242,7 @@ class TestStripParamSignature:
         # Pointer-to-member-function parameter: "Class::*" inside the list,
         # the same text the real wrapper branch recognizes in a return type.
         assert (
-            _strip_param_signature("ns::C::bind(void (ns::C::*)(int))")
-            == "ns::C::bind"
+            _strip_param_signature("ns::C::bind(void (ns::C::*)(int))") == "ns::C::bind"
         )
 
     def test_decltype_return_type_does_not_truncate(self) -> None:
@@ -233,6 +254,7 @@ class TestStripParamSignature:
         sig = "decltype ({parm#1}+{parm#1}) ns::sort<int>(int)"
         result = _strip_param_signature(sig)
         from abicheck.diff_namespaces import _segments
+
         assert _segments(result)[-1] == "sort"
 
     def test_decltype_with_nested_unrelated_call_does_not_truncate(self) -> None:
@@ -246,6 +268,7 @@ class TestStripParamSignature:
         sig = "decltype ((g())?{parm#1} : {parm#1}) ns::experimental::f<int>(int)"
         result = _strip_param_signature(sig)
         from abicheck.diff_namespaces import _segments
+
         assert _segments(result)[-1] == "f"
 
     def test_decltype_with_arithmetic_star_is_not_a_declarator(self) -> None:
@@ -266,6 +289,7 @@ class TestStripParamSignature:
         result = _strip_param_signature(sig)
         assert result != ""
         from abicheck.diff_namespaces import _segments
+
         assert _segments(result)[-1] == "sort"
 
     def test_decltype_auto_return_type_has_no_space_before_its_paren(self) -> None:
@@ -282,6 +306,7 @@ class TestStripParamSignature:
         sig = "decltype(auto) ns::sort<int>(int)"
         result = _strip_param_signature(sig)
         from abicheck.diff_namespaces import _segments
+
         assert _segments(result)[-1] == "sort"
         # The leaked "decltype(auto) " prefix is stripped downstream by
         # _strip_leading_return_type, same as every other function-template
@@ -454,7 +479,9 @@ class TestStripParamSignature:
         dm.demangle_batch = fake_demangle  # type: ignore[assignment]
         try:
             old = _snap(funcs=[_fn("", mangled="_Zfn")])
-            new = _snap(vars_=[_var("sort", type_="ns::__sort_fn", mangled="_ZN2ns4sortE")])
+            new = _snap(
+                vars_=[_var("sort", type_="ns::__sort_fn", mangled="_ZN2ns4sortE")]
+            )
             changes = detect_cpo_kind_changed(old, new)
         finally:
             dm.demangle_batch = orig  # type: ignore[assignment]
@@ -481,9 +508,15 @@ class TestStripParamSignature:
         dm.demangle_batch = fake_demangle  # type: ignore[assignment]
         try:
             old = _snap(funcs=[_fn("", mangled="_Zfn")])
-            new = _snap(vars_=[
-                _var("bar", type_="ns::experimental::__bar_fn", mangled="_ZN2ns12experimental3barE"),
-            ])
+            new = _snap(
+                vars_=[
+                    _var(
+                        "bar",
+                        type_="ns::experimental::__bar_fn",
+                        mangled="_ZN2ns12experimental3barE",
+                    ),
+                ]
+            )
             changes = detect_cpo_kind_changed(old, new)
         finally:
             dm.demangle_batch = orig  # type: ignore[assignment]
@@ -499,14 +532,18 @@ class TestStripParamSignature:
 
 class TestInternalTemplateLeaks:
     def test_changed_instantiation_set_fires(self) -> None:
-        old = _snap(funcs=[
-            _fn("lib::__detail::walk<int>"),
-            _fn("lib::__detail::walk<char>"),
-        ])
-        new = _snap(funcs=[
-            _fn("lib::__detail::walk<int>"),
-            _fn("lib::__detail::walk<double>"),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("lib::__detail::walk<int>"),
+                _fn("lib::__detail::walk<char>"),
+            ]
+        )
+        new = _snap(
+            funcs=[
+                _fn("lib::__detail::walk<int>"),
+                _fn("lib::__detail::walk<double>"),
+            ]
+        )
         changes = detect_internal_template_leaks(old, new)
         assert len(changes) == 1
         c = changes[0]
@@ -532,7 +569,9 @@ class TestInternalTemplateLeaks:
         old = _snap(funcs=[_fn("lib::priv::walk<int>")])
         new = _snap(funcs=[_fn("lib::priv::walk<char>")])
         changes = detect_internal_template_leaks(
-            old, new, internal_namespaces=("priv",),
+            old,
+            new,
+            internal_namespaces=("priv",),
         )
         assert len(changes) == 1
 
@@ -580,24 +619,30 @@ class TestInternalTemplateLeaks:
         # an addition alone cannot break an already-linked consumer, so this
         # must not be reported as INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API.
         old = _snap(funcs=[_fn("lib::__detail::walk<int>")])
-        new = _snap(funcs=[
-            _fn("lib::__detail::walk<int>"),
-            _fn("lib::__detail::walk<char>"),
-        ])
+        new = _snap(
+            funcs=[
+                _fn("lib::__detail::walk<int>"),
+                _fn("lib::__detail::walk<char>"),
+            ]
+        )
         assert detect_internal_template_leaks(old, new) == []
 
     def test_removed_instantiation_alongside_addition_still_fires(self) -> None:
         # A mix of "existing instantiation vanished" and "new one appeared"
         # must still fire — the removal alone already breaks a consumer that
         # linked against it.
-        old = _snap(funcs=[
-            _fn("lib::__detail::walk<int>"),
-            _fn("lib::__detail::walk<char>"),
-        ])
-        new = _snap(funcs=[
-            _fn("lib::__detail::walk<int>"),
-            _fn("lib::__detail::walk<double>"),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("lib::__detail::walk<int>"),
+                _fn("lib::__detail::walk<char>"),
+            ]
+        )
+        new = _snap(
+            funcs=[
+                _fn("lib::__detail::walk<int>"),
+                _fn("lib::__detail::walk<double>"),
+            ]
+        )
         changes = detect_internal_template_leaks(old, new)
         assert len(changes) == 1
 
@@ -633,12 +678,14 @@ class TestInternalTemplateLeaks:
             # namespace (a real, documented dumper-backend quirk) even
             # though the mangled symbol -- and hence the demangled
             # canonical form above -- is unchanged.
-            new = _snap(funcs=[
-                _fn(
-                    "detail::train_parameters<int>::check_ranges",
-                    mangled="_Zcr1",
-                ),
-            ])
+            new = _snap(
+                funcs=[
+                    _fn(
+                        "detail::train_parameters<int>::check_ranges",
+                        mangled="_Zcr1",
+                    ),
+                ]
+            )
             changes = detect_internal_template_leaks(old, new)
         finally:
             dm.demangle_batch = orig  # type: ignore[assignment]
@@ -675,12 +722,14 @@ class TestInternalTemplateLeaks:
             # internal in the first place, so a Mach-O prefix bug that
             # silently skips demangling still reproduces a real leak here.
             old = _snap(funcs=[_fn("detail::check_ranges<int>", mangled="__Zcr1")])
-            new = _snap(funcs=[
-                _fn(
-                    "oneapi::dal::detail::check_ranges<int>",
-                    mangled="__Zcr1",
-                ),
-            ])
+            new = _snap(
+                funcs=[
+                    _fn(
+                        "oneapi::dal::detail::check_ranges<int>",
+                        mangled="__Zcr1",
+                    ),
+                ]
+            )
             changes = detect_internal_template_leaks(old, new)
         finally:
             dm.demangle_batch = orig  # type: ignore[assignment]
@@ -702,7 +751,9 @@ class TestCpoKindChanged:
     # unrelated namespaces reusing the same leaf never cross-match).
     def test_function_became_variable(self) -> None:
         old = _snap(funcs=[_fn("lib::sort")])
-        new = _snap(vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")])
+        new = _snap(
+            vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")]
+        )
         changes = detect_cpo_kind_changed(old, new)
         assert len(changes) == 1
         c = changes[0]
@@ -717,7 +768,9 @@ class TestCpoKindChanged:
         assert c.reachability_kind == "direct_public_symbol"
 
     def test_variable_became_function(self) -> None:
-        old = _snap(vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")])
+        old = _snap(
+            vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")]
+        )
         new = _snap(funcs=[_fn("lib::sort")])
         changes = detect_cpo_kind_changed(old, new)
         assert len(changes) == 1
@@ -746,7 +799,9 @@ class TestCpoKindChanged:
         # (regression: a bare-leaf-only comparison would wrongly conflate
         # them, since Variable.name itself carries no namespace).
         old = _snap(funcs=[_fn("ns1::sort")])
-        new = _snap(vars_=[_var("sort", type_="ns2::__sort_fn", mangled="_ZN3ns24sortE")])
+        new = _snap(
+            vars_=[_var("sort", type_="ns2::__sort_fn", mangled="_ZN3ns24sortE")]
+        )
         assert detect_cpo_kind_changed(old, new) == []
 
     def test_function_template_became_variable(self) -> None:
@@ -761,7 +816,9 @@ class TestCpoKindChanged:
         # side's plain "lib::sort" (Codex review: function-template variant
         # of case88).
         old = _snap(funcs=[_fn("sort", mangled="_ZN3lib4sortIiEET_PS1_S2_")])
-        new = _snap(vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")])
+        new = _snap(
+            vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")]
+        )
         changes = detect_cpo_kind_changed(old, new)
         assert len(changes) == 1
         assert changes[0].new_value == "variable"
@@ -775,7 +832,9 @@ class TestCpoKindChanged:
         # "lib::sort" and wrongly collide with an unrelated same-named CPO
         # variable (Codex review).
         old = _snap(funcs=[_fn("non-virtual thunk to lib::sort()")])
-        new = _snap(vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")])
+        new = _snap(
+            vars_=[_var("sort", type_="lib::__sort_fn", mangled="_ZN3lib4sortE")]
+        )
         assert detect_cpo_kind_changed(old, new) == []
 
     def test_operator_substring_in_namespace_is_not_an_operator_overload(self) -> None:
@@ -785,7 +844,13 @@ class TestCpoKindChanged:
         # transition living under it is detected (Codex review).
         old = _snap(funcs=[_fn("int lib::cooperator::sort<int>")])
         new = _snap(
-            vars_=[_var("sort", type_="lib::cooperator::__sort_fn", mangled="_ZN3lib10cooperator4sortE")]
+            vars_=[
+                _var(
+                    "sort",
+                    type_="lib::cooperator::__sort_fn",
+                    mangled="_ZN3lib10cooperator4sortE",
+                )
+            ]
         )
         changes = detect_cpo_kind_changed(old, new)
         assert len(changes) == 1
@@ -799,14 +864,18 @@ class TestCpoKindChanged:
 
 class TestOverloadSetRerouted:
     def test_overload_swap_fires(self) -> None:
-        old = _snap(funcs=[
-            _fn("lib::sort", mangled="_Zold1", params=[("a", "int*")]),
-            _fn("lib::sort", mangled="_Zold2", params=[("a", "long*")]),
-        ])
-        new = _snap(funcs=[
-            _fn("lib::sort", mangled="_Znew1", params=[("a", "int*")]),
-            _fn("lib::sort", mangled="_Znew2", params=[("a", "double*")]),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("lib::sort", mangled="_Zold1", params=[("a", "int*")]),
+                _fn("lib::sort", mangled="_Zold2", params=[("a", "long*")]),
+            ]
+        )
+        new = _snap(
+            funcs=[
+                _fn("lib::sort", mangled="_Znew1", params=[("a", "int*")]),
+                _fn("lib::sort", mangled="_Znew2", params=[("a", "double*")]),
+            ]
+        )
         changes = detect_overload_set_rerouted(old, new)
         assert len(changes) == 1
         assert changes[0].kind == ChangeKind.OVERLOAD_SET_REROUTED
@@ -815,23 +884,31 @@ class TestOverloadSetRerouted:
         assert changes[0].reachability_kind == "direct_public_symbol"
 
     def test_pure_addition_no_finding(self) -> None:
-        old = _snap(funcs=[
-            _fn("lib::sort", mangled="_Zo1", params=[("a", "int*")]),
-        ])
-        new = _snap(funcs=[
-            _fn("lib::sort", mangled="_Zn1", params=[("a", "int*")]),
-            _fn("lib::sort", mangled="_Zn2", params=[("a", "long*")]),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("lib::sort", mangled="_Zo1", params=[("a", "int*")]),
+            ]
+        )
+        new = _snap(
+            funcs=[
+                _fn("lib::sort", mangled="_Zn1", params=[("a", "int*")]),
+                _fn("lib::sort", mangled="_Zn2", params=[("a", "long*")]),
+            ]
+        )
         assert detect_overload_set_rerouted(old, new) == []
 
     def test_pure_removal_no_finding(self) -> None:
-        old = _snap(funcs=[
-            _fn("lib::sort", mangled="_Zo1", params=[("a", "int*")]),
-            _fn("lib::sort", mangled="_Zo2", params=[("a", "long*")]),
-        ])
-        new = _snap(funcs=[
-            _fn("lib::sort", mangled="_Zn1", params=[("a", "int*")]),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("lib::sort", mangled="_Zo1", params=[("a", "int*")]),
+                _fn("lib::sort", mangled="_Zo2", params=[("a", "long*")]),
+            ]
+        )
+        new = _snap(
+            funcs=[
+                _fn("lib::sort", mangled="_Zn1", params=[("a", "int*")]),
+            ]
+        )
         assert detect_overload_set_rerouted(old, new) == []
 
     def test_volatile_and_ref_qualifiers_rendered(self) -> None:
@@ -841,11 +918,13 @@ class TestOverloadSetRerouted:
         f_vol.is_volatile = True
         f_ref = _fn("lib::g", mangled="_ZRo", params=[("a", "int")])
         f_ref.ref_qualifier = "&"
-        old = _snap(funcs=[
-            _fn("lib::g", mangled="_Zo", params=[("a", "int")]),
-            f_vol,
-            f_ref,
-        ])
+        old = _snap(
+            funcs=[
+                _fn("lib::g", mangled="_Zo", params=[("a", "int")]),
+                f_vol,
+                f_ref,
+            ]
+        )
         new = _snap(funcs=[_fn("lib::g", mangled="_Zn", params=[("a", "long")])])
         changes = detect_overload_set_rerouted(old, new)
         assert len(changes) == 1
@@ -860,13 +939,17 @@ class TestOverloadSetRerouted:
         distinct parameter-type tuples."""
         f_const = _fn("lib::f", mangled="_ZNK3lib1fEi", params=[("a", "int")])
         f_const.is_const = True
-        old = _snap(funcs=[
-            _fn("lib::f", mangled="_ZN3lib1fEi", params=[("a", "int")]),
-            f_const,
-        ])
-        new = _snap(funcs=[
-            _fn("lib::f", mangled="_ZN3lib1fEl", params=[("a", "long")]),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("lib::f", mangled="_ZN3lib1fEi", params=[("a", "int")]),
+                f_const,
+            ]
+        )
+        new = _snap(
+            funcs=[
+                _fn("lib::f", mangled="_ZN3lib1fEl", params=[("a", "long")]),
+            ]
+        )
         changes = detect_overload_set_rerouted(old, new)
         assert len(changes) == 1
         assert changes[0].kind == ChangeKind.OVERLOAD_SET_REROUTED
@@ -879,14 +962,18 @@ class TestOverloadSetRerouted:
         missed. The const overload's disappearance must be detected."""
         f_const = _fn("lib::f", mangled="_ZNK3lib1fEi", params=[("a", "int")])
         f_const.is_const = True
-        old = _snap(funcs=[
-            _fn("lib::f", mangled="_ZN3lib1fEi", params=[("a", "int")]),
-            f_const,
-        ])
-        new = _snap(funcs=[
-            _fn("lib::f", mangled="_ZN3lib1fEi", params=[("a", "int")]),
-            _fn("lib::f", mangled="_ZN3lib1fEl", params=[("a", "long")]),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("lib::f", mangled="_ZN3lib1fEi", params=[("a", "int")]),
+                f_const,
+            ]
+        )
+        new = _snap(
+            funcs=[
+                _fn("lib::f", mangled="_ZN3lib1fEi", params=[("a", "int")]),
+                _fn("lib::f", mangled="_ZN3lib1fEl", params=[("a", "long")]),
+            ]
+        )
         changes = detect_overload_set_rerouted(old, new)
         assert len(changes) == 1
         assert changes[0].kind == ChangeKind.OVERLOAD_SET_REROUTED
@@ -897,12 +984,16 @@ class TestOverloadSetRerouted:
         overload, so it must not produce a spurious OVERLOAD_SET_REROUTED
         finding (it is already reported as FUNC_PARAMS_CHANGED). This also
         covers every plain C function, which can never be overloaded."""
-        old = _snap(funcs=[
-            _fn("add", mangled="add", params=[("a", "int"), ("b", "int")]),
-        ])
-        new = _snap(funcs=[
-            _fn("add", mangled="add", params=[("a", "long"), ("b", "int")]),
-        ])
+        old = _snap(
+            funcs=[
+                _fn("add", mangled="add", params=[("a", "int"), ("b", "int")]),
+            ]
+        )
+        new = _snap(
+            funcs=[
+                _fn("add", mangled="add", params=[("a", "long"), ("b", "int")]),
+            ]
+        )
         assert detect_overload_set_rerouted(old, new) == []
 
 
@@ -1016,4 +1107,5 @@ class TestCombined:
 class TestPipelineIntegration:
     def test_default_pipeline_includes_template_step(self) -> None:
         from abicheck.post_processing import DEFAULT_PIPELINE
+
         assert "detect_template_patterns" in DEFAULT_PIPELINE.step_names

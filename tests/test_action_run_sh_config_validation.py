@@ -55,6 +55,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from _action_run_sh_harness import annotation_helpers_source
 from _workflow_exec import bash_executable, require_bash
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
@@ -237,6 +238,7 @@ def _harness(mode_marker: str) -> str:
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
         + _py_safe_dir_source()
         + _py_bin_has_abicheck_source()
+        + annotation_helpers_source()
         + _path_qualified_helper_source()
         + _mktemp_canonical_source()
         + _merge_config_overlay_fn_source()

@@ -67,6 +67,7 @@ PROBE_MATRIX_SCHEMA = "abicheck.probe-matrix/v1"
 #: default, so a document missing one was never loadable as a matrix).
 _PROBE_MATRIX_REQUIRED_KEYS = frozenset({"library", "version", "spec_name"})
 
+
 class DebugTransport(Enum):
     """How a ``--debug-info`` operand carries its debug evidence."""
 

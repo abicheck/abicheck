@@ -257,7 +257,9 @@ def rematch_declarations(
     export_index: dict[str, list[str]],
     exact_index: dict[str, str],
     owner_index: dict[str, str],
-    match_export: Callable[[str, set[str], dict[str, list[str]], dict[str, str]], tuple[str, list[str]]],
+    match_export: Callable[
+        [str, set[str], dict[str, list[str]], dict[str, str]], tuple[str, list[str]]
+    ],
 ) -> tuple[list[SourceEntity], dict[str, str], set[str], dict[str, str]]:
     """Re-derive decl -> export mapping for a relink. Every declaration is
     kept here, generated candidates included -- the caller must apply
@@ -278,7 +280,9 @@ def rematch_declarations(
     identity_to_qname: dict[str, str] = {}
     for entity in declarations:
         export_sym = entity.mangled_name or entity.qualified_name
-        primary, variants = match_export(export_sym, exported, export_index, exact_index)
+        primary, variants = match_export(
+            export_sym, exported, export_index, exact_index
+        )
         kept.append(entity)
         key = entity.identity()
         if not key:

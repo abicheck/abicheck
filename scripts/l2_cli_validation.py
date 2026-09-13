@@ -109,6 +109,31 @@ def _validate_break_findings(report: dict[str, Any]) -> list[str]:
     return problems
 
 
+def _validate_break_families_in_text(text: str, *, artifact: str) -> list[str]:
+    """The same break-family expectation, applied to a *rendered* report.
+
+    The JSON path checks `report["changes"]` kinds; a human renderer names the
+    kind slug verbatim in its finding list (`- **func_removed**: Public function
+    removed: shape_count ...`), so the same `EXPECTED_BREAK_KIND_FAMILIES` can
+    be asserted against its text. That is the point: this scenario's claim is
+    that one completed analysis feeds both exports, which is not checked by
+    asking the rendered half only for the word "BREAKING" -- a renderer that
+    kept the verdict metadata and dropped the finding list would have read as a
+    pure speedup (Codex review).
+
+    Deliberately the shared table rather than a second hand-written list: two
+    expectations that can disagree is how the two artifacts would stop being
+    checked against the same thing.
+    """
+    lowered = text.lower()
+    return [
+        f"the {artifact} export names no {family}-family finding (expected one of "
+        f"{list(alternatives)}) -- the two exports do not describe the same analysis"
+        for family, alternatives in fixtures.EXPECTED_BREAK_KIND_FAMILIES.items()
+        if not any(alternative in lowered for alternative in alternatives)
+    ]
+
+
 #: Verdicts an identical pair may never produce. Deliberately a deny-list of the
 #: two that assert a *difference*, not an allow-list of exactly ``COMPATIBLE``: a
 #: risk-level observation that holds on BOTH sides is a true statement about the

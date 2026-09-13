@@ -4,6 +4,7 @@ Verifies that the benchmark script imports cleanly, parses args correctly,
 and that the run_abicc_dumper / run_abicc_xml helpers handle missing tools
 gracefully (return SKIP instead of crashing).
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -54,6 +55,7 @@ def _load_benchmark():
 
 # ── Import / parse_args ───────────────────────────────────────────────────────
 
+
 def test_parse_args_defaults():
     mod = _load_benchmark()
     with patch("sys.argv", ["benchmark_comparison.py"]):
@@ -74,7 +76,9 @@ def test_parse_args_custom_timeout():
 
 def test_parse_args_custom_abicheck_full_timeout():
     mod = _load_benchmark()
-    with patch("sys.argv", ["benchmark_comparison.py", "--abicheck-full-timeout", "180"]):
+    with patch(
+        "sys.argv", ["benchmark_comparison.py", "--abicheck-full-timeout", "180"]
+    ):
         args = mod.parse_args()
     assert args.abicheck_full_timeout == 180
 
@@ -135,6 +139,7 @@ def test_bundle_uses_canonical_case_verdict():
 
 # ── case64 compiler selection ────────────────────────────────────────────────
 
+
 def test_case64_auto_prefers_versioned_clang():
     mod = _load_benchmark()
 
@@ -146,16 +151,21 @@ def test_case64_auto_prefers_versioned_clang():
 
     with patch("shutil.which", side_effect=fake_which):
         assert mod._first_available_tool("clang-18", "clang") == "/usr/bin/clang-18"
-        assert mod._case64_toolchain_policy("case64_calling_convention_changed", "auto") == ("clang", True)
+        assert mod._case64_toolchain_policy(
+            "case64_calling_convention_changed", "auto"
+        ) == ("clang", True)
 
 
 def test_case64_auto_no_clang_uses_default_toolchain():
     mod = _load_benchmark()
     with patch("shutil.which", return_value=None):
-        assert mod._case64_toolchain_policy("case64_calling_convention_changed", "auto") == (None, False)
+        assert mod._case64_toolchain_policy(
+            "case64_calling_convention_changed", "auto"
+        ) == (None, False)
 
 
 # ── _gcc_major_version (case115 _BitInt toolchain probing) ──────────────────
+
 
 def test_gcc_major_version_missing_tool_returns_none():
     mod = _load_benchmark()
@@ -195,6 +205,7 @@ def test_gcc_major_version_subprocess_error_returns_none():
 
 # ── Graceful SKIP when tool not present ──────────────────────────────────────
 
+
 def test_run_abicc_dumper_skip_when_missing(tmp_path):
     """run_abicc_dumper returns SKIP if abi-dumper is not installed."""
     mod = _load_benchmark()
@@ -203,8 +214,9 @@ def test_run_abicc_dumper_skip_when_missing(tmp_path):
     dummy_h = tmp_path / "v1.h"
 
     with patch("shutil.which", return_value=None):
-        result = mod.run_abicc_dumper(dummy, dummy, dummy_h, dummy_h,
-                                      "smoke_case", tmp_path)
+        result = mod.run_abicc_dumper(
+            dummy, dummy, dummy_h, dummy_h, "smoke_case", tmp_path
+        )
     assert result.verdict == "SKIP"
 
 
@@ -216,8 +228,9 @@ def test_run_abicc_xml_skip_when_missing(tmp_path):
     dummy_h = tmp_path / "v1.h"
 
     with patch("shutil.which", return_value=None):
-        result = mod.run_abicc_xml(dummy, dummy, dummy_h, dummy_h,
-                                   "smoke_case", tmp_path)
+        result = mod.run_abicc_xml(
+            dummy, dummy, dummy_h, dummy_h, "smoke_case", tmp_path
+        )
     assert result.verdict == "SKIP"
 
 
@@ -229,8 +242,9 @@ def test_run_abicheck_skip_when_missing(tmp_path):
     dummy_h = tmp_path / "v1.h"
 
     with patch.object(mod, "_HAS_ABICHECK", False):
-        result = mod.run_abicheck(dummy, dummy, dummy_h, dummy_h,
-                                  "smoke_case", tmp_path)
+        result = mod.run_abicheck(
+            dummy, dummy, dummy_h, dummy_h, "smoke_case", tmp_path
+        )
     assert result.verdict == "SKIP"
 
 
@@ -253,9 +267,11 @@ def test_abicheck_baseline_has_no_full_evidence_options(tmp_path):
             Path(cmd[cmd.index("-o") + 1]).touch()
         return Result()
 
-    with patch.object(mod, "_HAS_ABICHECK", True), patch.object(
-        mod, "BUILD_DIR", tmp_path / "build"
-    ), patch.object(mod.subprocess, "run", side_effect=fake_run):
+    with (
+        patch.object(mod, "_HAS_ABICHECK", True),
+        patch.object(mod, "BUILD_DIR", tmp_path / "build"),
+        patch.object(mod.subprocess, "run", side_effect=fake_run),
+    ):
         mod.run_abicheck(so, so, header, header, "baseline", tmp_path)
 
     assert len(commands) == 3
@@ -289,12 +305,19 @@ def test_case115_dump_pins_the_discovered_clang_binary(tmp_path):
             Path(cmd[cmd.index("-o") + 1]).touch()
         return Result()
 
-    with patch.object(mod, "_HAS_ABICHECK", True), patch.object(
-        mod, "BUILD_DIR", tmp_path / "build"
-    ), patch.object(
-        mod, "_first_available_tool", side_effect=lambda *names: f"/usr/bin/{names[0]}"
-    ), patch.object(mod.subprocess, "run", side_effect=fake_run):
-        mod.run_abicheck(so, so, header, header, "case115_bit_int_width_changed", tmp_path)
+    with (
+        patch.object(mod, "_HAS_ABICHECK", True),
+        patch.object(mod, "BUILD_DIR", tmp_path / "build"),
+        patch.object(
+            mod,
+            "_first_available_tool",
+            side_effect=lambda *names: f"/usr/bin/{names[0]}",
+        ),
+        patch.object(mod.subprocess, "run", side_effect=fake_run),
+    ):
+        mod.run_abicheck(
+            so, so, header, header, "case115_bit_int_width_changed", tmp_path
+        )
 
     dumps = [cmd for cmd in commands if "dump" in cmd]
     assert dumps
@@ -306,6 +329,7 @@ def test_case115_dump_pins_the_discovered_clang_binary(tmp_path):
 
 def _write_plugin_pack(pack, version, source, *, with_facts=True):
     import json
+
     (pack / "source_facts").mkdir(parents=True)
     (pack / "manifest.json").write_text(json.dumps({"version": version}))
     record = {"source": str(source), "functions": [{"id": "f"}] if with_facts else []}
@@ -339,7 +363,9 @@ def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
             out = build / case
             out.mkdir(parents=True, exist_ok=True)
             (out / f"lib{version}.so").touch()
-            injection_arg = next(x for x in commands[-2] if x.startswith("-DCMAKE_PROJECT_INCLUDE="))
+            injection_arg = next(
+                x for x in commands[-2] if x.startswith("-DCMAKE_PROJECT_INCLUDE=")
+            )
             injection = Path(injection_arg.split("=", 1)[1]).read_text()
             pack = Path(injection.split("out=", 1)[1].split("'", 1)[0].split()[0])
             _write_plugin_pack(pack, version, v1_src if version == "v1" else v2_src)
@@ -351,16 +377,29 @@ def test_abicheck_full_builds_separate_targets_merges_separate_packs(tmp_path):
         return Result()
 
     build_root = tmp_path / "bench-build"
-    with patch.object(mod, "_HAS_ABICHECK", True), patch.object(
-        mod, "BUILD_DIR", build_root
-    ), patch.object(mod, "_find_or_build_abicheck_plugin", return_value=(plugin, "")), patch.object(
-        mod, "_first_available_tool", side_effect=lambda *names: f"/usr/bin/{names[0]}"
-    ), patch.object(mod.subprocess, "run", side_effect=fake_run), patch.object(
-        mod, "SHARED_LIB_SUFFIX", ".so"
+    with (
+        patch.object(mod, "_HAS_ABICHECK", True),
+        patch.object(mod, "BUILD_DIR", build_root),
+        patch.object(mod, "_find_or_build_abicheck_plugin", return_value=(plugin, "")),
+        patch.object(
+            mod,
+            "_first_available_tool",
+            side_effect=lambda *names: f"/usr/bin/{names[0]}",
+        ),
+        patch.object(mod.subprocess, "run", side_effect=fake_run),
+        patch.object(mod, "SHARED_LIB_SUFFIX", ".so"),
     ):
         result = mod.run_abicheck_full(
-            plugin, plugin, v1_h, v2_h, case, tmp_path, case_dir=case_dir,
-            v1_src=v1_src, v2_src=v2_src, timeout=177,
+            plugin,
+            plugin,
+            v1_h,
+            v2_h,
+            case,
+            tmp_path,
+            case_dir=case_dir,
+            v1_src=v1_src,
+            v2_src=v2_src,
+            timeout=177,
         )
 
     assert result.verdict == "BREAKING"
@@ -409,7 +448,9 @@ def test_abicheck_full_case115_dump_pins_the_discovered_clang_binary(tmp_path):
             out = build / case
             out.mkdir(parents=True, exist_ok=True)
             (out / f"lib{version}.so").touch()
-            injection_arg = next(x for x in commands[-2] if x.startswith("-DCMAKE_PROJECT_INCLUDE="))
+            injection_arg = next(
+                x for x in commands[-2] if x.startswith("-DCMAKE_PROJECT_INCLUDE=")
+            )
             injection = Path(injection_arg.split("=", 1)[1]).read_text()
             pack = Path(injection.split("out=", 1)[1].split("'", 1)[0].split()[0])
             _write_plugin_pack(pack, version, v1_src if version == "v1" else v2_src)
@@ -420,16 +461,28 @@ def test_abicheck_full_case115_dump_pins_the_discovered_clang_binary(tmp_path):
         return Result()
 
     build_root = tmp_path / "bench-build"
-    with patch.object(mod, "_HAS_ABICHECK", True), patch.object(
-        mod, "BUILD_DIR", build_root
-    ), patch.object(mod, "_find_or_build_abicheck_plugin", return_value=(plugin, "")), patch.object(
-        mod, "_first_available_tool", side_effect=lambda *names: f"/usr/bin/{names[0]}"
-    ), patch.object(mod.subprocess, "run", side_effect=fake_run), patch.object(
-        mod, "SHARED_LIB_SUFFIX", ".so"
+    with (
+        patch.object(mod, "_HAS_ABICHECK", True),
+        patch.object(mod, "BUILD_DIR", build_root),
+        patch.object(mod, "_find_or_build_abicheck_plugin", return_value=(plugin, "")),
+        patch.object(
+            mod,
+            "_first_available_tool",
+            side_effect=lambda *names: f"/usr/bin/{names[0]}",
+        ),
+        patch.object(mod.subprocess, "run", side_effect=fake_run),
+        patch.object(mod, "SHARED_LIB_SUFFIX", ".so"),
     ):
         mod.run_abicheck_full(
-            plugin, plugin, v1_h, v2_h, case, tmp_path, case_dir=case_dir,
-            v1_src=v1_src, v2_src=v2_src,
+            plugin,
+            plugin,
+            v1_h,
+            v2_h,
+            case,
+            tmp_path,
+            case_dir=case_dir,
+            v1_src=v1_src,
+            v2_src=v2_src,
         )
 
     dumps = [cmd for cmd in commands if "dump" in cmd]
@@ -526,18 +579,31 @@ def test_build_plugin_side_does_not_force_include_header(tmp_path):
         commands.append([str(x) for x in cmd])
         return Result()
 
-    with patch.object(
-        mod, "_first_available_tool", side_effect=lambda *names: f"/usr/bin/{names[0]}"
-    ), patch.object(mod.subprocess, "run", side_effect=fake_run), patch.object(
-        mod, "_find_cmake_lib", return_value=None
+    with (
+        patch.object(
+            mod,
+            "_first_available_tool",
+            side_effect=lambda *names: f"/usr/bin/{names[0]}",
+        ),
+        patch.object(mod.subprocess, "run", side_effect=fake_run),
+        patch.object(mod, "_find_cmake_lib", return_value=None),
     ):
         mod._build_plugin_side(
-            case_dir, case, "v1", v1_src, v1_src, v1_h, plugin, root, 90,
+            case_dir,
+            case,
+            "v1",
+            v1_src,
+            v1_src,
+            v1_h,
+            plugin,
+            root,
+            90,
         )
 
     injection = root / "plugin_flags_v1.cmake"
     assert injection.exists()
     assert "-include" not in injection.read_text()
+
 
 def test_default_tools_include_both_abicheck_lanes():
     mod = _load_benchmark()
@@ -558,6 +624,7 @@ def test_run_abidiff_skip_when_missing(tmp_path):
 
 
 # ── ToolResult dataclass ──────────────────────────────────────────────────────
+
 
 def test_tool_result_defaults():
     mod = _load_benchmark()
@@ -580,11 +647,31 @@ class _FakeTool:
 def test_collect_metadata_shape_and_accuracy():
     mod = _load_benchmark()
     results = [
-        {"case": "case01", "expected": "BREAKING", "abicheck": "BREAKING", "abicheck_ms": 5},
-        {"case": "case02", "expected": "COMPATIBLE", "abicheck": "COMPATIBLE", "abicheck_ms": 4},
-        {"case": "case03", "expected": "BREAKING", "abicheck": "COMPATIBLE", "abicheck_ms": 6},
+        {
+            "case": "case01",
+            "expected": "BREAKING",
+            "abicheck": "BREAKING",
+            "abicheck_ms": 5,
+        },
+        {
+            "case": "case02",
+            "expected": "COMPATIBLE",
+            "abicheck": "COMPATIBLE",
+            "abicheck_ms": 4,
+        },
+        {
+            "case": "case03",
+            "expected": "BREAKING",
+            "abicheck": "COMPATIBLE",
+            "abicheck_ms": 6,
+        },
         # SKIP rows must not be scored.
-        {"case": "case04", "expected": "BREAKING", "abicheck": "SKIP", "abicheck_ms": 0},
+        {
+            "case": "case04",
+            "expected": "BREAKING",
+            "abicheck": "SKIP",
+            "abicheck_ms": 0,
+        },
     ]
     meta = mod._collect_metadata(results, [_FakeTool()], "pinned74")
 
@@ -596,8 +683,8 @@ def test_collect_metadata_shape_and_accuracy():
     assert meta["results"] is results
 
     acc = meta["accuracy"]["abicheck"]
-    assert acc["scored"] == 3          # SKIP excluded
-    assert acc["correct"] == 2          # case03 wrong
+    assert acc["scored"] == 3  # SKIP excluded
+    assert acc["correct"] == 2  # case03 wrong
     assert acc["pct"] == round(100 * 2 / 3, 1)
 
 
@@ -631,7 +718,10 @@ def test_source_enrichment_match_only_credits_abicheck_full():
     # COMPATIBLE_WITH_RISK transition regardless of case would silently hide
     # a genuine future over-calling regression from the FP count.
     assert not mod._is_source_enrichment_match(
-        "case999_hypothetical_new_case", "abicheck_full", "COMPATIBLE", "COMPATIBLE_WITH_RISK"
+        "case999_hypothetical_new_case",
+        "abicheck_full",
+        "COMPATIBLE",
+        "COMPATIBLE_WITH_RISK",
     )
 
 
@@ -639,7 +729,11 @@ def test_source_enrichment_credited_in_accuracy_fp_and_coverage():
     mod = _load_benchmark()
     known_case = next(iter(mod._SOURCE_ENRICHMENT_CASES))
     results = [
-        {"case": known_case, "expected": "COMPATIBLE", "abicheck_full": "COMPATIBLE_WITH_RISK"},
+        {
+            "case": known_case,
+            "expected": "COMPATIBLE",
+            "abicheck_full": "COMPATIBLE_WITH_RISK",
+        },
     ]
     correct, scored = mod._accuracy(results, "abicheck_full")
     assert (correct, scored) == (1, 1)
@@ -677,7 +771,11 @@ def test_freeze_tools_merges_with_existing_frozen_data(tmp_path):
     out = tmp_path / "frozen.json"
 
     dumper_results = [
-        {"case": "case01_symbol_removal", "abicc_dumper": "BREAKING", "abicc_dumper_ms": 100},
+        {
+            "case": "case01_symbol_removal",
+            "abicc_dumper": "BREAKING",
+            "abicc_dumper_ms": 100,
+        },
     ]
     mod._freeze_tools(dumper_results, ["abicc_dumper"], out)
 
@@ -704,15 +802,18 @@ def test_freeze_tools_overwrites_only_its_own_tool_columns(tmp_path):
 
     mod._freeze_tools(
         [{"case": "case01", "abicc_xml": "COMPATIBLE", "abicc_xml_ms": 1}],
-        ["abicc_xml"], out,
+        ["abicc_xml"],
+        out,
     )
     mod._freeze_tools(
         [{"case": "case01", "abicc_dumper": "BREAKING", "abicc_dumper_ms": 2}],
-        ["abicc_dumper"], out,
+        ["abicc_dumper"],
+        out,
     )
     mod._freeze_tools(
         [{"case": "case01", "abicc_dumper": "TIMEOUT", "abicc_dumper_ms": 3}],
-        ["abicc_dumper"], out,
+        ["abicc_dumper"],
+        out,
     )
 
     entry = json.loads(out.read_text())["results_by_case"]["case01"]
@@ -729,19 +830,24 @@ def test_freeze_tools_discards_stale_cache_instead_of_merging(tmp_path):
     mod = _load_benchmark()
     out = tmp_path / "frozen.json"
 
-    out.write_text(json.dumps({
-        "schema": "abicheck-frozen-competitor/1.0",
-        "ground_truth_sha256": "stale-digest-from-an-older-catalog",
-        "tools": ["abicc_xml"],
-        "results_by_case": {
-            "case01": {"abicc_xml": "COMPATIBLE", "abicc_xml_ms": 1},
-        },
-    }))
+    out.write_text(
+        json.dumps(
+            {
+                "schema": "abicheck-frozen-competitor/1.0",
+                "ground_truth_sha256": "stale-digest-from-an-older-catalog",
+                "tools": ["abicc_xml"],
+                "results_by_case": {
+                    "case01": {"abicc_xml": "COMPATIBLE", "abicc_xml_ms": 1},
+                },
+            }
+        )
+    )
 
     with patch.object(mod, "_ground_truth_digest", return_value="current-digest"):
         mod._freeze_tools(
             [{"case": "case01", "abicc_dumper": "BREAKING", "abicc_dumper_ms": 2}],
-            ["abicc_dumper"], out,
+            ["abicc_dumper"],
+            out,
         )
 
     frozen = json.loads(out.read_text())
@@ -764,7 +870,8 @@ def test_merge_frozen_into_results_rejects_stale_digest():
         "tools": ["abicc_xml"],
         "results_by_case": {
             "case187_public_struct_private_field_type": {
-                "abicc_xml": "SKIP", "abicc_xml_ms": 0,
+                "abicc_xml": "SKIP",
+                "abicc_xml_ms": 0,
             },
         },
     }
@@ -801,10 +908,18 @@ def test_run_suite_rejects_freeze_with_cases_filter():
     stale rows for every untouched case, then stamp the whole file as if it
     were all freshly generated -- refuse before doing any case processing."""
     mod = _load_benchmark()
-    with patch("sys.argv", [
-        "benchmark_comparison.py", "--cases", "case01",
-        "--tools", "abicc_xml", "--freeze", "abicc_xml",
-    ]):
+    with patch(
+        "sys.argv",
+        [
+            "benchmark_comparison.py",
+            "--cases",
+            "case01",
+            "--tools",
+            "abicc_xml",
+            "--freeze",
+            "abicc_xml",
+        ],
+    ):
         args = mod.parse_args()
     with pytest.raises(SystemExit):
         mod.run_suite(args)
@@ -812,10 +927,18 @@ def test_run_suite_rejects_freeze_with_cases_filter():
 
 def test_run_suite_rejects_freeze_with_pinned_suite():
     mod = _load_benchmark()
-    with patch("sys.argv", [
-        "benchmark_comparison.py", "--suite", "pinned74",
-        "--tools", "abicc_xml", "--freeze", "abicc_xml",
-    ]):
+    with patch(
+        "sys.argv",
+        [
+            "benchmark_comparison.py",
+            "--suite",
+            "pinned74",
+            "--tools",
+            "abicc_xml",
+            "--freeze",
+            "abicc_xml",
+        ],
+    ):
         args = mod.parse_args()
     with pytest.raises(SystemExit):
         mod.run_suite(args)

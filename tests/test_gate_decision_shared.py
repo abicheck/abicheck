@@ -86,8 +86,10 @@ _SEVERITY_CONFIGS: list[SeverityConfig] = [
 
 
 def _result(changes: list[Change]) -> DiffResult:
-    verdict = Verdict.BREAKING if any(c.kind == ChangeKind.FUNC_REMOVED for c in changes) else (
-        Verdict.COMPATIBLE if changes else Verdict.NO_CHANGE
+    verdict = (
+        Verdict.BREAKING
+        if any(c.kind == ChangeKind.FUNC_REMOVED for c in changes)
+        else (Verdict.COMPATIBLE if changes else Verdict.NO_CHANGE)
     )
     return DiffResult(
         old_version="1.0",
@@ -107,7 +109,9 @@ def _html_gate(html: str) -> tuple[bool, int | None, frozenset[str]]:
     categories_match = re.search(r"Blocked by: (.*?)</div>", html[match.start() :])
     categories: frozenset[str] = frozenset()
     if categories_match:
-        categories = frozenset(re.findall(r"<code>(.*?)</code>", categories_match.group(1)))
+        categories = frozenset(
+            re.findall(r"<code>(.*?)</code>", categories_match.group(1))
+        )
     return passed, exit_code, categories
 
 
@@ -131,13 +135,13 @@ class TestGateDecisionComputedOnce:
             expected.blocking_categories
         )
 
-        sarif_report = json.loads(
-            to_sarif_str(result, severity_config=severity_config)
-        )
+        sarif_report = json.loads(to_sarif_str(result, severity_config=severity_config))
         sarif_gate = sarif_report["runs"][0]["properties"]["severityGate"]
         assert sarif_gate["exitCode"] == expected.exit_code
         assert sarif_gate["blocking"] == expected.blocking
-        assert set(sarif_gate["blockingCategories"]) == set(expected.blocking_categories)
+        assert set(sarif_gate["blockingCategories"]) == set(
+            expected.blocking_categories
+        )
 
         html = generate_html_report(
             result,
@@ -150,7 +154,9 @@ class TestGateDecisionComputedOnce:
         assert html_passed == (not expected.blocking)
         assert html_exit_code == expected.exit_code
         assert html_categories == (
-            frozenset(expected.blocking_categories) if expected.blocking else frozenset()
+            frozenset(expected.blocking_categories)
+            if expected.blocking
+            else frozenset()
         )
 
     def test_gate_decision_for_result_is_none_without_severity_config(self) -> None:

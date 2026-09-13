@@ -145,7 +145,7 @@ class CanonicalEntity:
                 raise ValueError(
                     f"{name} is {fact.status.value} but carries no value; "
                     "confirmed absence is spelled with this field's own "
-                    "empty value (\"\" or ()), never None"
+                    'empty value ("" or ()), never None'
                 )
         cv = self.cv_qualification
         # `is_present`, not `status is PRESENT`: `PARTIAL` is usable evidence

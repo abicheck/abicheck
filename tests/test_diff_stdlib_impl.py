@@ -108,7 +108,9 @@ class TestDetectorFindings:
         assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED in RISK_KINDS
         assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
 
-    def test_stdlib_implementation_change_with_public_embedding_is_breaking(self) -> None:
+    def test_stdlib_implementation_change_with_public_embedding_is_breaking(
+        self,
+    ) -> None:
         old = _snap("1", stdlib=StdlibFamily.LIBSTDCXX, types=[_embed_stdlib_record()])
         new = _snap("2", stdlib=StdlibFamily.LIBCXX, types=[_embed_stdlib_record()])
         result = compare(old, new)
@@ -120,7 +122,9 @@ class TestDetectorFindings:
         assert finding.effective_verdict is Verdict.BREAKING
         assert result.verdict is Verdict.BREAKING
 
-    def test_policy_override_does_not_disagree_with_effective_verdict(self, tmp_path) -> None:
+    def test_policy_override_does_not_disagree_with_effective_verdict(
+        self, tmp_path
+    ) -> None:
         old = _snap("1", stdlib=StdlibFamily.LIBSTDCXX, types=[_embed_stdlib_record()])
         new = _snap("2", stdlib=StdlibFamily.LIBCXX, types=[_embed_stdlib_record()])
         finding = next(
@@ -146,11 +150,13 @@ class TestDetectorFindings:
             visibility=Visibility.PUBLIC,
         )
         old = _snap(
-            "1", stdlib=StdlibFamily.LIBSTDCXX,
+            "1",
+            stdlib=StdlibFamily.LIBSTDCXX,
             types=[private_owner, public_owner],
         )
         new = _snap(
-            "2", stdlib=StdlibFamily.LIBCXX,
+            "2",
+            stdlib=StdlibFamily.LIBCXX,
             types=[private_owner, public_owner],
         )
         old.functions.append(public_fn)
@@ -186,11 +192,13 @@ class TestDetectorFindings:
             visibility=Visibility.PUBLIC,
         )
         old = _snap(
-            "1", stdlib=StdlibFamily.LIBSTDCXX,
+            "1",
+            stdlib=StdlibFamily.LIBSTDCXX,
             types=[impl, public_owner],
         )
         new = _snap(
-            "2", stdlib=StdlibFamily.LIBCXX,
+            "2",
+            stdlib=StdlibFamily.LIBCXX,
             types=[impl, public_owner],
         )
         old.functions.append(public_fn)
@@ -206,7 +214,9 @@ class TestDetectorFindings:
         assert finding.effective_verdict is None
         assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
 
-    def test_same_size_owner_with_filtered_stdlib_layout_change_is_breaking(self) -> None:
+    def test_same_size_owner_with_filtered_stdlib_layout_change_is_breaking(
+        self,
+    ) -> None:
         owner = _embed_stdlib_record(size_bits=192)
         old_std = RecordType(
             name="std::string",
@@ -711,8 +721,10 @@ class TestPublicByValueClosure:
             name="app::Widget", kind="class", size_bits=64, bases=["Inner"]
         )
         fn = Function(
-            name="make", mangled="_Z4makev",
-            return_type="app::Widget", visibility=Visibility.PUBLIC,
+            name="make",
+            mangled="_Z4makev",
+            return_type="app::Widget",
+            visibility=Visibility.PUBLIC,
         )
         old, new = self._pair(types=[widget, inner], functions=[fn])
         result, finding = self._finding(old, new)
@@ -724,7 +736,9 @@ class TestPublicByValueClosure:
         # typedef target to find the embedding behind the alias.
         inner = self._embedding("Buffer")
         fn = Function(
-            name="take", mangled="_Z4takev", return_type="void",
+            name="take",
+            mangled="_Z4takev",
+            return_type="void",
             params=[Param(name="b", type="BufferAlias")],
             visibility=Visibility.PUBLIC,
         )
@@ -738,8 +752,10 @@ class TestPublicByValueClosure:
         # A public global variable is also a public root that seeds the closure.
         inner = self._embedding("Buffer")
         var = Variable(
-            name="g_buf", mangled="g_buf",
-            type="Buffer", visibility=Visibility.PUBLIC,
+            name="g_buf",
+            mangled="g_buf",
+            type="Buffer",
+            visibility=Visibility.PUBLIC,
         )
         old, new = self._pair(types=[inner], variables=[var])
         _, finding = self._finding(old, new)
@@ -751,12 +767,16 @@ class TestPublicByValueClosure:
         # which must not seed the by-value closure. So no escalation.
         inner = self._embedding("Buffer")
         public_var = Variable(
-            name="g_flag", mangled="g_flag",
-            type="int", visibility=Visibility.PUBLIC,
+            name="g_flag",
+            mangled="g_flag",
+            type="int",
+            visibility=Visibility.PUBLIC,
         )
         hidden_fn = Function(
-            name="hidden", mangled="_Z6hiddenv",
-            return_type="Buffer", visibility=Visibility.HIDDEN,
+            name="hidden",
+            mangled="_Z6hiddenv",
+            return_type="Buffer",
+            visibility=Visibility.HIDDEN,
         )
         old, new = self._pair(
             types=[inner], functions=[hidden_fn], variables=[public_var]
@@ -774,7 +794,9 @@ class TestPublicByValueClosure:
         # the by-value-reachable embedding.
         inner = self._embedding("Inner")
         widget = RecordType(
-            name="Widget", kind="class", size_bits=64,
+            name="Widget",
+            kind="class",
+            size_bits=64,
             bases=["Inner"],
             fields=[
                 TypeField(name="dup", type="Inner", offset_bits=0),
@@ -783,7 +805,9 @@ class TestPublicByValueClosure:
             ],
         )
         fn = Function(
-            name="make", mangled="_Z4makev", return_type="Widget",
+            name="make",
+            mangled="_Z4makev",
+            return_type="Widget",
             params=[Param(name="anon", type="")],
             visibility=Visibility.PUBLIC,
         )

@@ -36,6 +36,7 @@ DWARF *inside* the shared object. macOS emits a separate `.dSYM` bundle
 and Windows/MSVC emits a PDB (covered by `tests/test_msvc_pdb_e2e.py`),
 so extending this lane to those platforms is tracked under G1 separately.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -129,9 +130,19 @@ def _compile(src: Path, out: Path) -> None:
     if comp is None:
         pytest.skip("no C/C++ compiler available for castxml-free lane")
     res = subprocess.run(
-        [comp, "-shared", "-fPIC", "-g", "-Og", "-fvisibility=default",
-         "-o", str(out), str(src)],
-        capture_output=True, text=True,
+        [
+            comp,
+            "-shared",
+            "-fPIC",
+            "-g",
+            "-Og",
+            "-fvisibility=default",
+            "-o",
+            str(out),
+            str(src),
+        ],
+        capture_output=True,
+        text=True,
     )
     if res.returncode != 0:
         pytest.fail(f"compile failed for {src.name}: {res.stderr[:400]}")
@@ -155,7 +166,8 @@ def test_subset_entries_are_well_formed() -> None:
 
 @pytest.mark.parametrize("case_name", CASTXML_FREE_CASES)
 def test_castxml_free_verdict_matches_ground_truth(
-    case_name: str, tmp_path: Path,
+    case_name: str,
+    tmp_path: Path,
 ) -> None:
     entry = _GT[case_name]
     expected = entry["expected"]

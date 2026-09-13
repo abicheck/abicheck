@@ -1,4 +1,5 @@
 """Unit tests for abicheck.resolver module — targeting uncovered lines."""
+
 from __future__ import annotations
 
 import sys
@@ -26,6 +27,7 @@ from abicheck.resolver import (
 # _merge_rpaths
 # ---------------------------------------------------------------------------
 
+
 class TestMergeRpaths:
     def test_both_empty(self):
         assert _merge_rpaths([], []) == []
@@ -48,6 +50,7 @@ class TestMergeRpaths:
 # _detect_target_triple
 # ---------------------------------------------------------------------------
 
+
 class TestDetectTargetTriple:
     def test_x86_64(self):
         assert _detect_target_triple("ld-linux-x86-64.so.2") == "x86_64-linux-gnu"
@@ -59,7 +62,9 @@ class TestDetectTargetTriple:
         assert _detect_target_triple("") == "x86_64-linux-gnu"
 
     def test_full_path(self):
-        assert _detect_target_triple("/lib64/ld-linux-x86-64.so.2") == "x86_64-linux-gnu"
+        assert (
+            _detect_target_triple("/lib64/ld-linux-x86-64.so.2") == "x86_64-linux-gnu"
+        )
 
     def test_unknown_fallback(self):
         assert _detect_target_triple("unknown") == "x86_64-linux-gnu"
@@ -68,6 +73,7 @@ class TestDetectTargetTriple:
 # ---------------------------------------------------------------------------
 # _default_dirs_for_triple
 # ---------------------------------------------------------------------------
+
 
 class TestDefaultDirsForTriple:
     def test_x86_64_has_lib64(self):
@@ -88,6 +94,7 @@ class TestDefaultDirsForTriple:
 # _platform_token_for_triple / _lib_token_for_triple
 # ---------------------------------------------------------------------------
 
+
 class TestTokenHelpers:
     def test_platform_token_x86_64(self):
         assert _platform_token_for_triple("x86_64-linux-gnu") == "x86_64"
@@ -106,6 +113,7 @@ class TestTokenHelpers:
 # _expand_rpath
 # ---------------------------------------------------------------------------
 
+
 class TestExpandRpath:
     def test_origin_replacement(self):
         result = _expand_rpath("$ORIGIN/../lib", Path("/usr/bin"), "")
@@ -116,13 +124,13 @@ class TestExpandRpath:
         assert result == ["/opt/app/lib"]
 
     def test_lib_replacement(self):
-        result = _expand_rpath("/usr/$LIB", Path("/usr/bin"), "",
-                               lib_token="lib64")
+        result = _expand_rpath("/usr/$LIB", Path("/usr/bin"), "", lib_token="lib64")
         assert result == ["/usr/lib64"]
 
     def test_platform_replacement(self):
-        result = _expand_rpath("/usr/$PLATFORM", Path("/usr/bin"), "",
-                               platform_token="x86_64")
+        result = _expand_rpath(
+            "/usr/$PLATFORM", Path("/usr/bin"), "", platform_token="x86_64"
+        )
         assert result == ["/usr/x86_64"]
 
     def test_colon_separated(self):
@@ -146,6 +154,7 @@ class TestExpandRpath:
 # ---------------------------------------------------------------------------
 # _find_resolved_key
 # ---------------------------------------------------------------------------
+
 
 class TestFindResolvedKey:
     def _make_graph(self):
@@ -189,6 +198,7 @@ class TestFindResolvedKey:
 # ---------------------------------------------------------------------------
 # _build_search_order
 # ---------------------------------------------------------------------------
+
 
 class TestBuildSearchOrder:
     def test_with_rpath_no_runpath(self):
@@ -308,6 +318,7 @@ class TestBuildSearchOrder:
 # resolve_dependencies — integration tests with mocked parse_elf_metadata
 # ---------------------------------------------------------------------------
 
+
 class TestResolveDependencies:
     def test_binary_not_found(self, tmp_path):
         """Non-existent binary returns empty graph."""
@@ -339,13 +350,20 @@ class TestResolveDependencies:
         libfoo.write_bytes(b"\x7fELF_stub_foo")
 
         root_meta = ElfMetadata(
-            soname="app", needed=["libfoo.so.1"], rpath="", runpath="",
+            soname="app",
+            needed=["libfoo.so.1"],
+            rpath="",
+            runpath="",
         )
         foo_meta = ElfMetadata(
-            soname="libfoo.so.1", needed=[], rpath="", runpath="",
+            soname="libfoo.so.1",
+            needed=[],
+            rpath="",
+            runpath="",
         )
 
         call_count = 0
+
         def fake_parse(path):
             nonlocal call_count
             call_count += 1
@@ -368,7 +386,10 @@ class TestResolveDependencies:
         binary.write_bytes(b"\x7fELF_stub")
 
         root_meta = ElfMetadata(
-            soname="app", needed=["libmissing.so.1"], rpath="", runpath="",
+            soname="app",
+            needed=["libmissing.so.1"],
+            rpath="",
+            runpath="",
         )
 
         with patch("abicheck.resolver.parse_elf_metadata", return_value=root_meta):
@@ -378,7 +399,9 @@ class TestResolveDependencies:
         assert len(result.unresolved) == 1
         assert result.unresolved[0][1] == "libmissing.so.1"
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="RPATH resolution is POSIX-only")
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="RPATH resolution is POSIX-only"
+    )
     def test_binary_with_rpath_propagation(self, tmp_path):
         """RPATH propagation through dependency chain (no RUNPATH)."""
         binary = tmp_path / "app"
@@ -411,6 +434,7 @@ class TestResolveDependencies:
         )
 
         call_count = 0
+
         def fake_parse(path):
             nonlocal call_count
             call_count += 1
@@ -443,12 +467,19 @@ class TestResolveDependencies:
 
         metas = {
             "root": ElfMetadata(soname="app", needed=["liba.so"], rpath="", runpath=""),
-            "liba": ElfMetadata(soname="liba.so", needed=["libb.so"], rpath="", runpath=""),
-            "libb": ElfMetadata(soname="libb.so", needed=["libc_custom.so"], rpath="", runpath=""),
-            "libc": ElfMetadata(soname="libc_custom.so", needed=[], rpath="", runpath=""),
+            "liba": ElfMetadata(
+                soname="liba.so", needed=["libb.so"], rpath="", runpath=""
+            ),
+            "libb": ElfMetadata(
+                soname="libb.so", needed=["libc_custom.so"], rpath="", runpath=""
+            ),
+            "libc": ElfMetadata(
+                soname="libc_custom.so", needed=[], rpath="", runpath=""
+            ),
         }
 
         call_count = 0
+
         def fake_parse(path):
             nonlocal call_count
             call_count += 1
@@ -470,6 +501,7 @@ class TestResolveDependencies:
 # ---------------------------------------------------------------------------
 # resolve_dependencies — max_file_size (ADR-021b D3)
 # ---------------------------------------------------------------------------
+
 
 class TestResolveDependenciesMaxFileSize:
     def test_no_limit_by_default(self, tmp_path):
@@ -504,7 +536,10 @@ class TestResolveDependenciesMaxFileSize:
         libfoo.write_bytes(b"\x7fELF" + b"\x00" * 4096)  # oversized dependency
 
         root_meta = ElfMetadata(
-            soname="app", needed=["libfoo.so.1"], rpath="", runpath="",
+            soname="app",
+            needed=["libfoo.so.1"],
+            rpath="",
+            runpath="",
         )
         foo_meta = ElfMetadata(soname="libfoo.so.1", needed=[], rpath="", runpath="")
 
@@ -520,5 +555,7 @@ class TestResolveDependenciesMaxFileSize:
         with patch("abicheck.resolver.parse_elf_metadata", side_effect=fake_parse):
             with pytest.raises(ValueError, match="exceeds limit"):
                 resolve_dependencies(
-                    binary, search_paths=[lib_dir], max_file_size=1024,
+                    binary,
+                    search_paths=[lib_dir],
+                    max_file_size=1024,
                 )

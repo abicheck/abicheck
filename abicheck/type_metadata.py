@@ -20,6 +20,7 @@ information without knowing the source format.
 
 See ADR-007 for design rationale.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ from .model.dwarf_facts import EnumInfo, StructLayout
 @dataclass
 class FuncProto:
     """Function prototype extracted from debug info (BTF/CTF)."""
+
     name: str
     return_type: str
     params: list[tuple[str, str]]  # [(param_name, param_type), ...]

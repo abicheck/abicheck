@@ -170,6 +170,7 @@ def run_layout_tool(
     force_cpp, force_cpp20, _explicit_c, cc_id = _resolve_clang_langmode(
         lang, resolved_headers, clang_bin, gcc_options, gcc_option_tokens
     )
+
     # Re-probe the same host system-include dirs `dumper._clang_header_dump`
     # injects (castxml<->clang parity: libstdc++/libc headers a hermetic
     # -isystem doesn't already cover). Without this, a header set that only
@@ -196,9 +197,7 @@ def run_layout_tool(
     )
 
     agg_ext = ".hpp" if force_cpp else ".h"
-    with tempfile.NamedTemporaryFile(
-        suffix=agg_ext, mode="w", delete=False
-    ) as agg:
+    with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
         agg_path = Path(agg.name)
     active_headers = list(resolved_headers)
 
@@ -426,7 +425,11 @@ def apply_layout_facts(
     new_types = []
     changed = False
     for t in snapshot.types:
-        facts = by_name.get(t.qualified_name or t.name) if not t.is_template_pattern else None
+        facts = (
+            by_name.get(t.qualified_name or t.name)
+            if not t.is_template_pattern
+            else None
+        )
         if facts is None:
             new_types.append(t)
             continue
@@ -550,8 +553,8 @@ def attach_clang_layout(
             gcc_option_tokens=compile.gcc_option_tokens if compile is not None else (),
         )
         eff_includes = list(extra_includes) + inc_extra
-        eff_tokens = (
-            (compile.gcc_option_tokens if compile is not None else ()) + tuple(deferred)
+        eff_tokens = (compile.gcc_option_tokens if compile is not None else ()) + tuple(
+            deferred
         )
     except (SnapshotError, ValidationError):
         return snap

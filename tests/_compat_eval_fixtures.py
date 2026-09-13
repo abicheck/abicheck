@@ -64,5 +64,3 @@ def resolve(
     return resolve_compatibility_evaluation_config(
         front_end=front_end, explicit=explicit, project=project
     )
-
-

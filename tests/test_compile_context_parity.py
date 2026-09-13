@@ -1232,7 +1232,11 @@ def test_compare_threads_compile_context_for_set_inputs(
     ("config_yaml", "attr", "expected"),
     [
         ("compile:\n  compiler: /custom/clang\n", "gcc_path", "/custom/clang"),
-        ("compile:\n  compiler: aarch64-linux-gnu-\n", "gcc_prefix", "aarch64-linux-gnu-"),
+        (
+            "compile:\n  compiler: aarch64-linux-gnu-\n",
+            "gcc_prefix",
+            "aarch64-linux-gnu-",
+        ),
         ("compile:\n  options: [-DX=1]\n", "gcc_option_tokens", ("-DX=1",)),
     ],
 )
@@ -1694,8 +1698,13 @@ def test_inline_source_side_keeps_its_own_configured_frontend(
     result = CliRunner().invoke(
         main,
         [
-            "compare", str(old_so), str(new_so), "-H", str(header),
-            "--sources", f"old={src}",
+            "compare",
+            str(old_so),
+            str(new_so),
+            "-H",
+            str(header),
+            "--sources",
+            f"old={src}",
         ],
     )
     assert len(seen) == 2, result.output
@@ -1733,9 +1742,15 @@ def test_project_config_frontend_never_marked_explicit_on_inline_source_sides(
     res = CliRunner().invoke(
         main,
         [
-            "compare", str(old_so), str(new_so), "-H", str(header),
-            "--sources", f"old={src}",
-            "--config", str(cfg),
+            "compare",
+            str(old_so),
+            str(new_so),
+            "-H",
+            str(header),
+            "--sources",
+            f"old={src}",
+            "--config",
+            str(cfg),
         ],
     )
     assert len(seen) == 2, res.output

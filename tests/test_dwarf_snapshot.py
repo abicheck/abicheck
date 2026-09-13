@@ -1,4 +1,5 @@
 """Tests for ADR-003 DwarfSnapshotBuilder and data source architecture."""
+
 from __future__ import annotations
 
 import subprocess
@@ -25,6 +26,7 @@ from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolT
 from abicheck.model import Visibility
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _elf_meta_with_symbols(names: list[str]) -> ElfMetadata:
     """Create ElfMetadata with exported symbols."""
@@ -65,6 +67,7 @@ def _dwarf_adv() -> AdvancedDwarfMetadata:
 
 
 # ── _strip_type_decorators ──────────────────────────────────────────────────
+
 
 class TestStripTypeDecorators:
     def test_pointer(self) -> None:
@@ -112,6 +115,7 @@ class TestStripTypeDecorators:
 
 
 # ── _evaluate_location_expr ─────────────────────────────────────────────────
+
 
 class TestEvaluateLocationExpr:
     def test_empty_list(self) -> None:
@@ -225,6 +229,7 @@ class TestEvaluateLocationExpr:
 
 # ── show_data_sources ───────────────────────────────────────────────────────
 
+
 class TestShowDataSources:
     def test_all_layers(self) -> None:
         elf = _elf_meta_with_symbols(["foo", "bar"])
@@ -326,7 +331,8 @@ def _can_compile() -> bool:
     try:
         result = subprocess.run(
             [_GCC, "--version"],
-            capture_output=True, timeout=5,
+            capture_output=True,
+            timeout=5,
         )
         return result.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
@@ -378,7 +384,9 @@ static int internal_func(int x) {
         so_path = tmp_path / "libtest.so"
         result = subprocess.run(
             [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         assert result.returncode == 0, f"Compilation failed: {result.stderr}"
         return so_path
@@ -392,7 +400,10 @@ static int internal_func(int x) {
         dwarf_meta, dwarf_adv = parse_dwarf(simple_lib)
 
         snap = build_snapshot_from_dwarf(
-            simple_lib, elf_meta, dwarf_meta, dwarf_adv,
+            simple_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         assert snap.elf_only_mode is False
@@ -413,7 +424,10 @@ static int internal_func(int x) {
         dwarf_meta, dwarf_adv = parse_dwarf(simple_lib)
 
         snap = build_snapshot_from_dwarf(
-            simple_lib, elf_meta, dwarf_meta, dwarf_adv,
+            simple_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         type_names = {t.name for t in snap.types}
@@ -428,7 +442,10 @@ static int internal_func(int x) {
         dwarf_meta, dwarf_adv = parse_dwarf(simple_lib)
 
         snap = build_snapshot_from_dwarf(
-            simple_lib, elf_meta, dwarf_meta, dwarf_adv,
+            simple_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         enum_names = {e.name for e in snap.enums}
@@ -459,9 +476,19 @@ int Derived::f(int z) { return z + a0; }
 """)
         so_path = tmp_path / "libnested.so"
         result = subprocess.run(
-            [_GCC.replace("gcc", "g++"), "-shared", "-fPIC", "-g", "-std=c++17",
-             "-o", str(so_path), str(cpp)],
-            capture_output=True, text=True, timeout=30,
+            [
+                _GCC.replace("gcc", "g++"),
+                "-shared",
+                "-fPIC",
+                "-g",
+                "-std=c++17",
+                "-o",
+                str(so_path),
+                str(cpp),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         assert result.returncode == 0, f"Compilation failed: {result.stderr}"
         return so_path
@@ -504,7 +531,9 @@ int Derived::f(int z) { return z + a0; }
 
         # Single-pass invariant: every DIE's children materialized at most once.
         repeated = {k: n for k, n in counts.items() if n > 1}
-        assert not repeated, f"DIEs whose children were iterated more than once: {repeated}"
+        assert not repeated, (
+            f"DIEs whose children were iterated more than once: {repeated}"
+        )
 
     def test_snapshot_has_variables(self, simple_lib: Path) -> None:
         """DWARF snapshot should contain exported variables."""
@@ -515,7 +544,10 @@ int Derived::f(int z) { return z + a0; }
         dwarf_meta, dwarf_adv = parse_dwarf(simple_lib)
 
         snap = build_snapshot_from_dwarf(
-            simple_lib, elf_meta, dwarf_meta, dwarf_adv,
+            simple_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         var_names = {v.name for v in snap.variables}
@@ -530,7 +562,10 @@ int Derived::f(int z) { return z + a0; }
         dwarf_meta, dwarf_adv = parse_dwarf(simple_lib)
 
         snap = build_snapshot_from_dwarf(
-            simple_lib, elf_meta, dwarf_meta, dwarf_adv,
+            simple_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         add_func = next((f for f in snap.functions if f.name == "add"), None)
@@ -547,7 +582,10 @@ int Derived::f(int z) { return z + a0; }
         dwarf_meta, dwarf_adv = parse_dwarf(simple_lib)
 
         snap = build_snapshot_from_dwarf(
-            simple_lib, elf_meta, dwarf_meta, dwarf_adv,
+            simple_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         for func in snap.functions:
@@ -563,7 +601,10 @@ int Derived::f(int z) { return z + a0; }
         dwarf_meta, dwarf_adv = parse_dwarf(simple_lib)
 
         snap = build_snapshot_from_dwarf(
-            simple_lib, elf_meta, dwarf_meta, dwarf_adv,
+            simple_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         json_path = tmp_path / "snap.json"
@@ -574,6 +615,7 @@ int Derived::f(int z) { return z + a0; }
 
 
 # ── Dumper fallback chain tests ─────────────────────────────────────────────
+
 
 @pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
 class TestDumperFallbackChain:
@@ -587,7 +629,9 @@ class TestDumperFallbackChain:
         so_path = tmp_path / "libtest.so"
         subprocess.run(
             [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
-            capture_output=True, check=True, timeout=30,
+            capture_output=True,
+            check=True,
+            timeout=30,
         )
         return so_path
 
@@ -600,13 +644,22 @@ class TestDumperFallbackChain:
         # -g0 disables all debug info; -Wl,--build-id=none prevents build-id note
         subprocess.run(
             [_GCC, "-shared", "-fPIC", "-g0", "-o", str(so_path), str(c_src)],
-            capture_output=True, check=True, timeout=30,
+            capture_output=True,
+            check=True,
+            timeout=30,
         )
         # Strip all sections including debug
         subprocess.run(
-            ["strip", "--strip-all", "--remove-section=.debug*",
-             "--remove-section=.note.gnu.build-id", str(so_path)],
-            capture_output=True, check=True, timeout=10,
+            [
+                "strip",
+                "--strip-all",
+                "--remove-section=.debug*",
+                "--remove-section=.note.gnu.build-id",
+                str(so_path),
+            ],
+            capture_output=True,
+            check=True,
+            timeout=10,
         )
         return so_path
 
@@ -647,6 +700,7 @@ class TestDumperFallbackChain:
 
 # ── CLI tests ───────────────────────────────────────────────────────────────
 
+
 @pytest.fixture(scope="module")
 def _cli_help():
     """Cache `<command> --help` stdout across the help-text tests.
@@ -661,8 +715,17 @@ def _cli_help():
         key = (command, help_flag)
         if key not in cache:
             result = subprocess.run(
-                [sys.executable, "-c", "from abicheck.cli import main; main()", command, help_flag],
-                capture_output=True, text=True, encoding="utf-8", timeout=10,
+                [
+                    sys.executable,
+                    "-c",
+                    "from abicheck.cli import main; main()",
+                    command,
+                    help_flag,
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=10,
             )
             cache[key] = result.stdout
         return cache[key]
@@ -703,12 +766,22 @@ class TestCLIDwarfFlags:
         so_path = tmp_path / "libtest.so"
         subprocess.run(
             [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
-            capture_output=True, check=True, timeout=30,
+            capture_output=True,
+            check=True,
+            timeout=30,
         )
         result = subprocess.run(
-            [sys.executable, "-c", "from abicheck.cli import main; main()", "dump", str(so_path),
-             "--dry-run"],
-            capture_output=True, text=True, timeout=10,
+            [
+                sys.executable,
+                "-c",
+                "from abicheck.cli import main; main()",
+                "dump",
+                str(so_path),
+                "--dry-run",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         assert result.returncode == 0
         assert "Data sources for" in result.stdout
@@ -716,6 +789,7 @@ class TestCLIDwarfFlags:
 
 
 # ── Visibility filtering (hidden/internal symbols) ──────────────────────────
+
 
 @pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
 class TestVisibilityFiltering:
@@ -732,7 +806,9 @@ __attribute__((visibility("hidden"))) int hidden_func(int x) { return x * 2; }
         so_path = tmp_path / "libtest.so"
         subprocess.run(
             [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
-            capture_output=True, check=True, timeout=30,
+            capture_output=True,
+            check=True,
+            timeout=30,
         )
         return so_path
 
@@ -752,7 +828,10 @@ __attribute__((visibility("hidden"))) int hidden_func(int x) { return x * 2; }
         dwarf_meta, dwarf_adv = parse_dwarf(_visibility_lib)
 
         snap = build_snapshot_from_dwarf(
-            _visibility_lib, elf_meta, dwarf_meta, dwarf_adv,
+            _visibility_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         funcs_by_name = {f.name: f for f in snap.functions}
@@ -763,6 +842,7 @@ __attribute__((visibility("hidden"))) int hidden_func(int x) { return x * 2; }
 
 
 # ── Dumper _dump_macho dwarf_only warning ───────────────────────────────────
+
 
 class TestDumpMachoDwarfOnlyWarning:
     """Test that _dump_macho warns when dwarf_only=True."""
@@ -778,20 +858,26 @@ class TestDumpMachoDwarfOnlyWarning:
             warnings.simplefilter("always")
             try:
                 _dump_macho(
-                    fake_path, headers=[], extra_includes=[],
-                    version="1.0", compiler="c++", dwarf_only=True,
+                    fake_path,
+                    headers=[],
+                    extra_includes=[],
+                    version="1.0",
+                    compiler="c++",
+                    dwarf_only=True,
                 )
             except Exception as exc:  # noqa: BLE001 - Expected to fail on fake binary
                 assert str(exc)
 
         dwarf_warnings = [
-            x for x in w
+            x
+            for x in w
             if "dwarf_only=True is not supported for Mach-O" in str(x.message)
         ]
         assert len(dwarf_warnings) == 1
 
 
 # ── Dumper variables-only fallback ──────────────────────────────────────────
+
 
 @pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
 class TestDumperVariablesOnlyFallback:
@@ -804,7 +890,9 @@ class TestDumperVariablesOnlyFallback:
         so_path = tmp_path / "libtest.so"
         subprocess.run(
             [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
-            capture_output=True, check=True, timeout=30,
+            capture_output=True,
+            check=True,
+            timeout=30,
         )
 
         from abicheck.dumper import dump
@@ -830,7 +918,9 @@ class TestDumperDwarfOnlyExplicit:
         so_path = tmp_path / "libtest.so"
         subprocess.run(
             [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
-            capture_output=True, check=True, timeout=30,
+            capture_output=True,
+            check=True,
+            timeout=30,
         )
 
         from abicheck.dumper import dump
@@ -849,7 +939,9 @@ class TestDumperDwarfOnlyExplicit:
         so_path = tmp_path / "libtest.so"
         subprocess.run(
             [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
-            capture_output=True, check=True, timeout=30,
+            capture_output=True,
+            check=True,
+            timeout=30,
         )
 
         from abicheck.dumper import dump
@@ -860,8 +952,7 @@ class TestDumperDwarfOnlyExplicit:
 
         assert snap.elf_only_mode is False
         dwarf_only_warnings = [
-            x for x in w
-            if "ignoring provided headers" in str(x.message)
+            x for x in w if "ignoring provided headers" in str(x.message)
         ]
         assert len(dwarf_only_warnings) == 1
 
@@ -873,7 +964,9 @@ class TestDumperDwarfOnlyExplicit:
         # Compile WITHOUT -g (no debug info)
         subprocess.run(
             [_GCC, "-shared", "-fPIC", "-o", str(so_path), str(c_src)],
-            capture_output=True, check=True, timeout=30,
+            capture_output=True,
+            check=True,
+            timeout=30,
         )
 
         from abicheck.dumper import dump
@@ -897,7 +990,9 @@ def _has_gpp() -> bool:
         return False
     try:
         result = subprocess.run(
-            [_GPP, "--version"], capture_output=True, timeout=5,
+            [_GPP, "--version"],
+            capture_output=True,
+            timeout=5,
         )
         return result.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
@@ -1038,7 +1133,9 @@ extern "C" SensorData make_sensor(int c, int s) {
         so_path = tmp_path / "libtest.so"
         result = subprocess.run(
             [_GPP, "-shared", "-fPIC", "-g", "-o", str(so_path), str(cpp_src)],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         assert result.returncode == 0, f"Compilation failed: {result.stderr}"
         return so_path
@@ -1051,7 +1148,10 @@ extern "C" SensorData make_sensor(int c, int s) {
         elf_meta = parse_elf_metadata(cpp_lib)
         dwarf_meta, dwarf_adv = parse_dwarf(cpp_lib)
         snap = build_snapshot_from_dwarf(
-            cpp_lib, elf_meta, dwarf_meta, dwarf_adv,
+            cpp_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         func_names = {f.name for f in snap.functions}
@@ -1070,7 +1170,10 @@ extern "C" SensorData make_sensor(int c, int s) {
         elf_meta = parse_elf_metadata(cpp_lib)
         dwarf_meta, dwarf_adv = parse_dwarf(cpp_lib)
         snap = build_snapshot_from_dwarf(
-            cpp_lib, elf_meta, dwarf_meta, dwarf_adv,
+            cpp_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         type_names = {t.name for t in snap.types}
@@ -1084,7 +1187,10 @@ extern "C" SensorData make_sensor(int c, int s) {
         elf_meta = parse_elf_metadata(cpp_lib)
         dwarf_meta, dwarf_adv = parse_dwarf(cpp_lib)
         snap = build_snapshot_from_dwarf(
-            cpp_lib, elf_meta, dwarf_meta, dwarf_adv,
+            cpp_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         type_names = {t.name for t in snap.types}
@@ -1103,7 +1209,10 @@ extern "C" SensorData make_sensor(int c, int s) {
         elf_meta = parse_elf_metadata(cpp_lib)
         dwarf_meta, dwarf_adv = parse_dwarf(cpp_lib)
         snap = build_snapshot_from_dwarf(
-            cpp_lib, elf_meta, dwarf_meta, dwarf_adv,
+            cpp_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         # At least one of our typedefs should be present
@@ -1117,7 +1226,10 @@ extern "C" SensorData make_sensor(int c, int s) {
         elf_meta = parse_elf_metadata(cpp_lib)
         dwarf_meta, dwarf_adv = parse_dwarf(cpp_lib)
         snap = build_snapshot_from_dwarf(
-            cpp_lib, elf_meta, dwarf_meta, dwarf_adv,
+            cpp_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         # MAGIC may or may not be exported depending on linker, but
@@ -1132,7 +1244,10 @@ extern "C" SensorData make_sensor(int c, int s) {
         elf_meta = parse_elf_metadata(cpp_lib)
         dwarf_meta, dwarf_adv = parse_dwarf(cpp_lib)
         snap = build_snapshot_from_dwarf(
-            cpp_lib, elf_meta, dwarf_meta, dwarf_adv,
+            cpp_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
             version="2.0.0",
             language_profile="cpp",
         )
@@ -1148,7 +1263,10 @@ extern "C" SensorData make_sensor(int c, int s) {
         elf_meta = parse_elf_metadata(cpp_lib)
         dwarf_meta, dwarf_adv = parse_dwarf(cpp_lib)
         snap = build_snapshot_from_dwarf(
-            cpp_lib, elf_meta, dwarf_meta, dwarf_adv,
+            cpp_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         func_names = {f.name for f in snap.functions}
@@ -1162,7 +1280,10 @@ extern "C" SensorData make_sensor(int c, int s) {
         elf_meta = parse_elf_metadata(cpp_lib)
         dwarf_meta, dwarf_adv = parse_dwarf(cpp_lib)
         snap = build_snapshot_from_dwarf(
-            cpp_lib, elf_meta, dwarf_meta, dwarf_adv,
+            cpp_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         func_names = {f.name for f in snap.functions}
@@ -1176,7 +1297,10 @@ extern "C" SensorData make_sensor(int c, int s) {
         elf_meta = parse_elf_metadata(cpp_lib)
         dwarf_meta, dwarf_adv = parse_dwarf(cpp_lib)
         snap = build_snapshot_from_dwarf(
-            cpp_lib, elf_meta, dwarf_meta, dwarf_adv,
+            cpp_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         func_names = {f.name for f in snap.functions}
@@ -1190,7 +1314,10 @@ extern "C" SensorData make_sensor(int c, int s) {
         elf_meta = parse_elf_metadata(cpp_lib)
         dwarf_meta, dwarf_adv = parse_dwarf(cpp_lib)
         snap = build_snapshot_from_dwarf(
-            cpp_lib, elf_meta, dwarf_meta, dwarf_adv,
+            cpp_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         enum_names = {e.name for e in snap.enums}
@@ -1209,7 +1336,10 @@ extern "C" SensorData make_sensor(int c, int s) {
         elf_meta = parse_elf_metadata(cpp_lib)
         dwarf_meta, dwarf_adv = parse_dwarf(cpp_lib)
         snap = build_snapshot_from_dwarf(
-            cpp_lib, elf_meta, dwarf_meta, dwarf_adv,
+            cpp_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         type_names = {t.name for t in snap.types}
@@ -1224,7 +1354,10 @@ extern "C" SensorData make_sensor(int c, int s) {
         elf_meta = parse_elf_metadata(cpp_lib)
         dwarf_meta, dwarf_adv = parse_dwarf(cpp_lib)
         snap = build_snapshot_from_dwarf(
-            cpp_lib, elf_meta, dwarf_meta, dwarf_adv,
+            cpp_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         enum_names = {e.name for e in snap.enums}
@@ -1242,7 +1375,10 @@ extern "C" SensorData make_sensor(int c, int s) {
         elf_meta = parse_elf_metadata(cpp_lib)
         dwarf_meta, dwarf_adv = parse_dwarf(cpp_lib)
         snap = build_snapshot_from_dwarf(
-            cpp_lib, elf_meta, dwarf_meta, dwarf_adv,
+            cpp_lib,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
 
         type_names = {t.name for t in snap.types}
@@ -1256,6 +1392,7 @@ extern "C" SensorData make_sensor(int c, int s) {
 
 
 # ── CLI tests via CliRunner (in-process for coverage) ────────────────────────
+
 
 @pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
 class TestDwarfSnapshotCEnumsTypedefs:
@@ -1301,7 +1438,9 @@ my_int2_t add_typed(my_int2_t a, my_int2_t b) { return a + b; }
         so_path = tmp_path / "libtest.so"
         subprocess.run(
             [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
-            capture_output=True, check=True, timeout=30,
+            capture_output=True,
+            check=True,
+            timeout=30,
         )
         return so_path
 
@@ -1379,7 +1518,9 @@ class TestCLIInProcess:
         so_path = tmp_path / "libtest.so"
         subprocess.run(
             [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
-            capture_output=True, check=True, timeout=30,
+            capture_output=True,
+            check=True,
+            timeout=30,
         )
         return so_path
 
@@ -1408,9 +1549,17 @@ class TestCLIInProcess:
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text("debug:\n  dwarf_only: true\n")
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "dump", str(_debug_lib), "--config", str(cfg), "-o", str(out),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "dump",
+                str(_debug_lib),
+                "--config",
+                str(cfg),
+                "-o",
+                str(out),
+            ],
+        )
         assert result.exit_code == 0, result.output
         assert out.exists()
 
@@ -1435,26 +1584,38 @@ class TestCLIInProcess:
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text("debug:\n  dwarf_only: true\n")
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(_debug_lib), str(_debug_lib), "--config", str(cfg),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(_debug_lib),
+                str(_debug_lib),
+                "--config",
+                str(cfg),
+            ],
+        )
         assert result.exit_code == 0, result.output  # comparing same lib to itself
 
 
 # ── _print_data_sources direct call ──────────────────────────────────────────
+
 
 @pytest.mark.integration
 @pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
 class TestPrintDataSourcesDirect:
     """Direct call to _print_data_sources for coverage."""
 
-    def testprint_data_sources(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def testprint_data_sources(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         c_src = tmp_path / "lib.c"
         c_src.write_text("int bar(void) { return 1; }\n")
         so_path = tmp_path / "libtest.so"
         subprocess.run(
             [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
-            capture_output=True, check=True, timeout=30,
+            capture_output=True,
+            check=True,
+            timeout=30,
         )
 
         from abicheck.cli_datasources import print_data_sources
@@ -1464,13 +1625,17 @@ class TestPrintDataSourcesDirect:
         assert "Data sources for libtest.so" in out
         assert "L3 Build context:   not collected" in out
 
-    def test_print_data_sources_with_headers(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_print_data_sources_with_headers(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         c_src = tmp_path / "lib.c"
         c_src.write_text("int bar(void) { return 1; }\n")
         so_path = tmp_path / "libtest.so"
         subprocess.run(
             [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
-            capture_output=True, check=True, timeout=30,
+            capture_output=True,
+            check=True,
+            timeout=30,
         )
 
         from abicheck.cli_datasources import print_data_sources
@@ -1488,7 +1653,9 @@ class TestPrintDataSourcesDirect:
         so_path = tmp_path / "libtest.so"
         subprocess.run(
             [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
-            capture_output=True, check=True, timeout=30,
+            capture_output=True,
+            check=True,
+            timeout=30,
         )
         pack = BuildSourcePack.empty(tmp_path / "pack")
         pack.build_evidence = BuildEvidence(
@@ -1511,7 +1678,9 @@ class TestPrintDataSourcesDirect:
         so_path = tmp_path / "libtest.so"
         subprocess.run(
             [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
-            capture_output=True, check=True, timeout=30,
+            capture_output=True,
+            check=True,
+            timeout=30,
         )
         build_pack = BuildSourcePack.empty(tmp_path / "build-pack")
         build_pack.build_evidence = BuildEvidence(
@@ -1551,7 +1720,9 @@ class TestPrintDataSourcesDirect:
         so_path = tmp_path / "libtest.so"
         subprocess.run(
             [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
-            capture_output=True, check=True, timeout=30,
+            capture_output=True,
+            check=True,
+            timeout=30,
         )
         full_pack = BuildSourcePack.empty(tmp_path / "full-pack")
         full_pack.build_evidence = BuildEvidence(
@@ -1586,7 +1757,9 @@ class TestPrintDataSourcesDirect:
         so_path = tmp_path / "libtest.so"
         subprocess.run(
             [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
-            capture_output=True, check=True, timeout=30,
+            capture_output=True,
+            check=True,
+            timeout=30,
         )
 
         from abicheck.cli_datasources import print_data_sources
@@ -1598,6 +1771,7 @@ class TestPrintDataSourcesDirect:
 
 
 # ── Error handling tests ─────────────────────────────────────────────────────
+
 
 class TestDwarfSnapshotErrorHandling:
     """Test error and edge-case handling."""
@@ -1612,7 +1786,10 @@ class TestDwarfSnapshotErrorHandling:
         dwarf_adv = _dwarf_adv()
 
         snap = build_snapshot_from_dwarf(
-            fake_elf, elf_meta, dwarf_meta, dwarf_adv,
+            fake_elf,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
         # Should return an empty but valid snapshot
         assert snap.elf_only_mode is False
@@ -1627,7 +1804,10 @@ class TestDwarfSnapshotErrorHandling:
         dwarf_adv = _dwarf_adv()
 
         snap = build_snapshot_from_dwarf(
-            missing, elf_meta, dwarf_meta, dwarf_adv,
+            missing,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
         assert snap.elf_only_mode is False
         assert len(snap.functions) == 0
@@ -1642,7 +1822,10 @@ class TestDwarfSnapshotErrorHandling:
         dwarf_adv = _dwarf_adv()
 
         snap = build_snapshot_from_dwarf(
-            fake_elf, elf_meta, dwarf_meta, dwarf_adv,
+            fake_elf,
+            elf_meta,
+            dwarf_meta,
+            dwarf_adv,
         )
         assert snap is not None
         assert len(snap.functions) == 0
@@ -1668,8 +1851,13 @@ def test_build_function_is_isolated_from_elf_and_filter():
     die = SimpleNamespace(attributes={}, iter_children=lambda: iter(()))
 
     fn = builder._build_function(
-        die, CU=None, scope="", name="do_thing", mangled="do_thing",
-        qualified_name="do_thing", is_deleted=False,
+        die,
+        CU=None,
+        scope="",
+        name="do_thing",
+        mangled="do_thing",
+        qualified_name="do_thing",
+        is_deleted=False,
     )
 
     assert isinstance(fn, Function)
@@ -1677,8 +1865,8 @@ def test_build_function_is_isolated_from_elf_and_filter():
     assert fn.mangled == "do_thing"
     assert fn.return_type == "void"
     assert fn.params == []
-    assert fn.is_extern_c is True           # mangled does not start with _Z
-    assert fn.is_static is True             # DW_AT_external absent
+    assert fn.is_extern_c is True  # mangled does not start with _Z
+    assert fn.is_static is True  # DW_AT_external absent
     assert fn.is_virtual is False
     assert fn.is_pure_virtual is False
     assert fn.access == AccessLevel.PUBLIC
@@ -1704,16 +1892,21 @@ def test_build_function_reads_virtual_and_access_from_die():
 
     die = SimpleNamespace(
         attributes={
-            "DW_AT_virtuality": _av(2),            # pure virtual
-            "DW_AT_accessibility": _av(3),         # private
+            "DW_AT_virtuality": _av(2),  # pure virtual
+            "DW_AT_accessibility": _av(3),  # private
             "DW_AT_vtable_elem_location": _av(4),
             "DW_AT_external": _av(1),
         },
         iter_children=lambda: iter(()),
     )
     fn = builder._build_function(
-        die, CU=None, scope="Cls", name="m", mangled="_ZN3Cls1mEv",
-        qualified_name="Cls::m", is_deleted=False,
+        die,
+        CU=None,
+        scope="Cls",
+        name="m",
+        mangled="_ZN3Cls1mEv",
+        qualified_name="Cls::m",
+        is_deleted=False,
     )
     assert fn.name == "Cls::m"
     assert fn.is_virtual is True
@@ -1748,8 +1941,13 @@ class TestDwarfExplicitFactEligibility:
             attributes["DW_AT_explicit"] = SimpleNamespace(value=explicit_attr)
         die = SimpleNamespace(attributes=attributes, iter_children=lambda: iter(()))
         return builder._build_function(
-            die, CU=None, scope="Cls", name="m", mangled=mangled,
-            qualified_name="Cls::m", is_deleted=False,
+            die,
+            CU=None,
+            scope="Cls",
+            name="m",
+            mangled=mangled,
+            qualified_name="Cls::m",
+            is_deleted=False,
         )
 
     def test_ordinary_method_is_explicit_not_applicable(self) -> None:

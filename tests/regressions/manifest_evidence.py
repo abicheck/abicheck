@@ -408,4 +408,67 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="evidence.operand_shape_silently_unresolved",
+        invariant=(
+            "A member the caller explicitly named resolves to the same "
+            "evidence regardless of the *spelling* of the operand carrying "
+            "it -- a directory-backed ProjectSnapshot package and a loose "
+            "snapshot file (plain, gzip or zstd; flat or sectioned) are two "
+            "spellings of one stored artifact, not two evidence levels. A "
+            "resolver that recognises only some spellings must never reduce "
+            "the rest to 'absent': an operand shape silently dropped for "
+            "being unrecognised is indistinguishable, downstream, from a "
+            "library that genuinely is not there -- and an emptied OLD-side "
+            "graph then scores as a clean pass with every real cross-DSO "
+            "break unreported, which is AGENTS.md's 'absent is not removed' "
+            "read at the operand layer rather than the inventory layer."
+        ),
+        fixed_by=(1269,),
+        seed_tests=("tests/test_bundle_stored_file_members.py",),
+        public_surfaces=(),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Resolution is fixed, but the *disposition* is not: an "
+                    "unresolvable stored member is still skipped with a log "
+                    "line rather than recorded on the comparison scope, so a "
+                    "release whose members all fail to resolve can still "
+                    "report a compatible bundle verdict. Closing that is an "
+                    "ADR-065 scope-record decision (the `unsupported`/"
+                    "`failed` member states), not a resolver change, and the "
+                    "skip-not-raise contract is separately pinned by "
+                    "tests/test_cli_compare_release_evidence_preservation.py."
+                ),
+                reference="abicheck/bundle.py::build_bundle_snapshot_mixed",
+                canary_test=None,
+            ),
+            KnownGap(
+                description=(
+                    "The bundle sniff is not the first gate: "
+                    "`workflows.release_inputs.collect_release_inputs` "
+                    "filters a release directory through "
+                    "`classify.AbiJsonClassifier`, whose own 4096-byte probe "
+                    "rejects a valid uncompressed snapshot padded with more "
+                    "leading JSON whitespace than that -- so such a member is "
+                    "lost upstream of the bundle path and never reaches the "
+                    "sniff at all. Pre-existing and not introduced by the "
+                    "operand-shape fix; closing it means widening a "
+                    "tool-wide input classifier, which governs far more than "
+                    "bundle members. What is enforced instead is the "
+                    "*relationship*: everything discovery accepts, the bundle "
+                    "sniff accepts too "
+                    "(TestDiscoveryAndBundleSniffAgree), so the two cannot "
+                    "drift into the dangerous direction."
+                ),
+                reference="PR #1269 (Codex review)",
+                canary_test="tests/test_bundle_stored_file_members.py",  # TestUpstreamDiscoveryProbeBoundCanary
+            ),
+        ),
+        axes={
+            "operand_shape": ("package_directory", "snapshot_file"),
+            "compression": ("none", "gzip", "zstd", "auto"),
+            "envelope": ("flat", "sectioned"),
+        },
+    ),
 )
