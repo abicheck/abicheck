@@ -212,7 +212,11 @@ class TestMeasuredRequiresACompletedMeasurement:
         assert partial.status == "PARTIAL"
         promoted = profiles.promote_to_measured(
             partial,
-            profiles.MeasurementResult("onedal", ("onedal_core",), 9.0),
+            profiles.MeasurementResult(
+                "onedal",
+                ("onedal_core", "onedal", "onedal_parameters"),
+                9.0,
+            ),
         )
         assert promoted.status == "MEASURED"
         assert promoted.measurement["promoted_from"] == "PARTIAL"
@@ -270,3 +274,311 @@ class TestSideAcquisitionIsDeclared:
         script = profiles.prepare_script(profiles.SVS_PR_BASE)
         assert "svs_pr_base_old_src" in script
         assert '-DCMAKE_INSTALL_PREFIX="$ROOT"/svs_pr_base_old ' in script
+
+
+class TestOperandChecksRespectTheContextSplit:
+    """A context this host cannot build does not also owe its operands.
+
+    The first version of the operand check ran over every declared library
+    unconditionally, before the context split was resolved. oneDAL on a host
+    without ``icpx`` then reported ``BLOCKED`` for the two DPC++ artifacts a
+    host-only build correctly never produces -- making ``PARTIAL``, the whole
+    point of ``context_tools``, reachable only when the already-unmeasurable
+    operands happened to be present anyway (Codex review).
+
+    The class is **a precondition check that demands evidence for work it has
+    already ruled out**, so these tests build genuinely partial trees (only the
+    buildable contexts' operands) rather than the complete ones the shared
+    fixture makes -- which is exactly what hid the regression: a fixture that
+    materializes everything cannot tell a context-aware check from a blind one.
+    """
+
+    @staticmethod
+    def _materialize_contexts(profile, prepared_root: Path, contexts: set[str]):
+        """Only the operands belonging to *contexts* -- a real partial tree."""
+        prepared_root.mkdir(parents=True, exist_ok=True)
+        for side in ("old", "new"):
+            root = profile.side_root(prepared_root, side)
+            # The side tree exists even when this host can build nothing in it,
+            # so a test of the context split is not answered by the earlier
+            # "no prepared build tree" blocker instead.
+            root.mkdir(parents=True, exist_ok=True)
+            for lib in profile.l2_libraries:
+                if lib.context not in contexts:
+                    continue
+                artifact = root / lib.artifact
+                artifact.parent.mkdir(parents=True, exist_ok=True)
+                artifact.write_bytes(b"\x7fELF")
+                for header in lib.public_headers:
+                    target = root / header
+                    if target.suffix in profiles.HEADER_SUFFIXES:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_text("int x;")
+                    else:
+                        target.mkdir(parents=True, exist_ok=True)
+                        (target / "api.h").write_text("int x;")
+
+    def test_a_host_only_tree_is_partial_not_blocked(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            profiles.shutil,
+            "which",
+            lambda tool: None if tool == "icpx" else f"/usr/bin/{tool}",
+        )
+        monkeypatch.setattr(profiles, "toolchain_identity", lambda p: {})
+        self._materialize_contexts(profiles.ONEDAL, tmp_path, {"host"})
+        status = profiles.resolve_status(
+            profiles.ONEDAL, prepared_root=tmp_path, requested=True
+        )
+        assert status.status == "PARTIAL", status.reason
+        assert status.measurable_libraries == [
+            "onedal_core",
+            "onedal",
+            "onedal_parameters",
+        ]
+        assert set(status.blocked_libraries) == {
+            "onedal_dpc",
+            "onedal_parameters_dpc",
+        }
+
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
+    def test_no_unbuildable_context_is_ever_demanded(
+        self, monkeypatch, tmp_path, profile_id
+    ):
+        """The invariant, over every profile and every one of its contexts.
+
+        Generalized rather than asserted for oneDAL's `dpcpp` alone: each
+        profile is given a synthetic per-context tool for every context it
+        declares, then each context in turn is made unbuildable by withholding
+        exactly that tool while only the *other* contexts' operands exist on
+        disk. The resolver must never report the withheld context's operands as
+        a blocker, whatever the profile's shape -- the defect was in the shared
+        resolver, not in one profile.
+        """
+        profile = profiles.PROFILES[profile_id]
+        contexts = sorted({lib.context for lib in profile.l2_libraries})
+        assert contexts, profile_id
+        monkeypatch.setattr(profiles, "toolchain_identity", lambda p: {})
+        for withheld in contexts:
+            variant = dataclasses.replace(
+                profile,
+                context_tools={
+                    context: (f"fake-{context}-cc",) for context in contexts
+                },
+            )
+            absent_tool = f"fake-{withheld}-cc"
+            monkeypatch.setattr(
+                profiles.shutil,
+                "which",
+                lambda tool, _absent=absent_tool: (
+                    None if tool == _absent else f"/usr/bin/{tool}"
+                ),
+            )
+            root = tmp_path / f"without_{withheld}"
+            buildable = set(contexts) - {withheld}
+            self._materialize_contexts(variant, root, buildable)
+            status = profiles.resolve_status(
+                variant, prepared_root=root, requested=True
+            )
+            withheld_libraries = [
+                lib.name for lib in variant.l2_libraries if lib.context == withheld
+            ]
+            if not buildable:
+                # A single-context profile with its only context withheld is
+                # BLOCKED on the context, which is the honest answer -- and it
+                # must name the tool, not the operands it would have needed.
+                assert status.status == "BLOCKED", (withheld, status.reason)
+                assert status.missing_inputs == []
+                assert set(status.blocked_libraries) == set(withheld_libraries)
+                continue
+            assert status.status == "PARTIAL", (withheld, status.reason)
+            assert status.missing_inputs == []
+            for name in withheld_libraries:
+                assert name not in status.measurable_libraries, (withheld, name)
+
+
+class TestHeaderEvidenceMustBeEvidence:
+    """An empty header root is not header evidence.
+
+    ``missing_inputs`` first accepted any declared public header whose path
+    merely ``exists()``. Both SVS profiles declare a header *root*
+    (``include/svs/runtime``), so a partial extraction, an interrupted install,
+    or a distribution whose layout moved left an empty directory that satisfied
+    the check -- and a run with no header evidence at all could proceed toward
+    appearing to have completed an L2 comparison (Codex review). That is this
+    PR's own bug class one level down: a container's existence taken for its
+    contents.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _tools_present(self, monkeypatch):
+        monkeypatch.setattr(profiles.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+        monkeypatch.setattr(profiles, "toolchain_identity", lambda p: {})
+
+    def test_an_empty_header_root_is_blocked(self, tmp_path):
+        materialize_operands(profiles.SVS, tmp_path)
+        for side in ("old", "new"):
+            root = profiles.SVS.side_root(tmp_path, side) / "include/svs/runtime"
+            for child in root.iterdir():
+                child.unlink()
+        status = profiles.resolve_status(
+            profiles.SVS, prepared_root=tmp_path, requested=True
+        )
+        assert status.status == "BLOCKED"
+        assert all(
+            "contains no header file" in entry for entry in status.missing_inputs
+        )
+
+    def test_a_root_holding_only_non_headers_is_blocked(self, tmp_path):
+        # The near-miss an `exists()` check and a naive `any(iterdir())` check
+        # both accept: a directory that is populated, but with nothing that is
+        # a header.
+        materialize_operands(profiles.SVS, tmp_path)
+        for side in ("old", "new"):
+            root = profiles.SVS.side_root(tmp_path, side) / "include/svs/runtime"
+            for child in root.iterdir():
+                child.unlink()
+            (root / "README.md").write_text("not a header")
+            (root / "CMakeLists.txt").write_text("not a header")
+        status = profiles.resolve_status(
+            profiles.SVS, prepared_root=tmp_path, requested=True
+        )
+        assert status.status == "BLOCKED"
+
+    @pytest.mark.parametrize("suffix", sorted(profiles.HEADER_SUFFIXES))
+    def test_every_declared_header_suffix_counts_as_evidence(self, tmp_path, suffix):
+        # Exhaustive over the vocabulary rather than the one suffix SVS ships:
+        # a suffix silently absent from the check would make a real header root
+        # read as empty.
+        root = tmp_path / "inc"
+        root.mkdir()
+        (root / f"api{suffix}").write_text("int x;")
+        assert profiles.header_evidence_missing(root) is None
+
+    def test_a_nested_header_counts(self, tmp_path):
+        root = tmp_path / "inc"
+        (root / "detail").mkdir(parents=True)
+        (root / "detail" / "impl.h").write_text("int x;")
+        assert profiles.header_evidence_missing(root) is None
+
+    def test_an_absent_path_and_an_empty_root_are_distinguished(self, tmp_path):
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        assert profiles.header_evidence_missing(tmp_path / "nope") == "absent"
+        assert "no header file" in profiles.header_evidence_missing(empty)
+
+
+class TestMeasurementCoversTheMeasurableSet:
+    """A subset result may not be promoted as the profile's whole scope.
+
+    ``promote_to_measured`` first checked only that a result named no *unknown*
+    library, so a five-library oneDAL profile could be promoted by a result
+    naming one of them -- and the promoted status then republished that subset
+    as the profile's measurable set, so "we measured oneDAL" stood for a fifth
+    of it with nothing anywhere recording the other four (Codex review).
+    """
+
+    def _ready(self, monkeypatch, tmp_path, profile):
+        monkeypatch.setattr(profiles.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+        monkeypatch.setattr(profiles, "toolchain_identity", lambda p: {})
+        materialize_operands(profile, tmp_path)
+        status = profiles.resolve_status(
+            profile, prepared_root=tmp_path, requested=True
+        )
+        assert status.status == "READY", status.reason
+        return status
+
+    @pytest.mark.parametrize("profile_id", sorted(profiles.PROFILES))
+    def test_every_proper_subset_is_refused(self, monkeypatch, tmp_path, profile_id):
+        """Exhaustive over every proper subset of each profile's libraries.
+
+        Not "oneDAL minus four": every way a result can cover less than the
+        measurable set, for every profile, including the one-library profiles
+        where the only proper subset is the empty one.
+        """
+        import itertools
+
+        profile = profiles.PROFILES[profile_id]
+        ready = self._ready(monkeypatch, tmp_path, profile)
+        names = tuple(ready.measurable_libraries)
+        assert names, profile_id
+        subsets = [
+            combo
+            for size in range(len(names))
+            for combo in itertools.combinations(names, size)
+        ]
+        assert subsets, profile_id
+        for subset in subsets:
+            with pytest.raises(ValueError):
+                profiles.promote_to_measured(
+                    ready, profiles.MeasurementResult(profile.id, subset, 5.0)
+                )
+        # Vacuity guard: the complete set really does promote, so the sweep
+        # above is not passing because promotion is broken outright.
+        promoted = profiles.promote_to_measured(
+            ready, profiles.MeasurementResult(profile.id, names, 5.0)
+        )
+        assert promoted.status == "MEASURED"
+
+    def test_a_stated_omission_is_accepted_and_stays_in_the_receipt(
+        self, monkeypatch, tmp_path
+    ):
+        # Omission is allowed -- it just has to be stated, with a reason, and
+        # remain visible. Hiding it is the defect; declining to run a library
+        # is not.
+        ready = self._ready(monkeypatch, tmp_path, profiles.ONEDAL)
+        promoted = profiles.promote_to_measured(
+            ready,
+            profiles.MeasurementResult(
+                "onedal",
+                ("onedal_core", "onedal", "onedal_parameters"),
+                12.0,
+                omitted_libraries={
+                    "onedal_dpc": "DPC++ build ran out of disk",
+                    "onedal_parameters_dpc": "DPC++ build ran out of disk",
+                },
+            ),
+        )
+        assert promoted.status == "MEASURED"
+        assert set(promoted.measurement["omitted_libraries"]) == {
+            "onedal_dpc",
+            "onedal_parameters_dpc",
+        }
+
+    def test_an_unexplained_omission_is_refused(self, monkeypatch, tmp_path):
+        ready = self._ready(monkeypatch, tmp_path, profiles.ONEDAL)
+        with pytest.raises(ValueError, match="state no reason"):
+            profiles.promote_to_measured(
+                ready,
+                profiles.MeasurementResult(
+                    "onedal",
+                    ("onedal_core", "onedal", "onedal_parameters"),
+                    12.0,
+                    omitted_libraries={"onedal_dpc": "", "onedal_parameters_dpc": " "},
+                ),
+            )
+
+    def test_a_library_cannot_be_both_measured_and_omitted(self, monkeypatch, tmp_path):
+        ready = self._ready(monkeypatch, tmp_path, profiles.SVS)
+        with pytest.raises(ValueError, match="both"):
+            profiles.promote_to_measured(
+                ready,
+                profiles.MeasurementResult(
+                    "svs",
+                    ("svs_runtime",),
+                    3.0,
+                    omitted_libraries={"svs_runtime": "also skipped"},
+                ),
+            )
+
+    def test_an_unknown_omission_is_refused(self, monkeypatch, tmp_path):
+        ready = self._ready(monkeypatch, tmp_path, profiles.SVS)
+        with pytest.raises(ValueError, match="unmeasurable"):
+            profiles.promote_to_measured(
+                ready,
+                profiles.MeasurementResult(
+                    "svs",
+                    ("svs_runtime",),
+                    3.0,
+                    omitted_libraries={"not_a_library": "whatever"},
+                ),
+            )

@@ -157,6 +157,14 @@ TEMPORAL_SCENARIOS = ("temporal_release", "temporal_pr_base")
 #: How one side's operands are obtained.
 SIDE_SOURCES = ("build_from_revision", "prebuilt_distribution")
 
+#: Suffixes that make a file count as header evidence. Mirrors
+#: ``abicheck.header_utils.HEADER_SUFFIXES``; restated rather than imported
+#: because this module is deliberately dependency-free stdlib (it is read and
+#: run by the periodic lane without installing abicheck). A divergence would be
+#: conservative in the safe direction -- a suffix missing here makes a real
+#: header root read as empty, i.e. BLOCKED, never READY.
+HEADER_SUFFIXES = (".h", ".hh", ".hpp", ".hxx", ".h++", ".ipp", ".tpp", ".inc")
+
 
 @dataclass(frozen=True)
 class LibraryTarget:
@@ -758,7 +766,38 @@ def digest_tree(root: Path, patterns: tuple[str, ...] = ("*.h", "*.hpp")) -> str
     return f"sha256:{h.hexdigest()}"
 
 
-def missing_inputs(profile: RealProfile, prepared_root: Path) -> list[str]:
+def header_evidence_missing(path: Path) -> str | None:
+    """Why *path* is not usable header evidence, or ``None`` when it is.
+
+    A declared public header is either a file or a header *root* directory, and
+    a directory needs the same treatment this module's whole status vocabulary
+    exists to enforce: its existence says nothing about its contents. An empty
+    ``include/svs/runtime`` -- a partial extraction, an interrupted install, a
+    distribution whose layout moved -- satisfied a bare ``exists()`` check, so a
+    run with no header evidence at all could reach the point of appearing to
+    have completed an L2 comparison. That is the same defect as an empty
+    prepared tree reading as measured, one level down.
+    """
+    if not path.exists():
+        return "absent"
+    if path.is_dir():
+        if not any(
+            child.is_file() and child.suffix in HEADER_SUFFIXES
+            for child in path.rglob("*")
+        ):
+            return "header root contains no header file"
+        return None
+    if not path.is_file():
+        return "neither a file nor a directory"
+    return None
+
+
+def missing_inputs(
+    profile: RealProfile,
+    prepared_root: Path,
+    *,
+    libraries: tuple[LibraryTarget, ...] | None = None,
+) -> list[str]:
     """Concrete operands this profile needs that are absent under *prepared_root*.
 
     The gap this closes: readiness used to be answered by ``prepared_root`` being
@@ -768,23 +807,33 @@ def missing_inputs(profile: RealProfile, prepared_root: Path) -> list[str]:
     evidence of anything; the operands are.
 
     Both sides are checked, and both halves of each library's L2 input: the
-    binary artifact and every declared public header (a file or a header root
-    directory). A missing historical side is exactly as disqualifying as a
-    missing candidate one -- a comparison needs both.
+    binary artifact and every declared public header, which must be real header
+    *evidence* rather than a path that merely exists (see
+    :func:`header_evidence_missing`). A missing historical side is exactly as
+    disqualifying as a missing candidate one -- a comparison needs both.
+
+    *libraries* narrows the check to a subset, which is how a caller asks about
+    the libraries this host can actually build. Defaulting to all of them keeps
+    this function's own contract ("everything the profile declares") intact for
+    a caller that has not resolved a context split.
     """
+    targets = profile.l2_libraries if libraries is None else libraries
     missing: list[str] = []
     for side in ("old", "new"):
         root = profile.side_root(prepared_root, side)
         if not root.is_dir():
             missing.append(f"{side}: {root} (no operand tree for this side)")
             continue
-        for lib in profile.l2_libraries:
+        for lib in targets:
             artifact = root / lib.artifact
             if not artifact.is_file():
                 missing.append(f"{side}/{lib.name}: {lib.artifact} (library)")
             for header in lib.public_headers:
-                if not (root / header).exists():
-                    missing.append(f"{side}/{lib.name}: {header} (public header)")
+                problem = header_evidence_missing(root / header)
+                if problem is not None:
+                    missing.append(
+                        f"{side}/{lib.name}: {header} (public header: {problem})"
+                    )
     return missing
 
 
@@ -1023,11 +1072,23 @@ def resolve_status(
             ),
             toolchain=toolchain_identity(profile),
         )
-    absent_inputs = missing_inputs(profile, prepared_root)
+    # The context split is resolved BEFORE the operand check, and the operand
+    # check then asks only about the libraries this host can actually build.
+    # The first version checked every declared library unconditionally, which
+    # broke the documented partial path in the one case it exists for: a host
+    # without `icpx` cannot build oneDAL's two DPC++ libraries, so a
+    # legitimately prepared host-only tree does not contain their artifacts --
+    # and reporting BLOCKED for that absence made PARTIAL reachable only when
+    # the already-unmeasurable operands happened to be present anyway (Codex
+    # review). A context this host cannot build is reported as a context
+    # blocker, which is what it is; its operands are not also demanded.
+    partial = _partial_status(profile)
+    if partial is not None and partial.status == "BLOCKED":
+        # No context is buildable: name that, not the operands it implies.
+        return partial
+    buildable = measurable_libraries(profile)
+    absent_inputs = missing_inputs(profile, prepared_root, libraries=buildable)
     if absent_inputs:
-        # Checked before the per-context split for the same reason the prepared
-        # tree is: a host missing the operands themselves is blocked on them,
-        # whatever its compilers can build.
         return ProfileStatus(
             profile.id,
             "BLOCKED",
@@ -1038,8 +1099,9 @@ def resolve_status(
             ),
             toolchain=toolchain_identity(profile),
             missing_inputs=absent_inputs,
+            measurable_libraries=[lib.name for lib in buildable],
+            blocked_libraries=dict(partial.blocked_libraries) if partial else {},
         )
-    partial = _partial_status(profile)
     if partial is not None:
         return partial
     return ProfileStatus(
@@ -1050,7 +1112,7 @@ def resolve_status(
             "operands are present. Nothing has been measured yet"
         ),
         toolchain=toolchain_identity(profile),
-        measurable_libraries=[lib.name for lib in profile.l2_libraries],
+        measurable_libraries=[lib.name for lib in buildable],
     )
 
 
@@ -1066,6 +1128,11 @@ class MeasurementResult:
     wall_seconds: float
     #: Files the measurement produced (reports, receipts). Each must exist.
     output_paths: tuple[Path, ...] = ()
+    #: Measurable libraries this run deliberately did NOT cover, each with its
+    #: reason. Every measurable library must appear in `libraries` or here --
+    #: see :func:`promote_to_measured` for why an unaccounted omission is the
+    #: same substitution this module exists to prevent.
+    omitted_libraries: dict[str, str] = field(default_factory=dict)
     #: Free-text detail carried into the status for a reader.
     detail: str | None = None
 
@@ -1082,6 +1149,8 @@ def promote_to_measured(
     * a status that was never ready (``BLOCKED``/``NOT_RUN``) cannot become
       measured by assertion;
     * a result covering no library measured nothing;
+    * a result that leaves a measurable library neither measured nor explicitly
+      omitted would republish a subset as the profile's whole scope;
     * a non-positive duration is not a timed window;
     * an output path that does not exist is an unvalidated output.
 
@@ -1105,12 +1174,50 @@ def promote_to_measured(
             "nothing; MEASURED would be a claim about an empty run"
         )
     if status.measurable_libraries:
-        unexpected = sorted(set(result.libraries) - set(status.measurable_libraries))
+        measurable = set(status.measurable_libraries)
+        unexpected = sorted(
+            (set(result.libraries) | set(result.omitted_libraries)) - measurable
+        )
         if unexpected:
             raise ValueError(
                 f"{status.profile_id}: measurement claims librar(ies) "
                 f"{unexpected} that this host reported unmeasurable"
             )
+        # Every measurable library is measured or explicitly accounted for.
+        # Checking only for *unknown* libraries let a five-library oneDAL
+        # profile be promoted to MEASURED by a result naming one of them, and
+        # the promoted status then silently republished that subset as the
+        # profile's scope -- "we measured oneDAL" standing for a fifth of it
+        # (Codex review). That is the same substitution as publishing a
+        # synthetic number under a real project's name, so an omission is
+        # allowed only when it is stated, with a reason, and stays visible in
+        # the receipt.
+        unaccounted = sorted(
+            measurable - set(result.libraries) - set(result.omitted_libraries)
+        )
+        if unaccounted:
+            raise ValueError(
+                f"{status.profile_id}: measurable librar(ies) {unaccounted} were "
+                "neither measured nor recorded as omitted; MEASURED would "
+                "republish a subset as the profile's full scope"
+            )
+        overlap = sorted(set(result.libraries) & set(result.omitted_libraries))
+        if overlap:
+            raise ValueError(
+                f"{status.profile_id}: librar(ies) {overlap} are recorded as both "
+                "measured and omitted"
+            )
+    unexplained = sorted(
+        name
+        for name, reason in result.omitted_libraries.items()
+        if not str(reason).strip()
+    )
+    if unexplained:
+        raise ValueError(
+            f"{status.profile_id}: omitted librar(ies) {unexplained} state no "
+            "reason -- an unexplained omission is a coverage gap wearing a "
+            "completed-measurement label"
+        )
     if not result.wall_seconds > 0:
         raise ValueError(
             f"{status.profile_id}: wall_seconds={result.wall_seconds!r} is not a "
@@ -1136,6 +1243,7 @@ def promote_to_measured(
         blocked_libraries=dict(status.blocked_libraries),
         measurement={
             "libraries": list(result.libraries),
+            "omitted_libraries": dict(result.omitted_libraries),
             "wall_seconds": result.wall_seconds,
             "outputs": [str(path) for path in result.output_paths],
             "promoted_from": status.status,
