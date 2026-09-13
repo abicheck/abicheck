@@ -269,7 +269,7 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "no-evidence-in-hand is reported as such rather than as a claim "
             "about what the artifact contains."
         ),
-        fixed_by=(),
+        fixed_by=(1268,),
         seed_tests=("tests/test_debug_evidence_presence.py",),
         public_surfaces=("compare --format json: layer_coverage[].status",),
         axes={
@@ -323,7 +323,7 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "never introduces a false negative in the consumer -- here an "
             "export obligation, whose whole purpose is to flag exactly those."
         ),
-        fixed_by=(),
+        fixed_by=(1268,),
         seed_tests=("tests/test_clang_inline_semantics.py",),
         public_surfaces=(
             "compare --format json: changes[].kind == public_not_exported",
@@ -353,6 +353,27 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "backend": ("clang JSON AST", "castxml"),
         },
         known_gaps=(
+            KnownGap(
+                description=(
+                    "No reliability flag guards `Function.is_inline` across "
+                    "evidence generations, so a baseline dumped with the "
+                    "clang backend *before* this fix -- which recorded the "
+                    "wrong value -- compares against a post-fix candidate as "
+                    "a wave of spurious FUNC_BECAME_INLINE. Bounded (castxml "
+                    "is the default backend and always recorded these as "
+                    "inline; the findings are RISK-class) and cleared by "
+                    "re-dumping the baseline. The complete fix is a "
+                    "`clang_inline_facts_reliable` flag on the established "
+                    "`*_facts_reliable` pattern, which needs a SCHEMA_VERSION "
+                    "bump to be able to tell the two generations apart at "
+                    "all, hence its own ADR and migration."
+                ),
+                reference=(
+                    "docs/contribute/known-gaps.md, the "
+                    "clang_inline_facts_reliable entry"
+                ),
+                canary_test=None,
+            ),
             KnownGap(
                 description=(
                     "Templates are still excluded from the export obligation "

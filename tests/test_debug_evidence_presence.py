@@ -40,16 +40,15 @@ are anchored to a real ``g++`` build whose debug info is settled by ``-g`` vs
 
 from __future__ import annotations
 
-import itertools
 import shutil
 import subprocess
 
 import pytest
 
-from abicheck.checker import compare
-from abicheck.diff_helpers import typedef_flat_map_is_dwarf_qualified
 from abicheck.buildsource.evidence_report import intrinsic_coverage
 from abicheck.buildsource.model import CoverageStatus, LayerConfidence
+from abicheck.checker import compare
+from abicheck.diff_helpers import typedef_flat_map_is_dwarf_qualified
 from abicheck.model import AbiSnapshot, debug_info_present
 from abicheck.model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
 from abicheck.model.elf_facts import ElfMetadata

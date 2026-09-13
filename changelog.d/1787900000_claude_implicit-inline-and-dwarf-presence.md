@@ -16,7 +16,14 @@
   scope, and a `= delete`d member keep their export obligation. This also
   removes spurious `func_became_inline`/`func_lost_inline` findings from any
   comparison whose two sides were captured with different frontends, and
-  correspondingly narrows `func_deleted_elf_fallback`.
+  correspondingly narrows `func_deleted_elf_fallback`. One transitional
+  note: a baseline dumped with the opt-in clang backend *before* this fix
+  carries the old value, so comparing it against a freshly-dumped candidate
+  reports `func_became_inline` (RISK, never breaking) for each affected
+  declaration until that baseline is re-dumped. castxml baselines are
+  unaffected. See `docs/contribute/known-gaps.md`'s
+  `clang_inline_facts_reliable` entry for why the durable fix is a separate,
+  schema-versioned change.
 - **`L1` evidence coverage no longer reports `present` for a binary with no
   debug info.** Both debug-metadata classes are plain dataclasses with no
   `__bool__`, and every ELF dump attaches one unconditionally — including the

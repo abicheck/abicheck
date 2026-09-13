@@ -179,7 +179,10 @@ def test_plain_declaration_is_never_inline():
     assert is_effectively_inline(_node("FunctionDecl"), ()) is False
     assert is_effectively_inline({"kind": "FunctionDecl"}, ()) is False
     # Missing/garbage `inner` must not raise.
-    assert is_effectively_inline({"kind": "CXXMethodDecl", "inner": None}, _RECORD) is False
+    assert (
+        is_effectively_inline({"kind": "CXXMethodDecl", "inner": None}, _RECORD)
+        is False
+    )
 
 
 def test_exhaustive_domain_sweep_has_both_outcomes_and_is_order_free():
@@ -256,13 +259,24 @@ def _clang_functions(header):
     from abicheck.dumper import _ClangAstParser
 
     out = subprocess.run(
-        ["clang++", "-std=c++20", "-Xclang", "-ast-dump=json", "-fsyntax-only",
-         str(header)],
-        capture_output=True, text=True, check=True,
+        [
+            "clang++",
+            "-std=c++20",
+            "-Xclang",
+            "-ast-dump=json",
+            "-fsyntax-only",
+            str(header),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
     )
     parser = _ClangAstParser(
-        json.loads(out.stdout), set(), set(),
-        public_header_paths=[str(header)], no_binary_evidence=True,
+        json.loads(out.stdout),
+        set(),
+        set(),
+        public_header_paths=[str(header)],
+        no_binary_evidence=True,
     )
     return parser.parse_functions()
 
@@ -273,11 +287,16 @@ def _castxml_functions(header, tmp_path):
     xml = tmp_path / "cx.xml"
     subprocess.run(
         ["castxml", "--castxml-output=1", "-std=c++20", "-o", str(xml), str(header)],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     parser = _CastxmlParser(
-        ET.parse(xml).getroot(), set(), set(),
-        public_header_paths=[str(header)], no_binary_evidence=True,
+        ET.parse(xml).getroot(),
+        set(),
+        set(),
+        public_header_paths=[str(header)],
+        no_binary_evidence=True,
     )
     return parser.parse_functions()
 
@@ -367,9 +386,18 @@ def test_header_defined_members_raise_no_export_obligation_end_to_end(tmp_path):
     (tmp_path / "svs.cpp").write_text(_E2E_SOURCE)
     lib = tmp_path / "libsvs.so"
     subprocess.run(
-        ["g++", "-shared", "-fPIC", "-O2", "-g0", "-o", str(lib),
-         str(tmp_path / "svs.cpp")],
-        check=True, capture_output=True,
+        [
+            "g++",
+            "-shared",
+            "-fPIC",
+            "-O2",
+            "-g0",
+            "-o",
+            str(lib),
+            str(tmp_path / "svs.cpp"),
+        ],
+        check=True,
+        capture_output=True,
     )
     report = tmp_path / "out.json"
 
@@ -379,16 +407,22 @@ def test_header_defined_members_raise_no_export_obligation_end_to_end(tmp_path):
     runner = CliRunner(env=env)
     result = runner.invoke(
         main,
-        ["compare", str(lib), str(lib), "--header", str(tmp_path / "svs.hpp"),
-         "-o", f"json={report}"],
+        [
+            "compare",
+            str(lib),
+            str(lib),
+            "--header",
+            str(tmp_path / "svs.hpp"),
+            "-o",
+            f"json={report}",
+        ],
         env=env,
     )
     assert report.exists(), result.output
 
     data = json.loads(report.read_text())
     flagged = [
-        c for c in (data.get("changes") or [])
-        if c.get("kind") == "public_not_exported"
+        c for c in (data.get("changes") or []) if c.get("kind") == "public_not_exported"
     ]
     assert not flagged, [c.get("symbol") for c in flagged]
     assert data.get("verdict") == "NO_CHANGE", data.get("verdict")
@@ -411,17 +445,23 @@ def test_constexpr_only_fix_would_leave_a_residual(tmp_path):
     plain = by_name["plain"]
     assert plain.is_inline is True
     # …and the narrow predicate, evaluated here rather than described in prose.
-    node = next(
-        n for n in _raw_function_nodes(header) if n.get("name") == "plain"
-    )
+    node = next(n for n in _raw_function_nodes(header) if n.get("name") == "plain")
     assert not (node.get("inline") or node.get("constexpr"))
 
 
 def _raw_function_nodes(header):
     out = subprocess.run(
-        ["clang++", "-std=c++20", "-Xclang", "-ast-dump=json", "-fsyntax-only",
-         str(header)],
-        capture_output=True, text=True, check=True,
+        [
+            "clang++",
+            "-std=c++20",
+            "-Xclang",
+            "-ast-dump=json",
+            "-fsyntax-only",
+            str(header),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
     )
 
     def walk(node):
