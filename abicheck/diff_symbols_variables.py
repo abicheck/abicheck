@@ -346,46 +346,20 @@ def _type_unknown(type_name: str | None) -> bool:
     return type_name is None or type_name.strip() == _UNKNOWN_TYPE
 
 
-def _var_removed(
-    mangled: str,
-    v_old: Variable,
-    new_all: dict[str, Variable] | None = None,
-    old_exported_symbols: frozenset[str] = frozenset(),
-    cv_facts_reliable: bool = True,
-) -> list[Change]:
+def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
     """A public variable with no peer in the NEW side's public surface.
 
-    *new_all* is the NEW side's FULL variable map (not just its public
-    surface): a variable still declared there, which left the compared
-    surface only because this run established less contract evidence for
-    that side, is an evidence gap rather than a removal -- see
-    ``export_transition.surface_exit_is_evidence_gap``. Defaulted so a
-    caller with no full map behaves exactly as before.
-
-    Such a surviving declaration is then *compared* (:func:`_check_variable`)
-    rather than reported as removed: a real type change on it must still be
-    reported (Codex review, P1).
+    Both surfaces are evidence-gap-reconciled before any detector runs
+    (:mod:`abicheck.compare.surface_reconcile`), so a key that is still
+    missing here is genuinely absent rather than merely unestablished --
+    which is why this function needs no evidence guard of its own.
     """
-    v_new = None if new_all is None else new_all.get(mangled)
-    if v_new is not None and _export_transition.surface_exit_is_evidence_gap(
-        v_old,
-        v_new,
-        old_exported_symbols=old_exported_symbols,
-        key=mangled,
-    ):
-        # Matched, not discarded (Codex review, P1) -- see the identical
-        # reasoning at `diff_symbols._match_old_function`'s own call: the
-        # declaration is on both sides, so a real type or const-qualification
-        # change on it is still comparable and must still be reported.
-        return _check_variable(
-            mangled, v_old, v_new, cv_facts_reliable=cv_facts_reliable
-        )
     return [
         make_change(
             ChangeKind.VAR_REMOVED,
             symbol=mangled,
             name=v_old.name,
-            # See Change.symbol_binding's docstring — None when not captured.
+            # See Change.symbol_binding's docstring - None when not captured.
             symbol_binding=v_old.elf_binding.value if v_old.elf_binding else None,
             entity_id=v_old.entity_id,
             demangled_symbol=_elf_only_demangled_name(mangled, v_old.visibility),
@@ -395,31 +369,8 @@ def _var_removed(
     ]
 
 
-def _var_added(
-    mangled: str,
-    v_new: Variable,
-    old_all: dict[str, Variable] | None = None,
-    new_exported_symbols: frozenset[str] = frozenset(),
-    cv_facts_reliable: bool = True,
-) -> list[Change]:
-    """A public variable with no peer in the OLD side's public surface.
-
-    The mirror of :func:`_var_removed`'s own guard (Codex review, P2): when
-    it is the OLD side that lacks contract evidence, the same unchanged
-    declaration *enters* the compared surface and reads as an addition. Same
-    predicate with the sides swapped, same outcome -- the surviving pair is
-    compared, not reported as new.
-    """
-    v_old = None if old_all is None else old_all.get(mangled)
-    if v_old is not None and _export_transition.surface_exit_is_evidence_gap(
-        v_new,
-        v_old,
-        old_exported_symbols=new_exported_symbols,
-        key=mangled,
-    ):
-        return _check_variable(
-            mangled, v_old, v_new, cv_facts_reliable=cv_facts_reliable
-        )
+def _var_added(mangled: str, v_new: Variable) -> list[Change]:
+    """The mirror of :func:`_var_removed`, and reconciled the same way."""
     return [
         make_change(
             ChangeKind.VAR_ADDED,

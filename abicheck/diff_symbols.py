@@ -30,6 +30,7 @@ from .compare.elf_only_demangle import (
 )
 from .compare.fact_comparison import compare_facts
 from .compare.functions import function_identity_index
+from .compare.surface_reconcile import reconcile_surfaces
 from .detector_registry import registry
 from .diff_cxx_rules import (
     old_virtual_signatures,
@@ -124,6 +125,7 @@ from .model import (
     Param,
     ParamKind,
     RecordType,
+    Variable,
     canonicalize_type_name,
     cv_qualifiers_only_differ,
     func_signature_cv_only_differ,
@@ -249,6 +251,45 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
         for k, v in funcs.items()
         if _export_transition.survives_export_narrowing(k, v, exported, name_counts)
     }
+
+
+def _reconciled_function_surfaces(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[dict[str, Function], dict[str, Function]]:
+    """Both sides' public function surfaces, evidence-gap-reconciled.
+
+    The one join every per-pair function detector in this module uses in
+    place of a bare ``_public_functions`` pair, so a declaration that left
+    one side's surface only because that run established less contract
+    evidence is visible to *all* of them rather than to whichever call site
+    happened to guard it -- see
+    :mod:`abicheck.compare.surface_reconcile`.
+    """
+    return reconcile_surfaces(
+        _public_functions(old),
+        _public_functions(new),
+        old_all=old.function_map,
+        new_all=new.function_map,
+        old_exported=_observed_exports(old, FUNCTION_SYMBOL_TYPES),
+        new_exported=_observed_exports(new, FUNCTION_SYMBOL_TYPES),
+    )
+
+
+def _reconciled_variable_surfaces(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[dict[str, Variable], dict[str, Variable]]:
+    """:func:`_reconciled_function_surfaces` for data symbols, and for the
+    same reason: the variable value/access detectors join their own filtered
+    maps too, so reconciling only inside the removal path would leave them
+    blind to the pair (Codex review, P1)."""
+    return reconcile_surfaces(
+        _public_variables(old),
+        _public_variables(new),
+        old_all=old.variable_map,
+        new_all=new.variable_map,
+        old_exported=_observed_exports(old, VARIABLE_SYMBOL_TYPES),
+        new_exported=_observed_exports(new, VARIABLE_SYMBOL_TYPES),
+    )
 
 
 def _format_params(params: list[Param]) -> str:
@@ -870,25 +911,6 @@ def _match_old_function(
         matched_by_name.add(f_old.name)
         return result
 
-    # Still declared on the NEW side, and out of its *compared surface* only
-    # because this run established less contract evidence there: an evidence
-    # gap, not a removal -- and then a matched pair, whose signature is still
-    # compared. See `export_transition.surface_exit_is_evidence_gap`.
-    if f_new_all is not None and _export_transition.surface_exit_is_evidence_gap(
-        f_old,
-        f_new_all,
-        old_exported_symbols=old_exported_symbols,
-        key=mangled,
-    ):
-        return list(
-            _check_function_signature(
-                mangled,
-                f_old,
-                f_new_all,
-                params_unconfirmed=params_unconfirmed,
-                is_llp64=is_llp64,
-            )
-        )
     return [_check_removed_function(mangled, f_old, new_all, elf_only_mode)]
 
 
@@ -975,7 +997,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # table (see `_match_old_function`'s `old_exported_symbols`).
     _old_exported_functions = _observed_exports(old, FUNCTION_SYMBOL_TYPES)
     _new_exported_functions = _observed_exports(new, FUNCTION_SYMBOL_TYPES)
-    old_map = _public_functions(old)
+    old_map, _reconciled_new_functions = _reconciled_function_surfaces(old, new)
     # ADR-049 Phase 2: the new side's matching index. A ``Mapping`` over the
     # same keys ``_public_functions`` returns -- so every loop below is
     # unchanged and each function is still visited once -- plus the
@@ -986,7 +1008,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # built through ``SemanticIRIndex``/the legacy adapter rather than a
     # direct ``AbiSnapshot.function_map`` read -- see that module's own
     # docstring for why the *resolved* identity itself is unchanged.
-    new_map = function_identity_index(_public_functions(new), new)
+    new_map = function_identity_index(_reconciled_new_functions, new)
     _prewarm_elf_only_demangling(old_map, new_map)
 
     # Lookups for the virtual-method-addition check below: type records
@@ -1040,31 +1062,6 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if mangled in ctor_dtor_consumed_new:
             continue
         if mangled not in old_map and f_new.name not in matched_by_name:
-            # The mirror of the removal-side guard above, and not optional
-            # symmetry (Codex review, P2): when it is the OLD side that
-            # lacks contract evidence, the same unchanged declaration
-            # *enters* the compared surface and reads as an addition. Same
-            # predicate, sides swapped, same outcome -- compare the pair.
-            f_old_all = old.function_map.get(mangled)
-            if (
-                f_old_all is not None
-                and _export_transition.surface_exit_is_evidence_gap(
-                    f_new,
-                    f_old_all,
-                    old_exported_symbols=_new_exported_functions,
-                    key=mangled,
-                )
-            ):
-                changes.extend(
-                    _check_function_signature(
-                        mangled,
-                        f_old_all,
-                        f_new,
-                        params_unconfirmed=params_unconfirmed,
-                        is_llp64=is_llp64,
-                    )
-                )
-                continue
             virtual_break = virtual_method_addition(
                 f_new,
                 old_owner_classes,
@@ -1238,20 +1235,14 @@ def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     and one ambiguity contract.
     """
     cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
-    _old_exported_variables = _observed_exports(old, VARIABLE_SYMBOL_TYPES)
-    _new_exported_variables = _observed_exports(new, VARIABLE_SYMBOL_TYPES)
-    old_vars = _public_variables(old)
-    new_vars_index = SymbolIdentityIndex.for_variables(_public_variables(new))
+    old_vars, _reconciled_new_vars = _reconciled_variable_surfaces(old, new)
+    new_vars_index = SymbolIdentityIndex.for_variables(_reconciled_new_vars)
     _prewarm_elf_only_demangling(old_vars, new_vars_index)
     return diff_by_key(
         SymbolIdentityIndex.for_variables(old_vars),
         new_vars_index,
-        on_removed=lambda m, v: _var_removed(
-            m, v, new.variable_map, _old_exported_variables, cv_facts_reliable
-        ),
-        on_added=lambda m, v: _var_added(
-            m, v, old.variable_map, _new_exported_variables, cv_facts_reliable
-        ),
+        on_removed=_var_removed,
+        on_added=_var_added,
         on_common=lambda m, o, n: _check_variable(
             m, o, n, cv_facts_reliable=cv_facts_reliable
         ),
@@ -1311,8 +1302,7 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     if not _both_header_aware(old, new):
         return []
     changes: list[Change] = []
-    old_map = _public_functions(old)
-    new_map = _public_functions(new)
+    old_map, new_map = _reconciled_function_surfaces(old, new)
 
     def _param_defaults_producer(snap: AbiSnapshot, f: Function) -> str | None:
         return fact_producer(snap, func_fact_key(f.mangled, "param_defaults"))
@@ -1375,8 +1365,7 @@ def _diff_param_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         return changes
     if old.from_headers_inferred or new.from_headers_inferred:
         return changes
-    old_map = _public_functions(old)
-    new_map = _public_functions(new)
+    old_map, new_map = _reconciled_function_surfaces(old, new)
 
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
@@ -1405,8 +1394,7 @@ def _diff_param_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect pointer level changes in params and return types."""
     changes: list[Change] = []
-    old_map = _public_functions(old)
-    new_map = _public_functions(new)
+    old_map, new_map = _reconciled_function_surfaces(old, new)
     # RD2-5: param depths from a stripped symbols-only stub default to 0 and
     # would read as phantom level changes; suppress them. The return depth is
     # guarded independently by the unknown-return ("?") check below.
@@ -1530,7 +1518,7 @@ def _diff_access_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     changes: list[Change] = []
     changes.extend(
-        _check_method_access_changes(_public_functions(old), _public_functions(new))
+        _check_method_access_changes(*_reconciled_function_surfaces(old, new))
     )
     excl = stdlib_namespaces_excluded(old, new)
     old_types = build_type_map(
@@ -1591,8 +1579,7 @@ def _diff_symbol_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     symbol really is gone from the old name and a consumer linked against it
     really does fail to resolve.
     """
-    old_map = _public_functions(old)
-    new_map = _public_functions(new)
+    old_map, new_map = _reconciled_function_surfaces(old, new)
 
     removed = set(old_map.keys()) - set(new_map.keys())
     added = set(new_map.keys()) - set(old_map.keys())
@@ -1647,7 +1634,7 @@ def _diff_param_restrict(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         return []
     if not (old.clang_restrict_facts_reliable and new.clang_restrict_facts_reliable):
         return []
-    return param_restrict_changes(_public_functions(old), _public_functions(new))
+    return param_restrict_changes(*_reconciled_function_surfaces(old, new))
 
 
 @registry.detector("func_deprecated")
@@ -1674,8 +1661,7 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     different keys.
     """
     changes: list[Change] = []
-    old_map = _public_functions(old)
-    new_map = _public_functions(new)
+    old_map, new_map = _reconciled_function_surfaces(old, new)
 
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         if fact_producer(old, func_fact_key(f_old.mangled, "deprecated")) is None:
@@ -1723,8 +1709,7 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
     what correctly supports ``--ast-frontend hybrid``.
     """
     changes: list[Change] = []
-    old_map = _public_functions(old)
-    new_map = _public_functions(new)
+    old_map, new_map = _reconciled_function_surfaces(old, new)
 
     for mangled, f_old in old_map.items():
         f_new = new_map.get(mangled)
@@ -1772,8 +1757,7 @@ def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     correctly supports a ``--ast-frontend hybrid`` snapshot, G28 Phase 3).
     """
     changes: list[Change] = []
-    old_map = _public_variables(old)
-    new_map = _public_variables(new)
+    old_map, new_map = _reconciled_variable_surfaces(old, new)
 
     for mangled, v_old in old_map.items():
         v_new = new_map.get(mangled)
@@ -1825,7 +1809,7 @@ def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         return []
     if not (old.clang_va_list_facts_reliable and new.clang_va_list_facts_reliable):
         return []
-    return param_va_list_changes(_public_functions(old), _public_functions(new))
+    return param_va_list_changes(*_reconciled_function_surfaces(old, new))
 
 
 @registry.detector("constants")
@@ -1900,4 +1884,4 @@ def _diff_var_access(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         old.castxml_var_access_facts_reliable and new.castxml_var_access_facts_reliable
     ):
         return []
-    return var_access_changes(_public_variables(old), _public_variables(new))
+    return var_access_changes(*_reconciled_variable_surfaces(old, new))

@@ -40,7 +40,7 @@ from hypothesis import given, settings, strategies as st
 
 from abicheck.checker import compare
 from abicheck.model.change_catalog.kinds import ChangeKind
-from abicheck.model.declarations import Function, Variable, Visibility
+from abicheck.model.declarations import Function, Param, Variable, Visibility
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
 from abicheck.model.fact import Fact
 from abicheck.model.snapshot import AbiSnapshot
@@ -225,6 +225,32 @@ class TestSurfaceEvidenceAsymmetry:
             c.symbol
             for c in compare(old, new).changes
             if c.kind is ChangeKind.VAR_TYPE_CHANGED
+        }
+        assert reported == set(names)
+
+    @given(names=_names)
+    @settings(deadline=None, max_examples=30)
+    def test_every_matched_pair_detector_sees_the_reconciled_pair(
+        self, names: list[str]
+    ) -> None:
+        """Not just the signature comparison (Codex review, P1).
+
+        Each per-pair detector rebuilds the filtered surfaces itself, so
+        reconciling at one disposition site left all the others blind: a
+        parameter default moving from 1 to 2 on such a declaration -- the
+        reviewer's own example -- produced a completely clean result. The
+        surfaces are now reconciled before any detector runs, so this
+        asserts through a detector that never knew about the asymmetry.
+        """
+        old = _snapshot(names, evidence=True)
+        new = _snapshot(names, evidence=False)
+        for snap, default in ((old, "1"), (new, "2")):
+            for fn in snap.functions:
+                fn.params = [Param(name="n", type="int", default=default)]
+        reported = {
+            c.symbol
+            for c in compare(old, new).changes
+            if c.kind is ChangeKind.PARAM_DEFAULT_VALUE_CHANGED
         }
         assert reported == set(names)
 
