@@ -172,96 +172,20 @@ class Scenario:
     suites: tuple[str, ...] = ("pr", "extended")
 
 
-# ── CLI invocation builders ───────────────────────────────────────────────────
-def _cli(*args: str) -> list[str]:
-    # `-m abicheck` rather than the `abicheck` console script: it is the entry
-    # point that exists in every environment this may run in (including one
-    # where the script directory is not on PATH), and it is the same code path.
-    return [sys.executable, "-m", "abicheck", *args]
-
-
-def _header_args(libs: list[fixtures.BuiltLibrary], side: str) -> list[str]:
-    """``--header`` plus the ``--include`` roots those headers need to parse.
-
-    The extra roots are not optional decoration: in a shared-context
-    multi-library fixture the one physical ``detail/core.h`` lives at a common
-    root, so without ``--include`` pointing there the headers do not resolve at
-    all -- and a run that fell back would silently not be the shared arm it is
-    labelled as.
-    """
-    out: list[str] = []
-    for lib in libs:
-        for header in lib.headers:
-            out += ["--header", f"{side}={header}"]
-        for extra in lib.extra_includes:
-            out += ["--include", f"{side}={extra}"]
-    return out
-
-
-def _dump_argv(lib: fixtures.BuiltLibrary, out: Path) -> list[str]:
-    argv = _cli("dump", str(lib.so), "--depth", "headers", "-o", str(out))
-    for header in lib.headers:
-        argv += ["-H", str(header)]
-    # dump's --include is not side-scoped (there is only one operand).
-    for extra in lib.extra_includes:
-        argv += ["-I", str(extra)]
-    return argv
-
-
-def _compare_argv(
-    old: str | None,
-    new: str,
-    *,
-    exports: dict[str, Path],
-    old_headers: list[str] | None = None,
-    new_headers: list[str] | None = None,
-    no_baseline: bool = False,
-) -> list[str]:
-    """A ``compare`` invocation exporting each ``{format: destination}`` pair.
-
-    *exports* is a mapping rather than a single format because ``-o`` is
-    repeatable (``-o FORMAT=DESTINATION``, ADR-068 slices 7m/7n): one invocation
-    renders any number of artifacts from the one completed analysis. That is
-    what lets the two-format scenario be a *single* comparison, which is what it
-    is supposed to measure.
-    """
-    args = ["compare"]
-    if no_baseline:
-        args += [new, "--no-baseline"]
-    else:
-        if old is None:
-            raise ValueError("a baseline comparison needs an old operand")
-        args += [old, new]
-    args += ["--depth", "headers"]
-    for fmt, destination in exports.items():
-        args += ["-o", f"{fmt}={destination}"]
-    args += old_headers or []
-    args += new_headers or []
-    return _cli(*args)
-
-
-def _dry_run_argv(argv: list[str]) -> list[str]:
-    """*argv* rewritten as a resolution-only run.
-
-    ``-o`` is stripped, not merely supplemented: ``compare`` rejects
-    ``--dry-run -o PATH`` outright (exit 64 -- "a dry run performs no analysis
-    and writes nothing"), which the first version of this harness tripped. The
-    flag is dropped rather than the whole step skipped because the resolution
-    window is the one phase boundary available here that does not require
-    duplicating any product internals.
-    """
-    out: list[str] = []
-    skip_next = False
-    for token in argv:
-        if skip_next:
-            skip_next = False
-            continue
-        if token in ("-o", "--output"):
-            skip_next = True
-            continue
-        out.append(token)
-    return out + ["--dry-run"]
-
+# ── CLI invocation builders ────────────────────────────────────────────────────
+# Split into `l2_cli_argv.py` once this file crossed the AI-readiness `file-size`
+# gate's 2000-line hard cap a third time -- a mechanical extraction, unchanged
+# function bodies. Argv construction is the narrowest seam left: it depends on the
+# fixture shape and nothing else, and it is where the CLI's own grammar is
+# mirrored, so a CLI change lands in one small file rather than inside the
+# measurement loop.
+from l2_cli_argv import (  # noqa: E402
+    _cli as _cli,
+    _compare_argv as _compare_argv,
+    _dry_run_argv as _dry_run_argv,
+    _dump_argv as _dump_argv,
+    _header_args as _header_args,
+)
 
 # ── validation (always outside the timed window) ───────────────────────────────
 # Split into `l2_cli_validation.py` once this file crossed the AI-readiness
