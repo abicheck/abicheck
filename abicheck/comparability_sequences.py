@@ -499,6 +499,4 @@ def _header_sequence_is_scope_confirmed_growth(
     """
     return _header_sequence_is_additive_reorder_free(
         old_value, new_value, scope_new_headers
-    ) or _header_sequence_is_interior_insertion(
-        old_value, new_value, scope_new_headers
-    )
+    ) or _header_sequence_is_interior_insertion(old_value, new_value, scope_new_headers)

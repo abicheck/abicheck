@@ -171,6 +171,46 @@ def test_reported_invocation_reports_the_added_api(tmp_path: Path) -> None:
     assert not removed, removed
 
 
+def test_the_rendered_report_claims_no_reduced_assurance(tmp_path: Path) -> None:
+    """The reported SYMPTOM, at the surface the user reads it from.
+
+    A verdict alone was never the whole ask: the run that prompted this was
+    configured with `assurance.require_complete`, and a
+    `comparability_assurance` marking `declaration`/`layout` unverified reads
+    through to `analysis_assurance.status = "partial"` ("extraction contexts
+    were not provably identical"), which floors the exit code to 1. So the
+    report must carry no comparability reduction at all -- not merely a
+    verdict alongside one.
+    """
+    old_so = _build(tmp_path / "old", _OLD_HEADERS)
+    new_so = _build(tmp_path / "new", _NEW_HEADERS)
+    out = tmp_path / "report.json"
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(old_so),
+            str(new_so),
+            "--header",
+            f"old={tmp_path / 'old' / 'pvxs'}",
+            "--header",
+            f"new={tmp_path / 'new' / 'pvxs'}",
+            "-o",
+            f"json={out}",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+    report = json.loads(out.read_text(encoding="utf-8"))
+    # Present only when a mismatch was found at all, so its absence is the
+    # assertion that the pair compared cleanly rather than tolerably.
+    assert "comparability_assurance" not in report, report["comparability_assurance"]
+    notes = report.get("analysis_assurance", {}).get("notes", [])
+    assert not any("provably identical" in n for n in notes), notes
+    assert not any("reduced assurance" in n for n in notes), notes
+
+
 def test_a_reordered_header_surface_still_refuses_through_the_cli(
     tmp_path: Path,
 ) -> None:
