@@ -57,6 +57,16 @@ _TAG_SUFFIX_PATTERNS: tuple[str, ...] = (
     "_tagid",
 )
 
+#: ``ChangeEntity`` values this detector attributes a tag to, spelled as the
+#: plain strings ``Change.entity_discriminator`` carries. Named once rather
+#: than repeated as a bare literal at each of the three pools below, so the
+#: three cannot drift apart; spelled out rather than imported from
+#: ``ChangeEntity`` because that enum lives in `model`, and the resolver
+#: (`reporter_markdown.entity_for_change`) validates the string against it
+#: anyway -- an unrecognized spelling falls back to the declared entity.
+_ENTITY_VARIABLE = "variable"
+_ENTITY_ENUM = "enum"
+
 _TAG_EXACT_LEAVES: frozenset[str] = frozenset(
     {
         "tag_id",
@@ -75,22 +85,36 @@ def _looks_like_serialization_tag(name: str) -> bool:
     return any(leaf.endswith(p) for p in _TAG_SUFFIX_PATTERNS)
 
 
-def _collect_tag_constants(snap: AbiSnapshot) -> dict[str, str]:
-    """Return ``{constant_name: stringified_value}`` for tag-shaped constants.
+def _collect_tag_constants(snap: AbiSnapshot) -> dict[str, tuple[str, str]]:
+    """Return ``{tag_name: (stringified_value, display_entity)}``.
 
     Three data sources, in order of reliability:
       1. ``snap.constants`` — ``constexpr`` / ``#define`` values.
       2. ``snap.variables`` — global ``const`` variables with values.
       3. ``snap.enums`` — enumerators whose enclosing type name or own
          name matches the tag convention.
+
+    The second element is the ``ChangeEntity`` *value* the contributing
+    source resolves to, carried per entry rather than decided once for the
+    kind. A single declared entity cannot be right here: the pool spans
+    constants, variables and enum members, and the kind declared ``type``,
+    which is wrong for all three at once -- so ``--view show=variables`` and
+    ``show=enums`` both omitted real findings while the machine reports
+    spelled them as types (Codex review, PR #1284). Constants share the
+    ``variable`` entity with real variables, the way ``constant_changed``
+    already does, so the distinction that survives is variable-vs-enum.
+
+    ``setdefault`` keeps the *first* contributor's entity along with its
+    value, so the reliability order above decides both together and the two
+    can never disagree about which source a row came from.
     """
-    out: dict[str, str] = {}
+    out: dict[str, tuple[str, str]] = {}
     for name, value in (snap.constants or {}).items():
         if _looks_like_serialization_tag(name) and value is not None:
-            out.setdefault(name, str(value))
+            out.setdefault(name, (str(value), _ENTITY_VARIABLE))
     for var in snap.variables:
         if _looks_like_serialization_tag(var.name) and var.value is not None:
-            out.setdefault(var.name, str(var.value))
+            out.setdefault(var.name, (str(var.value), _ENTITY_VARIABLE))
     for enum_t in snap.enums or []:
         enum_leaf = _last_segment(enum_t.name).lower()
         type_is_tag = enum_leaf in _TAG_EXACT_LEAVES or any(
@@ -99,7 +123,7 @@ def _collect_tag_constants(snap: AbiSnapshot) -> dict[str, str]:
         for m in enum_t.members:
             full = f"{enum_t.name}::{m.name}"
             if type_is_tag or _looks_like_serialization_tag(m.name):
-                out.setdefault(full, str(m.value))
+                out.setdefault(full, (str(m.value), _ENTITY_ENUM))
     return out
 
 
@@ -112,12 +136,13 @@ def detect_serialization_tag_changes(
     old_tags = _collect_tag_constants(old)
     new_tags = _collect_tag_constants(new)
     findings: list[Change] = []
-    for name, old_val in old_tags.items():
-        new_val = new_tags.get(name)
-        if new_val is None or new_val == old_val:
+    for name, (old_val, entity) in old_tags.items():
+        new_entry = new_tags.get(name)
+        if new_entry is None or new_entry[0] == old_val:
             continue
+        new_val = new_entry[0]
         partner = next(
-            (n for n, v in new_tags.items() if v == old_val and n != name),
+            (n for n, (v, _e) in new_tags.items() if v == old_val and n != name),
             None,
         )
         if partner is not None:
@@ -140,6 +165,8 @@ def detect_serialization_tag_changes(
                 description=desc,
                 old_value=old_val,
                 new_value=new_val,
+                # Per finding, since one kind covers three producers' pools.
+                entity_discriminator=entity,
             )
         )
     return findings

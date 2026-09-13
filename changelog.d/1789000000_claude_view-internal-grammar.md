@@ -189,3 +189,20 @@
   `RenderOptions` folds it at construction too, since an envelope bakes its
   shared document before any projection runs -- so the stored options and the
   baked document cannot disagree about whether the section was asked for.
+
+- **A release discloses every disposition, not two of three.** The per-library
+  ledgers carried suppression and public-surface scoping but not ADR-039
+  build-context reconciliation, so a release whose entire breaking set was
+  cleared as context-free header-parse artifacts passed while its JSON and
+  Markdown named neither the findings nor the reasons. Reconciliation is the
+  one disposition that needs no settings at all -- no suppression document, no
+  `--scope-public-headers` -- so the section was absent rather than incomplete.
+
+- **Two more findings reach the right display filter.** `inline_body_changed`
+  is a function finding, not a `source` one: its producer iterates only
+  `reachable_inline_bodies` and names the function, exactly like the sibling
+  `inline_function_removed` (`source` described the evidence layer, which is
+  not what the display dimension answers). `serialization_tag_changed` resolves
+  its entity per finding, because its detector pools tags from constants,
+  global variables *and* enum members before emitting one kind -- so the fixed
+  `type` was wrong for all three at once.

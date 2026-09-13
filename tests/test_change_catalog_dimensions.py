@@ -769,6 +769,11 @@ class TestPolymorphicKindsRealDetectorCoverage:
             "atomic_qualifier_changed",
             "bit_int_width_changed",
             "char8t_migration",
+            # Round 14: `_collect_tag_constants` pools three sources --
+            # `snapshot.constants`, global `variables`, and `enums` members --
+            # so the previous static `type` was wrong for all three at once,
+            # not merely for one of them.
+            "serialization_tag_changed",
         }
 
     def test_every_polymorphic_kind_names_a_real_change_field(self):

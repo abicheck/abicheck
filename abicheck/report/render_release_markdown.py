@@ -96,8 +96,8 @@ def _release_md_disposed_findings(
     PR #1284 -- raised twice, the second time observing that the structured
     blocks this slice added reached JSON and had no Markdown consumer).
 
-    Reads the same two per-library blocks the release JSON carries
-    (``suppression``/``surface_scope``, built by
+    Reads the same per-library blocks the release JSON carries
+    (``suppression``/``surface_scope``/``build_context_reconciled``, built by
     ``reporter.disposition_ledger_blocks``), so the two formats cannot
     disagree about what was disposed. Absent when nothing was, which keeps
     every release report produced without those settings unchanged. The
@@ -134,6 +134,20 @@ def _release_md_disposed_findings(
             why = entry.get("reason") or "outside the public surface"
             rows.append(
                 f"| `{md_cell(name)}` | scoped out | `{md_cell(entry.get('kind', '?'))}` "
+                f"| `{md_cell(entry.get('symbol', '?'))}` | {md_cell(why)} |"
+            )
+        # The third disposition, and the one this section shipped without:
+        # a release can clear its entire breaking set through ADR-039
+        # build-context reconciliation, with no suppression document and no
+        # public-surface scoping in play at all, so neither loop above sees
+        # anything (Codex review, PR #1284).
+        reconciled = cast(
+            "dict[str, object]", lib.get("build_context_reconciled") or {}
+        )
+        for entry in cast("list[dict[str, object]]", reconciled.get("changes") or []):
+            why = entry.get("reason") or "reconciled against build context"
+            rows.append(
+                f"| `{md_cell(name)}` | reconciled | `{md_cell(entry.get('kind', '?'))}` "
                 f"| `{md_cell(entry.get('symbol', '?'))}` | {md_cell(why)} |"
             )
     if not rows:

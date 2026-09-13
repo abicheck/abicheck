@@ -2027,6 +2027,38 @@ mechanism* first and an option count second:
   a vacuity guard fails if `show_impact=True` ever stops changing the
   document. Each fold is separately mutation-checked, because the renderer-level equivalences survive removing the envelope one (the downstream boundaries normalize too, masking it): removing the boundary fold fails three tests, and removing the envelope fold fails three different ones, which is what `TestRenderOptionsNeverStoresTheSugarSpelling` exists to state.
 
+  **Round 14, and the pattern in it.** Three findings, all confirmed against
+  the producers rather than from the catalog text. One P1: the release
+  disposition ledgers carried suppression and surface scoping but not ADR-039
+  build-context reconciliation -- and reconciliation is precisely the
+  disposition that needs no settings, so a release that cleared every break
+  that way rendered the section not-incomplete but *absent*. The fix is the
+  same `_add_reconciled` the scalar JSON path already used, so the two formats
+  cannot disagree, and it is self-gating, so a release that reconciled nothing
+  is byte-unchanged. Two P2s were the display dimension again:
+  `inline_body_changed` declared `source` (the *evidence layer* it came from,
+  not the subject it is about) while its producer iterates only
+  `reachable_inline_bodies` and names the function, and
+  `serialization_tag_changed` declared a fixed `type` while
+  `_collect_tag_constants` pools constants, global variables and enum members
+  -- wrong for all three at once, which is worth stating precisely: the review
+  named it as unsupported for two of the three, and reading the producer showed
+  no source resolved to `type` at all. Both now carry the per-finding
+  discriminator and are driven in tests by the real detector, never a
+  hand-built `Change` whose discriminator the test itself supplied -- the
+  failure mode those classes exist to catch is a producer that never sets it.
+
+  One process note worth keeping, because it recurs: the cross-path test added
+  here ("every disposition the scalar report discloses is reachable in the
+  release blocks") first failed on a difference that is *by design* -- the
+  release blocks prune a disposition that says nothing, to keep existing
+  release documents byte-stable, while the scalar report emits an empty
+  `suppression` block unconditionally. The test was rewritten to drive a result
+  carrying all three dispositions rather than to compare key presence. A test
+  that reports a deliberate asymmetry as a defect would have been reverted on
+  the next reading; the invariant is only worth having if it is stated over
+  inputs where both sides genuinely have something to say.
+
   The surviving parsing primitive gets the treatment AGENTS.md requires:
   `TestParseViewTokensProperties` (`tests/test_view_internal_grammar.py`)
   states `parse_view_tokens`'s contract as invariants — last mode wins under

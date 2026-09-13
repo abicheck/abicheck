@@ -342,7 +342,14 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "old behavior until recompiled, so a mixed-build deployment can run "
         "two versions of the same function. A deployment/ODR risk, not a "
         "proven binary break.",
-        entity=_ENT.SOURCE,
+        # FUNCTION, not SOURCE: `_diff_inline_bodies` iterates only
+        # `reachable_inline_bodies` and uses the function's own qualified name
+        # as the finding symbol, exactly like the sibling
+        # `inline_function_removed` -- so `--view show=functions` omitted a
+        # function-level finding and the machine reports spelled the wrong
+        # entity (Codex review, PR #1284). `SOURCE` describes the *evidence
+        # layer* the finding came from, which is not the display dimension.
+        entity=_ENT.FUNCTION,
         operation=_OP.MODIFIED,
     ),
     _E(

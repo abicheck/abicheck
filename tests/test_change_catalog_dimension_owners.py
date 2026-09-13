@@ -433,3 +433,132 @@ class TestASharedSlotIteratorKeepsEachFindingsOwner:
         )
         types = ShowOnlyFilter(frozenset(), frozenset({"types"}), frozenset())
         assert types._check_element(finding, "atomic_qualifier_changed")
+
+
+class TestSerializationTagFindingsKeepTheirContributingSource:
+    """`serialization_tag_changed` resolves its entity per finding.
+
+    `_collect_tag_constants` pools three sources — `AbiSnapshot.constants`,
+    global `variables`, and `enums` members — before emitting one kind, so
+    the static `type` it used to declare was wrong for *all three* at once,
+    not merely for one of them: `--view show=variables` and `show=enums`
+    both omitted real findings, and every machine report spelled them types
+    (Codex review, PR #1284).
+
+    Driven by the real detector rather than by hand-built `Change` objects,
+    per the sibling classes above: a discriminator the producer never sets
+    is the failure this class exists to catch, and a fixture that sets it
+    itself cannot catch it.
+    """
+
+    @staticmethod
+    def _snapshot(*, const_value, var_value, enum_value):
+        from abicheck.model import AbiSnapshot, EnumMember, EnumType, Variable
+
+        snap = AbiSnapshot(library="libtag.so", version="1")
+        snap.constants = {"Foo_tag_id": const_value}
+        snap.variables = [
+            Variable(name="Bar_tagid", mangled="Bar_tagid", type="int", value=var_value)
+        ]
+        snap.enums = [
+            EnumType(
+                name="Msg_tag_id",
+                members=[EnumMember(name="kAlpha", value=enum_value)],
+            )
+        ]
+        return snap
+
+    def _findings(self):
+        from abicheck.diff_serialization import detect_serialization_tag_changes
+
+        return detect_serialization_tag_changes(
+            self._snapshot(const_value=7, var_value=21, enum_value=11),
+            self._snapshot(const_value=8, var_value=22, enum_value=12),
+        )
+
+    def test_the_detector_reaches_all_three_pools(self):
+        """Vacuity guard: without this, every assertion below is empty."""
+        by_symbol = {c.symbol for c in self._findings()}
+        assert by_symbol == {"Foo_tag_id", "Bar_tagid", "Msg_tag_id::kAlpha"}, by_symbol
+
+    def test_each_finding_states_the_entity_of_its_own_source(self):
+        """Batched, so a failure names every disagreeing source at once."""
+        from abicheck.reporter_markdown import entity_for_change
+
+        # Constants share the `variable` entity with real variables, the way
+        # `constant_changed` already declares it; the enum member is the one
+        # that differs. Stated here as the expectation rather than read back
+        # off the producer, so a producer that stops distinguishing them fails.
+        expected = {
+            "Foo_tag_id": "variable",
+            "Bar_tagid": "variable",
+            "Msg_tag_id::kAlpha": "enum",
+        }
+        actual = {
+            c.symbol: entity_for_change(c, c.kind.value) for c in self._findings()
+        }
+        assert actual == expected
+
+    def test_no_finding_is_reported_as_a_type(self):
+        """The specific regression: `type` was wrong for every source."""
+        from abicheck.reporter_markdown import entity_for_change
+
+        wrong = [
+            c.symbol
+            for c in self._findings()
+            if entity_for_change(c, c.kind.value) == "type"
+        ]
+        assert not wrong, wrong
+
+    def test_an_enum_sourced_tag_reaches_the_enums_filter(self):
+        """Through the display filter the bug was actually observed in."""
+        enums = ShowOnlyFilter(frozenset(), frozenset({"enums"}), frozenset())
+        enum_findings = [
+            c for c in self._findings() if c.symbol == "Msg_tag_id::kAlpha"
+        ]
+        assert enum_findings, "vacuity guard: no enum-sourced finding"
+        for c in enum_findings:
+            assert enums._check_element(c, c.kind.value)
+
+    def test_a_variable_sourced_tag_reaches_the_variables_filter(self):
+        variables = ShowOnlyFilter(frozenset(), frozenset({"variables"}), frozenset())
+        var_findings = [c for c in self._findings() if c.symbol != "Msg_tag_id::kAlpha"]
+        assert var_findings, "vacuity guard: no variable-sourced finding"
+        for c in var_findings:
+            assert variables._check_element(c, c.kind.value)
+
+
+class TestAnInlineBodyChangeIsAFunctionFinding:
+    """`inline_body_changed` is declared FUNCTION, not SOURCE.
+
+    `_diff_inline_bodies` iterates only `reachable_inline_bodies` and uses
+    the function's own qualified name as the finding symbol, exactly like
+    the sibling `inline_function_removed` — which is already FUNCTION. The
+    `SOURCE` entity described the *evidence layer* the finding came from,
+    which is not what the display dimension answers, so `--view
+    show=functions` omitted it (Codex review, PR #1284).
+    """
+
+    def test_the_catalog_declares_it_a_function(self):
+        from abicheck.change_registry import ChangeEntity
+
+        assert REGISTRY.entity_for("inline_body_changed") is ChangeEntity.FUNCTION
+
+    def test_it_agrees_with_its_sibling_from_the_same_producer(self):
+        """Both come from the same surface and name the same kind of subject,
+        so a future edit that moves one must move the other deliberately."""
+        assert REGISTRY.entity_for("inline_body_changed") == REGISTRY.entity_for(
+            "inline_function_removed"
+        )
+
+    def test_it_reaches_the_functions_filter(self):
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+
+        finding = Change(
+            kind=ChangeKind.INLINE_BODY_CHANGED,
+            symbol="ns::widget::size",
+            description="d",
+        )
+        functions = ShowOnlyFilter(frozenset(), frozenset({"functions"}), frozenset())
+        assert functions._check_element(finding, "inline_body_changed")

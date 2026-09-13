@@ -863,27 +863,31 @@ def _add_suppression(d: dict[str, object], result: DiffResult) -> None:
 
 
 def disposition_ledger_blocks(result: DiffResult) -> dict[str, object]:
-    """The two ADR-067 *disposition* disclosure blocks for one comparison.
+    """The ADR-067 *disposition* disclosure blocks for one comparison.
 
-    ``suppression`` (what a rule hid, with the rule's own id/source/reason)
-    and ``surface_scope`` (what public-surface scoping demoted, with each
-    finding's exclusion reason) -- built by the very same two functions the
-    scalar ``compare`` JSON path uses, so there is one shape, not a second
-    release-flavoured copy of it.
+    ``suppression`` (what a rule hid, with the rule's own id/source/reason),
+    ``surface_scope`` (what public-surface scoping demoted, with each
+    finding's exclusion reason) and ``build_context_reconciled`` (what
+    ADR-039 reconciliation cleared as a context-free header-parse artifact)
+    -- built by the very same functions the scalar ``compare`` JSON path
+    uses, so there is one shape, not a second release-flavoured copy of it.
 
-    Exists because the release fan-out had neither (Codex review, PR #1284).
-    A directory/package ``compare`` captured both ledgers as *text* and
-    echoed them to stderr, so a requested JSON or Markdown release artifact
+    Exists because the release fan-out had none of them (Codex review,
+    PR #1284). A directory/package ``compare`` captured the ledgers as *text*
+    and echoed them to stderr, so a requested JSON or Markdown release artifact
     carried the per-library counts but named neither the rules that fired
     nor the findings they disposed of -- a passing report could hide every
     break in it, which is the exact failure ADR-067's record-before-disposing
     rule exists to prevent, and a terminal log is not a report.
 
     Returns only the blocks that actually say something: ``surface_scope``
-    when scoping ran (``_add_surface_scope``'s own condition), and
-    ``suppression`` when a suppression document was supplied or a finding was
-    suppressed. A library with neither adds no keys, which is what keeps
-    every release document produced without those settings unchanged.
+    when scoping ran (``_add_surface_scope``'s own condition), ``suppression``
+    when a suppression document was supplied or a finding was suppressed, and
+    ``build_context_reconciled`` when reconciliation cleared anything. A
+    library with none of them adds no keys, which is what keeps every release
+    document produced without those settings unchanged -- and note this is a
+    deliberate asymmetry with the scalar report, which emits an empty
+    ``suppression`` block unconditionally.
     """
     # Warm the shared demangle cache once, here rather than at each caller:
     # every suppressed row resolves a demangled symbol and the scope ledger
@@ -899,6 +903,16 @@ def disposition_ledger_blocks(result: DiffResult) -> dict[str, object]:
     if not (suppression.get("file_provided") or suppression.get("suppressed_count")):
         del blocks["suppression"]
     _add_surface_scope(blocks, result)
+    # Build-context reconciliation is a *disposition* too, and the release
+    # fan-out omitted it: a release whose every break was cleared as a
+    # context-free header-parse artifact passed while its JSON and Markdown
+    # named neither the findings nor the reasons (Codex review, PR #1284).
+    # Same function the scalar path uses, so the block has one shape; it is
+    # independent of both siblings above (reconciliation runs without
+    # `--scope-public-headers` and without any suppression document) and
+    # self-gating -- `_add_reconciled` returns early when nothing was
+    # cleared, so a library that reconciled nothing still adds no key.
+    _add_reconciled(blocks, result)
     return blocks
 
 
