@@ -38,7 +38,13 @@ from dataclasses import dataclass
 
 from .. import deadline, process_resources
 
-__all__ = ["DepfileProbe", "ProbeOutcome", "resolve_jobs", "run_probes"]
+__all__ = [
+    "DepfileProbe",
+    "ProbeOutcome",
+    "host_job_limit",
+    "resolve_jobs",
+    "run_probes",
+]
 
 
 #: Worker-count override for the per-unit ``clang -M`` pass. ``0``/``1``
@@ -61,24 +67,39 @@ _JOB_MEM_DEFAULT_GIB = 0.5
 _PARALLEL_MIN_UNITS = 3
 
 #: Process-wide cap on concurrently spawned ``clang -M`` children, shared by
-#: every :func:`run_probes` pool in this process -- see
-#: :func:`run_probes` for why a per-pool bound is not
-#: enough. Rebuilt when the resolved size changes (only tests do that; a
-#: rebuild mid-flight would lose in-flight accounting, which is why it is
-#: keyed on the size rather than resized in place).
+#: every :func:`run_probes` pool in this process -- see :func:`run_probes` for
+#: why a per-pool bound is not enough.
+#:
+#: Built once and **never replaced**, and sized by :func:`host_job_limit`
+#: (which deliberately knows nothing about how many units any one caller has).
+#: Both halves of that are load-bearing, and an earlier revision got it wrong:
+#: it keyed the semaphore on each pool's own resolved worker count and rebuilt
+#: it whenever that changed. ``service.compare`` resolves the old and new sides
+#: concurrently, and :func:`resolve_jobs` clamps to ``min(..., unit_count)`` --
+#: so two sides whose header/unit counts differ resolve *different* worker
+#: counts, and the second one's rebuild left the first pool holding a
+#: now-orphaned semaphore. Both gates then admitted their full quota at once
+#: (a 2-slot and a 4-slot gate = six concurrent children against an intended
+#: cap of four), which is exactly the CPU/RAM clamp this exists to enforce
+#: being defeated on a constrained runner (Codex review, PR #1275).
 _clang_slots_lock = threading.Lock()
-_clang_slots_state: tuple[int, threading.Semaphore] | None = None
+_clang_slots_state: threading.Semaphore | None = None
 
 
-def _clang_slots(limit: int) -> threading.Semaphore:
-    """The process-wide ``clang -M`` concurrency gate, sized to *limit*."""
+def _clang_slots() -> threading.Semaphore:
+    """The one process-wide ``clang -M`` concurrency gate.
+
+    Sized on first use from :func:`host_job_limit` alone, and kept for the life
+    of the process: a gate that could be replaced while a pool still held the
+    previous one would not be a cap at all (see :data:`_clang_slots_state`).
+    A later caller's larger ``jobs`` request therefore widens its own pool but
+    never this bound -- the pool then simply queues on it.
+    """
     global _clang_slots_state
     with _clang_slots_lock:
-        state = _clang_slots_state
-        if state is None or state[0] != limit:
-            state = (limit, threading.BoundedSemaphore(limit))
-            _clang_slots_state = state
-        return state[1]
+        if _clang_slots_state is None:
+            _clang_slots_state = threading.BoundedSemaphore(host_job_limit())
+        return _clang_slots_state
 
 
 @dataclass(frozen=True)
@@ -112,23 +133,24 @@ class ProbeOutcome:
     detail: str = ""
 
 
-def resolve_jobs(
-    unit_count: int, *, jobs: int | None = None, diagnostics: list[str] | None = None
+def host_job_limit(
+    *, jobs: int | None = None, diagnostics: list[str] | None = None
 ) -> int:
-    """Worker count for *unit_count* planned units (>= 1).
+    """Concurrent ``clang -M`` children this host should tolerate (>= 1).
+
+    Deliberately independent of how many units any one caller has: this is the
+    *host* budget, which is what makes it a safe size for the one shared gate
+    in :func:`_clang_slots` (a limit derived from one caller's unit count would
+    differ between two concurrent callers -- see that state's own docstring for
+    what that cost).
 
     *jobs* (the caller's explicit request) wins when set; otherwise
-    ``ABICHECK_INCLUDE_MAP_JOBS`` (``0``/``1`` disables parallelism),
-    otherwise the shared CPU/RAM-derived sizing every other abicheck
-    worker pool uses (:mod:`abicheck.process_resources`).
-
-    Never more than one worker per unit, and deliberately sequential below
-    :data:`_PARALLEL_MIN_UNITS`: a two-unit build gains little, while a
-    single-threaded path keeps the call *order* observable, which several
-    callers' own tests (and any future debugging session) rely on.
+    ``ABICHECK_INCLUDE_MAP_JOBS`` (``0`` or unset takes the default), otherwise
+    the shared CPU/RAM-derived sizing every other abicheck worker pool uses
+    (:mod:`abicheck.process_resources`). An explicit request is still clamped
+    to the oversubscription ceiling and the memory cap, same as every other
+    pool.
     """
-    if unit_count < _PARALLEL_MIN_UNITS:
-        return 1
     if jobs is not None:
         requested = jobs
     else:
@@ -155,7 +177,27 @@ def resolve_jobs(
     )
     if cap is not None:
         requested = min(requested, cap)
-    return max(1, min(requested, unit_count))
+    return max(1, requested)
+
+
+def resolve_jobs(
+    unit_count: int, *, jobs: int | None = None, diagnostics: list[str] | None = None
+) -> int:
+    """Worker count for a pool of *unit_count* planned units (>= 1).
+
+    :func:`host_job_limit`, narrowed to one worker per unit -- never more
+    threads than there is work for. Deliberately sequential below
+    :data:`_PARALLEL_MIN_UNITS`: a two-unit build gains little, while a
+    single-threaded path keeps the call *order* observable, which several
+    callers' own tests (and any future debugging session) rely on.
+
+    Note this is a *pool* size, not a concurrency guarantee: total concurrent
+    children across every pool in the process is bounded by
+    :func:`_clang_slots`, which is sized from the host budget alone.
+    """
+    if unit_count < _PARALLEL_MIN_UNITS:
+        return 1
+    return max(1, min(host_job_limit(jobs=jobs, diagnostics=diagnostics), unit_count))
 
 
 def run_probes(
@@ -194,8 +236,9 @@ def run_probes(
     # `service_compare_pipeline.resolve_sides_sequentially` documents for
     # manifest dumps. The semaphore bounds *concurrently spawned clang
     # processes* across the request; the pools above it can stay
-    # independent.
-    slots = _clang_slots(resolved_jobs)
+    # independent. Sized from the host budget alone and never replaced -- see
+    # `_clang_slots_state` for the concrete way a per-pool size defeated it.
+    slots = _clang_slots()
     deadline_ts = deadline.current_deadline_ts()
     with ThreadPoolExecutor(max_workers=resolved_jobs) as pool:
         futures = [

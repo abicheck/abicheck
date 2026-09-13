@@ -917,6 +917,16 @@ component figures, not an end-to-end speedup claim.
   rather than removing compiler work -- child CPU time is unchanged -- so the
   pool is clamped by the same `process_resources` RAM probe the L4 pool uses
   (at a much smaller per-worker budget: `clang -M` is preprocess-only). One
+  One sizing subtlety worth keeping: the shared gate is sized from the
+  *host* budget alone and never replaced, while each pool's own size is that
+  budget narrowed to `min(..., unit_count)`. Deriving the gate from a pool's
+  size instead is what a review round caught here -- two sides with differing
+  header counts resolve differing sizes, and rebuilding the gate for the
+  second left the first pool holding an orphaned semaphore, so both admitted
+  their full quota at once (`tests/test_include_graph_parallel.py::
+  test_sides_with_different_unit_counts_still_share_one_gate`, and
+  `perf.shared_resource_gate_keyed_on_a_per_caller_value` in
+  `tests/regressions/manifest.py`). One
   thing that is *not* a valid shortcut here, and was ruled out with a real
   clang: replacing the per-header probes with a single umbrella TU. A header
   with an include guard that a *previous* header in the umbrella already

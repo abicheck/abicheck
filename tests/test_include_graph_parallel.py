@@ -190,6 +190,19 @@ def test_worker_count_actually_bounds_concurrency(
     assert sequential.calls == [f"u{i}.cpp" for i in range(12)]
 
 
+@pytest.fixture
+def _fresh_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Start from an unbuilt process-wide gate.
+
+    The gate is built once per process and kept, so a test that wants to
+    observe its sizing must clear it rather than expect a rebuild -- that
+    "rebuild when the size changes" behaviour is exactly the bug the tests
+    below pin.
+    """
+    monkeypatch.setattr(igw, "_clang_slots_state", None)
+
+
+@pytest.mark.usefixtures("_fresh_gate")
 def test_process_wide_gate_bounds_two_concurrent_extractors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -199,6 +212,7 @@ def test_process_wide_gate_bounds_two_concurrent_extractors(
     each building its own pool; a per-pool bound alone would let the host be
     oversubscribed by exactly the factor of sides.
     """
+    monkeypatch.setattr(igw, "host_job_limit", lambda **_kw: 2)
     build = _build(12)
     compiler = _FakeCompiler(12)
     monkeypatch.setattr(igw.deadline, "run_bounded", compiler)
@@ -213,6 +227,60 @@ def test_process_wide_gate_bounds_two_concurrent_extractors(
         t.join()
 
     assert compiler.peak_inflight <= 2
+
+
+@pytest.mark.usefixtures("_fresh_gate")
+def test_sides_with_different_unit_counts_still_share_one_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The gate holds even when the two pools resolve *different* sizes.
+
+    Regression test for a defect found in review. The gate used to be keyed on
+    each pool's own resolved worker count and rebuilt whenever that changed --
+    and ``resolve_jobs`` clamps to ``min(..., unit_count)``, so two sides with
+    differing header counts (the ordinary case: a library that gained or lost
+    headers between versions) resolve differing counts. The second side's
+    rebuild left the first holding an orphaned semaphore and both admitted
+    their full quota at once, which is the CPU/RAM clamp defeated precisely
+    when it matters -- a constrained runner.
+
+    The host limit is pinned to 4 and the two sides are sized 3 and 4, so the
+    old behaviour admits up to 7 concurrent children and the correct behaviour
+    at most 4. Asserted by observing concurrent children, not by inspecting the
+    gate: a future rewrite that bounds concurrency some other way should pass.
+    """
+    monkeypatch.setattr(igw, "host_job_limit", lambda **_kw: 4)
+    compiler = _FakeCompiler(40)
+    monkeypatch.setattr(igw.deadline, "run_bounded", compiler)
+    assert igw.resolve_jobs(3) != igw.resolve_jobs(40), "fixture must size differently"
+
+    def side(unit_count: int, first: int) -> None:
+        ClangIncludeExtractor().extract_from_build(_build(unit_count, first=first))
+
+    threads = [
+        threading.Thread(target=side, args=(3, 0)),
+        threading.Thread(target=side, args=(20, 10)),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert compiler.peak_inflight > 1, "neither pool overlapped; the bound is untested"
+    assert compiler.peak_inflight <= 4
+
+
+@pytest.mark.usefixtures("_fresh_gate")
+def test_the_gate_is_never_replaced_once_built(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Whatever a later caller asks for, the existing gate object survives.
+
+    The identity check is the point: a replaced gate is not a cap, because the
+    pool still holding the previous one keeps its own independent quota.
+    """
+    monkeypatch.setattr(igw, "host_job_limit", lambda **_kw: 2)
+    first = igw._clang_slots()
+    monkeypatch.setattr(igw, "host_job_limit", lambda **_kw: 16)
+    assert igw._clang_slots() is first
 
 
 class TestResolveJobs:
@@ -443,13 +511,6 @@ def test_units_without_a_source_are_skipped_before_planning(
     )
     out = ClangIncludeExtractor(jobs=4).extract_from_build(build)
     assert set(out) == {"cu://0", "cu://1", "cu://2"}
-
-
-def test_clang_slots_are_reused_for_a_stable_limit() -> None:
-    """The process-wide gate is one object per size, not one per call."""
-    first = igw._clang_slots(3)
-    assert igw._clang_slots(3) is first
-    assert igw._clang_slots(4) is not first
 
 
 @pytest.mark.integration
