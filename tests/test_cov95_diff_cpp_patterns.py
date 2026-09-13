@@ -15,7 +15,7 @@ existing ``test_cpp_pattern_detectors.py`` suite does not reach:
 * ``_parent_namespace`` with no ``::``
 * ``_stable_leading_template_args`` degenerate / mismatch branches
 * ``_extract_template_args`` no-match path
-* ``_split_top_level_commas_local`` nesting
+* ``_split_top_level_commas`` nesting
 * tag-rename candidate rejection paths
 * inline-body pimpl helper branches
 * bundle-SONAME directory scanning and best-effort SONAME readers
@@ -39,7 +39,6 @@ from abicheck.diff_cpp_patterns import (
     _parent_namespace,
     _read_elf_soname,
     _read_soname_best_effort,
-    _split_top_level_commas_local,
     _stable_leading_template_args,
     _symbols_embedding_leaf,
     _unqualified_function_name,
@@ -49,6 +48,7 @@ from abicheck.diff_cpp_patterns import (
     detect_inline_body_renamed_member,
     detect_tag_type_renamed,
 )
+from abicheck.internal_leak import _split_top_level_commas
 from abicheck.model import (
     AbiSnapshot,
     AccessLevel,
@@ -169,20 +169,20 @@ class TestStableLeadingTemplateArgs:
 
 
 # ---------------------------------------------------------------------------
-# _split_top_level_commas_local
+# _split_top_level_commas
 # ---------------------------------------------------------------------------
 
 
 class TestSplitTopLevelCommas:
     def test_simple(self) -> None:
-        assert _split_top_level_commas_local("a, b, c") == ["a", " b", " c"]
+        assert _split_top_level_commas("a, b, c") == ["a", " b", " c"]
 
     def test_nested_angle_brackets_not_split(self) -> None:
         # The comma inside ``<...>`` must not split.
-        assert _split_top_level_commas_local("a, X<b, c>") == ["a", " X<b, c>"]
+        assert _split_top_level_commas("a, X<b, c>") == ["a", " X<b, c>"]
 
     def test_empty(self) -> None:
-        assert _split_top_level_commas_local("") == []
+        assert _split_top_level_commas("") == []
 
 
 # ---------------------------------------------------------------------------

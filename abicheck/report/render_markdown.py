@@ -497,20 +497,6 @@ class SeveritySectionsData:
     groups: tuple[ChangeGroup, ...]
 
 
-def render_severity_sections(data: SeveritySectionsData) -> list[str]:
-    lines: list[str] = []
-    for group in data.groups:
-        lines += [group.heading, ""]
-        if group.note_lines:
-            lines += list(group.note_lines)
-            lines.append("")
-        fmt = _format_change_md_oneline if group.oneline else _format_change_md
-        for c in group.changes:
-            lines.append(fmt(c))
-        lines.append("")
-    return lines
-
-
 # ---------------------------------------------------------------------------
 # Environment & toolchain drift section
 # ---------------------------------------------------------------------------

@@ -203,6 +203,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from .. import deadline
+from ..model.mangled_name import strip_macho_itanium_decoration
 from .clang_ast_run import run_clang_ast_dump
 from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge
 from .preprocessor_facts import _DEFINE_RE
@@ -301,14 +302,6 @@ class _LocationCursor:
         return (self.file, self.line)
 
 
-def _normalize_mangled(mangled: str) -> str:
-    """Strip a spurious macOS Mach-O leading underscore, mirroring
-    ``call_graph._normalize_mangled``/``type_graph._normalize_mangled`` (same
-    bug, same fix, kept as a local copy per those modules' own documented
-    reasoning: this module doesn't otherwise depend on either)."""
-    return mangled[1:] if mangled.startswith("__Z") else mangled
-
-
 def _var_decl_identity(node: dict[str, Any], scope: list[str], name: str) -> str:
     """A namespace/class-scope variable's identity, mirroring
     ``type_graph._emit_var_decl_edge``'s identity computation (that function
@@ -316,7 +309,7 @@ def _var_decl_identity(node: dict[str, Any], scope: list[str], name: str) -> str
     from ..model.source_graph import function_decl_identity
 
     return function_decl_identity(
-        _normalize_mangled(str(node.get("mangledName") or "")),
+        strip_macho_itanium_decoration(str(node.get("mangledName") or "")),
         name,
         "::".join([*scope, name]) if scope else name,
         "",

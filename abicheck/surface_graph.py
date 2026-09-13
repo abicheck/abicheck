@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .checker_policy import EvidenceTier
+from .compare.surface_graph import _type_identifiers
 from .model import (
     AbiSnapshot,
     Function,
@@ -45,7 +46,6 @@ from .model import (
 )
 from .model.dwarf_facts import debug_info_present
 from .model.surface_facts import in_public_surface, is_binary_exported
-from .surface import _type_identifiers
 
 if TYPE_CHECKING:
     from .model.identity import EntityId
