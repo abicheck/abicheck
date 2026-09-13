@@ -71,6 +71,7 @@ if TYPE_CHECKING:
     from ..snapshot_io import SnapshotWriteResult
 from ..errors import IncompatibleSnapshotSchemaError, SnapshotError
 from ..model import AbiSnapshot, DependencyInfo
+from ..model.header_exclusion_record import normalize_matching
 from ..model.semantic_ir_legacy_adapter import assert_snapshot_semantic_ir_consistent
 from ..snapshot_platform_blocks import (
     dwarf_advanced_from_dict as _dwarf_advanced_from_dict,
@@ -543,7 +544,7 @@ def decode_snapshot(
         # glob snapshot that excluded a different set of headers. A snapshot
         # carrying no patterns is unaffected -- there is nothing for a rule
         # to have matched (Codex review).
-        excluded_header_matching=d.get("excluded_header_matching") or "unknown",
+        excluded_header_matching=normalize_matching(d.get("excluded_header_matching")),
         language_profile=d.get("language_profile"),
         scope_fallback=d.get("scope_fallback"),
         dependency_info=dep_info,

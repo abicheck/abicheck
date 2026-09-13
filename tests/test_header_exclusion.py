@@ -772,3 +772,107 @@ class TestAModelessSnapshotIsAmbiguousNotNative:
             )
             is None
         )
+
+
+class TestOnlyAnAchievableNarrowingIsRecorded:
+    """A descriptor skip that matched nothing is not a recorded narrowing.
+
+    Under exact membership a wildcard matches no header at all --
+    `warn_glob_skips_do_nothing` says exactly that -- yet the pattern was
+    persisted anyway, so the snapshot claimed a narrowing that never
+    happened: the coverage warning reported headers omitted and the gate
+    refused an otherwise identical unexcluded snapshot (Codex review).
+
+    This filter and the recorded *rule* are complements, not alternatives.
+    Conflating them is how it came to be dropped: the metacharacter test was
+    falsified as a *comparability* rule and removed when the rule began to be
+    recorded — but it was never wrong as a "what did this run achieve" test,
+    which is a different question.
+    """
+
+    @pytest.mark.parametrize("pattern", ["*.h", "a?.h", "x[0].h"])
+    def test_an_unachievable_exact_pattern_is_not_recorded(self, pattern):
+        from abicheck.model.header_exclusion_record import (
+            EXACT_MATCHING,
+            patterns_achievable_under,
+        )
+
+        assert patterns_achievable_under([pattern], EXACT_MATCHING) == ()
+
+    @pytest.mark.parametrize("pattern", ["b.h", "include/foo.h", "a_b.h"])
+    def test_an_achievable_exact_pattern_is_kept(self, pattern):
+        """The negative control: dropping everything would satisfy the claim
+        above completely."""
+        from abicheck.model.header_exclusion_record import (
+            EXACT_MATCHING,
+            patterns_achievable_under,
+        )
+
+        assert patterns_achievable_under([pattern], EXACT_MATCHING) == (pattern,)
+
+    @pytest.mark.parametrize("pattern", ["*.h", "b.h", "x[0].h"])
+    def test_the_native_rule_passes_everything_through(self, pattern):
+        """Every pattern is achievable under fnmatch by construction, so the
+        native path must be untouched -- filtering it would silently drop a
+        real exclusion."""
+        from abicheck.model.header_exclusion_record import (
+            GLOB_MATCHING,
+            patterns_achievable_under,
+        )
+
+        assert patterns_achievable_under([pattern], GLOB_MATCHING) == (pattern,)
+
+
+class TestAnUnrecognisedMatchingRuleIsNotTakenAtItsWord:
+    """Recognising a rule's name is not the same as implementing it.
+
+    A hand-edited or third-party snapshot naming `"regex"` on both sides
+    would otherwise compare equal and be approved, though this build cannot
+    establish what either side excluded (Codex review).
+    """
+
+    @pytest.mark.parametrize("bogus", ["regex", "REGEX", "", "  ", "fnmatch2"])
+    def test_an_unknown_rule_loads_as_unknown(self, bogus):
+        from abicheck.model import AbiSnapshot
+        from abicheck.serialization import snapshot_from_dict
+        from abicheck.storage.snapshot_encode import snapshot_to_dict
+
+        d = snapshot_to_dict(
+            AbiSnapshot(library="l", version="1", excluded_header_patterns=("a.h",))
+        )
+        d["excluded_header_matching"] = bogus
+        assert snapshot_from_dict(d).excluded_header_matching == "unknown"
+
+    @pytest.mark.parametrize("known", ["glob", "exact", "unknown"])
+    def test_a_known_rule_survives(self, known):
+        """The negative control: mapping everything to unknown would satisfy
+        the claim above and refuse every comparison."""
+        from abicheck.model import AbiSnapshot
+        from abicheck.serialization import snapshot_from_dict
+        from abicheck.storage.snapshot_encode import snapshot_to_dict
+
+        d = snapshot_to_dict(
+            AbiSnapshot(library="l", version="1", excluded_header_patterns=("a.h",))
+        )
+        d["excluded_header_matching"] = known
+        assert snapshot_from_dict(d).excluded_header_matching == known
+
+    def test_two_sides_naming_the_same_unknown_rule_are_refused(self):
+        """The reported case: equal strings are not equal evidence."""
+        from abicheck.comparability import check_contracts_comparable
+        from abicheck.errors import ScopeMismatchError
+        from abicheck.model import AbiSnapshot
+        from abicheck.serialization import snapshot_from_dict
+        from abicheck.storage.snapshot_encode import snapshot_to_dict
+
+        def bogus(version):
+            d = snapshot_to_dict(
+                AbiSnapshot(
+                    library="l", version=version, excluded_header_patterns=("a.h",)
+                )
+            )
+            d["excluded_header_matching"] = "regex"
+            return snapshot_from_dict(d)
+
+        with pytest.raises(ScopeMismatchError):
+            check_contracts_comparable(bogus("1"), bogus("2"))

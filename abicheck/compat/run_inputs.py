@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING
 from ..errors import SnapshotError
 from ..model.header_exclusion_record import (
     EXACT_MATCHING,
+    patterns_achievable_under,
     record_header_exclusions,
 )
 from ..serialization import load_snapshot
@@ -301,4 +302,16 @@ def record_descriptor_skips(
     # alone -- or trying to decide from the text which patterns mean the same
     # thing under both rules -- was falsified twice; see
     # `exclusions_are_symmetric`.
-    return record_header_exclusions(snapshot, skips, matching=EXACT_MATCHING)
+    # Only what the exact-membership rule could actually have excluded. A
+    # wildcard skip matches nothing under it -- `warn_glob_skips_do_nothing`
+    # has just said so -- and recording it anyway would make this snapshot
+    # claim a narrowing that did not happen, which the coverage warning then
+    # reports and the comparability gate then refuses against an identical
+    # unexcluded snapshot (Codex review). The recorded *rule* and this filter
+    # answer different questions: the rule decides whether two sides are
+    # comparable, this keeps each side's own record honest.
+    return record_header_exclusions(
+        snapshot,
+        patterns_achievable_under(skips, EXACT_MATCHING),
+        matching=EXACT_MATCHING,
+    )

@@ -366,7 +366,7 @@ class TestOnlyTheAchievedNarrowingIsRecorded:
         assert result.exit_code == 0, result.output
         return load_snapshot(out), result.output
 
-    @pytest.mark.parametrize("skip", ["*.h", "a?.h", "x[0].h", "b.h"])
+    @pytest.mark.parametrize("skip", ["b.h", "include/foo.h"])
     def test_the_matching_rule_is_recorded_with_the_patterns(self, skip, tree):
         """The fact, not a guess from the text.
 
@@ -380,6 +380,28 @@ class TestOnlyTheAchievedNarrowingIsRecorded:
         snap, _ = self._dump(tree, skip)
         assert snap.excluded_header_matching == "exact"
         assert snap.excluded_header_patterns == (skip,)
+
+    @pytest.mark.parametrize("skip", ["*.h", "a?.h", "x[0].h"])
+    def test_a_wildcard_skip_records_no_narrowing_at_all(self, skip, tree):
+        """It matched nothing under exact membership, so there is no achieved
+        narrowing to record -- and recording one would make this snapshot
+        claim a reduced surface it does not have (Codex review, a round after
+        the matching rule was added: the rule and this filter answer different
+        questions, and the filter was wrongly dropped when the rule landed).
+        """
+        snap, output = self._dump(tree, skip)
+        assert snap.excluded_header_patterns == ()
+        assert "wildcard" in output
+
+    def test_a_wildcard_skip_still_compares_with_an_unexcluded_snapshot(self, tree):
+        """The consequence: a run whose skip rule did nothing must not be
+        refused against a snapshot that never had one."""
+        from abicheck.comparability import check_contracts_comparable
+        from abicheck.model import AbiSnapshot
+
+        snap, _ = self._dump(tree, "*.h")
+        plain = AbiSnapshot(library="libfoo.so", version="0.9")
+        assert check_contracts_comparable(plain, snap) is None
 
     @pytest.mark.parametrize("skip", ["*.h", "a?.h", "x[0].h"])
     def test_a_glob_skip_is_reported_rather_than_silently_ignored(self, skip, tree):
