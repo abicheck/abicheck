@@ -1329,6 +1329,69 @@ class TestPersistentHygieneRespectsAnExplicitPolicy:
             == 1
         )
 
+    def test_a_reclassify_rule_keeps_its_matched_finding(self) -> None:
+        """The `reclassify:` namespace, not just `overrides:`.
+
+        Found in review. The first version mined rules for
+        `rule.kinds`/`rule.kind` -- neither of which exists; the field is
+        `change_kind` -- so every reclassify rule was silently ignored and a
+        rule like `{kind: exported_not_public, symbol: x, to: break}` had
+        its finding dropped before `PolicyFile.compute_verdict` ever saw it,
+        turning a deliberate `break` into `NO_CHANGE`. Asking the rule
+        whether it matches also covers a rule with no kind selector at all,
+        which mining kind names could never have done.
+        """
+        from abicheck.checker import _drop_persistent_hygiene
+        from abicheck.checker_policy import Verdict
+        from abicheck.policy.reclassify import ReclassifyRule
+        from abicheck.policy_file import PolicyFile
+
+        matched = self._persistent()
+        unmatched = Change(
+            kind=ChangeKind.EXPORTED_NOT_PUBLIC,
+            symbol="something_else",
+            description="",
+            cross_source_evolution=CrossSourceEvolution.PERSISTENT,
+        )
+        policy = PolicyFile(
+            base_policy="strict_abi",
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.BREAKING,
+                    to="break",
+                    change_kind="exported_not_public",
+                    symbol="undeclared",
+                )
+            ],
+        )
+        scored = _drop_persistent_hygiene([matched, unmatched], "strict_abi", policy)
+        # Only the rule's own target is retained -- the exclusion stays in
+        # force for every finding the rule does not name.
+        assert [c.symbol for c in scored] == ["undeclared"]
+        assert policy.compute_verdict(scored) == Verdict.BREAKING
+
+    def test_a_kindless_reclassify_rule_is_honoured_too(self) -> None:
+        """A rule scoped only by symbol or namespace legitimately applies to
+        a hygiene finding, and no amount of collecting *kind* names would
+        ever have found it."""
+        from abicheck.checker import _drop_persistent_hygiene
+        from abicheck.checker_policy import Verdict
+        from abicheck.policy.reclassify import ReclassifyRule
+        from abicheck.policy_file import PolicyFile
+
+        policy = PolicyFile(
+            base_policy="strict_abi",
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.BREAKING, to="break", symbol="undeclared"
+                )
+            ],
+        )
+        assert (
+            len(_drop_persistent_hygiene([self._persistent()], "strict_abi", policy))
+            == 1
+        )
+
     def test_an_unrelated_override_does_not_disable_the_exclusion(self) -> None:
         """Vacuity guard. If the guard were "any policy document at all", the
         exclusion would stop working for every project that has a policy

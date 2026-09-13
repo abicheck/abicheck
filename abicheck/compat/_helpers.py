@@ -743,14 +743,20 @@ def build_descriptor_suppression(
 
     for desc in descriptors:
         for ns in getattr(desc, "skip_namespaces", []):
-            # A namespace rule covers the namespace itself and everything
-            # under it; the selector is fnmatch-style, so both spellings are
-            # needed for `detail` to cover `detail::impl::T`.
+            # The bare namespace, **not** a `ns*` glob. The selector already
+            # has ancestor semantics -- `detail` matches `detail::T` and
+            # `detail::impl::T` -- so the trailing wildcard buys nothing and
+            # costs correctness: `detail*` also matches the unrelated
+            # segments `details::T` and `detail_public::T`, silently
+            # suppressing real breaks in public namespaces the descriptor
+            # never named (Codex review). Verified against the selector
+            # rather than assumed; see
+            # `test_namespace_rule_does_not_leak_into_sibling_segments`.
             _add(
                 "namespace",
                 ns,
                 Suppression(
-                    namespace=f"{ns}*",
+                    namespace=ns,
                     reason=f"descriptor <skip_namespaces>: {ns}",
                 ),
             )

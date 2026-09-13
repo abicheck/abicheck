@@ -21,6 +21,7 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change, DiffResult
+from abicheck.compat.descriptor import CompatDescriptor
 from abicheck.compat.multi_library import (
     _FIELD_POLICY,
     _WORST_SCALES,
@@ -453,3 +454,177 @@ class TestCompatCheckMultiLibraryEndToEnd:
         )
         assert result.exit_code == 0, result.output
         assert "b_dropped" not in result.output
+
+
+class TestZeroPairPlanRefusesToInventAComparison:
+    """A multi-library descriptor pair in which nothing pairs must not
+    produce a verdict.
+
+    Found in review. ``_plan_library_pairs`` returned ``([], [], [])`` for
+    two different situations -- "not a multi-library comparison" and "a
+    multi-library comparison that paired nothing" -- and the caller's
+    ``or [(None, None)]`` fallback turned the second into "compare
+    ``libs[0]`` against ``libs[0]``": two *unrelated* libraries, yielding a
+    real BREAKING-or-clean verdict that the unpaired-library warnings
+    appended afterwards could not undo. ADR-065: a run that completed zero
+    comparisons never reads as a clean pass.
+    """
+
+    @staticmethod
+    def _desc(libs: list[str]) -> CompatDescriptor:
+        return CompatDescriptor(
+            version="1.0", headers=[], libs=[Path(f"/fake/{n}") for n in libs]
+        )
+
+    def test_a_zero_pair_plan_is_distinguishable_from_no_plan(self) -> None:
+        """The distinction the bug turned on, stated directly: ``None``
+        means "no fan-out applies", an empty pair list means "a fan-out
+        that matched nothing". Collapsing them is what let a verdict be
+        invented."""
+        from abicheck.compat.cli import _plan_library_pairs
+
+        # Not a multi-library comparison at all -> None.
+        assert (
+            _plan_library_pairs(self._desc(["liba.so"]), self._desc(["liba.so"]))
+            is None
+        )
+
+        # Multi-library, nothing pairs -> a real plan with zero pairs.
+        plan = _plan_library_pairs(
+            self._desc(["libalpha1.so", "libalpha2.so"]),
+            self._desc(["libbeta1.so", "libbeta2.so"]),
+        )
+        assert plan is not None
+        pairs, old_only, new_only = plan
+        assert pairs == []
+        assert len(old_only) == 2 and len(new_only) == 2
+
+    def test_a_snapshot_operand_is_not_a_fan_out(self) -> None:
+        """A JSON/Perl dump names no library list, so there is nothing to
+        fan out over -- and that is ``None``, not a zero-pair plan."""
+        from abicheck.compat.cli import _plan_library_pairs
+        from abicheck.model import AbiSnapshot
+
+        snap = AbiSnapshot(library="libfoo.so", version="1.0")
+        multi = self._desc(["liba.so", "libb.so"])
+        assert _plan_library_pairs(snap, multi) is None
+        assert _plan_library_pairs(multi, snap) is None
+
+    def test_the_error_names_every_unpaired_library(self) -> None:
+        """A user has to be able to see *why* nothing paired; an error that
+        only says "no pairs" leaves them guessing at names."""
+        from abicheck.compat.cli import _no_library_pair_error
+
+        exc = _no_library_pair_error(
+            [Path("old/libalpha1.so"), Path("old/libalpha2.so")],
+            [Path("new/libbeta1.so")],
+        )
+        text = str(exc)
+        for name in ("libalpha1.so", "libalpha2.so", "libbeta1.so"):
+            assert name in text
+
+    def test_one_pair_plus_unpaired_still_compares(self) -> None:
+        """The boundary in the other direction: a plan that pairs *some*
+        libraries is a real comparison, and must not be refused because
+        others went unpaired."""
+        from abicheck.compat.cli import _plan_library_pairs
+
+        plan = _plan_library_pairs(
+            self._desc(["libshared.so", "libalpha.so"]),
+            self._desc(["libshared.so", "libbeta.so"]),
+        )
+        assert plan is not None
+        pairs, old_only, new_only = plan
+        assert [(o.name, n.name) for o, n in pairs] == [
+            ("libshared.so", "libshared.so")
+        ]
+        assert [p.name for p in old_only] == ["libalpha.so"]
+        assert [p.name for p in new_only] == ["libbeta.so"]
+
+
+class TestWorstScalesAreOrderedWorstLast:
+    """Every ``"worst"`` ordinal must actually rank the *worst* value last.
+
+    Found in review. The depth and ``evidence_tier`` scales were written in
+    their natural reading order (shallow -> deep), so ``max`` selected the
+    *strongest* member: a two-library release with one binary-only member
+    and one reaching source evidence reported ``effective_depth='source'``
+    and ``HEADER_AWARE`` release-wide — presenting the best member's
+    assurance as the release's, the exact inversion of "weaker evidence
+    narrows conclusions".
+
+    The membership tests that were here first passed throughout, because a
+    reversed scale contains exactly the right values. Only direction catches
+    it, so direction is what this class asserts.
+    """
+
+    #: (field, better value, worse value). Spelled out rather than derived
+    #: from the scale under test — an oracle read off the same table would
+    #: agree with it however it is ordered.
+    CASES = (
+        ("old_evidence_depth", "source", "binary"),
+        ("new_evidence_depth", "headers", "debug"),
+        ("effective_depth", "build", "binary"),
+        ("evidence_tier", "header_aware", "elf_only"),
+        ("confidence", "high", "low"),
+        ("surface_scope_confidence", "high", "reduced"),
+        ("verdict", "COMPATIBLE", "BREAKING"),
+    )
+
+    def test_the_worse_value_wins_in_both_argument_orders(self) -> None:
+        from abicheck.compat.multi_library import _worst
+
+        offenders = []
+        for field, better, worse in self.CASES:
+            for values in ([better, worse], [worse, better]):
+                if _worst(field, list(values)) != worse:
+                    offenders.append(f"{field}: {values} -> {_worst(field, values)}")
+        assert not offenders, (
+            "a 'worst' field selected the better value (scale ordered "
+            "best-last, or max/min inverted): " + "; ".join(offenders)
+        )
+
+    def test_every_worst_field_is_covered_by_a_direction_case(self) -> None:
+        """Vacuity guard on the table above: a new ``"worst"`` field with no
+        direction case would silently inherit the bug this class exists to
+        catch."""
+        from abicheck.compat.multi_library import _FIELD_POLICY
+
+        worst_fields = {k for k, v in _FIELD_POLICY.items() if v == "worst"}
+        covered = {field for field, _b, _w in self.CASES}
+        # Single-valued scales have no direction to test.
+        single = {"contract_coverage", "assurance"}
+        assert worst_fields - covered - single == set()
+
+    def test_an_unknown_value_ranks_worst(self) -> None:
+        """Missing evidence is not evidence of good evidence: a value absent
+        from its scale must not be beaten by a known-good one."""
+        from abicheck.compat.multi_library import _worst
+
+        assert _worst("effective_depth", ["source", "some-future-depth"]) == (
+            "some-future-depth"
+        )
+
+    def test_merge_reports_the_weakest_members_evidence(self) -> None:
+        """The property end-to-end, through the real merge rather than the
+        ranking helper: a release is only as well-evidenced as its least
+        well-evidenced member."""
+        from abicheck.policy.evidence_status import EvidenceTier
+
+        merged = merge_results(
+            [
+                _result(
+                    "libdeep.so",
+                    effective_depth="source",
+                    evidence_tier=EvidenceTier.HEADER_AWARE,
+                ),
+                _result(
+                    "libshallow.so",
+                    effective_depth="binary",
+                    evidence_tier=EvidenceTier.ELF_ONLY,
+                ),
+            ],
+            label="2 libraries",
+        )
+        assert merged.effective_depth == "binary"
+        assert merged.evidence_tier == EvidenceTier.ELF_ONLY

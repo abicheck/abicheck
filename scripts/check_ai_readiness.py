@@ -2759,8 +2759,8 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # every paired library (kept a *single* call site deliberately --
         # see that loop's own comment).
         "abicheck/compat/cli.py:321:19:dumper.dump",
-        "abicheck/compat/cli.py:1017:16:checker.compare",
-        "abicheck/compat/cli.py:1238:15:dumper.dump",
+        "abicheck/compat/cli.py:1026:16:checker.compare",
+        "abicheck/compat/cli.py:1247:15:dumper.dump",
     }
 )
 

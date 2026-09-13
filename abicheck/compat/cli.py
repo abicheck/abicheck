@@ -952,7 +952,16 @@ def compat_check_cmd(  # noqa: PLR0913
         "nostdinc": nostdinc,
         "lang": lang,
     }
-    _library_pairs, _unpaired_old, _unpaired_new = _plan_library_pairs(old_d, new_d)
+    _plan = _plan_library_pairs(old_d, new_d)
+    _library_pairs, _unpaired_old, _unpaired_new = _plan or ([], [], [])
+    if _plan is not None and not _library_pairs:
+        # A multi-library plan that paired nothing: no comparison is
+        # possible, and falling through would compare two unrelated
+        # libraries (see `_no_library_pair_error`).
+        _compat_fail(
+            "comparing snapshots",
+            _no_library_pair_error(_unpaired_old, _unpaired_new),
+        )
 
     if headers_only:
         _do_echo("Note: -headers-only is accepted — ELF/DWARF checks still run.", quiet)
@@ -1405,22 +1414,58 @@ class _SnapshotOptions(TypedDict):
 def _plan_library_pairs(
     old_d: CompatDescriptor | AbiSnapshot,
     new_d: CompatDescriptor | AbiSnapshot,
-) -> tuple[list[tuple[Path, Path]], list[Path], list[Path]]:
-    """Pair the two sides' ``<libs>`` entries, or return no pairs at all.
+) -> tuple[list[tuple[Path, Path]], list[Path], list[Path]] | None:
+    """Pair the two sides' ``<libs>`` entries, or ``None`` for no fan-out.
 
-    Returns ``([], [], [])`` whenever either side is an already-built
-    snapshot (a JSON/Perl dump names no library list to fan out over) or
-    either side names one library or fewer -- the single-library path then
-    runs exactly as it did before, which is what keeps this change inert for
-    every ordinary one-library descriptor.
+    ``None`` -- **not** an empty pair list -- is how "this is not a
+    multi-library comparison" is reported: either side being an
+    already-built snapshot (a JSON/Perl dump names no library list), or both
+    naming one library or fewer. The single-library path then runs exactly
+    as it did before, which keeps this change inert for every ordinary
+    one-library descriptor.
+
+    The distinction is load-bearing. Returning ``[]`` for both "no fan-out
+    applies" and "a multi-library plan that paired nothing" let the caller's
+    ``or [(None, None)]`` fallback turn the second case into "compare
+    ``libs[0]`` against ``libs[0]``" -- two *unrelated* libraries, yielding a
+    real verdict that the unpaired-library warnings appended afterwards
+    could not undo (Codex review). A zero-pair multi-library plan is now
+    returned as one, and the caller refuses to produce a verdict from it.
     """
     if not isinstance(old_d, CompatDescriptor) or not isinstance(
         new_d, CompatDescriptor
     ):
-        return [], [], []
+        return None
     if len(old_d.libs) <= 1 and len(new_d.libs) <= 1:
-        return [], [], []
+        return None
     return pair_libraries(old_d.libs, new_d.libs)
+
+
+def _no_library_pair_error(
+    unpaired_old: list[Path], unpaired_new: list[Path]
+) -> ScopeMismatchError:
+    """The error for a multi-library comparison in which nothing paired.
+
+    ADR-065: "a run that completed zero comparisons never reads as a clean
+    pass". With no pair there is no comparison to draw a verdict from, and
+    the alternative -- comparing the first library of each side regardless
+    of whether they are the same library -- produces a confident verdict
+    about two unrelated artifacts.
+
+    ``ScopeMismatchError`` so it classifies as compat exit 9 (not_comparable,
+    ADR-050 D2), which is what actually happened: the two descriptors name
+    library sets that cannot be put into correspondence.
+    """
+    return ScopeMismatchError(
+        "No library in the old descriptor pairs with one in the new "
+        "descriptor, so no comparison could be run. Old: "
+        + (", ".join(p.name for p in unpaired_old) or "(none)")
+        + "; new: "
+        + (", ".join(p.name for p in unpaired_new) or "(none)")
+        + ". Libraries are paired by filename, then by version-insensitive "
+        "stem; rename or list matching libraries, or compare one pair "
+        "directly."
+    )
 
 
 def _record_unpaired_libraries(

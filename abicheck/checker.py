@@ -232,8 +232,8 @@ def _drop_persistent_hygiene(
     document is in effect, so a document that changed the base profile does
     not get judged against ``strict_abi``'s partitions.
 
-    **A kind the policy document speaks about is never excluded**, whether it
-    speaks through ``overrides:`` or ``reclassify:``. Those rules are applied
+    **A finding the policy document states a rule about is never excluded**,
+    whether through ``overrides:`` or ``reclassify:``. Those rules are applied
     by ``PolicyFile.compute_verdict``, not by the base kind sets, so the
     category this function resolves does not see them: a project that
     deliberately set ``exported_not_public: breaking`` would have had every
@@ -251,35 +251,40 @@ def _drop_persistent_hygiene(
     """
     base = policy_file.base_policy if policy_file is not None else policy
     sets = policy_kind_sets(base)
-    policy_governed = _policy_governed_kinds(policy_file)
     return [
         c
         for c in changes
-        if c.kind in policy_governed
+        if _policy_governs(c, policy_file)
         or not excluded_from_verdict_as_persistent_hygiene(c, *sets)
     ]
 
 
-def _policy_governed_kinds(policy_file: PolicyFile | None) -> frozenset[ChangeKind]:
-    """Every ``ChangeKind`` *policy_file* states a rule about.
+def _policy_governs(change: Change, policy_file: PolicyFile | None) -> bool:
+    """Whether *policy_file* states a rule that applies to *change*.
 
     Both rule namespaces, because both change a finding's resolved verdict
-    and neither is visible in the base profile's kind sets: ``overrides:``
-    (kind-global) and ``reclassify:`` (selector-scoped, which still names
-    the kinds it applies to).
+    and neither is visible in the base profile's kind sets:
+    ``overrides:`` is kind-global, so a kind lookup answers it; ``reclassify:``
+    is selector-scoped, so the rule is *asked whether it matches this
+    finding* rather than mined for the kinds it mentions.
+
+    Asking the rule is not a refinement, it is the only correct form. An
+    earlier version collected ``rule.kinds``/``rule.kind`` -- neither of
+    which exists; the field is ``change_kind`` -- so every reclassify rule
+    was silently ignored, and a rule like ``{kind: exported_not_public,
+    symbol: x, to: break}`` had its finding dropped before
+    ``PolicyFile.compute_verdict`` ever saw it, turning a deliberate
+    ``break`` into ``NO_CHANGE`` (Codex review). Mining kind names would
+    also have missed a rule with no kind selector at all -- a symbol- or
+    namespace-scoped rule that legitimately applies to a hygiene finding.
     """
     if policy_file is None:
-        return frozenset()
-    governed: set[ChangeKind] = set(getattr(policy_file, "overrides", {}) or {})
-    for rule in getattr(policy_file, "reclassify", ()) or ():
-        kinds = getattr(rule, "kinds", None) or getattr(rule, "kind", None)
-        if kinds is None:
-            continue
-        if isinstance(kinds, (list, tuple, set, frozenset)):
-            governed.update(kinds)
-        else:
-            governed.add(kinds)
-    return frozenset(governed)
+        return False
+    if change.kind in (getattr(policy_file, "overrides", {}) or {}):
+        return True
+    return any(
+        rule.matches(change) for rule in (getattr(policy_file, "reclassify", ()) or ())
+    )
 
 
 def _verdict_scored_population(

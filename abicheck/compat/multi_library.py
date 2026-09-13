@@ -229,17 +229,37 @@ _FIELD_POLICY: dict[str, str] = {
     "library": "drop",  # replaced by the caller-supplied label
 }
 
-#: Ordinal scales for the ``"worst"`` fields that are plain strings. A value
-#: absent from its scale sorts last (most severe) rather than being ignored:
-#: an unrecognised depth/assurance is not evidence of a good one.
+#: Ordinal scales for the ``"worst"`` fields, **every one ordered
+#: worst-last**, because :func:`_worst` takes the ``max``. That single
+#: convention is the whole contract of this table, and it is not optional
+#: bookkeeping: the depth and ``evidence_tier`` scales were originally
+#: written in their natural reading order (shallow -> deep), which made
+#: ``max`` select the *strongest* member. A two-library release with one
+#: binary-only member and one reaching source evidence then reported
+#: ``effective_depth='source'`` and ``HEADER_AWARE`` release-wide --
+#: presenting the best member's assurance as the release's, which is
+#: exactly the inversion of ``vision.md``'s "weaker evidence narrows
+#: conclusions" (Codex review).
+#:
+#: A value absent from its scale ranks worst: an unrecognised depth or
+#: assurance level is not evidence of a good one.
+#:
+#: ``TestWorstScalesAreOrderedWorstLast`` asserts the direction of every
+#: entry, not merely its membership -- the membership tests that were here
+#: first passed throughout, because a reversed scale contains exactly the
+#: right values.
 _WORST_SCALES: dict[str, tuple[str, ...]] = {
-    "old_evidence_depth": ("binary", "debug", "headers", "build", "source"),
-    "new_evidence_depth": ("binary", "debug", "headers", "build", "source"),
-    "effective_depth": ("binary", "debug", "headers", "build", "source"),
+    # Depth and tier: deepest/richest evidence FIRST, so the shallowest
+    # member wins the max.
+    "old_evidence_depth": ("source", "build", "headers", "debug", "binary"),
+    "new_evidence_depth": ("source", "build", "headers", "debug", "binary"),
+    "effective_depth": ("source", "build", "headers", "debug", "binary"),
+    "evidence_tier": ("header_aware", "dwarf_aware", "elf_only"),
+    # Already worst-last in their natural reading order.
     "surface_scope_confidence": ("high", "reduced"),
+    "confidence": ("high", "medium", "low"),
     "contract_coverage": ("partial",),
     "assurance": ("none",),
-    # Enum-valued ordinals, keyed by ``.value`` (see :func:`_rank`).
     "verdict": (
         "NO_CHANGE",
         "COMPATIBLE",
@@ -247,8 +267,6 @@ _WORST_SCALES: dict[str, tuple[str, ...]] = {
         "API_BREAK",
         "BREAKING",
     ),
-    "confidence": ("high", "medium", "low"),
-    "evidence_tier": ("elf_only", "dwarf_aware", "header_aware"),
 }
 
 

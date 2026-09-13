@@ -498,6 +498,43 @@ class TestDescriptorSuppression:
             is None
         )
 
+    def test_namespace_rule_does_not_leak_into_sibling_segments(self) -> None:
+        """`detail` must not suppress `details` or `detail_public`.
+
+        Found in review. The rule was generated as a `detail*` glob, on the
+        assumption that a trailing wildcard was needed to reach nested
+        namespaces. It is not -- the selector already has ancestor
+        semantics -- and the wildcard actively suppressed real breaks in
+        *unrelated public* namespaces that merely share a prefix, which the
+        descriptor never named. Asserted against the sibling spellings
+        directly, since the nesting test below passes either way and so
+        could not catch this.
+        """
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+        from abicheck.compat._helpers import build_descriptor_suppression
+        from abicheck.compat.descriptor import CompatDescriptor
+
+        sl = build_descriptor_suppression(
+            [
+                CompatDescriptor(
+                    version="1", headers=[], libs=[], skip_namespaces=["detail"]
+                )
+            ]
+        )
+        assert sl is not None
+        leaked = [
+            sym
+            for sym in ("details::gone", "detail_public::gone", "detailed::gone")
+            if sl.is_suppressed(
+                Change(kind=ChangeKind.FUNC_REMOVED, symbol=sym, description="")
+            )
+        ]
+        assert not leaked, (
+            "a <skip_namespaces>detail</skip_namespaces> rule suppressed "
+            f"breaks in unrelated namespaces: {leaked}"
+        )
+
     def test_namespace_rule_covers_nested_namespaces(self) -> None:
         """`detail` must cover `detail::impl::T`, or the rule only matches a
         namespace with no children -- which is not what anyone means by
