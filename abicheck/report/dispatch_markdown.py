@@ -75,6 +75,13 @@ def to_markdown(
     ``leaf``/``root-cause`` alternate views ignore both, since those stay
     their own separate documents."""
 
+    # Every public rendering entry point shares one report-mode check
+    # (report_modes.py) -- see its docstring for why enforcing the ``leaf``
+    # retirement in `service_render` alone was not a retirement.
+    from .report_modes import reject_unsupported_report_mode
+
+    reject_unsupported_report_mode(report_mode)
+
     # Human-facing only: optionally demangle Itanium C++ symbols in the rendered
     # output. Machine formats (JSON/SARIF/JUnit) keep the raw mangled symbols.
     def _out(text: str) -> str:

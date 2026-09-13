@@ -22,12 +22,16 @@ AI-readiness size cap. This is a leaf module: it does not import
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from .errors import ValidationError
 from .model import AbiSnapshot
 from .report.build import build_report_envelope
 from .report.envelope import RenderOptions, ReportEnvelope
+from .report.report_modes import (
+    reject_unsupported_report_mode as _reject_unsupported_report_mode,
+)
 from .reporter import (
     to_json,
     to_markdown,
@@ -84,13 +88,15 @@ def render_output(
     ``'junit'``, ``'review'``, and :data:`ONELINE_FORMAT` (``'oneline'``),
     a public ``--format`` choice on ``compare``.
 
-    ``demangle`` only affects human-facing formats (markdown, review, html);
-    machine formats (json/sarif/junit) always keep raw mangled symbols so
-    downstream tooling can match on them. This function's own default
-    (``False``) is for a direct Tier-2 caller with no CLI in front of it;
-    the CLI itself resolves the per-format default via
-    ``resolve_demangle_for_format`` -- which this function now does itself
-    when the argument is omitted.
+    ``demangle`` only affects human-facing formats (markdown, review, html,
+    text, oneline); machine formats (json/sarif/junit) always keep raw
+    mangled symbols so downstream tooling can match on them, and carry the
+    readable name in their own ``demangled_symbol`` field. Omitting it
+    (``None``, the default) means "resolve it from *fmt*" -- the same answer
+    the CLI gets, so a direct Tier-2 caller is not the one path left with
+    raw output. The resolution itself happens once, in
+    :func:`render_envelope`, because demangling is a property of the format
+    a projection targets rather than of the evaluation being projected.
 
     The release recommendation is included in every human-facing format
     (markdown/review) and in JSON's own ``summary`` block. ``show_recommendation``
@@ -132,6 +138,11 @@ def render_output(
     Raises:
         ValidationError: For unrecognised output format.
     """
+    # Before the ``oneline`` early return, not after it: that return used to
+    # sit in front of the check, so a retired or unknown mode reached
+    # ``--stat``'s summary and got a report rather than a ValidationError
+    # (CodeRabbit review, PR #1284).
+    _reject_unsupported_report_mode(report_mode)
     if fmt == ONELINE_FORMAT:
         return to_stat(result, severity_config=severity_config)
 
@@ -139,11 +150,10 @@ def render_output(
     # Plan slice 7o (Codex review, PR #1284): `None` -- the default -- means
     # "resolve it from the format", which is what makes automatic demangling
     # true for this public entry point and not only for the CLI in front of
-    # it. An explicit True/False still wins, for a caller that wants the
-    # other answer.
-    if demangle is None:
-        demangle = resolve_demangle_for_format(fmt)
-    _reject_unsupported_report_mode(report_mode)
+    # it. An explicit True/False still wins. Deliberately *not* resolved
+    # here: it is carried into the envelope as `None` and resolved by
+    # `render_envelope`, so both public entry points apply one rule in one
+    # place and cannot drift (CodeRabbit/CI, PR #1284).
     envelope = build_report_envelope(
         result,
         old,
@@ -221,45 +231,6 @@ def _reject_unsupported_format(fmt: str) -> None:
         )
 
 
-#: Report modes this function renders. Plan slice 7o retired ``"leaf"``
-#: against ``"root-cause"`` on a 129-pair measurement; kept here as a named
-#: retirement rather than simply absent because a *silent* fall-through is
-#: what the check below exists to stop.
-_SUPPORTED_REPORT_MODES: frozenset[str] = frozenset({"full", "impact", "root-cause"})
-_RETIRED_REPORT_MODES: dict[str, str] = {
-    "leaf": (
-        "use report_mode='root-cause': measured over 129 real library pairs, "
-        "the two exposed the identical finding set in every one of the 93 "
-        "with findings, and 'leaf' rendered an empty headline section in 40 "
-        "of them"
-    ),
-}
-
-
-def _reject_unsupported_report_mode(report_mode: str) -> None:
-    """Reject a retired or unknown ``report_mode`` at the public boundary.
-
-    Codex review, PR #1284: retiring ``leaf`` from the Click parser does not
-    retire the *documented Python* rendering path. A typed-API caller passing
-    ``report_mode="leaf"`` to :func:`render_output` would otherwise fall
-    through to a full report -- a silently different document shape, which is
-    strictly worse than an error, since the caller keeps rendering and never
-    learns the mode is gone. ``abicheck/AGENTS.md`` treats the typed API as
-    public surface, so the retirement is enforced where that surface is, not
-    only where Click is.
-    """
-    if report_mode in _RETIRED_REPORT_MODES:
-        raise ValidationError(
-            f"report_mode={report_mode!r} was retired (plan slice 7o): "
-            f"{_RETIRED_REPORT_MODES[report_mode]}"
-        )
-    if report_mode not in _SUPPORTED_REPORT_MODES:
-        raise ValidationError(
-            f"Unsupported report mode: {report_mode!r} "
-            f"(expected one of {sorted(_SUPPORTED_REPORT_MODES)})"
-        )
-
-
 def render_envelope(fmt: str, envelope: ReportEnvelope) -> str:
     """Project one already-completed *envelope* into *fmt*.
 
@@ -279,6 +250,20 @@ def render_envelope(fmt: str, envelope: ReportEnvelope) -> str:
         ValidationError: For unrecognised output format.
     """
     _reject_unsupported_format(fmt)
+    # Demangling is a property of the format being projected, not of the
+    # envelope -- one envelope is rendered into several formats, and a
+    # single stored bool cannot be right for a human format and a machine
+    # one at once. `RenderOptions.demangle=None` (the default) means
+    # "resolve it here"; an explicit True/False from the caller still wins.
+    # Resolving in `render_output` alone is what made the two public entry
+    # points produce different bytes for the same evaluation (plan slice 7o).
+    if envelope.options.demangle is None:
+        envelope = replace(
+            envelope,
+            options=replace(
+                envelope.options, demangle=resolve_demangle_for_format(fmt)
+            ),
+        )
     projection: Callable[[ReportEnvelope], str] = _PROJECTIONS[fmt]
     return projection(envelope)
 
@@ -352,7 +337,9 @@ def _project_html(envelope: ReportEnvelope) -> str:
         show_only=envelope.options.show_only,
         show_impact=envelope.options.show_impact,
         severity_config=envelope.severity_config,
-        demangle=envelope.options.demangle,
+        # `render_envelope` has already resolved the tri-state for this
+        # format, so a projection only ever sees a real bool.
+        demangle=bool(envelope.options.demangle),
         envelope=envelope,
     )
 

@@ -189,7 +189,7 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "types), so it is reported as a risk to review, not a "
         "certain break.",
         description_template="Class '{name}' gained a 2nd+ non-explicit converting constructor: {new}",
-        entity=_ENT.FUNCTION,
+        entity=_ENT.TYPE,
         operation=_OP.MODIFIED,
     ),
     _E(

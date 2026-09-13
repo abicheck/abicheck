@@ -573,15 +573,21 @@ def reject_unsupported_options(
         )
     # Plan slice 7o retired `--view demangle`/`no-demangle` and
     # `--view patterns`, so the two rejections that used to stand here have
-    # nothing left to reject. Neither gap they named is closed by that: this
-    # dispatcher's markdown still renders bundle findings through
-    # `bundle.render_bundle_findings_markdown()` (no demangling), and it
-    # still has no stderr echo channel for the pattern-modulation ledger.
-    # Both are now simply *absent* rather than refused -- which is the same
-    # answer every other unsupported-here rendering detail already gets, and
-    # neither loses information: the ledger is in this comparison's own JSON
-    # output unconditionally, and every machine projection carries both the
-    # mangled and demangled symbol names.
+    # nothing left to reject. What became of each gap they named differs,
+    # and the difference matters:
+    #
+    # * Demangling is no longer absent here at all. `_render_markdown` runs
+    #   the same `demangle_text` pass every other human renderer does, so
+    #   this path honours the format-driven contract rather than being the
+    #   one Markdown output with raw mangled names (CodeRabbit review, PR
+    #   #1284).
+    # * The pattern-modulation ledger is absent because it is never
+    #   *computed* on this path -- `compare_snapshots` defaults
+    #   `pattern_verdicts=False` and `bundle_side_input.py` deliberately
+    #   does not pass True (ADR-027 defers that flip). So there is no ledger
+    #   in this comparison's JSON either, and the retired token could only
+    #   ever have echoed an empty one. Nothing was lost; disclosure here
+    #   becomes real work only if that ADR-027 decision changes.
     if new_is_single_file and (dso_only or include_private_dso):
         raise click.UsageError(
             "release.dso_only/release.include_private_dso are not supported "

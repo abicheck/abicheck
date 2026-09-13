@@ -1009,4 +1009,10 @@ def _render_markdown(
     lines.append("")
     bundle_lines = render_bundle_findings_markdown(result.bundle_findings)
     lines += bundle_lines if bundle_lines else ["(none)"]
-    return "\n".join(lines) + "\n"
+    # Markdown is a human format, and demangling is a property of the
+    # format rather than a token a user types, so this path honours it like
+    # every other human renderer. `demangle_text` rewrites only Itanium
+    # tokens and keeps the exact spelling beside the readable name.
+    from ....demangle import demangle_text
+
+    return demangle_text("\n".join(lines) + "\n")

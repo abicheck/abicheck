@@ -741,8 +741,12 @@ class TestShowOnlyInReporters:
         assert len(lines) == 1
         assert "causes non-zero exit" in lines[0]
 
-    def test_leaf_severity_summary_exit_impact_ignores_show_only_filter(self):
-        """Same fix as above, for the report_mode="leaf" summary table."""
+    def test_root_cause_severity_summary_exit_impact_ignores_show_only_filter(self):
+        """Same fix as above, for the ``report_mode="root-cause"`` summary
+        table. Was written against ``leaf``, which plan slice 7o retired; the
+        claim is unchanged because that table is built the same way there
+        (``build_root_cause_document`` -> ``compute_severity_summary`` with
+        ``all_changes=list(result.changes)``)."""
         from abicheck.severity import PRESET_DEFAULT
 
         result = _make_result(
@@ -753,7 +757,7 @@ class TestShowOnlyInReporters:
         )
         text = to_markdown(
             result,
-            report_mode="leaf",
+            report_mode="root-cause",
             show_only="compatible",
             severity_config=PRESET_DEFAULT,
         )

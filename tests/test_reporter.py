@@ -1136,11 +1136,12 @@ class TestRootCauseMarkdown:
         assert "No ABI changes detected" in md
         assert "Root Causes" not in md
 
-    @pytest.mark.parametrize("mode", ["leaf", "root-cause"])
+    @pytest.mark.parametrize("mode", ["root-cause"])
     def test_coverage_warning_surfaced_in_alternate_modes(self, mode):
         # Codex review: _append_confidence_section (the coverage-warning
-        # banner's other home) only runs in full mode -- leaf/root-cause
+        # banner's other home) only runs in full mode -- the alternate views
         # share _view_preamble instead, which must carry the same banner.
+        # ``leaf`` left this parametrization with plan slice 7o.
         r = _result(Verdict.COMPATIBLE)
         r.coverage_warnings = ["old and new binaries are byte-identical"]
         assert "byte-identical" in to_markdown(r, report_mode=mode)

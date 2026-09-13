@@ -262,7 +262,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "are encouraged to migrate to the stable name.",
         description_template="Experimental {detail} '{old}' graduated to stable name '{new}'; experimental alias retained.",
         entity=_ENT.TYPE,
-        entity_from_field="detail",
+        entity_from_field="entity_discriminator",
         operation=_OP.ADDED,
     ),
     _E(
@@ -278,7 +278,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "users see whether a replacement was published.",
         description_template="Experimental {detail} '{old}' was removed and no {detail} with leaf '{name}' was published at a stable namespace in the new headers.",
         entity=_ENT.TYPE,
-        entity_from_field="detail",
+        entity_from_field="entity_discriminator",
         operation=_OP.REMOVED,
     ),
     _E(
@@ -696,7 +696,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "implicitly public becoming implicitly private).",
         policy_overrides={"sdk_vendor": _C},
         description_template="Aggregate kind changed: {name} ({old} → {new})",
-        entity=_ENT.BINARY,
+        entity=_ENT.TYPE,
         operation=_OP.MODIFIED,
     ),
     _E(
@@ -1179,7 +1179,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "passes it to the new library can hand the new callee "
         "indeterminate bytes that it now interprets as real data.",
         description_template="Reserved field put into use: {name}::{old} → {new}",
-        entity=_ENT.FUNCTION,
+        entity=_ENT.TYPE,
         operation=_OP.MODIFIED,
     ),
     _E(

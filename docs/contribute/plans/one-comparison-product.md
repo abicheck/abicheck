@@ -1847,14 +1847,41 @@ mechanism* first and an option count second:
      show=functions`. The fix keeps the one-registration property rather
      than reintroducing a reporter-side table: `ChangeKindMeta.
      entity_from_field` names the *finding's own* attribute that states the
-     concrete entity (here `detail`, the same word the kind's
-     `description_template` already interpolates), with the declared
+     concrete entity (`Change.entity_discriminator`), with the declared
      `entity` as the fallback when a finding states none — an unresolvable
      dimension would drop the finding from every element filter, which is
      worse than a coarse one. Splitting the two kinds into function/type
      variants was the alternative and costs two `ChangeKind` values, two
      catalog entries and a detector branch to express what one declarative
-     field does.
+ field does.
+
+     **Two rounds of this went wrong in ways worth recording.** The
+     mechanism first pointed at `make_change`'s `detail` *argument* — the
+     same word the description template interpolates — which `Change` does
+     not store, so it resolved to nothing on every production finding while
+     a synthetic test object carrying a `detail` attribute made it look
+     correct: the "test written to confirm the fix" failure AGENTS.md names,
+     committed in the same slice that quotes it. Rewritten against the real
+     detector, the test then caught the second error immediately: the
+     detector's own label for a function is `"declaration"`, not
+     `"function"`, so even a persisted field carrying it would have resolved
+     to nothing. The rule that survives: **a per-finding dimension is only
+     tested by a finding the detector actually produced.**
+
+     The same three rounds kept finding *seeding* errors by eye —
+     `anon_field_changed` and the three `base_class_*` kinds, then
+     `source_level_kind_changed` and `used_reserved_field`. 407 entries were
+     classified by hand and a wrong one fails nothing anywhere, which is
+     exactly the escape class the bug-class plan names. So the
+     contradiction is now mechanical:
+     `tests/test_change_catalog_dimensions.py`'s
+     `TestADeclaredEntityAgreesWithItsOwnRegistration` checks each declared
+     entity against two oracles derived from the entry's *own*
+     `description_template` — its leading noun, and the `{name}::{...}`
+     member shape — neither of which restates the field under test. It
+     immediately found a third error no reviewer had flagged
+     (`ctor_overload_ambiguity_risk`, whose template names a class). The
+     judgement stays manual; only the contradiction is automated.
 
      Per-finding `operation` values may move in JSON for a kind the suffix
      rule classified wrongly, and each finding now carries `entity` beside
@@ -1926,12 +1953,20 @@ mechanism* first and an option count second:
      feature rather than a usage error, and it is the one place where a
      release comparison discloses less in human output than a single-pair
      one. The machine projections are unaffected.
-  2. **A stored-bundle-facts comparison lost two rejections the same way**
-     (`compare_bundle_facts_rejections.py`): that dispatcher's markdown
-     still renders bundle findings without demangling, and it still has no
-     stderr channel for the pattern ledger. Neither loses information — the
-     ledger is in that comparison's own JSON unconditionally, and every
-     machine projection carries both symbol names.
+  2. **A stored-bundle-facts comparison lost two rejections**
+     (`compare_bundle_facts_rejections.py`), and the two outcomes are not
+     the same — the first revision of this note said they were, which was
+     wrong in both directions (CodeRabbit review, PR #1284). *Demangling*
+     was a real gap and is closed: `_render_markdown` now runs the same
+     `demangle_text` pass every other human renderer does, because a
+     format-driven contract that one Markdown path ignores is not a
+     contract. The *pattern ledger* is absent for a different reason
+     entirely — it is never computed on this path (`compare_snapshots`
+     defaults `pattern_verdicts=False`; `bundle_side_input.py` deliberately
+     does not pass True, ADR-027 defers that flip), so it is **not** in that
+     comparison's JSON either and the retired token could only ever have
+     echoed an empty one. Nothing was lost; disclosure there becomes real
+     work only if the ADR-027 decision changes.
   3. **The F-19 rendering-invariance space shrank from 6048 points to
      189**, because four of its axes stopped existing. The invariant is
      unchanged; there is simply less rendering space left for it to hold

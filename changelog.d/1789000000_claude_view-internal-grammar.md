@@ -33,6 +33,16 @@
   `func_export_added`/`var_export_added` stay additions: there a symbol
   genuinely appears in the export table.
 
+- **Stored-bundle-facts Markdown demangles too.** It was the one human
+  Markdown output still rendering raw mangled names, which the retired
+  `--view demangle` token left with no override.
+
+- **Every public rendering entry point rejects the retired `leaf` mode.**
+  `reporter.to_json` and `report.to_markdown` shared none of
+  `render_output`'s check, so a caller passing `report_mode="leaf"` to
+  either silently received a *full* report instead of an error. One owner
+  now (`report/report_modes.py`).
+
 ### Removed
 
 - **`--view leaf` is retired in favour of `--view root-cause`.** Measured

@@ -733,6 +733,13 @@ def _classify_experimental_event(
     return None
 
 
+#: This detector's ``kind_label`` (a word for the description sentence)
+#: mapped onto the ``ChangeEntity`` *value* the display dimension uses --
+#: two deliberately different vocabularies, so reusing one as the other
+#: resolved to nothing at all.
+_ENTITY_FOR_KIND_LABEL = {"declaration": "function", "type": "type"}
+
+
 def _emit_experimental_change(
     event: str,
     leaf: str,
@@ -778,6 +785,12 @@ def _emit_experimental_change(
             ChangeKind.EXPERIMENTAL_GRADUATED,
             symbol=new_q,
             detail=kind_label,
+            # Both experimental kinds are emitted for functions and types
+            # alike, so the catalog's single declared entity cannot be right
+            # for every finding -- the concrete one travels on the finding
+            # itself (see Change.entity_discriminator). `detail` above is a
+            # description-template argument only; it is not stored.
+            entity_discriminator=_ENTITY_FOR_KIND_LABEL.get(kind_label),
             old=old_q,
             new=new_q,
             public_reachable=subject_is_public,
@@ -796,6 +809,7 @@ def _emit_experimental_change(
         symbol=old_q,
         name=leaf,
         detail=kind_label,
+        entity_discriminator=_ENTITY_FOR_KIND_LABEL.get(kind_label),
         old=old_q,
         new_value=None,
         public_reachable=subject_is_public,

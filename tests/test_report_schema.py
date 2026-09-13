@@ -455,7 +455,7 @@ class TestReportValidatesAgainstSchema:
         assert type_changes, "fixture must produce a Result type-size finding"
         assert any(c.contract_relevance is not None for c in type_changes)
 
-        md = reporter.to_markdown(result, report_mode="leaf")
+        md = reporter.to_markdown(result, report_mode="root-cause")
         assert "Result" in md
         assert "Contract:" in md
 
@@ -1069,7 +1069,7 @@ class TestReportIdentityEnvelope:
         result.requested_depth = "source"
         result.effective_depth = "build"
         result.baseline_channel = "accepted-main"
-        payload = json.loads(reporter.to_json(result, report_mode="leaf"))
+        payload = json.loads(reporter.to_json(result, report_mode="root-cause"))
         assert payload["check_id"] == "libfoo@profile#channel@source"
         assert payload["profile_id"] == "linux-x86_64-gcc13"
         assert payload["requested_depth"] == "source"
@@ -1078,7 +1078,9 @@ class TestReportIdentityEnvelope:
 
     def test_leaf_mode_unset_by_default(self):
         old, new = _breaking_pair()
-        payload = json.loads(reporter.to_json(compare(old, new), report_mode="leaf"))
+        payload = json.loads(
+            reporter.to_json(compare(old, new), report_mode="root-cause")
+        )
         for key in (
             "check_id",
             "profile_id",
@@ -1130,7 +1132,9 @@ class TestSchemaVersion:
     def test_leaf_mode_carries_version(self):
         """--report-mode leaf JSON must still carry the version marker."""
         old, new = _breaking_pair()
-        payload = json.loads(reporter.to_json(compare(old, new), report_mode="leaf"))
+        payload = json.loads(
+            reporter.to_json(compare(old, new), report_mode="root-cause")
+        )
         assert payload["report_schema_version"] == REPORT_SCHEMA_VERSION
 
 

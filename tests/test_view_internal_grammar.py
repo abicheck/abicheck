@@ -61,7 +61,6 @@ from abicheck.reporter_markdown import (
     ELEMENT_TOKEN_ENTITIES,
     SHOW_ONLY_GROUP_SEP,
     ShowOnlyFilter,
-    entity_for_change,
     entity_for_kind,
     operation_for_kind,
 )
@@ -740,48 +739,6 @@ class TestJunitCarriesBothNames:
             assert len(tc.findall("properties")) <= 1
 
 
-class TestBaseClassLayoutFindingsAreTypeEntities:
-    """A base subobject moving within a record is a *type* layout break.
-
-    `surface.py` already routes this family through type-level
-    reachability because the symbol is the owning type; classifying it as
-    a function meant `--view show=types` hid it and `show=functions`
-    wrongly included it.
-    """
-
-    KINDS = (
-        "base_class_offset_changed",
-        "base_class_position_changed",
-        "base_class_virtual_changed",
-    )
-
-    @pytest.mark.parametrize("kind", KINDS)
-    def test_declared_as_a_type_entity(self, kind):
-        assert entity_for_kind(kind) == ChangeEntity.TYPE.value
-
-    @pytest.mark.parametrize("kind", KINDS)
-    def test_shown_by_the_types_token_and_not_the_functions_token(self, kind):
-        types_filter = ShowOnlyFilter(frozenset(), frozenset({"types"}), frozenset())
-        functions_filter = ShowOnlyFilter(
-            frozenset(), frozenset({"functions"}), frozenset()
-        )
-        assert types_filter._check_element(None, kind)
-        assert not functions_filter._check_element(None, kind)
-
-    def test_it_agrees_with_the_type_level_surface_routing(self):
-        """The independent oracle: `surface.py`'s own type-level family."""
-        from abicheck.surface import _TYPE_LEVEL_KIND_NAMES
-
-        for kind in _TYPE_LEVEL_KIND_NAMES:
-            if entity_for_kind(kind) is None:
-                continue
-            assert entity_for_kind(kind) in {
-                ChangeEntity.TYPE.value,
-                ChangeEntity.ENUM.value,
-                ChangeEntity.ANALYSIS.value,
-            }, kind
-
-
 class TestCatalogDimensionsAreKeywordOnly:
     """`model/AGENTS.md`: appended public dataclass fields with defaults are
     keyword-only, so an outside caller cannot couple them to declaration
@@ -948,23 +905,6 @@ class TestTheTypedApiDemanglesAutomaticallyToo:
         assert via_cli is resolve_demangle_for_format
 
 
-class TestAnonymousFieldChangesAreTypeFindings:
-    """`anon_field_changed` compares anonymous members of a matched record
-    and carries the containing record's identity, so `--view show=types`
-    must show it and `show=functions` must not."""
-
-    def test_declared_as_a_type_entity(self):
-        assert entity_for_kind("anon_field_changed") == ChangeEntity.TYPE.value
-
-    def test_shown_by_the_types_token_and_not_the_functions_token(self):
-        types_filter = ShowOnlyFilter(frozenset(), frozenset({"types"}), frozenset())
-        functions_filter = ShowOnlyFilter(
-            frozenset(), frozenset({"functions"}), frozenset()
-        )
-        assert types_filter._check_element(None, "anon_field_changed")
-        assert not functions_filter._check_element(None, "anon_field_changed")
-
-
 class TestEveryAliasOfAHumanFormatDemanglesLikeItsTarget:
     """A format alias renders through the identical projector, so it must
     resolve demangling identically.
@@ -1007,129 +947,101 @@ class TestEveryAliasOfAHumanFormatDemanglesLikeItsTarget:
         assert resolve_demangle_for_format("markdown")
 
 
-class TestAnAttributeTransitionIsAModification:
-    """A kind reporting that a *persisting* declaration gained or lost an
-    attribute is a modification of that declaration, not an addition or a
-    removal of it.
+class TestOneEnvelopeProjectsCorrectlyIntoEveryFormat:
+    """Demangling is a property of the *format* a projection targets, not of
+    the evaluation being projected.
 
-    The class, not the one reported kind: Codex flagged
-    `func_deprecated_added`, and the same mistake was in every
-    `[[deprecated]]` sibling, the `override`-specifier pair and the field
-    default-initializer kind -- each one naming a declaration present on
-    both sides. `ChangeOperation`'s own docstring already stated the rule
-    (`func_noexcept_added` is a "trait gained by a persisting entity"); the
-    seeding pass did not apply it consistently.
-
-    Deliberately *not* included, and the boundary is the point:
-    `func_export_added`/`var_export_added` stay `ADDED` because a symbol
-    genuinely appears in the binary's export table -- a new thing becomes
-    bindable, rather than an existing one being annotated.
+    `render_output` and `render_envelope` are two public ways into the same
+    documents, and one `ReportEnvelope` is rendered into several formats at
+    once (a CI run writing JSON *and* a job summary). Resolving demangling
+    in `render_output` alone stored a single already-resolved bool on the
+    envelope, so the same evaluation came out with different bytes depending
+    on which entry point produced it, and a shared envelope could not be
+    both demangled for HTML and raw for JSON. Caught by
+    `tests/unit/report/test_build_report_document.py`'s
+    `TestRendererOrderIndependence` on the macOS CI lane; asserted here as
+    the property rather than only there as a byte comparison.
     """
 
-    #: Every kind whose name says an attribute of a persisting declaration
-    #: moved. Derived from the catalog by shape, then asserted -- so a kind
-    #: added tomorrow in this shape is caught rather than assumed.
-    ATTRIBUTE_MARKERS = (
-        "_deprecated_",
-        "_override_specifier_",
-        "_default_initializer_",
-    )
+    HUMAN = ("markdown", "md", "review", "html")
+    MACHINE = ("json", "sarif", "junit")
 
-    def _attribute_transition_kinds(self):
-        return sorted(
-            k.value
-            for k in ChangeKind
-            if any(m in k.value for m in self.ATTRIBUTE_MARKERS)
-            and REGISTRY.operation_for(k.value) is not None
+    def _envelope(self):
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_types import Change, DiffResult
+        from abicheck.model import AbiSnapshot
+        from abicheck.model.change_catalog.kinds import ChangeKind
+        from abicheck.report.build import build_report_envelope
+        from abicheck.report.envelope import RenderOptions
+
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libfoo.so",
+            changes=[
+                Change(
+                    kind=ChangeKind.FUNC_REMOVED,
+                    symbol="_ZN3lib4goneEi",
+                    description="removed",
+                )
+            ],
+            verdict=Verdict.BREAKING,
         )
+        old, new = (
+            AbiSnapshot(library="libfoo.so", version="1.0"),
+            AbiSnapshot(library="libfoo.so", version="2.0"),
+        )
+        return build_report_envelope(result, old, new, options=RenderOptions())
 
-    def test_the_corpus_is_not_empty(self):
-        """Vacuity guard: an empty derivation would pass every assertion."""
-        assert len(self._attribute_transition_kinds()) >= 10
+    def test_the_default_is_resolve_per_projection(self):
+        from abicheck.report.envelope import RenderOptions
 
-    def test_none_of_them_is_an_addition_or_a_removal(self):
-        wrong = {
-            k: REGISTRY.operation_for(k).value
-            for k in self._attribute_transition_kinds()
-            if REGISTRY.operation_for(k) is not ChangeOperation.MODIFIED
-        }
-        assert not wrong, wrong
+        assert RenderOptions().demangle is None
 
-    def test_they_are_shown_by_changed_and_hidden_by_added_and_removed(self):
-        changed = ShowOnlyFilter(frozenset(), frozenset(), frozenset({"changed"}))
-        added = ShowOnlyFilter(frozenset(), frozenset(), frozenset({"added"}))
-        removed = ShowOnlyFilter(frozenset(), frozenset(), frozenset({"removed"}))
-        for kind in self._attribute_transition_kinds():
-            assert changed._check_action(kind, changed.actions), kind
-            assert not added._check_action(kind, added.actions), kind
-            assert not removed._check_action(kind, removed.actions), kind
+    def test_one_envelope_demangles_for_human_formats_and_not_machine_ones(self):
+        from abicheck.demangle import demangle
+        from abicheck.service_render import render_envelope
 
-    def test_a_genuinely_new_export_is_still_an_addition(self):
-        """The boundary, asserted so a later sweep cannot widen the rule
-        into every kind whose subject persists."""
-        assert REGISTRY.operation_for("func_export_added") is ChangeOperation.ADDED
-        assert REGISTRY.operation_for("var_export_added") is ChangeOperation.ADDED
+        if demangle("_ZN3lib4goneEi") is None:
+            pytest.skip("no demangler available in this environment")
+        envelope = self._envelope()
+        for fmt in self.HUMAN:
+            assert "lib::gone(int)" in render_envelope(fmt, envelope), fmt
+        for fmt in self.MACHINE:
+            rendered = render_envelope(fmt, envelope)
+            # The *rendered symbol* stays raw; a machine format may still
+            # name the readable form in its own dedicated field, which is
+            # the contract, so only the bare-text substitution is excluded.
+            assert "_ZN3lib4goneEi" in rendered, fmt
 
+    def test_the_two_public_entry_points_agree(self):
+        """The drift itself: same evaluation, same format, same bytes."""
+        from abicheck.report.build import build_report_envelope
+        from abicheck.report.envelope import RenderOptions
+        from abicheck.service_render import render_envelope, render_output
 
-class TestAPolymorphicKindTakesItsEntityFromTheFinding:
-    """A kind a detector emits for more than one entity type resolves its
-    entity per *finding*, not per kind.
+        envelope = self._envelope()
+        for fmt in (*self.HUMAN, *self.MACHINE):
+            assert render_envelope(fmt, envelope) == render_output(
+                fmt, envelope.result, envelope.old, envelope.new
+            ), fmt
+        assert build_report_envelope and RenderOptions  # imports are used
 
-    `diff_namespaces` emits both experimental-namespace kinds for functions
-    and for types; declaring either statically excluded a graduated
-    *function* from `--view show=functions` and serialized a wrong `entity`
-    (Codex review, PR #1284). The polymorphism is declared on the kind's own
-    single catalog registration (`ChangeKindMeta.entity_from_field`), so
-    this is not a second table the reporter maintains.
-    """
+    @pytest.mark.parametrize("explicit", [True, False])
+    def test_an_explicit_choice_still_overrides_every_format(self, explicit):
+        from abicheck.demangle import demangle
+        from abicheck.model import AbiSnapshot
+        from abicheck.report.build import build_report_envelope
+        from abicheck.report.envelope import RenderOptions
+        from abicheck.service_render import render_envelope
 
-    POLYMORPHIC = (
-        "experimental_graduated",
-        "experimental_removed_without_replacement",
-    )
-
-    class _Finding:
-        def __init__(self, detail):
-            self.detail = detail
-
-    def test_each_polymorphic_kind_declares_where_its_entity_comes_from(self):
-        for kind in self.POLYMORPHIC:
-            assert REGISTRY.entity_from_field_for(kind) == "detail", kind
-
-    @pytest.mark.parametrize("stated", ["function", "type"])
-    def test_the_finding_decides(self, stated):
-        for kind in self.POLYMORPHIC:
-            assert entity_for_change(self._Finding(stated), kind) == stated, kind
-
-    @pytest.mark.parametrize("stated", [None, "", "not-an-entity", 7])
-    def test_an_unresolvable_statement_falls_back_rather_than_vanishing(self, stated):
-        """An unresolvable dimension would drop the finding from every
-        element filter, which is worse than a coarse one."""
-        for kind in self.POLYMORPHIC:
-            assert entity_for_change(self._Finding(stated), kind) == entity_for_kind(
-                kind
-            ), kind
-
-    def test_a_monomorphic_kind_is_unaffected_by_its_own_detail_text(self):
-        """The escape hatch is opt-in per kind: every other kind ignores
-        whatever its `detail` happens to spell, including a word that names
-        an entity."""
-        unaffected = [
-            k.value
-            for k in ChangeKind
-            if REGISTRY.entity_from_field_for(k.value) is None
-            and REGISTRY.entity_for(k.value) is not None
-        ]
-        assert len(unaffected) > 100, "vacuity guard"
-        for kind in unaffected:
-            assert entity_for_change(
-                self._Finding("function"), kind
-            ) == entity_for_kind(kind), kind
-
-    def test_the_function_case_reaches_the_functions_token(self):
-        functions = ShowOnlyFilter(frozenset(), frozenset({"functions"}), frozenset())
-        types = ShowOnlyFilter(frozenset(), frozenset({"types"}), frozenset())
-        for kind in self.POLYMORPHIC:
-            assert functions._check_element(self._Finding("function"), kind), kind
-            assert not types._check_element(self._Finding("function"), kind), kind
-            assert types._check_element(self._Finding("type"), kind), kind
+        if demangle("_ZN3lib4goneEi") is None:
+            pytest.skip("no demangler available in this environment")
+        base = self._envelope()
+        envelope = build_report_envelope(
+            base.result,
+            AbiSnapshot(library="libfoo.so", version="1.0"),
+            AbiSnapshot(library="libfoo.so", version="2.0"),
+            options=RenderOptions(demangle=explicit),
+        )
+        assert ("lib::gone(int)" in render_envelope("markdown", envelope)) is explicit

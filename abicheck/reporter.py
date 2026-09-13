@@ -1018,6 +1018,14 @@ def to_json(
     # A `stat` parameter used to short-circuit to `to_stat_json` here. Call
     # `to_stat_json` directly for the summary-only document; this function
     # renders the full report.
+    #
+    # Every public rendering entry point shares one report-mode check
+    # (report/report_modes.py): enforcing the ``leaf`` retirement only in
+    # `service_render` left this one silently rendering a *full* report for
+    # a retired mode (CodeRabbit review, PR #1284).
+    from .report.report_modes import reject_unsupported_report_mode
+
+    reject_unsupported_report_mode(report_mode)
     if report_mode == "root-cause":
         return _to_json_root_cause(
             result,

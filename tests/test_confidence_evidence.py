@@ -289,7 +289,7 @@ class TestCanonicalEvidenceTier:
         f = _pub_func("api", "_Z3apiv")
         r = compare(_snap(functions=[f]), _snap(functions=[f]))
         stat = json.loads(reporter.to_stat_json(r))
-        leaf = json.loads(reporter.to_json(r, report_mode="leaf"))
+        leaf = json.loads(reporter.to_json(r, report_mode="root-cause"))
         assert stat["evidence_tier"] == "header_aware"
         assert leaf["evidence_tier"] == "header_aware"
 
