@@ -178,7 +178,7 @@ still exit non-zero for any detected changes, even those the policy downgrades.
 The GitHub Action supports severity configuration via inputs:
 
 ```yaml
-- uses: abicheck/abicheck@v0.5.0
+- uses: abicheck/abicheck@v0.6.0
   with:
     old-library: libfoo-v1.json
     new-library: libfoo-v2.json
@@ -198,7 +198,7 @@ severity:
 ```
 
 ```yaml
-- uses: abicheck/abicheck@v0.5.0
+- uses: abicheck/abicheck@v0.6.0
   with:
     old-library: libfoo-v1.json
     new-library: libfoo-v2.json

@@ -30,7 +30,7 @@ automatically, then runs ABI comparison and reports results.
 ## Quick start
 
 ```yaml
-- uses: abicheck/abicheck@v0.5.0
+- uses: abicheck/abicheck@v0.6.0
   with:
     old-library: abi-baseline.json
     new-library: build/libfoo.so
@@ -127,7 +127,7 @@ There is no separate `appcompat` mode. Scope a normal `compare` to what an
 application actually uses via `extra-args`:
 
 ```yaml
-- uses: abicheck/abicheck@v0.5.0
+- uses: abicheck/abicheck@v0.6.0
   with:
     old-library: libfoo-old.so
     new-library: libfoo-new.so
@@ -140,10 +140,9 @@ the full verdict and unrelated changes stay as informational context. The
 `OLD`/`NEW` operands may be real library binaries or JSON snapshots that
 carry binary evidence (a `dump` of a real library, not headers-only).
 
-> A dedicated `used-by` input (space-separated, mutually exclusive with
-> `required-symbol`/`required-symbols`) was added after the `v0.5.0` release
-> — on a commit-SHA pin newer than `v0.5.0`, prefer `used-by: myapp` over
-> `extra-args` for the same effect.
+> The dedicated `used-by` input (space-separated, mutually exclusive with
+> `required-symbol`/`required-symbols`) is available in `v0.6.0`; prefer
+> `used-by: myapp` over `extra-args` for the same effect.
 
 ### Version labels
 
@@ -311,7 +310,7 @@ jobs:
         run: mkdir build && cd build && cmake .. && make
 
       - name: Check ABI compatibility
-        uses: abicheck/abicheck@v0.5.0
+        uses: abicheck/abicheck@v0.6.0
         with:
           old-library: abi-baseline.json  # committed to repo
           new-library: build/libfoo.so
@@ -340,7 +339,7 @@ jobs:
         run: mkdir build && cd build && cmake .. && make
 
       - name: Dump ABI baseline
-        uses: abicheck/abicheck@v0.5.0
+        uses: abicheck/abicheck@v0.6.0
         with:
           mode: dump
           new-library: build/libfoo.so
@@ -363,7 +362,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check ABI
-        uses: abicheck/abicheck@v0.5.0
+        uses: abicheck/abicheck@v0.6.0
         with:
           old-library: abi-baseline.json
           new-library: build/libfoo.so
@@ -454,10 +453,10 @@ own page:
 
 The action follows [semantic versioning](https://semver.org/). While abicheck
 is pre-1.0, pin an exact release tag (the examples in this guide use the latest,
-`v0.5.0`); a floating major tag is not published yet:
+`v0.6.0`); a floating major tag is not published yet:
 
 ```yaml
-uses: abicheck/abicheck@v0.5.0     # exact release tag (recommended, reproducible)
+uses: abicheck/abicheck@v0.6.0     # exact release tag (recommended, reproducible)
 uses: abicheck/abicheck@abc123def  # exact commit SHA (most secure)
 ```
 
@@ -471,7 +470,7 @@ with that permission's token, so the same rule applies to all of them. Keep
 the release tag in a trailing comment so the pin stays human-auditable:
 
 ```yaml
-uses: abicheck/abicheck@<commit-sha>  # v0.5.0
+uses: abicheck/abicheck@<commit-sha>  # v0.6.0
 ```
 
 Released tags are listed on the

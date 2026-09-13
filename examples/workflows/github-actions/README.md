@@ -69,7 +69,7 @@ jobs:
       - name: Build new release
         run: gcc -shared -fPIC -g v2/counter.c -o libcounter_v2.so
 
-      - uses: abicheck/abicheck@v0.5.0
+      - uses: abicheck/abicheck@v0.6.0
         with:
           old-library: libcounter_v1.so
           new-library: libcounter_v2.so
