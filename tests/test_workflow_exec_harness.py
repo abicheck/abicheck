@@ -587,7 +587,13 @@ class TestEveryStepGetsAPrivateTmpdir:
         result = run_step(self._tmpdir_probe(), workspace=workspace)
 
         assert result.returncode == 0, result.stderr
-        shared = {Path("/tmp"), Path(tempfile.gettempdir())}
+        # `# nosec`: bandit's B108 is about a module *using* a hardcoded
+        # temporary path; here the literal is the assertion's target -- the
+        # directory this test exists to prove a step never lands in. It is
+        # named alongside `tempfile.gettempdir()` rather than through it,
+        # because `$TMPDIR` in this very process would otherwise move the
+        # oracle along with the thing being checked.
+        shared = {Path("/tmp"), Path(tempfile.gettempdir())}  # nosec B108
         for name in ("made", "file"):
             created = Path(result.outputs[name])
             assert created.parent not in shared, (
