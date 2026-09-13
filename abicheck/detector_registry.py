@@ -120,7 +120,17 @@ class DetectorRegistry:
     # — importing it standalone yields one fewer detector than a real
     # ``compare()`` run. Keep this list in sync with any such out-of-band
     # registration.
-    _EXTRA_DETECTOR_MODULES = ("abicheck.checker",)
+    _EXTRA_DETECTOR_MODULES = (
+        "abicheck.checker",
+        # Discovery globs `abicheck.diff_*` at the top level only, and ADR-061
+        # freezes that root family -- so a detector whose owner is a
+        # responsibility package names itself here instead. Omitting it does
+        # not fail anything loudly: the module simply never imports, the
+        # decorator never runs, and the detector silently stops producing
+        # findings (`tests/test_undeclared_export_additions.py` asserts
+        # registration through the real registry for exactly that reason).
+        "abicheck.compare.undeclared_exports",
+    )
 
     def ensure_loaded(self) -> None:
         """Import every detector-hosting module so its detectors register.

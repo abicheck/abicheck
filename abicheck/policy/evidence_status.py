@@ -233,6 +233,39 @@ def is_cross_source_resolved(change: object) -> bool:
     )
 
 
+def is_cross_source_persistent(change: object) -> bool:
+    """Whether *change* is a cross-source hygiene finding present on **both**
+    sides -- pre-existing debt this release neither introduced nor fixed.
+
+    The sibling of :func:`is_cross_source_resolved`, duck-typed the same way
+    and for the same reasons. It answers only the evolution state; whether
+    that state excludes the finding from the *verdict* additionally depends
+    on the category the finding resolves to under the active policy, which
+    this leaf module deliberately cannot see. ``policy.classification.
+    excluded_from_verdict_as_persistent_hygiene`` is the predicate that
+    combines the two, and ``checker._compute_verdict_for`` is the single
+    chokepoint that applies it.
+
+    Why this axis reaches the verdict at all: a ``PERSISTENT`` finding
+    states that OLD and NEW carry the identical hygiene problem, so nothing
+    about it *changed* between the two -- and a pairwise ``compare()``
+    verdict answers what this release did. Intel MKL 2026.0.0 -> 2026.1.0 is
+    the case that forced it: 39,956 ``exported_not_public`` findings, 39,955
+    of them stamped ``PERSISTENT``, downgraded a release whose ground truth
+    is +1 symbol / -0 to ``COMPATIBLE_WITH_RISK``. Reporting that debt is
+    right; charging this release's verdict for it is not.
+
+    Exactly as with ``RESOLVED``, this never removes the finding from
+    anything else: it keeps its ``ChangeKind`` category, its report section,
+    its row in every disposition ledger, and its place in the
+    ``cross_source_evolution`` counts (ADR-067 -- record before disposing).
+    """
+    return (
+        getattr(change, "cross_source_evolution", None)
+        == CrossSourceEvolution.PERSISTENT
+    )
+
+
 class EvidenceStatus(str, Enum):
     """The epistemic status of a single finding — *how* it was proven, not just
     *what* it is (its ``Verdict``/severity already say that).

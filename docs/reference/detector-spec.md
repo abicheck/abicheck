@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (407 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (409 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -116,6 +116,7 @@ One row per `ChangeKind` (407 total). Columns fuse the verdict partition (`check
 | `fortify_source_weakened` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `fortify_source_weakened` | — |
 | `frame_register_changed` | breaking | `BREAKING` | `error` | unspecified | `frame_register_changed` | — |
 | `func_added` | addition | `COMPATIBLE` | `warning` | L0 | `func_added` | [case03](examples/case03_compat_addition.md), [case111](examples/case111_enumerable_thread_specific_lambda_ambiguity.md), [case141](examples/case141_versioned_symbol_scheme.md), [case16](examples/case16_inline_to_non_inline.md), +7 |
+| `func_added_elf_only` | addition | `COMPATIBLE` | `warning` | L0 | `func_added_elf_only` | — |
 | `func_became_inline` | api_break | `API_BREAK` | `warning` | unspecified | `func_became_inline` | — |
 | `func_contract_attribute_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `func_contract_attribute_added` | — |
 | `func_contract_attribute_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `func_contract_attribute_removed` | — |
@@ -384,6 +385,7 @@ One row per `ChangeKind` (407 total). Columns fuse the verdict partition (`check
 | `var_access_changed` | api_break | `API_BREAK` | `warning` | unspecified | `var_access_changed` | — |
 | `var_access_widened` | quality | `COMPATIBLE` | `warning` | unspecified | `var_access_widened` | — |
 | `var_added` | addition | `COMPATIBLE` | `warning` | L0 | `var_added` | [case61](examples/case61_var_added.md) |
+| `var_added_elf_only` | addition | `COMPATIBLE` | `warning` | L0 | `var_added_elf_only` | — |
 | `var_alignment_changed` | breaking | `BREAKING` | `error` | L2 | `var_alignment_changed` | — |
 | `var_became_const` | breaking | `BREAKING` | `error` | L1 | `var_became_const` | [case39](examples/case39_var_const.md) |
 | `var_deprecated_added` | quality | `COMPATIBLE` | `warning` | L2 | `var_deprecated_added` | — |

@@ -872,7 +872,9 @@ def _vtable_capture_asymmetry_stays_filtered() -> tuple[AbiSnapshot, AbiSnapshot
 
     return (
         _snap("1", functions=[_fn("api", ret="Widget *")], types=[cls([])]),
-        _snap("2", functions=[_fn("api", ret="Widget *")], types=[cls(["Widget::draw()"])]),
+        _snap(
+            "2", functions=[_fn("api", ret="Widget *")], types=[cls(["Widget::draw()"])]
+        ),
     )
 
 
@@ -905,8 +907,11 @@ def _overaligned_first_vptr_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
         return RecordType(name="Aligned", kind="class", size_bits=64, vtable=vtable)
 
     virt = Function(
-        name="Aligned::f", mangled="_ZN7Aligned1fEv", return_type="void",
-        visibility=Visibility.PUBLIC, is_virtual=True,
+        name="Aligned::f",
+        mangled="_ZN7Aligned1fEv",
+        return_type="void",
+        visibility=Visibility.PUBLIC,
+        is_virtual=True,
     )
     return (
         _snap("1", functions=[_fn("api", ret="Aligned *")], types=[cls([])]),
@@ -936,8 +941,11 @@ def _overaligned_pure_virtual_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot
     # signal here that is not another projection of the same subprogram DIEs.
     def cls(vtable: list[str], vptr: int | None) -> RecordType:
         return RecordType(
-            name="Abstract", kind="class", size_bits=64,
-            vtable=vtable, vptr_offset_bits=vptr,
+            name="Abstract",
+            kind="class",
+            size_bits=64,
+            vtable=vtable,
+            vptr_offset_bits=vptr,
         )
 
     return (
@@ -960,8 +968,11 @@ def _namespaced_leaf_vtable_removal_stays_breaking() -> tuple[AbiSnapshot, AbiSn
         return RecordType(name="A", kind="class", size_bits=64, vtable=vtable)
 
     virt = Function(
-        name="foo", mangled="_ZN2ns1A3fooEv", return_type="void",
-        visibility=Visibility.PUBLIC, is_virtual=True,
+        name="foo",
+        mangled="_ZN2ns1A3fooEv",
+        return_type="void",
+        visibility=Visibility.PUBLIC,
+        is_virtual=True,
     )
     return (
         _snap("1", functions=[_fn("api", ret="A *"), virt], types=[cls(["A::foo()"])]),
@@ -998,8 +1009,11 @@ _SOLID_BASE = RecordType(
 
 def _derived(bases: list[str], size: int) -> RecordType:
     return RecordType(
-        name="Derived", kind="class", size_bits=size,
-        fields=[TypeField(name="x", type="int")], bases=list(bases),
+        name="Derived",
+        kind="class",
+        size_bits=size,
+        fields=[TypeField(name="x", type="int")],
+        bases=list(bases),
     )
 
 
@@ -1010,10 +1024,16 @@ def _empty_base_added_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
     # explained and is not evidence of a capture gap. Adding one is a real
     # ABI-relevant change (conversions, RTTI, overload resolution).
     return (
-        _snap("1", functions=[_fn("api", ret="Derived *")],
-              types=[_derived([], 64), _EMPTY_BASE]),
-        _snap("2", functions=[_fn("api", ret="Derived *")],
-              types=[_derived(["Tag"], 64), _EMPTY_BASE]),
+        _snap(
+            "1",
+            functions=[_fn("api", ret="Derived *")],
+            types=[_derived([], 64), _EMPTY_BASE],
+        ),
+        _snap(
+            "2",
+            functions=[_fn("api", ret="Derived *")],
+            types=[_derived(["Tag"], 64), _EMPTY_BASE],
+        ),
     )
 
 
@@ -1021,10 +1041,16 @@ def _nonempty_base_added_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
     # The ordinary real break: a storage-contributing base moves the size, so
     # the transition is evidenced and must still be reported.
     return (
-        _snap("1", functions=[_fn("api", ret="Derived *")],
-              types=[_derived([], 64), _SOLID_BASE]),
-        _snap("2", functions=[_fn("api", ret="Derived *")],
-              types=[_derived(["Payload"], 128), _SOLID_BASE]),
+        _snap(
+            "1",
+            functions=[_fn("api", ret="Derived *")],
+            types=[_derived([], 64), _SOLID_BASE],
+        ),
+        _snap(
+            "2",
+            functions=[_fn("api", ret="Derived *")],
+            types=[_derived(["Payload"], 128), _SOLID_BASE],
+        ),
     )
 
 

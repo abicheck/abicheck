@@ -176,6 +176,14 @@ def _add_problem_element(parent: ET.Element, change: object) -> None:
     ks = kind_str(change)
     prob = ET.SubElement(parent, "problem")
     prob.set("id", ks)
+    # Schema 4.6's `Change.library`, as an attribute so the element's shape is
+    # unchanged for every scalar comparison (where the field is unset). A
+    # multi-library `compat check` pairs DSOs that routinely share symbols, so
+    # without this two libraries' identical problems are indistinguishable in
+    # the XML exactly as they were in the HTML (Codex review).
+    library = getattr(change, "library", None)
+    if library:
+        prob.set("library", str(library))
 
     change_el = ET.SubElement(prob, "change")
     old_val = str(getattr(change, "old_value", "") or "")
@@ -242,6 +250,12 @@ def _build_symbol_list(
         for c in matched:
             sym = ET.SubElement(detail, "name")
             sym.text = getattr(c, "symbol", "") or ""
+            # Same rule as <problem> above, and it matters more here: a bare
+            # <name> is all this element carries, so two DSOs each losing the
+            # same symbol produced two identical, unattributable entries.
+            library = getattr(c, "library", None)
+            if library:
+                sym.set("library", str(library))
 
 
 def _build_problem_details(parent: ET.Element, changes: list[object]) -> None:

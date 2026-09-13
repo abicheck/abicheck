@@ -82,6 +82,7 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.FIELD_LOST_VOLATILE,
     ChangeKind.FIELD_RENAMED,
     ChangeKind.FUNC_ADDED,
+    ChangeKind.FUNC_ADDED_ELF_ONLY,
     # tests/test_surface_fact_split.py::TestExportGainedIsRecordedNotDropped
     # asserts this kind's finding, its compatible verdict, and that it is the
     # thing reported where the pre-split run reported FUNC_ADDED.
@@ -233,6 +234,7 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.VAR_ACCESS_CHANGED,
     ChangeKind.VAR_ACCESS_WIDENED,
     ChangeKind.VAR_ADDED,
+    ChangeKind.VAR_ADDED_ELF_ONLY,
     # tests/test_surface_fact_split.py::
     # TestExportLossIsDetectedForEveryDeclarationKind asserts this kind's
     # finding, its surface_facts stamp, and that it is not reported as a

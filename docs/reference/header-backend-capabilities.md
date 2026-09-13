@@ -110,7 +110,7 @@ Across the 149 fields of the 6 declaration types the two header-AST backends bui
 | `is_pure_virtual` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `is_deleted` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `deleted_from_dwarf` | — n/a | — n/a | — n/a | Set from DWARF's `DW_AT_deleted` (`dwarf_snapshot.py`). |
-| `is_inline` | ✅ Yes | ✅ Yes | ✅ Yes | — |
+| `is_inline` | ✅ Yes | ✅ Yes | ✅ Yes | Inline linkage, explicit or implicit. castxml's frontend resolves implicit inline before emitting; clang's JSON emits its `inline` key only for the written keyword, so the clang backend reconstructs the implicit forms (`extract/headers/clang/inline_semantics.py`). This row read _FULL/_FULL while the two actually disagreed on every constexpr/in-class declaration. |
 | `access` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `return_pointer_depth` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `elf_visibility` | — n/a | — n/a | — n/a | Read from the binary's own symbol table (`dumper_elf_symbols.py`). |

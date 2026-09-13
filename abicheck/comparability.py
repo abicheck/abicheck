@@ -924,6 +924,31 @@ def _check_dependency_scope_comparable(
     )
 
 
+def _check_header_exclusions_comparable(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> ComparabilityMismatch | None:
+    """Refuse a pair whose ``--exclude-header`` patterns differ (schema v47).
+
+    A sibling of :func:`_check_dependency_scope_comparable` for the same
+    structural reason: a post-parse narrowing the fingerprints cannot always
+    observe. The rule itself lives with the rest of the exclusion rules in
+    ``extract.header_exclusions`` -- see
+    :func:`~abicheck.extract.header_exclusions.exclusion_asymmetry_reason`
+    for why a contract-less baseline makes this check load-bearing rather
+    than redundant with ``scope_fingerprint``, and why no pre-v47 ambiguity
+    carve-out is needed.
+    """
+    from .extract.header_exclusions import exclusion_asymmetry_reason
+
+    reason = exclusion_asymmetry_reason(
+        getattr(old, "excluded_header_patterns", ()) or (),
+        getattr(new, "excluded_header_patterns", ()) or (),
+    )
+    if reason is None:
+        return None
+    return ComparabilityMismatch(kind="scope", reason=reason)
+
+
 #: Every key set :func:`compute_extraction_contract` may have hashed a
 #: ``profile_fingerprint``/``scope_fingerprint`` over. Each fingerprint is
 #: computed over the base set, *or* over the extended one when that dump
@@ -1395,6 +1420,7 @@ def check_contracts_comparable(
     # already answered.
     checks: tuple[Callable[[], ComparabilityMismatch | None], ...] = (
         lambda: _check_dependency_scope_comparable(old, new),
+        lambda: _check_header_exclusions_comparable(old, new),
         lambda: _check_scope_fingerprint_comparable(old.contract, new.contract),
         lambda: _check_profile_fingerprint_comparable(old, new),
     )

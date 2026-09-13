@@ -133,8 +133,11 @@ class TestFieldDefaultsToNone:
         `demangled_symbol` (Codex review, item 8) immediately after
         `candidate_side_enrichment`, and `surface_facts` (the three split
         surface facts -- see `model/surface_facts.py`) is the newest field,
-        appended immediately after `demangled_symbol` -- all eight must stay
-        keyword-only, and `surface_facts` must stay last until some
+        appended immediately after `demangled_symbol`, and `library` (the
+        per-finding library a multi-library `compat check` merge stamps --
+        see `compat/multi_library._attribute_findings_to_their_library`) is
+        the newest field, appended immediately after `surface_facts` -- all
+        nine must stay keyword-only, and `library` must stay last until some
         still-newer field is appended after it in turn."""
         import dataclasses
 
@@ -147,10 +150,12 @@ class TestFieldDefaultsToNone:
         assert by_name["candidate_side_enrichment"].kw_only is True
         assert by_name["demangled_symbol"].kw_only is True
         assert by_name["surface_facts"].kw_only is True
+        assert by_name["library"].kw_only is True
         all_names = [f.name for f in dataclasses.fields(Change)]
-        assert all_names[-1] == "surface_facts", (
-            "surface_facts must be the last-declared field on Change"
+        assert all_names[-1] == "library", (
+            "library must be the last-declared field on Change"
         )
+        assert all_names.index("library") == all_names.index("surface_facts") + 1
         assert (
             all_names.index("surface_facts") == all_names.index("demangled_symbol") + 1
         ), "surface_facts must be appended immediately after demangled_symbol"

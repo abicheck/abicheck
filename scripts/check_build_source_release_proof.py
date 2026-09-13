@@ -29,18 +29,20 @@ import json
 import sys
 from pathlib import Path
 
-EXPECTED_CASE_IDS = frozenset({
-    "case01_symbol_removal",
-    "case04_no_change",
-    "case98_cxx_standard_floor_raised",
-    "case105_concept_tightening",
-    "case122_template_signature_uninstantiated",
-    "case129_struct_return_convention",
-    "case130_exceptions_mode_flip",
-    "case131_rtti_mode_flip",
-    "case132_threadsafe_statics_flip",
-    "case133_tls_model_flip",
-})
+EXPECTED_CASE_IDS = frozenset(
+    {
+        "case01_symbol_removal",
+        "case04_no_change",
+        "case98_cxx_standard_floor_raised",
+        "case105_concept_tightening",
+        "case122_template_signature_uninstantiated",
+        "case129_struct_return_convention",
+        "case130_exceptions_mode_flip",
+        "case131_rtti_mode_flip",
+        "case132_threadsafe_statics_flip",
+        "case133_tls_model_flip",
+    }
+)
 EXPECTED_RESULT_COUNT = len(EXPECTED_CASE_IDS)
 
 
@@ -122,7 +124,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {error}", file=sys.stderr)
         return 1
 
-    print(f"build/source release proof: {EXPECTED_RESULT_COUNT}/{EXPECTED_RESULT_COUNT} PASS")
+    print(
+        f"build/source release proof: {EXPECTED_RESULT_COUNT}/{EXPECTED_RESULT_COUNT} PASS"
+    )
     return 0
 
 

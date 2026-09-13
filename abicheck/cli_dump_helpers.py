@@ -333,6 +333,15 @@ def write_snapshot_payload(
     return write_snapshot_text(text, path, compression=compression)
 
 
+#: Size at which a plain (uncompressed) snapshot is worth a one-line note
+#: pointing at the compressed envelopes. 64 MB: comfortably above any
+#: ordinary single-library dump (a one-header C++ library is tens of KB), so
+#: the note stays rare, and well below the ~384 MB per side a real
+#: conda-forge Intel MKL dump reaches, which is the case that showed the
+#: option was undiscoverable at the only scale where it matters.
+_LARGE_UNCOMPRESSED_SNAPSHOT_BYTES = 64 * 1024 * 1024
+
+
 def reject_snapshot_compression_conflict(
     output: Path | None, snapshot_compression: str
 ) -> None:
@@ -393,6 +402,24 @@ def write_snapshot_and_report(
         f"({write_result.ratio:.1%})",
         err=True,
     )
+    if (
+        write_result.compression is SnapshotCompression.NONE
+        and write_result.stored_size_bytes >= _LARGE_UNCOMPRESSED_SNAPSHOT_BYTES
+    ):
+        # `--compression auto` infers the envelope from the output suffix, so
+        # a plain `.json` name means a plain file however large it gets --
+        # correct, and undiscoverable at the scale where it starts to matter.
+        # A real conda-forge Intel MKL dump is ~384 MB per side uncompressed;
+        # nothing in the output suggested that an `.json.zst` name would have
+        # avoided it. Reported once, at the point the size is already known,
+        # rather than by changing a default (which would contradict the
+        # documented suffix contract).
+        click.echo(
+            f"Note: this snapshot is {write_result.stored_size_bytes / 1e6:,.0f} MB "
+            "uncompressed. Naming the output '.json.zst' or '.json.gz' stores "
+            "it compressed; the decoded content is identical either way.",
+            err=True,
+        )
     # Self-describing output (CLI-audit P2): report the evidence depth this
     # snapshot actually reached -- computed from what it carries, not the
     # requested --depth, so an explicit --depth source that collected
