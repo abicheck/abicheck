@@ -29,7 +29,6 @@ the Tier-2 service (``service.compare_snapshots``), never a direct
 from __future__ import annotations
 
 import math
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -39,7 +38,7 @@ from . import cli_resolve
 from .cli_audit import echo_pattern_modulations
 from .cli_compare_fold import (
     _exit_on_budget_overflow,
-    _report_not_comparable,
+    report_not_comparable_and_exit,
 )
 from .cli_compare_options import (
     _NormalizedCompareOptions,
@@ -101,7 +100,6 @@ from .frontends.cli.compare_report import (
 from .frontends.cli.compare_use_cases import reject_use_cases_without_carrying_output
 from .frontends.cli.options.params import _load_suppression_and_policy
 from .frontends.cli.runtime import (
-    _EXIT_NOT_COMPARABLE,
     _announce_exit_scheme,
     _exit_with_severity_or_verdict,
     _finalize_compare_result,
@@ -2132,15 +2130,9 @@ def run_compare(
             contract_mode=resolved_contract_mode,
         )
     except (ProfileMismatchError, ScopeMismatchError) as exc:
-        _report_not_comparable(
-            exc,
-            old,
-            new,
-            fmt=fmt,
-            output=output,
-            secondary_writes=secondary_writes,
+        report_not_comparable_and_exit(
+            exc, old, new, fmt=fmt, output=output, secondary_writes=secondary_writes
         )
-        sys.exit(_EXIT_NOT_COMPARABLE)
     except deadline.DeadlineExceeded as exc:
         # ADR-068 §3 #19: budget expired during classification itself (the
         # automatic cross-source/pattern/preprocessor scans, ADR-068 D4/D5,

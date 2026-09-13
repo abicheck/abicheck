@@ -71,7 +71,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import click
 
@@ -680,6 +680,33 @@ def _report_not_comparable(
         secondary_writes=secondary_writes,
         operational=OperationalStatus.NOT_COMPARABLE,
     )
+
+
+def report_not_comparable_and_exit(
+    exc: ProfileMismatchError | ScopeMismatchError,
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    fmt: str,
+    output: Path | None,
+    secondary_writes: tuple[tuple[str, Path], ...] = (),
+) -> NoReturn:
+    """Render the refusal to every requested output and exit
+    ``_EXIT_NOT_COMPARABLE``.
+
+    The whole comparability-refusal step, owned here beside the renderer it
+    drives (Codex review, PR #1274) rather than spelled out in
+    ``cli_compare_helpers.run_compare``'s ``except`` clause -- that module
+    is at its ``architecture/debt.yaml`` no-growth baseline, and "report
+    this refusal, then exit with its code" is one decision, not a caller's
+    two.
+    """
+    from .frontends.cli.runtime import _EXIT_NOT_COMPARABLE
+
+    _report_not_comparable(
+        exc, old, new, fmt=fmt, output=output, secondary_writes=secondary_writes
+    )
+    sys.exit(_EXIT_NOT_COMPARABLE)
 
 
 def _report_run_aborted(

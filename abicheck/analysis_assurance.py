@@ -119,6 +119,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from .analysis_assurance_comparability import (
+    bounded_comparability_notes,
+    is_comparability_bounded,
+)
 from .analysis_assurance_layout import (
     layout_unverified_detectors as _layout_unverified_detectors,
 )
@@ -1316,33 +1320,9 @@ def compute_analysis_assurance(
             ),
         )
 
-    # -- bounded (non-fatal) comparability mismatch ------------------------
-    # ADR-050 D2 / PR #1274 (Codex review, second P1 + P2): a NON-fatal
-    # `ComparabilityMismatch` leaves `result.assurance` at `None` -- nothing
-    # was forced through a refusal -- but it does mark specific
-    # COMPARABILITY_DIMENSIONS unverified. This rollup previously read only
-    # `assurance == "none"` above, so such a run reported `status="complete"`
-    # while `comparability_assurance` said declaration/layout were
-    # unverified: two assurance fields of the same report contradicting each
-    # other, and `assurance.require_complete` declining to gate a run that
-    # is by its own account not complete. It is `partial`, not
-    # `not_comparable`: a verdict WAS produced and every axis below was
-    # genuinely computed -- only some dimensions' conclusions carry reduced
-    # assurance.
-    comparability_bounded = any(
-        state == "unverified"
-        for state in (result.comparability_assurance or {}).values()
-    )
-    if comparability_bounded:
-        unverified = sorted(
-            dimension
-            for dimension, state in (result.comparability_assurance or {}).items()
-            if state == "unverified"
-        )
-        notes.append(
-            "extraction contexts were not provably identical; conclusions on "
-            f"the {', '.join(unverified)} dimension(s) carry reduced assurance"
-        )
+    # Bounded (non-fatal) comparability mismatch -- owner:
+    # `analysis_assurance_comparability.py` (Codex review, PR #1274).
+    notes.extend(bounded_comparability_notes(result.comparability_assurance))
 
     # -- depth --------------------------------------------------------------
     requested_depth = result.requested_depth
@@ -1486,7 +1466,7 @@ def compute_analysis_assurance(
         or manifest_layer_incomplete
         or (export_accounting.unaccounted or 0) > 0
         or target_unresolved
-        or comparability_bounded
+        or is_comparability_bounded(result.comparability_assurance)
     ):
         status = "partial"
     elif nothing_requested:

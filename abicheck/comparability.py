@@ -120,7 +120,7 @@ import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from .comparability_fields import (
     # The redundant `X as X` aliases are explicit re-exports, for import-path
@@ -1416,6 +1416,40 @@ def check_contracts_comparable(
             return mismatch
         raise _MISMATCH_ERRORS[mismatch.kind](mismatch.reason)
     return bounded
+
+
+def comparability_outcome(
+    mismatch: ComparabilityMismatch | None,
+) -> tuple[Literal["none"] | None, dict[str, str] | None]:
+    """Both halves of what *mismatch* means for a ``DiffResult``, as one
+    call: :func:`forced_assurance` and :func:`dimension_assurance`.
+
+    One accessor rather than two so ``checker.compare`` -- which is at its
+    ``architecture/debt.yaml`` no-growth baseline -- asks this module one
+    question instead of importing and calling two pieces of it.
+    """
+    return forced_assurance(mismatch), dimension_assurance(mismatch)
+
+
+def forced_assurance(mismatch: ComparabilityMismatch | None) -> Literal["none"] | None:
+    """``DiffResult.assurance`` for a run that produced *mismatch*.
+
+    ``"none"`` means one specific thing: this result came from a refusal
+    FORCED through with ``--diagnostic-comparison``, so do not trust it.
+    Only a FATAL mismatch can produce that. A non-fatal one
+    (:attr:`ComparabilityMismatch.fatal` ``False``) bounds the comparison
+    rather than refusing it -- nothing was forced, so stamping ``"none"``
+    would misreport a bounded result as an override. Its reduction is
+    carried by :func:`dimension_assurance`'s per-dimension breakdown, by
+    ``coverage_warnings``, and by ``AnalysisAssurance.status`` reading
+    ``partial`` (``analysis_assurance_comparability.py``).
+
+    Lives here rather than inline in ``checker.compare`` (Codex review,
+    PR #1274): this is a fact about a ``ComparabilityMismatch``, which is
+    this module's own type, and it belongs beside the sibling that answers
+    the other half of the same question.
+    """
+    return "none" if mismatch is not None and mismatch.fatal else None
 
 
 def dimension_assurance(
