@@ -196,14 +196,19 @@ def test_no_stub_announcement_fires_when_nothing_is_set(
         [command_name, *_minimal_invocation(command_name, tmp_path)],
         catch_exceptions=False,
     )
+    output = _combined(result)
     for param in _hidden_params(command_name):
-        if param.name not in _P2_STUB_FLAGS:
-            continue
-        spelling = max(param.opts, key=len)
-        assert spelling not in _combined(result), (
-            f"`compat {command_name}` announces {spelling} on a run that never "
-            f"set it: {result.output!r}"
-        )
+        # Every hidden option, not just the `_P2_STUB_FLAGS` half: the
+        # informational notes are just as capable of regressing to fire
+        # unconditionally, and skipping them here meant a `compat check`
+        # that spuriously announced `-count-symbols` on every run failed
+        # nothing (Codex review). Alias-aware for the same reason the
+        # positive case is.
+        for spelling in param.opts:
+            assert spelling not in output, (
+                f"`compat {command_name}` announces {spelling} on a run that "
+                f"never set it: {output!r}"
+            )
 
 
 def test_quiet_suppresses_the_stub_warnings_but_not_the_acceptance(
@@ -241,74 +246,97 @@ def test_every_registry_entry_still_names_a_real_option() -> None:
     )
 
 
-#: Which hidden options each command accepts today, per command rather than
-#: pooled. Five of `dump`'s stubs also exist on `check`, so a set of bare
-#: parameter *names* cannot see one being dropped from one command while the
-#: other still declares it -- an existing ABICC `dump` line would then start
-#: failing with "no such option" and nothing here would notice (Codex
-#: review). Frozen for the same reason the Action's tombstones are: a
-#: derived set never catches its own members disappearing.
-_EXPECTED_HIDDEN_SURFACE = {
+#: Every option *spelling* each command accepts today, per command.
+#:
+#: Two levels of identity are load-bearing here and both were learned the
+#: hard way (Codex review, two rounds). Pooling spellings across commands
+#: cannot see one being dropped from `dump` while `check` keeps it -- five
+#: stubs are shared. And keying by Click *destination* cannot see an alias
+#: being dropped at all: `-cpp-incompatible` and `-cxx-incompatible` share
+#: one destination, as do `-static` and `-static-libs`, `-ext` and
+#: `-extended`, so deleting either spelling left the derived set unchanged
+#: and every test green while an existing ABICC command line using it began
+#: failing with "no such option".
+#:
+#: An alias is not a nicety here: the whole value of the compat surface is
+#: that a command line written for abi-compliance-checker keeps working, and
+#: ABICC's own callers use both spellings.
+#:
+#: Frozen for the same reason the Action's tombstones are: a set derived
+#: from the code never catches its own members disappearing.
+_EXPECTED_HIDDEN_SPELLINGS = {
     "check": frozenset(
         {
-            "check",
-            "check_private_abi",
-            "count_all_symbols",
-            "count_symbols",
-            "cpp_compatible",
-            "cxx_incompatible",
-            "disable_constants_check",
-            "extended",
-            "extra_dump",
-            "extra_info",
-            "force",
-            "mingw_compatible",
-            "quick",
-            "skip_added_constants",
-            "skip_removed_constants",
-            "skip_typedef_uncover",
-            "skip_unidentified",
-            "sort_dump",
-            "static_libs",
-            "tolerance",
-            "tolerant",
-            "xml_format",
+            "-check",
+            "-check-private-abi",
+            "-count-all-symbols",
+            "-count-symbols",
+            "-cpp-compatible",
+            "-cpp-incompatible",
+            "-cxx-incompatible",
+            "-disable-constants-check",
+            "-ext",
+            "-extended",
+            "-extra-dump",
+            "-extra-info",
+            "-force",
+            "-mingw-compatible",
+            "-quick",
+            "-skip-added-constants",
+            "-skip-removed-constants",
+            "-skip-typedef-uncover",
+            "-skip-unidentified",
+            "-sort",
+            "-static",
+            "-static-libs",
+            "-tolerance",
+            "-tolerant",
+            "-xml",
         }
     ),
-    "dump": frozenset({"check", "extra_dump", "extra_info", "sort_dump", "xml_format"}),
+    "dump": frozenset({"-check", "-extra-dump", "-extra-info", "-sort", "-xml"}),
 }
 
 
-@pytest.mark.parametrize("command_name", sorted(_EXPECTED_HIDDEN_SURFACE))
-def test_no_command_has_quietly_dropped_an_accepted_abicc_option(
+def _declared_spellings(command_name: str) -> set[str]:
+    return {
+        spelling for param in _hidden_params(command_name) for spelling in param.opts
+    }
+
+
+@pytest.mark.parametrize("command_name", sorted(_EXPECTED_HIDDEN_SPELLINGS))
+def test_no_command_has_quietly_dropped_an_accepted_abicc_spelling(
     command_name: str,
 ) -> None:
-    """Each command keeps its own accepted-option surface.
+    """Each command keeps every spelling it accepts today, aliases included.
 
-    Dropping one is a break in the drop-in promise for every ABICC command
-    line that uses it -- so, like the Action's tombstones, removal has to be
-    a deliberate edit here with a reason, not a deletion no test observes.
+    Dropping one breaks the drop-in promise for every ABICC command line
+    that uses it -- so, like the Action's tombstones, removal has to be a
+    deliberate edit here with a reason, not a deletion no test observes.
     """
-    actual = {param.name for param in _hidden_params(command_name)}
-    missing = sorted(_EXPECTED_HIDDEN_SURFACE[command_name] - actual)
+    missing = sorted(
+        _EXPECTED_HIDDEN_SPELLINGS[command_name] - _declared_spellings(command_name)
+    )
     assert not missing, (
         f"`compat {command_name}` no longer accepts {missing}; an ABICC "
         f"command line passing one now fails with 'no such option'. If the "
-        f"removal is intended, drop the name from _EXPECTED_HIDDEN_SURFACE "
-        f"and say in the PR why no ABICC caller can still pass it."
+        f"removal is intended, drop the spelling from "
+        f"_EXPECTED_HIDDEN_SPELLINGS and say in the PR why no ABICC caller "
+        f"can still pass it."
     )
 
 
-@pytest.mark.parametrize("command_name", sorted(_EXPECTED_HIDDEN_SURFACE))
-def test_the_expected_hidden_surface_has_not_gone_stale(command_name: str) -> None:
-    """The converse: a newly added stub is announced-checked immediately by
-    the derived tests above, but should be listed here too, or its own later
-    removal goes unnoticed.
+@pytest.mark.parametrize("command_name", sorted(_EXPECTED_HIDDEN_SPELLINGS))
+def test_the_expected_spelling_surface_has_not_gone_stale(command_name: str) -> None:
+    """The converse: a newly added stub (or a new alias for an existing one)
+    is announcement-checked immediately by the derived tests above, but must
+    be listed here too, or its own later removal goes unnoticed.
     """
-    actual = {param.name for param in _hidden_params(command_name)}
-    unlisted = sorted(actual - _EXPECTED_HIDDEN_SURFACE[command_name])
+    unlisted = sorted(
+        _declared_spellings(command_name) - _EXPECTED_HIDDEN_SPELLINGS[command_name]
+    )
     assert not unlisted, (
-        f"`compat {command_name}` declares hidden options {unlisted} that "
-        f"_EXPECTED_HIDDEN_SURFACE does not list, so dropping one later would "
-        f"fail nothing. Add them."
+        f"`compat {command_name}` declares hidden option spellings {unlisted} "
+        f"that _EXPECTED_HIDDEN_SPELLINGS does not list, so dropping one later "
+        f"would fail nothing. Add them."
     )
