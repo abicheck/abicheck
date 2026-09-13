@@ -112,6 +112,7 @@ def _try_attach_numpy_capi_surface(snap: AbiSnapshot, lib_path: Path) -> None:
     carried over verbatim from ``service.py``, claiming the opposite).
     """
     from .numpy_capi import extract_numpy_capi_surface
+
     try:
         numpy_capi = extract_numpy_capi_surface(lib_path)
     except Exception as exc:  # noqa: BLE001
@@ -138,6 +139,7 @@ def _try_attach_python_api_surface(snap: AbiSnapshot) -> None:
     common case for a plain C/C++ library or a stubless extension.
     """
     from .python_api import detect_python_api
+
     try:
         python_api = detect_python_api(snap)
     except Exception as exc:  # noqa: BLE001

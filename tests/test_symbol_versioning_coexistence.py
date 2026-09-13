@@ -7,6 +7,7 @@ Validates ELF symbol version scenarios including:
 4. Required version changes (dependency version requirements)
 5. SONAME bump policy checks with version-aware changes
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
@@ -20,25 +21,32 @@ from abicheck.model import (
 
 def _snap(version="1.0", functions=None, elf=None, elf_only_mode=False):
     return AbiSnapshot(
-        library="libtest.so.1", version=version,
-        functions=functions or [], variables=[], types=[], enums=[],
-        typedefs={}, elf=elf, elf_only_mode=elf_only_mode,
+        library="libtest.so.1",
+        version=version,
+        functions=functions or [],
+        variables=[],
+        types=[],
+        enums=[],
+        typedefs={},
+        elf=elf,
+        elf_only_mode=elf_only_mode,
     )
 
 
 def _pub_func(name, mangled, ret="void"):
-    return Function(name=name, mangled=mangled, return_type=ret,
-                    visibility=Visibility.PUBLIC)
+    return Function(
+        name=name, mangled=mangled, return_type=ret, visibility=Visibility.PUBLIC
+    )
 
 
 def _kinds(result):
     return {c.kind for c in result.changes}
 
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Version Node Additions & Removals
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestVersionNodeAddition:
     """Adding a new version node is typically compatible."""
@@ -52,8 +60,9 @@ class TestVersionNodeAddition:
 
     def test_multiple_versions_added(self):
         old_elf = ElfMetadata(versions_defined=["LIBFOO_1.0"])
-        new_elf = ElfMetadata(versions_defined=[
-            "LIBFOO_1.0", "LIBFOO_2.0", "LIBFOO_3.0"])
+        new_elf = ElfMetadata(
+            versions_defined=["LIBFOO_1.0", "LIBFOO_2.0", "LIBFOO_3.0"]
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert ChangeKind.SYMBOL_VERSION_DEFINED_ADDED in _kinds(r)
 
@@ -93,17 +102,25 @@ class TestVersionNodeCoexistence:
         old_elf = ElfMetadata(
             versions_defined=["LIBFOO_1.0", "LIBFOO_2.0"],
             symbols=[
-                ElfSymbol(name="foo", binding=SymbolBinding.GLOBAL,
-                          sym_type=SymbolType.FUNC, version="LIBFOO_2.0",
-                          is_default=True),
+                ElfSymbol(
+                    name="foo",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                    version="LIBFOO_2.0",
+                    is_default=True,
+                ),
             ],
         )
         new_elf = ElfMetadata(
             versions_defined=["LIBFOO_1.0", "LIBFOO_2.0", "LIBFOO_3.0"],
             symbols=[
-                ElfSymbol(name="foo", binding=SymbolBinding.GLOBAL,
-                          sym_type=SymbolType.FUNC, version="LIBFOO_3.0",
-                          is_default=True),
+                ElfSymbol(
+                    name="foo",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                    version="LIBFOO_3.0",
+                    is_default=True,
+                ),
             ],
         )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
@@ -119,6 +136,7 @@ class TestVersionNodeCoexistence:
 # Default vs Non-Default Version Aliases
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 class TestVersionAliases:
     """Symbol version alias changes (foo@V1 vs foo@@V2)."""
 
@@ -126,17 +144,25 @@ class TestVersionAliases:
         """Default version moved from one node to another."""
         old_elf = ElfMetadata(
             symbols=[
-                ElfSymbol(name="api", binding=SymbolBinding.GLOBAL,
-                          sym_type=SymbolType.FUNC, version="LIBFOO_1.0",
-                          is_default=True),
+                ElfSymbol(
+                    name="api",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                    version="LIBFOO_1.0",
+                    is_default=True,
+                ),
             ],
             versions_defined=["LIBFOO_1.0", "LIBFOO_2.0"],
         )
         new_elf = ElfMetadata(
             symbols=[
-                ElfSymbol(name="api", binding=SymbolBinding.GLOBAL,
-                          sym_type=SymbolType.FUNC, version="LIBFOO_2.0",
-                          is_default=True),
+                ElfSymbol(
+                    name="api",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                    version="LIBFOO_2.0",
+                    is_default=True,
+                ),
             ],
             versions_defined=["LIBFOO_1.0", "LIBFOO_2.0"],
         )
@@ -148,16 +174,24 @@ class TestVersionAliases:
         """Symbol went from @@default to @specific (non-default)."""
         old_elf = ElfMetadata(
             symbols=[
-                ElfSymbol(name="api", binding=SymbolBinding.GLOBAL,
-                          sym_type=SymbolType.FUNC, version="V1",
-                          is_default=True),
+                ElfSymbol(
+                    name="api",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                    version="V1",
+                    is_default=True,
+                ),
             ],
         )
         new_elf = ElfMetadata(
             symbols=[
-                ElfSymbol(name="api", binding=SymbolBinding.GLOBAL,
-                          sym_type=SymbolType.FUNC, version="V1",
-                          is_default=False),
+                ElfSymbol(
+                    name="api",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                    version="V1",
+                    is_default=False,
+                ),
             ],
         )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
@@ -170,48 +204,53 @@ class TestVersionAliases:
 # Required Version Changes
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 class TestRequiredVersionChanges:
     """Changes to .gnu.version_r (required versions from dependencies)."""
 
     def test_new_dependency_version_required(self):
-        old_elf = ElfMetadata(
-            versions_required={"libc.so.6": ["GLIBC_2.17"]})
+        old_elf = ElfMetadata(versions_required={"libc.so.6": ["GLIBC_2.17"]})
         new_elf = ElfMetadata(
-            versions_required={"libc.so.6": ["GLIBC_2.17", "GLIBC_2.34"]})
+            versions_required={"libc.so.6": ["GLIBC_2.17", "GLIBC_2.34"]}
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         kind_set = _kinds(r)
-        assert (ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED in kind_set or
-                ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED_COMPAT in kind_set)
+        assert (
+            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED in kind_set
+            or ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED_COMPAT in kind_set
+        )
 
     def test_dependency_version_dropped(self):
         old_elf = ElfMetadata(
-            versions_required={"libc.so.6": ["GLIBC_2.17", "GLIBC_2.28"]})
-        new_elf = ElfMetadata(
-            versions_required={"libc.so.6": ["GLIBC_2.17"]})
+            versions_required={"libc.so.6": ["GLIBC_2.17", "GLIBC_2.28"]}
+        )
+        new_elf = ElfMetadata(versions_required={"libc.so.6": ["GLIBC_2.17"]})
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert ChangeKind.SYMBOL_VERSION_REQUIRED_REMOVED in _kinds(r)
 
     def test_new_dependency_library_added(self):
-        old_elf = ElfMetadata(
-            versions_required={"libc.so.6": ["GLIBC_2.17"]})
+        old_elf = ElfMetadata(versions_required={"libc.so.6": ["GLIBC_2.17"]})
         new_elf = ElfMetadata(
             versions_required={
                 "libc.so.6": ["GLIBC_2.17"],
                 "libm.so.6": ["GLIBC_2.17"],
-            })
+            }
+        )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         kind_set = _kinds(r)
-        assert (ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED in kind_set or
-                ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED_COMPAT in kind_set)
+        assert (
+            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED in kind_set
+            or ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED_COMPAT in kind_set
+        )
 
     def test_dependency_library_removed(self):
         old_elf = ElfMetadata(
             versions_required={
                 "libc.so.6": ["GLIBC_2.17"],
                 "libm.so.6": ["GLIBC_2.17"],
-            })
-        new_elf = ElfMetadata(
-            versions_required={"libc.so.6": ["GLIBC_2.17"]})
+            }
+        )
+        new_elf = ElfMetadata(versions_required={"libc.so.6": ["GLIBC_2.17"]})
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert ChangeKind.SYMBOL_VERSION_REQUIRED_REMOVED in _kinds(r)
 
@@ -219,6 +258,7 @@ class TestRequiredVersionChanges:
 # ═══════════════════════════════════════════════════════════════════════════
 # Combined Version + Symbol Changes
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestVersionWithSymbolChanges:
     """Version changes combined with symbol-level changes."""
@@ -230,8 +270,12 @@ class TestVersionWithSymbolChanges:
         new_elf = ElfMetadata(
             versions_defined=["LIBFOO_1.0", "LIBFOO_2.0"],
             symbols=[
-                ElfSymbol(name="_Z7new_apiv", binding=SymbolBinding.GLOBAL,
-                          sym_type=SymbolType.FUNC, version="LIBFOO_2.0"),
+                ElfSymbol(
+                    name="_Z7new_apiv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                    version="LIBFOO_2.0",
+                ),
             ],
         )
         r = compare(
@@ -248,8 +292,12 @@ class TestVersionWithSymbolChanges:
         old_elf = ElfMetadata(
             versions_defined=["LIBFOO_1.0", "LIBFOO_2.0"],
             symbols=[
-                ElfSymbol(name="_Z7old_apiv", binding=SymbolBinding.GLOBAL,
-                          sym_type=SymbolType.FUNC, version="LIBFOO_1.0"),
+                ElfSymbol(
+                    name="_Z7old_apiv",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                    version="LIBFOO_1.0",
+                ),
             ],
         )
         new_elf = ElfMetadata(versions_defined=["LIBFOO_2.0"])
@@ -266,6 +314,7 @@ class TestVersionWithSymbolChanges:
 # Edge Cases
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 class TestVersionEdgeCases:
     """Edge cases in version handling."""
 
@@ -273,8 +322,7 @@ class TestVersionEdgeCases:
         """Both snapshots with no versions → no version changes."""
         elf = ElfMetadata(versions_defined=[], versions_required={})
         r = compare(_snap(elf=elf), _snap(elf=elf))
-        version_kinds = {c.kind for c in r.changes
-                         if "version" in c.kind.value.lower()}
+        version_kinds = {c.kind for c in r.changes if "version" in c.kind.value.lower()}
         assert len(version_kinds) == 0
 
     def test_same_versions_no_change(self):
@@ -283,8 +331,7 @@ class TestVersionEdgeCases:
             versions_required={"libc.so.6": ["GLIBC_2.17"]},
         )
         r = compare(_snap(elf=elf), _snap(elf=elf))
-        version_kinds = {c.kind for c in r.changes
-                         if "version" in c.kind.value.lower()}
+        version_kinds = {c.kind for c in r.changes if "version" in c.kind.value.lower()}
         assert len(version_kinds) == 0
 
     def test_version_rename_is_add_plus_remove(self):

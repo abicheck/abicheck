@@ -20,6 +20,7 @@ raises, current_version downgrades, re-export repoints, strong↔weak export
 flips, arm64e slice naming, and the dyld export-trie walker. All tests use
 synthetic ``MachoMetadata`` — no real binaries required.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -68,9 +69,12 @@ def _macho(**kwargs) -> MachoMetadata:
 
 # ── Filetype ─────────────────────────────────────────────────────────────────
 
+
 class TestFiletype:
     def test_dylib_to_bundle_is_breaking(self):
-        r = compare(_snap(_macho(filetype="MH_DYLIB")), _snap(_macho(filetype="MH_BUNDLE")))
+        r = compare(
+            _snap(_macho(filetype="MH_DYLIB")), _snap(_macho(filetype="MH_BUNDLE"))
+        )
         assert ChangeKind.MACHO_FILETYPE_CHANGED in _kinds(r)
 
     def test_uncaptured_side_skipped(self):
@@ -80,13 +84,16 @@ class TestFiletype:
 
 # ── Linkage flags ────────────────────────────────────────────────────────────
 
+
 class TestLinkageFlags:
     def test_twolevel_dropped(self):
-        old = _macho(flags=0x80)   # MH_TWOLEVEL
+        old = _macho(flags=0x80)  # MH_TWOLEVEL
         new = _macho(flags=0x0)
         r = compare(_snap(old), _snap(new))
         assert ChangeKind.MACHO_LINKAGE_FLAGS_CHANGED in _kinds(r)
-        change = next(c for c in r.changes if c.kind == ChangeKind.MACHO_LINKAGE_FLAGS_CHANGED)
+        change = next(
+            c for c in r.changes if c.kind == ChangeKind.MACHO_LINKAGE_FLAGS_CHANGED
+        )
         assert "-MH_TWOLEVEL" in change.description
 
     def test_unrelated_flag_bits_ignored(self):
@@ -102,6 +109,7 @@ class TestLinkageFlags:
 
 
 # ── LC_RPATH ─────────────────────────────────────────────────────────────────
+
 
 class TestMachoRpath:
     def test_changed(self):
@@ -133,6 +141,7 @@ class TestMachoRpath:
 
 # ── Deployment floor / versions ──────────────────────────────────────────────
 
+
 class TestMachoVersions:
     def test_min_os_raised(self):
         old = _macho(min_os_version="11.0.0")
@@ -160,6 +169,7 @@ class TestMachoVersions:
 
 
 # ── Re-export repoint ────────────────────────────────────────────────────────
+
 
 class TestReexportRepoint:
     def test_single_repoint(self):
@@ -242,6 +252,7 @@ class TestMachoDependenciesVendorHash:
 
 # ── Weak↔strong export flips ─────────────────────────────────────────────────
 
+
 def _export(name: str, weak: bool = False) -> MachoExport:
     return MachoExport(
         name=name,
@@ -273,6 +284,7 @@ class TestWeakExportFlips:
 
 # ── arm64e slice naming ──────────────────────────────────────────────────────
 
+
 class TestArm64e:
     def test_slice_names(self):
         assert _cpu_slice_name(0x0100000C, 0) == "ARM64"
@@ -289,6 +301,7 @@ class TestArm64e:
 
 # ── dyld export trie ─────────────────────────────────────────────────────────
 
+
 class TestExportTrie:
     def test_walk_single_weak_symbol(self):
         # Root: terminal_size=0, one child edge "_foo" → node at offset 8.
@@ -299,10 +312,10 @@ class TestExportTrie:
     def test_walk_shared_prefix(self):
         # Root → edge "_f" → intermediate node with two children "oo"/"ar".
         blob = (
-            b"\x00\x01_f\x00\x06"            # root (0-5): child "_f" at offset 6
+            b"\x00\x01_f\x00\x06"  # root (0-5): child "_f" at offset 6
             b"\x00\x02oo\x00\x10ar\x00\x14"  # node (6-15): children "oo"@16, "ar"@20
-            b"\x02\x00\x00\x00"              # "_foo" (16-19): terminal, flags=0
-            b"\x02\x08\x00\x00"              # "_far" (20-23): terminal, flags=REEXPORT
+            b"\x02\x00\x00\x00"  # "_foo" (16-19): terminal, flags=0
+            b"\x02\x08\x00\x00"  # "_far" (20-23): terminal, flags=REEXPORT
         )
         assert sorted(_walk_export_trie(blob)) == [("_far", 0x08), ("_foo", 0x00)]
 
@@ -359,19 +372,21 @@ def _trie_header(trie: bytes, *, modern: bool = False) -> SimpleNamespace:
 #: Root (bytes 0-29): no terminal, 4 children.
 _TRIE = (
     b"\x00\x04"
-    b"_plain\x00\x1e"      # → node at 30
-    b"_weakling\x00\x22"   # → node at 34
-    b"_fwd\x00\x26"        # → node at 38
-    b"_\x00\x2a"           # → node at 42
-    b"\x02\x00\x00\x00"    # _plain: terminal, flags=0
-    b"\x02\x04\x00\x00"    # _weakling: terminal, flags=WEAK_DEFINITION
-    b"\x02\x08\x00\x00"    # _fwd: terminal, flags=REEXPORT
-    b"\x02\x00\x00\x00"    # _: terminal — name empties after strip
+    b"_plain\x00\x1e"  # → node at 30
+    b"_weakling\x00\x22"  # → node at 34
+    b"_fwd\x00\x26"  # → node at 38
+    b"_\x00\x2a"  # → node at 42
+    b"\x02\x00\x00\x00"  # _plain: terminal, flags=0
+    b"\x02\x04\x00\x00"  # _weakling: terminal, flags=WEAK_DEFINITION
+    b"\x02\x08\x00\x00"  # _fwd: terminal, flags=REEXPORT
+    b"\x02\x00\x00\x00"  # _: terminal — name empties after strip
 )
 
 
 class TestParseExportTrie:
-    def _run(self, tmp_path, meta: MachoMetadata, *, modern: bool = False) -> MachoMetadata:
+    def _run(
+        self, tmp_path, meta: MachoMetadata, *, modern: bool = False
+    ) -> MachoMetadata:
         f = tmp_path / "lib.dylib"
         f.write_bytes(b"\x00" * _TRIE_OFF + _TRIE)
         _parse_export_trie(f, _trie_header(_TRIE, modern=modern), meta)
@@ -387,10 +402,12 @@ class TestParseExportTrie:
         assert by_name["fwd"].sym_type == MachoSymbolType.REEXPORT
 
     def test_existing_exports_upgraded_not_duplicated(self, tmp_path):
-        meta = MachoMetadata(exports=[
-            MachoExport(name="weakling"),
-            MachoExport(name="fwd"),
-        ])
+        meta = MachoMetadata(
+            exports=[
+                MachoExport(name="weakling"),
+                MachoExport(name="fwd"),
+            ]
+        )
         self._run(tmp_path, meta)
         by_name = {e.name: e for e in meta.exports}
         assert len(meta.exports) == 3  # only "plain" added
@@ -424,14 +441,23 @@ class TestParseExportTrie:
 
 # ── LC_RPATH collection in _parse ────────────────────────────────────────────
 
+
 class TestParseRpaths:
     def test_rpaths_collected(self, tmp_path, monkeypatch):
         from abicheck import macho_metadata as mm
 
         hdr = SimpleNamespace(cputype=0x0100000C, cpusubtype=0, filetype=6, flags=0)
         commands = [
-            (SimpleNamespace(cmd=mm.LC_RPATH), SimpleNamespace(), b"@loader_path/../lib\x00"),
-            (SimpleNamespace(cmd=mm.LC_RPATH), SimpleNamespace(), b"\x00"),  # empty → dropped
+            (
+                SimpleNamespace(cmd=mm.LC_RPATH),
+                SimpleNamespace(),
+                b"@loader_path/../lib\x00",
+            ),
+            (
+                SimpleNamespace(cmd=mm.LC_RPATH),
+                SimpleNamespace(),
+                b"\x00",
+            ),  # empty → dropped
             # A segment with one section exercises the ordinal → segment map.
             (
                 SimpleNamespace(cmd=mm.LC_SEGMENT_64),
@@ -440,8 +466,6 @@ class TestParseRpaths:
             ),
         ]
         header = SimpleNamespace(header=hdr, commands=commands, offset=0)
-        monkeypatch.setattr(
-            mm, "MachO", lambda path: SimpleNamespace(headers=[header])
-        )
+        monkeypatch.setattr(mm, "MachO", lambda path: SimpleNamespace(headers=[header]))
         meta = _parse(tmp_path / "lib.dylib")
         assert meta.rpaths == ["@loader_path/../lib"]

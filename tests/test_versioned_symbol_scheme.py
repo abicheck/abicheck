@@ -49,7 +49,9 @@ _BASES: dict[str, list[str]] = {
 
 def _fn(name: str, ptypes: list[str]) -> Function:
     return Function(
-        name=name, mangled=name, return_type="int",
+        name=name,
+        mangled=name,
+        return_type="int",
         params=[Param(name=f"a{i}", type=t) for i, t in enumerate(ptypes)],
         visibility=Visibility.PUBLIC,
     )
@@ -62,9 +64,12 @@ def _snap(version: str, suffix: str) -> AbiSnapshot:
 
 
 def _kind_counts(result) -> dict[str, int]:
-    return dict(collections.Counter(
-        (c.kind.value if hasattr(c.kind, "value") else c.kind) for c in result.changes
-    ))
+    return dict(
+        collections.Counter(
+            (c.kind.value if hasattr(c.kind, "value") else c.kind)
+            for c in result.changes
+        )
+    )
 
 
 def test_versioned_suffix_bump_reads_as_full_churn():
@@ -96,13 +101,16 @@ def test_identical_versioned_surface_is_no_change():
 
 # --- pure recogniser: thresholds + false-positive guards ------------------
 
+
 def _ch(kind_value: str, symbol: str):
     from abicheck.checker_types import Change, ChangeKind
+
     return Change(kind=ChangeKind(kind_value), symbol=symbol, description="")
 
 
 def test_recogniser_fires_on_majority_versioned_churn():
     from abicheck.versioned_symbol_scheme import detect_versioned_symbol_scheme
+
     changes = []
     for b in ("a", "b", "c", "d"):
         changes.append(_ch("func_removed", f"u_{b}_75"))
@@ -115,9 +123,12 @@ def test_recogniser_fires_on_majority_versioned_churn():
 def test_recogniser_silent_below_floor():
     # Only one versioned pair amid real removals → not a scheme (no false positive).
     from abicheck.versioned_symbol_scheme import detect_versioned_symbol_scheme
+
     changes = [
-        _ch("func_removed", "u_a_75"), _ch("func_added", "u_a_78"),
-        _ch("func_removed", "real_gone_1"), _ch("func_removed", "real_gone_2"),
+        _ch("func_removed", "u_a_75"),
+        _ch("func_added", "u_a_78"),
+        _ch("func_removed", "real_gone_1"),
+        _ch("func_removed", "real_gone_2"),
         _ch("func_removed", "real_gone_3"),
     ]
     assert detect_versioned_symbol_scheme(changes) is None
@@ -126,10 +137,14 @@ def test_recogniser_silent_below_floor():
 def test_recogniser_ignores_digitless_renames():
     # Removals/additions without a numeric token are not a versioned scheme.
     from abicheck.versioned_symbol_scheme import detect_versioned_symbol_scheme
+
     changes = [
-        _ch("func_removed", "alpha"), _ch("func_added", "beta"),
-        _ch("func_removed", "gamma"), _ch("func_added", "delta"),
-        _ch("func_removed", "epsilon"), _ch("func_added", "zeta"),
+        _ch("func_removed", "alpha"),
+        _ch("func_added", "beta"),
+        _ch("func_removed", "gamma"),
+        _ch("func_added", "delta"),
+        _ch("func_removed", "epsilon"),
+        _ch("func_added", "zeta"),
     ]
     assert detect_versioned_symbol_scheme(changes) is None
 
@@ -138,10 +153,14 @@ def test_recogniser_ignores_itanium_mangling_digits():
     # The digits in Itanium C++ ABI names are structural length/name data, not a
     # source-level versioning convention like ICU's `u_name_75` suffix.
     from abicheck.versioned_symbol_scheme import detect_versioned_symbol_scheme
+
     changes = [
-        _ch("func_removed", "_Z4sym1"), _ch("func_added", "_Z4sym3"),
-        _ch("func_removed", "_Z4sym2"), _ch("func_added", "_Z4sym4"),
-        _ch("func_removed", "_Z4sym5"), _ch("func_added", "_Z4sym6"),
+        _ch("func_removed", "_Z4sym1"),
+        _ch("func_added", "_Z4sym3"),
+        _ch("func_removed", "_Z4sym2"),
+        _ch("func_added", "_Z4sym4"),
+        _ch("func_removed", "_Z4sym5"),
+        _ch("func_added", "_Z4sym6"),
     ]
     assert detect_versioned_symbol_scheme(changes) is None
 
@@ -168,15 +187,20 @@ def test_collapse_preset_reclassifies_versioned_pairs():
 
 # --- C++ inline-namespace stamp (G15 deeper half) -------------------------
 
+
 def _cpp_changes(removed_added):
     """Build Change rows from (kind_value, mangled_symbol) tuples."""
     from abicheck.checker_types import Change, ChangeKind
-    return [Change(kind=ChangeKind(k), symbol=s, description="") for k, s in removed_added]
+
+    return [
+        Change(kind=ChangeKind(k), symbol=s, description="") for k, s in removed_added
+    ]
 
 
 def test_cpp_inline_namespace_scheme_detected(monkeypatch):
     """Mangled icu_75::→icu_78:: across a majority of symbols is recognised."""
     import abicheck.versioned_symbol_scheme as vs
+
     # synthetic demangle map: old symbols carry icu_75, new carry icu_78
     dem = {}
     rows = []
@@ -195,13 +219,18 @@ def test_cpp_inline_namespace_scheme_detected(monkeypatch):
 def test_cpp_scheme_ignores_camelcase_digit_classes(monkeypatch):
     """Sha256::/Sha512:: (no '_<digits>' token) must NOT be read as a version bump."""
     import abicheck.versioned_symbol_scheme as vs
+
     dem = {
-        "_ZN6Sha256d1E": "Sha256::digest()", "_ZN6Sha512d2E": "Sha512::digest()",
-        "_ZN6Sha256h1E": "Sha256::hash()", "_ZN6Sha512h2E": "Sha512::hash()",
-        "_ZN6Sha256u1E": "Sha256::update()", "_ZN6Sha512u2E": "Sha512::update()",
+        "_ZN6Sha256d1E": "Sha256::digest()",
+        "_ZN6Sha512d2E": "Sha512::digest()",
+        "_ZN6Sha256h1E": "Sha256::hash()",
+        "_ZN6Sha512h2E": "Sha512::hash()",
+        "_ZN6Sha256u1E": "Sha256::update()",
+        "_ZN6Sha512u2E": "Sha512::update()",
     }
-    rows = [("func_removed", s) for s in dem if "256" in s] + \
-           [("func_added", s) for s in dem if "512" in s]
+    rows = [("func_removed", s) for s in dem if "256" in s] + [
+        ("func_added", s) for s in dem if "512" in s
+    ]
     monkeypatch.setattr(vs, "demangle", lambda s: dem.get(s))
     monkeypatch.setattr(vs, "demangle_batch", lambda names: {})
     adv, matched = vs.analyze_versioned_scheme(_cpp_changes(rows))
@@ -211,6 +240,7 @@ def test_cpp_scheme_ignores_camelcase_digit_classes(monkeypatch):
 def test_variables_participate_in_scheme():
     """Versioned global variables (var_removed/var_added) collapse like functions."""
     from abicheck.versioned_symbol_scheme import analyze_versioned_scheme
+
     rows = []
     for b in ("a", "b", "c", "d"):
         rows.append(_ch("var_removed", f"u_{b}_data_75"))
@@ -223,9 +253,17 @@ def test_likely_renamed_versioned_pairs_collapse():
     """func_likely_renamed whose old→new differ only by a version token are matched."""
     from abicheck.checker_types import Change, ChangeKind
     from abicheck.versioned_symbol_scheme import analyze_versioned_scheme
-    rows = [Change(kind=ChangeKind.FUNC_LIKELY_RENAMED, symbol=f"u_{b}_75",
-                   description="", old_value=f"u_{b}_75", new_value=f"u_{b}_78")
-            for b in ("a", "b", "c", "d")]
+
+    rows = [
+        Change(
+            kind=ChangeKind.FUNC_LIKELY_RENAMED,
+            symbol=f"u_{b}_75",
+            description="",
+            old_value=f"u_{b}_75",
+            new_value=f"u_{b}_78",
+        )
+        for b in ("a", "b", "c", "d")
+    ]
     adv, matched = analyze_versioned_scheme(rows)
     assert adv is not None and len(matched) == 4
 
@@ -241,11 +279,17 @@ def test_likely_renamed_versioned_pairs_collapse():
 
 def _scheme_from_demangle_map(monkeypatch, dem, removed, added):
     import abicheck.versioned_symbol_scheme as vs
+
     monkeypatch.setattr(vs, "demangle", lambda s: dem.get(s))
     monkeypatch.setattr(vs, "demangle_batch", lambda names: {})
     from abicheck.checker_types import Change, ChangeKind
-    rows = [Change(kind=ChangeKind.FUNC_REMOVED, symbol=s, description="") for s in removed]
-    rows += [Change(kind=ChangeKind.FUNC_ADDED, symbol=s, description="") for s in added]
+
+    rows = [
+        Change(kind=ChangeKind.FUNC_REMOVED, symbol=s, description="") for s in removed
+    ]
+    rows += [
+        Change(kind=ChangeKind.FUNC_ADDED, symbol=s, description="") for s in added
+    ]
     return vs.analyze_versioned_scheme(rows)
 
 
@@ -288,7 +332,9 @@ def test_libstdcxx_versioned_namespace_scheme_collapses(monkeypatch):
 
 def _versioned_advisory(result):
     for c in result.changes:
-        if (c.kind.value if hasattr(c.kind, "value") else c.kind) == "versioned_symbol_scheme_detected":
+        if (
+            c.kind.value if hasattr(c.kind, "value") else c.kind
+        ) == "versioned_symbol_scheme_detected":
             return c
     return None
 
@@ -306,6 +352,7 @@ def test_collapse_reports_version_rename_count_in_summary():
 
 def _snap_with_soname(version: str, suffix: str, soname: str) -> AbiSnapshot:
     from abicheck.elf_metadata import ElfMetadata
+
     s = AbiSnapshot(library=f"libicuuc.so.{suffix}", version=version)
     s.functions = [_fn(f"u_{b}_{suffix}", pt) for b, pt in _BASES.items()]
     s.elf = ElfMetadata(soname=soname)
@@ -344,7 +391,9 @@ def test_collapse_with_soname_bump_does_not_call_it_unnecessary():
     old = _snap_with_soname("75.1", "75", soname="libicui18n.so.75")
     new = _snap_with_soname("78.3", "78", soname="libicui18n.so.78")
     result = compare(old, new, collapse_versioned_symbols=True)
-    kinds = {(c.kind.value if hasattr(c.kind, "value") else c.kind) for c in result.changes}
+    kinds = {
+        (c.kind.value if hasattr(c.kind, "value") else c.kind) for c in result.changes
+    }
     adv = _versioned_advisory(result)
     assert adv is not None and "relink" in adv.description
     assert "soname_bump_unnecessary" not in kinds, kinds
@@ -356,12 +405,20 @@ def test_collapse_with_suppressed_advisory_still_justifies_soname_bump():
     # SONAME_BUMP_UNNECESSARY — the relink-required state is carried on the
     # context, set before the advisory is suppressed.
     from abicheck.suppression import Suppression, SuppressionList
+
     old = _snap_with_soname("75.1", "75", soname="libicui18n.so.75")
     new = _snap_with_soname("78.3", "78", soname="libicui18n.so.78")
-    supp = SuppressionList([Suppression(
-        symbol_pattern=".*", change_kind="versioned_symbol_scheme_detected")])
+    supp = SuppressionList(
+        [
+            Suppression(
+                symbol_pattern=".*", change_kind="versioned_symbol_scheme_detected"
+            )
+        ]
+    )
     result = compare(old, new, collapse_versioned_symbols=True, suppression=supp)
-    kinds = {(c.kind.value if hasattr(c.kind, "value") else c.kind) for c in result.changes}
+    kinds = {
+        (c.kind.value if hasattr(c.kind, "value") else c.kind) for c in result.changes
+    }
     assert "versioned_symbol_scheme_detected" not in kinds  # advisory suppressed
     assert "soname_bump_unnecessary" not in kinds, kinds
 
@@ -373,18 +430,24 @@ def test_suppressed_advisory_is_attributed_to_its_matching_rule():
     # path (ApplySuppression, _merge_findings_respecting_suppression) -- a
     # labelled rule matching this advisory left no attribution behind.
     from abicheck.suppression import Suppression, SuppressionList
+
     old = _snap_with_soname("75.1", "75", soname="libicui18n.so.75")
     new = _snap_with_soname("78.3", "78", soname="libicui18n.so.75")
-    supp = SuppressionList([Suppression(
-        symbol_pattern=".*",
-        change_kind="versioned_symbol_scheme_detected",
-        label="icu-version-rename",
-    )])
+    supp = SuppressionList(
+        [
+            Suppression(
+                symbol_pattern=".*",
+                change_kind="versioned_symbol_scheme_detected",
+                label="icu-version-rename",
+            )
+        ]
+    )
     result = compare(old, new, suppression=supp)
     kinds = {c.kind.value for c in result.changes}
     assert "versioned_symbol_scheme_detected" not in kinds
     suppressed_adv = next(
-        c for c in result.suppressed_changes
+        c
+        for c in result.suppressed_changes
         if c.kind.value == "versioned_symbol_scheme_detected"
     )
     assert suppressed_adv.suppression_rule == "icu-version-rename"
@@ -474,9 +537,7 @@ def test_service_run_compare_shim_forwards_collapse_versioned_symbols(tmp_path):
     new_p.write_text(snapshot_to_json(new), encoding="utf-8")
 
     default_result = run_compare(old_p, new_p).diff
-    collapsed_result = run_compare(
-        old_p, new_p, collapse_versioned_symbols=True
-    ).diff
+    collapsed_result = run_compare(old_p, new_p, collapse_versioned_symbols=True).diff
 
     assert default_result.verdict == Verdict.BREAKING
     assert collapsed_result.verdict != Verdict.BREAKING

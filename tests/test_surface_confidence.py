@@ -7,6 +7,7 @@ snapshot when header scoping had to fall back, and the surface resolver flags a
 reachability demotion made without provenance. Both are disclosed (confidence +
 notes) in the JSON/SARIF surface ledger so "demote + disclose" stays auditable.
 """
+
 from __future__ import annotations
 
 import json
@@ -56,8 +57,12 @@ def _rec(name, size=64, origin=ScopeOrigin.UNKNOWN):
 
 class TestScopeFallbackConfidence:
     def test_mangling_fallback_recorded(self):
-        old = AbiSnapshot(library="l.dll", version="1", scope_fallback="mangling-fallback")
-        new = AbiSnapshot(library="l.dll", version="2", scope_fallback="mangling-fallback")
+        old = AbiSnapshot(
+            library="l.dll", version="1", scope_fallback="mangling-fallback"
+        )
+        new = AbiSnapshot(
+            library="l.dll", version="2", scope_fallback="mangling-fallback"
+        )
         conf, notes = surface_scope_confidence(old, new, scope_enabled=True)
         assert conf == "reduced"
         assert notes == ["mangling-fallback"]
@@ -74,8 +79,16 @@ class TestScopeFallbackConfidence:
         assert notes == ["header-backend-unavailable"]
 
     def test_clean_run_is_high_confidence(self):
-        old = AbiSnapshot(library="l", version="1", functions=[_fn("api", origin=ScopeOrigin.PUBLIC_HEADER)])
-        new = AbiSnapshot(library="l", version="2", functions=[_fn("api", origin=ScopeOrigin.PUBLIC_HEADER)])
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="2",
+            functions=[_fn("api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
         conf, notes = surface_scope_confidence(old, new, scope_enabled=True)
         assert conf == "high"
         assert notes == []
@@ -106,7 +119,8 @@ class TestNoProvenanceReason:
         # no origin is demoted by reachability → no-provenance (not plain
         # non-public-type), disclosing the demotion was not provenance-confirmed.
         snap = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[_fn("api", ret="Public *", origin=ScopeOrigin.PUBLIC_HEADER)],
             types=[
                 _rec("Public", origin=ScopeOrigin.PUBLIC_HEADER),
@@ -122,7 +136,8 @@ class TestNoProvenanceReason:
         # No provenance anywhere → keep the plain reachability reason (regression
         # guard for the pre-Phase-1 behaviour).
         snap = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[_fn("api", ret="Public *")],
             types=[_rec("Public"), _rec("Orphan")],
         )
@@ -145,18 +160,22 @@ class TestExportOnlyAntiHiding:
 
     def _export_only_fn(self, name):
         # Mirrors service._dump_pe export-table functions.
-        return Function(name=name, mangled=name, return_type="?", visibility=Visibility.PUBLIC)
+        return Function(
+            name=name, mangled=name, return_type="?", visibility=Visibility.PUBLIC
+        )
 
     def test_public_header_type_not_hidden_on_fallback(self):
         # A PUBLIC_HEADER PDB type whose layout changed must stay in surface
         # even though no typed function reaches it.
         old = AbiSnapshot(
-            library="l.dll", version="1",
+            library="l.dll",
+            version="1",
             functions=[self._export_only_fn("Api")],
             types=[_rec("Widget", size=64, origin=ScopeOrigin.PUBLIC_HEADER)],
         )
         new = AbiSnapshot(
-            library="l.dll", version="2",
+            library="l.dll",
+            version="2",
             functions=[self._export_only_fn("Api")],
             types=[_rec("Widget", size=128, origin=ScopeOrigin.PUBLIC_HEADER)],
         )
@@ -170,12 +189,14 @@ class TestExportOnlyAntiHiding:
         # Confident provenance still demotes — anti-hiding does not block a
         # genuinely private type.
         old = AbiSnapshot(
-            library="l.dll", version="1",
+            library="l.dll",
+            version="1",
             functions=[self._export_only_fn("Api")],
             types=[_rec("Internal", size=64, origin=ScopeOrigin.PRIVATE_HEADER)],
         )
         new = AbiSnapshot(
-            library="l.dll", version="2",
+            library="l.dll",
+            version="2",
             functions=[self._export_only_fn("Api")],
             types=[_rec("Internal", size=128, origin=ScopeOrigin.PRIVATE_HEADER)],
         )
@@ -189,13 +210,16 @@ class TestExportOnlyAntiHiding:
         # Regression guard: with real typed roots, reachability demotion is
         # still active (this is the normal castxml/ELF path).
         old = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[_fn("api", ret="Public *")],
             types=[_rec("Public"), _rec("Unreached")],
         )
         s = compute_public_surface(old)
         assert s.has_typed_roots is True
-        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Unreached", description="")
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Unreached", description=""
+        )
         in_surf, _ = classify_change_surface(c, s, s)
         assert in_surf is False
 
@@ -205,7 +229,8 @@ class TestExportOnlyAntiHiding:
         # reachable from any public API root. Treating the full field spelling
         # as an unknown type kept the private layout change as BREAKING.
         snap = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[_fn("api", ret="Public *")],
             types=[_rec("Public"), _rec("p11_virtual")],
         )
@@ -220,25 +245,29 @@ class TestExportOnlyAntiHiding:
         assert in_surf is False
         assert reason == REASON_NON_PUBLIC_TYPE
 
-    @pytest.mark.parametrize("kind, symbol", [
-        # Struct/union field findings (``Type::field``).
-        (ChangeKind.STRUCT_FIELD_TYPE_CHANGED, "p11_virtual::funcs"),
-        (ChangeKind.STRUCT_FIELD_REMOVED, "p11_virtual::funcs"),
-        (ChangeKind.TYPE_FIELD_OFFSET_CHANGED, "p11_virtual::funcs"),
-        (ChangeKind.UNION_FIELD_TYPE_CHANGED, "p11_virtual::funcs"),
-        # Enum member findings (``Enum::member``) — same owner-qualified shape,
-        # and ENUM_MEMBER_REMOVED/VALUE_CHANGED are BREAKING, so a private enum's
-        # member churn would otherwise read as a public break (the gap this fix
-        # closes alongside struct fields).
-        (ChangeKind.ENUM_MEMBER_REMOVED, "p11_secret::SECRET"),
-        (ChangeKind.ENUM_MEMBER_VALUE_CHANGED, "p11_secret::SECRET"),
-    ])
+    @pytest.mark.parametrize(
+        "kind, symbol",
+        [
+            # Struct/union field findings (``Type::field``).
+            (ChangeKind.STRUCT_FIELD_TYPE_CHANGED, "p11_virtual::funcs"),
+            (ChangeKind.STRUCT_FIELD_REMOVED, "p11_virtual::funcs"),
+            (ChangeKind.TYPE_FIELD_OFFSET_CHANGED, "p11_virtual::funcs"),
+            (ChangeKind.UNION_FIELD_TYPE_CHANGED, "p11_virtual::funcs"),
+            # Enum member findings (``Enum::member``) — same owner-qualified shape,
+            # and ENUM_MEMBER_REMOVED/VALUE_CHANGED are BREAKING, so a private enum's
+            # member churn would otherwise read as a public break (the gap this fix
+            # closes alongside struct fields).
+            (ChangeKind.ENUM_MEMBER_REMOVED, "p11_secret::SECRET"),
+            (ChangeKind.ENUM_MEMBER_VALUE_CHANGED, "p11_secret::SECRET"),
+        ],
+    )
     def test_member_level_private_owner_demoted(self, kind, symbol):
         # Owner-qualified member findings must be classified by the owning type,
         # not the full ``Owner::member`` spelling (which is never a known type
         # name and so used to stay in-surface as an "unknown").
         snap = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[_fn("api", ret="Public *")],
             types=[_rec("Public"), _rec("p11_virtual")],
             enums=[EnumType(name="p11_secret")],
@@ -255,7 +284,8 @@ class TestExportOnlyAntiHiding:
         # The owner reclassification must not over-demote: a member change on a
         # public, reachable type stays in-surface.
         snap = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[_fn("api", ret="Public *")],
             types=[_rec("Public")],
         )
@@ -277,13 +307,15 @@ class TestExportOnlyAntiHiding:
 class TestLedgerConfidenceDisclosure:
     def _result_with_fallback(self):
         old = AbiSnapshot(
-            library="l.dll", version="1",
+            library="l.dll",
+            version="1",
             functions=[_fn("api", ret="Public *", origin=ScopeOrigin.PUBLIC_HEADER)],
             types=[_rec("Public", size=64, origin=ScopeOrigin.PUBLIC_HEADER)],
             scope_fallback="mangling-fallback",
         )
         new = AbiSnapshot(
-            library="l.dll", version="2",
+            library="l.dll",
+            version="2",
             functions=[_fn("api", ret="Public *", origin=ScopeOrigin.PUBLIC_HEADER)],
             types=[_rec("Public", size=128, origin=ScopeOrigin.PUBLIC_HEADER)],
             scope_fallback="mangling-fallback",
@@ -304,12 +336,14 @@ class TestLedgerConfidenceDisclosure:
 
     def test_clean_result_high_confidence(self):
         old = AbiSnapshot(
-            library="l", version="1",
+            library="l",
+            version="1",
             functions=[_fn("api", ret="Public *", origin=ScopeOrigin.PUBLIC_HEADER)],
             types=[_rec("Public", size=64, origin=ScopeOrigin.PUBLIC_HEADER)],
         )
         new = AbiSnapshot(
-            library="l", version="2",
+            library="l",
+            version="2",
             functions=[_fn("api", ret="Public *", origin=ScopeOrigin.PUBLIC_HEADER)],
             types=[_rec("Public", size=64, origin=ScopeOrigin.PUBLIC_HEADER)],
         )

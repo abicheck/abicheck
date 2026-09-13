@@ -29,7 +29,10 @@ from abicheck.report_summary import build_summary, compatibility_metrics
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
-def _snap(ver: str = "1.0", funcs=None, variables=None, types=None, enums=None) -> AbiSnapshot:
+
+def _snap(
+    ver: str = "1.0", funcs=None, variables=None, types=None, enums=None
+) -> AbiSnapshot:
     s = AbiSnapshot(library="libtest.so", version=ver)
     if funcs is not None:
         s.functions = funcs
@@ -44,8 +47,11 @@ def _snap(ver: str = "1.0", funcs=None, variables=None, types=None, enums=None) 
 
 def _pub_func(name: str, mangled: str, ret: str = "void", params=None) -> Function:
     return Function(
-        name=name, mangled=mangled, return_type=ret,
-        params=params or [], visibility=Visibility.PUBLIC,
+        name=name,
+        mangled=mangled,
+        return_type=ret,
+        params=params or [],
+        visibility=Visibility.PUBLIC,
     )
 
 
@@ -55,51 +61,81 @@ def _pub_var(name: str) -> Variable:
 
 # ── Bug 1: Enum symbols use member-qualified format ──────────────────────────
 
+
 class TestBug1EnumSymbolFormat:
     """Enum change symbols must be 'EnumName::MemberName', not just 'EnumName'."""
 
     def test_enum_member_removed_symbol_has_member(self):
-        old = _snap(enums=[EnumType("Color", [EnumMember("RED", 0), EnumMember("GREEN", 1)])])
+        old = _snap(
+            enums=[EnumType("Color", [EnumMember("RED", 0), EnumMember("GREEN", 1)])]
+        )
         new = _snap(enums=[EnumType("Color", [EnumMember("RED", 0)])])
         result = compare(old, new)
-        removed = [c for c in result.changes if c.kind == ChangeKind.ENUM_MEMBER_REMOVED]
+        removed = [
+            c for c in result.changes if c.kind == ChangeKind.ENUM_MEMBER_REMOVED
+        ]
         assert len(removed) == 1
         assert removed[0].symbol == "Color::GREEN"
 
     def test_enum_member_added_symbol_has_member(self):
         old = _snap(enums=[EnumType("Color", [EnumMember("RED", 0)])])
-        new = _snap(enums=[EnumType("Color", [EnumMember("RED", 0), EnumMember("BLUE", 2)])])
+        new = _snap(
+            enums=[EnumType("Color", [EnumMember("RED", 0), EnumMember("BLUE", 2)])]
+        )
         result = compare(old, new)
         added = [c for c in result.changes if c.kind == ChangeKind.ENUM_MEMBER_ADDED]
         assert len(added) == 1
         assert added[0].symbol == "Color::BLUE"
 
     def test_enum_member_value_changed_symbol_has_member(self):
-        old = _snap(enums=[EnumType("Err", [EnumMember("OK", 0), EnumMember("FAIL", 1)])])
-        new = _snap(enums=[EnumType("Err", [EnumMember("OK", 0), EnumMember("FAIL", 99)])])
+        old = _snap(
+            enums=[EnumType("Err", [EnumMember("OK", 0), EnumMember("FAIL", 1)])]
+        )
+        new = _snap(
+            enums=[EnumType("Err", [EnumMember("OK", 0), EnumMember("FAIL", 99)])]
+        )
         result = compare(old, new)
-        changed = [c for c in result.changes if c.kind == ChangeKind.ENUM_MEMBER_VALUE_CHANGED]
+        changed = [
+            c for c in result.changes if c.kind == ChangeKind.ENUM_MEMBER_VALUE_CHANGED
+        ]
         assert len(changed) == 1
         assert changed[0].symbol == "Err::FAIL"
 
     def test_multiple_members_produce_distinct_symbols(self):
-        old = _snap(enums=[EnumType("X", [EnumMember("A", 0), EnumMember("B", 1), EnumMember("C", 2)])])
+        old = _snap(
+            enums=[
+                EnumType(
+                    "X", [EnumMember("A", 0), EnumMember("B", 1), EnumMember("C", 2)]
+                )
+            ]
+        )
         new = _snap(enums=[EnumType("X", [EnumMember("A", 0)])])
         result = compare(old, new)
-        removed = [c for c in result.changes if c.kind == ChangeKind.ENUM_MEMBER_REMOVED]
+        removed = [
+            c for c in result.changes if c.kind == ChangeKind.ENUM_MEMBER_REMOVED
+        ]
         symbols = {c.symbol for c in removed}
         assert symbols == {"X::B", "X::C"}
 
     def test_sentinel_member_symbol_has_member(self):
-        old = _snap(enums=[EnumType("E", [EnumMember("A", 0), EnumMember("E_MAX", 10)])])
-        new = _snap(enums=[EnumType("E", [EnumMember("A", 0), EnumMember("E_MAX", 20)])])
+        old = _snap(
+            enums=[EnumType("E", [EnumMember("A", 0), EnumMember("E_MAX", 10)])]
+        )
+        new = _snap(
+            enums=[EnumType("E", [EnumMember("A", 0), EnumMember("E_MAX", 20)])]
+        )
         result = compare(old, new)
-        changed = [c for c in result.changes if c.kind == ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED]
+        changed = [
+            c
+            for c in result.changes
+            if c.kind == ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED
+        ]
         assert len(changed) == 1
         assert changed[0].symbol == "E::E_MAX"
 
 
 # ── Bug 2: Human-readable parameter format ───────────────────────────────────
+
 
 class TestBug2ParamFormat:
     """FUNC_PARAMS_CHANGED old_value/new_value must be human-readable, not repr()."""
@@ -108,33 +144,55 @@ class TestBug2ParamFormat:
         old_f = _pub_func("f", "_Zf", params=[Param(name="x", type="int")])
         new_f = _pub_func("f", "_Zf", params=[Param(name="x", type="long")])
         result = compare(_snap(funcs=[old_f]), _snap("2.0", funcs=[new_f]))
-        change = next(c for c in result.changes if c.kind == ChangeKind.FUNC_PARAMS_CHANGED)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.FUNC_PARAMS_CHANGED
+        )
         assert change.old_value == "int"
         assert change.new_value == "long"
 
     def test_pointer_param_shows_asterisk(self):
         # Param.type already carries the sigil (as produced by the DWARF parser)
-        old_f = _pub_func("f", "_Zf", params=[Param(name="p", type="int *", kind=ParamKind.POINTER)])
-        new_f = _pub_func("f", "_Zf", params=[Param(name="p", type="void *", kind=ParamKind.POINTER)])
+        old_f = _pub_func(
+            "f", "_Zf", params=[Param(name="p", type="int *", kind=ParamKind.POINTER)]
+        )
+        new_f = _pub_func(
+            "f", "_Zf", params=[Param(name="p", type="void *", kind=ParamKind.POINTER)]
+        )
         result = compare(_snap(funcs=[old_f]), _snap("2.0", funcs=[new_f]))
-        change = next(c for c in result.changes if c.kind == ChangeKind.FUNC_PARAMS_CHANGED)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.FUNC_PARAMS_CHANGED
+        )
         assert change.old_value == "int *"
         assert change.new_value == "void *"
 
     def test_reference_param_shows_ampersand(self):
-        old_f = _pub_func("f", "_Zf", params=[Param(name="r", type="int &", kind=ParamKind.REFERENCE)])
-        new_f = _pub_func("f", "_Zf", params=[Param(name="r", type="int &&", kind=ParamKind.RVALUE_REF)])
+        old_f = _pub_func(
+            "f", "_Zf", params=[Param(name="r", type="int &", kind=ParamKind.REFERENCE)]
+        )
+        new_f = _pub_func(
+            "f",
+            "_Zf",
+            params=[Param(name="r", type="int &&", kind=ParamKind.RVALUE_REF)],
+        )
         result = compare(_snap(funcs=[old_f]), _snap("2.0", funcs=[new_f]))
-        change = next(c for c in result.changes if c.kind == ChangeKind.FUNC_PARAMS_CHANGED)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.FUNC_PARAMS_CHANGED
+        )
         assert change.old_value == "int &"
         assert change.new_value == "int &&"
 
     def test_no_repr_artifacts(self):
         """Ensure no Python repr artifacts like ParamKind.VALUE or tuple syntax."""
-        old_f = _pub_func("f", "_Zf", params=[Param(name="a", type="int"), Param(name="b", type="float")])
+        old_f = _pub_func(
+            "f",
+            "_Zf",
+            params=[Param(name="a", type="int"), Param(name="b", type="float")],
+        )
         new_f = _pub_func("f", "_Zf", params=[Param(name="a", type="int")])
         result = compare(_snap(funcs=[old_f]), _snap("2.0", funcs=[new_f]))
-        change = next(c for c in result.changes if c.kind == ChangeKind.FUNC_PARAMS_CHANGED)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.FUNC_PARAMS_CHANGED
+        )
         assert "ParamKind" not in change.old_value
         assert "[(" not in change.old_value
         assert change.old_value == "int, float"
@@ -144,18 +202,22 @@ class TestBug2ParamFormat:
         old_f = _pub_func("f", "_Zf", params=[])
         new_f = _pub_func("f", "_Zf", params=[Param(name="x", type="int")])
         result = compare(_snap(funcs=[old_f]), _snap("2.0", funcs=[new_f]))
-        change = next(c for c in result.changes if c.kind == ChangeKind.FUNC_PARAMS_CHANGED)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.FUNC_PARAMS_CHANGED
+        )
         assert change.old_value == "(none)"
         assert change.new_value == "int"
 
 
 # ── Bug 3: Snapshot metadata skipped for JSON/Perl inputs ────────────────────
 
+
 class TestBug3MetadataCollection:
     """_collect_metadata must return None for JSON/Perl snapshots."""
 
     def test_binary_file_returns_metadata(self):
         from abicheck.frontends.cli.runtime import _collect_metadata
+
         with tempfile.NamedTemporaryFile(suffix=".so", delete=False) as f:
             content = b"fake binary content"
             f.write(content)
@@ -171,6 +233,7 @@ class TestBug3MetadataCollection:
 
     def test_json_snapshot_returns_none(self):
         from abicheck.frontends.cli.runtime import _collect_metadata
+
         with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
             json.dump({"library": "lib.so", "version": "1.0"}, f)
             path = Path(f.name)
@@ -182,6 +245,7 @@ class TestBug3MetadataCollection:
 
     def test_perl_dump_returns_none(self):
         from abicheck.frontends.cli.runtime import _collect_metadata
+
         with tempfile.NamedTemporaryFile(suffix=".dump", mode="w", delete=False) as f:
             f.write("$VAR1 = { 'library' => 'lib.so' };")
             f.flush()
@@ -195,6 +259,7 @@ class TestBug3MetadataCollection:
 
 # ── Bug 4: Policy overrides affect DiffResult section properties ─────────────
 
+
 class TestBug4PolicyOverrideProperties:
     """DiffResult.breaking/compatible/etc. must reflect PolicyFile overrides."""
 
@@ -206,7 +271,9 @@ class TestBug4PolicyOverrideProperties:
             overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE},
         )
         result = DiffResult(
-            old_version="1.0", new_version="2.0", library="lib.so",
+            old_version="1.0",
+            new_version="2.0",
+            library="lib.so",
             changes=[Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "func removed")],
             verdict=Verdict.COMPATIBLE,
             policy="strict_abi",
@@ -225,7 +292,9 @@ class TestBug4PolicyOverrideProperties:
             overrides={ChangeKind.ENUM_MEMBER_ADDED: Verdict.COMPATIBLE_WITH_RISK},
         )
         result = DiffResult(
-            old_version="1.0", new_version="2.0", library="lib.so",
+            old_version="1.0",
+            new_version="2.0",
+            library="lib.so",
             changes=[Change(ChangeKind.ENUM_MEMBER_ADDED, "E::NEW", "added")],
             verdict=Verdict.COMPATIBLE_WITH_RISK,
             policy="strict_abi",
@@ -237,7 +306,9 @@ class TestBug4PolicyOverrideProperties:
     def test_no_policy_file_uses_base_policy(self):
         """Without policy_file, properties use base policy sets directly."""
         result = DiffResult(
-            old_version="1.0", new_version="2.0", library="lib.so",
+            old_version="1.0",
+            new_version="2.0",
+            library="lib.so",
             changes=[Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
             verdict=Verdict.BREAKING,
             policy="strict_abi",
@@ -249,16 +320,23 @@ class TestBug4PolicyOverrideProperties:
         from abicheck.policy_file import PolicyFile
 
         p = tmp_path / "policy.yaml"
-        p.write_text(textwrap.dedent("""\
+        p.write_text(
+            textwrap.dedent("""\
             base_policy: strict_abi
             overrides:
               func_removed: ignore
-        """), encoding="utf-8")
+        """),
+            encoding="utf-8",
+        )
         pf = PolicyFile.load(p)
         result = DiffResult(
-            old_version="1.0", new_version="2.0", library="lib.so",
+            old_version="1.0",
+            new_version="2.0",
+            library="lib.so",
             changes=[Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
-            verdict=pf.compute_verdict([Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")]),
+            verdict=pf.compute_verdict(
+                [Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")]
+            ),
             policy=pf.base_policy,
             policy_file=pf,
         )
@@ -268,17 +346,20 @@ class TestBug4PolicyOverrideProperties:
 
 # ── Bug 5: Safe output file writing with parent dir creation ─────────────────
 
+
 class TestBug5SafeWriteOutput:
     """_safe_write_output creates parent directories and handles errors."""
 
     def test_creates_parent_dirs(self, tmp_path):
         from abicheck.frontends.cli.runtime import _safe_write_output
+
         out = tmp_path / "deeply" / "nested" / "report.txt"
         _safe_write_output(out, "hello")
         assert out.read_text() == "hello"
 
     def test_overwrites_existing_file(self, tmp_path):
         from abicheck.frontends.cli.runtime import _safe_write_output
+
         out = tmp_path / "report.txt"
         out.write_text("old")
         _safe_write_output(out, "new")
@@ -286,6 +367,7 @@ class TestBug5SafeWriteOutput:
 
     def test_bad_path_raises_click_exception(self, tmp_path):
         from abicheck.frontends.cli.runtime import _safe_write_output
+
         # Create a regular file, then try to write inside it as if it were a
         # directory — fails on every OS because mkdir will raise OSError.
         blocker = tmp_path / "blocker"
@@ -296,6 +378,7 @@ class TestBug5SafeWriteOutput:
 
 
 # ── Bug 7: ELF validation for deps/stack-check ──────────────────────────────
+
 
 class TestBug7ElfValidation:
     """deps and stack-check commands must reject non-ELF inputs."""
@@ -310,7 +393,9 @@ class TestBug7ElfValidation:
         runner = CliRunner()
         result = runner.invoke(main, ["deps", "tree", str(fake)])
         assert result.exit_code != 0
-        assert "ELF" in result.output or "ELF" in (result.exception and str(result.exception) or "")
+        assert "ELF" in result.output or "ELF" in (
+            result.exception and str(result.exception) or ""
+        )
 
     def test_deps_rejects_text_file(self, tmp_path):
         from click.testing import CliRunner
@@ -325,6 +410,7 @@ class TestBug7ElfValidation:
 
 
 # ── Bug 8: affected_pct computed from old_symbol_count ───────────────────────
+
 
 class TestBug8AffectedPct:
     """affected_pct must be non-zero when old_symbol_count is known."""
@@ -344,15 +430,19 @@ class TestBug8AffectedPct:
         assert metrics.binary_compatibility_pct == pytest.approx(90.0)
 
     def test_old_symbol_count_stored_on_diff_result(self):
-        old = _snap(funcs=[_pub_func("a", "_Za"), _pub_func("b", "_Zb")],
-                    variables=[_pub_var("g")])
+        old = _snap(
+            funcs=[_pub_func("a", "_Za"), _pub_func("b", "_Zb")],
+            variables=[_pub_var("g")],
+        )
         new = _snap("2.0", funcs=[_pub_func("a", "_Za")])
         result = compare(old, new)
         assert result.old_symbol_count == 3  # 2 functions + 1 variable
 
     def test_build_summary_uses_old_symbol_count(self):
         result = DiffResult(
-            old_version="1.0", new_version="2.0", library="lib.so",
+            old_version="1.0",
+            new_version="2.0",
+            library="lib.so",
             changes=[Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
             verdict=Verdict.BREAKING,
             old_symbol_count=20,
@@ -371,6 +461,7 @@ class TestBug8AffectedPct:
 
 # ── Bug 1 + Suppression interaction: type_pattern still matches ──────────────
 
+
 class TestBug1SuppressionInteraction:
     """type_pattern suppression must work with member-qualified enum symbols."""
 
@@ -378,15 +469,20 @@ class TestBug1SuppressionInteraction:
         from abicheck.suppression import SuppressionList
 
         p = tmp_path / "sup.yaml"
-        p.write_text(textwrap.dedent("""\
+        p.write_text(
+            textwrap.dedent("""\
             version: 1
             suppressions:
               - type_pattern: "Status"
                 reason: "intentional enum change"
-        """), encoding="utf-8")
+        """),
+            encoding="utf-8",
+        )
         sl = SuppressionList.load(p)
 
-        old = _snap(enums=[EnumType("Status", [EnumMember("OK", 0), EnumMember("FAIL", 1)])])
+        old = _snap(
+            enums=[EnumType("Status", [EnumMember("OK", 0), EnumMember("FAIL", 1)])]
+        )
         new = _snap("2.0", enums=[EnumType("Status", [EnumMember("OK", 0)])])
         result = compare(old, new, suppression=sl)
         assert result.suppressed_count >= 1
@@ -395,21 +491,29 @@ class TestBug1SuppressionInteraction:
         from abicheck.suppression import SuppressionList
 
         p = tmp_path / "sup.yaml"
-        p.write_text(textwrap.dedent("""\
+        p.write_text(
+            textwrap.dedent("""\
             version: 1
             suppressions:
               - type_pattern: "Status|Error"
                 reason: "suppress both"
-        """), encoding="utf-8")
+        """),
+            encoding="utf-8",
+        )
         sl = SuppressionList.load(p)
 
-        old = _snap(enums=[
-            EnumType("Status", [EnumMember("OK", 0), EnumMember("FAIL", 1)]),
-            EnumType("Error", [EnumMember("NONE", 0), EnumMember("TIMEOUT", 1)]),
-        ])
-        new = _snap("2.0", enums=[
-            EnumType("Status", [EnumMember("OK", 0)]),
-            EnumType("Error", [EnumMember("NONE", 0)]),
-        ])
+        old = _snap(
+            enums=[
+                EnumType("Status", [EnumMember("OK", 0), EnumMember("FAIL", 1)]),
+                EnumType("Error", [EnumMember("NONE", 0), EnumMember("TIMEOUT", 1)]),
+            ]
+        )
+        new = _snap(
+            "2.0",
+            enums=[
+                EnumType("Status", [EnumMember("OK", 0)]),
+                EnumType("Error", [EnumMember("NONE", 0)]),
+            ],
+        )
         result = compare(old, new, suppression=sl)
         assert result.suppressed_count >= 2

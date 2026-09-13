@@ -10,6 +10,7 @@ patterns (struct layouts, versioned symbols, typedefs, enums).
 
 Requires: gcc, castxml.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -322,8 +323,17 @@ def _build_lib(src: str, hdr: str, name: str, tmp_path: Path) -> tuple[Path, Pat
     hdr_path.write_text(textwrap.dedent(hdr).strip(), encoding="utf-8")
     src_path.write_text(textwrap.dedent(src).strip(), encoding="utf-8")
 
-    cmd = ["gcc", "-shared", "-fPIC", "-g", "-fvisibility=default",
-           f"-I{tmp_path}", "-o", str(so_path), str(src_path)]
+    cmd = [
+        "gcc",
+        "-shared",
+        "-fPIC",
+        "-g",
+        "-fvisibility=default",
+        f"-I{tmp_path}",
+        "-o",
+        str(so_path),
+        str(src_path),
+    ]
     if sys.platform == "darwin":
         # Set a consistent install_name so builds in different directories
         # don't produce different LC_ID_DYLIB values.
@@ -357,12 +367,17 @@ class TestRealWorldCompatibleRelease:
         _require_tool("castxml")
 
         v1_so, v1_hdr = _build_lib(V1_SOURCE, V1_HEADER, "compress_v1", tmp_path)
-        v2_so, v2_hdr = _build_lib(V2_COMPAT_SOURCE, V2_COMPAT_HEADER,
-                                    "compress_v2", tmp_path)
+        v2_so, v2_hdr = _build_lib(
+            V2_COMPAT_SOURCE, V2_COMPAT_HEADER, "compress_v2", tmp_path
+        )
 
         r = _scan(v1_so, v1_hdr, v2_so, v2_hdr, tmp_path)
 
-        expected = Verdict.COMPATIBLE_WITH_RISK if sys.platform == "darwin" else Verdict.COMPATIBLE
+        expected = (
+            Verdict.COMPATIBLE_WITH_RISK
+            if sys.platform == "darwin"
+            else Verdict.COMPATIBLE
+        )
         assert r.verdict == expected, (
             f"Expected {expected.value} for additive release; got {r.verdict}. "
             f"Changes: {[(c.kind.value, c.symbol) for c in r.changes]}"
@@ -370,9 +385,13 @@ class TestRealWorldCompatibleRelease:
         assert not r.breaking
 
         kinds = {c.kind for c in r.changes}
-        assert ChangeKind.ENUM_MEMBER_ADDED in kinds, "Expected COMPRESS_EPARAM to be ENUM_MEMBER_ADDED"
+        assert ChangeKind.ENUM_MEMBER_ADDED in kinds, (
+            "Expected COMPRESS_EPARAM to be ENUM_MEMBER_ADDED"
+        )
         if sys.platform == "darwin":
-            assert ChangeKind.SONAME_CHANGED in kinds, "Expected platform install-name drift to be detected"
+            assert ChangeKind.SONAME_CHANGED in kinds, (
+                "Expected platform install-name drift to be detected"
+            )
 
     def test_compatible_release_confidence(self, tmp_path):
         """Compatible release with full data → high confidence."""
@@ -380,12 +399,14 @@ class TestRealWorldCompatibleRelease:
         _require_tool("castxml")
 
         v1_so, v1_hdr = _build_lib(V1_SOURCE, V1_HEADER, "compress_v1", tmp_path)
-        v2_so, v2_hdr = _build_lib(V2_COMPAT_SOURCE, V2_COMPAT_HEADER,
-                                    "compress_v2", tmp_path)
+        v2_so, v2_hdr = _build_lib(
+            V2_COMPAT_SOURCE, V2_COMPAT_HEADER, "compress_v2", tmp_path
+        )
 
         r = _scan(v1_so, v1_hdr, v2_so, v2_hdr, tmp_path)
         # With headers + ELF + DWARF, should have good confidence
         from abicheck.checker_policy import Confidence
+
         assert r.confidence in (Confidence.HIGH, Confidence.MEDIUM)
 
 
@@ -398,8 +419,9 @@ class TestRealWorldBreakingRelease:
         _require_tool("castxml")
 
         v1_so, v1_hdr = _build_lib(V1_SOURCE, V1_HEADER, "compress_v1", tmp_path)
-        v2_so, v2_hdr = _build_lib(V2_BREAKING_SOURCE, V2_BREAKING_HEADER,
-                                    "compress_v2", tmp_path)
+        v2_so, v2_hdr = _build_lib(
+            V2_BREAKING_SOURCE, V2_BREAKING_HEADER, "compress_v2", tmp_path
+        )
 
         r = _scan(v1_so, v1_hdr, v2_so, v2_hdr, tmp_path)
 
@@ -418,15 +440,14 @@ class TestRealWorldBreakingRelease:
         _require_tool("castxml")
 
         v1_so, v1_hdr = _build_lib(V1_SOURCE, V1_HEADER, "compress_v1", tmp_path)
-        v2_so, v2_hdr = _build_lib(V2_BREAKING_SOURCE, V2_BREAKING_HEADER,
-                                    "compress_v2", tmp_path)
+        v2_so, v2_hdr = _build_lib(
+            V2_BREAKING_SOURCE, V2_BREAKING_HEADER, "compress_v2", tmp_path
+        )
 
         r = _scan(v1_so, v1_hdr, v2_so, v2_hdr, tmp_path)
         # Should detect at least 2 different kinds of changes
         kinds = {c.kind for c in r.changes}
-        assert len(kinds) >= 2, (
-            f"Expected multiple change types; got {kinds}"
-        )
+        assert len(kinds) >= 2, f"Expected multiple change types; got {kinds}"
 
 
 @pytest.mark.integration
@@ -464,8 +485,9 @@ class TestRealWorldAbidiffParity:
         _require_tool("abidiff")
 
         v1_so, v1_hdr = _build_lib(V1_SOURCE, V1_HEADER, "compress_v1", tmp_path)
-        v2_so, v2_hdr = _build_lib(V2_COMPAT_SOURCE, V2_COMPAT_HEADER,
-                                    "compress_v2", tmp_path)
+        v2_so, v2_hdr = _build_lib(
+            V2_COMPAT_SOURCE, V2_COMPAT_HEADER, "compress_v2", tmp_path
+        )
 
         # abicheck result
         r = _scan(v1_so, v1_hdr, v2_so, v2_hdr, tmp_path)
@@ -473,14 +495,15 @@ class TestRealWorldAbidiffParity:
         # abidiff result
         ab_result = subprocess.run(
             ["abidiff", "--no-show-locs", str(v1_so), str(v2_so)],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         code = ab_result.returncode
         # Check error bit first — abidiff sets bit 0 on tool errors
         if code & 1:
             pytest.fail(
-                f"abidiff returned error (code {code}): "
-                f"{ab_result.stderr[:300]}"
+                f"abidiff returned error (code {code}): {ab_result.stderr[:300]}"
             )
         if code == 0:
             ab_verdict = "NO_CHANGE"
@@ -495,8 +518,11 @@ class TestRealWorldAbidiffParity:
         assert r.verdict != Verdict.BREAKING
         assert ab_verdict != "BREAKING"
         # Both tools should classify this in the "safe" category
-        ac_safe = r.verdict in (Verdict.NO_CHANGE, Verdict.COMPATIBLE,
-                                 Verdict.COMPATIBLE_WITH_RISK)
+        ac_safe = r.verdict in (
+            Verdict.NO_CHANGE,
+            Verdict.COMPATIBLE,
+            Verdict.COMPATIBLE_WITH_RISK,
+        )
         ab_safe = ab_verdict in ("NO_CHANGE", "COMPATIBLE")
         assert ac_safe and ab_safe, (
             f"Parity: abicheck={r.verdict.value}, abidiff={ab_verdict}"

@@ -154,7 +154,9 @@ class TestCollectModeParity:
                 depth=None,
                 resolved_collect_mode=mode,
             )
-            errors = [e for e in request.validation_errors() if "resolved_collect_mode" in e]
+            errors = [
+                e for e in request.validation_errors() if "resolved_collect_mode" in e
+            ]
             assert errors == [], (mode, errors)
 
     def test_source_only_binary_depth_is_rejected(self, tmp_path: Path) -> None:
@@ -170,7 +172,9 @@ class TestCollectModeParity:
         """
         spec = InputSpec.of(path=None, sources=tmp_path)
         errors = DumpRequest(input=spec, depth="binary").validation_errors()
-        assert any("--depth binary requires a native artifact" in e for e in errors), errors
+        assert any("--depth binary requires a native artifact" in e for e in errors), (
+            errors
+        )
 
     def test_source_only_binary_depth_is_rejected_case_insensitively(
         self, tmp_path: Path

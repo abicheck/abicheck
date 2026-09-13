@@ -18,6 +18,7 @@ Each adapter ingests one build-system surface and emits the shared, neutral
 ``BuildEvidence`` model. Adapters are post-build and non-executing by default
 (ADR-028 D6): they read existing build outputs and pre-captured query output.
 """
+
 from __future__ import annotations
 
 from .base import (

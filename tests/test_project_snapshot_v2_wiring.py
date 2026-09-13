@@ -246,7 +246,6 @@ class TestClassifyCompareOperand:
         assert classify_compare_operand(libdir) == "directory"
 
 
-
 class TestWriteLegacySnapshotPackageRefusesNonemptyRoot:
     """`write_project_manifest`'s own docstring names its ref-then-manifest
     publish order as safe for a *first* publication only, not for

@@ -1084,9 +1084,7 @@ class TestIncludeDedupCoversAttachedFormsAndResolveFailure:
     `drop_include_tokens_duplicating_paths`, and the defensive
     `Path.resolve()` `OSError` fallback both dedup helpers share."""
 
-    def test_already_covered_attached_form_is_recognized(
-        self, tmp_path: Path
-    ) -> None:
+    def test_already_covered_attached_form_is_recognized(self, tmp_path: Path) -> None:
         # `already_covered` (here `-I<dir>`, no space) walks through the
         # identical `_include_class_path_pairs()` parser as `toks` -- the
         # attached-form branch is only exercised from *this* side, since

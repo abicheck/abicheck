@@ -206,7 +206,9 @@ class TestCheckNumPyMetadataContract:
         # BREAKING ABI-major finding since the major itself is covered.
         surf = NumPyCapiSurface(consumes_array_api=True, capi_target_version="2.1")
         changes = check_numpy_metadata_contract(surf, ">=1.23,!=1.*")
-        assert _kinds(changes) == {ChangeKind.NUMPY_METADATA_UNDERSTATES_REQUIRED_VERSION}
+        assert _kinds(changes) == {
+            ChangeKind.NUMPY_METADATA_UNDERSTATES_REQUIRED_VERSION
+        }
 
     def test_chained_wildcard_major_exclusions_bump_repeatedly(self) -> None:
         # numpy>=1.23,!=1.*,!=2.* excludes two entire majors in a row --

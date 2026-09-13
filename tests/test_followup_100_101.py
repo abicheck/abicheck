@@ -6,6 +6,7 @@ Covers:
 - policy-aware compute_verdict: sdk_vendor, plugin_abi
 - CLI/report filtering honoring --policy
 """
+
 from __future__ import annotations
 
 import json
@@ -31,6 +32,7 @@ from abicheck.dwarf_advanced import (
 from abicheck.model import AbiSnapshot
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _change(kind: ChangeKind) -> Any:
     c = MagicMock()
@@ -61,6 +63,7 @@ def _make_section(symbols: list[MagicMock]) -> MagicMock:
 
 
 # ── _reg_name helpers ─────────────────────────────────────────────────────────
+
 
 class TestRegNameHelpers:
     def test_x86_64_rbp(self) -> None:
@@ -104,19 +107,27 @@ class TestBuildAddrToSym:
         elf = MagicMock()
         dyn = _make_section([_make_symbol("exported", 0x1000, "STB_GLOBAL")])
         sym = _make_section([_make_symbol("local_shadow", 0x1000, "STB_GLOBAL")])
-        elf.get_section_by_name.side_effect = lambda name: {".dynsym": dyn, ".symtab": sym}.get(name)
+        elf.get_section_by_name.side_effect = lambda name: {
+            ".dynsym": dyn,
+            ".symtab": sym,
+        }.get(name)
 
         out = _build_addr_to_sym(elf)
         assert out[0x1000] == "exported"
 
     def test_ignores_local_and_zero(self) -> None:
         elf = MagicMock()
-        dyn = _make_section([
-            _make_symbol("zero", 0, "STB_GLOBAL"),
-            _make_symbol("local", 0x2000, "STB_LOCAL"),
-            _make_symbol("weak_ok", 0x3000, "STB_WEAK"),
-        ])
-        elf.get_section_by_name.side_effect = lambda name: {".dynsym": dyn, ".symtab": None}.get(name)
+        dyn = _make_section(
+            [
+                _make_symbol("zero", 0, "STB_GLOBAL"),
+                _make_symbol("local", 0x2000, "STB_LOCAL"),
+                _make_symbol("weak_ok", 0x3000, "STB_WEAK"),
+            ]
+        )
+        elf.get_section_by_name.side_effect = lambda name: {
+            ".dynsym": dyn,
+            ".symtab": None,
+        }.get(name)
 
         out = _build_addr_to_sym(elf)
         assert 0x2000 not in out
@@ -147,14 +158,14 @@ class TestGetCfiSource:
 
 # ── _extract_cfa_reg_from_fde ─────────────────────────────────────────────────
 
-class TestExtractCfaRegFromFde:
 
+class TestExtractCfaRegFromFde:
     def test_tie_break_by_highest_pc(self) -> None:
         """2-row table: entry rbp, body rsp -> tie => higher PC row wins (rsp)."""
         cfa_entry = MagicMock()
-        cfa_entry.reg = 6   # rbp — entry-state (lower PC)
+        cfa_entry.reg = 6  # rbp — entry-state (lower PC)
         cfa_post = MagicMock()
-        cfa_post.reg = 7    # rsp — post-prologue (higher PC)
+        cfa_post.reg = 7  # rsp — post-prologue (higher PC)
 
         rows = [
             {"pc": 0x1000, "cfa": cfa_entry},
@@ -165,11 +176,11 @@ class TestExtractCfaRegFromFde:
     def test_modal_register_avoids_epilogue_bias(self) -> None:
         """3-row table: entry/body rbp, epilogue rsp -> dominant should be rbp."""
         cfa_entry = MagicMock()
-        cfa_entry.reg = 6   # rbp
+        cfa_entry.reg = 6  # rbp
         cfa_body = MagicMock()
-        cfa_body.reg = 6    # rbp
+        cfa_body.reg = 6  # rbp
         cfa_epi = MagicMock()
-        cfa_epi.reg = 7     # rsp
+        cfa_epi.reg = 7  # rsp
 
         rows = [
             {"pc": 0x1000, "cfa": cfa_entry},
@@ -181,7 +192,10 @@ class TestExtractCfaRegFromFde:
     def test_single_row_used(self) -> None:
         cfa = MagicMock()
         cfa.reg = 6
-        assert _extract_cfa_reg_from_fde(_make_fde([{"pc": 0x1000, "cfa": cfa}]), "x64") == "rbp"
+        assert (
+            _extract_cfa_reg_from_fde(_make_fde([{"pc": 0x1000, "cfa": cfa}]), "x64")
+            == "rbp"
+        )
 
     def test_empty_table_returns_none(self) -> None:
         assert _extract_cfa_reg_from_fde(_make_fde([]), "x64") is None
@@ -191,7 +205,10 @@ class TestExtractCfaRegFromFde:
 
     def test_cfa_no_reg_attr_returns_none(self) -> None:
         cfa = MagicMock(spec=[])
-        assert _extract_cfa_reg_from_fde(_make_fde([{"pc": 0x1000, "cfa": cfa}]), "x64") is None
+        assert (
+            _extract_cfa_reg_from_fde(_make_fde([{"pc": 0x1000, "cfa": cfa}]), "x64")
+            is None
+        )
 
     def test_decode_exception_returns_none(self) -> None:
         fde = MagicMock()
@@ -201,6 +218,7 @@ class TestExtractCfaRegFromFde:
 
 # ── compute_verdict — sdk_vendor ──────────────────────────────────────────────
 
+
 class TestSdkVendorVerdict:
     """sdk_vendor downgrades source-level API_BREAK kinds to COMPATIBLE."""
 
@@ -208,22 +226,48 @@ class TestSdkVendorVerdict:
         assert SDK_VENDOR_DOWNGRADED_KINDS == SDK_VENDOR_COMPAT_KINDS
 
     def test_enum_member_renamed_is_compatible(self) -> None:
-        assert compute_verdict([_change(ChangeKind.ENUM_MEMBER_RENAMED)], policy="sdk_vendor") == Verdict.COMPATIBLE
+        assert (
+            compute_verdict(
+                [_change(ChangeKind.ENUM_MEMBER_RENAMED)], policy="sdk_vendor"
+            )
+            == Verdict.COMPATIBLE
+        )
 
     def test_field_renamed_is_compatible(self) -> None:
-        assert compute_verdict([_change(ChangeKind.FIELD_RENAMED)], policy="sdk_vendor") == Verdict.COMPATIBLE
+        assert (
+            compute_verdict([_change(ChangeKind.FIELD_RENAMED)], policy="sdk_vendor")
+            == Verdict.COMPATIBLE
+        )
 
     def test_source_level_kind_changed_is_compatible(self) -> None:
-        assert compute_verdict([_change(ChangeKind.SOURCE_LEVEL_KIND_CHANGED)], policy="sdk_vendor") == Verdict.COMPATIBLE
+        assert (
+            compute_verdict(
+                [_change(ChangeKind.SOURCE_LEVEL_KIND_CHANGED)], policy="sdk_vendor"
+            )
+            == Verdict.COMPATIBLE
+        )
 
     def test_default_value_changed_strict_is_compatible(self) -> None:
-        assert compute_verdict([_change(ChangeKind.PARAM_DEFAULT_VALUE_CHANGED)], policy="strict_abi") == Verdict.COMPATIBLE
+        assert (
+            compute_verdict(
+                [_change(ChangeKind.PARAM_DEFAULT_VALUE_CHANGED)], policy="strict_abi"
+            )
+            == Verdict.COMPATIBLE
+        )
 
     def test_func_removed_still_breaking(self) -> None:
-        assert compute_verdict([_change(ChangeKind.FUNC_REMOVED)], policy="sdk_vendor") == Verdict.BREAKING
+        assert (
+            compute_verdict([_change(ChangeKind.FUNC_REMOVED)], policy="sdk_vendor")
+            == Verdict.BREAKING
+        )
 
     def test_strict_abi_enum_rename_is_api_break(self) -> None:
-        assert compute_verdict([_change(ChangeKind.ENUM_MEMBER_RENAMED)], policy="strict_abi") == Verdict.API_BREAK
+        assert (
+            compute_verdict(
+                [_change(ChangeKind.ENUM_MEMBER_RENAMED)], policy="strict_abi"
+            )
+            == Verdict.API_BREAK
+        )
 
     def test_all_sdk_compat_kinds_produce_compatible(self) -> None:
         for kind in SDK_VENDOR_COMPAT_KINDS:
@@ -235,32 +279,55 @@ class TestSdkVendorVerdict:
 
 # ── compute_verdict — plugin_abi ──────────────────────────────────────────────
 
+
 class TestPluginAbiVerdict:
     """plugin_abi downgrades calling-convention kinds to COMPATIBLE."""
 
     def test_calling_convention_changed_is_compatible(self) -> None:
-        assert compute_verdict([_change(ChangeKind.CALLING_CONVENTION_CHANGED)], policy="plugin_abi") == Verdict.COMPATIBLE
+        assert (
+            compute_verdict(
+                [_change(ChangeKind.CALLING_CONVENTION_CHANGED)], policy="plugin_abi"
+            )
+            == Verdict.COMPATIBLE
+        )
 
     def test_value_abi_trait_changed_is_compatible(self) -> None:
-        assert compute_verdict([_change(ChangeKind.VALUE_ABI_TRAIT_CHANGED)], policy="plugin_abi") == Verdict.COMPATIBLE
+        assert (
+            compute_verdict(
+                [_change(ChangeKind.VALUE_ABI_TRAIT_CHANGED)], policy="plugin_abi"
+            )
+            == Verdict.COMPATIBLE
+        )
 
     def test_calling_convention_strict_is_breaking(self) -> None:
-        assert compute_verdict([_change(ChangeKind.CALLING_CONVENTION_CHANGED)], policy="strict_abi") == Verdict.BREAKING
+        assert (
+            compute_verdict(
+                [_change(ChangeKind.CALLING_CONVENTION_CHANGED)], policy="strict_abi"
+            )
+            == Verdict.BREAKING
+        )
 
     def test_func_removed_still_breaking_in_plugin(self) -> None:
-        assert compute_verdict([_change(ChangeKind.FUNC_REMOVED)], policy="plugin_abi") == Verdict.BREAKING
+        assert (
+            compute_verdict([_change(ChangeKind.FUNC_REMOVED)], policy="plugin_abi")
+            == Verdict.BREAKING
+        )
 
     def test_symbol_version_required_added_is_breaking_in_plugin_policy(self) -> None:
         """plugin_abi treats deployment floor raises as BREAKING (host/plugin load risk)."""
         assert (
-            compute_verdict([_change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED)], policy="plugin_abi")
+            compute_verdict(
+                [_change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED)], policy="plugin_abi"
+            )
             == Verdict.BREAKING
         )
 
     def test_symbol_version_required_added_is_risk_in_strict_policy(self) -> None:
         """strict_abi keeps this as COMPATIBLE_WITH_RISK."""
         assert (
-            compute_verdict([_change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED)], policy="strict_abi")
+            compute_verdict(
+                [_change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED)], policy="strict_abi"
+            )
             == Verdict.COMPATIBLE_WITH_RISK
         )
 
@@ -273,6 +340,7 @@ class TestPluginAbiVerdict:
 
 
 # ── CLI/report-filter policy integration ─────────────────────────────────────
+
 
 class TestCliPolicyFiltering:
     def _mk_result(self, policy: str = "strict_abi", *kinds: ChangeKind) -> DiffResult:
@@ -331,8 +399,8 @@ class TestCliPolicyFiltering:
 
 # ── CLI --policy end-to-end ───────────────────────────────────────────────────
 
-class TestCliPolicy:
 
+class TestCliPolicy:
     def _write_snapshots(self, tmp_path: Any) -> tuple[Any, Any]:
         from abicheck.serialization import snapshot_to_dict
 
@@ -353,10 +421,18 @@ class TestCliPolicy:
 
         def _fake_compare(*_args: Any, **kwargs: Any) -> DiffResult:
             assert kwargs["policy"] == "plugin_abi"
-            return DiffResult(old_version="1.0", new_version="2.0", library="lib.so", changes=[], verdict=Verdict.NO_CHANGE)
+            return DiffResult(
+                old_version="1.0",
+                new_version="2.0",
+                library="lib.so",
+                changes=[],
+                verdict=Verdict.NO_CHANGE,
+            )
 
         with patch("abicheck.service.compare_snapshots", side_effect=_fake_compare):
-            result = CliRunner().invoke(main, ["compare", str(old_p), str(new_p), "--policy", "plugin_abi"])
+            result = CliRunner().invoke(
+                main, ["compare", str(old_p), str(new_p), "--policy", "plugin_abi"]
+            )
 
         assert result.exit_code == 0, result.output
 
@@ -365,8 +441,11 @@ class TestCliPolicy:
 
         from abicheck.cli import main
         from abicheck.frontends.cli.runtime import _EXIT_USAGE_ERROR
+
         old_p, new_p = self._write_snapshots(tmp_path)
-        result = CliRunner().invoke(main, ["compare", str(old_p), str(new_p), "--policy", "SDK_VENDOR"])
+        result = CliRunner().invoke(
+            main, ["compare", str(old_p), str(new_p), "--policy", "SDK_VENDOR"]
+        )
         # Invalid option value → Click usage error, remapped to the dedicated
         # usage-error code so it is not mistaken for a "2 = source break" verdict.
         assert result.exit_code == _EXIT_USAGE_ERROR
@@ -382,7 +461,13 @@ class TestCliPolicy:
 
         def _fake_compare(*_args: Any, **kwargs: Any) -> DiffResult:
             assert kwargs["policy_file"] is not None
-            return DiffResult(old_version="1.0", new_version="2.0", library="lib.so", changes=[], verdict=Verdict.NO_CHANGE)
+            return DiffResult(
+                old_version="1.0",
+                new_version="2.0",
+                library="lib.so",
+                changes=[],
+                verdict=Verdict.NO_CHANGE,
+            )
 
         with patch("abicheck.service.compare_snapshots", side_effect=_fake_compare):
             result = CliRunner().invoke(
@@ -408,23 +493,37 @@ class TestCliPolicy:
 
         old_p, new_p = self._write_snapshots(tmp_path)
         policy_p = tmp_path / "strict.yaml"
-        policy_p.write_text("base_policy: strict_abi\noverrides: {}\n", encoding="utf-8")
+        policy_p.write_text(
+            "base_policy: strict_abi\noverrides: {}\n", encoding="utf-8"
+        )
 
         captured: dict = {}
 
         def _fake_compare(*_args: Any, **kwargs: Any) -> DiffResult:
             captured["policy"] = kwargs.get("policy")
             captured["policy_file"] = kwargs.get("policy_file")
-            return DiffResult(old_version="1.0", new_version="2.0", library="lib.so", changes=[], verdict=Verdict.NO_CHANGE)
+            return DiffResult(
+                old_version="1.0",
+                new_version="2.0",
+                library="lib.so",
+                changes=[],
+                verdict=Verdict.NO_CHANGE,
+            )
 
         # A document last: the document is loaded, the profile slot falls back
         # to the default rather than keeping the earlier profile name.
         with patch("abicheck.service.compare_snapshots", side_effect=_fake_compare):
             result = CliRunner().invoke(
                 main,
-                ["compare", str(old_p), str(new_p),
-                 "--policy", "sdk_vendor",
-                 "--policy", str(policy_p)],
+                [
+                    "compare",
+                    str(old_p),
+                    str(new_p),
+                    "--policy",
+                    "sdk_vendor",
+                    "--policy",
+                    str(policy_p),
+                ],
             )
         assert result.exit_code == 0, result.output
         assert captured["policy_file"] is not None
@@ -434,9 +533,15 @@ class TestCliPolicy:
         with patch("abicheck.service.compare_snapshots", side_effect=_fake_compare):
             result = CliRunner().invoke(
                 main,
-                ["compare", str(old_p), str(new_p),
-                 "--policy", str(policy_p),
-                 "--policy", "sdk_vendor"],
+                [
+                    "compare",
+                    str(old_p),
+                    str(new_p),
+                    "--policy",
+                    str(policy_p),
+                    "--policy",
+                    "sdk_vendor",
+                ],
             )
         assert result.exit_code == 0, result.output
         assert captured["policy_file"] is None
@@ -455,9 +560,14 @@ class TestCliPolicy:
         # routes by value. The built-in names are still a closed set, and the
         # help text is where a user reads them -- so assert both, since a
         # metavar alone would let the name list silently drift out of the help.
-        assert {"sdk_vendor", "plugin_abi", "strict_abi"} <= set(BUILTIN_POLICY_PROFILES)
-        policy = next(p for p in main.commands["compare"].params
-                      if getattr(p, "name", "") == "policy")
+        assert {"sdk_vendor", "plugin_abi", "strict_abi"} <= set(
+            BUILTIN_POLICY_PROFILES
+        )
+        policy = next(
+            p
+            for p in main.commands["compare"].params
+            if getattr(p, "name", "") == "policy"
+        )
         norm = result.output.replace("│", "").replace("\n", "").replace(" ", "")
         assert "--policy" in norm
         assert policy.metavar == "NAME|PATH"
@@ -504,6 +614,7 @@ class TestCompatPolicyExposure:
         from click.testing import CliRunner
 
         from abicheck.cli import main
+
         result = CliRunner().invoke(main, ["compat", "--help"])
         assert result.exit_code == 0, result.output
         assert "--policy" not in result.output

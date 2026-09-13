@@ -34,6 +34,7 @@ from abicheck.reporter import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_result(
     changes: list[Change] | None = None,
     redundant_changes: list[Change] | None = None,
@@ -56,6 +57,7 @@ def _make_result(
 # _filter_redundant tests
 # ---------------------------------------------------------------------------
 
+
 class TestFilterRedundant:
     def test_no_root_types_returns_all(self):
         """When no root type changes exist, all changes are kept."""
@@ -70,9 +72,14 @@ class TestFilterRedundant:
     def test_type_change_causes_func_params_redundancy(self):
         """FUNC_PARAMS_CHANGED referencing a root type is redundant."""
         changes = [
-            Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "size changed from 64 to 72 bytes"),
             Change(
-                ChangeKind.FUNC_PARAMS_CHANGED, "config_init",
+                ChangeKind.TYPE_SIZE_CHANGED,
+                "Config",
+                "size changed from 64 to 72 bytes",
+            ),
+            Change(
+                ChangeKind.FUNC_PARAMS_CHANGED,
+                "config_init",
                 "parameter type changed in config_init(Config*)",
                 old_value="Config (64 bytes)",
                 new_value="Config (72 bytes)",
@@ -90,12 +97,14 @@ class TestFilterRedundant:
         changes = [
             Change(ChangeKind.TYPE_SIZE_CHANGED, "Point", "size changed"),
             Change(
-                ChangeKind.FUNC_PARAMS_CHANGED, "draw",
+                ChangeKind.FUNC_PARAMS_CHANGED,
+                "draw",
                 "parameter type changed: Point",
                 old_value="Point (8 bytes)",
             ),
             Change(
-                ChangeKind.FUNC_RETURN_CHANGED, "get_point",
+                ChangeKind.FUNC_RETURN_CHANGED,
+                "get_point",
                 "return type changed: Point",
                 new_value="Point (16 bytes)",
             ),
@@ -110,7 +119,9 @@ class TestFilterRedundant:
         """FUNC_REMOVED is never redundant even if type changed."""
         changes = [
             Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "size changed"),
-            Change(ChangeKind.FUNC_REMOVED, "config_init", "removed", old_value="Config*"),
+            Change(
+                ChangeKind.FUNC_REMOVED, "config_init", "removed", old_value="Config*"
+            ),
         ]
         kept, redundant = _filter_redundant(changes)
         assert len(kept) == 2
@@ -121,7 +132,8 @@ class TestFilterRedundant:
         changes = [
             Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "size changed"),
             Change(
-                ChangeKind.FUNC_PARAMS_CHANGED, "process",
+                ChangeKind.FUNC_PARAMS_CHANGED,
+                "process",
                 "parameter count changed",
                 old_value="int",
                 new_value="int, int",
@@ -136,7 +148,8 @@ class TestFilterRedundant:
         changes = [
             Change(ChangeKind.TYPE_SIZE_CHANGED, "Point", "size changed"),
             Change(
-                ChangeKind.TYPE_FIELD_TYPE_CHANGED, "Container::pos",
+                ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+                "Container::pos",
                 "field type changed: Point",
                 old_value="Point (8 bytes)",
                 new_value="Point (16 bytes)",
@@ -162,7 +175,8 @@ class TestFilterRedundant:
         changes = [
             Change(ChangeKind.ENUM_MEMBER_REMOVED, "Status", "member removed"),
             Change(
-                ChangeKind.VAR_TYPE_CHANGED, "current_status",
+                ChangeKind.VAR_TYPE_CHANGED,
+                "current_status",
                 "variable type changed: Status",
                 old_value="Status",
                 new_value="Status",
@@ -177,7 +191,8 @@ class TestFilterRedundant:
         changes = [
             Change(ChangeKind.TYPE_FIELD_REMOVED, "Container::flags", "field removed"),
             Change(
-                ChangeKind.FUNC_PARAMS_CHANGED, "process",
+                ChangeKind.FUNC_PARAMS_CHANGED,
+                "process",
                 "param type changed: Container",
                 old_value="Container (64)",
             ),
@@ -191,22 +206,45 @@ class TestFilterRedundant:
 class TestMatchRootType:
     def test_matches_in_old_value(self):
         c = Change(ChangeKind.FUNC_PARAMS_CHANGED, "foo", "desc", old_value="Config*")
-        assert _match_root_type(c, {"Config": Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "")}) == "Config"
+        assert (
+            _match_root_type(
+                c, {"Config": Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "")}
+            )
+            == "Config"
+        )
 
     def test_matches_in_description(self):
         c = Change(ChangeKind.FUNC_RETURN_CHANGED, "bar", "return type changed: Config")
-        assert _match_root_type(c, {"Config": Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "")}) == "Config"
+        assert (
+            _match_root_type(
+                c, {"Config": Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "")}
+            )
+            == "Config"
+        )
 
     def test_no_match_returns_none(self):
-        c = Change(ChangeKind.FUNC_PARAMS_CHANGED, "foo", "param count changed", old_value="int")
-        assert _match_root_type(c, {"Config": Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "")}) is None
+        c = Change(
+            ChangeKind.FUNC_PARAMS_CHANGED,
+            "foo",
+            "param count changed",
+            old_value="int",
+        )
+        assert (
+            _match_root_type(
+                c, {"Config": Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "")}
+            )
+            is None
+        )
 
     def test_with_precompiled_patterns(self):
         """Pre-compiled patterns dict produces same results as without."""
         import re
+
         root_types = {"Config": Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "")}
         compiled = {
-            name: re.compile(r'(?<![A-Za-z0-9_])' + re.escape(name) + r'(?![A-Za-z0-9_])')
+            name: re.compile(
+                r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])"
+            )
             for name in root_types
         }
         c = Change(ChangeKind.FUNC_PARAMS_CHANGED, "foo", "desc", old_value="Config*")
@@ -215,18 +253,29 @@ class TestMatchRootType:
     def test_without_compiled_patterns_fallback(self):
         """When compiled_patterns is None, function still works (fallback)."""
         c = Change(ChangeKind.FUNC_PARAMS_CHANGED, "foo", "desc", new_value="Config*")
-        assert _match_root_type(c, {"Config": Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "")}, None) == "Config"
+        assert (
+            _match_root_type(
+                c, {"Config": Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "")}, None
+            )
+            == "Config"
+        )
 
     def test_compiled_patterns_empty_dict(self):
         """Empty compiled_patterns dict triggers fallback compilation per type."""
         c = Change(ChangeKind.FUNC_RETURN_CHANGED, "bar", "return type changed: Config")
         # Empty dict — type_name not in compiled_patterns, should compile on the fly
-        assert _match_root_type(c, {"Config": Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "")}, {}) == "Config"
+        assert (
+            _match_root_type(
+                c, {"Config": Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "")}, {}
+            )
+            == "Config"
+        )
 
 
 # ---------------------------------------------------------------------------
 # ShowOnlyFilter tests
 # ---------------------------------------------------------------------------
+
 
 class TestShowOnlyFilter:
     def test_parse_severity_tokens(self):
@@ -310,8 +359,12 @@ class TestApplyShowOnly:
         c = Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
         pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
         result = DiffResult(
-            old_version="1.0", new_version="2.0", library="libtest.so",
-            changes=[c], verdict=Verdict.COMPATIBLE, policy_file=pf,
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so",
+            changes=[c],
+            verdict=Verdict.COMPATIBLE,
+            policy_file=pf,
         )
 
         # Without threading kind_sets/policy_file, the override is invisible.
@@ -322,11 +375,20 @@ class TestApplyShowOnly:
         # renderer now does) makes --show-only agree with the effective
         # verdict the rest of the report uses.
         kind_sets = result._effective_kind_sets()
+        assert (
+            apply_show_only(
+                [c],
+                "breaking",
+                kind_sets=kind_sets,
+                policy_file=pf,
+            )
+            == []
+        )
         assert apply_show_only(
-            [c], "breaking", kind_sets=kind_sets, policy_file=pf,
-        ) == []
-        assert apply_show_only(
-            [c], "compatible", kind_sets=kind_sets, policy_file=pf,
+            [c],
+            "compatible",
+            kind_sets=kind_sets,
+            policy_file=pf,
         ) == [c]
 
     def test_per_finding_effective_verdict_still_respected(self):
@@ -361,7 +423,9 @@ class TestOperationForKind:
     def test_non_suffix_removal_kinds(self):
         from abicheck.reporter_markdown import operation_for_kind
 
-        assert operation_for_kind("experimental_removed_without_replacement") == "removed"
+        assert (
+            operation_for_kind("experimental_removed_without_replacement") == "removed"
+        )
         assert operation_for_kind("func_deleted_dwarf") == "removed"
         assert operation_for_kind("cpu_dispatch_isa_dropped") == "removed"
 
@@ -495,13 +559,16 @@ class TestOperationForKind:
         from abicheck.checker_policy import ADDITION_KINDS
         from abicheck.reporter_markdown import operation_for_kind
 
-        misses = [k.value for k in ADDITION_KINDS if operation_for_kind(k.value) != "added"]
+        misses = [
+            k.value for k in ADDITION_KINDS if operation_for_kind(k.value) != "added"
+        ]
         assert not misses, f"ADDITION_KINDS members not classified as 'added': {misses}"
 
 
 # ---------------------------------------------------------------------------
 # Stat mode tests
 # ---------------------------------------------------------------------------
+
 
 class TestStatMode:
     def test_stat_text_output(self):
@@ -558,12 +625,17 @@ class TestStatMode:
 # Leaf mode tests
 # ---------------------------------------------------------------------------
 
+
 class TestLeafMode:
     def test_leaf_markdown(self):
         result = _make_result(
             changes=[
-                Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "size changed from 64 to 72 bytes",
-                       affected_symbols=["config_init", "config_load"]),
+                Change(
+                    ChangeKind.TYPE_SIZE_CHANGED,
+                    "Config",
+                    "size changed from 64 to 72 bytes",
+                    affected_symbols=["config_init", "config_load"],
+                ),
                 Change(ChangeKind.FUNC_REMOVED, "old_api", "function removed: old_api"),
             ],
         )
@@ -577,8 +649,12 @@ class TestLeafMode:
     def test_leaf_json(self):
         result = _make_result(
             changes=[
-                Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "size changed",
-                       affected_symbols=["f1", "f2"]),
+                Change(
+                    ChangeKind.TYPE_SIZE_CHANGED,
+                    "Config",
+                    "size changed",
+                    affected_symbols=["f1", "f2"],
+                ),
                 Change(ChangeKind.FUNC_REMOVED, "old_api", "removed"),
             ],
         )
@@ -608,10 +684,15 @@ class TestLeafMode:
 # Show-impact tests
 # ---------------------------------------------------------------------------
 
+
 class TestShowImpact:
     def test_impact_in_markdown(self):
-        root = Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "size changed",
-                      affected_symbols=["f1", "f2", "f3"])
+        root = Change(
+            ChangeKind.TYPE_SIZE_CHANGED,
+            "Config",
+            "size changed",
+            affected_symbols=["f1", "f2", "f3"],
+        )
         root.caused_count = 3
         result = _make_result(changes=[root])
         text = to_markdown(result, show_impact=True)
@@ -620,8 +701,14 @@ class TestShowImpact:
 
     def test_impact_in_json(self):
         result = _make_result(
-            changes=[Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "size changed",
-                           affected_symbols=["f1"])],
+            changes=[
+                Change(
+                    ChangeKind.TYPE_SIZE_CHANGED,
+                    "Config",
+                    "size changed",
+                    affected_symbols=["f1"],
+                )
+            ],
         )
         text = to_json(result, show_impact=True)
         d = json.loads(text)
@@ -631,6 +718,7 @@ class TestShowImpact:
 # ---------------------------------------------------------------------------
 # Show-only in markdown/json
 # ---------------------------------------------------------------------------
+
 
 class TestShowOnlyInReporters:
     def test_show_only_in_markdown(self):
@@ -706,6 +794,7 @@ class TestShowOnlyInReporters:
 # Redundancy note in markdown
 # ---------------------------------------------------------------------------
 
+
 class TestRedundancyNote:
     def test_redundancy_note_shown(self):
         result = _make_result(
@@ -730,6 +819,7 @@ class TestRedundancyNote:
 # Change model new fields
 # ---------------------------------------------------------------------------
 
+
 class TestChangeModelFields:
     def test_caused_by_type_default_none(self):
         c = Change(ChangeKind.FUNC_REMOVED, "foo", "removed")
@@ -749,10 +839,13 @@ class TestChangeModelFields:
 # DiffResult new fields
 # ---------------------------------------------------------------------------
 
+
 class TestDiffResultFields:
     def test_redundant_changes_default_empty(self):
         result = DiffResult(
-            old_version="1", new_version="2", library="lib.so",
+            old_version="1",
+            new_version="2",
+            library="lib.so",
         )
         assert result.redundant_changes == []
         assert result.redundant_count == 0
@@ -771,6 +864,7 @@ class TestDiffResultFields:
 # Caused-count in markdown format
 # ---------------------------------------------------------------------------
 
+
 class TestCausedCountInMarkdown:
     def test_caused_count_shown(self):
         c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "size changed 64 -> 72")
@@ -784,6 +878,7 @@ class TestCausedCountInMarkdown:
 # ---------------------------------------------------------------------------
 # SARIF format support
 # ---------------------------------------------------------------------------
+
 
 class TestSarifRedundancy:
     def test_sarif_includes_redundant_count(self):
@@ -846,6 +941,7 @@ class TestSarifRedundancy:
 # HTML format support
 # ---------------------------------------------------------------------------
 
+
 class TestHtmlRedundancy:
     def test_html_redundancy_note(self):
         from abicheck.html_report import generate_html_report
@@ -883,8 +979,12 @@ class TestHtmlRedundancy:
     def test_html_show_impact(self):
         from abicheck.html_report import generate_html_report
 
-        c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "size changed",
-                    affected_symbols=["f1", "f2"])
+        c = Change(
+            ChangeKind.TYPE_SIZE_CHANGED,
+            "Config",
+            "size changed",
+            affected_symbols=["f1", "f2"],
+        )
         c.caused_count = 3
         result = _make_result(changes=[c])
         html = generate_html_report(result, lib_name="lib.so", show_impact=True)
@@ -895,6 +995,7 @@ class TestHtmlRedundancy:
 # ---------------------------------------------------------------------------
 # XML (ABICC compat) format support
 # ---------------------------------------------------------------------------
+
 
 class TestXmlRedundancy:
     def test_xml_redundant_count(self):
@@ -958,13 +1059,17 @@ class TestReservedFieldExactMatch:
     def test_exact_old_field_suppresses(self):
         changes = [
             Change(
-                ChangeKind.USED_RESERVED_FIELD, "S",
+                ChangeKind.USED_RESERVED_FIELD,
+                "S",
                 "Reserved field put into use: S::__reserved0 → active",
-                old_value="__reserved0", new_value="active",
+                old_value="__reserved0",
+                new_value="active",
             ),
             Change(
-                ChangeKind.STRUCT_FIELD_REMOVED, "S::__reserved0",
-                "Struct field removed: S::__reserved0", old_value="uint32_t",
+                ChangeKind.STRUCT_FIELD_REMOVED,
+                "S::__reserved0",
+                "Struct field removed: S::__reserved0",
+                old_value="uint32_t",
             ),
         ]
         result = _filter_reserved_field_renames(changes)
@@ -975,13 +1080,17 @@ class TestReservedFieldExactMatch:
         """'__reserved0_extra' must NOT be suppressed for '__reserved0'."""
         changes = [
             Change(
-                ChangeKind.USED_RESERVED_FIELD, "S",
+                ChangeKind.USED_RESERVED_FIELD,
+                "S",
                 "Reserved field put into use: S::__reserved0 → active",
-                old_value="__reserved0", new_value="active",
+                old_value="__reserved0",
+                new_value="active",
             ),
             Change(
-                ChangeKind.STRUCT_FIELD_REMOVED, "S::__reserved0_extra",
-                "Struct field removed: S::__reserved0_extra", old_value="uint32_t",
+                ChangeKind.STRUCT_FIELD_REMOVED,
+                "S::__reserved0_extra",
+                "Struct field removed: S::__reserved0_extra",
+                old_value="uint32_t",
             ),
         ]
         result = _filter_reserved_field_renames(changes)
@@ -991,13 +1100,17 @@ class TestReservedFieldExactMatch:
     def test_exact_new_field_suppresses_added(self):
         changes = [
             Change(
-                ChangeKind.USED_RESERVED_FIELD, "S",
+                ChangeKind.USED_RESERVED_FIELD,
+                "S",
                 "Reserved: S::__pad → active",
-                old_value="__pad", new_value="active",
+                old_value="__pad",
+                new_value="active",
             ),
             Change(
-                ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE, "S::active",
-                "Struct field added: S::active", new_value="uint32_t",
+                ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
+                "S::active",
+                "Struct field added: S::active",
+                new_value="uint32_t",
             ),
         ]
         result = _filter_reserved_field_renames(changes)
@@ -1008,13 +1121,17 @@ class TestReservedFieldExactMatch:
         """'active_flags' must NOT be suppressed when new_field is 'active'."""
         changes = [
             Change(
-                ChangeKind.USED_RESERVED_FIELD, "S",
+                ChangeKind.USED_RESERVED_FIELD,
+                "S",
                 "Reserved: S::__pad → active",
-                old_value="__pad", new_value="active",
+                old_value="__pad",
+                new_value="active",
             ),
             Change(
-                ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE, "S::active_flags",
-                "Struct field added: S::active_flags", new_value="uint32_t",
+                ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
+                "S::active_flags",
+                "Struct field added: S::active_flags",
+                new_value="uint32_t",
             ),
         ]
         result = _filter_reserved_field_renames(changes)
@@ -1025,13 +1142,17 @@ class TestReservedFieldExactMatch:
         """Regression: 'flag' must not match 'flags'."""
         changes = [
             Change(
-                ChangeKind.USED_RESERVED_FIELD, "S",
+                ChangeKind.USED_RESERVED_FIELD,
+                "S",
                 "Reserved: S::__pad → flag",
-                old_value="__pad", new_value="flag",
+                old_value="__pad",
+                new_value="flag",
             ),
             Change(
-                ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE, "S::flags",
-                "Struct field added: S::flags", new_value="uint32_t",
+                ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
+                "S::flags",
+                "Struct field added: S::flags",
+                new_value="uint32_t",
             ),
         ]
         result = _filter_reserved_field_renames(changes)

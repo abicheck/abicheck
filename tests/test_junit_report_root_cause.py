@@ -165,9 +165,7 @@ class TestJunitRootCauseMode:
             caused_by_type="ns::detail::Impl",
         )
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
-        xml = to_junit_xml_multi(
-            [(_make_result([c]), snap)], report_mode="root-cause"
-        )
+        xml = to_junit_xml_multi([(_make_result([c]), snap)], report_mode="root-cause")
         fail = _parse(xml).find(".//failure")
         assert fail is not None
         assert fail.get("rootCauseId") is not None

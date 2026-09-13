@@ -19,6 +19,7 @@ by intersecting the app's required symbols with the library diff.
 
 See docs/adr/005-application-compat-check.md for the full design.
 """
+
 from __future__ import annotations
 
 import logging
@@ -70,6 +71,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class AppRequirements:
@@ -179,6 +181,7 @@ def _detect_app_format(app_path: Path) -> str | None:
 # ELF: parse app requirements
 # ---------------------------------------------------------------------------
 
+
 def _collect_needed_libs(elf: object, reqs: AppRequirements) -> None:
     """Read DT_NEEDED entries from the ELF dynamic section."""
     from elftools.elf.dynamic import DynamicSection
@@ -191,7 +194,9 @@ def _collect_needed_libs(elf: object, reqs: AppRequirements) -> None:
 
 
 def _build_version_index(
-    elf: object, reqs: AppRequirements, library_soname: str,
+    elf: object,
+    reqs: AppRequirements,
+    library_soname: str,
 ) -> dict[int, str]:
     """Build version-index -> library SONAME map from .gnu.version_r.
 
@@ -290,7 +295,8 @@ def _collect_undefined_symbols(
 
 
 def _parse_elf_app_requirements(
-    app_path: Path, library_soname: str,
+    app_path: Path,
+    library_soname: str,
 ) -> AppRequirements:
     """Extract app requirements for a specific library from an ELF binary.
 
@@ -321,7 +327,9 @@ def _parse_elf_app_requirements(
                     break
 
             # 4. Read undefined symbols from .dynsym, filtered by target library
-            _collect_undefined_symbols(elf, reqs, library_soname, ver_idx_to_lib, versym_section)
+            _collect_undefined_symbols(
+                elf, reqs, library_soname, ver_idx_to_lib, versym_section
+            )
 
     except (ELFError, OSError, ValueError) as exc:
         log.warning("Failed to parse ELF app requirements from %s: %s", app_path, exc)
@@ -333,8 +341,10 @@ def _parse_elf_app_requirements(
 # PE: parse app requirements
 # ---------------------------------------------------------------------------
 
+
 def _parse_pe_app_requirements(
-    app_path: Path, library_name: str,
+    app_path: Path,
+    library_name: str,
 ) -> AppRequirements:
     """Extract app requirements for a specific DLL from a PE binary."""
     import pefile
@@ -353,7 +363,9 @@ def _parse_pe_app_requirements(
 
             if hasattr(pe, "DIRECTORY_ENTRY_IMPORT"):
                 for entry in pe.DIRECTORY_ENTRY_IMPORT:
-                    dll_name = entry.dll.decode("utf-8", errors="replace") if entry.dll else ""
+                    dll_name = (
+                        entry.dll.decode("utf-8", errors="replace") if entry.dll else ""
+                    )
                     reqs.needed_libs.append(dll_name)
 
                     # Only collect symbols for the target DLL
@@ -380,6 +392,7 @@ def _parse_pe_app_requirements(
 # Mach-O: parse app requirements
 # ---------------------------------------------------------------------------
 
+
 def _find_target_ordinal(reqs: AppRequirements, library_name: str) -> int | None:
     """Determine 1-based index of target library in LC_LOAD_DYLIB list.
 
@@ -391,15 +404,20 @@ def _find_target_ordinal(reqs: AppRequirements, library_name: str) -> int | None
     lib_lower = library_name.lower()
     for idx, lib in enumerate(reqs.needed_libs, start=1):
         # Match by exact path, basename, or install_name
-        if (lib.lower() == lib_lower
-                or os.path.basename(lib).lower() == lib_lower
-                or lib_lower in lib.lower()):
+        if (
+            lib.lower() == lib_lower
+            or os.path.basename(lib).lower() == lib_lower
+            or lib_lower in lib.lower()
+        ):
             return idx
     return None
 
 
 def _collect_macho_undefined_symbols(
-    macho: object, header: object, reqs: AppRequirements, target_ordinal: int | None,
+    macho: object,
+    header: object,
+    reqs: AppRequirements,
+    target_ordinal: int | None,
 ) -> None:
     """Read undefined symbols from a Mach-O header, filtered by target library ordinal."""
     from macholib.mach_o import N_EXT, N_TYPE, N_UNDF
@@ -435,7 +453,8 @@ def _collect_macho_undefined_symbols(
 
 
 def _parse_macho_app_requirements(
-    app_path: Path, library_name: str,
+    app_path: Path,
+    library_name: str,
 ) -> AppRequirements:
     """Extract app requirements for a specific dylib from a Mach-O binary."""
     from macholib.mach_o import LC_LOAD_DYLIB
@@ -470,7 +489,9 @@ def _parse_macho_app_requirements(
             log.debug("SymbolTable failed for %s: %s", app_path, exc)
 
     except (OSError, ValueError, struct.error) as exc:
-        log.warning("Failed to parse Mach-O app requirements from %s: %s", app_path, exc)
+        log.warning(
+            "Failed to parse Mach-O app requirements from %s: %s", app_path, exc
+        )
 
     return reqs
 
@@ -479,8 +500,10 @@ def _parse_macho_app_requirements(
 # Public API: parse_app_requirements
 # ---------------------------------------------------------------------------
 
+
 def parse_app_requirements(
-    app_path: ConsumerAppInput, library_name: str,
+    app_path: ConsumerAppInput,
+    library_name: str,
 ) -> AppRequirements:
     """Extract app's requirements for a specific library.
 
@@ -515,6 +538,7 @@ def parse_app_requirements(
 # Filtering: is a change relevant to the app?
 # ---------------------------------------------------------------------------
 
+
 def _is_relevant_to_app(change: Change, app: AppRequirements) -> bool:
     """Does this change affect a symbol the application uses?
 
@@ -530,6 +554,7 @@ def _is_relevant_to_app(change: Change, app: AppRequirements) -> bool:
     # change.symbol may be C++-mangled (e.g. "_Z3addii") while app uses
     # the plain C linker name (e.g. "add").
     from .demangle import demangle as _demangle_symbol
+
     plain = _demangle_symbol(change.symbol)
     if plain and plain != change.symbol and plain in app.undefined_symbols:
         return True
@@ -576,7 +601,8 @@ def _change_covers_symbol(change: Change, symbol: str) -> bool:
 
 
 def uncovered_missing_symbols(
-    missing: Iterable[str], relevant_changes: Iterable[Change],
+    missing: Iterable[str],
+    relevant_changes: Iterable[Change],
 ) -> list[str]:
     """*missing* entries not already represented by a *relevant_changes* Change.
 
@@ -591,10 +617,7 @@ def uncovered_missing_symbols(
     surfaced as a Change, such as a versioned-symbol default retarget).
     """
     changes = list(relevant_changes)
-    return [
-        m for m in missing
-        if not any(_change_covers_symbol(c, m) for c in changes)
-    ]
+    return [m for m in missing if not any(_change_covers_symbol(c, m) for c in changes)]
 
 
 # ---------------------------------------------------------------------------
@@ -636,6 +659,7 @@ def _lib_elf_meta(lib: Path | AbiSnapshot) -> ElfMetadata | None:
     if _detect_app_format(lib) != "elf":
         return None
     from .elf_metadata import parse_elf_metadata
+
     return parse_elf_metadata(lib)
 
 
@@ -645,6 +669,7 @@ def _lib_pe_meta(lib: Path | AbiSnapshot) -> PeMetadata | None:
     if _detect_app_format(lib) != "pe":
         return None
     from .pe_metadata import parse_pe_metadata
+
     return parse_pe_metadata(lib)
 
 
@@ -654,6 +679,7 @@ def _lib_macho_meta(lib: Path | AbiSnapshot) -> MachoMetadata | None:
     if _detect_app_format(lib) != "macho":
         return None
     from .macho_metadata import parse_macho_metadata
+
     return parse_macho_metadata(lib)
 
 
@@ -665,7 +691,11 @@ def _get_new_lib_exports(new_lib: Path | AbiSnapshot) -> set[str]:
         return {s.name for s in elf_meta.symbols} if elf_meta is not None else set()
     if fmt == "pe":
         pe_meta = _lib_pe_meta(new_lib)
-        return {e.name for e in pe_meta.exports if e.name} if pe_meta is not None else set()
+        return (
+            {e.name for e in pe_meta.exports if e.name}
+            if pe_meta is not None
+            else set()
+        )
     if fmt == "macho":
         macho_meta = _lib_macho_meta(new_lib)
         return (
@@ -719,8 +749,11 @@ def _get_lib_soname(lib: Path | AbiSnapshot) -> str:
 # Core: appcompat check
 # ---------------------------------------------------------------------------
 
+
 def _scope_app_symbols_to_library(
-    app_reqs: AppRequirements, old_lib: Path | AbiSnapshot, app_path: Path,
+    app_reqs: AppRequirements,
+    old_lib: Path | AbiSnapshot,
+    app_path: Path,
 ) -> None:
     """Scope app-required symbols to those actually exported by the target library.
 
@@ -796,7 +829,8 @@ def _compute_appcompat_verdict(
 
 
 def _missing_app_versions(
-    new_lib: Path | AbiSnapshot, app_reqs: AppRequirements,
+    new_lib: Path | AbiSnapshot,
+    app_reqs: AppRequirements,
 ) -> list[str]:
     """Return ELF version tags required by the app but absent from the new library."""
     elf_meta = _lib_elf_meta(new_lib)
@@ -811,7 +845,9 @@ def _missing_app_versions(
 
 
 def _check_pe_ordinal_imports(
-    old_lib: Path | AbiSnapshot, new_lib: Path | AbiSnapshot, app_reqs: AppRequirements,
+    old_lib: Path | AbiSnapshot,
+    new_lib: Path | AbiSnapshot,
+    app_reqs: AppRequirements,
 ) -> tuple[set[str], list[Change], set[str]]:
     """Resolve the app's ordinal-only PE imports against old/new export tables.
 
@@ -887,19 +923,26 @@ def _check_pe_ordinal_imports(
 
 
 def _partition_app_changes(
-    diff: DiffResult, app_reqs: AppRequirements,
+    diff: DiffResult,
+    app_reqs: AppRequirements,
 ) -> tuple[list[Change], list[Change]]:
     """Split diff changes into (relevant-to-app, irrelevant-to-app)."""
     breaking_for_app: list[Change] = []
     irrelevant_for_app: list[Change] = []
     for change in diff.changes:
-        target = breaking_for_app if _is_relevant_to_app(change, app_reqs) else irrelevant_for_app
+        target = (
+            breaking_for_app
+            if _is_relevant_to_app(change, app_reqs)
+            else irrelevant_for_app
+        )
         target.append(change)
     return breaking_for_app, irrelevant_for_app
 
 
 def _compute_symbol_coverage(
-    new_exports: set[str], required_count: int, missing_count: int,
+    new_exports: set[str],
+    required_count: int,
+    missing_count: int,
 ) -> float:
     """Percentage of required app symbols still available in the new library."""
     if not new_exports:
@@ -957,9 +1000,7 @@ def _promote_scoped_contract(
     promoted_onto_axis = any(not is_evaluated(c) for c in already_classified)
     stamp_scoped_changes(already_classified, policy=policy, policy_file=policy_file)
     if promoted_onto_axis and diff is not None:
-        recompute_verdict_after_promotion(
-            diff, policy=policy, policy_file=policy_file
-        )
+        recompute_verdict_after_promotion(diff, policy=policy, policy_file=policy_file)
 
 
 def _finalize_consumer_scope_diff(
@@ -1103,11 +1144,12 @@ def scope_diff_to_app(
     # against both DLLs' export directories so they aren't reported as
     # generically "missing" when the ordinal still (possibly differently)
     # resolves.
-    resolved_ordinals, ordinal_retargets, resolved_export_names = _check_pe_ordinal_imports(
-        old_lib, new_lib, app_reqs
+    resolved_ordinals, ordinal_retargets, resolved_export_names = (
+        _check_pe_ordinal_imports(old_lib, new_lib, app_reqs)
     )
     missing_symbols = sorted(
-        sym for sym in app_reqs.undefined_symbols
+        sym
+        for sym in app_reqs.undefined_symbols
         if sym not in new_exports and sym not in resolved_ordinals
     )
 
@@ -1141,7 +1183,9 @@ def scope_diff_to_app(
     # an objective fact about the export table, not a gate, so a suppressed
     # overlay finding should not make the reported coverage number lie.
     required_count = len(app_reqs.undefined_symbols)
-    coverage = _compute_symbol_coverage(new_exports, required_count, len(missing_symbols))
+    coverage = _compute_symbol_coverage(
+        new_exports, required_count, len(missing_symbols)
+    )
 
     # ADR-067 C-S1: the consumer overlay is the one recording call site that
     # runs *after* `compare()` closed the ledger, so it resolves the diff's
@@ -1224,7 +1268,10 @@ def scope_diff_to_app(
         # surface (D2), with the consumer overlay named as its own
         # application point.
         kept, overreach = record_and_maybe_suppress_overlay(
-            overlay_ledger, overlay_change, diff, suppression=suppression,
+            overlay_ledger,
+            overlay_change,
+            diff,
+            suppression=suppression,
         )
         if not kept:
             suppressed_missing.add(sym)
@@ -1242,8 +1289,12 @@ def scope_diff_to_app(
         missing_symbols = [s for s in missing_symbols if s not in suppressed_missing]
 
     verdict = _compute_appcompat_verdict(
-        missing_symbols, missing_versions, breaking_for_app,
-        required_count, policy, policy_file,
+        missing_symbols,
+        missing_versions,
+        breaking_for_app,
+        required_count,
+        policy,
+        policy_file,
     )
     _finalize_consumer_scope_diff(
         diff, overlay_ledger, breaking_for_app, policy=policy, policy_file=policy_file
@@ -1339,22 +1390,44 @@ def check_appcompat(
     # `_dump_elf`'s own wiring, so an explicit include root promotes its
     # declarations to PUBLIC_HEADER here too.
     old_snap = run_dump(
-        old_lib_path, old_fmt, _old_h, _old_inc, old_version, lang,
+        old_lib_path,
+        old_fmt,
+        _old_h,
+        _old_inc,
+        old_version,
+        lang,
         public_headers=list(_old_h),
         public_include_search_dirs=list(_old_inc),
     )
     new_snap = run_dump(
-        new_lib_path, new_fmt, _new_h, _new_inc, new_version, lang,
+        new_lib_path,
+        new_fmt,
+        _new_h,
+        _new_inc,
+        new_version,
+        lang,
         public_headers=list(_new_h),
         public_include_search_dirs=list(_new_inc),
     )
 
     # Route through the real workflows owner; ADR-037 D1.
-    diff = compare_snapshots(old_snap, new_snap, suppression=suppression, policy=policy, policy_file=policy_file, scope_to_public_surface=scope_to_public_surface)
+    diff = compare_snapshots(
+        old_snap,
+        new_snap,
+        suppression=suppression,
+        policy=policy,
+        policy_file=policy_file,
+        scope_to_public_surface=scope_to_public_surface,
+    )
 
     scoped = scope_diff_to_app(
-        diff, app_path, old_lib_path, new_lib_path,
-        policy=policy, policy_file=policy_file, suppression=suppression,
+        diff,
+        app_path,
+        old_lib_path,
+        new_lib_path,
+        policy=policy,
+        policy_file=policy_file,
+        suppression=suppression,
         # ADR-057: old_lib_path is a real binary, so the graph the dump above
         # already attached is only reachable through the snapshot itself.
         old_snapshot=old_snap,
@@ -1377,6 +1450,7 @@ def check_appcompat(
 # Weak mode: check-against (no old library needed)
 # ---------------------------------------------------------------------------
 
+
 def check_against(
     app_path: Path,
     new_lib_path: Path,
@@ -1390,17 +1464,22 @@ def check_against(
 
     new_exports = _get_new_lib_exports(new_lib_path)
     missing_symbols = sorted(
-        sym for sym in app_reqs.undefined_symbols
-        if sym not in new_exports
+        sym for sym in app_reqs.undefined_symbols if sym not in new_exports
     )
 
     # Check version availability for ELF
     missing_versions = _missing_app_versions(new_lib_path, app_reqs)
 
     required_count = len(app_reqs.undefined_symbols)
-    coverage = _compute_symbol_coverage(new_exports, required_count, len(missing_symbols))
+    coverage = _compute_symbol_coverage(
+        new_exports, required_count, len(missing_symbols)
+    )
 
-    verdict = Verdict.BREAKING if (missing_symbols or missing_versions) else Verdict.COMPATIBLE
+    verdict = (
+        Verdict.BREAKING
+        if (missing_symbols or missing_versions)
+        else Verdict.COMPATIBLE
+    )
 
     return AppCompatResult(
         app_path=str(app_path),
@@ -1421,6 +1500,7 @@ def check_against(
 # ---------------------------------------------------------------------------
 # Plugin host↔plugin load contract (the dlopen direction) — gap G5
 # ---------------------------------------------------------------------------
+
 
 def _resolvable_symbol_names(name: str, mangled: str | None) -> set[str]:
     """The names ``dlsym`` could actually resolve for one exported entity.
@@ -1556,7 +1636,12 @@ def scope_diff_to_required_symbols(
         missing = [s for s in missing if s not in suppressed_missing]
 
     verdict = _compute_appcompat_verdict(
-        missing, [], breaking_for_host, len(required), policy, policy_file,
+        missing,
+        [],
+        breaking_for_host,
+        len(required),
+        policy,
+        policy_file,
     )
     coverage = _compute_symbol_coverage(new_exports, len(required), raw_missing_count)
     _finalize_consumer_scope_diff(
@@ -1597,14 +1682,23 @@ def check_plugin_host_contract(
     # facade (ADR-061 gap A; see `check_appcompat`'s own comment above for
     # why). Lazy import avoids an import cycle.
     from .workflows.compare_policy import compare_snapshots
+
     diff = compare_snapshots(
-        old_plugin, new_plugin,
-        suppression=suppression, policy=policy, policy_file=policy_file,
+        old_plugin,
+        new_plugin,
+        suppression=suppression,
+        policy=policy,
+        policy_file=policy_file,
     )
 
     scoped = scope_diff_to_required_symbols(
-        diff, old_plugin, new_plugin, required_entrypoints,
-        policy=policy, policy_file=policy_file, suppression=suppression,
+        diff,
+        old_plugin,
+        new_plugin,
+        required_entrypoints,
+        policy=policy,
+        policy_file=policy_file,
+        suppression=suppression,
     )
     # ADR-067: the standalone plugin-host entry point is the orchestrator for
     # its own single host contract, exactly as `check_appcompat` is for its

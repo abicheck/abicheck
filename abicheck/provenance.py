@@ -239,6 +239,7 @@ def _looks_like_gcc_target(component: str) -> bool:
         component.lower() in _SINGLE_COMPONENT_GCC_TARGETS
     )
 
+
 #: A genuine Debian/Ubuntu multiarch tuple always names a real OS or
 #: libc/environment family as one of its hyphen-separated words (``linux``,
 #: ``gnu``/``gnueabihf``/``musl``/...) -- an ordinary project directory that
@@ -318,7 +319,11 @@ def _prefix_then_optional_multiarch_cxx(
         j = i + n
         if j < m and hay[j] == "c++":
             return True
-        if j + 1 < m and _looks_like_multiarch_component(hay[j]) and hay[j + 1] == "c++":
+        if (
+            j + 1 < m
+            and _looks_like_multiarch_component(hay[j])
+            and hay[j + 1] == "c++"
+        ):
             return True
     return False
 
@@ -659,7 +664,9 @@ def _public_dirs_from_include_roots(
     # relative root like ``.`` or ``include`` either segments to nothing at
     # all or becomes a short, generic segment that could spuriously match
     # unrelated paths sharing that same component elsewhere.
-    segs = [_segments(str(_absolutize_header_root(d))) for d in (include_search_dirs or [])]
+    segs = [
+        _segments(str(_absolutize_header_root(d))) for d in (include_search_dirs or [])
+    ]
     return [s for s in segs if s and not _is_bare_system_dir(s)]
 
 
@@ -792,8 +799,6 @@ def tag_provenance(
     # this is the one pass that knows the run's real scope selection, and it
     # only ever adds a positive -- see that function.
     if hasattr(decl, "in_public_contract_fact"):
-        contract = public_header_contract_fact(
-            cast("SurfaceFactBearing", decl), origin
-        )
+        contract = public_header_contract_fact(cast("SurfaceFactBearing", decl), origin)
         if contract is not None:
             decl.in_public_contract_fact = contract  # type: ignore[attr-defined]

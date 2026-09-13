@@ -345,7 +345,9 @@ def test_unrelated_coincidentally_equal_registration_does_not_corrupt_redecl_ide
     assert types["D"].vptr_offset_bits == 0
 
 
-def test_default_added_by_legal_redeclaration_still_resolves_dependent_default() -> None:
+def test_default_added_by_legal_redeclaration_still_resolves_dependent_default() -> (
+    None
+):
     """Codex review, fresh evidence (sixth round): a CONFIRMED redeclaration
     (linked via ``previousDecl``) previously kept the tracked metadata frozen
     at the FIRST declaration's value unconditionally -- correct for a

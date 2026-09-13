@@ -91,7 +91,9 @@ def _function_st(draw, name: str) -> Function:
 @st.composite
 def _snapshot_st(draw, *, version: str) -> AbiSnapshot:
     fn_names = draw(st.lists(_ident_st, min_size=1, max_size=5, unique=True))
-    type_names = draw(st.lists(st.sampled_from(_TYPE_POOL), min_size=0, max_size=5, unique=True))
+    type_names = draw(
+        st.lists(st.sampled_from(_TYPE_POOL), min_size=0, max_size=5, unique=True)
+    )
     return AbiSnapshot(
         library="lib",
         version=version,
@@ -168,7 +170,9 @@ def test_adding_private_symbol_preserves_public_findings(
     old: AbiSnapshot, new: AbiSnapshot, extra_name: str
 ):
     """Adding an ELF-only symbol to both sides leaves scoped findings unchanged."""
-    before = compare(copy.deepcopy(old), copy.deepcopy(new), scope_to_public_surface=True)
+    before = compare(
+        copy.deepcopy(old), copy.deepcopy(new), scope_to_public_surface=True
+    )
 
     old2 = copy.deepcopy(old)
     new2 = copy.deepcopy(new)
@@ -196,14 +200,20 @@ def test_adding_private_symbol_preserves_public_findings(
 
 @given(old=_snapshot_st(version="1"), new=_snapshot_st(version="2"))
 @settings(max_examples=100)
-def test_scoped_findings_subset_of_unscoped_universe(old: AbiSnapshot, new: AbiSnapshot):
+def test_scoped_findings_subset_of_unscoped_universe(
+    old: AbiSnapshot, new: AbiSnapshot
+):
     """Every scoped finding also appears somewhere in the unscoped run.
 
     ADR-024 §D4: header scoping only removes/demotes findings; it must never
     surface a (kind, symbol) the unscoped comparison did not produce.
     """
-    unscoped = compare(copy.deepcopy(old), copy.deepcopy(new), scope_to_public_surface=False)
-    scoped = compare(copy.deepcopy(old), copy.deepcopy(new), scope_to_public_surface=True)
+    unscoped = compare(
+        copy.deepcopy(old), copy.deepcopy(new), scope_to_public_surface=False
+    )
+    scoped = compare(
+        copy.deepcopy(old), copy.deepcopy(new), scope_to_public_surface=True
+    )
 
     universe = _all_finding_keys(unscoped)
     assert _all_finding_keys(scoped) <= universe
@@ -228,6 +238,7 @@ def test_public_type_break_is_never_hidden_by_scoping(
 ):
     """A layout change to a type reachable from a PUBLIC function must remain a
     reported finding under scoping — it is observable to consumers."""
+
     def _pair(size: int, version: str) -> AbiSnapshot:
         return AbiSnapshot(
             library="lib",
@@ -267,12 +278,16 @@ def test_widening_only_repromotes_never_hides_or_invents(
     """Force-including every demoted symbol moves findings from the ledger back
     into the report and changes nothing else: kept grows, the ledger shrinks,
     and the overall universe is identical (widening can only ever *keep*)."""
-    scoped = compare(copy.deepcopy(old), copy.deepcopy(new), scope_to_public_surface=True)
+    scoped = compare(
+        copy.deepcopy(old), copy.deepcopy(new), scope_to_public_surface=True
+    )
     forced = {c.symbol for c in scoped.out_of_surface_changes if c.symbol}
 
     widened = compare(
-        copy.deepcopy(old), copy.deepcopy(new),
-        scope_to_public_surface=True, force_public_symbols=forced,
+        copy.deepcopy(old),
+        copy.deepcopy(new),
+        scope_to_public_surface=True,
+        force_public_symbols=forced,
     )
 
     # Re-promotion keeps every scoped change *reported* — as a normal or a

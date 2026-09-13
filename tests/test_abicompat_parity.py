@@ -75,7 +75,12 @@ int main(void) { return stable(41); }
 # (name, lib_v2_src, abicheck_expected, abicompat_expected)
 PARITY_CASES = [
     ("identical", _LIB_SAME, {"NO_CHANGE", "COMPATIBLE"}, {"NO_CHANGE", "COMPATIBLE"}),
-    ("drop_unused_symbol", _LIB_DROP_UNUSED, {"NO_CHANGE", "COMPATIBLE"}, {"NO_CHANGE", "COMPATIBLE"}),
+    (
+        "drop_unused_symbol",
+        _LIB_DROP_UNUSED,
+        {"NO_CHANGE", "COMPATIBLE"},
+        {"NO_CHANGE", "COMPATIBLE"},
+    ),
     ("drop_used_symbol", _LIB_DROP_USED, {"BREAKING"}, {"BREAKING"}),
 ]
 
@@ -85,8 +90,14 @@ def _compile_app(src: str, lib: Path, out: Path, tmp_path: Path) -> None:
     src_file.write_text(src.strip() + "\n", encoding="utf-8")
     # lib is named libfoo.so → link with -lfoo.
     cmd = [
-        "gcc", "-g", "-o", str(out), str(src_file),
-        "-L", str(lib.parent), "-lfoo",
+        "gcc",
+        "-g",
+        "-o",
+        str(out),
+        str(src_file),
+        "-L",
+        str(lib.parent),
+        "-lfoo",
         f"-Wl,-rpath,{lib.parent}",
     ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -98,7 +109,9 @@ def _run_abicompat(app: Path, old_lib: Path, new_lib: Path) -> str:
     # abicompat argument order: <application> <old-library> <new-library>.
     r = subprocess.run(
         ["abicompat", str(app), str(old_lib), str(new_lib)],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     return decode_exit_code(r.returncode, zero_verdict="COMPATIBLE")
 
@@ -143,5 +156,9 @@ def test_abicompat_parity(
     if ab == "ERROR":
         pytest.skip(f"abicompat returned ERROR for case {name}")
 
-    assert ac in abicheck_exp, f"abicheck verdict {ac!r} not in {abicheck_exp} (case {name})"
-    assert ab in abicompat_exp, f"abicompat verdict {ab!r} not in {abicompat_exp} (case {name})"
+    assert ac in abicheck_exp, (
+        f"abicheck verdict {ac!r} not in {abicheck_exp} (case {name})"
+    )
+    assert ab in abicompat_exp, (
+        f"abicompat verdict {ab!r} not in {abicompat_exp} (case {name})"
+    )

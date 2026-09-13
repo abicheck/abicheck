@@ -241,7 +241,9 @@ _PREFIX_NO_MATCH: object = object()
 
 
 def _origin_from_prefix_table(
-    symbol: str, needed_libs: list[str], self_names: tuple[str, ...],
+    symbol: str,
+    needed_libs: list[str],
+    self_names: tuple[str, ...],
 ) -> str | None | object:
     """Prefix-table origin, or :data:`_PREFIX_NO_MATCH` to fall through to owners.
 
@@ -267,7 +269,10 @@ def _origin_from_prefix_table(
 
 
 def _itanium_owner_runtime(
-    owner: str, symbol: str, needed_libs: list[str], self_names: tuple[str, ...],
+    owner: str,
+    symbol: str,
+    needed_libs: list[str],
+    self_names: tuple[str, ...],
 ) -> str | None:
     """Resolve an Itanium owner namespace to its C++ runtime lib, else ``None``.
 
@@ -309,7 +314,9 @@ def _msvc_leaked_owner(symbol: str) -> tuple[str, str | None] | None:
 
 
 def _vendored_owner_result(
-    owner: str, google_child: str | None, self_names: tuple[str, ...],
+    owner: str,
+    google_child: str | None,
+    self_names: tuple[str, ...],
 ) -> str | None:
     """Map a resolved owner namespace to its vendored dependency lib, or ``None``."""
     vendored = _VENDORED_OWNER_NAMESPACES.get(owner)

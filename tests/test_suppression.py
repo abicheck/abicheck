@@ -1,4 +1,5 @@
 """Tests for suppression file support."""
+
 from __future__ import annotations
 
 import textwrap
@@ -10,6 +11,7 @@ from abicheck.checker import Change, ChangeKind, compare
 from abicheck.suppression import Suppression, SuppressionList
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
+
 
 def make_change(kind: ChangeKind, symbol: str, description: str = "desc") -> Change:
     return Change(kind=kind, symbol=symbol, description=description)
@@ -24,19 +26,27 @@ def write_yaml(tmp_path: Path, content: str) -> Path:
 def _make_snapshots_with_removed_func(mangled: str = "_ZN3foo3barEv"):
     """Return (old, new) where old has one public function that new doesn't."""
     from abicheck.model import AbiSnapshot, Function, Visibility
+
     old = AbiSnapshot(library="libfoo", version="1.0")
     new = AbiSnapshot(library="libfoo", version="2.0")
-    old.functions.append(Function(
-        name="foo::bar", mangled=mangled,
-        return_type="void", visibility=Visibility.PUBLIC,
-    ))
+    old.functions.append(
+        Function(
+            name="foo::bar",
+            mangled=mangled,
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+        )
+    )
     return old, new
 
 
 # ─── load valid suppression file ─────────────────────────────────────────────
 
+
 def test_load_valid_file(tmp_path: Path) -> None:
-    yaml_path = write_yaml(tmp_path, """
+    yaml_path = write_yaml(
+        tmp_path,
+        """
         version: 1
         suppressions:
           - symbol: "_ZN3foo3barEv"
@@ -44,7 +54,8 @@ def test_load_valid_file(tmp_path: Path) -> None:
             reason: "intentional"
           - symbol_pattern: ".*detail.*"
             reason: "internal namespace"
-    """)
+    """,
+    )
     sl = SuppressionList.load(yaml_path)
     assert len(sl) == 2
 
@@ -63,6 +74,7 @@ def test_load_missing_suppressions_key(tmp_path: Path) -> None:
 
 # ─── exact symbol match ───────────────────────────────────────────────────────
 
+
 def test_exact_symbol_match() -> None:
     sup = Suppression(symbol="_ZN3foo3barEv")
     assert sup.matches(make_change(ChangeKind.FUNC_REMOVED, "_ZN3foo3barEv"))
@@ -74,6 +86,7 @@ def test_exact_symbol_no_match() -> None:
 
 
 # ─── pattern match (fullmatch semantics) ─────────────────────────────────────
+
 
 def test_pattern_fullmatch() -> None:
     # Pattern must cover the whole symbol — '.*detail.*' requires explicit wildcards
@@ -95,6 +108,7 @@ def test_pattern_short_does_not_over_match() -> None:
 
 # ─── change_kind filtering ────────────────────────────────────────────────────
 
+
 def test_change_kind_match() -> None:
     sup = Suppression(symbol="_ZN3foo3barEv", change_kind="func_removed")
     assert sup.matches(make_change(ChangeKind.FUNC_REMOVED, "_ZN3foo3barEv"))
@@ -108,14 +122,18 @@ def test_change_kind_mismatch() -> None:
 
 # ─── suppressed_changes audit trail in DiffResult ────────────────────────────
 
+
 def test_suppressed_changes_audit_trail(tmp_path: Path) -> None:
     """suppressed_changes must contain the full Change objects, not just count."""
-    yaml_path = write_yaml(tmp_path, """
+    yaml_path = write_yaml(
+        tmp_path,
+        """
         version: 1
         suppressions:
           - symbol: "_ZN3foo3barEv"
             change_kind: "func_removed"
-    """)
+    """,
+    )
     sl = SuppressionList.load(yaml_path)
     old, new = _make_snapshots_with_removed_func("_ZN3foo3barEv")
     result = compare(old, new, suppression=sl)
@@ -132,13 +150,16 @@ def test_suppressed_change_records_matching_rule_label(tmp_path: Path) -> None:
     """G29 Phase 3 slice 2 (ADR-052 follow-up): Change.suppression_rule
     carries the label of the rule that actually suppressed it, so
     impact_assessment.decision.suppression_rule isn't always None."""
-    yaml_path = write_yaml(tmp_path, """
+    yaml_path = write_yaml(
+        tmp_path,
+        """
         version: 1
         suppressions:
           - symbol: "_ZN3foo3barEv"
             change_kind: "func_removed"
             label: "workaround-123"
-    """)
+    """,
+    )
     sl = SuppressionList.load(yaml_path)
     old, new = _make_snapshots_with_removed_func("_ZN3foo3barEv")
     result = compare(old, new, suppression=sl)
@@ -150,13 +171,16 @@ def test_suppressed_change_falls_back_to_reason_when_unlabeled(tmp_path: Path) -
     """No label set on the matching rule -- fall back to reason rather than
     leaving suppression_rule None when there's a perfectly good description
     available."""
-    yaml_path = write_yaml(tmp_path, """
+    yaml_path = write_yaml(
+        tmp_path,
+        """
         version: 1
         suppressions:
           - symbol: "_ZN3foo3barEv"
             change_kind: "func_removed"
             reason: "internal ABI churn, not user-facing"
-    """)
+    """,
+    )
     sl = SuppressionList.load(yaml_path)
     old, new = _make_snapshots_with_removed_func("_ZN3foo3barEv")
     result = compare(old, new, suppression=sl)
@@ -187,13 +211,18 @@ def test_no_suppression_flag_when_not_provided() -> None:
 
 # ─── reporter: markdown footer ───────────────────────────────────────────────
 
+
 def test_markdown_footer_with_suppressions(tmp_path: Path) -> None:
     from abicheck.reporter import to_markdown
-    yaml_path = write_yaml(tmp_path, """
+
+    yaml_path = write_yaml(
+        tmp_path,
+        """
         version: 1
         suppressions:
           - symbol: "_ZN3foo3barEv"
-    """)
+    """,
+    )
     sl = SuppressionList.load(yaml_path)
     old, new = _make_snapshots_with_removed_func("_ZN3foo3barEv")
     result = compare(old, new, suppression=sl)
@@ -204,6 +233,7 @@ def test_markdown_footer_with_suppressions(tmp_path: Path) -> None:
 
 def test_markdown_footer_zero_suppressed(tmp_path: Path) -> None:
     from abicheck.reporter import to_markdown
+
     yaml_path = write_yaml(tmp_path, "version: 1\nsuppressions: []\n")
     sl = SuppressionList.load(yaml_path)
     old, new = _make_snapshots_with_removed_func()
@@ -214,15 +244,20 @@ def test_markdown_footer_zero_suppressed(tmp_path: Path) -> None:
 
 # ─── reporter: JSON suppression section ──────────────────────────────────────
 
+
 def test_json_includes_suppression_section(tmp_path: Path) -> None:
     import json
 
     from abicheck.reporter import to_json
-    yaml_path = write_yaml(tmp_path, """
+
+    yaml_path = write_yaml(
+        tmp_path,
+        """
         version: 1
         suppressions:
           - symbol: "_ZN3foo3barEv"
-    """)
+    """,
+    )
     sl = SuppressionList.load(yaml_path)
     old, new = _make_snapshots_with_removed_func("_ZN3foo3barEv")
     result = compare(old, new, suppression=sl)
@@ -234,6 +269,7 @@ def test_json_includes_suppression_section(tmp_path: Path) -> None:
 
 
 # ─── validation: bad inputs ──────────────────────────────────────────────────
+
 
 def test_unsupported_version_raises(tmp_path: Path) -> None:
     bad = tmp_path / "bad.yaml"
@@ -270,12 +306,15 @@ def test_invalid_regex_raises() -> None:
 
 
 def test_unknown_yaml_key_raises(tmp_path: Path) -> None:
-    bad = write_yaml(tmp_path, """
+    bad = write_yaml(
+        tmp_path,
+        """
         version: 1
         suppressions:
           - symbl: "_ZN3foo3barEv"
             reason: "typo in key"
-    """)
+    """,
+    )
     with pytest.raises(ValueError, match="unknown key"):
         SuppressionList.load(bad)
 
@@ -294,6 +333,7 @@ def test_type_pattern_with_change_kind_mismatch_not_matched() -> None:
 
 
 # ─── member_name selector ────────────────────────────────────────────────────
+
 
 def test_member_name_matches_bare_typedef_symbol() -> None:
     """Typedef removals use the bare alias as the symbol — member_name should match it."""
@@ -370,24 +410,29 @@ def test_member_name_counts_as_selector() -> None:
 
 
 def test_member_name_loaded_from_yaml(tmp_path: Path) -> None:
-    yaml_path = write_yaml(tmp_path, """
+    yaml_path = write_yaml(
+        tmp_path,
+        """
         version: 1
         suppressions:
           - member_name: "value_type"
             change_kind: "typedef_removed"
             reason: "stdlib boilerplate"
-    """)
+    """,
+    )
     sl = SuppressionList.load(yaml_path)
     assert len(sl) == 1
     assert sl.is_suppressed(make_change(ChangeKind.TYPEDEF_REMOVED, "value_type"))
 
 
 def test_rules_by_label_and_repr() -> None:
-    sl = SuppressionList([
-        Suppression(symbol="a", label="x"),
-        Suppression(symbol="b", label="x"),
-        Suppression(symbol="c", label="y"),
-    ])
+    sl = SuppressionList(
+        [
+            Suppression(symbol="a", label="x"),
+            Suppression(symbol="b", label="x"),
+            Suppression(symbol="c", label="y"),
+        ]
+    )
     assert len(sl.rules_by_label("x")) == 2
     assert len(sl.rules_by_label("y")) == 1
     assert "SuppressionList(3 rules)" in repr(sl)
@@ -401,30 +446,39 @@ def test_merge_combines_lists() -> None:
 
 
 def test_suppressions_must_be_list(tmp_path: Path) -> None:
-    bad = write_yaml(tmp_path, """
+    bad = write_yaml(
+        tmp_path,
+        """
         version: 1
         suppressions: {}
-    """)
+    """,
+    )
     with pytest.raises(ValueError, match="must be a list"):
         SuppressionList.load(bad)
 
 
 def test_entry_must_be_mapping(tmp_path: Path) -> None:
-    bad = write_yaml(tmp_path, """
+    bad = write_yaml(
+        tmp_path,
+        """
         version: 1
         suppressions:
           - not-a-mapping
-    """)
+    """,
+    )
     with pytest.raises(ValueError, match="must be a mapping"):
         SuppressionList.load(bad)
 
 
 def test_invalid_expires_date_raises(tmp_path: Path) -> None:
-    bad = write_yaml(tmp_path, """
+    bad = write_yaml(
+        tmp_path,
+        """
         version: 1
         suppressions:
           - symbol: foo
             expires: not-a-date
-    """)
+    """,
+    )
     with pytest.raises(ValueError, match="invalid 'expires' date"):
         SuppressionList.load(bad)

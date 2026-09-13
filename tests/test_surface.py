@@ -667,9 +667,7 @@ class TestSurfaceExclusionReason:
             types=[_rec("Island", source_header="extra.h")],
         )
         s = self._surf(snap)
-        c = Change(
-            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Island", description=""
-        )
+        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Island", description="")
         assert classify_change_surface(c, s, s) == (False, REASON_NON_PUBLIC_TYPE)
 
     def test_generated_origin_type_still_demoted(self):
@@ -980,7 +978,14 @@ class TestScopeCli:
         runner = CliRunner()
         result = runner.invoke(
             main,
-            ["compare", str(op), str(np_), "--scope-public-headers", "--view", "filtered"],
+            [
+                "compare",
+                str(op),
+                str(np_),
+                "--scope-public-headers",
+                "--view",
+                "filtered",
+            ],
         )
         assert result.exit_code == 0, result.output
         # The internal layout change is in the audit ledger on stderr...
@@ -1972,9 +1977,7 @@ class TestWideningCLI:
         assert "InternalCache" not in scoped.stdout
         # Scoped + widened: the change is back in the report.
         cfg = tmp_path / ".abicheck.yml"
-        cfg.write_text(
-            "scope:\n  public_symbols: [InternalCache]\n", encoding="utf-8"
-        )
+        cfg.write_text("scope:\n  public_symbols: [InternalCache]\n", encoding="utf-8")
         widened = runner.invoke(
             main,
             [

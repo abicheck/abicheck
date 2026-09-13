@@ -63,7 +63,11 @@ def _snapshot(libraries: dict[str, ElfMetadata]) -> BundleSnapshot:
 
 def _diff(library: str, *, verdict: Verdict) -> DiffResult:
     return DiffResult(
-        old_version="old", new_version="new", library=library, changes=[], verdict=verdict
+        old_version="old",
+        new_version="new",
+        library=library,
+        changes=[],
+        verdict=verdict,
     )
 
 
@@ -89,7 +93,10 @@ def _elf_only_evidence(version: str) -> dict[str, AbiSnapshot]:
     # for this symbol, so find_unverified_signature_findings() cannot
     # confirm or deny the signature actually agrees between old and new.
     fn = Function(
-        name="core_fn", mangled="core_fn", return_type="?", visibility=Visibility.ELF_ONLY
+        name="core_fn",
+        mangled="core_fn",
+        return_type="?",
+        visibility=Visibility.ELF_ONLY,
     )
     return {
         "libcore.so": AbiSnapshot(

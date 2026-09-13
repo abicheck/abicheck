@@ -54,7 +54,10 @@ def test_examples_dir_matches_real_repo_layout():
 
 def test_case_dir_is_byte_identical_to_the_hand_rolled_join():
     catalog = _catalog()
-    for case_id in ("case01_symbol_removal", "case197_header_graph_identity_reconciled"):
+    for case_id in (
+        "case01_symbol_removal",
+        "case197_header_graph_identity_reconciled",
+    ):
         assert catalog.case_dir(case_id) == catalog.CASES_DIR / case_id
 
 

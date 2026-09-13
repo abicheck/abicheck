@@ -75,7 +75,11 @@ def build_report_findings(
     findings = []
     for change in changes:
         verdict = effective_verdict_for_change(
-            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
+            change,
+            policy=policy,
+            kind_sets=kind_sets,
+            policy_file=policy_file,
+            today=today,
         )
         category = classify_effective_change(
             change,
@@ -85,7 +89,9 @@ def build_report_findings(
             today=today,
             verdict=verdict,
         )
-        findings.append(ReportFinding(change=change, verdict=verdict, category=category))
+        findings.append(
+            ReportFinding(change=change, verdict=verdict, category=category)
+        )
     return tuple(findings)
 
 

@@ -160,9 +160,7 @@ def _sized_rtti(
     return out
 
 
-def _pointer_words_delta(
-    old_size: int, new_size: int, pointer_size: int
-) -> int | None:
+def _pointer_words_delta(old_size: int, new_size: int, pointer_size: int) -> int | None:
     """Signed change in pointer-sized words, or ``None`` if not a clean multiple.
 
     This is the only count L0 can state without inventing structure.  An
@@ -222,7 +220,9 @@ _THUNK_H_RE = re.compile(r"^_ZTh(?P<offset>n?\d+)_(?P<base>.+)$")
 _THUNK_V_RE = re.compile(r"^_ZTv(?P<offset>n?\d+_n?\d+)_(?P<base>.+)$")
 # One covariant call-offset: `h<nv-offset>_` or `v<offset>_<virtual-offset>_`.
 _THUNK_C_CALL = r"(?:hn?\d+_|vn?\d+_n?\d+_)"
-_THUNK_C_RE = re.compile(rf"^_ZTc(?P<offset>{_THUNK_C_CALL}{_THUNK_C_CALL})(?P<base>.+)$")
+_THUNK_C_RE = re.compile(
+    rf"^_ZTc(?P<offset>{_THUNK_C_CALL}{_THUNK_C_CALL})(?P<base>.+)$"
+)
 
 
 def _parse_thunk(name: str) -> tuple[str, str] | None:
@@ -255,9 +255,7 @@ def _base_is_runtime(base: str) -> bool:
     return base.startswith(("NSt", "NKSt", "St", "Ss", "Si", "So"))
 
 
-def _thunks_by_base(
-    snap: AbiSnapshot, *, skip_runtime: bool
-) -> dict[str, set[str]]:
+def _thunks_by_base(snap: AbiSnapshot, *, skip_runtime: bool) -> dict[str, set[str]]:
     """Map ``base_encoding → {offset_signatures}`` for every thunk symbol."""
     elf = snap.elf
     if elf is None:
@@ -279,7 +277,9 @@ def _method_name(base: str) -> str:
     return _class_name("_Z" + base) if not base.startswith("_Z") else _class_name(base)
 
 
-def _diff_thunks(old: AbiSnapshot, new: AbiSnapshot, *, skip_runtime: bool) -> list[Change]:
+def _diff_thunks(
+    old: AbiSnapshot, new: AbiSnapshot, *, skip_runtime: bool
+) -> list[Change]:
     """Detect thunk offset / set drift (B1)."""
     old_t = _thunks_by_base(old, skip_runtime=skip_runtime)
     new_t = _thunks_by_base(new, skip_runtime=skip_runtime)

@@ -38,7 +38,9 @@ from abicheck.snapshot_io import (
 from abicheck.storage.zstd_frame_guard import skip_leading_skippable_frames
 
 
-def _leading_skippable_zstd_bytes(payload: bytes, zstandard, *, user_data: bytes = b"some-metadata") -> bytes:
+def _leading_skippable_zstd_bytes(
+    payload: bytes, zstandard, *, user_data: bytes = b"some-metadata"
+) -> bytes:
     cctx = zstandard.ZstdCompressor(write_content_size=True)
     real_frame = cctx.compress(payload)
     skippable_magic = struct.pack("<I", 0x184D2A50)
@@ -68,7 +70,10 @@ def test_leading_skippable_frame_recognized_as_zstd(tmp_path):
     p.write_bytes(skippable_frame + real_frame)
 
     assert read_snapshot_bytes(p) == payload
-    assert detect_compression_from_bytes(skippable_frame + real_frame) is SnapshotCompression.ZSTD
+    assert (
+        detect_compression_from_bytes(skippable_frame + real_frame)
+        is SnapshotCompression.ZSTD
+    )
 
 
 def test_leading_skippable_frame_too_short_to_classify_stays_none(tmp_path):
@@ -156,7 +161,9 @@ def test_read_past_leading_skippable_frames_stays_linear(tmp_path):
     elapsed = time.monotonic() - t0
 
     assert result == b""
-    assert elapsed < 5.0, f"expected near-linear walk, took {elapsed:.2f}s for {n_frames} frames"
+    assert elapsed < 5.0, (
+        f"expected near-linear walk, took {elapsed:.2f}s for {n_frames} frames"
+    )
 
 
 def test_read_snapshot_bytes_cap_selection_sees_past_leading_skippable_frame(tmp_path):
@@ -256,7 +263,9 @@ def test_probe_call_sites_stay_correct_past_the_escalation_ceiling(tmp_path):
     assert prefix is None or not prefix.startswith(skippable_magic)
 
 
-def test_read_snapshot_bytes_handles_many_leading_skippable_frames_at_realistic_scale(tmp_path):
+def test_read_snapshot_bytes_handles_many_leading_skippable_frames_at_realistic_scale(
+    tmp_path,
+):
     """Covers the public reader end-to-end at the same realistic frame
     count the primitive-level test above uses directly, per the review
     comment's own request ("cover the public reader at a realistic frame
@@ -280,4 +289,6 @@ def test_read_snapshot_bytes_handles_many_leading_skippable_frames_at_realistic_
     elapsed = time.monotonic() - t0
 
     assert result == payload
-    assert elapsed < 5.0, f"expected near-linear walk, took {elapsed:.2f}s for {n_frames} frames"
+    assert elapsed < 5.0, (
+        f"expected near-linear walk, took {elapsed:.2f}s for {n_frames} frames"
+    )

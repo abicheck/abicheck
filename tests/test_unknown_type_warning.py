@@ -11,6 +11,7 @@ Implementation:
 Test: verify the warning is emitted when an unknown DWARF type tag is
 encountered during type resolution.
 """
+
 from __future__ import annotations
 
 import logging
@@ -49,7 +50,9 @@ class TestUnknownTypeWarning:
         """
         monkeypatch.setattr(dwarf_metadata, "_SEEN_UNKNOWN_DWARF_TAGS", set())
 
-    def test_unknown_tag_no_name_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_unknown_tag_no_name_logs_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Unknown DWARF tag with no name attribute must emit a WARNING.
 
         abi-dumper #6: __unknown__ type entries should produce a diagnostic.
@@ -65,7 +68,9 @@ class TestUnknownTypeWarning:
         # The tag name must appear in the warning
         assert "DW_TAG_GNU_formal_parameter_pack" in warnings[0].message
 
-    def test_unknown_tag_with_name_no_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_unknown_tag_with_name_no_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Unknown DWARF tag that HAS a name attribute must NOT warn (has useful info)."""
 
         class _Attr:
@@ -98,8 +103,11 @@ class TestUnknownTypeWarning:
         name, size = _compute_fallback_type_info(die, "")
         assert name == "unknown"
 
-    def test_known_tag_with_name_does_not_use_fallback(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_known_tag_with_name_does_not_use_fallback(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Known DWARF tags go through proper dispatch, not fallback — no warning expected."""
+
         # This tests that normal code paths don't accidentally trigger warnings
         class _Attr:
             def __init__(self, value: object) -> None:

@@ -746,13 +746,19 @@ def _worst_effective_verdict(result: DiffResult, today: date) -> Verdict:
         return Verdict.NO_CHANGE
     verdicts = {
         effective_verdict_for_change(
-            c, policy=result.policy, kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file, today=today,
+            c,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+            today=today,
         )
         for c in eligible
     }
-    for candidate in (Verdict.BREAKING, Verdict.API_BREAK, Verdict.COMPATIBLE_WITH_RISK):
+    for candidate in (
+        Verdict.BREAKING,
+        Verdict.API_BREAK,
+        Verdict.COMPATIBLE_WITH_RISK,
+    ):
         if candidate in verdicts:
             return candidate
     return Verdict.COMPATIBLE
-

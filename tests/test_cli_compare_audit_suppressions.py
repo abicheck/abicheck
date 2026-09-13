@@ -95,7 +95,15 @@ class TestNoOpWithoutSuppress:
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--view", "suppressions", "-o", "json=-"],
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--view",
+                "suppressions",
+                "-o",
+                "json=-",
+            ],
         )
         # A real BREAKING removal in _breaking_pair() -- the flag's absence
         # of a suppression file must not change that outcome.
@@ -108,8 +116,12 @@ class TestNoOpWithoutSuppress:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--view", "suppressions", "--dry-run",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--view",
+                "suppressions",
+                "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -135,8 +147,13 @@ class TestRejectedOnSetInputs:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_dir), str(new_dir),
-                "--suppress", str(suppress), "--view", "suppressions",
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
             ],
         )
         assert result.exit_code != 0
@@ -653,8 +670,13 @@ class TestMarkdownReport:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--view", "suppressions",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -682,13 +704,20 @@ class TestMarkdownReport:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--view", "suppressions",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
             ],
         )
         assert result.exit_code == 4, result.output
         assert "Stale rules (matched nothing):" in result.output
-        assert "symbol=never_matches_anything, change_kind=func_removed" in result.output
+        assert (
+            "symbol=never_matches_anything, change_kind=func_removed" in result.output
+        )
         assert "symbol=never_matches_anything, change_kind=var_removed" in result.output
 
     def test_high_risk_match_rendered(self, tmp_path):
@@ -703,8 +732,13 @@ class TestMarkdownReport:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--view", "suppressions",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -750,15 +784,20 @@ class TestMarkdownReport:
             tmp_path,
             "version: 1\n"
             "suppressions:\n"
-            '  - symbol: never_matches_anything\n'
-            '    reason: stale workaround\n'
+            "  - symbol: never_matches_anything\n"
+            "    reason: stale workaround\n"
             '    expires: "2000-01-01"\n',
         )
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--view", "suppressions",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--suppress",
+                str(suppress),
+                "--view",
+                "suppressions",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -811,13 +850,15 @@ class TestUsedByScopedOnlyChange:
             name=app.name,
         )
         scoped = AppCompatResult(
-            app_path=str(app), old_lib_path=str(old), new_lib_path=str(new),
-            required_symbols={"_Z5entryv"}, required_symbol_count=1,
-            breaking_for_app=[synthetic], verdict=Verdict.BREAKING,
+            app_path=str(app),
+            old_lib_path=str(old),
+            new_lib_path=str(new),
+            required_symbols={"_Z5entryv"},
+            required_symbol_count=1,
+            breaking_for_app=[synthetic],
+            verdict=Verdict.BREAKING,
         )
-        monkeypatch.setattr(
-            appcompat_mod, "scope_diff_to_app", lambda *a, **k: scoped
-        )
+        monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", lambda *a, **k: scoped)
         suppress = _write_suppression(
             tmp_path,
             "version: 1\n"

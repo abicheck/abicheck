@@ -25,6 +25,7 @@ schema/instance pairs chosen to include the cases a caching bug would break
 (a schema mutated in place after its first use, a bool-vs-int instance, a
 malformed schema, a `format_checker`).
 """
+
 from __future__ import annotations
 
 import copy
@@ -42,7 +43,11 @@ _SCHEMAS: list[dict] = [
     {"type": "integer", "minimum": 0, "maximum": 10},
     {"type": "boolean"},
     {"oneOf": [{"type": "string"}, {"type": "integer"}]},
-    {"type": "object", "additionalProperties": False, "properties": {"a": {"const": 1}}},
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {"a": {"const": 1}},
+    },
     {"type": "string", "format": "date-time"},
 ]
 
@@ -69,7 +74,9 @@ _INSTANCES: list[object] = [
 def _reference(instance: object, schema: dict, format_checker=None) -> str:
     """The oracle: the library's own `validate`, reduced to a comparable token."""
     try:
-        jsonschema.validate(instance=instance, schema=schema, format_checker=format_checker)
+        jsonschema.validate(
+            instance=instance, schema=schema, format_checker=format_checker
+        )
     except jsonschema.ValidationError as exc:
         return f"ValidationError:{exc.message}"
     return "ok"
@@ -102,7 +109,11 @@ def test_the_sweep_is_not_vacuous() -> None:
 
 
 def test_a_malformed_schema_still_raises_schema_error() -> None:
-    for bad in ({"type": 123}, {"required": "not-a-list"}, {"minimum": "x", "type": "integer"}):
+    for bad in (
+        {"type": 123},
+        {"required": "not-a-list"},
+        {"minimum": "x", "type": "integer"},
+    ):
         with pytest.raises(jsonschema.SchemaError):
             validate_instance({}, bad)
 
@@ -200,8 +211,7 @@ def test_the_cache_actually_caches() -> None:
     assert validator_for(dict(schema), jsonschema.FormatChecker()) is not first
 
 
-def test_the_real_packaged_schemas_round_trip(
-) -> None:
+def test_the_real_packaged_schemas_round_trip() -> None:
     """Not only toy schemas: the packaged documents this helper exists for
     must themselves check clean and validate a real report shape."""
     from abicheck.schemas import (

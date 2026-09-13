@@ -4,6 +4,7 @@ Each test must either succeed or raise an expected exception
 (AbicheckError, ValueError, KeyError, json.JSONDecodeError, etc.)
 -- never an unhandled crash.
 """
+
 from __future__ import annotations
 
 import json
@@ -25,6 +26,7 @@ from abicheck.suppression import SuppressionList
 # ---------------------------------------------------------------------------
 # 1. Malformed ELF files (abicheck/elf_metadata.py)
 # ---------------------------------------------------------------------------
+
 
 class TestMalformedElf:
     """parse_elf_metadata returns an empty ElfMetadata on any parse error."""
@@ -65,9 +67,9 @@ class TestMalformedElf:
         # Minimal 64-byte ELF header for 64-bit little-endian
         header = bytearray(64)
         header[0:4] = b"\x7fELF"
-        header[4] = 2      # ELFCLASS64
-        header[5] = 1      # ELFDATA2LSB
-        header[6] = 1      # EV_CURRENT
+        header[4] = 2  # ELFCLASS64
+        header[5] = 1  # ELFDATA2LSB
+        header[6] = 1  # EV_CURRENT
         header[16:18] = (2).to_bytes(2, "little")  # ET_EXEC
         header[18:20] = (62).to_bytes(2, "little")  # EM_X86_64
         header[20:24] = (1).to_bytes(4, "little")  # EV_CURRENT
@@ -93,8 +95,8 @@ class TestMalformedElf:
 # 2. Malformed JSON snapshots (abicheck/serialization.py)
 # ---------------------------------------------------------------------------
 
-class TestMalformedJsonSnapshots:
 
+class TestMalformedJsonSnapshots:
     def test_empty_json_object(self, tmp_path: Path) -> None:
         """Empty JSON {} -- missing 'library' and 'version' keys."""
         p = tmp_path / "empty.json"
@@ -148,8 +150,13 @@ class TestMalformedJsonSnapshots:
     def test_deeply_nested_json(self, tmp_path: Path) -> None:
         """Very deeply nested JSON -- should either parse or raise, not crash."""
         # Build a genuinely deeply nested structure inside an extra field
-        nested: dict = {"library": "libfoo.so", "version": "1.0",
-                        "functions": [], "variables": [], "types": []}
+        nested: dict = {
+            "library": "libfoo.so",
+            "version": "1.0",
+            "functions": [],
+            "variables": [],
+            "types": [],
+        }
         inner: dict = {}
         nested["extra"] = inner
         for _ in range(200):
@@ -176,8 +183,8 @@ class TestMalformedJsonSnapshots:
 # 3. Malformed suppression files (abicheck/suppression.py)
 # ---------------------------------------------------------------------------
 
-class TestMalformedSuppressionFiles:
 
+class TestMalformedSuppressionFiles:
     def test_empty_yaml(self, tmp_path: Path) -> None:
         """Empty YAML file -- should raise ValueError (not a dict)."""
         p = tmp_path / "empty.yaml"
@@ -247,8 +254,8 @@ class TestMalformedSuppressionFiles:
 # 4. Malformed policy files (abicheck/policy_file.py)
 # ---------------------------------------------------------------------------
 
-class TestMalformedPolicyFiles:
 
+class TestMalformedPolicyFiles:
     def test_empty_yaml(self, tmp_path: Path) -> None:
         """Empty YAML file -- returns default policy."""
         p = tmp_path / "empty.yaml"
@@ -281,9 +288,7 @@ class TestMalformedPolicyFiles:
         from abicheck.errors import PolicyError
 
         content = (
-            "base_policy: strict_abi\n"
-            "overrides:\n"
-            "  totally_made_up_kind: ignore\n"
+            "base_policy: strict_abi\noverrides:\n  totally_made_up_kind: ignore\n"
         )
         p = tmp_path / "unknown_kind.yaml"
         p.write_text(content, encoding="utf-8")
@@ -292,11 +297,7 @@ class TestMalformedPolicyFiles:
 
     def test_invalid_severity_in_overrides(self, tmp_path: Path) -> None:
         """Valid change kind but invalid severity -- should raise ValueError."""
-        content = (
-            "base_policy: strict_abi\n"
-            "overrides:\n"
-            "  func_removed: explode\n"
-        )
+        content = "base_policy: strict_abi\noverrides:\n  func_removed: explode\n"
         p = tmp_path / "bad_severity.yaml"
         p.write_text(content, encoding="utf-8")
         with pytest.raises(ValueError, match="Invalid severity"):
@@ -323,9 +324,11 @@ class TestMalformedPolicyFiles:
 # 5. Edge case model objects
 # ---------------------------------------------------------------------------
 
-class TestEdgeCaseModelObjects:
 
-    def _empty_snapshot(self, name: str = "libfoo.so", version: str = "1.0") -> AbiSnapshot:
+class TestEdgeCaseModelObjects:
+    def _empty_snapshot(
+        self, name: str = "libfoo.so", version: str = "1.0"
+    ) -> AbiSnapshot:
         return AbiSnapshot(library=name, version=version)
 
     def test_compare_two_empty_snapshots(self) -> None:
@@ -460,8 +463,8 @@ class TestEdgeCaseModelObjects:
 # 6. compat/abicc_dump_import.py edge cases
 # ---------------------------------------------------------------------------
 
-class TestAbiccDumpImportEdgeCases:
 
+class TestAbiccDumpImportEdgeCases:
     def test_looks_like_perl_dump_false_positive(self) -> None:
         """Text that starts with $VAR1 but has malformed content."""
         assert looks_like_perl_dump("$VAR1 = garbage that is not perl;")
@@ -519,8 +522,8 @@ class TestAbiccDumpImportEdgeCases:
 # 7. Reporter edge cases
 # ---------------------------------------------------------------------------
 
-class TestReporterEdgeCases:
 
+class TestReporterEdgeCases:
     def _make_diff_result(
         self,
         changes: list[Change] | None = None,

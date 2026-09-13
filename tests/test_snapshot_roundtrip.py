@@ -6,6 +6,7 @@ Verifies:
   3. Serialisation is stable (same input → same JSON bytes).
   4. All AbiSnapshot fields survive the roundtrip faithfully.
 """
+
 from __future__ import annotations
 
 import json
@@ -37,6 +38,7 @@ from abicheck.serialization import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _minimal_snap(ver: str = "1.0") -> AbiSnapshot:
     """Minimal AbiSnapshot — only required fields."""
@@ -111,7 +113,11 @@ def _rich_snap() -> AbiSnapshot:
     snap.enums = [
         EnumType(
             name="Status",
-            members=[EnumMember("OK", 0), EnumMember("FAIL", 1), EnumMember("RETRY", 2)],
+            members=[
+                EnumMember("OK", 0),
+                EnumMember("FAIL", 1),
+                EnumMember("RETRY", 2),
+            ],
             underlying_type="int",
         ),
     ]
@@ -138,6 +144,7 @@ def _roundtrip(snap: AbiSnapshot) -> AbiSnapshot:
 # ---------------------------------------------------------------------------
 # 1. Basic roundtrip
 # ---------------------------------------------------------------------------
+
 
 class TestSnapshotRoundtrip:
     """AbiSnapshot ↔ JSON roundtrip correctness."""
@@ -191,8 +198,9 @@ class TestSnapshotRoundtrip:
         e_rest = restored.enums[0]
         assert e_rest.name == e_orig.name
         assert e_rest.underlying_type == e_orig.underlying_type
-        assert [(m.name, m.value) for m in e_rest.members] == \
-               [(m.name, m.value) for m in e_orig.members]
+        assert [(m.name, m.value) for m in e_rest.members] == [
+            (m.name, m.value) for m in e_orig.members
+        ]
 
     def test_typedefs_survive_roundtrip(self) -> None:
         """Typedef dict preserved through roundtrip."""
@@ -243,8 +251,12 @@ class TestSnapshotRoundtrip:
         orig.elf = ElfMetadata(
             soname="libalgo.so.1",
             imports=[
-                ElfImport(name="core_op", version="FOO_1.0", version_soname="libcore.so.1"),
-                ElfImport(name="syscall", version="GLIBC_2.2.5", version_soname="libc.so.6"),
+                ElfImport(
+                    name="core_op", version="FOO_1.0", version_soname="libcore.so.1"
+                ),
+                ElfImport(
+                    name="syscall", version="GLIBC_2.2.5", version_soname="libc.so.6"
+                ),
             ],
         )
         restored = _roundtrip(orig)
@@ -273,6 +285,7 @@ class TestSnapshotRoundtrip:
 # ---------------------------------------------------------------------------
 # 2. compare(snap, snap) == NO_CHANGE
 # ---------------------------------------------------------------------------
+
 
 class TestCompareIdentical:
     """compare(s, s) must always return NO_CHANGE."""
@@ -311,6 +324,7 @@ class TestCompareIdentical:
 # ---------------------------------------------------------------------------
 # 3. Stable serialisation
 # ---------------------------------------------------------------------------
+
 
 class TestStableSerialization:
     """Same input → same JSON bytes (deterministic output)."""
@@ -377,6 +391,7 @@ class TestStableSerialization:
 # 4. Edge cases
 # ---------------------------------------------------------------------------
 
+
 class TestEdgeCases:
     """Edge cases in roundtrip handling."""
 
@@ -419,15 +434,16 @@ class TestEdgeCases:
     def test_function_with_many_params(self) -> None:
         """Function with many params roundtrips completely."""
         params = [
-            Param(name=f"p{i}", type="int", kind=ParamKind.VALUE)
-            for i in range(20)
+            Param(name=f"p{i}", type="int", kind=ParamKind.VALUE) for i in range(20)
         ]
         orig = AbiSnapshot(library="libmany.so", version="1.0")
-        orig.functions = [Function(
-            name="multi_param",
-            mangled="_Z11multi_param" + "i" * 20,
-            return_type="void",
-            params=params,
-        )]
+        orig.functions = [
+            Function(
+                name="multi_param",
+                mangled="_Z11multi_param" + "i" * 20,
+                return_type="void",
+                params=params,
+            )
+        ]
         restored = _roundtrip(orig)
         assert len(restored.functions[0].params) == 20

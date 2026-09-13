@@ -229,7 +229,7 @@ def test_pr_profile_is_superset_of_fast_checks() -> None:
     under `pr` — `pr` must not be a weaker gate than the everyday inner loop."""
     fast_names = {s.name for s in verify.STEPS if verify.FAST in s.profiles}
     pr_names = {s.name for s in verify.STEPS if verify.PR in s.profiles}
-    shared_gate_steps = {"lint", "fmt-check", "typecheck"}
+    shared_gate_steps = _SHARED_GATE_STEPS
     assert shared_gate_steps <= fast_names
     assert shared_gate_steps <= pr_names
 
@@ -397,7 +397,32 @@ def test_ci_ai_readiness_job_calls_verify_py() -> None:
 
 def test_ci_lint_and_types_job_calls_verify_py() -> None:
     ci = _read(".github/workflows/ci.yml")
-    assert "scripts/verify.py --profile pr --only lint,typecheck,docs-build" in ci
+    assert (
+        "scripts/verify.py --profile pr --only lint,fmt-check,typecheck,docs-build"
+        in ci
+    )
+
+
+def test_ci_actually_runs_every_shared_gate_step() -> None:
+    """`fmt-check` reaches a real CI job, not just `--profile pr` locally.
+
+    Asserted against the *steps* rather than one literal command line, because
+    the literal is what let the gap stand: `fmt-check` lived in the `fast`/`pr`
+    /`full` profiles and in pre-commit for months while `ci.yml` invoked
+    `--only lint,typecheck,docs-build`, and no test compared the two. Nothing
+    failed anywhere, and the tree drifted to 625 unformatted files. Deriving
+    the expectation from `_SHARED_GATE_STEPS` means a step added to that set
+    and not wired into CI fails here instead of going quietly unreachable.
+    """
+    ci = _read(".github/workflows/ci.yml")
+    only_lists = re.findall(r"verify\.py --profile \w+ --only ([\w,-]+)", ci)
+    assert only_lists, "no verify.py --only invocation found in ci.yml"
+    wired = {step for lst in only_lists for step in lst.split(",")}
+    missing = _SHARED_GATE_STEPS - wired
+    assert not missing, (
+        f"shared gate step(s) {sorted(missing)} run in --profile pr but are "
+        f"wired into no ci.yml job; CI wires {sorted(wired)}"
+    )
 
 
 def test_ci_canonical_unit_lane_matches_verify_pr_profile() -> None:
@@ -496,16 +521,15 @@ def test_other_agent_adapters_point_at_agents_md() -> None:
 #: reviewed list rather than a wildcard: a step added to the `pr` profile but
 #: wired into no CI job is invisible in CI while `--profile pr` reports it
 #: locally, which is exactly how `agent-skills-generated` shipped unreachable.
+#: The check-type steps every profile shares. Both the profile-membership
+#: test and the CI-wiring test derive from this one set.
+_SHARED_GATE_STEPS = {"lint", "fmt-check", "typecheck"}
+
 _PR_STEPS_NOT_IN_A_CI_ONLY_LIST = {
     # ci.yml runs the same pytest command directly as its own matrix job
     # (asserted by test_ci_unit_lane_matches_verify_unit_pr above), because
     # the lane spans several OS/Python combinations that one Step can't model.
     "unit-pr": "run directly as the unit-tests matrix job",
-    # KNOWN GAP, pre-existing and not introduced here: `ruff format --check`
-    # runs in `--profile pr`/`pixi run check` and in pre-commit, but no CI job
-    # invokes it. Recorded so it stays visible rather than being mistaken for
-    # a deliberate exemption.
-    "fmt-check": "NOT RUN IN CI — pre-existing gap, tracked here",
 }
 
 
@@ -700,7 +724,9 @@ class TestUnitTestsPerPlatformTimeout:
     @staticmethod
     def _unit_tests_job() -> dict[str, Any]:
         yaml = pytest.importorskip("yaml")
-        data = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+        data = yaml.safe_load(
+            (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        )
         return dict(data["jobs"]["unit-tests"])
 
     @classmethod

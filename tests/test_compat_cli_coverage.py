@@ -40,9 +40,15 @@ def _fake_elf(path: Path) -> Path:
     return path
 
 
-def _stub_dump(monkeypatch: pytest.MonkeyPatch, snapshot: AbiSnapshot | None = None) -> None:
+def _stub_dump(
+    monkeypatch: pytest.MonkeyPatch, snapshot: AbiSnapshot | None = None
+) -> None:
     """Replace ``compat.cli.dump`` so the dump path runs without a real binary."""
-    snap = snapshot if snapshot is not None else AbiSnapshot(library="orig-name", version="1.0")
+    snap = (
+        snapshot
+        if snapshot is not None
+        else AbiSnapshot(library="orig-name", version="1.0")
+    )
     monkeypatch.setattr("abicheck.compat.cli.dump", lambda *a, **k: snap)
 
 
@@ -406,10 +412,14 @@ def test_check_not_comparable_exits_9(tmp_path: Path, monkeypatch):
     result = CliRunner().invoke(
         main,
         [
-            "compat", "check",
-            "-lib", "libfoo",
-            "-old", str(old_json),
-            "-new", str(new_json),
+            "compat",
+            "check",
+            "-lib",
+            "libfoo",
+            "-old",
+            str(old_json),
+            "-new",
+            str(new_json),
         ],
     )
     assert result.exit_code == 9

@@ -15,6 +15,7 @@ real breaks:
 The fast tests are deterministic; the Hypothesis-randomized generalization is
 marked ``slow`` so it stays out of the default lane.
 """
+
 from __future__ import annotations
 
 import random

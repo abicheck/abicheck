@@ -152,37 +152,77 @@ def _resolve_and_check_dump_debug_format(
 @main.command("dump")
 @cli_help.dump_help_options  # curated --help + full --help-all (G21.8 collapse M2)
 @click.argument("so_path", type=click.Path(exists=True, path_type=Path), required=False)
-@click.option("-H", "--header", "headers", multiple=True, type=click.Path(exists=True, path_type=Path),
-              help="Public header file or directory (repeat for multiple).")
-@click.option("-I", "--include", "includes", multiple=True, type=click.Path(path_type=Path),
-              help="Extra include directory for castxml.")
+@click.option(
+    "-H",
+    "--header",
+    "headers",
+    multiple=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Public header file or directory (repeat for multiple).",
+)
+@click.option(
+    "-I",
+    "--include",
+    "includes",
+    multiple=True,
+    type=click.Path(path_type=Path),
+    help="Extra include directory for castxml.",
+)
 # Declaration provenance (ADR-015) comes from -H/--header itself: a file
 # entry tags that header public, a directory entry tags everything under it
 # (split by header_utils.split_public_header_inputs, the same partition
 # `compare` has always applied to its own -H list). The separate
 # --public-header/--public-header-dir pair said the same thing a second way.
 @include_dependencies_option
-@click.option("--version", "version", default="unknown", show_default=True,
-              help="Library version string to embed in snapshot.")
-@click.option("-o", "--output", "output", type=click.Path(path_type=Path), default=None,
-              help="Output JSON file. Defaults to stdout.")
+@click.option(
+    "--version",
+    "version",
+    default="unknown",
+    show_default=True,
+    help="Library version string to embed in snapshot.",
+)
+@click.option(
+    "-o",
+    "--output",
+    "output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Output JSON file. Defaults to stdout.",
+)
 @snapshot_compression_option
 # Phase 7: --lang + L2 compile-context family gone from `dump`'s CLI
 # (compile: config only); `scan` keeps them.
-@click.option("--follow-deps", is_flag=True, default=False,
-              help="Resolve transitive DT_NEEDED dependencies and include the full "
-                   "dependency graph and symbol binding status in the snapshot. "
-                   "ELF only.")
-@click.option("--search-path", "search_paths", multiple=True,
-              type=click.Path(exists=True, path_type=Path),
-              help="Additional directory to search for shared libraries (with --follow-deps).")
-@click.option("--ld-library-path", "ld_library_path", default="",
-              help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
-@click.option("--dry-run", "dry_run", is_flag=True, default=False,
-              help="Resolve and validate the invocation -- classify inputs, discover "
-                   "config, show which evidence depths (binary/headers/build/source) "
-                   "are available -- and print a report without producing a snapshot. "
-                   "Writes nothing; incompatible with -o/--output.")
+@click.option(
+    "--follow-deps",
+    is_flag=True,
+    default=False,
+    help="Resolve transitive DT_NEEDED dependencies and include the full "
+    "dependency graph and symbol binding status in the snapshot. "
+    "ELF only.",
+)
+@click.option(
+    "--search-path",
+    "search_paths",
+    multiple=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Additional directory to search for shared libraries (with --follow-deps).",
+)
+@click.option(
+    "--ld-library-path",
+    "ld_library_path",
+    default="",
+    help="Simulated LD_LIBRARY_PATH (with --follow-deps).",
+)
+@click.option(
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    default=False,
+    help="Resolve and validate the invocation -- classify inputs, discover "
+    "config, show which evidence depths (binary/headers/build/source) "
+    "are available -- and print a report without producing a snapshot. "
+    "Writes nothing; incompatible with -o/--output.",
+)
 # ── Build context capture (ADR-020a) ──────────────────────────────────────────
 # The L2 compile database comes from --build-info, whose operand is already
 # "a build dir, a compile_commands.json, or a pre-captured pack" -- the same
@@ -192,51 +232,68 @@ def _resolve_and_check_dump_debug_format(
 # --dwarf-only/--debug-format/--debuginfod/--debuginfod-url/--pdb-path: gone
 # (Phase 7c, debug: config only). --debug-info stays (per-run evidence), and
 # absorbed --debug-root in Phase 7n (one role, several transports).
-@click.option("--debug-info", "debug_roots", multiple=True, type=click.Path(path_type=Path),
-              help="Separate debug info: a directory to search (build-id tree, "
-                   "path mirror, dSYM bundles) or a detached DWARF debug file (a "
-                   ".debug sidecar) -- told apart by content, not name. "
-                   "Repeatable. A debug *package* is a release transport "
-                   "(`compare --debug-info`), rejected here rather than ignored.")
+@click.option(
+    "--debug-info",
+    "debug_roots",
+    multiple=True,
+    type=click.Path(path_type=Path),
+    help="Separate debug info: a directory to search (build-id tree, "
+    "path mirror, dSYM bundles) or a detached DWARF debug file (a "
+    ".debug sidecar) -- told apart by content, not name. "
+    "Repeatable. A debug *package* is a release transport "
+    "(`compare --debug-info`), rejected here rather than ignored.",
+)
 # ── Multi-TU manifest (ADR-050 D3) ────────────────────────────────────────────
-@click.option("--dump-manifest", "dump_manifest_path",
-              type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
-              help="A strict YAML document describing multiple translation units to compile "
-                   "and merge into one snapshot, instead of a single -H/--header list. "
-                   "Mutually exclusive with -H/--header (declare the public surface in "
-                   "the manifest's own roots field and base profile instead). ELF only "
-                   "so far.")
+@click.option(
+    "--dump-manifest",
+    "dump_manifest_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="A strict YAML document describing multiple translation units to compile "
+    "and merge into one snapshot, instead of a single -H/--header list. "
+    "Mutually exclusive with -H/--header (declare the public surface in "
+    "the manifest's own roots field and base profile instead). ELF only "
+    "so far.",
+)
 @verbose_option
 # ── Provenance metadata ──────────────────────────────────────────────────────
 # §4.2 / Phase 7f: --git-tag/--build-id/--no-git -> one KEY=VALUE selector.
 @dump_provenance_option
 @build_source_dump_options  # --build-info / --sources (embed inline)
-def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Path, ...],
-             include_dependencies: bool,
-             version: str, output: Path | None,
-             snapshot_compression: str,
-             follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
-             dry_run: bool,
-             debug_roots: tuple[Path, ...],
-             dump_manifest_path: Path | None,
-             verbose: bool,
-             provenance: tuple[str, ...],
-             build_info: Path | None = None, sources: Path | None = None,
-             build_config: Path | None = None,
-             depth: str | None = None,
-             # --gcc-options removed as a CLI flag (CLI audit PR 5/5); this
-             # defaulted-None parameter stays only so the internal composition
-             # below (_merge_gcc_options et al.) doesn't need to change --
-             # it's never populated from the CLI anymore, only ever None here.
-             gcc_options: str | None = None,
-             _resolved_compile_context: CompileContext | None = None,
-             _resolved_collect_mode: str | None = None,
-             _resolved_include_labels: dict[Path, str] | None = None,
-             _resolved_lang_explicit: bool | None = None,
-             _resolved_changed_paths: tuple[str, ...] = (),
-             # Phase 7: no CLI spelling; compare's inline embed still forwards these.
-             lang: str | None = None,
-             _resolved_debug: DumpDebugConfig | None = None) -> None:
+def dump_cmd(
+    so_path: Path | None,
+    headers: tuple[Path, ...],
+    includes: tuple[Path, ...],
+    include_dependencies: bool,
+    version: str,
+    output: Path | None,
+    snapshot_compression: str,
+    follow_deps: bool,
+    search_paths: tuple[Path, ...],
+    ld_library_path: str,
+    dry_run: bool,
+    debug_roots: tuple[Path, ...],
+    dump_manifest_path: Path | None,
+    verbose: bool,
+    provenance: tuple[str, ...],
+    build_info: Path | None = None,
+    sources: Path | None = None,
+    build_config: Path | None = None,
+    depth: str | None = None,
+    # --gcc-options removed as a CLI flag (CLI audit PR 5/5); this
+    # defaulted-None parameter stays only so the internal composition
+    # below (_merge_gcc_options et al.) doesn't need to change --
+    # it's never populated from the CLI anymore, only ever None here.
+    gcc_options: str | None = None,
+    _resolved_compile_context: CompileContext | None = None,
+    _resolved_collect_mode: str | None = None,
+    _resolved_include_labels: dict[Path, str] | None = None,
+    _resolved_lang_explicit: bool | None = None,
+    _resolved_changed_paths: tuple[str, ...] = (),
+    # Phase 7: no CLI spelling; compare's inline embed still forwards these.
+    lang: str | None = None,
+    _resolved_debug: DumpDebugConfig | None = None,
+) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
     \b
@@ -274,16 +331,29 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
 
     # Phase 7: compile.lang default + env-var toggles.
     lang, _config_lang_explicit = resolve_dump_lang_and_env_toggles(
-        click.get_current_context(), build_config=build_config, sources=sources,
-        lang=lang, lang_default=LANG_DEFAULT, apply_env_toggles=apply_compile_config_env_toggles,
+        click.get_current_context(),
+        build_config=build_config,
+        sources=sources,
+        lang=lang,
+        lang_default=LANG_DEFAULT,
+        apply_env_toggles=apply_compile_config_env_toggles,
     )
     # §4.2's CONFIG row: `build.compile_db_filter` replaces
     # `--compile-db-filter`.
     compile_db_filter = resolve_dump_build_compile_db_filter(build_config, sources)
     # Phase 7c: debug.* config only
-    _debug = resolve_dump_debug_fields(_resolved_debug, build_config=build_config, sources=sources, debug_roots=debug_roots)
+    _debug = resolve_dump_debug_fields(
+        _resolved_debug,
+        build_config=build_config,
+        sources=sources,
+        debug_roots=debug_roots,
+    )
     dwarf_only, debug_format_opt, debuginfod, debuginfod_url, pdb_path = (
-        _debug.dwarf_only, _debug.format, _debug.debuginfod, _debug.debuginfod_url, _debug.pdb_path,
+        _debug.dwarf_only,
+        _debug.format,
+        _debug.debuginfod,
+        _debug.debuginfod_url,
+        _debug.pdb_path,
     )
 
     # G31 Phase C follow-up (AGENTS.md "dump --lang c++ is silently discarded
@@ -327,7 +397,11 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # Resolve the evidence-depth preset into the collect mode, apply --depth binary
     # suppression, and warn on an explicitly-requested deep depth without sources.
     collect_mode, headers = resolve_dump_collect_context(
-        depth, _resolved_collect_mode, sources, build_info, headers,
+        depth,
+        _resolved_collect_mode,
+        sources,
+        build_info,
+        headers,
     )
     # PR 3C prerequisite 3's own residual gap (CLI cleanup phase two plan,
     # "The `-H` directory gap"): `--dry-run` never validated a `-H`
@@ -383,7 +457,11 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # own docstring for why widening it here would widen that too.
     if (
         _filter_scope_error := dump_cli_compile_db_filter_scope_error(
-            compile_db_filter, build_info, sources, headers, collect_mode,
+            compile_db_filter,
+            build_info,
+            sources,
+            headers,
+            collect_mode,
         )
     ) is not None:
         raise click.UsageError(_filter_scope_error)
@@ -403,11 +481,16 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # (compile: config only, no escape hatch, ADR-068 D5 guard #2).
     _cc, includes = resolve_dump_compile_context(
         _resolved_compile_context,
-        gcc_options=gcc_options, sysroot=None, nostdinc=False,
-        header_backend="auto", includes=includes,
-        build_config=build_config, sources=sources,
+        gcc_options=gcc_options,
+        sysroot=None,
+        nostdinc=False,
+        header_backend="auto",
+        includes=includes,
+        build_config=build_config,
+        sources=sources,
         frontend_context="host",
-        compiler_path=None, compiler_prefix=None,
+        compiler_path=None,
+        compiler_prefix=None,
         compiler_option_tokens=(),
     )
     gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
@@ -489,7 +572,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # that echo and the so_path reassignment (a no-op re-validation once
     # this has already passed).
     effective_debug_format = _resolve_and_check_dump_debug_format(
-        so_path, debug_format_opt,
+        so_path,
+        debug_format_opt,
     )
 
     # CLI cleanup phase two, PR 3A blocker 5: one `DumpRequest` describing this
@@ -524,17 +608,28 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # not a real PE/Mach-O toolchain -- none was available where this was
     # done.
     _dump_request = build_dump_request(
-        so_path=so_path, headers=headers, includes=includes,
-        version=version, lang=lang, lang_explicit=lang_explicit,
-        header_backend=header_backend, compile_context=_cc,
-        frontend_context=frontend_context, depth=depth,
-        dwarf_only=dwarf_only, debug_format=effective_debug_format,
-        pdb_path=pdb_path, debug_roots=debug_roots,
-        debuginfod=debuginfod, debuginfod_url=debuginfod_url,
+        so_path=so_path,
+        headers=headers,
+        includes=includes,
+        version=version,
+        lang=lang,
+        lang_explicit=lang_explicit,
+        header_backend=header_backend,
+        compile_context=_cc,
+        frontend_context=frontend_context,
+        depth=depth,
+        dwarf_only=dwarf_only,
+        debug_format=effective_debug_format,
+        pdb_path=pdb_path,
+        debug_roots=debug_roots,
+        debuginfod=debuginfod,
+        debuginfod_url=debuginfod_url,
         dump_manifest=parsed_dump_manifest,
-        sources=sources, build_info=build_info,
+        sources=sources,
+        build_info=build_info,
         include_dependencies=include_dependencies,
-        follow_deps=follow_deps, search_paths=search_paths,
+        follow_deps=follow_deps,
+        search_paths=search_paths,
         ld_library_path=ld_library_path,
         include_labels=_resolved_include_labels,
         resolved_collect_mode=_resolved_collect_mode,
@@ -590,7 +685,10 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         from ....workflows.extraction import is_pack_dir
 
         _dry_matched = dry_run_compile_db_matched(
-            compile_db_path, None, headers, compile_db_filter,
+            compile_db_path,
+            None,
+            headers,
+            compile_db_filter,
         )
         _dry_result = render_dump_dry_run(
             _resolved,
@@ -615,10 +713,13 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         # CLI cleanup phase two, PR 3C prerequisite 3: show whether/why
         # build.query would execute, without ever running it.
         add_build_query_dry_run_section(
-            _dry_result, so_path=so_path,
+            _dry_result,
+            so_path=so_path,
             dump_manifest_given=parsed_dump_manifest is not None,
-            sources=sources, headers=headers,
-            collect_mode=collect_mode, build_info=build_info,
+            sources=sources,
+            headers=headers,
+            collect_mode=collect_mode,
+            build_info=build_info,
             build_config=build_config,
         )
         # ADR-063 Track T4: the execution-options preview attached onto
@@ -647,11 +748,16 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 build_config=build_config,
                 stamp_provenance=_stamp_provenance,
                 write_snapshot_output=_write_snapshot_output_fn,
-                git_tag=git_tag, build_id=build_id, no_git=no_git,
-                output=output, build_info=build_info, sources=sources,
+                git_tag=git_tag,
+                build_id=build_id,
+                no_git=no_git,
+                output=output,
+                build_info=build_info,
+                sources=sources,
                 include_dependencies=include_dependencies,
                 headers=tuple(headers),
-                gcc_path=gcc_path, gcc_prefix=gcc_prefix,
+                gcc_path=gcc_path,
+                gcc_prefix=gcc_prefix,
                 snapshot_compression=snapshot_compression,
             )
             return
@@ -690,7 +796,24 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 err=True,
             )
         from ....cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, git_tag, build_id, no_git, collect_mode, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
+
+        dump_source_only(
+            sources,
+            build_info,
+            version,
+            output,
+            build_config,
+            git_tag,
+            build_id,
+            no_git,
+            collect_mode,
+            extractor=header_backend,
+            depth=depth,
+            include_dependencies=include_dependencies,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            snapshot_compression=snapshot_compression,
+        )
         return
 
     effective_compile_db = compile_db_path
@@ -701,7 +824,9 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # early return, so a compile database's flags were silently dropped for
     # PE/Mach-O input (parsed_with_build_context was never stamped either).
     build_context_flags, compile_db_matched = _resolve_build_context_flags(
-        effective_compile_db, headers, compile_db_filter,
+        effective_compile_db,
+        headers,
+        compile_db_filter,
     )
 
     # Auto-detect binary format — PE/Mach-O skip the ELF/castxml path. The
@@ -753,7 +878,10 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         # migration.
         if debug_roots or debuginfod:
             artifact = _resolve_debug_artifact(
-                so_path, debug_roots, debuginfod, debuginfod_url,
+                so_path,
+                debug_roots,
+                debuginfod,
+                debuginfod_url,
             )
             if artifact:
                 click.echo(f"Debug info: {artifact.source}", err=True)
@@ -801,8 +929,12 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         build_config=build_config,
         stamp_provenance=_stamp_provenance,
         write_snapshot_output=_write_snapshot_output_fn,
-        git_tag=git_tag, build_id=build_id, no_git=no_git,
-        output=output, build_info=build_info, sources=sources,
+        git_tag=git_tag,
+        build_id=build_id,
+        no_git=no_git,
+        output=output,
+        build_info=build_info,
+        sources=sources,
         collect_mode=_resolved.collect_mode,
         header_backend=_resolved.header_backend,
         requested_depth=_resolved.requested_depth,
@@ -816,7 +948,9 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         + tuple(_resolved.public_headers)
         + tuple(_resolved.public_header_dirs),
         clang_bin=resolve_source_frontend_clang_bin(
-            gcc_path, gcc_prefix, exclude_cl_style=False,
+            gcc_path,
+            gcc_prefix,
+            exclude_cl_style=False,
         ),
         snapshot_compression=snapshot_compression,
         # L4 replay classifies declarations against these roots; with none it
@@ -825,4 +959,3 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         public_headers=tuple(_resolved.public_headers),
         public_header_dirs=tuple(_resolved.public_header_dirs),
     )
-

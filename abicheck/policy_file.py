@@ -185,18 +185,21 @@ def builtin_policy_path(name: str) -> Path | None:
     candidate = POLICIES_DIR / f"{name}.yaml"
     return candidate if candidate.is_file() else None
 
+
 # Kinds that are especially dangerous to downgrade — removing a function
 # or changing its signature always causes hard crashes.
-_CRITICAL_BREAKING_KINDS: frozenset[ChangeKind] = frozenset({
-    ChangeKind.FUNC_REMOVED,
-    ChangeKind.FUNC_RETURN_CHANGED,
-    ChangeKind.FUNC_PARAMS_CHANGED,
-    ChangeKind.TYPE_SIZE_CHANGED,
-    ChangeKind.TYPE_VTABLE_CHANGED,
-    ChangeKind.VAR_REMOVED,
-    ChangeKind.VAR_TYPE_CHANGED,
-    ChangeKind.SONAME_CHANGED,
-})
+_CRITICAL_BREAKING_KINDS: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.FUNC_REMOVED,
+        ChangeKind.FUNC_RETURN_CHANGED,
+        ChangeKind.FUNC_PARAMS_CHANGED,
+        ChangeKind.TYPE_SIZE_CHANGED,
+        ChangeKind.TYPE_VTABLE_CHANGED,
+        ChangeKind.VAR_REMOVED,
+        ChangeKind.VAR_TYPE_CHANGED,
+        ChangeKind.SONAME_CHANGED,
+    }
+)
 
 
 def _parse_evidence_action(
@@ -318,9 +321,17 @@ def _parse_reclassify_expires(raw: Any, path: Path, index: int) -> date | None:
 #: have their own dedicated, differently-shaped validation below and are
 #: deliberately not in this set.
 _RECLASSIFY_STRING_FIELDS: tuple[str, ...] = (
-    "symbol", "symbol_pattern", "type_pattern", "member_name", "namespace",
-    "entity_namespace", "cause_namespace", "source_location", "binding",
-    "reason", "label",
+    "symbol",
+    "symbol_pattern",
+    "type_pattern",
+    "member_name",
+    "namespace",
+    "entity_namespace",
+    "cause_namespace",
+    "source_location",
+    "binding",
+    "reason",
+    "label",
 )
 
 
@@ -529,8 +540,7 @@ def _parse_evidence_policy(
     """
     if not isinstance(ev_raw, dict):
         raise PolicyError(
-            "'evidence_policy' must be a YAML mapping, got "
-            + type(ev_raw).__name__
+            "'evidence_policy' must be a YAML mapping, got " + type(ev_raw).__name__
         )
     source_only = _parse_evidence_action(
         ev_raw, "source_only_findings", _SOURCE_ONLY_ACTIONS, path
@@ -624,7 +634,9 @@ class PolicyFile:
     experimental_namespaces_stated: bool = field(default=False, kw_only=True)
     # ADR-066 D4/S2 -- versioning policy; `versioning_stated` mirrors `internal_namespaces_stated`.
     # `kw_only=True` for the same reason `reclassify` above is (CodeRabbit review; see its comment).
-    versioning: VersioningPolicy = field(default_factory=built_in_default_versioning_policy, kw_only=True)
+    versioning: VersioningPolicy = field(
+        default_factory=built_in_default_versioning_policy, kw_only=True
+    )
     versioning_stated: bool = field(default=False, kw_only=True)
     # ADR-067 D6/S3 -- the additions review gate policy; `acknowledgment_policy_stated`
     # mirrors `versioning_stated`/`internal_namespaces_stated` above.
@@ -636,8 +648,8 @@ class PolicyFile:
     # finding keeps its default category (current behaviour). A set value maps
     # the whole category of build/source evidence findings to a verdict ceiling.
     source_only_findings: str | None = None  # ignore|warn|fail-api|fail-release
-    build_context_drift: str | None = None   # ignore|warn|fail-on-abi-relevant
-    graph_risk_findings: str | None = None    # ignore|warn|fail
+    build_context_drift: str | None = None  # ignore|warn|fail-on-abi-relevant
+    graph_risk_findings: str | None = None  # ignore|warn|fail
     # require_evidence — fail the run when a declared-required evidence layer is
     # absent (enforced in the compare evidence pipeline, ADR-033 D7). Empty =
     # nothing required.
@@ -692,7 +704,9 @@ class PolicyFile:
         overrides = _parse_overrides(raw.get("overrides", {}), path)
         reclassify = _parse_reclassify(raw.get("reclassify", []), path)
         frozen_namespaces = _parse_frozen_namespaces(raw.get("frozen_namespaces", []))
-        internal_namespaces = parse_internal_namespaces(raw.get("internal_namespaces", []))
+        internal_namespaces = parse_internal_namespaces(
+            raw.get("internal_namespaces", [])
+        )
         experimental_namespaces = parse_experimental_namespaces(
             raw.get("experimental_namespaces", [])
         )
@@ -733,7 +747,9 @@ class PolicyFile:
             require_evidence=require_evidence,
         )
 
-    def evidence_verdict(self, category: str, abi_relevant: bool = False) -> Verdict | None:
+    def evidence_verdict(
+        self, category: str, abi_relevant: bool = False
+    ) -> Verdict | None:
         """Resolve the ADR-033 D7 verdict ceiling for an evidence *category*.
 
         *category* is one of ``"source_only"``, ``"build_context"``,
@@ -773,14 +789,23 @@ class PolicyFile:
 
         verdicts = [
             _resolve_change_verdict(
-                change, self.base_policy, self.overrides, _b, _a, _c, _r,
+                change,
+                self.base_policy,
+                self.overrides,
+                _b,
+                _a,
+                _c,
+                _r,
                 self.reclassify,
             )
             for change in changes
         ]
 
         # Worst verdict wins.
-        return max(verdicts, key=lambda v: _VERDICT_ORDER.index(v) if v in _VERDICT_ORDER else 0)
+        return max(
+            verdicts,
+            key=lambda v: _VERDICT_ORDER.index(v) if v in _VERDICT_ORDER else 0,
+        )
 
     def describe(self) -> str:
         """Return a human-readable summary of this policy."""

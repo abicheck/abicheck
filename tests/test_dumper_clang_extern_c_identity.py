@@ -456,7 +456,9 @@ def test_parse_variables_explicit_asm_label_unstripped_on_darwin() -> None:
     assert var.entity_id.extra == ("mangled", "__Zfake_g")
 
 
-def test_parse_functions_explicit_single_underscore_asm_label_not_treated_as_extern_c() -> None:
+def test_parse_functions_explicit_single_underscore_asm_label_not_treated_as_extern_c() -> (
+    None
+):
     """Codex review, fresh evidence, empirically verified against a real
     Clang 18 install (``void foo() asm("_foo");`` under
     ``--target=x86_64-apple-darwin`` reports both a literal ``mangledName``
@@ -488,7 +490,9 @@ def test_parse_functions_explicit_single_underscore_asm_label_not_treated_as_ext
     assert fn.entity_id.extra == ("mangled", "_foo")
 
 
-def test_parse_variables_explicit_single_underscore_asm_label_not_treated_as_extern_c() -> None:
+def test_parse_variables_explicit_single_underscore_asm_label_not_treated_as_extern_c() -> (
+    None
+):
     """The variable-level sibling of the function case above."""
     root = _tu(
         {
@@ -595,9 +599,7 @@ def test_parse_functions_mangled_field_unaffected_off_darwin() -> None:
     assert fn.entity_id.extra == ("mangled", "__ZN1n3fooEv")
 
 
-def test_parse_functions_mangled_field_unaffected_when_no_mangled_name_at_all() -> (
-    None
-):
+def test_parse_functions_mangled_field_unaffected_when_no_mangled_name_at_all() -> None:
     """The strip is gated on ``raw_mangled is not None`` -- a declaration
     that fell back to its bare source ``name`` (e.g. an uninstantiated
     function template, which carries no ``mangledName`` key at all) must

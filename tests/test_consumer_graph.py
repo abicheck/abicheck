@@ -110,9 +110,15 @@ def _library_graph(
         )
     )
     g.add_node(
-        GraphNode(id=_symbol_node_id(_DISPATCHER), kind="binary_symbol", label=_DISPATCHER)
+        GraphNode(
+            id=_symbol_node_id(_DISPATCHER), kind="binary_symbol", label=_DISPATCHER
+        )
     )
-    g.add_node(GraphNode(id=_symbol_node_id("_Z5trainv"), kind="binary_symbol", label="_Z5trainv"))
+    g.add_node(
+        GraphNode(
+            id=_symbol_node_id("_Z5trainv"), kind="binary_symbol", label="_Z5trainv"
+        )
+    )
     g.add_edge(
         GraphEdge(
             src="decl://train",
@@ -167,7 +173,9 @@ def test_build_consumer_graph_emits_requirement_edges() -> None:
     assert g.has_node(consumer)
     reqs = {e.dst for e in g.edges if e.kind == "CONSUMER_REQUIRES_SYMBOL"}
     assert reqs == {symbol_node_id(_DISPATCHER), symbol_node_id("_Z5trainv")}
-    assert all(e.src == consumer for e in g.edges if e.kind == "CONSUMER_REQUIRES_SYMBOL")
+    assert all(
+        e.src == consumer for e in g.edges if e.kind == "CONSUMER_REQUIRES_SYMBOL"
+    )
     assert {n.provenance for n in g.nodes} == {CONSUMER_PROVENANCE}
 
 
@@ -234,9 +242,7 @@ def test_join_does_not_mutate_the_library_graph() -> None:
     # leave the library's own symbol node carrying the consumer's fact while
     # every count stayed identical.
     assert CONSUMER_PROVENANCE not in {f.producer for f in lib_symbol.facts}
-    joined_symbol = next(
-        n for n in joined.nodes if n.id == symbol_node_id(_DISPATCHER)
-    )
+    joined_symbol = next(n for n in joined.nodes if n.id == symbol_node_id(_DISPATCHER))
     assert joined_symbol is not lib_symbol
 
 
@@ -381,9 +387,7 @@ def test_explain_returns_nothing_when_no_entry_reaches_the_declaration() -> None
     """Entries exist and the symbol has a declaration, but nothing public
     reaches it — an honest "no explanation", not a fabricated one."""
     library = _library_graph()
-    library.edges[:] = [
-        e for e in library.edges if e.kind != "DECL_CALLS_DECL"
-    ]
+    library.edges[:] = [e for e in library.edges if e.kind != "DECL_CALLS_DECL"]
     joined = join_consumer_graph(
         library, build_consumer_graph("app", _reqs(_DISPATCHER))
     )
@@ -448,11 +452,19 @@ def test_explain_prefers_one_entry_and_keeps_the_rest_as_alternatives() -> None:
         )
     )
     library.add_node(
-        GraphNode(id="decl://mid", kind="source_decl", label="mid", attrs={"visibility": "source"})
+        GraphNode(
+            id="decl://mid",
+            kind="source_decl",
+            label="mid",
+            attrs={"visibility": "source"},
+        )
     )
     library.add_edge(
         GraphEdge(
-            src="decl://train2", dst="decl://mid", kind="DECL_CALLS_DECL", confidence="high"
+            src="decl://train2",
+            dst="decl://mid",
+            kind="DECL_CALLS_DECL",
+            confidence="high",
         )
     )
     library.add_edge(
@@ -539,7 +551,9 @@ def test_only_the_endpoint_counts_for_tier_one() -> None:
     node_by_id = {n.id: n for n in joined.nodes}
     required = _consumer_required_nodes(joined)
     call = next(
-        e for e in joined.edges if e.src == "decl://train" and e.dst == "decl://dispatcher"
+        e
+        for e in joined.edges
+        if e.src == "decl://train" and e.dst == "decl://dispatcher"
     )
     mapping = next(
         e
@@ -550,8 +564,7 @@ def test_only_the_endpoint_counts_for_tier_one() -> None:
     continuation = next(e for e in joined.edges if e.dst == "decl://elsewhere")
     # Ends *at* the required symbol -> consumer-proven.
     assert (
-        _graph_path_tier(node_by_id, [call, mapping], required)
-        == _TIER_CONSUMER_PROVEN
+        _graph_path_tier(node_by_id, [call, mapping], required) == _TIER_CONSUMER_PROVEN
     )
     # Passes *through* it and continues elsewhere -> not consumer-proven.
     assert (
@@ -596,15 +609,25 @@ def test_select_preferred_graph_path_prefers_the_consumer_proven_candidate() -> 
         _library_graph(), build_consumer_graph("app", _reqs(_DISPATCHER))
     )
     joined.add_node(
-        GraphNode(id="decl://other", kind="source_decl", label="other", attrs={"visibility": "source"})
+        GraphNode(
+            id="decl://other",
+            kind="source_decl",
+            label="other",
+            attrs={"visibility": "source"},
+        )
     )
     joined.add_edge(
         GraphEdge(
-            src="decl://train", dst="decl://other", kind="DECL_CALLS_DECL", confidence="high"
+            src="decl://train",
+            dst="decl://other",
+            kind="DECL_CALLS_DECL",
+            confidence="high",
         )
     )
     call = next(
-        e for e in joined.edges if e.src == "decl://train" and e.dst == "decl://dispatcher"
+        e
+        for e in joined.edges
+        if e.src == "decl://train" and e.dst == "decl://dispatcher"
     )
     mapping = next(
         e
@@ -612,9 +635,7 @@ def test_select_preferred_graph_path_prefers_the_consumer_proven_candidate() -> 
         if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
         and e.dst == symbol_node_id(_DISPATCHER)
     )
-    short_but_unproven = [
-        next(e for e in joined.edges if e.dst == "decl://other")
-    ]
+    short_but_unproven = [next(e for e in joined.edges if e.dst == "decl://other")]
     long_but_proven = [call, mapping]
     picked = select_preferred_graph_path(joined, [short_but_unproven, long_but_proven])
     assert picked is long_but_proven
@@ -628,9 +649,7 @@ class TestScopeDiffToAppConsumerImpact:
     overlay picks up the join's answer, and is byte-for-byte unchanged when
     there is no graph to join against."""
 
-    def _snapshots(
-        self, *, with_graph: bool
-    ) -> tuple[AbiSnapshot, AbiSnapshot]:
+    def _snapshots(self, *, with_graph: bool) -> tuple[AbiSnapshot, AbiSnapshot]:
         old = AbiSnapshot(
             library="libtrain.so.1",
             version="1.0",
@@ -652,9 +671,7 @@ class TestScopeDiffToAppConsumerImpact:
         )
         return old, new
 
-    def _run(
-        self, tmp_path: Path, *, with_graph: bool, old_as_path: bool = False
-    ):
+    def _run(self, tmp_path: Path, *, with_graph: bool, old_as_path: bool = False):
         old, new = self._snapshots(with_graph=with_graph)
         diff = DiffResult(
             old_version="1.0",
@@ -673,11 +690,13 @@ class TestScopeDiffToAppConsumerImpact:
             old_operand = tmp_path / "libtrain.so.1"
             old_operand.write_bytes(b"\x7fELF" + b"\x00" * 100)
             old_snapshot = old
-        with patch(
-            "abicheck.appcompat.parse_app_requirements", return_value=reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"), patch(
-            "abicheck.appcompat._lib_elf_meta",
-            side_effect=lambda lib: old.elf if lib is old_operand else new.elf,
+        with (
+            patch("abicheck.appcompat.parse_app_requirements", return_value=reqs),
+            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
+            patch(
+                "abicheck.appcompat._lib_elf_meta",
+                side_effect=lambda lib: old.elf if lib is old_operand else new.elf,
+            ),
         ):
             result = scope_diff_to_app(
                 diff,
@@ -723,7 +742,9 @@ class TestScopeDiffToAppConsumerImpact:
         assert assessment.proof_path is not None
         assert assessment.proof_path.root == "train"
         assert assessment.proof_path.target == _DISPATCHER
-        assert [s.kind for s in assessment.proof_path.steps if s.step_type == "edge"] == [
+        assert [
+            s.kind for s in assessment.proof_path.steps if s.step_type == "edge"
+        ] == [
             "DECL_CALLS_DECL",
             "SOURCE_DECL_MAPS_TO_SYMBOL",
         ]
@@ -816,12 +837,11 @@ class TestCoveredChangeEnrichment:
             verdict=Verdict.BREAKING,
         )
         reqs = AppRequirements(undefined_symbols={"_Z5trainv", _DISPATCHER})
-        with patch(
-            "abicheck.appcompat.parse_app_requirements", return_value=reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
-            result = scope_diff_to_app(
-                diff, tmp_path / "training-service", old, new
-            )
+        with (
+            patch("abicheck.appcompat.parse_app_requirements", return_value=reqs),
+            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
+        ):
+            result = scope_diff_to_app(diff, tmp_path / "training-service", old, new)
         return result, removed
 
     def test_the_existing_removal_finding_gets_the_proof_path(
@@ -862,9 +882,7 @@ class TestCoveredChangeEnrichment:
         assert removed.impact_proof_path is None
         assert removed.affected_public_roots is None
 
-    def test_enrichment_changes_no_verdict_or_finding_set(
-        self, tmp_path: Path
-    ) -> None:
+    def test_enrichment_changes_no_verdict_or_finding_set(self, tmp_path: Path) -> None:
         result, removed = self._run(tmp_path)
         assert result.verdict == Verdict.BREAKING
         assert [c.kind for c in result.breaking_for_app] == [ChangeKind.FUNC_REMOVED]
@@ -903,9 +921,10 @@ class TestDirectRequirementAndFallthroughs:
             verdict=Verdict.BREAKING,
         )
         reqs = AppRequirements(undefined_symbols={"_Z5trainv"})
-        with patch(
-            "abicheck.appcompat.parse_app_requirements", return_value=reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+        with (
+            patch("abicheck.appcompat.parse_app_requirements", return_value=reqs),
+            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
+        ):
             return scope_diff_to_app(diff, tmp_path / "training-service", old, new)
 
     def test_direct_requirement_overlay_names_the_consumer(
@@ -970,9 +989,10 @@ class TestDirectRequirementAndFallthroughs:
             verdict=Verdict.BREAKING,
         )
         reqs = AppRequirements(undefined_symbols={"_Z5trainv", "_Z4noopv"})
-        with patch(
-            "abicheck.appcompat.parse_app_requirements", return_value=reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+        with (
+            patch("abicheck.appcompat.parse_app_requirements", return_value=reqs),
+            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
+        ):
             scope_diff_to_app(diff, tmp_path / "training-service", old, new)
         assert explainable.reachability_proof_path is not None
         assert opaque.reachability_proof_path is None

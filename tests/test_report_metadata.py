@@ -22,7 +22,10 @@ from abicheck.reporter import to_json, to_markdown
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _meta(path: str = "/lib/libfoo.so", sha: str = "abc123def456", size: int = 4096) -> LibraryMetadata:
+
+def _meta(
+    path: str = "/lib/libfoo.so", sha: str = "abc123def456", size: int = 4096
+) -> LibraryMetadata:
     return LibraryMetadata(path=path, sha256=sha, size_bytes=size)
 
 
@@ -48,6 +51,7 @@ def _result(
 # LibraryMetadata dataclass
 # ---------------------------------------------------------------------------
 
+
 class TestLibraryMetadata:
     def test_fields(self):
         m = _meta("/usr/lib/libbar.so", "deadbeef", 8192)
@@ -64,6 +68,7 @@ class TestLibraryMetadata:
 # ---------------------------------------------------------------------------
 # JSON format
 # ---------------------------------------------------------------------------
+
 
 class TestJsonMetadata:
     def test_no_metadata_null_values(self):
@@ -112,13 +117,19 @@ class TestJsonImpact:
         assert len(change["impact"]) > 0
 
     def test_source_location_in_change(self):
-        c = Change(ChangeKind.FUNC_REMOVED, "foo", "removed", source_location="foo.h:42")
+        c = Change(
+            ChangeKind.FUNC_REMOVED, "foo", "removed", source_location="foo.h:42"
+        )
         d = json.loads(to_json(_result(changes=[c])))
         assert d["changes"][0]["source_location"] == "foo.h:42"
 
     def test_affected_symbols_in_change(self):
-        c = Change(ChangeKind.TYPE_SIZE_CHANGED, "MyStruct", "size changed",
-                   affected_symbols=["func_a", "func_b"])
+        c = Change(
+            ChangeKind.TYPE_SIZE_CHANGED,
+            "MyStruct",
+            "size changed",
+            affected_symbols=["func_a", "func_b"],
+        )
         d = json.loads(to_json(_result(changes=[c])))
         assert d["changes"][0]["affected_symbols"] == ["func_a", "func_b"]
 
@@ -136,12 +147,15 @@ class TestJsonImpact:
 class TestJsonDetectorTrimming:
     def test_zero_count_detectors_excluded(self):
         from abicheck.detectors import DetectorResult
+
         r = _result(verdict=Verdict.NO_CHANGE)
         r.detector_results = [
             DetectorResult(name="functions", changes_count=0, enabled=True),
             DetectorResult(name="types", changes_count=3, enabled=True),
             DetectorResult(name="elf", changes_count=0, enabled=True),
-            DetectorResult(name="dwarf", changes_count=0, enabled=False, coverage_gap="missing"),
+            DetectorResult(
+                name="dwarf", changes_count=0, enabled=False, coverage_gap="missing"
+            ),
         ]
         d = json.loads(to_json(r))
         names = [det["name"] for det in d["detectors"]]
@@ -154,6 +168,7 @@ class TestJsonDetectorTrimming:
 # ---------------------------------------------------------------------------
 # Markdown format
 # ---------------------------------------------------------------------------
+
 
 class TestMarkdownMetadata:
     def test_no_metadata_no_section(self):
@@ -183,7 +198,9 @@ class TestMarkdownMetadata:
         assert "2.0 KB" in md
 
     def test_size_formatting_mb(self):
-        r = _result(old_meta=_meta(size=2 * 1024 * 1024), new_meta=_meta(size=2 * 1024 * 1024))
+        r = _result(
+            old_meta=_meta(size=2 * 1024 * 1024), new_meta=_meta(size=2 * 1024 * 1024)
+        )
         md = to_markdown(r)
         assert "2.0 MB" in md
 
@@ -196,14 +213,21 @@ class TestMarkdownEnrichments:
         assert "> " in md
 
     def test_source_location_shown(self):
-        c = Change(ChangeKind.FUNC_REMOVED, "foo", "removed", source_location="header.h:10")
+        c = Change(
+            ChangeKind.FUNC_REMOVED, "foo", "removed", source_location="header.h:10"
+        )
         md = to_markdown(_result(changes=[c]))
         assert "`header.h:10`" in md
 
     def test_affected_symbols_shown(self):
-        c = Change(ChangeKind.TYPE_SIZE_CHANGED, "MyStruct", "size changed",
-                   old_value="8", new_value="16",
-                   affected_symbols=["api_create", "api_destroy"])
+        c = Change(
+            ChangeKind.TYPE_SIZE_CHANGED,
+            "MyStruct",
+            "size changed",
+            old_value="8",
+            new_value="16",
+            affected_symbols=["api_create", "api_destroy"],
+        )
         md = to_markdown(_result(changes=[c]))
         assert "Affected symbols" in md
         assert "`api_create`" in md
@@ -220,9 +244,11 @@ class TestMarkdownEnrichments:
 # SARIF format
 # ---------------------------------------------------------------------------
 
+
 class TestSarifMetadata:
     def test_no_metadata_no_keys(self):
         from abicheck.sarif import to_sarif
+
         r = _result()
         sarif = to_sarif(r)
         props = sarif["runs"][0]["properties"]
@@ -231,6 +257,7 @@ class TestSarifMetadata:
 
     def test_metadata_in_properties(self):
         from abicheck.sarif import to_sarif
+
         r = _result(
             old_meta=_meta("/old.so", "sha_old", 1024),
             new_meta=_meta("/new.so", "sha_new", 2048),
@@ -246,6 +273,7 @@ class TestSarifMetadata:
 
     def test_impact_in_rule_description(self):
         from abicheck.sarif import to_sarif
+
         c = Change(ChangeKind.FUNC_REMOVED, "foo", "removed")
         r = _result(changes=[c])
         sarif = to_sarif(r)
@@ -255,7 +283,10 @@ class TestSarifMetadata:
 
     def test_source_location_in_result(self):
         from abicheck.sarif import to_sarif
-        c = Change(ChangeKind.FUNC_REMOVED, "foo", "removed", source_location="api.h:99")
+
+        c = Change(
+            ChangeKind.FUNC_REMOVED, "foo", "removed", source_location="api.h:99"
+        )
         r = _result(changes=[c])
         sarif = to_sarif(r)
         loc = sarif["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
@@ -264,8 +295,13 @@ class TestSarifMetadata:
 
     def test_affected_symbols_in_result_properties(self):
         from abicheck.sarif import to_sarif
-        c = Change(ChangeKind.TYPE_SIZE_CHANGED, "S", "changed",
-                   affected_symbols=["fn_a", "fn_b"])
+
+        c = Change(
+            ChangeKind.TYPE_SIZE_CHANGED,
+            "S",
+            "changed",
+            affected_symbols=["fn_a", "fn_b"],
+        )
         r = _result(changes=[c])
         sarif = to_sarif(r)
         props = sarif["runs"][0]["results"][0]["properties"]
@@ -276,15 +312,18 @@ class TestSarifMetadata:
 # HTML format
 # ---------------------------------------------------------------------------
 
+
 class TestHtmlMetadata:
     def test_no_metadata_no_table(self):
         from abicheck.html_report import generate_html_report
+
         r = _result(verdict=Verdict.NO_CHANGE, changes=[])
         html = generate_html_report(r)
         assert "Library Files" not in html
 
     def test_metadata_table_present(self):
         from abicheck.html_report import generate_html_report
+
         r = _result(
             verdict=Verdict.NO_CHANGE,
             changes=[],
@@ -301,6 +340,7 @@ class TestHtmlMetadata:
 
     def test_compat_html_metadata(self):
         from abicheck.html_report import generate_html_report
+
         r = _result(
             verdict=Verdict.NO_CHANGE,
             changes=[],
@@ -316,6 +356,7 @@ class TestHtmlMetadata:
 class TestHtmlEnrichments:
     def test_impact_in_html(self):
         from abicheck.html_report import generate_html_report
+
         c = Change(ChangeKind.FUNC_REMOVED, "foo", "Public function removed: foo")
         r = _result(changes=[c])
         html = generate_html_report(r)
@@ -324,8 +365,13 @@ class TestHtmlEnrichments:
 
     def test_affected_symbols_in_html(self):
         from abicheck.html_report import generate_html_report
-        c = Change(ChangeKind.TYPE_SIZE_CHANGED, "S", "size changed",
-                   affected_symbols=["api_call"])
+
+        c = Change(
+            ChangeKind.TYPE_SIZE_CHANGED,
+            "S",
+            "size changed",
+            affected_symbols=["api_call"],
+        )
         r = _result(changes=[c])
         html = generate_html_report(r)
         assert "📎" in html
@@ -333,7 +379,10 @@ class TestHtmlEnrichments:
 
     def test_source_location_in_html(self):
         from abicheck.html_report import generate_html_report
-        c = Change(ChangeKind.FUNC_REMOVED, "foo", "removed", source_location="foo.h:42")
+
+        c = Change(
+            ChangeKind.FUNC_REMOVED, "foo", "removed", source_location="foo.h:42"
+        )
         r = _result(changes=[c])
         html = generate_html_report(r)
         assert "📍" in html
@@ -344,9 +393,11 @@ class TestHtmlEnrichments:
 # CLI metadata collection
 # ---------------------------------------------------------------------------
 
+
 class TestCliMetadataCollection:
     def test_collect_metadata(self):
         from abicheck.frontends.cli.runtime import _collect_metadata
+
         with tempfile.NamedTemporaryFile(suffix=".so", delete=False) as f:
             f.write(b"fake ELF content for testing")
             f.flush()
@@ -363,6 +414,7 @@ class TestCliMetadataCollection:
 
     def test_collect_metadata_large_file(self):
         from abicheck.frontends.cli.runtime import _collect_metadata
+
         content = b"x" * 100_000
         with tempfile.NamedTemporaryFile(suffix=".so", delete=False) as f:
             f.write(content)
@@ -381,6 +433,7 @@ class TestCliMetadataCollection:
 # Deduplication
 # ---------------------------------------------------------------------------
 
+
 class TestDeduplication:
     def test_ast_dwarf_dedup(self):
         """DWARF findings that duplicate AST findings are removed."""
@@ -390,10 +443,20 @@ class TestDeduplication:
         # STRUCT_SIZE_CHANGED (DWARF tier) is byte-based (DW_AT_byte_size) --
         # 8/16 bytes == 64/128 bits, a genuinely identical transition.
         changes = [
-            Change(ChangeKind.TYPE_SIZE_CHANGED, "MyStruct", "Type size changed: MyStruct (64 → 128)",
-                   old_value="64", new_value="128"),
-            Change(ChangeKind.STRUCT_SIZE_CHANGED, "MyStruct", "Type size changed: MyStruct (8 → 16)",
-                   old_value="8", new_value="16"),
+            Change(
+                ChangeKind.TYPE_SIZE_CHANGED,
+                "MyStruct",
+                "Type size changed: MyStruct (64 → 128)",
+                old_value="64",
+                new_value="128",
+            ),
+            Change(
+                ChangeKind.STRUCT_SIZE_CHANGED,
+                "MyStruct",
+                "Type size changed: MyStruct (8 → 16)",
+                old_value="8",
+                new_value="16",
+            ),
         ]
         result = _deduplicate_ast_dwarf(changes)
         assert len(result) == 1
@@ -408,13 +471,23 @@ class TestDeduplication:
         from abicheck.checker import _deduplicate_ast_dwarf
 
         changes = [
-            Change(ChangeKind.TYPE_SIZE_CHANGED, "MyStruct", "Type size changed: MyStruct (64 → 128)",
-                   old_value="64", new_value="128"),
+            Change(
+                ChangeKind.TYPE_SIZE_CHANGED,
+                "MyStruct",
+                "Type size changed: MyStruct (64 → 128)",
+                old_value="64",
+                new_value="128",
+            ),
             # DWARF reports 64 -> 96 bits (8 -> 12 bytes) -- a real
             # disagreement with the AST finding's 64 -> 128, not a
             # duplicate.
-            Change(ChangeKind.STRUCT_SIZE_CHANGED, "MyStruct", "Type size changed: MyStruct (8 → 12)",
-                   old_value="8", new_value="12"),
+            Change(
+                ChangeKind.STRUCT_SIZE_CHANGED,
+                "MyStruct",
+                "Type size changed: MyStruct (8 → 12)",
+                old_value="8",
+                new_value="12",
+            ),
         ]
         result = _deduplicate_ast_dwarf(changes)
         assert len(result) == 2
@@ -429,12 +502,22 @@ class TestDeduplication:
         from abicheck.checker import _deduplicate_ast_dwarf
 
         changes = [
-            Change(ChangeKind.TYPE_FIELD_TYPE_CHANGED, "S::a",
-                   "Field type changed: S::a", old_value="Foo", new_value="Bar"),
+            Change(
+                ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+                "S::a",
+                "Field type changed: S::a",
+                old_value="Foo",
+                new_value="Bar",
+            ),
             # DWARF says both sides are pointers -- a real disagreement
             # with the header's by-value Foo -> Bar, not a duplicate.
-            Change(ChangeKind.STRUCT_FIELD_TYPE_CHANGED, "S::a",
-                   "Field type changed: S::a", old_value="Foo *", new_value="Bar *"),
+            Change(
+                ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+                "S::a",
+                "Field type changed: S::a",
+                old_value="Foo *",
+                new_value="Bar *",
+            ),
         ]
         result = _deduplicate_ast_dwarf(changes)
         assert len(result) == 2
@@ -446,16 +529,27 @@ class TestDeduplication:
         from abicheck.checker import _deduplicate_ast_dwarf
 
         changes = [
-            Change(ChangeKind.TYPE_FIELD_TYPE_CHANGED, "S::a",
-                   "Field type changed: S::a", old_value="Foo", new_value="Bar"),
-            Change(ChangeKind.STRUCT_FIELD_TYPE_CHANGED, "S::a",
-                   "Field type changed: S::a",
-                   old_value="struct Foo", new_value="struct Bar"),
+            Change(
+                ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+                "S::a",
+                "Field type changed: S::a",
+                old_value="Foo",
+                new_value="Bar",
+            ),
+            Change(
+                ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+                "S::a",
+                "Field type changed: S::a",
+                old_value="struct Foo",
+                new_value="struct Bar",
+            ),
         ]
         result = _deduplicate_ast_dwarf(changes)
         assert len(result) == 1
 
-    def test_field_type_transition_agreeing_modulo_indirection_whitespace_still_deduped(self):
+    def test_field_type_transition_agreeing_modulo_indirection_whitespace_still_deduped(
+        self,
+    ):
         """Codex review, fresh evidence: preserving `*`/`&` for the
         indirection fix above still needs their surrounding whitespace
         normalized, or a pure extractor-spelling difference ("Foo*" vs
@@ -464,11 +558,20 @@ class TestDeduplication:
         from abicheck.checker import _deduplicate_ast_dwarf
 
         changes = [
-            Change(ChangeKind.TYPE_FIELD_TYPE_CHANGED, "S::a",
-                   "Field type changed: S::a", old_value="Foo*", new_value="Bar*"),
-            Change(ChangeKind.STRUCT_FIELD_TYPE_CHANGED, "S::a",
-                   "Field type changed: S::a",
-                   old_value="struct Foo * ", new_value="struct Bar * "),
+            Change(
+                ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+                "S::a",
+                "Field type changed: S::a",
+                old_value="Foo*",
+                new_value="Bar*",
+            ),
+            Change(
+                ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+                "S::a",
+                "Field type changed: S::a",
+                old_value="struct Foo * ",
+                new_value="struct Bar * ",
+            ),
         ]
         result = _deduplicate_ast_dwarf(changes)
         assert len(result) == 1
@@ -523,11 +626,21 @@ class TestDeduplication:
 
         changes = [
             # AST found offset change for field S::a
-            Change(ChangeKind.TYPE_FIELD_OFFSET_CHANGED, "S::a",
-                   "Field offset changed: S::a (0 → 8)", old_value="0", new_value="8"),
+            Change(
+                ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+                "S::a",
+                "Field offset changed: S::a (0 → 8)",
+                old_value="0",
+                new_value="8",
+            ),
             # DWARF found offset change for field S::b — different field, must keep
-            Change(ChangeKind.STRUCT_FIELD_OFFSET_CHANGED, "S::b",
-                   "Field offset changed: S::b (8 → 16)", old_value="8", new_value="16"),
+            Change(
+                ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+                "S::b",
+                "Field offset changed: S::b (8 → 16)",
+                old_value="8",
+                new_value="16",
+            ),
         ]
         result = _deduplicate_ast_dwarf(changes)
         assert len(result) == 2
@@ -543,10 +656,20 @@ class TestDeduplication:
         # STRUCT_FIELD_OFFSET_CHANGED (DWARF tier) is byte-based
         # (byte_offset) -- 0/8 bytes == 0/64 bits.
         changes = [
-            Change(ChangeKind.TYPE_FIELD_OFFSET_CHANGED, "S::a",
-                   "Field offset changed: S::a (0 → 64)", old_value="0", new_value="64"),
-            Change(ChangeKind.STRUCT_FIELD_OFFSET_CHANGED, "S::a",
-                   "Field offset changed: S::a (0 → 8)", old_value="0", new_value="8"),
+            Change(
+                ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+                "S::a",
+                "Field offset changed: S::a (0 → 64)",
+                old_value="0",
+                new_value="64",
+            ),
+            Change(
+                ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+                "S::a",
+                "Field offset changed: S::a (0 → 8)",
+                old_value="0",
+                new_value="8",
+            ),
         ]
         result = _deduplicate_ast_dwarf(changes)
         assert len(result) == 1
@@ -558,11 +681,21 @@ class TestDeduplication:
         from abicheck.checker import _deduplicate_ast_dwarf
 
         changes = [
-            Change(ChangeKind.TYPE_FIELD_OFFSET_CHANGED, "S::a",
-                   "Field offset changed: S::a (0 → 64)", old_value="0", new_value="64"),
+            Change(
+                ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+                "S::a",
+                "Field offset changed: S::a (0 → 64)",
+                old_value="0",
+                new_value="64",
+            ),
             # DWARF reports 0 -> 4 bytes (32 bits), not 0 -> 8 bytes (64 bits).
-            Change(ChangeKind.STRUCT_FIELD_OFFSET_CHANGED, "S::a",
-                   "Field offset changed: S::a (0 → 4)", old_value="0", new_value="4"),
+            Change(
+                ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+                "S::a",
+                "Field offset changed: S::a (0 → 4)",
+                old_value="0",
+                new_value="4",
+            ),
         ]
         result = _deduplicate_ast_dwarf(changes)
         assert len(result) == 2
@@ -572,27 +705,42 @@ class TestDeduplication:
 # Markdown falsey value handling
 # ---------------------------------------------------------------------------
 
+
 class TestMarkdownFalseyValues:
     def test_zero_old_value_shown(self):
         """old_value='0' (falsey but not None) should be displayed."""
-        c = Change(ChangeKind.TYPE_FIELD_OFFSET_CHANGED, "S::x",
-                   "offset changed", old_value="0", new_value="8")
+        c = Change(
+            ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+            "S::x",
+            "offset changed",
+            old_value="0",
+            new_value="8",
+        )
         md = to_markdown(_result(changes=[c]))
         assert "`0`" in md
         assert "`8`" in md
 
     def test_empty_string_old_value_shown(self):
         """old_value='' (falsey but not None) should be displayed."""
-        c = Change(ChangeKind.FUNC_PARAMS_CHANGED, "foo",
-                   "params changed", old_value="", new_value="int")
+        c = Change(
+            ChangeKind.FUNC_PARAMS_CHANGED,
+            "foo",
+            "params changed",
+            old_value="",
+            new_value="int",
+        )
         md = to_markdown(_result(changes=[c]))
         assert "→" in md
         assert "`int`" in md
 
     def test_new_only_value_shown(self):
         """When old_value is None but new_value has a value, new_value should appear."""
-        c = Change(ChangeKind.FUNC_RETURN_CHANGED, "foo",
-                   "return type changed", new_value="int")
+        c = Change(
+            ChangeKind.FUNC_RETURN_CHANGED,
+            "foo",
+            "return type changed",
+            new_value="int",
+        )
         md = to_markdown(_result(changes=[c]))
         assert "`int`" in md
 
@@ -601,26 +749,38 @@ class TestMarkdownFalseyValues:
 # PolicyEntry.impact populated
 # ---------------------------------------------------------------------------
 
+
 class TestPolicyEntryImpact:
     def test_impact_populated_for_breaking_kinds(self):
         from abicheck.checker_policy import policy_for
+
         entry = policy_for(ChangeKind.FUNC_REMOVED)
         assert entry.impact != ""
-        assert "symbol" in entry.impact.lower() or "crash" in entry.impact.lower() or "linker" in entry.impact.lower()
+        assert (
+            "symbol" in entry.impact.lower()
+            or "crash" in entry.impact.lower()
+            or "linker" in entry.impact.lower()
+        )
 
     def test_impact_populated_for_type_changes(self):
         from abicheck.checker_policy import policy_for
+
         entry = policy_for(ChangeKind.TYPE_SIZE_CHANGED)
         assert entry.impact != ""
 
     def test_impact_matches_impact_for(self):
         from abicheck.checker_policy import impact_for, policy_for
-        for kind in [ChangeKind.FUNC_REMOVED, ChangeKind.TYPE_SIZE_CHANGED,
-                     ChangeKind.ENUM_MEMBER_VALUE_CHANGED]:
+
+        for kind in [
+            ChangeKind.FUNC_REMOVED,
+            ChangeKind.TYPE_SIZE_CHANGED,
+            ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+        ]:
             assert policy_for(kind).impact == impact_for(kind)
 
     def test_compatible_kind_impact(self):
         from abicheck.checker_policy import policy_for
+
         entry = policy_for(ChangeKind.FUNC_ADDED)
         assert entry.impact != ""
         assert "unaffected" in entry.impact.lower()

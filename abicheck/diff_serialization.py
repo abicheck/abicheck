@@ -57,11 +57,13 @@ _TAG_SUFFIX_PATTERNS: tuple[str, ...] = (
     "_tagid",
 )
 
-_TAG_EXACT_LEAVES: frozenset[str] = frozenset({
-    "tag_id",
-    "tagid",
-    "serializationtag",
-})
+_TAG_EXACT_LEAVES: frozenset[str] = frozenset(
+    {
+        "tag_id",
+        "tagid",
+        "serializationtag",
+    }
+)
 
 
 def _looks_like_serialization_tag(name: str) -> bool:
@@ -131,13 +133,15 @@ def detect_serialization_tag_changes(
                 f"{new_val}; persisted data using the old tag id is no "
                 f"longer recognised."
             )
-        findings.append(make_change(
-            ChangeKind.SERIALIZATION_TAG_CHANGED,
-            symbol=name,
-            description=desc,
-            old_value=old_val,
-            new_value=new_val,
-        ))
+        findings.append(
+            make_change(
+                ChangeKind.SERIALIZATION_TAG_CHANGED,
+                symbol=name,
+                description=desc,
+                old_value=old_val,
+                new_value=new_val,
+            )
+        )
     return findings
 
 

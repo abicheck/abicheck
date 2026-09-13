@@ -27,6 +27,7 @@ symlink escapes, absolute paths, and special file types (character/block
 devices, FIFOs).  See ``_validate_member_path()`` and
 ``TarExtractor._safe_extract()`` for the mandatory safety contract.
 """
+
 from __future__ import annotations
 
 import copy
@@ -934,9 +935,7 @@ class DebExtractor:
                     control_tar = candidate
 
             if data_tar is None:
-                raise SnapshotError(
-                    f"No data.tar.* found in Deb package: {deb_path}"
-                )
+                raise SnapshotError(f"No data.tar.* found in Deb package: {deb_path}")
 
             # Extract data.tar.* with security checks
             if data_tar.name.endswith(".tar.zst"):
@@ -1049,7 +1048,13 @@ class CondaExtractor:
         # should degrade to "not detected as this format" the same way
         # a malformed archive already does here, not propagate out of
         # a detection step and abort dispatch to every other detector.
-        except (tarfile.TarError, OSError, EOFError, ValueError, ExtractionSecurityError):
+        except (
+            tarfile.TarError,
+            OSError,
+            EOFError,
+            ValueError,
+            ExtractionSecurityError,
+        ):
             return False
 
     def detect(self, pkg_path: Path) -> bool:
@@ -1087,7 +1092,9 @@ class CondaExtractor:
             for member in staging.iterdir():
                 if member.name.startswith("pkg-") and member.name.endswith(".tar.zst"):
                     CondaExtractor._extract_zst_tar(member, target_dir)
-                elif member.name.startswith("info-") and member.name.endswith(".tar.zst"):
+                elif member.name.startswith("info-") and member.name.endswith(
+                    ".tar.zst"
+                ):
                     # Also extract info for metadata
                     info_dir = target_dir / "info"
                     info_dir.mkdir(exist_ok=True)
@@ -1225,7 +1232,9 @@ _PT_DYNAMIC = 2
 _DT_NULL = 0
 _DT_FLAGS_1 = 0x6FFFFFFB
 _DF_1_PIE = 0x08000000
-_SO_NAME_RE = re.compile(r"^(?P<stem>.+)\.so(?P<version>(?:\.[A-Za-z0-9]+)*)$", re.IGNORECASE)
+_SO_NAME_RE = re.compile(
+    r"^(?P<stem>.+)\.so(?P<version>(?:\.[A-Za-z0-9]+)*)$", re.IGNORECASE
+)
 _NUMERIC_SO_VERSION_RE = re.compile(r"(?:\.\d+)+$")
 _ALNUM_SO_VERSION_RE = re.compile(r"(?:\.[A-Za-z0-9]+)+$")
 
@@ -1284,7 +1293,9 @@ def _has_interp_segment(f: IO[bytes], ei_class: int, byte_order: str) -> bool | 
         return None
 
 
-def _find_pt_dynamic(f: IO[bytes], ei_class: int, byte_order: str) -> tuple[int, int] | None:
+def _find_pt_dynamic(
+    f: IO[bytes], ei_class: int, byte_order: str
+) -> tuple[int, int] | None:
     """Return (p_offset, p_filesz) of the PT_DYNAMIC segment, or None if
     absent or the program header table is malformed/untrustworthy."""
     try:
@@ -1440,7 +1451,14 @@ def discover_shared_libraries(
         include_private: If True, include DSOs from non-standard paths
             (e.g. private plugin directories).
     """
-    _PUBLIC_LIB_DIRS = {"lib", "lib64", "usr/lib", "usr/lib64", "usr/local/lib", "usr/local/lib64"}
+    _PUBLIC_LIB_DIRS = {
+        "lib",
+        "lib64",
+        "usr/lib",
+        "usr/lib64",
+        "usr/local/lib",
+        "usr/local/lib64",
+    }
 
     libraries: list[Path] = []
     for dirpath, _dirnames, filenames in os.walk(extract_dir, followlinks=False):
@@ -1634,7 +1652,9 @@ def resolve_debug_info(
                 mirrored = search_root.joinpath(*binary_parts[i:])
                 debug_candidate = mirrored.parent / f"{mirrored.name}.debug"
                 if debug_candidate.exists():
-                    _log.debug("Debug info resolved via path mirror: %s", debug_candidate)
+                    _log.debug(
+                        "Debug info resolved via path mirror: %s", debug_candidate
+                    )
                     return debug_candidate
 
     # Strategy 3: basename rglob with disambiguation
@@ -1658,7 +1678,8 @@ def resolve_debug_info(
             if cand_bid == build_id:
                 _log.debug(
                     "Debug info resolved via build-id match among %d candidates: %s",
-                    len(candidates), candidate,
+                    len(candidates),
+                    candidate,
                 )
                 return candidate
 
@@ -1675,7 +1696,8 @@ def resolve_debug_info(
 
     _log.debug(
         "Debug info resolved via path similarity among %d candidates: %s",
-        len(candidates), best,
+        len(candidates),
+        best,
     )
     return best
 
@@ -1687,6 +1709,7 @@ def _read_build_id(binary_path: Path) -> str | None:
     """
     try:
         from elftools.elf.elffile import ELFFile
+
         with open(binary_path, "rb") as f:
             elf = ELFFile(f)
             for section in elf.iter_sections():

@@ -59,6 +59,7 @@ def _elf_snapshot(
 
 def _breaking_symbols(result) -> set[str]:
     from abicheck.checker_policy import BREAKING_KINDS
+
     return {c.symbol for c in result.changes if c.kind in BREAKING_KINDS}
 
 
@@ -104,12 +105,22 @@ def test_lambda_rtti_removal_is_not_breaking():
 def test_public_type_rtti_removal_is_still_breaking():
     """Guard against over-filtering: typeinfo/vtable of a NON-local (public,
     nameable) type must still count as a break when removed (RD2-4)."""
-    public_rtti = "_ZTIN3foo3BarE"   # typeinfo for foo::Bar (not function-local)
+    public_rtti = "_ZTIN3foo3BarE"  # typeinfo for foo::Bar (not function-local)
     public_vtable = "_ZTVN3foo3BarE"  # vtable for foo::Bar
     old = _elf_snapshot(
         variables=[
-            Variable(name=public_rtti, mangled=public_rtti, type="?", visibility=Visibility.ELF_ONLY),
-            Variable(name=public_vtable, mangled=public_vtable, type="?", visibility=Visibility.ELF_ONLY),
+            Variable(
+                name=public_rtti,
+                mangled=public_rtti,
+                type="?",
+                visibility=Visibility.ELF_ONLY,
+            ),
+            Variable(
+                name=public_vtable,
+                mangled=public_vtable,
+                type="?",
+                visibility=Visibility.ELF_ONLY,
+            ),
         ]
     )
     new = _elf_snapshot(variables=[])
@@ -195,12 +206,16 @@ def test_anonymous_type_removal_is_not_breaking():
 # ---------------------------------------------------------------------------
 def _exported_func(mangled: str):
     from abicheck.model import Function
-    return Function(name=mangled, mangled=mangled, return_type="?",
-                    visibility=Visibility.ELF_ONLY)
+
+    return Function(
+        name=mangled, mangled=mangled, return_type="?", visibility=Visibility.ELF_ONLY
+    )
 
 
 def _elf_exports(*names: str, sym_type: SymbolType = SymbolType.FUNC) -> ElfMetadata:
-    return ElfMetadata(symbols=[ElfSymbol(name=name, sym_type=sym_type) for name in names])
+    return ElfMetadata(
+        symbols=[ElfSymbol(name=name, sym_type=sym_type) for name in names]
+    )
 
 
 def test_stripped_new_side_does_not_fabricate_type_removals():
@@ -231,6 +246,7 @@ def test_stripped_new_side_does_not_fabricate_type_removals():
         f"removals; breaking symbols: {_breaking_symbols(result)}"
     )
     from abicheck.checker_policy import ChangeKind
+
     assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes)
     assert not any(c.kind == ChangeKind.TYPEDEF_REMOVED for c in result.changes)
 
@@ -273,8 +289,7 @@ def test_semantic_ir_only_typedef_evidence_still_confirms_a_real_removal():
 
     result = compare(old, new)
     assert any(
-        c.kind == ChangeKind.TYPEDEF_REMOVED and c.symbol == "B"
-        for c in result.changes
+        c.kind == ChangeKind.TYPEDEF_REMOVED and c.symbol == "B" for c in result.changes
     ), (
         "a typedef genuinely absent from the new side's real SemanticIR must "
         f"still be reported as removed; changes: "
@@ -287,8 +302,12 @@ def test_real_removal_still_reported_when_symbols_also_dropped():
     removed type's exported methods are also gone, symbol retention is low and
     the removal is real (validation RD2-5; examples/case107)."""
     from abicheck.checker_policy import BREAKING_KINDS
+
     old = _elf_snapshot(
-        functions=[_exported_func("_ZN5mylib3Foo3barEv"), _exported_func("_ZN5mylib3FooC1Ev")],
+        functions=[
+            _exported_func("_ZN5mylib3Foo3barEv"),
+            _exported_func("_ZN5mylib3FooC1Ev"),
+        ],
         types=[RecordType(name="mylib::Foo", kind="class", size_bits=64)],
     )
     # new: class and ALL its methods gone (retention 0%), only a new free fn.
@@ -309,11 +328,16 @@ def test_stripped_suppression_counts_only_exported_functions():
     (Codex review on PR #275)."""
     from abicheck.checker_policy import ChangeKind
     from abicheck.model import Function
+
     exported = [_exported_func("xmlNewNode"), _exported_func("xmlFreeDoc")]
     # old: 2 exported + many internal (HIDDEN) DWARF subprograms + rich types.
     internal = [
-        Function(name=f"__internal_{i}", mangled=f"__internal_{i}",
-                 return_type="void", visibility=Visibility.HIDDEN)
+        Function(
+            name=f"__internal_{i}",
+            mangled=f"__internal_{i}",
+            return_type="void",
+            visibility=Visibility.HIDDEN,
+        )
         for i in range(50)
     ]
     old = _elf_snapshot(
@@ -466,7 +490,11 @@ def test_function_diff_prefers_elf_exports_over_dwarf_public_helpers():
                 visibility=Visibility.PUBLIC,
             ),
         ],
-        types=[RecordType(name="tbb::detail::d0::atomic_backoff", kind="class", size_bits=64)],
+        types=[
+            RecordType(
+                name="tbb::detail::d0::atomic_backoff", kind="class", size_bits=64
+            )
+        ],
     )
     old.elf = _elf_exports("stable_api")
     old.elf_only_mode = False
@@ -486,7 +514,9 @@ def test_function_diff_with_elf_exports_still_reports_real_export_loss():
     """The ELF export filter must not hide genuine removed dynamic functions."""
     from abicheck.checker_policy import ChangeKind
 
-    old = _elf_snapshot(functions=[_exported_func("removed_api"), _exported_func("stable_api")])
+    old = _elf_snapshot(
+        functions=[_exported_func("removed_api"), _exported_func("stable_api")]
+    )
     old.elf = _elf_exports("removed_api", "stable_api")
 
     new = _elf_snapshot(functions=[_exported_func("stable_api")])
@@ -507,14 +537,19 @@ def test_function_diff_with_elf_exports_keeps_notype_function_exports():
     """STT_NOTYPE assembly/alias entry points are function-like dynamic ABI."""
     from abicheck.checker_policy import ChangeKind
 
-    old = _elf_snapshot(functions=[_exported_func("asm_entry"), _exported_func("stable_api")])
+    old = _elf_snapshot(
+        functions=[_exported_func("asm_entry"), _exported_func("stable_api")]
+    )
     old.elf = _elf_exports("asm_entry", "stable_api", sym_type=SymbolType.NOTYPE)
 
     new = _elf_snapshot(functions=[_exported_func("stable_api")])
     new.elf = _elf_exports("stable_api", sym_type=SymbolType.NOTYPE)
 
     result = compare(old, new)
-    assert any(c.kind == ChangeKind.FUNC_REMOVED_ELF_ONLY and c.symbol == "asm_entry" for c in result.changes), (
+    assert any(
+        c.kind == ChangeKind.FUNC_REMOVED_ELF_ONLY and c.symbol == "asm_entry"
+        for c in result.changes
+    ), (
         "removing a NOTYPE dynamic entry point must not be hidden by the ELF "
         f"intersection; changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
     )
@@ -525,7 +560,9 @@ def test_function_diff_preserves_deleted_functions_missing_from_elf_exports():
     from abicheck.checker_policy import ChangeKind
     from abicheck.model import Function
 
-    old = _elf_snapshot(functions=[_exported_func("process"), _exported_func("stable_api")])
+    old = _elf_snapshot(
+        functions=[_exported_func("process"), _exported_func("stable_api")]
+    )
     old.elf = _elf_exports("process", "stable_api")
 
     new = _elf_snapshot(
@@ -545,7 +582,10 @@ def test_function_diff_preserves_deleted_functions_missing_from_elf_exports():
     result = compare(old, new)
     kinds_by_symbol = [(c.kind, c.symbol) for c in result.changes]
     assert (ChangeKind.FUNC_DELETED, "process") in kinds_by_symbol
-    assert not any(c.kind == ChangeKind.FUNC_REMOVED and c.symbol == "process" for c in result.changes), (
+    assert not any(
+        c.kind == ChangeKind.FUNC_REMOVED and c.symbol == "process"
+        for c in result.changes
+    ), (
         f"deleted APIs must not also be reported as removed: {[(c.kind.value, c.symbol) for c in result.changes]}"
     )
 
@@ -556,27 +596,37 @@ def test_has_type_evidence_via_dwarf_structs_blocks_suppression():
     type-evidence check)."""
     from abicheck.checker_policy import ChangeKind
     from abicheck.dwarf_metadata import DwarfMetadata, StructLayout
+
     old = _elf_snapshot(
         functions=[_exported_func("api")],
         types=[RecordType(name="Gone", kind="struct", size_bits=32)],
     )
     new = _elf_snapshot(functions=[_exported_func("api")], types=[])
     # new has real DWARF content → has type evidence → not "stripped".
-    new.dwarf = DwarfMetadata(structs={"Other": StructLayout(name="Other", byte_size=4)}, has_dwarf=True)
+    new.dwarf = DwarfMetadata(
+        structs={"Other": StructLayout(name="Other", byte_size=4)}, has_dwarf=True
+    )
     result = compare(old, new)
-    assert any(c.kind == ChangeKind.TYPE_REMOVED and c.symbol == "Gone" for c in result.changes)
+    assert any(
+        c.kind == ChangeKind.TYPE_REMOVED and c.symbol == "Gone" for c in result.changes
+    )
 
 
 def test_stripped_suppression_with_only_variable_exports():
     """A stripped new side that exports only variables (no functions) is still
     recognised as stripped (covers the 'no exported functions' branch)."""
     from abicheck.checker_policy import ChangeKind
+
     old = _elf_snapshot(
-        variables=[Variable(name="g", mangled="g", type="int", visibility=Visibility.ELF_ONLY)],
+        variables=[
+            Variable(name="g", mangled="g", type="int", visibility=Visibility.ELF_ONLY)
+        ],
         types=[RecordType(name="_xmlNode", kind="struct", size_bits=960)],
     )
     new = _elf_snapshot(
-        variables=[Variable(name="g", mangled="g", type="?", visibility=Visibility.ELF_ONLY)],
+        variables=[
+            Variable(name="g", mangled="g", type="?", visibility=Visibility.ELF_ONLY)
+        ],
         types=[],
     )
     new.dwarf = None
@@ -590,24 +640,47 @@ def test_unknown_signature_not_flagged_as_change():
     fabricate func_return/params/var_type changes (RD2-5)."""
     from abicheck.checker_policy import ChangeKind
     from abicheck.model import Function, Param
+
     # old: a resolved (DWARF/header) snapshot — NOT stripped.
     old = _elf_snapshot(
-        functions=[Function(name="f", mangled="_Z1fi", return_type="int",
-                            params=[Param(name="a", type="int")], visibility=Visibility.PUBLIC)],
-        variables=[Variable(name="g", mangled="g", type="int", visibility=Visibility.PUBLIC)],
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1fi",
+                return_type="int",
+                params=[Param(name="a", type="int")],
+                visibility=Visibility.PUBLIC,
+            )
+        ],
+        variables=[
+            Variable(name="g", mangled="g", type="int", visibility=Visibility.PUBLIC)
+        ],
         types=[RecordType(name="Cfg", kind="struct", size_bits=32)],
     )
     old.elf_only_mode = False
     # new: stripped symbols-only — same symbols, signatures unknown, no types.
     new = _elf_snapshot(
-        functions=[Function(name="f", mangled="_Z1fi", return_type="?",
-                            params=[], visibility=Visibility.PUBLIC)],
-        variables=[Variable(name="g", mangled="g", type="?", visibility=Visibility.PUBLIC)],
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1fi",
+                return_type="?",
+                params=[],
+                visibility=Visibility.PUBLIC,
+            )
+        ],
+        variables=[
+            Variable(name="g", mangled="g", type="?", visibility=Visibility.PUBLIC)
+        ],
     )
     new.dwarf = None
     result = compare(old, new)
-    phantom = {ChangeKind.FUNC_RETURN_CHANGED, ChangeKind.FUNC_PARAMS_CHANGED,
-               ChangeKind.VAR_TYPE_CHANGED, ChangeKind.RETURN_POINTER_LEVEL_CHANGED}
+    phantom = {
+        ChangeKind.FUNC_RETURN_CHANGED,
+        ChangeKind.FUNC_PARAMS_CHANGED,
+        ChangeKind.VAR_TYPE_CHANGED,
+        ChangeKind.RETURN_POINTER_LEVEL_CHANGED,
+    }
     offenders = [c.kind.value for c in result.changes if c.kind in phantom]
     assert offenders == [], f"unknown ('?') signatures must not be diffed: {offenders}"
 
@@ -626,12 +699,29 @@ def test_param_change_still_detected_when_only_return_is_unknown():
     unknown-return guard must not swallow it (Codex review on PR #275)."""
     from abicheck.checker_policy import ChangeKind
     from abicheck.model import Function, Param
-    old = _resolved_snapshot(functions=[Function(
-        name="f", mangled="_Z1fi", return_type="?",
-        params=[Param(name="a", type="int")], visibility=Visibility.PUBLIC)])
-    new = _resolved_snapshot(functions=[Function(
-        name="f", mangled="_Z1fi", return_type="?",
-        params=[Param(name="a", type="long")], visibility=Visibility.PUBLIC)])
+
+    old = _resolved_snapshot(
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1fi",
+                return_type="?",
+                params=[Param(name="a", type="int")],
+                visibility=Visibility.PUBLIC,
+            )
+        ]
+    )
+    new = _resolved_snapshot(
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1fi",
+                return_type="?",
+                params=[Param(name="a", type="long")],
+                visibility=Visibility.PUBLIC,
+            )
+        ]
+    )
     result = compare(old, new)
     assert any(c.kind == ChangeKind.FUNC_PARAMS_CHANGED for c in result.changes), (
         "param int->long under an unresolved return must still be detected; "
@@ -645,12 +735,29 @@ def test_individually_unresolved_param_type_not_diffed():
     meaningless), even though the function is otherwise comparable (RD2-5)."""
     from abicheck.checker_policy import ChangeKind
     from abicheck.model import Function, Param
-    old = _resolved_snapshot(functions=[Function(
-        name="f", mangled="_Z1fi", return_type="int",
-        params=[Param(name="a", type="int")], visibility=Visibility.PUBLIC)])
-    new = _resolved_snapshot(functions=[Function(
-        name="f", mangled="_Z1fi", return_type="int",
-        params=[Param(name="a", type="?")], visibility=Visibility.PUBLIC)])
+
+    old = _resolved_snapshot(
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1fi",
+                return_type="int",
+                params=[Param(name="a", type="int")],
+                visibility=Visibility.PUBLIC,
+            )
+        ]
+    )
+    new = _resolved_snapshot(
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1fi",
+                return_type="int",
+                params=[Param(name="a", type="?")],
+                visibility=Visibility.PUBLIC,
+            )
+        ]
+    )
     result = compare(old, new)
     assert not any(c.kind == ChangeKind.FUNC_PARAMS_CHANGED for c in result.changes), (
         "a parameter with an unresolved '?' type must not be diffed; "
@@ -663,7 +770,10 @@ def test_stripped_suppression_with_no_exported_surface():
     variables to corroborate, a stripped new side is treated as pure stripping
     and removals are suppressed (covers the 'no exported surface' branch)."""
     from abicheck.checker_policy import ChangeKind
-    old = _elf_snapshot(types=[RecordType(name="_xmlNode", kind="struct", size_bits=960)])
+
+    old = _elf_snapshot(
+        types=[RecordType(name="_xmlNode", kind="struct", size_bits=960)]
+    )
     # new: stripped — exports a symbol (so it is recognised as a real binary)
     # but carries no type evidence; old has no exported symbols to compare.
     new = _elf_snapshot(
@@ -681,14 +791,29 @@ def test_param_change_on_known_param_detected_despite_unrelated_unknown():
     resolved independently (Codex review on PR #275)."""
     from abicheck.checker_policy import ChangeKind
     from abicheck.model import Function, Param
-    old = _resolved_snapshot(functions=[Function(
-        name="f", mangled="_Z1f", return_type="void",
-        params=[Param(name="a", type="?"), Param(name="b", type="int")],
-        visibility=Visibility.PUBLIC)])
-    new = _resolved_snapshot(functions=[Function(
-        name="f", mangled="_Z1f", return_type="void",
-        params=[Param(name="a", type="?"), Param(name="b", type="long")],
-        visibility=Visibility.PUBLIC)])
+
+    old = _resolved_snapshot(
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1f",
+                return_type="void",
+                params=[Param(name="a", type="?"), Param(name="b", type="int")],
+                visibility=Visibility.PUBLIC,
+            )
+        ]
+    )
+    new = _resolved_snapshot(
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1f",
+                return_type="void",
+                params=[Param(name="a", type="?"), Param(name="b", type="long")],
+                visibility=Visibility.PUBLIC,
+            )
+        ]
+    )
     result = compare(old, new)
     assert any(c.kind == ChangeKind.FUNC_PARAMS_CHANGED for c in result.changes), (
         "int->long on a known param must be detected despite an unrelated '?' param; "
@@ -701,16 +826,33 @@ def test_param_pointer_depth_not_diffed_for_unresolved_param():
     PARAM_POINTER_LEVEL_CHANGED (depth falls back to 0) (CodeRabbit, PR #275)."""
     from abicheck.checker_policy import ChangeKind
     from abicheck.model import Function, Param
-    old = _resolved_snapshot(functions=[Function(
-        name="f", mangled="_Z1fPi", return_type="void",
-        params=[Param(name="p", type="int *", pointer_depth=1)],
-        visibility=Visibility.PUBLIC)])
-    new = _resolved_snapshot(functions=[Function(
-        name="f", mangled="_Z1fPi", return_type="void",
-        params=[Param(name="p", type="?", pointer_depth=0)],
-        visibility=Visibility.PUBLIC)])
+
+    old = _resolved_snapshot(
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1fPi",
+                return_type="void",
+                params=[Param(name="p", type="int *", pointer_depth=1)],
+                visibility=Visibility.PUBLIC,
+            )
+        ]
+    )
+    new = _resolved_snapshot(
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1fPi",
+                return_type="void",
+                params=[Param(name="p", type="?", pointer_depth=0)],
+                visibility=Visibility.PUBLIC,
+            )
+        ]
+    )
     result = compare(old, new)
-    assert not any(c.kind == ChangeKind.PARAM_POINTER_LEVEL_CHANGED for c in result.changes), (
+    assert not any(
+        c.kind == ChangeKind.PARAM_POINTER_LEVEL_CHANGED for c in result.changes
+    ), (
         "unresolved '?' param must not yield a phantom pointer-level change; "
         f"changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
     )
@@ -721,9 +863,15 @@ def test_data_only_library_removal_still_reported_when_variables_change():
     auto-suppress removals when the exported *variable* surface also shrank — the
     retention corroboration falls back to variables (CodeRabbit, PR #275)."""
     from abicheck.checker_policy import ChangeKind
+
     old = _elf_snapshot(
         variables=[
-            Variable(name=f"v{i}", mangled=f"v{i}", type="int", visibility=Visibility.ELF_ONLY)
+            Variable(
+                name=f"v{i}",
+                mangled=f"v{i}",
+                type="int",
+                visibility=Visibility.ELF_ONLY,
+            )
             for i in range(10)
         ],
         types=[RecordType(name="Cfg", kind="struct", size_bits=64)],
@@ -731,12 +879,16 @@ def test_data_only_library_removal_still_reported_when_variables_change():
     # new: stripped of types AND most variables gone (only 1 of 10 retained) →
     # the library genuinely changed, so the type removal must still be reported.
     new = _elf_snapshot(
-        variables=[Variable(name="v0", mangled="v0", type="?", visibility=Visibility.ELF_ONLY)],
+        variables=[
+            Variable(name="v0", mangled="v0", type="?", visibility=Visibility.ELF_ONLY)
+        ],
         types=[],
     )
     new.dwarf = None
     result = compare(old, new)
-    assert any(c.kind == ChangeKind.TYPE_REMOVED and c.symbol == "Cfg" for c in result.changes), (
+    assert any(
+        c.kind == ChangeKind.TYPE_REMOVED and c.symbol == "Cfg" for c in result.changes
+    ), (
         "low variable retention must not auto-suppress a real type removal; "
         f"changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
     )
@@ -746,16 +898,24 @@ def test_data_only_library_stripped_suppresses_when_variables_retained():
     """Mirror of the above: a data-only DSO that is merely stripped (all exported
     variables retained) must still suppress phantom type removals."""
     from abicheck.checker_policy import ChangeKind
+
     old = _elf_snapshot(
         variables=[
-            Variable(name=f"v{i}", mangled=f"v{i}", type="int", visibility=Visibility.ELF_ONLY)
+            Variable(
+                name=f"v{i}",
+                mangled=f"v{i}",
+                type="int",
+                visibility=Visibility.ELF_ONLY,
+            )
             for i in range(10)
         ],
         types=[RecordType(name="Cfg", kind="struct", size_bits=64)],
     )
     new = _elf_snapshot(
         variables=[
-            Variable(name=f"v{i}", mangled=f"v{i}", type="?", visibility=Visibility.ELF_ONLY)
+            Variable(
+                name=f"v{i}", mangled=f"v{i}", type="?", visibility=Visibility.ELF_ONLY
+            )
             for i in range(10)
         ],
         types=[],
@@ -774,12 +934,29 @@ def test_zero_arg_to_one_arg_detected_under_unknown_return():
     'unknown params' (Codex review on PR #275)."""
     from abicheck.checker_policy import ChangeKind
     from abicheck.model import Function, Param
-    old = _resolved_snapshot(functions=[Function(
-        name="f", mangled="_Z1fv", return_type="?", params=[],
-        visibility=Visibility.PUBLIC)])
-    new = _resolved_snapshot(functions=[Function(
-        name="f", mangled="_Z1fv", return_type="?",
-        params=[Param(name="a", type="int")], visibility=Visibility.PUBLIC)])
+
+    old = _resolved_snapshot(
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1fv",
+                return_type="?",
+                params=[],
+                visibility=Visibility.PUBLIC,
+            )
+        ]
+    )
+    new = _resolved_snapshot(
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1fv",
+                return_type="?",
+                params=[Param(name="a", type="int")],
+                visibility=Visibility.PUBLIC,
+            )
+        ]
+    )
     result = compare(old, new)
     assert any(c.kind == ChangeKind.FUNC_PARAMS_CHANGED for c in result.changes), (
         "f(void)->f(int) under an unresolved return must still be detected; "
@@ -826,23 +1003,46 @@ def test_is_non_abi_surface_type_keeps_stdlib_when_requested():
     # opt-out: std:: kept when the runtime owns the namespace
     assert is_non_abi_surface_type(std_type, exclude_stdlib_namespaces=False) is False
     # anonymous + compiler-internal stay excluded regardless of the flag
-    assert is_non_abi_surface_type("<lambda()>", exclude_stdlib_namespaces=False) is True
-    assert is_non_abi_surface_type("__va_list_tag", exclude_stdlib_namespaces=False) is True
-    assert is_non_abi_surface_type("typedef __va_list_tag __va_list_tag", exclude_stdlib_namespaces=False) is True
+    assert (
+        is_non_abi_surface_type("<lambda()>", exclude_stdlib_namespaces=False) is True
+    )
+    assert (
+        is_non_abi_surface_type("__va_list_tag", exclude_stdlib_namespaces=False)
+        is True
+    )
+    assert (
+        is_non_abi_surface_type(
+            "typedef __va_list_tag __va_list_tag", exclude_stdlib_namespaces=False
+        )
+        is True
+    )
     # libstdc++ debug-mode namespace is toolchain-owned too
     assert is_non_abi_surface_type("__gnu_debug::_Safe_iterator<int>") is True
-    assert is_non_abi_surface_type("__gnu_debug::_Safe_iterator<int>", exclude_stdlib_namespaces=False) is False
+    assert (
+        is_non_abi_surface_type(
+            "__gnu_debug::_Safe_iterator<int>", exclude_stdlib_namespaces=False
+        )
+        is False
+    )
 
 
 def test_stdlib_size_change_is_breaking_when_target_is_the_runtime():
     """A real std::basic_string size change in libstdc++ must NOT be hidden."""
     std_string = "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"
-    old = _elf_snapshot(name="libstdc++.so.6", types=[
-        RecordType(name=std_string, kind="class", size_bits=256),
-    ])
-    new = _elf_snapshot(name="libstdc++.so.6", types=[
-        RecordType(name=std_string, kind="class", size_bits=512),  # layout actually changed
-    ])
+    old = _elf_snapshot(
+        name="libstdc++.so.6",
+        types=[
+            RecordType(name=std_string, kind="class", size_bits=256),
+        ],
+    )
+    new = _elf_snapshot(
+        name="libstdc++.so.6",
+        types=[
+            RecordType(
+                name=std_string, kind="class", size_bits=512
+            ),  # layout actually changed
+        ],
+    )
     result = compare(old, new)
     assert result.verdict == Verdict.BREAKING, (
         "a std:: type size change in libstdc++ itself is a real ABI break and "
@@ -853,12 +1053,18 @@ def test_stdlib_size_change_is_breaking_when_target_is_the_runtime():
 def test_stdlib_size_change_is_filtered_for_a_normal_library():
     """The same std:: churn in a non-runtime library stays filtered (FP-1)."""
     std_string = "std::__cxx11::basic_string<char>"
-    old = _elf_snapshot(name="libtbb.so.12", types=[
-        RecordType(name=std_string, kind="class", size_bits=256),
-    ])
-    new = _elf_snapshot(name="libtbb.so.12", types=[
-        RecordType(name=std_string, kind="class", size_bits=512),
-    ])
+    old = _elf_snapshot(
+        name="libtbb.so.12",
+        types=[
+            RecordType(name=std_string, kind="class", size_bits=256),
+        ],
+    )
+    new = _elf_snapshot(
+        name="libtbb.so.12",
+        types=[
+            RecordType(name=std_string, kind="class", size_bits=512),
+        ],
+    )
     result = compare(old, new)
     assert result.verdict not in (Verdict.BREAKING,)
 
@@ -867,15 +1073,33 @@ def test_stdlib_union_field_churn_is_filtered_for_a_normal_library():
     """std:: *union* field churn must be filtered too — the union-specific diff
     path must apply the same surface filter as _diff_types (Codex review #273)."""
     std_union = "std::__detail::_Variant_storage<char, int>"  # a std:: union
-    old = _elf_snapshot(name="libtbb.so.12", types=[
-        RecordType(name=std_union, kind="union", is_union=True, size_bits=64,
-                   fields=[TypeField(name="_M_first", type="char", offset_bits=0),
-                           TypeField(name="_M_rest", type="int", offset_bits=0)]),
-    ])
-    new = _elf_snapshot(name="libtbb.so.12", types=[
-        RecordType(name=std_union, kind="union", is_union=True, size_bits=64,
-                   fields=[TypeField(name="_M_first", type="char", offset_bits=0)]),  # field removed
-    ])
+    old = _elf_snapshot(
+        name="libtbb.so.12",
+        types=[
+            RecordType(
+                name=std_union,
+                kind="union",
+                is_union=True,
+                size_bits=64,
+                fields=[
+                    TypeField(name="_M_first", type="char", offset_bits=0),
+                    TypeField(name="_M_rest", type="int", offset_bits=0),
+                ],
+            ),
+        ],
+    )
+    new = _elf_snapshot(
+        name="libtbb.so.12",
+        types=[
+            RecordType(
+                name=std_union,
+                kind="union",
+                is_union=True,
+                size_bits=64,
+                fields=[TypeField(name="_M_first", type="char", offset_bits=0)],
+            ),  # field removed
+        ],
+    )
     result = compare(old, new)
     assert result.verdict not in (Verdict.BREAKING,), (
         f"std:: union field churn in a non-runtime library must stay filtered; "
@@ -888,11 +1112,19 @@ def test_stdlib_enum_member_churn_is_filtered_for_a_normal_library():
     apply the same surface filter (Codex review on PR #273)."""
     std_enum = "std::__detail::_S_state"  # a std:: enum
     old = _elf_snapshot(name="libtbb.so.12")
-    old.enums = [EnumType(name=std_enum, members=[
-        EnumMember(name="_S_a", value=0), EnumMember(name="_S_b", value=1)])]
+    old.enums = [
+        EnumType(
+            name=std_enum,
+            members=[
+                EnumMember(name="_S_a", value=0),
+                EnumMember(name="_S_b", value=1),
+            ],
+        )
+    ]
     new = _elf_snapshot(name="libtbb.so.12")
-    new.enums = [EnumType(name=std_enum, members=[
-        EnumMember(name="_S_a", value=0)])]  # member removed
+    new.enums = [
+        EnumType(name=std_enum, members=[EnumMember(name="_S_a", value=0)])
+    ]  # member removed
     result = compare(old, new)
     assert result.verdict not in (Verdict.BREAKING,), (
         f"std:: enum member churn in a non-runtime library must stay filtered; "
@@ -904,11 +1136,17 @@ def test_stdlib_enum_member_change_is_breaking_when_target_is_the_runtime():
     """The same std:: enum churn IS a break when the target is libstdc++ itself."""
     std_enum = "std::__detail::_S_state"
     old = _elf_snapshot(name="libstdc++.so.6")
-    old.enums = [EnumType(name=std_enum, members=[
-        EnumMember(name="_S_a", value=0), EnumMember(name="_S_b", value=1)])]
+    old.enums = [
+        EnumType(
+            name=std_enum,
+            members=[
+                EnumMember(name="_S_a", value=0),
+                EnumMember(name="_S_b", value=1),
+            ],
+        )
+    ]
     new = _elf_snapshot(name="libstdc++.so.6")
-    new.enums = [EnumType(name=std_enum, members=[
-        EnumMember(name="_S_a", value=0)])]
+    new.enums = [EnumType(name=std_enum, members=[EnumMember(name="_S_a", value=0)])]
     result = compare(old, new)
     assert result.verdict == Verdict.BREAKING
 
@@ -937,18 +1175,33 @@ def test_qualified_public_typedef_removal_still_breaking():
     new.typedefs = {}
     result = compare(old, new)
     assert _breaking_symbols(result) or result.verdict in (
-        Verdict.BREAKING, Verdict.API_BREAK,
+        Verdict.BREAKING,
+        Verdict.API_BREAK,
     ), "removing a genuine public typedef must still be reported"
 
 
 def _record_field_access(library, old_access, new_access):
     tname = "std::__detail::_Node"
-    old = _elf_snapshot(name=library, types=[
-        RecordType(name=tname, kind="class",
-                   fields=[TypeField(name="x", type="int", access=old_access)])])
-    new = _elf_snapshot(name=library, types=[
-        RecordType(name=tname, kind="class",
-                   fields=[TypeField(name="x", type="int", access=new_access)])])
+    old = _elf_snapshot(
+        name=library,
+        types=[
+            RecordType(
+                name=tname,
+                kind="class",
+                fields=[TypeField(name="x", type="int", access=old_access)],
+            )
+        ],
+    )
+    new = _elf_snapshot(
+        name=library,
+        types=[
+            RecordType(
+                name=tname,
+                kind="class",
+                fields=[TypeField(name="x", type="int", access=new_access)],
+            )
+        ],
+    )
     return compare(old, new)
 
 
@@ -956,7 +1209,9 @@ def test_stdlib_field_access_change_is_filtered_for_a_normal_library():
     """A std:: record reached by a cross-module detector (FIELD_ACCESS_CHANGED in
     diff_symbols) must also be filtered — the surface predicate is shared across
     detector modules, not just diff_types (Codex review on PR #273)."""
-    result = _record_field_access("libtbb.so.12", AccessLevel.PUBLIC, AccessLevel.PRIVATE)
+    result = _record_field_access(
+        "libtbb.so.12", AccessLevel.PUBLIC, AccessLevel.PRIVATE
+    )
     assert result.verdict not in (Verdict.BREAKING, Verdict.API_BREAK), (
         f"std:: field access churn in a non-runtime library must stay filtered; "
         f"kinds: {[c.kind.value for c in result.changes]}"
@@ -965,7 +1220,9 @@ def test_stdlib_field_access_change_is_filtered_for_a_normal_library():
 
 def test_stdlib_field_access_change_is_breaking_when_target_is_the_runtime():
     """The same std:: field access narrowing IS a source break for libstdc++."""
-    result = _record_field_access("libstdc++.so.6", AccessLevel.PUBLIC, AccessLevel.PRIVATE)
+    result = _record_field_access(
+        "libstdc++.so.6", AccessLevel.PUBLIC, AccessLevel.PRIVATE
+    )
     assert result.verdict in (Verdict.BREAKING, Verdict.API_BREAK), (
         f"std:: field access narrowing in libstdc++ itself must still be reported; "
         f"kinds: {[c.kind.value for c in result.changes]}"
@@ -1049,7 +1306,9 @@ def test_header_backed_snapshot_with_incidental_dwarf_stays_bare_keyed():
     new.typedef_entity_ids = {"ns::Alias": eid_ns}
     new.semantic_ir = SemanticIR(
         occurrences={
-            OccurrenceId(eid_ns): CanonicalEntity(canonical_spelling=Fact.present("int"))
+            OccurrenceId(eid_ns): CanonicalEntity(
+                canonical_spelling=Fact.present("int")
+            )
         }
     )
 

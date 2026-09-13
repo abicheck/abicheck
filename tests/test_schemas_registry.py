@@ -62,8 +62,6 @@ class TestSchemasCurrent:
         # the value, so a docs generator can format it without guessing.
         assert isinstance(schemas.current("snapshot"), int)
 
-    @pytest.mark.parametrize(
-        "name", ["compare", "build-output", "run-plan", "release"]
-    )
+    @pytest.mark.parametrize("name", ["compare", "build-output", "run-plan", "release"])
     def test_other_versions_are_strings(self, name):
         assert isinstance(schemas.current(name), str)

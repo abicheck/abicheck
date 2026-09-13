@@ -453,7 +453,9 @@ def _looks_like_real_mangled_name(mangled: str) -> bool:
     indistinguishable from the fallback -- ``Function`` has no field that
     tells the two apart today.
     """
-    return mangled.startswith("_Z") or mangled.startswith("__Z") or mangled.startswith("?")
+    return (
+        mangled.startswith("_Z") or mangled.startswith("__Z") or mangled.startswith("?")
+    )
 
 
 def _func_index_items(
@@ -539,7 +541,11 @@ def _func_index_items(
         # throughout, and `Function` carries no field today that
         # distinguishes the two (`is_extern_c` is itself derived from this
         # same unreliable prefix check).
-        identity = f.mangled if f.mangled and _looks_like_real_mangled_name(f.mangled) else None
+        identity = (
+            f.mangled
+            if f.mangled and _looks_like_real_mangled_name(f.mangled)
+            else None
+        )
         out.append(_IndexItem(qname, stripped, leaf, identity))
     return out
 
@@ -688,7 +694,9 @@ def _identity_stable_keys(items: list[_IndexItem]) -> dict[object, set[str]]:
     out: dict[object, set[str]] = {}
     for item in items:
         if item.identity is not None:
-            out.setdefault(item.identity, set()).add(_strip_param_signature(item.stripped))
+            out.setdefault(item.identity, set()).add(
+                _strip_param_signature(item.stripped)
+            )
     return out
 
 
@@ -955,7 +963,9 @@ def detect_experimental_namespace_changes(
     out: list[Change] = []
     old_func_items = _func_index_items(old, experimental_namespaces)
     new_func_items = _func_index_items(new, experimental_namespaces)
-    old_func_index, new_func_index = _paired_stable_indices(old_func_items, new_func_items)
+    old_func_index, new_func_index = _paired_stable_indices(
+        old_func_items, new_func_items
+    )
     out.extend(
         _findings_for(
             old_func_index,
@@ -968,7 +978,9 @@ def detect_experimental_namespace_changes(
     )
     old_type_items = _type_index_items(old, experimental_namespaces)
     new_type_items = _type_index_items(new, experimental_namespaces)
-    old_type_index, new_type_index = _paired_stable_indices(old_type_items, new_type_items)
+    old_type_index, new_type_index = _paired_stable_indices(
+        old_type_items, new_type_items
+    )
     out.extend(
         _findings_for(
             old_type_index,

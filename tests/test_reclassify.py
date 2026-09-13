@@ -60,7 +60,9 @@ def test_reclassify_rule_matches_by_binding() -> None:
         binding="weak",
     )
     matched = _change(ChangeKind.FUNC_REMOVED, "_Z1fv", symbol_binding="weak")
-    unmatched_binding = _change(ChangeKind.FUNC_REMOVED, "_Z1fv", symbol_binding="global")
+    unmatched_binding = _change(
+        ChangeKind.FUNC_REMOVED, "_Z1fv", symbol_binding="global"
+    )
     unmatched_no_binding = _change(ChangeKind.FUNC_REMOVED, "_Z1fv")
 
     assert rule.matches(matched)
@@ -72,7 +74,9 @@ def test_reclassify_binding_is_conjunctive_only() -> None:
     # binding alone (no other selector) isn't a valid rule -- same
     # conjunctive-only rule Suppression.binding follows.
     with pytest.raises(ValueError):
-        ReclassifyRule(to_verdict=Verdict.COMPATIBLE_WITH_RISK, to="risk", binding="weak")
+        ReclassifyRule(
+            to_verdict=Verdict.COMPATIBLE_WITH_RISK, to="risk", binding="weak"
+        )
 
 
 def test_policy_file_loads_reclassify_binding_selector(tmp_path: Path) -> None:
@@ -218,13 +222,22 @@ reclassify:
     unmatched = _change(ChangeKind.FUNC_VISIBILITY_CHANGED, "_ZN3foo3barEv")
 
     assert pf.compute_verdict([matched]) == Verdict.COMPATIBLE_WITH_RISK
-    assert effective_verdict_for_change(matched, policy_file=pf) == Verdict.COMPATIBLE_WITH_RISK
-    assert classify_effective_change(matched, policy_file=pf) == IssueCategory.POTENTIAL_BREAKING
+    assert (
+        effective_verdict_for_change(matched, policy_file=pf)
+        == Verdict.COMPATIBLE_WITH_RISK
+    )
+    assert (
+        classify_effective_change(matched, policy_file=pf)
+        == IssueCategory.POTENTIAL_BREAKING
+    )
     assert compute_exit_code([matched], PRESET_DEFAULT, policy_file=pf) == 0
 
     assert pf.compute_verdict([unmatched]) == Verdict.BREAKING
     assert effective_verdict_for_change(unmatched, policy_file=pf) == Verdict.BREAKING
-    assert classify_effective_change(unmatched, policy_file=pf) == IssueCategory.ABI_BREAKING
+    assert (
+        classify_effective_change(unmatched, policy_file=pf)
+        == IssueCategory.ABI_BREAKING
+    )
     assert compute_exit_code([unmatched], PRESET_DEFAULT, policy_file=pf) == 4
 
 
@@ -550,7 +563,10 @@ reclassify:
     pf = PolicyFile.load(p)
     reclassified = _change(ChangeKind.FUNC_REMOVED, "_ZN6oneapi3dal3fooEv")
     diff = DiffResult(
-        changes=[reclassified], old_version="1", new_version="2", library="l",
+        changes=[reclassified],
+        old_version="1",
+        new_version="2",
+        library="l",
         policy_file=pf,
     )
 
@@ -588,7 +604,10 @@ def _override_adjusted_kind_sets(pf: PolicyFile, *changes):
     from abicheck.checker_types import DiffResult
 
     diff = DiffResult(
-        changes=list(changes), old_version="1", new_version="2", library="l",
+        changes=list(changes),
+        old_version="1",
+        new_version="2",
+        library="l",
         policy_file=pf,
     )
     return diff._effective_kind_sets()
@@ -676,9 +695,7 @@ reclassify:
         encoding="utf-8",
     )
     pf = PolicyFile.load(p)
-    change = _change(
-        ChangeKind.FUNC_ADDED, "foo", effective_verdict=Verdict.COMPATIBLE
-    )
+    change = _change(ChangeKind.FUNC_ADDED, "foo", effective_verdict=Verdict.COMPATIBLE)
     kind_sets = _override_adjusted_kind_sets(pf, change)
 
     assert (
@@ -718,7 +735,10 @@ reclassify:
     pf = PolicyFile.load(p)
     change = _change(ChangeKind.FUNC_VISIBILITY_CHANGED, "_ZN6oneapi3dal3fooEv")
     diff = DiffResult(
-        changes=[change], old_version="1", new_version="2", library="l",
+        changes=[change],
+        old_version="1",
+        new_version="2",
+        library="l",
         policy_file=pf,
     )
 
@@ -750,7 +770,10 @@ def test_policy_reclassify_absent_without_any_configured_rule(tmp_path: Path) ->
     pf = PolicyFile.load(p)
     change = _change(ChangeKind.ENUM_MEMBER_RENAMED, "foo")
     diff = DiffResult(
-        changes=[change], old_version="1", new_version="2", library="l",
+        changes=[change],
+        old_version="1",
+        new_version="2",
+        library="l",
         policy_file=pf,
     )
 
@@ -777,7 +800,10 @@ reclassify:
     pf = PolicyFile.load(p)
     change = _change(ChangeKind.FUNC_VISIBILITY_CHANGED, "_ZN6oneapi3dal3fooEv")
     return DiffResult(
-        changes=[change], old_version="1", new_version="2", library="l",
+        changes=[change],
+        old_version="1",
+        new_version="2",
+        library="l",
         policy_file=pf,
     )
 
@@ -885,7 +911,10 @@ reclassify:
     pf = PolicyFile.load(p)
     change = _change(ChangeKind.FUNC_REMOVED, "foo")
     return DiffResult(
-        changes=[change], old_version="1", new_version="2", library="l",
+        changes=[change],
+        old_version="1",
+        new_version="2",
+        library="l",
         policy_file=pf,
     )
 
@@ -1017,9 +1046,7 @@ def test_audit_without_policy_file_is_unchanged() -> None:
     supl = SuppressionList([sup])
     change = _change(ChangeKind.FUNC_REMOVED, "foo")
 
-    audit = supl.audit(
-        [change], breaking_kinds=frozenset({ChangeKind.FUNC_REMOVED})
-    )
+    audit = supl.audit([change], breaking_kinds=frozenset({ChangeKind.FUNC_REMOVED}))
     assert len(audit.high_risk_matches) == 1
 
 
@@ -1502,9 +1529,7 @@ reclassify:
         encoding="utf-8",
     )
     pf = PolicyFile.load(p)
-    change = _change(
-        ChangeKind.FUNC_REMOVED, "foo", effective_verdict=Verdict.BREAKING
-    )
+    change = _change(ChangeKind.FUNC_REMOVED, "foo", effective_verdict=Verdict.BREAKING)
     assert reclassify_rule_for_change(change, pf) is None
 
 
@@ -1559,7 +1584,10 @@ reclassify:
     pf = PolicyFile.load(p)
     change = _change(ChangeKind.FUNC_REMOVED, "foo")
     diff = DiffResult(
-        changes=[change], old_version="1", new_version="2", library="l",
+        changes=[change],
+        old_version="1",
+        new_version="2",
+        library="l",
         policy_file=pf,
     )
 
@@ -1587,7 +1615,10 @@ reclassify:
     pf = PolicyFile.load(p)
     change = _change(ChangeKind.FUNC_REMOVED, "foo")
     diff = DiffResult(
-        changes=[change], old_version="1", new_version="2", library="l",
+        changes=[change],
+        old_version="1",
+        new_version="2",
+        library="l",
         policy_file=pf,
     )
 
@@ -1610,7 +1641,10 @@ def test_reclassified_by_absent_for_a_kind_global_override(tmp_path: Path) -> No
     pf = PolicyFile.load(p)
     change = _change(ChangeKind.FUNC_REMOVED, "foo")
     diff = DiffResult(
-        changes=[change], old_version="1", new_version="2", library="l",
+        changes=[change],
+        old_version="1",
+        new_version="2",
+        library="l",
         policy_file=pf,
     )
 
@@ -1643,7 +1677,10 @@ reclassify:
     pf = PolicyFile.load(p)
     change = _change(ChangeKind.FUNC_REMOVED, "foo")
     diff = DiffResult(
-        changes=[change], old_version="1", new_version="2", library="l",
+        changes=[change],
+        old_version="1",
+        new_version="2",
+        library="l",
         policy_file=pf,
     )
 
@@ -1675,7 +1712,10 @@ def test_reclassified_by_falls_back_to_to_verdict_for_a_directly_constructed_rul
     pf = PolicyFile(base_policy="strict_abi", overrides={}, reclassify=[rule])
     change = _change(ChangeKind.FUNC_REMOVED, "foo")
     diff = DiffResult(
-        changes=[change], old_version="1", new_version="2", library="l",
+        changes=[change],
+        old_version="1",
+        new_version="2",
+        library="l",
         policy_file=pf,
     )
 
@@ -1713,7 +1753,10 @@ reclassify:
     pf = PolicyFile.load(p)
     change = _change(ChangeKind.TYPE_SIZE_CHANGED, "foo")
     diff = DiffResult(
-        changes=[change], old_version="1", new_version="2", library="l",
+        changes=[change],
+        old_version="1",
+        new_version="2",
+        library="l",
         policy_file=pf,
     )
 
@@ -1763,15 +1806,16 @@ reclassify:
     pf = PolicyFile.load(p)
     change = _change(ChangeKind.FUNC_VISIBILITY_CHANGED, "foo")
     diff = DiffResult(
-        changes=[change], old_version="1", new_version="2", library="l",
+        changes=[change],
+        old_version="1",
+        new_version="2",
+        library="l",
         policy_file=pf,
     )
     report = json.loads(to_json(diff))
     assert report["policy_reclassify"][0]["to"] == "COMPATIBLE_WITH_RISK"
 
-    schema = json.loads(
-        Path("abicheck/schemas/compare_report.schema.json").read_text()
-    )
+    schema = json.loads(Path("abicheck/schemas/compare_report.schema.json").read_text())
     jsonschema.Draft202012Validator.check_schema(schema)
     to_schema = schema["properties"]["policy_reclassify"]["items"]["properties"]["to"]
     validator = jsonschema.Draft202012Validator(to_schema)

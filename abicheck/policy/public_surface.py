@@ -243,9 +243,7 @@ def _merge_origin(existing: ScopeOrigin | None, new: ScopeOrigin) -> ScopeOrigin
     return existing
 
 
-def _record_origin(
-    surface: PublicSurface, keys: set[str], origin: ScopeOrigin
-) -> None:
+def _record_origin(surface: PublicSurface, keys: set[str], origin: ScopeOrigin) -> None:
     for k in keys:
         surface.origin_by_key[k] = _merge_origin(surface.origin_by_key.get(k), origin)
 

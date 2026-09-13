@@ -149,9 +149,7 @@ def test_gcc_include_dir_with_non_compiler_shaped_triple_and_version_not_system(
 def test_gcc_include_dir_with_compiler_shaped_triple_and_version_is_toolchain():
     # Positive control for the test above: a real-shaped triple/version
     # pair must still match (this is the case the fix must not regress).
-    segs = _segments(
-        "/opt/gcc/lib/gcc/x86_64-pc-linux-gnu/13.2.0/include/stddef.h"
-    )
+    segs = _segments("/opt/gcc/lib/gcc/x86_64-pc-linux-gnu/13.2.0/include/stddef.h")
     assert _is_toolchain_compiler_include_dir(segs) is True
 
 
@@ -164,9 +162,7 @@ def test_gcc_include_dir_with_dotted_solaris_style_os_component_is_toolchain():
     # not covered by _SYSTEM_HEADER_DIRS, this made a real compiler's own
     # private headers read as project declarations, reintroducing noisy/
     # false findings from the toolchain surface.
-    segs = _segments(
-        "/opt/gcc/lib/gcc/x86_64-pc-solaris2.11/13/include/stddef.h"
-    )
+    segs = _segments("/opt/gcc/lib/gcc/x86_64-pc-solaris2.11/13/include/stddef.h")
     assert _is_toolchain_compiler_include_dir(segs) is True
 
 
@@ -599,11 +595,15 @@ def test_origin_cache_hit_reuses_prior_classification(monkeypatch):
     header_segs, dir_segs, have_set = build_public_set(["include/api.h"], None)
     origin_cache: dict = {}
     a = Function(
-        name="a", mangled="a", return_type="void",
+        name="a",
+        mangled="a",
+        return_type="void",
         source_location="/build/include/api.h:10",
     )
     b = Function(
-        name="b", mangled="b", return_type="void",
+        name="b",
+        mangled="b",
+        return_type="void",
         source_location="/build/include/api.h:99",  # same header, different line
     )
     _tag(a, header_segs, dir_segs, have_set, origin_cache=origin_cache)
@@ -628,11 +628,15 @@ def test_origin_cache_distinguishes_different_headers(monkeypatch):
     header_segs, dir_segs, have_set = build_public_set(["include/api.h"], None)
     origin_cache: dict = {}
     pub = Function(
-        name="pub", mangled="pub", return_type="void",
+        name="pub",
+        mangled="pub",
+        return_type="void",
         source_location="/build/include/api.h:10",
     )
     priv = Function(
-        name="priv", mangled="priv", return_type="void",
+        name="priv",
+        mangled="priv",
+        return_type="void",
         source_location="/build/src/impl.h:20",
     )
     _tag(pub, header_segs, dir_segs, have_set, origin_cache=origin_cache)
@@ -654,11 +658,15 @@ def test_origin_cache_distinguishes_export_only_from_same_header(monkeypatch):
     header_segs, dir_segs, have_set = build_public_set(["include/api.h"], None)
     origin_cache: dict = {}
     exported = Function(
-        name="exported", mangled="exported", return_type="void",
+        name="exported",
+        mangled="exported",
+        return_type="void",
         visibility=Visibility.ELF_ONLY,
     )
     hidden = Function(
-        name="hidden", mangled="hidden", return_type="void",
+        name="hidden",
+        mangled="hidden",
+        return_type="void",
         visibility=Visibility.HIDDEN,
     )
     _tag(exported, header_segs, dir_segs, have_set, origin_cache=origin_cache)
@@ -676,14 +684,18 @@ def test_origin_cache_matches_uncached_result():
 
     cached_decls = [
         Function(
-            name=n, mangled=n, return_type="void",
+            name=n,
+            mangled=n,
+            return_type="void",
             source_location=f"/build/include/api.h:{i}",
         )
         for i, n in enumerate(["a", "b", "c"])
     ]
     uncached_decls = [
         Function(
-            name=n, mangled=n, return_type="void",
+            name=n,
+            mangled=n,
+            return_type="void",
             source_location=f"/build/include/api.h:{i}",
         )
         for i, n in enumerate(["a", "b", "c"])

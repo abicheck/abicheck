@@ -158,7 +158,9 @@ def test_host_contract_check_breaks_when_required_entrypoint_dropped() -> None:
     plugin_v2 = _lib("2.0", ["plugin_init", "plugin_debug"])  # drops plugin_run
 
     result = check_plugin_host_contract(
-        plugin_v1, plugin_v2, HOST_REQUIRED_ENTRYPOINTS,
+        plugin_v1,
+        plugin_v2,
+        HOST_REQUIRED_ENTRYPOINTS,
     )
 
     assert result.verdict is Verdict.BREAKING
@@ -177,7 +179,9 @@ def test_host_contract_check_safe_when_drop_outside_contract() -> None:
     assert compare(plugin_v1, plugin_v2).verdict is Verdict.BREAKING
     # … but the host's load contract is fully satisfied.
     result = check_plugin_host_contract(
-        plugin_v1, plugin_v2, HOST_REQUIRED_ENTRYPOINTS,
+        plugin_v1,
+        plugin_v2,
+        HOST_REQUIRED_ENTRYPOINTS,
     )
     assert result.verdict is Verdict.COMPATIBLE
     assert result.missing_entrypoints == []
@@ -189,7 +193,9 @@ def test_host_contract_check_additive_plugin_is_compatible() -> None:
     plugin_v2 = _lib("1.1", ["plugin_init", "plugin_run", "plugin_extra"])
 
     result = check_plugin_host_contract(
-        plugin_v1, plugin_v2, HOST_REQUIRED_ENTRYPOINTS,
+        plugin_v1,
+        plugin_v2,
+        HOST_REQUIRED_ENTRYPOINTS,
     )
     assert result.verdict is Verdict.COMPATIBLE
     assert result.missing_entrypoints == []
@@ -199,8 +205,10 @@ def test_host_contract_check_additive_plugin_is_compatible() -> None:
 def _cpp_lib(version: str) -> AbiSnapshot:
     """A plugin exporting a C++ entrypoint: source name != mangled linker name."""
     fn = Function(
-        name="plugin_run(int)", mangled="_Z10plugin_runi",
-        return_type="int", visibility=Visibility.PUBLIC,
+        name="plugin_run(int)",
+        mangled="_Z10plugin_runi",
+        return_type="int",
+        visibility=Visibility.PUBLIC,
     )
     return AbiSnapshot(library="libplugin.so", version=version, functions=[fn])
 
@@ -231,20 +239,40 @@ def test_snapshot_export_names_covers_vars_and_unmangled() -> None:
         version="1.0",
         functions=[
             # extern "C": name == mangled → plain name resolvable
-            Function(name="plugin_init", mangled="plugin_init",
-                     return_type="int", visibility=Visibility.PUBLIC),
+            Function(
+                name="plugin_init",
+                mangled="plugin_init",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            ),
             # no mangled recorded → fall back to name
-            Function(name="legacy_entry", mangled="",
-                     return_type="int", visibility=Visibility.PUBLIC),
+            Function(
+                name="legacy_entry",
+                mangled="",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            ),
             # non-public → never a dlsym export
-            Function(name="internal_helper", mangled="internal_helper",
-                     return_type="int", visibility=Visibility.HIDDEN),
+            Function(
+                name="internal_helper",
+                mangled="internal_helper",
+                return_type="int",
+                visibility=Visibility.HIDDEN,
+            ),
         ],
         variables=[
-            Variable(name="plugin_table", mangled="plugin_table", type="void*",
-                     visibility=Visibility.PUBLIC),
-            Variable(name="internal_state", mangled="internal_state", type="int",
-                     visibility=Visibility.HIDDEN),
+            Variable(
+                name="plugin_table",
+                mangled="plugin_table",
+                type="void*",
+                visibility=Visibility.PUBLIC,
+            ),
+            Variable(
+                name="internal_state",
+                mangled="internal_state",
+                type="int",
+                visibility=Visibility.HIDDEN,
+            ),
         ],
     )
     names = _snapshot_export_names(snap)
@@ -261,7 +289,10 @@ def _elf_only_lib(version: str, symbols: list[str]) -> AbiSnapshot:
         for s in symbols
     ]
     return AbiSnapshot(
-        library="libplugin.so", version=version, functions=fns, elf_only_mode=True,
+        library="libplugin.so",
+        version=version,
+        functions=fns,
+        elf_only_mode=True,
     )
 
 

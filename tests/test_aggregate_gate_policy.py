@@ -172,7 +172,9 @@ class TestGatePolicy:
         with pytest.raises(AggregateError):
             ExpectedTargets.from_manifest_data(data)
 
-    def test_explicit_override_reported_even_with_no_manifest_gate(self, tmp_path: Path):
+    def test_explicit_override_reported_even_with_no_manifest_gate(
+        self, tmp_path: Path
+    ):
         # The "explicit" source label applies whenever the caller passed an
         # override, independent of whether the manifest carried its own
         # `gate` block at all.

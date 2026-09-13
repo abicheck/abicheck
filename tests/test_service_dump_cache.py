@@ -1,4 +1,5 @@
 """Tests for the whole-snapshot cache wiring (service_dump_cache.py)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -122,19 +123,23 @@ class TestDumpCacheExtraKey:
 
     def test_binary_only_key_does_not_fingerprint_path_tools(self):
         with patch("abicheck.dumper._tool_identity") as identity:
-            key = _dump_cache_extra_key(
-                "elf", "auto", None, None, uses_ast=False
-            )
+            key = _dump_cache_extra_key("elf", "auto", None, None, uses_ast=False)
         assert "\x00no-ast\x00" in key
         identity.assert_not_called()
 
     def test_binary_only_key_includes_public_scope(self, tmp_path):
         first = _dump_cache_extra_key(
-            "elf", "auto", [tmp_path / "public" / "api.h"], None,
+            "elf",
+            "auto",
+            [tmp_path / "public" / "api.h"],
+            None,
             uses_ast=False,
         )
         second = _dump_cache_extra_key(
-            "elf", "auto", [tmp_path / "private" / "api.h"], None,
+            "elf",
+            "auto",
+            [tmp_path / "private" / "api.h"],
+            None,
             uses_ast=False,
         )
         assert first != second
@@ -217,11 +222,11 @@ class TestDumpCacheExtraKey:
         # ABICHECK_CLANG_LAYOUT_TOOL/PATH too -- a cache entry created before
         # enabling the tool must not be silently reused after enabling it.
         monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
-        with patch(
-            "abicheck.clang_layout_tool.shutil.which", return_value=None
-        ):
+        with patch("abicheck.clang_layout_tool.shutil.which", return_value=None):
             k_before = _dump_cache_extra_key("elf", "clang", None, None)
-        monkeypatch.setenv("ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool")
+        monkeypatch.setenv(
+            "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"
+        )
         k_after = _dump_cache_extra_key("elf", "clang", None, None)
         assert k_before != k_after
 
@@ -231,7 +236,9 @@ class TestDumpCacheExtraKey:
         # entry, which never involves it at all.
         monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
         k1 = _dump_cache_extra_key("elf", "castxml", None, None)
-        monkeypatch.setenv("ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool")
+        monkeypatch.setenv(
+            "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"
+        )
         k2 = _dump_cache_extra_key("elf", "castxml", None, None)
         assert k1 == k2
 
@@ -244,11 +251,11 @@ class TestDumpCacheExtraKey:
         # created before enabling/changing the tool must not be silently
         # reused afterward either.
         monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
-        with patch(
-            "abicheck.clang_layout_tool.shutil.which", return_value=None
-        ):
+        with patch("abicheck.clang_layout_tool.shutil.which", return_value=None):
             k_before = _dump_cache_extra_key("elf", "hybrid", None, None)
-        monkeypatch.setenv("ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool")
+        monkeypatch.setenv(
+            "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"
+        )
         k_after = _dump_cache_extra_key("elf", "hybrid", None, None)
         assert k_before != k_after
 
@@ -267,17 +274,15 @@ class TestDumpCacheExtraKey:
         monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
         monkeypatch.setenv("ABICHECK_ALLOW_AST_FALLBACK", "1")
         monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
-        with patch(
-            "abicheck.clang_layout_tool.shutil.which", return_value=None
-        ):
+        with patch("abicheck.clang_layout_tool.shutil.which", return_value=None):
             k_before = _dump_cache_extra_key("elf", "auto", None, None)
-        monkeypatch.setenv("ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool")
+        monkeypatch.setenv(
+            "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"
+        )
         k_after = _dump_cache_extra_key("elf", "auto", None, None)
         assert k_before != k_after
 
-    def test_layout_tool_irrelevant_when_auto_fallback_is_disabled(
-        self, monkeypatch
-    ):
+    def test_layout_tool_irrelevant_when_auto_fallback_is_disabled(self, monkeypatch):
         monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
         monkeypatch.delenv("ABICHECK_ALLOW_AST_FALLBACK", raising=False)
         monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
@@ -352,9 +357,7 @@ class TestDumpCacheExtraKey:
         )
         assert k_omitted != k_explicit_empty
 
-    def test_invalid_frontend_pin_uses_same_fallback_cache_identity(
-        self, monkeypatch
-    ):
+    def test_invalid_frontend_pin_uses_same_fallback_cache_identity(self, monkeypatch):
         monkeypatch.setenv("ABICHECK_AST_FRONTEND", "invalid-value")
         monkeypatch.setenv("ABICHECK_ALLOW_AST_FALLBACK", "1")
         monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
@@ -389,7 +392,9 @@ class TestDumpCacheExtraKey:
         monkeypatch.setenv("ABICHECK_AST_FRONTEND", "castxml")
         monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
         k1 = _dump_cache_extra_key("elf", "auto", None, None)
-        monkeypatch.setenv("ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool")
+        monkeypatch.setenv(
+            "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"
+        )
         k2 = _dump_cache_extra_key("elf", "auto", None, None)
         assert k1 == k2
 
@@ -418,9 +423,7 @@ class TestDumpCacheExtraKey:
                 k2 = _dump_cache_extra_key("elf", "castxml", None, None)
         assert k1 != k2
 
-    def test_differs_when_clang_binary_swapped_in_place_at_same_path(
-        self, tmp_path
-    ):
+    def test_differs_when_clang_binary_swapped_in_place_at_same_path(self, tmp_path):
         # Codex review: the resolved PATH string alone survives an in-place
         # binary swap at the same path (a package upgrade, or a symlink
         # retargeted to a different clang install) -- an mtime+size
@@ -511,19 +514,40 @@ class TestCachedRunDump:
         received: list[bool] = []
 
         def fake_run_dump(
-            path, binary_fmt, headers, includes, version, lang,
-            *, lang_explicit=False, **kwargs,
+            path,
+            binary_fmt,
+            headers,
+            includes,
+            version,
+            lang,
+            *,
+            lang_explicit=False,
+            **kwargs,
         ):
             received.append(lang_explicit)
             return _sample_snap()
 
         cached_run_dump(
-            fake_run_dump, binary, "elf", [], [], "1.0", "c++",
-            lang_explicit=False, header_backend="clang",
+            fake_run_dump,
+            binary,
+            "elf",
+            [],
+            [],
+            "1.0",
+            "c++",
+            lang_explicit=False,
+            header_backend="clang",
         )
         cached_run_dump(
-            fake_run_dump, binary, "elf", [], [], "1.0", "c++",
-            lang_explicit=True, header_backend="clang",
+            fake_run_dump,
+            binary,
+            "elf",
+            [],
+            [],
+            "1.0",
+            "c++",
+            lang_explicit=True,
+            header_backend="clang",
         )
         assert received == [False, True]
 

@@ -22,6 +22,7 @@ DwarfMetadata/AdvancedDwarfMetadata/AbiSnapshot output to the default
 (cache-reusing) path -- freeing a CU's DIE cache mid-walk must change only
 peak memory / CPU cost, never a single field of the result.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -40,6 +41,7 @@ from abicheck.dwarf_utils import (
 
 def _require_tool(name: str) -> None:
     import shutil
+
     if shutil.which(name) is None:
         pytest.skip(f"{name} not found in PATH")
 
@@ -51,9 +53,18 @@ def _compile_so(tmp_path: Path, name: str, src: str, lang: str = "cpp") -> Path:
     so_file = tmp_path / f"{name}.so"
     src_file.write_text(textwrap.dedent(src).strip(), encoding="utf-8")
     r = subprocess.run(
-        [compiler, "-shared", "-fPIC", "-g", "-fvisibility=default",
-         "-o", str(so_file), str(src_file)],
-        capture_output=True, text=True,
+        [
+            compiler,
+            "-shared",
+            "-fPIC",
+            "-g",
+            "-fvisibility=default",
+            "-o",
+            str(so_file),
+            str(src_file),
+        ],
+        capture_output=True,
+        text=True,
     )
     if r.returncode != 0:
         pytest.skip(f"Compilation failed: {r.stderr[:200]}")
@@ -89,6 +100,7 @@ _SRC = """
 # free_cu_die_cache — unit mechanics
 # ---------------------------------------------------------------------------
 
+
 class _FakeCU:
     """Minimal stand-in for pyelftools' CompileUnit cache attributes."""
 
@@ -122,6 +134,7 @@ class TestFreeCuDieCache:
 # dwarf_low_memory_mode — threshold decision
 # ---------------------------------------------------------------------------
 
+
 class _FakeSection:
     def __init__(self, size: int):
         self.size = size
@@ -129,7 +142,9 @@ class _FakeSection:
 
 class _FakeDwarfInfo:
     def __init__(self, debug_info_size: int | None):
-        self.debug_info_sec = None if debug_info_size is None else _FakeSection(debug_info_size)
+        self.debug_info_sec = (
+            None if debug_info_size is None else _FakeSection(debug_info_size)
+        )
 
 
 class TestDwarfLowMemoryMode:
@@ -153,7 +168,9 @@ class TestDwarfLowMemoryMode:
         tiny = _FakeDwarfInfo(1024)  # 1 KiB — above a 0 MiB threshold
         assert dwarf_low_memory_mode(tiny) is True
 
-    def test_env_override_raises_threshold_effectively_disabling(self, monkeypatch) -> None:
+    def test_env_override_raises_threshold_effectively_disabling(
+        self, monkeypatch
+    ) -> None:
         monkeypatch.setenv("ABICHECK_DWARF_LOW_MEMORY_MB", "1000000")
         huge = _FakeDwarfInfo(500 * 1024 * 1024)  # 500 MiB
         assert dwarf_low_memory_mode(huge) is False
@@ -191,13 +208,16 @@ class TestDwarfLowMemoryMode:
 # End-to-end: low-memory mode must not change any parsed output
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.skipif(
     sys.platform != "linux",
     reason="ELF DWARF tests require Linux (macOS/Windows compilers produce Mach-O/PE)",
 )
 class TestLowMemoryModeIsOutputNeutral:
     def test_parse_dwarf_identical_with_low_memory_forced_on(
-        self, tmp_path: Path, monkeypatch,
+        self,
+        tmp_path: Path,
+        monkeypatch,
     ) -> None:
         _require_tool("g++")
         from abicheck.dwarf_unified import parse_dwarf
@@ -220,7 +240,9 @@ class TestLowMemoryModeIsOutputNeutral:
         assert meta_normal.structs
 
     def test_snapshot_via_session_identical_with_low_memory_forced_on(
-        self, tmp_path: Path, monkeypatch,
+        self,
+        tmp_path: Path,
+        monkeypatch,
     ) -> None:
         _require_tool("g++")
         from abicheck.dwarf_snapshot import build_snapshot_from_dwarf
@@ -262,7 +284,9 @@ class TestLowMemoryModeIsOutputNeutral:
         assert snap_b.functions
 
     def test_low_memory_snapshot_matches_non_low_memory_direct_open(
-        self, tmp_path: Path, monkeypatch,
+        self,
+        tmp_path: Path,
+        monkeypatch,
     ) -> None:
         """Same check without session reuse -- the DWARF-only ``dump``
         (``--depth binary``) code path opens fresh rather than sharing a

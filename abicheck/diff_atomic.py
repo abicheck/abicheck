@@ -20,6 +20,7 @@ type may differ from the unqualified type and varies across implementations, so
 layout and calling convention can diverge. The DWARF/type parser surfaces the
 qualifier as the spelling ``_Atomic(T)`` (or a leading ``_Atomic`` keyword).
 """
+
 from __future__ import annotations
 
 import re
@@ -49,12 +50,14 @@ def _diff_atomic(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if old_a == new_a:
             continue
         direction = "qualifier added" if new_a else "qualifier removed"
-        changes.append(make_change(
-            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
-            symbol=ch.symbol,
-            name=f"{ch.slot} of '{ch.symbol}'",
-            detail=direction,
-            old=ch.old_type,
-            new=ch.new_type,
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+                symbol=ch.symbol,
+                name=f"{ch.slot} of '{ch.symbol}'",
+                detail=direction,
+                old=ch.old_type,
+                new=ch.new_type,
+            )
+        )
     return changes

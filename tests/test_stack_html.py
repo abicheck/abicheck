@@ -1,4 +1,5 @@
 """Tests for stack HTML report generator."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -9,8 +10,11 @@ from abicheck.stack_html import stack_to_html, write_stack_html
 
 def _node(soname: str, depth: int = 0, path: str = "", reason: str = "") -> object:
     return SimpleNamespace(
-        soname=soname, depth=depth, path=path or f"/lib/{soname}",
-        needed=[], resolution_reason=reason or ("root" if depth == 0 else "DT_NEEDED"),
+        soname=soname,
+        depth=depth,
+        path=path or f"/lib/{soname}",
+        needed=[],
+        resolution_reason=reason or ("root" if depth == 0 else "DT_NEEDED"),
     )
 
 
@@ -25,10 +29,15 @@ def _graph(root: str = "/bin/app", nodes: dict | None = None) -> object:
     )
 
 
-def _binding(consumer: str, symbol: str, status: str, version: str = "", explanation: str = "") -> object:
+def _binding(
+    consumer: str, symbol: str, status: str, version: str = "", explanation: str = ""
+) -> object:
     return SimpleNamespace(
-        consumer=consumer, symbol=symbol, version=version,
-        status=SimpleNamespace(value=status), explanation=explanation,
+        consumer=consumer,
+        symbol=symbol,
+        version=version,
+        status=SimpleNamespace(value=status),
+        explanation=explanation,
     )
 
 
@@ -76,7 +85,8 @@ def test_html_renders_binding_changes() -> None:
 
     change = Change(
         kind=ChangeKind.RUNTIME_SYMBOL_PROVIDER_CHANGED,
-        symbol="process", description="moved from liba.so.1 to libb.so.1",
+        symbol="process",
+        description="moved from liba.so.1 to libb.so.1",
     )
     out = stack_to_html(_stack_result(binding_changes=[change]))
     assert "Runtime Binding Changes" in out
@@ -106,7 +116,9 @@ def test_html_shows_binding_summary() -> None:
 
 
 def test_html_shows_missing_symbols() -> None:
-    missing = [_binding("/bin/myapp", "missing_func", "missing", explanation="not found")]
+    missing = [
+        _binding("/bin/myapp", "missing_func", "missing", explanation="not found")
+    ]
     out = stack_to_html(_stack_result(missing_symbols=missing))
     assert "Missing Symbols" in out
     assert "missing_func" in out
@@ -171,10 +183,16 @@ def test_html_shows_stack_changes_content_changed() -> None:
 
     abi_diff = SimpleNamespace(
         verdict=Verdict.BREAKING,
-        breaking=[SimpleNamespace(kind=SimpleNamespace(value="func_removed"), description="foo removed")],
+        breaking=[
+            SimpleNamespace(
+                kind=SimpleNamespace(value="func_removed"), description="foo removed"
+            )
+        ],
         changes=[SimpleNamespace()],
     )
-    sc = SimpleNamespace(library="libchanged.so", change_type="content_changed", abi_diff=abi_diff)
+    sc = SimpleNamespace(
+        library="libchanged.so", change_type="content_changed", abi_diff=abi_diff
+    )
     out = stack_to_html(_stack_result(stack_changes=[sc]))
     assert "libchanged.so" in out
     assert "BREAKING" in out
@@ -228,21 +246,33 @@ def test_html_tree_node_with_none_reason() -> None:
     nodes = {
         root_key: _node("app", 0, root_key),
         child_key: SimpleNamespace(
-            soname="libfoo.so", depth=1, path=child_key,
-            needed=[], resolution_reason=None,
+            soname="libfoo.so",
+            depth=1,
+            path=child_key,
+            needed=[],
+            resolution_reason=None,
         ),
     }
     graph = SimpleNamespace(
-        root=root_key, nodes=nodes, node_count=2,
-        edges=[(root_key, child_key)], unresolved=[],
+        root=root_key,
+        nodes=nodes,
+        node_count=2,
+        edges=[(root_key, child_key)],
+        unresolved=[],
     )
     r = StackCheckResult(
         root_binary="/bin/myapp",
-        baseline_env="/baseline", candidate_env="/candidate",
-        loadability=StackVerdict.PASS, abi_risk=StackVerdict.PASS,
-        baseline_graph=_graph(), candidate_graph=graph,
-        bindings_baseline=[], bindings_candidate=[],
-        missing_symbols=[], stack_changes=[], risk_score="low",
+        baseline_env="/baseline",
+        candidate_env="/candidate",
+        loadability=StackVerdict.PASS,
+        abi_risk=StackVerdict.PASS,
+        baseline_graph=_graph(),
+        candidate_graph=graph,
+        bindings_baseline=[],
+        bindings_candidate=[],
+        missing_symbols=[],
+        stack_changes=[],
+        risk_score="low",
     )
     out = stack_to_html(r)
     assert "(None)" not in out
@@ -254,11 +284,17 @@ def test_html_escapes_xss_in_root_binary() -> None:
     r = _stack_result()
     r = StackCheckResult(
         root_binary="<script>alert(1)</script>",
-        baseline_env="/baseline", candidate_env="/candidate",
-        loadability=StackVerdict.PASS, abi_risk=StackVerdict.PASS,
-        baseline_graph=_graph(), candidate_graph=_graph(),
-        bindings_baseline=[], bindings_candidate=[],
-        missing_symbols=[], stack_changes=[], risk_score="low",
+        baseline_env="/baseline",
+        candidate_env="/candidate",
+        loadability=StackVerdict.PASS,
+        abi_risk=StackVerdict.PASS,
+        baseline_graph=_graph(),
+        candidate_graph=_graph(),
+        bindings_baseline=[],
+        bindings_candidate=[],
+        missing_symbols=[],
+        stack_changes=[],
+        risk_score="low",
     )
     out = stack_to_html(r)
     assert "<script>" not in out
@@ -282,11 +318,17 @@ def test_html_medium_risk_score() -> None:
 def _result_with_graph(graph: object) -> StackCheckResult:
     return StackCheckResult(
         root_binary="/bin/myapp",
-        baseline_env="/baseline", candidate_env="/candidate",
-        loadability=StackVerdict.PASS, abi_risk=StackVerdict.PASS,
-        baseline_graph=_graph(), candidate_graph=graph,
-        bindings_baseline=[], bindings_candidate=[],
-        missing_symbols=[], stack_changes=[], risk_score="low",
+        baseline_env="/baseline",
+        candidate_env="/candidate",
+        loadability=StackVerdict.PASS,
+        abi_risk=StackVerdict.PASS,
+        baseline_graph=_graph(),
+        candidate_graph=graph,
+        bindings_baseline=[],
+        bindings_candidate=[],
+        missing_symbols=[],
+        stack_changes=[],
+        risk_score="low",
     )
 
 
@@ -307,7 +349,9 @@ def test_html_tree_empty_when_no_root_node() -> None:
     graph = SimpleNamespace(
         root="/bin/app",
         nodes={"/lib/orphan.so": _node("orphan.so", depth=1)},
-        node_count=1, edges=[], unresolved=[],
+        node_count=1,
+        edges=[],
+        unresolved=[],
     )
     out = stack_to_html(_result_with_graph(graph))
     assert "(empty graph)" in out
@@ -320,7 +364,9 @@ def test_html_tree_breaks_cycles() -> None:
     graph = SimpleNamespace(
         root=a,
         nodes={a: _node("app", 0, a), b: _node("libb.so", 1, b)},
-        node_count=2, edges=[(a, b), (b, a)], unresolved=[],
+        node_count=2,
+        edges=[(a, b), (b, a)],
+        unresolved=[],
     )
     out = stack_to_html(_result_with_graph(graph))
     assert "(cycle)" in out

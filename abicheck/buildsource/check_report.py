@@ -155,7 +155,13 @@ def validate_identifier(field_name: str, value: str) -> None:
 
 
 def build_check_id(
-    name: str, profile_id: str, baseline_channel: str, requested_depth: str, *, environment_id: str | None = None, explicit_id: str | None = None
+    name: str,
+    profile_id: str,
+    baseline_channel: str,
+    requested_depth: str,
+    *,
+    environment_id: str | None = None,
+    explicit_id: str | None = None,
 ) -> str:
     """Build the unconditional ``target@profile#baseline_channel@depth`` id
     (ADR-047 §7). G42: *environment_id*/*explicit_id* append an optional,
@@ -165,7 +171,10 @@ def build_check_id(
     validate_identifier("baseline_channel", baseline_channel)
     validate_evidence_depth("requested_depth", requested_depth)
     check_id = f"{name}@{profile_id}#{baseline_channel}@{requested_depth}"
-    for field, prefix, value in (("environment_id", "!", environment_id), ("explicit_id", "~", explicit_id)):
+    for field, prefix, value in (
+        ("environment_id", "!", environment_id),
+        ("explicit_id", "~", explicit_id),
+    ):
         if value:
             validate_identifier(field, value)
             check_id += f"{prefix}{value}"
@@ -221,7 +230,9 @@ def derive_effective_depth(
         if isinstance(scan_depth, str) and scan_depth in _DEPTH_RANK:
             achieved = scan_depth
             source = "scan"
-        elif (audit_result := _no_baseline.no_baseline_effective_depth(report)) and audit_result[0] in _DEPTH_RANK:
+        elif (
+            audit_result := _no_baseline.no_baseline_effective_depth(report)
+        ) and audit_result[0] in _DEPTH_RANK:
             achieved, source = audit_result
     if achieved is None:
         # Neither signal is present -- shouldn't happen for real compare/scan
@@ -379,11 +390,19 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
 
             node["exit"] = resolve_exit_decision(
                 compatibility_contribution=0,
-                operational_error_contribution=_int_or_zero("operational_error_contribution"),
-                evidence_contract_error_contribution=_int_or_zero("evidence_contract_error_contribution"),
-                budget_overflow_contribution=_int_or_zero("budget_overflow_contribution"),
+                operational_error_contribution=_int_or_zero(
+                    "operational_error_contribution"
+                ),
+                evidence_contract_error_contribution=_int_or_zero(
+                    "evidence_contract_error_contribution"
+                ),
+                budget_overflow_contribution=_int_or_zero(
+                    "budget_overflow_contribution"
+                ),
                 not_comparable_contribution=_int_or_zero("not_comparable_contribution"),
-                no_comparison_completed_contribution=_int_or_zero("no_comparison_completed_contribution"),  # ADR-065 D7
+                no_comparison_completed_contribution=_int_or_zero(
+                    "no_comparison_completed_contribution"
+                ),  # ADR-065 D7
             ).to_dict()
 
 
@@ -459,7 +478,10 @@ def _stamp_schema_version(out: dict[str, Any], report: dict[str, Any]) -> None:
     downstream validator would wrongly select the compare schema by the
     newly-added key's mere presence (Codex review).
     """
-    if "scan_schema_version" in report or _no_baseline.has_own_no_baseline_schema_version(report):
+    if (
+        "scan_schema_version" in report
+        or _no_baseline.has_own_no_baseline_schema_version(report)
+    ):
         return
     if not ("libraries" in report and "old_dir" in report):
         out["report_schema_version"] = REPORT_SCHEMA_VERSION
@@ -504,7 +526,10 @@ def _escalate_removed_library_severity(out: dict[str, Any]) -> None:
     # ADR-063 Phase 7: fold into `run_outcome.gate` too (no-op if absent), independently of `severity` above.
     run_outcome = out.get("run_outcome")
     if isinstance(run_outcome, dict):
-        out["run_outcome"] = {**run_outcome, "gate": PolicyGateDecision.ABI_BREAKING.value}
+        out["run_outcome"] = {
+            **run_outcome,
+            "gate": PolicyGateDecision.ABI_BREAKING.value,
+        }
 
 
 def _classify_verdict(
@@ -523,11 +548,19 @@ def _classify_verdict(
     """
     run_outcome = out.get("run_outcome")
     run_outcome = run_outcome if isinstance(run_outcome, Mapping) else {}
-    if run_outcome.get("operational") == OperationalStatus.NO_COMPARISON_COMPLETED.value:
+    if (
+        run_outcome.get("operational")
+        == OperationalStatus.NO_COMPARISON_COMPLETED.value
+    ):
         if run_outcome.get("compatibility") is not None:
             out["compatibility_verdict"] = run_outcome["compatibility"]
-        msg = report.get("error") or "no comparison completed: zero library-name pairs matched between OLD and NEW"
-        out["operational_errors"] = [{"kind": "no_comparison_completed", "message": str(msg)}]
+        msg = (
+            report.get("error")
+            or "no comparison completed: zero library-name pairs matched between OLD and NEW"
+        )
+        out["operational_errors"] = [
+            {"kind": "no_comparison_completed", "message": str(msg)}
+        ]
         return
     if _no_baseline.classify_no_baseline_verdict(out, report, run_outcome):
         return
@@ -557,9 +590,16 @@ def _classify_verdict(
 def augment_report(
     report: dict[str, Any],
     *,
-    name: str, profile_id: str, baseline_channel: str, requested_depth: str, gate_mode: str,
-    project: str | None = None, head_sha: str | None = None, base_ref: str | None = None,
-    action_version: str | None = None, analysis_exit_code: int | None = None,
+    name: str,
+    profile_id: str,
+    baseline_channel: str,
+    requested_depth: str,
+    gate_mode: str,
+    project: str | None = None,
+    head_sha: str | None = None,
+    base_ref: str | None = None,
+    action_version: str | None = None,
+    analysis_exit_code: int | None = None,
     explicit_id: str | None = None,
 ) -> dict[str, Any]:
     """Layer ADR-047 §7's identity/new fields onto a real analysis report.
@@ -585,7 +625,8 @@ def augment_report(
         raise ValueError(f"gate_mode must be one of {GATE_MODES}, got {gate_mode!r}")
     out = dict(report)
     check_id = build_check_id(
-        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id)
+        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id
+    )
     effective_depth, coverage = derive_effective_depth(report, requested_depth)
     backfill_run_outcome(out)
     backfill_exit_block_fields(out)
@@ -630,13 +671,21 @@ def augment_report(
 
 
 def _apply_optional_envelope_fields(
-    report: dict[str, Any], *, project: str | None, head_sha: str | None,
-    base_ref: str | None, tool_version: str | None, action_version: str | None,
+    report: dict[str, Any],
+    *,
+    project: str | None,
+    head_sha: str | None,
+    base_ref: str | None,
+    tool_version: str | None,
+    action_version: str | None,
 ) -> None:
     """Set each optional field only when given (shared by the three builders below)."""
     for key, value in (
-        ("project", project), ("head_sha", head_sha), ("base_ref", base_ref),
-        ("tool_version", tool_version), ("action_version", action_version),
+        ("project", project),
+        ("head_sha", head_sha),
+        ("base_ref", base_ref),
+        ("tool_version", tool_version),
+        ("action_version", action_version),
     ):
         if value is not None:
             report[key] = value
@@ -665,7 +714,8 @@ def build_operational_error_report(
     is the ADR-047 §7-documented choice, not an oversight.
     """
     check_id = build_check_id(
-        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id)
+        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id
+    )
     report: dict[str, Any] = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "check_id": check_id,
@@ -684,11 +734,18 @@ def build_operational_error_report(
         "operational_errors": [{"kind": resolve_outcome, "message": resolve_message}],
         "publication": {"state": "skipped", "channels": []},
         "verdict": OPERATIONAL_ERROR_VERDICT,
-        "run_outcome": synthetic_run_outcome(operational=OperationalStatus.EXTRACTION_ERROR),
+        "run_outcome": synthetic_run_outcome(
+            operational=OperationalStatus.EXTRACTION_ERROR
+        ),
     }
     _apply_optional_envelope_fields(
-        report, project=project, head_sha=head_sha, base_ref=base_ref,
-        tool_version=tool_version, action_version=action_version)
+        report,
+        project=project,
+        head_sha=head_sha,
+        base_ref=base_ref,
+        tool_version=tool_version,
+        action_version=action_version,
+    )
     return report
 
 
@@ -708,7 +765,8 @@ def build_bootstrap_report(
 ) -> dict[str, Any]:
     """Synthesize the "no baseline published yet" advisory pass (§6)."""
     check_id = build_check_id(
-        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id)
+        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id
+    )
     report: dict[str, Any] = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "check_id": check_id,
@@ -733,8 +791,13 @@ def build_bootstrap_report(
         "run_outcome": synthetic_run_outcome(lifecycle=TargetLifecycle.BOOTSTRAP),
     }
     _apply_optional_envelope_fields(
-        report, project=project, head_sha=head_sha, base_ref=base_ref,
-        tool_version=tool_version, action_version=action_version)
+        report,
+        project=project,
+        head_sha=head_sha,
+        base_ref=base_ref,
+        tool_version=tool_version,
+        action_version=action_version,
+    )
     return report
 
 
@@ -761,7 +824,8 @@ def build_new_target_report(
     simply carries no artifact for this particular target yet.
     """
     check_id = build_check_id(
-        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id)
+        name, profile_id, baseline_channel, requested_depth, explicit_id=explicit_id
+    )
     report: dict[str, Any] = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "check_id": check_id,
@@ -786,8 +850,13 @@ def build_new_target_report(
         "run_outcome": synthetic_run_outcome(lifecycle=TargetLifecycle.NEW_TARGET),
     }
     _apply_optional_envelope_fields(
-        report, project=project, head_sha=head_sha, base_ref=base_ref,
-        tool_version=tool_version, action_version=action_version)
+        report,
+        project=project,
+        head_sha=head_sha,
+        base_ref=base_ref,
+        tool_version=tool_version,
+        action_version=action_version,
+    )
     return report
 
 

@@ -4,6 +4,7 @@ without needing the native OS.
 Uses minimal binary fixtures written to tmp_path to exercise the parsing logic
 and verify graceful handling of minimal/malformed inputs.
 """
+
 from __future__ import annotations
 
 import struct
@@ -34,11 +35,11 @@ def _make_minimal_pe(tmp_path: Path) -> Path:
     coff_header = struct.pack(
         "<HHIIIHH",
         0x8664,  # Machine
-        0,       # NumberOfSections
-        0,       # TimeDateStamp
-        0,       # PointerToSymbolTable
-        0,       # NumberOfSymbols
-        0,       # SizeOfOptionalHeader
+        0,  # NumberOfSections
+        0,  # TimeDateStamp
+        0,  # PointerToSymbolTable
+        0,  # NumberOfSymbols
+        0,  # SizeOfOptionalHeader
         0x2000,  # Characteristics (DLL)
     )
 
@@ -55,10 +56,10 @@ def _make_minimal_macho(tmp_path: Path, filename: str = "test.dylib") -> Path:
         0x01000007,  # cputype (CPU_TYPE_X86_64)
         0x00000003,  # cpusubtype
         0x00000006,  # filetype (MH_DYLIB)
-        0,           # ncmds
-        0,           # sizeofcmds
-        0,           # flags
-        0,           # reserved
+        0,  # ncmds
+        0,  # sizeofcmds
+        0,  # flags
+        0,  # reserved
     )
     macho_file = tmp_path / filename
     macho_file.write_bytes(header)
@@ -73,10 +74,10 @@ def _make_minimal_macho_be(tmp_path: Path) -> Path:
         0x01000007,  # cputype
         0x00000003,  # cpusubtype
         0x00000006,  # filetype (MH_DYLIB)
-        0,           # ncmds
-        0,           # sizeofcmds
-        0,           # flags
-        0,           # reserved
+        0,  # ncmds
+        0,  # sizeofcmds
+        0,  # flags
+        0,  # reserved
     )
     macho_file = tmp_path / "test_be.dylib"
     macho_file.write_bytes(header)
@@ -88,26 +89,26 @@ def _make_minimal_elf(tmp_path: Path) -> Path:
     # ELF64 header (64 bytes)
     e_ident = bytearray(16)
     e_ident[0:4] = b"\x7fELF"
-    e_ident[4] = 2       # ELFCLASS64
-    e_ident[5] = 1       # ELFDATA2LSB
-    e_ident[6] = 1       # EV_CURRENT
+    e_ident[4] = 2  # ELFCLASS64
+    e_ident[5] = 1  # ELFDATA2LSB
+    e_ident[6] = 1  # EV_CURRENT
 
     # Rest of ELF header
     elf_header = struct.pack(
         "<HHIQQQIHHHHHH",
-        3,       # e_type: ET_DYN
-        0x3E,    # e_machine: EM_X86_64
-        1,       # e_version: EV_CURRENT
-        0,       # e_entry
-        0,       # e_phoff
-        0,       # e_shoff
-        0,       # e_flags
-        64,      # e_ehsize
-        0,       # e_phentsize
-        0,       # e_phnum
-        0,       # e_shentsize
-        0,       # e_shnum
-        0,       # e_shstrndx
+        3,  # e_type: ET_DYN
+        0x3E,  # e_machine: EM_X86_64
+        1,  # e_version: EV_CURRENT
+        0,  # e_entry
+        0,  # e_phoff
+        0,  # e_shoff
+        0,  # e_flags
+        64,  # e_ehsize
+        0,  # e_phentsize
+        0,  # e_phnum
+        0,  # e_shentsize
+        0,  # e_shnum
+        0,  # e_shstrndx
     )
 
     elf_file = tmp_path / "test.so"
@@ -131,6 +132,7 @@ class TestPeMetadataMinimal:
         meta = parse_pe_metadata(pe_file)
         # Should return PeMetadata (even if empty exports)
         from abicheck.pe_metadata import PeMetadata
+
         assert isinstance(meta, PeMetadata)
 
     def test_minimal_pe_has_empty_exports(self, tmp_path: Path) -> None:
@@ -278,12 +280,12 @@ class TestBinaryFormatDetection:
         from abicheck.macho_metadata import is_macho
 
         magics = [
-            b"\xfe\xed\xfa\xce",   # MH_MAGIC (32-bit)
-            b"\xce\xfa\xed\xfe",   # MH_CIGAM (32-bit, swapped)
-            b"\xfe\xed\xfa\xcf",   # MH_MAGIC_64 (64-bit)
-            b"\xcf\xfa\xed\xfe",   # MH_CIGAM_64 (64-bit, swapped)
-            b"\xca\xfe\xba\xbe",   # FAT_MAGIC (universal)
-            b"\xbe\xba\xfe\xca",   # FAT_CIGAM (universal, swapped)
+            b"\xfe\xed\xfa\xce",  # MH_MAGIC (32-bit)
+            b"\xce\xfa\xed\xfe",  # MH_CIGAM (32-bit, swapped)
+            b"\xfe\xed\xfa\xcf",  # MH_MAGIC_64 (64-bit)
+            b"\xcf\xfa\xed\xfe",  # MH_CIGAM_64 (64-bit, swapped)
+            b"\xca\xfe\xba\xbe",  # FAT_MAGIC (universal)
+            b"\xbe\xba\xfe\xca",  # FAT_CIGAM (universal, swapped)
         ]
         for i, magic in enumerate(magics):
             f = tmp_path / f"macho_{i}.dylib"
@@ -337,21 +339,35 @@ class TestCrossPlatformSnapshotCompare:
     def test_pe_platform_snapshot_compare(self) -> None:
         """compare() should work on snapshots tagged with platform='pe'."""
         old = AbiSnapshot(
-            library="test.dll", version="1.0",
+            library="test.dll",
+            version="1.0",
             platform="pe",
             functions=[
-                Function(name="DllFunc", mangled="DllFunc", return_type="int",
-                         visibility=Visibility.PUBLIC),
+                Function(
+                    name="DllFunc",
+                    mangled="DllFunc",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                ),
             ],
         )
         new = AbiSnapshot(
-            library="test.dll", version="2.0",
+            library="test.dll",
+            version="2.0",
             platform="pe",
             functions=[
-                Function(name="DllFunc", mangled="DllFunc", return_type="int",
-                         visibility=Visibility.PUBLIC),
-                Function(name="NewFunc", mangled="NewFunc", return_type="void",
-                         visibility=Visibility.PUBLIC),
+                Function(
+                    name="DllFunc",
+                    mangled="DllFunc",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                ),
+                Function(
+                    name="NewFunc",
+                    mangled="NewFunc",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                ),
             ],
         )
         result = compare(old, new)
@@ -360,15 +376,21 @@ class TestCrossPlatformSnapshotCompare:
     def test_macho_platform_snapshot_compare(self) -> None:
         """compare() should work on snapshots tagged with platform='macho'."""
         old = AbiSnapshot(
-            library="libtest.dylib", version="1.0",
+            library="libtest.dylib",
+            version="1.0",
             platform="macho",
             functions=[
-                Function(name="api_func", mangled="_api_func", return_type="int",
-                         visibility=Visibility.PUBLIC),
+                Function(
+                    name="api_func",
+                    mangled="_api_func",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                ),
             ],
         )
         new = AbiSnapshot(
-            library="libtest.dylib", version="2.0",
+            library="libtest.dylib",
+            version="2.0",
             platform="macho",
             functions=[],  # all functions removed
         )
@@ -378,19 +400,29 @@ class TestCrossPlatformSnapshotCompare:
     def test_mixed_platform_snapshots(self) -> None:
         """compare() should handle snapshots with different platform tags."""
         old = AbiSnapshot(
-            library="test.dll", version="1.0",
+            library="test.dll",
+            version="1.0",
             platform="pe",
             functions=[
-                Function(name="f", mangled="f", return_type="int",
-                         visibility=Visibility.PUBLIC),
+                Function(
+                    name="f",
+                    mangled="f",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                ),
             ],
         )
         new = AbiSnapshot(
-            library="test.dll", version="2.0",
+            library="test.dll",
+            version="2.0",
             platform="pe",
             functions=[
-                Function(name="f", mangled="f", return_type="int",
-                         visibility=Visibility.PUBLIC),
+                Function(
+                    name="f",
+                    mangled="f",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                ),
             ],
         )
         result = compare(old, new)
@@ -442,13 +474,14 @@ class TestPdbParserEdgeCases:
 
         # Magic + superblock with invalid block size (7)
         data = bytearray(_MSF_MAGIC)
-        data += struct.pack("<IIIIII",
-                            7,      # block_size (invalid)
-                            0,      # fpm_block
-                            100,    # num_blocks
-                            0,      # dir_bytes
-                            0,      # unknown
-                            0,      # block_map_addr
-                            )
+        data += struct.pack(
+            "<IIIIII",
+            7,  # block_size (invalid)
+            0,  # fpm_block
+            100,  # num_blocks
+            0,  # dir_bytes
+            0,  # unknown
+            0,  # block_map_addr
+        )
         with pytest.raises(ValueError, match="Unsupported PDB block size"):
             parse_msf(bytes(data))

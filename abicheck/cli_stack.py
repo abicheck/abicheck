@@ -22,6 +22,7 @@ AI-readiness file-size limit. Imported for side-effect at the bottom of
 :mod:`abicheck.cli` so the ``@main.group(...)`` / ``@deps_group.command(...)``
 decorators run.
 """
+
 from __future__ import annotations
 
 import sys
@@ -50,23 +51,44 @@ def deps_group() -> None:
 
 @deps_group.command("tree")
 @click.argument("binary", type=click.Path(exists=True, path_type=Path))
-@click.option("--search-path", "search_paths", multiple=True,
-              type=click.Path(exists=True, path_type=Path),
-              help="Additional directory to search for shared libraries.")
-@click.option("--sysroot", type=click.Path(exists=True, path_type=Path), default=None,
-              help="Sysroot prefix for cross/container analysis.")
-@click.option("--ld-library-path", "ld_library_path", default="",
-              help="Simulated LD_LIBRARY_PATH (colon-separated).")
+@click.option(
+    "--search-path",
+    "search_paths",
+    multiple=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Additional directory to search for shared libraries.",
+)
+@click.option(
+    "--sysroot",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Sysroot prefix for cross/container analysis.",
+)
+@click.option(
+    "--ld-library-path",
+    "ld_library_path",
+    default="",
+    help="Simulated LD_LIBRARY_PATH (colon-separated).",
+)
 @export_options(["json", "markdown", "html"], default_format="markdown")
-@click.option("--dry-run", "dry_run", is_flag=True, default=False,
-              help="Show the resolved binary, sysroot, search order, and loader "
-                   "inputs without walking/checking the full stack. Writes "
-                   "nothing; incompatible with -o/--output.")
+@click.option(
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    default=False,
+    help="Show the resolved binary, sysroot, search order, and loader "
+    "inputs without walking/checking the full stack. Writes "
+    "nothing; incompatible with -o/--output.",
+)
 @verbose_option
 def deps_tree_cmd(
-    binary: Path, search_paths: tuple[Path, ...],
-    sysroot: Path | None, ld_library_path: str,
-    exports: ExportSet, dry_run: bool, verbose: bool,
+    binary: Path,
+    search_paths: tuple[Path, ...],
+    sysroot: Path | None,
+    ld_library_path: str,
+    exports: ExportSet,
+    dry_run: bool,
+    verbose: bool,
 ) -> None:
     """Show the resolved dependency tree and symbol binding status.
 
@@ -110,7 +132,9 @@ def deps_tree_cmd(
         )
         dry_result.add(
             "Build/source inputs",
-            f"search path: {', '.join(str(p) for p in search_paths)}" if search_paths else None,
+            f"search path: {', '.join(str(p) for p in search_paths)}"
+            if search_paths
+            else None,
             f"LD_LIBRARY_PATH: {ld_library_path}" if ld_library_path else None,
         )
         dry_result.add("Tools and frontends", *tool_status("readelf", "ldd"))
@@ -152,27 +176,53 @@ def deps_tree_cmd(
 
 @deps_group.command("compare")
 @click.argument("binary", type=click.Path(path_type=Path))
-@click.option("--old-root", type=click.Path(exists=True, path_type=Path),
-              default=Path("/"), show_default=True,
-              help="Sysroot for the old (baseline) environment.")
-@click.option("--new-root", type=click.Path(exists=True, path_type=Path),
-              default=Path("/"), show_default=True,
-              help="Sysroot for the new (candidate) environment.")
-@click.option("--search-path", "search_paths", multiple=True,
-              type=click.Path(exists=True, path_type=Path),
-              help="Additional directory to search for shared libraries.")
-@click.option("--ld-library-path", "ld_library_path", default="",
-              help="Simulated LD_LIBRARY_PATH (colon-separated).")
+@click.option(
+    "--old-root",
+    type=click.Path(exists=True, path_type=Path),
+    default=Path("/"),
+    show_default=True,
+    help="Sysroot for the old (baseline) environment.",
+)
+@click.option(
+    "--new-root",
+    type=click.Path(exists=True, path_type=Path),
+    default=Path("/"),
+    show_default=True,
+    help="Sysroot for the new (candidate) environment.",
+)
+@click.option(
+    "--search-path",
+    "search_paths",
+    multiple=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Additional directory to search for shared libraries.",
+)
+@click.option(
+    "--ld-library-path",
+    "ld_library_path",
+    default="",
+    help="Simulated LD_LIBRARY_PATH (colon-separated).",
+)
 @export_options(["json", "markdown", "html"], default_format="markdown")
-@click.option("--dry-run", "dry_run", is_flag=True, default=False,
-              help="Show old/new roots, resolved binary paths, and search order "
-                   "without running per-library ABI diffs. Writes nothing; "
-                   "incompatible with any -o export to a file.")
+@click.option(
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    default=False,
+    help="Show old/new roots, resolved binary paths, and search order "
+    "without running per-library ABI diffs. Writes nothing; "
+    "incompatible with any -o export to a file.",
+)
 @verbose_option
 def deps_compare_cmd(
-    binary: Path, old_root: Path, new_root: Path,
-    search_paths: tuple[Path, ...], ld_library_path: str,
-    exports: ExportSet, dry_run: bool, verbose: bool,
+    binary: Path,
+    old_root: Path,
+    new_root: Path,
+    search_paths: tuple[Path, ...],
+    ld_library_path: str,
+    exports: ExportSet,
+    dry_run: bool,
+    verbose: bool,
 ) -> None:
     """Compare a binary's full dependency stack across two environments.
 
@@ -236,7 +286,9 @@ def deps_compare_cmd(
             "Build/source inputs",
             f"old resolved path: {under_sysroot(old_root, binary)}",
             f"new resolved path: {under_sysroot(new_root, binary)}",
-            f"search path: {', '.join(str(p) for p in search_paths)}" if search_paths else None,
+            f"search path: {', '.join(str(p) for p in search_paths)}"
+            if search_paths
+            else None,
         )
         dry_result.add(
             "Consumer/contract scoping",

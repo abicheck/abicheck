@@ -167,9 +167,7 @@ def parse_android_dump(
         extractor={"name": "android-header-abi", "version": ANDROID_EXTRACTOR_VERSION},
         source=source,
         public_header_roots=list(public_header_roots or []),
-        types=(
-            [_record_entity(r) for r in records] + [_enum_entity(e) for e in enums]
-        ),
+        types=([_record_entity(r) for r in records] + [_enum_entity(e) for e in enums]),
         functions=[_function_entity(f) for f in functions],
         variables=[_global_var_entity(g) for g in global_vars],
     )
@@ -190,7 +188,9 @@ class AndroidHeaderAbiAdapter:
     name = "android-header-abi"
     version = ANDROID_EXTRACTOR_VERSION
 
-    def __init__(self, *, dumper_bin: str = "header-abi-dumper", timeout: int = 180) -> None:
+    def __init__(
+        self, *, dumper_bin: str = "header-abi-dumper", timeout: int = 180
+    ) -> None:
         self.dumper_bin = dumper_bin
         self.timeout = timeout
 
@@ -209,7 +209,9 @@ class AndroidHeaderAbiAdapter:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except OSError as exc:
-            raise SourceExtractionError(f"cannot read Android dump {path}: {exc}") from exc
+            raise SourceExtractionError(
+                f"cannot read Android dump {path}: {exc}"
+            ) from exc
         except ValueError as exc:
             raise SourceExtractionError(
                 f"Android dump {path} is not JSON (a raw protobuf .sdump must be "

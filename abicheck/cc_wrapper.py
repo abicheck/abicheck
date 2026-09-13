@@ -80,7 +80,9 @@ def _is_preprocess_only(command: Sequence[str]) -> bool:
     return any(arg in _PREPROCESS_ONLY_FLAGS for arg in command)
 
 
-def compile_units_from_command(command: Sequence[str], directory: str | Path) -> list[CompileUnit]:
+def compile_units_from_command(
+    command: Sequence[str], directory: str | Path
+) -> list[CompileUnit]:
     """Build a :class:`CompileUnit` for **every** source operand in *command*.
 
     A single invocation may compile several TUs (``gcc -c a.c b.c``); each gets
@@ -125,7 +127,9 @@ def compile_units_from_command(command: Sequence[str], directory: str | Path) ->
     return units
 
 
-def compile_unit_from_command(command: Sequence[str], directory: str | Path) -> CompileUnit | None:
+def compile_unit_from_command(
+    command: Sequence[str], directory: str | Path
+) -> CompileUnit | None:
     """The first TU of *command* (convenience over :func:`compile_units_from_command`)."""
     units = compile_units_from_command(command, directory)
     return units[0] if units else None
@@ -193,13 +197,17 @@ def emit_facts_for_command(
         )
         return None
     target_id = f"target://{library}" if library else ""
-    init_inputs_pack(inputs_dir, library=library, version=version, created_by="abicheck-cc")
+    init_inputs_pack(
+        inputs_dir, library=library, version=version, created_by="abicheck-cc"
+    )
     first: SourceAbiTu | None = None
     for cu in units:
         # Per-TU isolation: one source the backend cannot parse must not drop the
         # other objects of the same multi-source compile (Codex review).
         try:
-            tu = impl.extract(cu, public_header_roots=list(public_header_roots), target_id=target_id)
+            tu = impl.extract(
+                cu, public_header_roots=list(public_header_roots), target_id=target_id
+            )
         except Exception as exc:
             click.echo(f"abicheck-cc: skipped facts for {cu.source}: {exc}", err=True)
             continue

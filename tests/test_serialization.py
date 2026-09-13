@@ -1,4 +1,5 @@
 """Tests for abi_check.serialization — roundtrip JSON."""
+
 import tempfile
 from pathlib import Path
 
@@ -182,9 +183,21 @@ class TestSerializationRoundtripExtended:
                     return_type="int",
                     visibility=Visibility.PUBLIC,
                     params=[
-                        Param(name="count", type="int", kind=ParamKind.VALUE, default="42"),
-                        Param(name="flag", type="bool", kind=ParamKind.VALUE, default="true"),
-                        Param(name="name", type="const char*", kind=ParamKind.POINTER, default=None),
+                        Param(
+                            name="count", type="int", kind=ParamKind.VALUE, default="42"
+                        ),
+                        Param(
+                            name="flag",
+                            type="bool",
+                            kind=ParamKind.VALUE,
+                            default="true",
+                        ),
+                        Param(
+                            name="name",
+                            type="const char*",
+                            kind=ParamKind.POINTER,
+                            default=None,
+                        ),
                     ],
                 )
             ],
@@ -281,11 +294,31 @@ class TestSerializationRoundtripExtended:
         # Verify deserialization
         snap2 = snapshot_from_dict(d)
         f = snap2.types[0].fields
-        assert f[0].is_const is True and f[0].is_volatile is False and f[0].is_mutable is False
-        assert f[1].is_const is False and f[1].is_volatile is True and f[1].is_mutable is False
-        assert f[2].is_const is False and f[2].is_volatile is False and f[2].is_mutable is True
-        assert f[3].is_const is True and f[3].is_volatile is True and f[3].is_mutable is True
-        assert f[4].is_const is False and f[4].is_volatile is False and f[4].is_mutable is False
+        assert (
+            f[0].is_const is True
+            and f[0].is_volatile is False
+            and f[0].is_mutable is False
+        )
+        assert (
+            f[1].is_const is False
+            and f[1].is_volatile is True
+            and f[1].is_mutable is False
+        )
+        assert (
+            f[2].is_const is False
+            and f[2].is_volatile is False
+            and f[2].is_mutable is True
+        )
+        assert (
+            f[3].is_const is True
+            and f[3].is_volatile is True
+            and f[3].is_mutable is True
+        )
+        assert (
+            f[4].is_const is False
+            and f[4].is_volatile is False
+            and f[4].is_mutable is False
+        )
 
     def test_is_template_pattern_roundtrip(self) -> None:
         """RecordType.is_template_pattern must survive a load→save cycle.
@@ -327,8 +360,12 @@ class TestSerializationRoundtripExtended:
             library="libanon.so.1",
             version="1.0",
             types=[
-                RecordType(name="Foo", kind="struct", has_anonymous_aggregate_fields=True),
-                RecordType(name="Bar", kind="struct", has_anonymous_aggregate_fields=False),
+                RecordType(
+                    name="Foo", kind="struct", has_anonymous_aggregate_fields=True
+                ),
+                RecordType(
+                    name="Bar", kind="struct", has_anonymous_aggregate_fields=False
+                ),
             ],
         )
         d = snapshot_to_dict(snap)
@@ -372,7 +409,9 @@ class TestFromHeadersBackCompat:
     def test_present_key_false_is_honored(self):
         # A current DWARF-only/symbols-only dump legitimately carries False.
         d = {
-            "library": "libfoo.so", "version": "1.0", "from_headers": False,
+            "library": "libfoo.so",
+            "version": "1.0",
+            "from_headers": False,
             "functions": [{"name": "f", "mangled": "f", "return_type": "int"}],
         }
         assert snapshot_from_dict(d).from_headers is False
@@ -381,7 +420,8 @@ class TestFromHeadersBackCompat:
         # Legacy snapshot (no from_headers key) that was dumped with headers:
         # a populated, non-elf-only surface must keep prior HEADER_AWARE behavior.
         d = {
-            "library": "libfoo.so", "version": "1.0",
+            "library": "libfoo.so",
+            "version": "1.0",
             "functions": [{"name": "f", "mangled": "f", "return_type": "int"}],
         }
         assert "from_headers" not in d
@@ -389,7 +429,9 @@ class TestFromHeadersBackCompat:
 
     def test_legacy_no_key_elf_only_mode_stays_false(self):
         d = {
-            "library": "libfoo.so", "version": "1.0", "elf_only_mode": True,
+            "library": "libfoo.so",
+            "version": "1.0",
+            "elf_only_mode": True,
             "functions": [{"name": "f", "mangled": "f", "return_type": "int"}],
         }
         assert snapshot_from_dict(d).from_headers is False

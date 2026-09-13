@@ -3,6 +3,7 @@
 Covers: .so + .so, .json + .json, .json + .so (mixed), error paths,
 and per-side header options (--old-header / --new-header).
 """
+
 from __future__ import annotations
 
 import json
@@ -20,11 +21,17 @@ from abicheck.serialization import snapshot_to_json
 # ── helpers ──────────────────────────────────────────────────────────────
 
 
-def _make_snapshot(version: str = "1.0", funcs: list[Function] | None = None) -> AbiSnapshot:
+def _make_snapshot(
+    version: str = "1.0", funcs: list[Function] | None = None
+) -> AbiSnapshot:
     if funcs is None:
         funcs = [
-            Function(name="foo", mangled="_Z3foov", return_type="int",
-                     visibility=Visibility.PUBLIC),
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            ),
         ]
     return AbiSnapshot(library="libtest.so", version=version, functions=funcs)
 
@@ -49,16 +56,34 @@ def _write_snapshots(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _breaking_snapshots(tmp_path: Path) -> tuple[AbiSnapshot, AbiSnapshot]:
-    old = _make_snapshot("1.0", [
-        Function(name="foo", mangled="_Z3foov", return_type="int",
-                 visibility=Visibility.PUBLIC),
-        Function(name="bar", mangled="_Z3barv", return_type="void",
-                 visibility=Visibility.PUBLIC),
-    ])
-    new = _make_snapshot("2.0", [
-        Function(name="foo", mangled="_Z3foov", return_type="int",
-                 visibility=Visibility.PUBLIC),
-    ])
+    old = _make_snapshot(
+        "1.0",
+        [
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            ),
+            Function(
+                name="bar",
+                mangled="_Z3barv",
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+            ),
+        ],
+    )
+    new = _make_snapshot(
+        "2.0",
+        [
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            ),
+        ],
+    )
     return old, new
 
 
@@ -201,7 +226,11 @@ class TestResolveInput:
         missing = tmp_path / "nonexistent.h"
         with pytest.raises(Exception, match="Header file not found"):
             _resolve_input(
-                p, headers=[missing], includes=[], version="1.0", lang="c++",
+                p,
+                headers=[missing],
+                includes=[],
+                version="1.0",
+                lang="c++",
             )
 
 
@@ -215,6 +244,7 @@ class TestLinkerScriptInput:
 
     def test_follows_input_directive(self, tmp_path):
         from abicheck.cli_resolve import _resolve_linker_script
+
         target = _write_fake_elf(tmp_path / "libfoo.so.1")
         script = tmp_path / "libfoo.so"
         script.write_text("INPUT(libfoo.so.1)\n", encoding="utf-8")
@@ -224,6 +254,7 @@ class TestLinkerScriptInput:
 
     def test_follows_group_with_comment_and_as_needed(self, tmp_path):
         from abicheck.cli_resolve import _resolve_linker_script
+
         target = _write_fake_elf(tmp_path / "libbar.so.6")
         script = tmp_path / "libbar.so"
         script.write_text(
@@ -236,6 +267,7 @@ class TestLinkerScriptInput:
 
     def test_follows_absolute_path_target(self, tmp_path):
         from abicheck.cli_resolve import _resolve_linker_script
+
         target = _write_fake_elf(tmp_path / "libabs.so.2")
         script = tmp_path / "libabs.so"
         script.write_text(f"INPUT({target})\n", encoding="utf-8")
@@ -245,6 +277,7 @@ class TestLinkerScriptInput:
 
     def test_plain_text_is_not_a_linker_script(self, tmp_path):
         from abicheck.cli_resolve import _resolve_linker_script
+
         p = tmp_path / "notes.txt"
         p.write_text("this is just text, not a script", encoding="utf-8")
         resolved, is_ld = _resolve_linker_script(p)
@@ -253,6 +286,7 @@ class TestLinkerScriptInput:
 
     def test_maybe_follow_returns_original_for_non_script(self, tmp_path):
         from abicheck.cli_resolve import _maybe_follow_linker_script
+
         p = _write_fake_elf(tmp_path / "real.so.1")
         assert _maybe_follow_linker_script(p) == p
 
@@ -264,7 +298,11 @@ class TestLinkerScriptInput:
         script.write_text("INPUT(libfollow.so.1)\n", encoding="utf-8")
         with pytest.raises(Exception, match="libfollow.so.1"):
             _resolve_input(
-                script, headers=[], includes=[], version="1.0", lang="c++",
+                script,
+                headers=[],
+                includes=[],
+                version="1.0",
+                lang="c++",
             )
 
     def test_unresolvable_script_gives_targeted_error(self, tmp_path):
@@ -272,13 +310,18 @@ class TestLinkerScriptInput:
         script.write_text("INPUT(libmissing.so.9)\n", encoding="utf-8")
         with pytest.raises(Exception, match="linker script"):
             _resolve_input(
-                script, headers=[], includes=[], version="1.0", lang="c++",
+                script,
+                headers=[],
+                includes=[],
+                version="1.0",
+                lang="c++",
             )
 
     def test_normalize_binary_input_follows_script_and_reports_elf(self, tmp_path):
         # Resolving at the caller is what lets downstream metadata/dependency
         # analysis use the real DSO instead of the text script.
         from abicheck.cli_resolve import _normalize_binary_input
+
         _write_fake_elf(tmp_path / "libn.so.1")
         script = tmp_path / "libn.so"
         script.write_text("INPUT(libn.so.1)\n", encoding="utf-8")
@@ -288,11 +331,13 @@ class TestLinkerScriptInput:
 
     def test_normalize_binary_input_passthrough_for_elf(self, tmp_path):
         from abicheck.cli_resolve import _normalize_binary_input
+
         p = _write_fake_elf(tmp_path / "plain.so.1")
         assert _normalize_binary_input(p) == (p, "elf")
 
     def test_normalize_binary_input_unknown_text(self, tmp_path):
         from abicheck.cli_resolve import _normalize_binary_input
+
         p = tmp_path / "notes.txt"
         p.write_text("just prose", encoding="utf-8")
         assert _normalize_binary_input(p) == (p, None)
@@ -341,9 +386,16 @@ class TestCompareJsonJson:
         hdr = tmp_path / "dummy.h"
         hdr.write_text("// dummy", encoding="utf-8")
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "-H", str(hdr),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-H",
+                str(hdr),
+            ],
+        )
         assert result.exit_code == 0
         assert "ignored" in result.output.lower()
 
@@ -353,10 +405,18 @@ class TestCompareJsonJson:
         hdr = tmp_path / "dummy.h"
         hdr.write_text("// dummy", encoding="utf-8")
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p),
-            "--header", "old=" + str(hdr), "--header", "new=" + str(hdr),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--header",
+                "old=" + str(hdr),
+                "--header",
+                "new=" + str(hdr),
+            ],
+        )
         assert result.exit_code == 0
         assert "--header old=" in result.output
         assert "--header new=" in result.output
@@ -379,8 +439,9 @@ class TestCompareSoSo:
 
         header_call_count = [0]
 
-        def mock_dump(so_path, headers, extra_includes=None, version="unknown",
-                      lang="c++", **kw):
+        def mock_dump(
+            so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw
+        ):
             if headers:
                 header_call_count[0] += 1
             if "v1" in str(so_path):
@@ -390,9 +451,16 @@ class TestCompareSoSo:
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_elf), str(new_elf), "-H", str(hdr),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_elf),
+                str(new_elf),
+                "-H",
+                str(hdr),
+            ],
+        )
         assert result.exit_code == 0, result.output
         # dump called for both sides. (A header-scoped compare also fires the
         # L0 hard-removal fold-in — case97 fix — which re-resolves both sides
@@ -410,19 +478,27 @@ class TestCompareSoSo:
 
         recorded_headers: list[list[Path]] = []
 
-        def mock_dump(so_path, headers, extra_includes=None, version="unknown",
-                      lang="c++", **kw):
+        def mock_dump(
+            so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw
+        ):
             recorded_headers.append(list(headers))
             return _make_snapshot(version)
 
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_elf), str(new_elf),
-            "--header", "old=" + str(old_hdr),
-            "--header", "new=" + str(new_hdr),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_elf),
+                str(new_elf),
+                "--header",
+                "old=" + str(old_hdr),
+                "--header",
+                "new=" + str(new_hdr),
+            ],
+        )
         assert result.exit_code == 0, result.output
         # The L0 hard-removal fold-in (case97 fix) also re-resolves both
         # sides symbols-only (headers=[]) — filter those out.
@@ -437,8 +513,9 @@ class TestCompareSoSo:
         old_elf = _write_fake_elf(tmp_path / "libv1.so")
         new_elf = _write_fake_elf(tmp_path / "libv2.so")
 
-        def mock_dump(so_path, headers, extra_includes=None, version="unknown",
-                      lang="c++", **kw):
+        def mock_dump(
+            so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw
+        ):
             return _make_snapshot(version)
 
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
@@ -457,8 +534,9 @@ class TestCompareSoSo:
 
         recorded_versions: list[str] = []
 
-        def mock_dump(so_path, headers, extra_includes=None, version="unknown",
-                      lang="c++", **kw):
+        def mock_dump(
+            so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw
+        ):
             if headers:
                 recorded_versions.append(version)
             return _make_snapshot(version)
@@ -466,10 +544,20 @@ class TestCompareSoSo:
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_elf), str(new_elf), "-H", str(hdr),
-            "--version", "old=1.0", "--version", "new=2.0",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_elf),
+                str(new_elf),
+                "-H",
+                str(hdr),
+                "--version",
+                "old=1.0",
+                "--version",
+                "new=2.0",
+            ],
+        )
         assert result.exit_code == 0, result.output
         # The L0 hard-removal fold-in (case97 fix) also re-resolves both sides
         # symbols-only (headers=[], version="") — excluded above.
@@ -486,8 +574,9 @@ class TestCompareSoSo:
 
         recorded_includes: list[list[Path]] = []
 
-        def mock_dump(so_path, headers, extra_includes=None, version="unknown",
-                      lang="c++", **kw):
+        def mock_dump(
+            so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw
+        ):
             if headers:
                 recorded_includes.append(list(extra_includes or []))
             return _make_snapshot(version)
@@ -495,10 +584,18 @@ class TestCompareSoSo:
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_elf), str(new_elf),
-            "-H", str(hdr), "-I", str(inc_dir),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_elf),
+                str(new_elf),
+                "-H",
+                str(hdr),
+                "-I",
+                str(inc_dir),
+            ],
+        )
         assert result.exit_code == 0, result.output
         # The L0 hard-removal fold-in (case97 fix) also re-resolves both sides
         # symbols-only (headers=[]) — excluded above.
@@ -522,16 +619,24 @@ class TestCompareMixed:
         hdr = tmp_path / "foo.h"
         hdr.write_text("int foo(void);", encoding="utf-8")
 
-        def mock_dump(so_path, headers, extra_includes=None, version="unknown",
-                      lang="c++", **kw):
+        def mock_dump(
+            so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw
+        ):
             return _make_snapshot(version)
 
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_elf), "-H", str(hdr),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_elf),
+                "-H",
+                str(hdr),
+            ],
+        )
         assert result.exit_code == 0, result.output
         assert "NO_CHANGE" in result.output
 
@@ -542,16 +647,24 @@ class TestCompareMixed:
         hdr = tmp_path / "foo.h"
         hdr.write_text("int foo(void);", encoding="utf-8")
 
-        def mock_dump(so_path, headers, extra_includes=None, version="unknown",
-                      lang="c++", **kw):
+        def mock_dump(
+            so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw
+        ):
             return _make_snapshot(version)
 
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_elf), str(new_p), "-H", str(hdr),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_elf),
+                str(new_p),
+                "-H",
+                str(hdr),
+            ],
+        )
         assert result.exit_code == 0, result.output
 
     def test_mixed_breaking_detection(self, tmp_path, monkeypatch):
@@ -562,16 +675,24 @@ class TestCompareMixed:
         hdr = tmp_path / "foo.h"
         hdr.write_text("int foo(void);", encoding="utf-8")
 
-        def mock_dump(so_path, headers, extra_includes=None, version="unknown",
-                      lang="c++", **kw):
+        def mock_dump(
+            so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw
+        ):
             return new_snap
 
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_elf), "-H", str(hdr),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_elf),
+                "-H",
+                str(hdr),
+            ],
+        )
         assert result.exit_code == 4  # BREAKING
 
     def test_mixed_with_per_side_headers(self, tmp_path, monkeypatch):
@@ -583,18 +704,25 @@ class TestCompareMixed:
 
         recorded_headers: list[list[Path]] = []
 
-        def mock_dump(so_path, headers, extra_includes=None, version="unknown",
-                      lang="c++", **kw):
+        def mock_dump(
+            so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw
+        ):
             recorded_headers.append(list(headers))
             return _make_snapshot(version)
 
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_elf),
-            "--header", "new=" + str(new_hdr),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_elf),
+                "--header",
+                "new=" + str(new_hdr),
+            ],
+        )
         assert result.exit_code == 0, result.output
         # dump should only be called for the .so side (new). The L0
         # hard-removal fold-in (case97 fix) also re-resolves the .so side
@@ -615,8 +743,9 @@ class TestCompareSoOutputFormats:
         hdr = tmp_path / "foo.h"
         hdr.write_text("int foo(void);", encoding="utf-8")
 
-        def mock_dump(so_path, headers, extra_includes=None, version="unknown",
-                      lang="c++", **kw):
+        def mock_dump(
+            so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw
+        ):
             return _make_snapshot(version)
 
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
@@ -669,10 +798,16 @@ class TestCompareHelp:
         """Headers with non-existent paths should not block snapshot-only runs."""
         old_p, new_p = _write_snapshots(tmp_path)
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p),
-            "-H", str(tmp_path / "nonexistent.h"),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "-H",
+                str(tmp_path / "nonexistent.h"),
+            ],
+        )
         # Should succeed (with warning) — header is ignored for snapshot inputs
         assert result.exit_code == 0
         assert "ignored" in result.output.lower()
@@ -684,8 +819,14 @@ class TestCompareHelp:
         runner = CliRunner()
         result = runner.invoke(main, ["compare", "--help"])
         assert result.exit_code == 0
-        for flag in ["-H", "--header", "--include", "--sources", "--build-info",
-                     "--version"]:
+        for flag in [
+            "-H",
+            "--header",
+            "--include",
+            "--sources",
+            "--build-info",
+            "--version",
+        ]:
             assert flag in result.output, f"{flag} not in help output"
         assert "--lang" not in result.output
 
@@ -698,15 +839,19 @@ class TestCompareHelp:
 
 # ── ELF compare without headers (default symbols-only fallback) ─────────────
 
+
 class TestElfNoHeaderFallback:
     """ELF compare without headers should fallback to symbols-only with warning."""
 
-    def test_elf_no_header_defaults_to_symbols_only_warning(self, tmp_path, monkeypatch):
+    def test_elf_no_header_defaults_to_symbols_only_warning(
+        self, tmp_path, monkeypatch
+    ):
         old_elf = _write_fake_elf(tmp_path / "libv1.so")
         new_elf = _write_fake_elf(tmp_path / "libv2.so")
 
-        def mock_dump(so_path, headers, extra_includes=None, version="unknown",
-                      lang="c++", **kw):
+        def mock_dump(
+            so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw
+        ):
             return _make_snapshot(version)
 
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
@@ -733,16 +878,18 @@ class TestHeaderDirectoryInput:
 
         captured: list[list[Path]] = []
 
-        def mock_dump(so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw):
+        def mock_dump(
+            so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw
+        ):
             captured.append(list(headers))
             return _make_snapshot(version)
 
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_elf), str(new_elf), "-H", str(hdr_dir)
-        ])
+        result = runner.invoke(
+            main, ["compare", str(old_elf), str(new_elf), "-H", str(hdr_dir)]
+        )
         assert result.exit_code == 0, result.output
         # old + new side. (The L0 hard-removal fold-in — case97 fix — also
         # re-resolves both sides symbols-only, appended after as headers=[].)
@@ -768,17 +915,26 @@ class TestHeaderDirectoryInput:
 
         captured: list[list[Path]] = []
 
-        def mock_dump(so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw):
+        def mock_dump(
+            so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw
+        ):
             captured.append(list(headers))
             return _make_snapshot(version)
 
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_elf), str(new_elf),
-            "--header", "old=" + str(old_dir),
-            "--header", "new=" + str(new_dir),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_elf),
+                str(new_elf),
+                "--header",
+                "old=" + str(old_dir),
+                "--header",
+                "new=" + str(new_dir),
+            ],
+        )
         assert result.exit_code == 0, result.output
         # The L0 hard-removal fold-in (case97 fix) also re-resolves both
         # sides symbols-only, appended after as headers=[].
@@ -801,16 +957,26 @@ class TestHeaderDirectoryInput:
 
         captured: list[list[Path]] = []
 
-        def mock_dump(so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw):
+        def mock_dump(
+            so_path, headers, extra_includes=None, version="unknown", lang="c++", **kw
+        ):
             captured.append(list(headers))
             return _make_snapshot(version)
 
         monkeypatch.setattr("abicheck.dumper.dump", mock_dump)
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_elf), str(new_elf),
-            "-H", str(hdr_dir), "-H", str(h1),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old_elf),
+                str(new_elf),
+                "-H",
+                str(hdr_dir),
+                "-H",
+                str(h1),
+            ],
+        )
         assert result.exit_code == 0, result.output
         expected = sorted([h1, h2], key=lambda p: str(p))
         assert captured[0] == expected

@@ -183,9 +183,7 @@ class TestReleaseFanOutFoldsBundleFindings:
         )
 
     def test_bundle_findings_are_folded_into_the_release_audit(self) -> None:
-        folded = release_disposition_audit_block(
-            [], None, None, self._bundle_result(3)
-        )
+        folded = release_disposition_audit_block([], None, None, self._bundle_result(3))
         assert folded["detected_total"] == 3
         assert folded["effective_total"] == 3
 

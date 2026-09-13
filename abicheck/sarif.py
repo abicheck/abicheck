@@ -495,7 +495,9 @@ def _result_for(
     # never opted into --contract, which is what keeps this
     # unconditional call inert for every pre-existing SARIF report.
     relevance = contract_relevance_of(change)
-    properties.update(_contract_properties(change, relevance, result, severity_config, today=today))
+    properties.update(
+        _contract_properties(change, relevance, result, severity_config, today=today)
+    )
 
     level = _severity(change, result, severity_config, finding=finding)
     # ADR-049 D1/D9: compatibility policy did not score this finding, so it
@@ -728,7 +730,8 @@ def to_sarif(
     show_only: str | None = None,
     report_mode: str = "full",
     severity_config: SeverityConfig | None = None,
-    report_document: ReportDocument | None = None, envelope: ReportEnvelope | None = None,
+    report_document: ReportDocument | None = None,
+    envelope: ReportEnvelope | None = None,
 ) -> dict[str, Any]:
     """Convert a DiffResult to a SARIF 2.1.0 document (dict).
     *envelope* (ADR-061 gap C), when given, is the one completed ``ReportEnvelope`` this render projects: its shared document supplies ``disposition_audit`` and its already-resolved ``gate`` drives the severity-gate block and the invocation exit contract, so SARIF decides neither for itself. *report_document* is the narrower, pre-envelope form of the same reuse (document only); the envelope wins when both are given, and a direct caller with neither keeps the prior, independent behaviour.
@@ -760,9 +763,14 @@ def to_sarif(
     """
     tool_version = _tool_version()
     gate_decision = resolved_gate(envelope, result, severity_config)  # ADR-061 gap C
-    disposition_audit_dict = disposition_audit_dict_reusing_document(result, severity_config, resolved_document(envelope, report_document))  # ADR-061 Phase 2 gap C
+    disposition_audit_dict = disposition_audit_dict_reusing_document(
+        result, severity_config, resolved_document(envelope, report_document)
+    )  # ADR-061 Phase 2 gap C
     from abicheck.report.envelope import env_matrix_digest_reusing_document
-    _env_matrix_digest = env_matrix_digest_reusing_document(result, resolved_document(envelope, report_document))  # ADR-061 gap C
+
+    _env_matrix_digest = env_matrix_digest_reusing_document(
+        result, resolved_document(envelope, report_document)
+    )  # ADR-061 gap C
     # Codex review: filtered so an expired rule -- which ReclassifyRule.
     # matches() would already refuse to apply -- isn't disclosed in
     # policyReclassify below as though it were still in effect. *today*
@@ -772,11 +780,20 @@ def to_sarif(
     if result.policy_file and result.policy_file.reclassify:
         from .policy.reclassify import active_reclassify_rules
 
-        _active_reclassify_rules = active_reclassify_rules(result.policy_file.reclassify, _resolved_today)
+        _active_reclassify_rules = active_reclassify_rules(
+            result.policy_file.reclassify, _resolved_today
+        )
 
     changes = list(result.changes)
     if show_only:
-        changes = apply_show_only(changes, show_only, result.policy, result._effective_kind_sets(), result.policy_file, _resolved_today)
+        changes = apply_show_only(
+            changes,
+            show_only,
+            result.policy,
+            result._effective_kind_sets(),
+            result.policy_file,
+            _resolved_today,
+        )
         changes = _suppress_dangling_correlation_notes(changes)
 
     # Collect unique rules used
@@ -800,7 +817,14 @@ def to_sarif(
     # mode, which computes from the filtered set only).
     scoped_only_changes = list(getattr(result, "scoped_only_changes", ()) or ())
     if show_only and scoped_only_changes:
-        scoped_only_changes = apply_show_only(scoped_only_changes, show_only, result.policy, result._effective_kind_sets(), result.policy_file, _resolved_today)
+        scoped_only_changes = apply_show_only(
+            scoped_only_changes,
+            show_only,
+            result.policy,
+            result._effective_kind_sets(),
+            result.policy_file,
+            _resolved_today,
+        )
 
     # G29 Phase 3 slice 5 (ADR-052): --report-mode root-cause adds
     # properties.rootCauseId/rootCause to every result rather than
@@ -913,7 +937,11 @@ def to_sarif(
         if rule_id not in rules_seen:
             rules_seen[rule_id] = _rule_for(change.kind)
         suppressed_result = _result_for(
-            change, result, severity_config, finding=finding_by_id.get(id(change)), today=_resolved_today,
+            change,
+            result,
+            severity_config,
+            finding=finding_by_id.get(id(change)),
+            today=_resolved_today,
         )
         suppressed_result["suppressions"] = [
             {
@@ -1208,8 +1236,11 @@ def to_sarif(
                         else {}
                     ),
                     # Mirrors no_baseline_render.py's envMatrixSourceSha256.
-                    **({"envMatrixSourceSha256": _env_matrix_digest}
-                       if _env_matrix_digest is not None else {}),
+                    **(
+                        {"envMatrixSourceSha256": _env_matrix_digest}
+                        if _env_matrix_digest is not None
+                        else {}
+                    ),
                 },
             }
         ],
@@ -1287,7 +1318,8 @@ def to_sarif_str(
     show_only: str | None = None,
     report_mode: str = "full",
     severity_config: SeverityConfig | None = None,
-    report_document: ReportDocument | None = None, envelope: ReportEnvelope | None = None,
+    report_document: ReportDocument | None = None,
+    envelope: ReportEnvelope | None = None,
 ) -> str:
     """Serialize DiffResult to a SARIF JSON string; *report_document*/*envelope* are forwarded unchanged to :func:`to_sarif` (ADR-061 gap C)."""
     return render_mapping_as_json(
@@ -1296,7 +1328,8 @@ def to_sarif_str(
             show_only=show_only,
             report_mode=report_mode,
             severity_config=severity_config,
-            report_document=report_document, envelope=envelope,
+            report_document=report_document,
+            envelope=envelope,
         ),
         indent=indent,
     )

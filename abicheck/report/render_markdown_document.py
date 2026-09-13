@@ -179,7 +179,14 @@ def _resolve_displayed_changes(
     changes = list(result.changes)
     show_only_note: dict[str, Any] | None = None
     if show_only:
-        changes = rm.apply_show_only(changes, show_only, result.policy, result._effective_kind_sets(), result.policy_file, today)
+        changes = rm.apply_show_only(
+            changes,
+            show_only,
+            result.policy,
+            result._effective_kind_sets(),
+            result.policy_file,
+            today,
+        )
         show_only_note = {
             "show_only": show_only,
             "shown": len(changes),

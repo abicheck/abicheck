@@ -86,7 +86,9 @@ _PY_SAFE_DIR_END = "\ntrap 'rm -rf \"$_PY_SAFE_DIR\"' EXIT\n"
 _REPORT_QUERY_PY_LINE = re.compile(r"^_REPORT_QUERY_PY=.*$", re.MULTILINE)
 #: The reader the override points at -- the real one, so these tests exercise
 #: the same report semantics production does.
-_REPORT_QUERY_PY_PATH = Path(__file__).resolve().parents[1] / "action" / "report_query.py"
+_REPORT_QUERY_PY_PATH = (
+    Path(__file__).resolve().parents[1] / "action" / "report_query.py"
+)
 
 
 def _py_safe_dir_source() -> str:
@@ -364,9 +366,7 @@ class TestReportPathAnchoring:
     genuine POSIX relative filename shaped like `a:baseline.json` was
     wrongly left un-anchored there too)."""
 
-    def _anchor(
-        self, report_path: str, cwd: Path, *, windows: bool = False
-    ) -> str:
+    def _anchor(self, report_path: str, cwd: Path, *, windows: bool = False) -> str:
         require_bash()
         script = (
             _path_qualified_helper_source()
@@ -432,8 +432,7 @@ class TestReportPathAnchoring:
         self, tmp_path: Path
     ) -> None:
         assert (
-            self._anchor("C:\\report.json", tmp_path, windows=True)
-            == "C:\\report.json"
+            self._anchor("C:\\report.json", tmp_path, windows=True) == "C:\\report.json"
         )
 
     def test_unc_path_is_unchanged_on_windows(self, tmp_path: Path) -> None:
@@ -447,10 +446,7 @@ class TestReportPathAnchoring:
     def test_windows_root_relative_path_is_unchanged_on_windows(
         self, tmp_path: Path
     ) -> None:
-        assert (
-            self._anchor("\\report.json", tmp_path, windows=True)
-            == "\\report.json"
-        )
+        assert self._anchor("\\report.json", tmp_path, windows=True) == "\\report.json"
 
     def test_windows_drive_relative_path_is_unchanged_on_windows(
         self, tmp_path: Path
@@ -461,10 +457,7 @@ class TestReportPathAnchoring:
         to correctly resolve it against $PWD either way, so a `$PWD/`
         prefix would be unconditionally wrong, not just "some other
         wrong" -- left alone instead (Codex review, fresh evidence)."""
-        assert (
-            self._anchor("C:report.json", tmp_path, windows=True)
-            == "C:report.json"
-        )
+        assert self._anchor("C:report.json", tmp_path, windows=True) == "C:report.json"
 
     def test_genuinely_relative_path_is_anchored_to_pwd(self, tmp_path: Path) -> None:
         assert (

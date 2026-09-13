@@ -5,6 +5,7 @@ Verifies that the CFA/frame-pointer convention drift detector:
 - does NOT emit when registers are identical
 - integrates correctly with compare()
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, compare
@@ -19,8 +20,12 @@ def _snap(frame_registers: dict[str, str]) -> AbiSnapshot:
         library="lib.so",
         version="1.0",
         functions=[
-            Function(name="foo", mangled="foo", return_type="void",
-                     visibility=Visibility.PUBLIC),
+            Function(
+                name="foo",
+                mangled="foo",
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+            ),
         ],
         dwarf_advanced=meta,
     )
@@ -59,8 +64,9 @@ class TestFrameRegisterChanged:
         old = _snap({"bar": "rbp"})
         new = _snap({"bar": "rsp"})
         result = compare(old, new)
-        change = next(c for c in result.changes
-                      if c.kind == ChangeKind.FRAME_REGISTER_CHANGED)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.FRAME_REGISTER_CHANGED
+        )
         assert change.old_value == "rbp"
         assert change.new_value == "rsp"
 
@@ -69,8 +75,9 @@ class TestFrameRegisterChanged:
         old = _snap({"_ZN3Foo3barEv": "rbp"})
         new = _snap({"_ZN3Foo3barEv": "rsp"})
         result = compare(old, new)
-        change = next(c for c in result.changes
-                      if c.kind == ChangeKind.FRAME_REGISTER_CHANGED)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.FRAME_REGISTER_CHANGED
+        )
         assert "_ZN3Foo3barEv" in change.symbol
 
     def test_added_function_not_reported(self) -> None:
@@ -94,8 +101,9 @@ class TestFrameRegisterChanged:
         old = _snap({"fn_a": "rbp", "fn_b": "rsp", "fn_c": "rbp"})
         new = _snap({"fn_a": "rsp", "fn_b": "rsp", "fn_c": "rbp"})
         result = compare(old, new)
-        frame_changes = [c for c in result.changes
-                         if c.kind == ChangeKind.FRAME_REGISTER_CHANGED]
+        frame_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FRAME_REGISTER_CHANGED
+        ]
         changed_syms = {c.symbol for c in frame_changes}
         assert "fn_a" in changed_syms
         assert "fn_b" not in changed_syms  # no change

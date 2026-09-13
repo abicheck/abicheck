@@ -5,6 +5,7 @@ the checker_policy verdict classification, and the example case directories.
 
 These tests run without compilation — they validate metadata integrity only.
 """
+
 from __future__ import annotations
 
 import json
@@ -112,9 +113,9 @@ class TestGroundTruthStructure:
         }
         for case_name, meta in verdicts.items():
             assert "category" in meta, f"{case_name} missing 'category'"
-            assert (
-                meta["category"] in valid_categories
-            ), f"{case_name} has invalid category: {meta['category']}"
+            assert meta["category"] in valid_categories, (
+                f"{case_name} has invalid category: {meta['category']}"
+            )
 
     def test_every_case_has_platforms(self, verdicts: dict) -> None:
         valid_platforms = {"linux", "macos", "windows"}
@@ -167,9 +168,7 @@ class TestDirectorySync:
 class TestRegistryConsistency:
     """Verify expected_kinds reference valid ChangeKind values."""
 
-    def test_expected_kinds_are_valid_changekind_values(
-        self, verdicts: dict
-    ) -> None:
+    def test_expected_kinds_are_valid_changekind_values(self, verdicts: dict) -> None:
         """All expected_kinds must be valid ChangeKind enum values."""
         valid_kinds = {ck.value for ck in ChangeKind}
         invalid = []
@@ -231,9 +230,7 @@ class TestVerdictCategoryAlignment:
                     f"{case_name}: verdict={verdict}, category={category}, "
                     f"expected one of {allowed}"
                 )
-        assert not mismatches, "Verdict/category mismatches:\n" + "\n".join(
-            mismatches
-        )
+        assert not mismatches, "Verdict/category mismatches:\n" + "\n".join(mismatches)
 
     def test_breaking_cases_have_abi_or_api_break(self, verdicts: dict) -> None:
         """BREAKING cases should have abi_break=true or api_break=true."""
@@ -253,9 +250,7 @@ class TestVerdictCategoryAlignment:
             if meta["expected"] == "NO_CHANGE":
                 if meta["abi_break"] or meta["api_break"]:
                     violations.append(case_name)
-        assert not violations, (
-            f"NO_CHANGE cases with break flags set: {violations}"
-        )
+        assert not violations, f"NO_CHANGE cases with break flags set: {violations}"
 
 
 # ---------------------------------------------------------------------------
@@ -283,9 +278,7 @@ class TestUnderlyingFactAlignment:
             for case_name, meta in verdicts.items()
             if meta.get("policy_note") and not meta.get("underlying_fact")
         ]
-        assert not missing, (
-            f"cases with policy_note but no underlying_fact: {missing}"
-        )
+        assert not missing, f"cases with policy_note but no underlying_fact: {missing}"
 
     def test_underlying_fact_matches_break_flags(self, verdicts: dict) -> None:
         """underlying_fact must agree with abi_break/api_break, the same way
@@ -415,11 +408,14 @@ class TestCoverageSummary:
             distribution[v] = distribution.get(v, 0) + 1
 
         # Verify we have cases in every verdict bucket
-        for verdict in ["BREAKING", "API_BREAK", "COMPATIBLE_WITH_RISK",
-                        "COMPATIBLE", "NO_CHANGE"]:
-            assert distribution.get(verdict, 0) > 0, (
-                f"No cases with verdict {verdict}"
-            )
+        for verdict in [
+            "BREAKING",
+            "API_BREAK",
+            "COMPATIBLE_WITH_RISK",
+            "COMPATIBLE",
+            "NO_CHANGE",
+        ]:
+            assert distribution.get(verdict, 0) > 0, f"No cases with verdict {verdict}"
 
     def test_platform_coverage(self, verdicts: dict) -> None:
         """Verify platform coverage counts."""

@@ -244,7 +244,9 @@ def build_summary(
     # ``classify_effective_change`` call.
     if findings is not None:
         quality_issues = sum(
-            1 for c in compatible if finding_by_id[id(c)].category == IssueCategory.QUALITY_ISSUES
+            1
+            for c in compatible
+            if finding_by_id[id(c)].category == IssueCategory.QUALITY_ISSUES
         )
     else:
         quality_issues = sum(

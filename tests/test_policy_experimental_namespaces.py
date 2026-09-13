@@ -272,9 +272,7 @@ class TestPositionalConstructionIsPreserved:
     def test_positional_construction_still_binds_evidence_policy(self) -> None:
         """The concrete break: the 8th positional argument must still be
         ``source_only_findings``, not the newly-inserted field."""
-        pf = PolicyFile(
-            "strict_abi", {}, None, "", [], ["detail"], True, "error"
-        )
+        pf = PolicyFile("strict_abi", {}, None, "", [], ["detail"], True, "error")
         assert pf.source_only_findings == "error"
         assert pf.experimental_namespaces == []
 
@@ -311,7 +309,9 @@ class TestExperimentalFindingsAreAnOverlay:
         from abicheck.checker import compare
 
         old, new = self._removal_pair()
-        return {c.kind.value for c in compare(old, new, policy_file=policy_file).changes}
+        return {
+            c.kind.value for c in compare(old, new, policy_file=policy_file).changes
+        }
 
     def test_plain_removal_is_reported_either_way(self) -> None:
         configured = PolicyFile(experimental_namespaces=["v0"])
@@ -387,7 +387,9 @@ class TestPersistedEvaluationContextRecordsTheKey:
     def test_an_explicit_empty_list_still_earns_provenance(self) -> None:
         """`[]` is a statement, not an absence -- the same distinction
         `internal_namespaces_stated` draws."""
-        stated = PolicyFile(experimental_namespaces=[], experimental_namespaces_stated=True)
+        stated = PolicyFile(
+            experimental_namespaces=[], experimental_namespaces_stated=True
+        )
         prov = self._context(stated).evaluation_context.resolved_config.provenance
         assert "surface.experimental_namespaces" in prov
         default = self._context(None).evaluation_context.resolved_config.provenance

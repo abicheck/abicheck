@@ -71,9 +71,7 @@ class TestSectionFieldsCompleteness:
 
     def test_every_abi_snapshot_field_is_accounted_for(self) -> None:
         fields = _abi_snapshot_field_names()
-        assigned = {
-            field for fields_ in _SECTION_FIELDS.values() for field in fields_
-        }
+        assigned = {field for fields_ in _SECTION_FIELDS.values() for field in fields_}
         accounted = (
             assigned
             | set(_NEVER_IN_A_DOCUMENT)

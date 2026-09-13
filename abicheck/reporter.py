@@ -173,7 +173,8 @@ def to_stat_json(
     *,
     severity_config: SeverityConfig | None = None,
     require_complete_analysis: bool = False,
-    show_only: str | None = None, contract_evaluation: bool = False,
+    show_only: str | None = None,
+    contract_evaluation: bool = False,
 ) -> str:
     """JSON output for --stat mode: summary only, no changes array.
 
@@ -240,18 +241,35 @@ def to_stat_json(
     if (block := analysis_assurance_report_dict(result)) is not None:
         d["analysis_assurance"] = block
         # Same persistence `add_contract_context` does for the full JSON path, which `--stat` bypasses entirely (Codex review).
-        d["analysis_assurance_exit_contribution"] = analysis_assurance_exit_contribution(
-            result, require_complete=require_complete_analysis
+        d["analysis_assurance_exit_contribution"] = (
+            analysis_assurance_exit_contribution(
+                result, require_complete=require_complete_analysis
+            )
         )
     from .reporter_contract_blocks import add_effective_config_digest
-    add_effective_config_digest(d, result, severity_config=severity_config, require_complete_analysis=require_complete_analysis)
+
+    add_effective_config_digest(
+        d,
+        result,
+        severity_config=severity_config,
+        require_complete_analysis=require_complete_analysis,
+    )
     # Deliberately NOT `add_use_case_impact` here, unlike the full JSON path
     # (`reporter_contract_blocks`): this function's contract is the summary
     # object alone, and a per-finding attribution block is the opposite of a
     # summary. `compare` rejects `--stat --use-cases` outright rather than
     # dropping the manifest silently; this keeps the same promise for a
     # direct caller of the renderer (Codex review).
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, helpers=_SCOPED_GATE_HELPERS, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
+    return _reporter_contract_blocks.render_json_with_side_facts(
+        d,
+        result,
+        indent=indent,
+        helpers=_SCOPED_GATE_HELPERS,
+        severity_config=severity_config,
+        gate=gate,
+        show_only=show_only,
+        contract_evaluation=contract_evaluation,
+    )
 
 
 def _add_surface_scope(d: dict[str, object], result: DiffResult) -> None:
@@ -354,7 +372,9 @@ def _to_json_leaf(
     show_only: str | None = None,
     *,
     severity_config: SeverityConfig | None = None,
-    require_complete_analysis: bool = False, include_exit_decision: bool = True, contract_evaluation: bool = False,
+    require_complete_analysis: bool = False,
+    include_exit_decision: bool = True,
+    contract_evaluation: bool = False,
 ) -> str:
     """Leaf-change mode JSON output.
 
@@ -582,16 +602,29 @@ def _to_json_leaf(
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
     _add_contract_context(
-        d, result, _displayed_with_scoped_only(result, changes, show_only),
+        d,
+        result,
+        _displayed_with_scoped_only(result, changes, show_only),
         require_complete_analysis=require_complete_analysis,
-        severity_config=severity_config, include_exit_decision=include_exit_decision)
+        severity_config=severity_config,
+        include_exit_decision=include_exit_decision,
+    )
     # Codex review: full/root-cause mode call this; leaf mode never did,
     # silently dropping policy_overrides/policy_reclassify here.
     _add_policy_overrides(d, result)
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, helpers=_SCOPED_GATE_HELPERS, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
+    return _reporter_contract_blocks.render_json_with_side_facts(
+        d,
+        result,
+        indent=indent,
+        helpers=_SCOPED_GATE_HELPERS,
+        severity_config=severity_config,
+        gate=gate,
+        show_only=show_only,
+        contract_evaluation=contract_evaluation,
+    )
 
 
 def _add_entries_to_root_causes(
@@ -674,7 +707,9 @@ def _to_json_root_cause(
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
-    require_complete_analysis: bool = False, include_exit_decision: bool = True, contract_evaluation: bool = False,
+    require_complete_analysis: bool = False,
+    include_exit_decision: bool = True,
+    contract_evaluation: bool = False,
 ) -> str:
     """``--report-mode root-cause`` JSON output (G29 Phase 3, ADR-052 slice 3).
 
@@ -789,9 +824,13 @@ def _to_json_root_cause(
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
     _add_contract_context(
-        d, result, _displayed_with_scoped_only(result, changes, show_only),
+        d,
+        result,
+        _displayed_with_scoped_only(result, changes, show_only),
         require_complete_analysis=require_complete_analysis,
-        severity_config=severity_config, include_exit_decision=include_exit_decision)
+        severity_config=severity_config,
+        include_exit_decision=include_exit_decision,
+    )
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
@@ -802,7 +841,16 @@ def _to_json_root_cause(
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
-    return _reporter_contract_blocks.render_json_with_side_facts(d, result, indent=indent, helpers=_SCOPED_GATE_HELPERS, severity_config=severity_config, gate=gate, show_only=show_only, contract_evaluation=contract_evaluation)
+    return _reporter_contract_blocks.render_json_with_side_facts(
+        d,
+        result,
+        indent=indent,
+        helpers=_SCOPED_GATE_HELPERS,
+        severity_config=severity_config,
+        gate=gate,
+        show_only=show_only,
+        contract_evaluation=contract_evaluation,
+    )
 
 
 def _metadata_dict(meta: object | None) -> dict[str, object] | None:
@@ -1112,7 +1160,9 @@ def _add_confidence_evidence(d: dict[str, object], result: DiffResult) -> None:
         d["comparability_assurance"] = dict(result.comparability_assurance)
 
 
-def _add_policy_overrides(d: dict[str, object], result: DiffResult, *, today: date | None = None) -> None:
+def _add_policy_overrides(
+    d: dict[str, object], result: DiffResult, *, today: date | None = None
+) -> None:
     """Add policy file overrides/reclassify rules (custom re-classifications)
     when present.
 
@@ -1147,8 +1197,14 @@ def _add_policy_overrides(d: dict[str, object], result: DiffResult, *, today: da
 
 
 def _add_changes_block(
-    d: dict[str, object], result: DiffResult, changes: list[Change], effective_policy: str, eff_sets: KindSets | None,
-    show_only: str | None = None, severity_config: SeverityConfig | None = None, today: date | None = None,
+    d: dict[str, object],
+    result: DiffResult,
+    changes: list[Change],
+    effective_policy: str,
+    eff_sets: KindSets | None,
+    show_only: str | None = None,
+    severity_config: SeverityConfig | None = None,
+    today: date | None = None,
 ) -> None:
     """Add changes list and optional redundant-count / pattern-modulations fields.
 
@@ -1220,25 +1276,41 @@ def to_json(
     # renders the full report.
     if report_mode == "leaf":
         return _to_json_leaf(
-            result, indent=indent, show_only=show_only, severity_config=severity_config,
+            result,
+            indent=indent,
+            show_only=show_only,
+            severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
-            include_exit_decision=include_exit_decision, contract_evaluation=contract_evaluation)
+            include_exit_decision=include_exit_decision,
+            contract_evaluation=contract_evaluation,
+        )
 
     if report_mode == "root-cause":
         return _to_json_root_cause(
-            result, indent=indent, show_only=show_only, severity_config=severity_config,
+            result,
+            indent=indent,
+            show_only=show_only,
+            severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
-            include_exit_decision=include_exit_decision, contract_evaluation=contract_evaluation)
+            include_exit_decision=include_exit_decision,
+            contract_evaluation=contract_evaluation,
+        )
 
     # report.build statically imports this module's own private `_add_*`
     # helpers; reaching back via a plain `from .report.build import ...`
     # would close a real import cycle, so this side goes through
     # `importlib` -- same pattern `scoped_gate.py` uses for a legacy sibling.
     import importlib
+
     doc = importlib.import_module(".report.build", __package__).build_report_document(
-        result, show_only=show_only, show_impact=show_impact, severity_config=severity_config,
+        result,
+        show_only=show_only,
+        show_impact=show_impact,
+        severity_config=severity_config,
         require_complete_analysis=require_complete_analysis,
-        include_exit_decision=include_exit_decision, contract_evaluation=contract_evaluation)
+        include_exit_decision=include_exit_decision,
+        contract_evaluation=contract_evaluation,
+    )
     return render_json(doc, indent=indent)
 
 
@@ -1250,7 +1322,12 @@ _VERDICT_TO_RECOMMENDED_ACTION: dict[Verdict, str] = {
 
 
 def _recommended_action_for_change(
-    c: object, *, policy: str | None, kind_sets: KindSets | None, policy_file: object | None, today: date | None = None,
+    c: object,
+    *,
+    policy: str | None,
+    kind_sets: KindSets | None,
+    policy_file: object | None,
+    today: date | None = None,
 ) -> str:
     """Return a structured, machine-readable next step for *c* (schema 2.4).
 
@@ -1313,7 +1390,12 @@ _DEFAULT_ADDITION_REVIEWER_ACTION = "confirm_public_api_intent"
 
 
 def _reviewer_action_for_change(
-    c: object, *, policy: str | None, kind_sets: KindSets | None, policy_file: object | None, today: date | None = None,
+    c: object,
+    *,
+    policy: str | None,
+    kind_sets: KindSets | None,
+    policy_file: object | None,
+    today: date | None = None,
 ) -> str | None:
     """Finer-grained reviewer guidance for a COMPATIBLE addition (additive).
 
@@ -1379,7 +1461,9 @@ def _change_reachability_fields(c: Any) -> dict[str, Any]:
     return out
 
 
-def _reclassified_by_for_change(c: object, policy_file: object | None, *, today: date | None = None) -> str | None:
+def _reclassified_by_for_change(
+    c: object, policy_file: object | None, *, today: date | None = None
+) -> str | None:
     """``reclassified_by`` audit value for *c*, or ``None`` -- shared by
     :func:`_change_to_dict` and leaf mode's ``_leaf_entry`` (Codex review)
     so the two entry builders can't drift on this field. Falls back to
@@ -1622,8 +1706,13 @@ def _change_to_dict(
 
 
 def _build_severity_json(
-    changes: list[Change], severity_config: SeverityConfig, *, gate: GateDecision,
-    policy: str | None = None, kind_sets: KindSets | None = None, policy_file: object | None = None,
+    changes: list[Change],
+    severity_config: SeverityConfig,
+    *,
+    gate: GateDecision,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
     today: date | None = None,
 ) -> dict[str, object]:
     """Build severity information for JSON output.

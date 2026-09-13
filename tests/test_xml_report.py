@@ -17,6 +17,7 @@ Real ABICC XML structure:
       <report kind="source" version="1.2">...</report>
     </reports>
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -67,8 +68,9 @@ class TestXmlReportStructure:
 
     def test_test_info_section(self):
         result = _make_result()
-        xml = generate_xml_report(result, lib_name="libfoo",
-                                  old_version="1.0", new_version="2.0")
+        xml = generate_xml_report(
+            result, lib_name="libfoo", old_version="1.0", new_version="2.0"
+        )
         root = xml_fromstring(xml)
         binary = root.find("report[@kind='binary']")
         test_info = binary.find("test_info")
@@ -155,8 +157,11 @@ class TestXmlReportCounts:
 
     def test_func_removed_counts_as_removed(self):
         changes = [
-            Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov",
-                   description="foo() removed"),
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol="_Z3foov",
+                description="foo() removed",
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
         xml = generate_xml_report(result, old_symbol_count=10)
@@ -167,8 +172,9 @@ class TestXmlReportCounts:
 
     def test_func_added_counts_as_added(self):
         changes = [
-            Change(kind=ChangeKind.FUNC_ADDED, symbol="_Z3barv",
-                   description="bar() added"),
+            Change(
+                kind=ChangeKind.FUNC_ADDED, symbol="_Z3barv", description="bar() added"
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.COMPATIBLE)
         xml = generate_xml_report(result)
@@ -179,8 +185,13 @@ class TestXmlReportCounts:
 
     def test_type_problem_classified_by_severity(self):
         changes = [
-            Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="MyStruct",
-                   description="size changed", old_value="8", new_value="16"),
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="MyStruct",
+                description="size changed",
+                old_value="8",
+                new_value="16",
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
         xml = generate_xml_report(result, old_symbol_count=5)
@@ -193,8 +204,13 @@ class TestXmlReportCounts:
 
     def test_func_return_changed_is_medium_severity(self):
         changes = [
-            Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="_Z3foov",
-                   description="return type changed", old_value="int", new_value="long"),
+            Change(
+                kind=ChangeKind.FUNC_RETURN_CHANGED,
+                symbol="_Z3foov",
+                description="return type changed",
+                old_value="int",
+                new_value="long",
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
         xml = generate_xml_report(result, old_symbol_count=10)
@@ -205,10 +221,16 @@ class TestXmlReportCounts:
 
     def test_source_section_excludes_binary_only_kinds(self):
         changes = [
-            Change(kind=ChangeKind.SONAME_CHANGED, symbol="libfoo.so",
-                   description="soname changed"),
-            Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="_Z3foov",
-                   description="return type changed"),
+            Change(
+                kind=ChangeKind.SONAME_CHANGED,
+                symbol="libfoo.so",
+                description="soname changed",
+            ),
+            Change(
+                kind=ChangeKind.FUNC_RETURN_CHANGED,
+                symbol="_Z3foov",
+                description="return type changed",
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
         xml = generate_xml_report(result, old_symbol_count=10)
@@ -226,8 +248,9 @@ class TestXmlReportDetailSections:
 
     def test_added_symbols_detail(self):
         changes = [
-            Change(kind=ChangeKind.FUNC_ADDED, symbol="_Z3barv",
-                   description="bar() added"),
+            Change(
+                kind=ChangeKind.FUNC_ADDED, symbol="_Z3barv", description="bar() added"
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.COMPATIBLE)
         xml = generate_xml_report(result)
@@ -240,8 +263,11 @@ class TestXmlReportDetailSections:
 
     def test_removed_symbols_detail(self):
         changes = [
-            Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov",
-                   description="foo() removed"),
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol="_Z3foov",
+                description="foo() removed",
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
         xml = generate_xml_report(result)
@@ -254,9 +280,13 @@ class TestXmlReportDetailSections:
 
     def test_type_problem_detail_section(self):
         changes = [
-            Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="MyStruct",
-                   description="size changed from 8 to 16",
-                   old_value="8", new_value="16"),
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="MyStruct",
+                description="size changed from 8 to 16",
+                old_value="8",
+                new_value="16",
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
         xml = generate_xml_report(result, old_symbol_count=5)
@@ -276,9 +306,13 @@ class TestXmlReportDetailSections:
 
     def test_symbol_problem_detail_section(self):
         changes = [
-            Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="_Z3foov",
-                   description="return type changed",
-                   old_value="int", new_value="long"),
+            Change(
+                kind=ChangeKind.FUNC_RETURN_CHANGED,
+                symbol="_Z3foov",
+                description="return type changed",
+                old_value="int",
+                new_value="long",
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
         xml = generate_xml_report(result, old_symbol_count=10)
@@ -291,8 +325,13 @@ class TestXmlReportDetailSections:
 
     def test_effect_element_in_type_problem(self):
         changes = [
-            Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="MyStruct",
-                   description="size changed", old_value="8", new_value="16"),
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="MyStruct",
+                description="size changed",
+                old_value="8",
+                new_value="16",
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
         xml = generate_xml_report(result, old_symbol_count=5)
@@ -308,8 +347,11 @@ class TestXmlReportDetailSections:
         """func_removed goes into removed_symbols, not problems_with_symbols.
         This is correct — ABICC lists removals separately from problems."""
         changes = [
-            Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov",
-                   description="foo() removed"),
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol="_Z3foov",
+                description="foo() removed",
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
         xml = generate_xml_report(result, old_symbol_count=5)
@@ -325,8 +367,11 @@ class TestXmlReportDetailSections:
 
     def test_no_overcome_for_non_removal(self):
         changes = [
-            Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="_Z3foov",
-                   description="return type changed"),
+            Change(
+                kind=ChangeKind.FUNC_RETURN_CHANGED,
+                symbol="_Z3foov",
+                description="return type changed",
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
         xml = generate_xml_report(result, old_symbol_count=5)
@@ -364,7 +409,9 @@ class TestXmlReportDetailSections:
         added = binary.find("added_symbols")
         assert added is not None, "TYPE_FIELD_ADDED should produce <added_symbols>"
         names = [n.text for n in added.findall("name")]
-        assert "MyClass" in names, "TYPE_FIELD_ADDED symbol must be listed in <added_symbols>"
+        assert "MyClass" in names, (
+            "TYPE_FIELD_ADDED symbol must be listed in <added_symbols>"
+        )
         # Must NOT appear in <problems_with_types> or <problems_with_symbols>
         assert binary.find("problems_with_types") is None, (
             "TYPE_FIELD_ADDED must NOT appear in <problems_with_types> (it belongs in added_symbols)"
@@ -380,8 +427,11 @@ class TestXmlReportParsability:
     def test_abi_tracker_bc_percentage_extraction(self):
         """abi-tracker computes BC from affected/symbols counts."""
         changes = [
-            Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov",
-                   description="foo() removed"),
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol="_Z3foov",
+                description="foo() removed",
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
         xml = generate_xml_report(result, lib_name="libfoo", old_symbol_count=10)
@@ -394,10 +444,16 @@ class TestXmlReportParsability:
     def test_abi_tracker_problem_summary_extraction(self):
         """abi-tracker reads problem_summary/removed_symbols and severity counts."""
         changes = [
-            Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov",
-                   description="foo() removed"),
-            Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="MyStruct",
-                   description="size changed"),
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol="_Z3foov",
+                description="foo() removed",
+            ),
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="MyStruct",
+                description="size changed",
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
         xml = generate_xml_report(result, old_symbol_count=10)
@@ -410,14 +466,24 @@ class TestXmlReportParsability:
 
     def test_mixed_changes_full_extraction(self):
         changes = [
-            Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov",
-                   description="foo() removed"),
-            Change(kind=ChangeKind.FUNC_ADDED, symbol="_Z3barv",
-                   description="bar() added"),
-            Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="MyStruct",
-                   description="size changed"),
-            Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="_Z3bazv",
-                   description="return type changed"),
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol="_Z3foov",
+                description="foo() removed",
+            ),
+            Change(
+                kind=ChangeKind.FUNC_ADDED, symbol="_Z3barv", description="bar() added"
+            ),
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="MyStruct",
+                description="size changed",
+            ),
+            Change(
+                kind=ChangeKind.FUNC_RETURN_CHANGED,
+                symbol="_Z3bazv",
+                description="return type changed",
+            ),
         ]
         result = _make_result(changes=changes, verdict=Verdict.BREAKING)
         xml = generate_xml_report(result, lib_name="libfoo", old_symbol_count=20)
@@ -496,6 +562,7 @@ class TestXmlEscaping:
 # File metadata in XML report (traceability)
 # ---------------------------------------------------------------------------
 
+
 class TestXmlFileMetadata:
     """XML report includes file metadata inside <test_info>."""
 
@@ -504,10 +571,14 @@ class TestXmlFileMetadata:
 
         result = _make_result()
         result.old_metadata = LibraryMetadata(
-            path="/old/lib.so", sha256="aa" * 32, size_bytes=4096,
+            path="/old/lib.so",
+            sha256="aa" * 32,
+            size_bytes=4096,
         )
         result.new_metadata = LibraryMetadata(
-            path="/new/lib.so", sha256="bb" * 32, size_bytes=8192,
+            path="/new/lib.so",
+            sha256="bb" * 32,
+            size_bytes=8192,
         )
         xml_str = generate_xml_report(result, lib_name="libtest")
         root = xml_fromstring(xml_str)
@@ -538,10 +609,14 @@ class TestXmlFileMetadata:
 
         result = _make_result()
         result.old_metadata = LibraryMetadata(
-            path="/old/lib.so", sha256="cc" * 32, size_bytes=1024,
+            path="/old/lib.so",
+            sha256="cc" * 32,
+            size_bytes=1024,
         )
         result.new_metadata = LibraryMetadata(
-            path="/new/lib.so", sha256="dd" * 32, size_bytes=2048,
+            path="/new/lib.so",
+            sha256="dd" * 32,
+            size_bytes=2048,
         )
         xml_str = generate_xml_report(result, lib_name="libtest")
         root = xml_fromstring(xml_str)
@@ -555,7 +630,9 @@ class TestXmlFileMetadata:
 
         result = _make_result()
         result.old_metadata = LibraryMetadata(
-            path="/old/lib.so", sha256="ee" * 32, size_bytes=512,
+            path="/old/lib.so",
+            sha256="ee" * 32,
+            size_bytes=512,
         )
         xml_str = generate_xml_report(result, lib_name="libtest")
         root = xml_fromstring(xml_str)

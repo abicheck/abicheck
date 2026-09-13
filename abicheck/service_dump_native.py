@@ -357,10 +357,16 @@ def _run_dump_uncached(
         # raw markers and assigns them ordinals from that narrower view.
         # Suppressed for this whole branch, renumbered once at the end.
         with (
-            dumper_cache.ast_memoize_scope()
-            if _headers and not _skip_header_graph_attach and not dwarf_only and not symbols_only
-            else nullcontext()
-        ), closure_identity.defer_closure_identity_renumbering():
+            (
+                dumper_cache.ast_memoize_scope()
+                if _headers
+                and not _skip_header_graph_attach
+                and not dwarf_only
+                and not symbols_only
+                else nullcontext()
+            ),
+            closure_identity.defer_closure_identity_renumbering(),
+        ):
             snap = _dump_elf(
                 path,
                 _headers,
@@ -536,7 +542,9 @@ def _finish_native_snapshot(
         if public_include_search_dirs is not None
         else includes
     )
-    snap = _apply_native_provenance(snap, public_headers, public_header_dirs, _public_dirs)
+    snap = _apply_native_provenance(
+        snap, public_headers, public_header_dirs, _public_dirs
+    )
     _try_attach_python_ext_metadata(snap)
     _try_attach_python_api_surface(snap)
     _try_attach_numpy_capi_surface(snap, path)
@@ -561,7 +569,9 @@ def _call_run_dump_uncached(*args: Any, **kwargs: Any) -> AbiSnapshot:
     return _run_dump_uncached(*args, **kwargs)
 
 
-run_dump = granting_live_source_licence(wrap_run_dump_with_dependency_scope(_call_run_dump_uncached))  # source-read licence: granted at the one shared live extraction every front end funnels through, never in a front end's own wrapper (see buildsource.source_inputs.granting_live_source_licence)
+run_dump = granting_live_source_licence(
+    wrap_run_dump_with_dependency_scope(_call_run_dump_uncached)
+)  # source-read licence: granted at the one shared live extraction every front end funnels through, never in a front end's own wrapper (see buildsource.source_inputs.granting_live_source_licence)
 # CodeRabbit: both functools.wraps() above copy __name__ down the chain from _run_dump_uncached, so run_dump.__name__ read as "_run_dump_uncached" -- wrong for any introspecting caller. __signature__ is unaffected.
 run_dump.__name__ = "run_dump"
 run_dump.__qualname__ = "run_dump"

@@ -5,6 +5,7 @@
 Exercises the boundary helpers directly (they are otherwise only reached via
 full CLI invocations), including the both-sides fan-out and the empty case.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -30,7 +31,10 @@ from abicheck.frontends.cli.options.params import (
 
 class TestSidedPathParam:
     def test_bare_value_is_both(self) -> None:
-        assert SIDED_PATH_PARAM.convert("inc/foo.h", None, None) == ("both", Path("inc/foo.h"))
+        assert SIDED_PATH_PARAM.convert("inc/foo.h", None, None) == (
+            "both",
+            Path("inc/foo.h"),
+        )
 
     def test_old_and_new_prefixes(self) -> None:
         assert SIDED_PATH_PARAM.convert("old=a.h", None, None) == ("old", Path("a.h"))
@@ -39,7 +43,8 @@ class TestSidedPathParam:
     def test_both_prefix_is_escape_hatch(self) -> None:
         # a path literally starting 'old=' is expressed with the both= escape
         assert SIDED_PATH_PARAM.convert("both=old=weird.h", None, None) == (
-            "both", Path("old=weird.h"),
+            "both",
+            Path("old=weird.h"),
         )
 
     def test_metavar(self) -> None:
@@ -51,9 +56,21 @@ class TestSidedIncludePathParam:
     form layered on top of the unlabeled ``[old=|new=|both=]PATH`` grammar."""
 
     def test_unlabeled_forms_match_sided_path_param(self) -> None:
-        assert SIDED_INCLUDE_PATH_PARAM.convert("inc", None, None) == ("both", Path("inc"), None)
-        assert SIDED_INCLUDE_PATH_PARAM.convert("old=a", None, None) == ("old", Path("a"), None)
-        assert SIDED_INCLUDE_PATH_PARAM.convert("new=b", None, None) == ("new", Path("b"), None)
+        assert SIDED_INCLUDE_PATH_PARAM.convert("inc", None, None) == (
+            "both",
+            Path("inc"),
+            None,
+        )
+        assert SIDED_INCLUDE_PATH_PARAM.convert("old=a", None, None) == (
+            "old",
+            Path("a"),
+            None,
+        )
+        assert SIDED_INCLUDE_PATH_PARAM.convert("new=b", None, None) == (
+            "new",
+            Path("b"),
+            None,
+        )
 
     def test_an_ordinary_equals_containing_path_is_unaffected(self) -> None:
         # A real, valid unlabeled --include value today: an '=' past the
@@ -66,13 +83,21 @@ class TestSidedIncludePathParam:
 
     def test_labeled_forms(self) -> None:
         assert SIDED_INCLUDE_PATH_PARAM.convert("old:support=old/src", None, None) == (
-            "old", Path("old/src"), "support",
+            "old",
+            Path("old/src"),
+            "support",
         )
         assert SIDED_INCLUDE_PATH_PARAM.convert("new:support=new/src", None, None) == (
-            "new", Path("new/src"), "support",
+            "new",
+            Path("new/src"),
+            "support",
         )
-        assert SIDED_INCLUDE_PATH_PARAM.convert("both:generated=old/gen", None, None) == (
-            "both", Path("old/gen"), "generated",
+        assert SIDED_INCLUDE_PATH_PARAM.convert(
+            "both:generated=old/gen", None, None
+        ) == (
+            "both",
+            Path("old/gen"),
+            "generated",
         )
 
     def test_labeled_form_requires_equals(self) -> None:
@@ -97,18 +122,23 @@ class TestLabeledIncludePathParam:
     treated it."""
 
     def test_bare_value_is_unlabeled(self) -> None:
-        assert LABELED_INCLUDE_PATH_PARAM.convert("inc", None, None) == (Path("inc"), None)
+        assert LABELED_INCLUDE_PATH_PARAM.convert("inc", None, None) == (
+            Path("inc"),
+            None,
+        )
 
     def test_old_equals_prefix_is_a_literal_directory_not_a_side(self) -> None:
         # dump has no old/new side concept -- 'old=foo/' is just a directory
         # literally named that, unchanged from before this type existed.
         assert LABELED_INCLUDE_PATH_PARAM.convert("old=foo/", None, None) == (
-            Path("old=foo/"), None,
+            Path("old=foo/"),
+            None,
         )
 
     def test_labeled_form(self) -> None:
         assert LABELED_INCLUDE_PATH_PARAM.convert("both:support=path", None, None) == (
-            Path("path"), "support",
+            Path("path"),
+            "support",
         )
 
     def test_labeled_form_requires_equals(self) -> None:
@@ -148,7 +178,12 @@ class TestSplitSidedIncludePaths:
 
 class TestSplitSidedPaths:
     def test_partitions_by_side(self) -> None:
-        pairs = [("both", Path("a")), ("old", Path("o")), ("new", Path("n")), ("both", Path("b"))]
+        pairs = [
+            ("both", Path("a")),
+            ("old", Path("o")),
+            ("new", Path("n")),
+            ("both", Path("b")),
+        ]
         both, old, new = split_sided_paths(pairs)
         assert both == (Path("a"), Path("b"))
         assert old == (Path("o"),)
@@ -164,13 +199,15 @@ class TestSplitSidedSingle:
 
     def test_per_side_overrides(self) -> None:
         assert _split_sided_single([("old", Path("o")), ("new", Path("n"))]) == (
-            Path("o"), Path("n"),
+            Path("o"),
+            Path("n"),
         )
 
     def test_both_then_side_override(self) -> None:
         # both sets both, a later new= overrides just the new side
         assert _split_sided_single([("both", Path("s")), ("new", Path("n"))]) == (
-            Path("s"), Path("n"),
+            Path("s"),
+            Path("n"),
         )
 
     def test_empty_is_none(self) -> None:
@@ -205,7 +242,8 @@ class TestNormalizeSidedOptions:
         assert kw["new_includes_only"] == (Path("new/src"),)
         assert kw["includes"] == (Path("dep"),)
         assert kw["include_labels"] == {
-            Path("old/src"): "support", Path("new/src"): "support",
+            Path("old/src"): "support",
+            Path("new/src"): "support",
         }
 
     def test_sources_and_build_info(self) -> None:
@@ -255,7 +293,10 @@ class TestSidedStrParam:
 
     def test_both_prefix_is_escape_hatch(self) -> None:
         # a label that literally starts 'old=' is expressed with both=
-        assert SIDED_STR_PARAM.convert("both=old=weird", None, None) == ("both", "old=weird")
+        assert SIDED_STR_PARAM.convert("both=old=weird", None, None) == (
+            "both",
+            "old=weird",
+        )
 
     def test_metavar(self) -> None:
         assert SIDED_STR_PARAM.get_metavar(None) == "[old=|new=]LABEL"
@@ -294,6 +335,10 @@ class TestSplitSidedBase:
         assert _split_sided_base([("both", Path("b"))]) == (Path("b"), None, None)
 
     def test_per_side_and_last_wins(self) -> None:
-        assert _split_sided_base([("old", Path("o1")), ("old", Path("o2")), ("new", Path("n"))]) == (
-            None, Path("o2"), Path("n"),
+        assert _split_sided_base(
+            [("old", Path("o1")), ("old", Path("o2")), ("new", Path("n"))]
+        ) == (
+            None,
+            Path("o2"),
+            Path("n"),
         )

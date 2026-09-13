@@ -93,7 +93,9 @@ def _resolve_new_side_headers_includes(
     return headers, includes
 
 
-def resolve_dispatch_compile_context(ctx: click.Context, kwargs: dict[str, Any], *, new_is_stored: bool) -> Any:
+def resolve_dispatch_compile_context(
+    ctx: click.Context, kwargs: dict[str, Any], *, new_is_stored: bool
+) -> Any:
     """Resolve ``dispatch()``'s ``compile_context`` argument, mutating
     *kwargs* the same way ``compare_cmd`` used to before delegating here --
     split out purely to keep ``compare.py`` under its architecture cap.
@@ -121,7 +123,9 @@ def resolve_dispatch_compile_context(ctx: click.Context, kwargs: dict[str, Any],
     # Codex review: mirror run_compare's own cwd-upward cfg_path fallback --
     # resolve_compile_context alone never auto-discovers without a
     # --sources tree.
-    _config_explicit = ctx.get_parameter_source("config") == click.core.ParameterSource.COMMANDLINE
+    _config_explicit = (
+        ctx.get_parameter_source("config") == click.core.ParameterSource.COMMANDLINE
+    )
     kwargs["config"] = kwargs.get("config") or discover_project_config()
     if new_is_stored:
         if _config_explicit and kwargs["config"] is not None:
@@ -139,7 +143,9 @@ def resolve_dispatch_compile_context(ctx: click.Context, kwargs: dict[str, Any],
     # compare's CLI) -- every `.get()` below resolves to its "nothing
     # explicit" default, which `resolve_compile_context` already treats as
     # "defer to .abicheck.yml's compile: block".
-    header_backend = kwargs.get("new_header_backend") or kwargs.get("header_backend") or "auto"
+    header_backend = (
+        kwargs.get("new_header_backend") or kwargs.get("header_backend") or "auto"
+    )
     compile_context, merged_includes = resolve_compile_context(
         ctx,
         sysroot=kwargs.get("sysroot"),
@@ -156,7 +162,9 @@ def resolve_dispatch_compile_context(ctx: click.Context, kwargs: dict[str, Any],
         # gate isn't fooled (PR #1154).
         config_explicit=_config_explicit,
     )
-    apply_env_toggles_for_stored_pair(ctx, kwargs["config"], apply_compile_config_env_toggles)
+    apply_env_toggles_for_stored_pair(
+        ctx, kwargs["config"], apply_compile_config_env_toggles
+    )
     # Forward the *merged* include list (Codex review), not the raw kwargs
     # resolve_compile_context was given -- .abicheck.yml's compile.
     # include_dirs would otherwise be dropped by dispatch()'s own
@@ -212,7 +220,13 @@ def _load_library_overrides(
     return overrides.headers, overrides.includes, overrides.compile
 
 
-def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explicit: bool = False, **kwargs: Any) -> None:
+def dispatch(
+    *,
+    compile_context: Any,
+    new_is_stored: bool = False,
+    config_explicit: bool = False,
+    **kwargs: Any,
+) -> None:
     """Handle a ``compare OLD_FACTS NEW_INPUT`` invocation where OLD_FACTS
     classified as a stored BundleFacts document.
 
@@ -347,9 +361,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
         fail_on_removed=(
             bool(_early_cfg.gate_fail_on_removed_library) if _early_cfg else False
         ),
-        support_promise=(
-            _early_cfg.release_support_promise if _early_cfg else None
-        ),
+        support_promise=(_early_cfg.release_support_promise if _early_cfg else None),
         new_is_single_file=_new_is_single_file,
         require_complete_analysis=(
             bool(_early_cfg.assurance_require_complete) if _early_cfg else False
@@ -411,7 +423,9 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
     # already loaded above for the Phase 7d reject_unsupported_options()
     # call rather than parsing .abicheck.yml a second time.
     _bundle_cfg = _early_cfg
-    bundle_system_providers = list(_bundle_cfg.bundle_system_providers) if _bundle_cfg else []
+    bundle_system_providers = (
+        list(_bundle_cfg.bundle_system_providers) if _bundle_cfg else []
+    )
     bundle_cohorts = list(_bundle_cfg.bundle_cohorts) if _bundle_cfg else []
     # Phase 7d (one-comparison-product.md §4.1): --include-private-dso is
     # gone as a CLI flag on `compare` -- release.include_private_dso in
@@ -424,9 +438,13 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
     # max_bundle_facts_decode_nodes in .abicheck.yml is its only source now
     # -- see resolve_max_json_object_nodes_cfg()'s own docstring (Codex).
     max_json_object_nodes_cfg = resolve_max_json_object_nodes_cfg(
-        _bundle_cfg.resource_limits_max_bundle_facts_decode_nodes if _bundle_cfg else None,
+        _bundle_cfg.resource_limits_max_bundle_facts_decode_nodes
+        if _bundle_cfg
+        else None,
         config_explicit=config_explicit,
-        default=importlib.import_module("abicheck.bundle_facts").DEFAULT_MAX_JSON_OBJECT_NODES,
+        default=importlib.import_module(
+            "abicheck.bundle_facts"
+        ).DEFAULT_MAX_JSON_OBJECT_NODES,
     )
 
     if new_is_stored:
@@ -582,9 +600,13 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
                     policy=kwargs["policy"],
                     policy_file=policy_file,
                     suppress=suppression,
-                    include_dependencies=bool(kwargs.get("include_dependencies", False)),
+                    include_dependencies=bool(
+                        kwargs.get("include_dependencies", False)
+                    ),
                     max_json_object_nodes=max_json_object_nodes_cfg,
-                    env_matrix=_early_cfg.deployment if _early_cfg else None,  # ADR-020b
+                    env_matrix=_early_cfg.deployment
+                    if _early_cfg
+                    else None,  # ADR-020b
                 )
             except BundleFactsLibraryOverridesError as exc:
                 # Codex review, fresh evidence: compare_release_against_bundle_
@@ -633,15 +655,15 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
     scope_terms = scope_terms_for(
         result,
         kwargs,
-        on_incomplete_scope=(
-            _bundle_cfg.scope_on_incomplete if _bundle_cfg else None
-        ),
+        on_incomplete_scope=(_bundle_cfg.scope_on_incomplete if _bundle_cfg else None),
     )
     if not result.per_library and result.scope_record is None:
         # No pair and no record to say so -> usage error (Codex). With a record
         # a zero-pair run renders like the fan-out's: D7 exits 1 (round 30).
         _new_desc = (
-            f"{new_dir}'s stored per_library_snapshots" if new_is_stored else str(new_dir)
+            f"{new_dir}'s stored per_library_snapshots"
+            if new_is_stored
+            else str(new_dir)
         )
         raise click.ClickException(
             f"No library in {_new_desc} matched any library in "
@@ -650,7 +672,10 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
             "the same release."
         )
     if not result.per_library and fmt != "json":
-        click.echo("Warning: no library pair was compared -- no comparison completed (ADR-065 D7).", err=True)
+        click.echo(
+            "Warning: no library pair was compared -- no comparison completed (ADR-065 D7).",
+            err=True,
+        )
 
     # Codex review, fresh evidence: route both writes through the shared
     # CLI-safe writer every other output/--write path uses -- a direct
@@ -767,8 +792,13 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
         require_complete=_require_complete,
     )
     text = _render(
-        result, fmt, old_facts_path=old_facts_path, new_dir=new_dir, new_is_stored=new_is_stored,
-        scope_terms=scope_terms, assurance_decision=assurance_decision,
+        result,
+        fmt,
+        old_facts_path=old_facts_path,
+        new_dir=new_dir,
+        new_is_stored=new_is_stored,
+        scope_terms=scope_terms,
+        assurance_decision=assurance_decision,
     )
     if output is not None:
         _safe_write_output(Path(output), text)
@@ -836,23 +866,39 @@ def _reported_verdict(result: Any) -> str:
 
 
 def _render(
-    result: Any, fmt: str, *, old_facts_path: Path, new_dir: Path, new_is_stored: bool = False,
+    result: Any,
+    fmt: str,
+    *,
+    old_facts_path: Path,
+    new_dir: Path,
+    new_is_stored: bool = False,
     scope_terms: ComparisonScopeTerms | None = None,
     assurance_decision: ReleaseAssuranceDecision | None = None,
 ) -> str:
     if fmt == "markdown":
         return _render_markdown(
-            result, old_facts_path=old_facts_path, new_dir=new_dir, new_is_stored=new_is_stored,
+            result,
+            old_facts_path=old_facts_path,
+            new_dir=new_dir,
+            new_is_stored=new_is_stored,
             scope_terms=scope_terms,
         )
     return _render_json(
-        result, old_facts_path=old_facts_path, new_dir=new_dir, new_is_stored=new_is_stored,
-        scope_terms=scope_terms, assurance_decision=assurance_decision,
+        result,
+        old_facts_path=old_facts_path,
+        new_dir=new_dir,
+        new_is_stored=new_is_stored,
+        scope_terms=scope_terms,
+        assurance_decision=assurance_decision,
     )
 
 
 def _render_json(
-    result: Any, *, old_facts_path: Path, new_dir: Path, new_is_stored: bool = False,
+    result: Any,
+    *,
+    old_facts_path: Path,
+    new_dir: Path,
+    new_is_stored: bool = False,
     scope_terms: ComparisonScopeTerms | None = None,
     assurance_decision: ReleaseAssuranceDecision | None = None,
 ) -> str:
@@ -921,7 +967,11 @@ def _render_json(
 
 
 def _render_markdown(
-    result: Any, *, old_facts_path: Path, new_dir: Path, new_is_stored: bool = False,
+    result: Any,
+    *,
+    old_facts_path: Path,
+    new_dir: Path,
+    new_is_stored: bool = False,
     scope_terms: ComparisonScopeTerms | None = None,
 ) -> str:
     from ....bundle import render_bundle_findings_markdown
@@ -941,7 +991,9 @@ def _render_markdown(
     if result.env_matrix_source_sha256 is not None:
         lines.append(f"- Deployment floor digest: `{result.env_matrix_source_sha256}`")
         lines.append("")
-    lines += markdown_scope_lines(scope_terms if scope_terms is not None else scope_terms_for(result, {}))
+    lines += markdown_scope_lines(
+        scope_terms if scope_terms is not None else scope_terms_for(result, {})
+    )
     if result.analysis_errors:
         lines.append("## Bundle analysis errors")
         lines += [f"- {msg}" for msg in result.analysis_errors]

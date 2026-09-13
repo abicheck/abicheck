@@ -54,7 +54,9 @@ def _write_snapshot(path: Path, *funcs: str) -> None:
         version="1.0",
         functions=[
             Function(
-                name=f, mangled=f, return_type="void",
+                name=f,
+                mangled=f,
+                return_type="void",
                 visibility=Visibility.PUBLIC,
             )
             for f in funcs
@@ -134,7 +136,11 @@ class TestDebugPdbPathRejectedOnlyForTwoLivePeOperands:
         _write_snapshot(new_path, "foo")
 
         code, _out = _invoke(
-            "compare", str(old_path), str(new_path), "-o", "json=-",
+            "compare",
+            str(old_path),
+            str(new_path),
+            "-o",
+            "json=-",
         )
 
         assert code == 4
@@ -214,7 +220,11 @@ class TestDebugPdbPathRejectedForReleaseFanOut:
         _write_fake_pe(new_dir / "widget.dll")
 
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "json=-",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
         )
 
         assert not (code == 64 and "debug.pdb_path" in out), out

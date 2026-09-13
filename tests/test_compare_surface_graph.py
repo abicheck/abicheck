@@ -267,9 +267,7 @@ class TestReferencedIdentifiersAttr:
     strings a second time."""
 
     def test_function_node_carries_its_own_referenced_identifiers(self) -> None:
-        fn = Function(
-            name="make", mangled="_Z4makev", return_type="Widget*", params=[]
-        )
+        fn = Function(name="make", mangled="_Z4makev", return_type="Widget*", params=[])
         snap = _snapshot(functions=[fn])
         graph = SourceGraphSummary()
         build_public_surface_facts(snap, graph)

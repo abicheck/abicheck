@@ -168,7 +168,9 @@ def test_healthy_link_records_matched_counters_not_zero():
     )
     surface = link_source_abi([tu], exported_symbols=["_Z3foov"], library="libfoo.so")
     snap = AbiSnapshot(
-        library="libfoo.so", version="1.0", from_headers=True,
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
         build_source=BuildSourcePack(root="", source_abi=surface),
     )
     odr = _odr_row(run_crosschecks(snap).coverage)
@@ -186,7 +188,9 @@ def test_empty_l4_skip_row_still_names_the_degraded_boundary():
         unmatched={"symbols_without_decl": ["_Z3barv", "_Z3bazv", "_Z3quxv"]},
     )
     snap = AbiSnapshot(
-        library="libfoo.so", version="1.0", from_headers=True,
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
         build_source=BuildSourcePack(root="", source_abi=surface),
     )
     res = run_crosschecks(snap)

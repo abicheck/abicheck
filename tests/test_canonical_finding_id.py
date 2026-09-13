@@ -1106,4 +1106,3 @@ class TestReportFindingIdDisambiguator:
 
         expected = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
         assert report_finding_id(change) == expected
-

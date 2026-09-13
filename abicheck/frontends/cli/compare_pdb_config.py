@@ -65,7 +65,10 @@ def resolve_and_reject_shared_pdb_path(
     if not cfg_pdb_path:
         return None
     pdb_path = Path(cfg_pdb_path)
-    if detect_binary_format(old_input) == "pe" and detect_binary_format(new_input) == "pe":
+    if (
+        detect_binary_format(old_input) == "pe"
+        and detect_binary_format(new_input) == "pe"
+    ):
         raise click.UsageError(
             "debug.pdb_path names one PDB file shared by both sides of a "
             "two-operand compare: without a per-side old=/new= spelling "

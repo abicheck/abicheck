@@ -21,6 +21,7 @@ using synthetically constructed PDB-like byte streams.
 Data model consistency tests ensure that PDB-derived data produces the
 same DwarfMetadata / AdvancedDwarfMetadata structures as the DWARF pipeline.
 """
+
 from __future__ import annotations
 
 import math
@@ -105,7 +106,9 @@ def _build_tpi_stream(records: list[tuple[int, bytes]]) -> bytes:
     version = 20040203
     header_size = 56
     # The rest of the header fields (hash info) — zeros
-    header = struct.pack("<IIIII", version, header_size, ti_begin, ti_end, len(rec_data))
+    header = struct.pack(
+        "<IIIII", version, header_size, ti_begin, ti_end, len(rec_data)
+    )
     header += b"\x00" * (header_size - len(header))
 
     return header + rec_data
@@ -136,18 +139,26 @@ def _build_dbi_stream(
         # Fixed part (64 bytes)
         fixed = struct.pack(
             "<IHHiiIHHIIHHIIIHHIII",
-            0,              # Unused1
-            0, 0,           # Section, Padding1
-            0, 0,           # Offset, Size
-            0,              # Characteristics
-            0, 0,           # ModuleIndex, Padding2
-            0, 0,           # DataCrc, RelocCrc
-            0,              # Flags
-            0xFFFF,         # ModuleSymStream (nil)
-            0, 0, 0,        # SymByteSize, C11ByteSize, C13ByteSize
-            0, 0,           # SourceFileCount, Padding
-            0,              # Unused2
-            0, 0,           # SourceFileNameIndex, PdbFilePathNameIndex
+            0,  # Unused1
+            0,
+            0,  # Section, Padding1
+            0,
+            0,  # Offset, Size
+            0,  # Characteristics
+            0,
+            0,  # ModuleIndex, Padding2
+            0,
+            0,  # DataCrc, RelocCrc
+            0,  # Flags
+            0xFFFF,  # ModuleSymStream (nil)
+            0,
+            0,
+            0,  # SymByteSize, C11ByteSize, C13ByteSize
+            0,
+            0,  # SourceFileCount, Padding
+            0,  # Unused2
+            0,
+            0,  # SourceFileNameIndex, PdbFilePathNameIndex
         )
         entry = fixed + mod_name.encode() + b"\x00" + obj_name.encode() + b"\x00"
         # 4-byte align
@@ -158,26 +169,26 @@ def _build_dbi_stream(
     # DBI header (64 bytes)
     header = struct.pack(
         "<iIIHHHHHHiiiiiIiiHHI",
-        -1,                     # VersionSignature
-        20040203,               # VersionHeader
-        1,                      # Age
-        0xFFFF,                 # GlobalStreamIndex
-        build_number,           # BuildNumber
-        0xFFFF,                 # PublicStreamIndex
-        0,                      # PdbDllVersion
-        0xFFFF,                 # SymRecordStream
-        0,                      # PdbDllRbld (skipped in unpack — mapped as fields[8])
-        len(mod_data),          # ModInfoSize
-        0,                      # SectionContributionSize
-        0,                      # SectionMapSize
-        0,                      # SourceInfoSize
-        0,                      # TypeServerMapSize
-        0,                      # MFCTypeServerIndex
-        0,                      # OptionalDbgHeaderSize
-        0,                      # ECSubstreamSize
-        flags,                  # Flags
-        machine,                # Machine
-        0,                      # Padding
+        -1,  # VersionSignature
+        20040203,  # VersionHeader
+        1,  # Age
+        0xFFFF,  # GlobalStreamIndex
+        build_number,  # BuildNumber
+        0xFFFF,  # PublicStreamIndex
+        0,  # PdbDllVersion
+        0xFFFF,  # SymRecordStream
+        0,  # PdbDllRbld (skipped in unpack — mapped as fields[8])
+        len(mod_data),  # ModInfoSize
+        0,  # SectionContributionSize
+        0,  # SectionMapSize
+        0,  # SourceInfoSize
+        0,  # TypeServerMapSize
+        0,  # MFCTypeServerIndex
+        0,  # OptionalDbgHeaderSize
+        0,  # ECSubstreamSize
+        flags,  # Flags
+        machine,  # Machine
+        0,  # Padding
     )
 
     return header + mod_data
@@ -211,10 +222,10 @@ def _build_minimal_pdb(
     # Stream 3: DBI
 
     streams = [
-        b"",        # Stream 0 (old directory)
-        pdb_info,   # Stream 1 (PDB info)
-        tpi_data,   # Stream 2 (TPI)
-        dbi_data,   # Stream 3 (DBI)
+        b"",  # Stream 0 (old directory)
+        pdb_info,  # Stream 1 (PDB info)
+        tpi_data,  # Stream 2 (TPI)
+        dbi_data,  # Stream 3 (DBI)
     ]
     if ipi_records is not None:
         streams.append(_build_tpi_stream(ipi_records))  # Stream 4 (IPI)
@@ -255,36 +266,38 @@ def _build_minimal_pdb(
 
     # Superblock (block 0)
     superblock = _MSF_MAGIC
-    superblock += struct.pack("<IIIIII",
-                              _BLOCK_SIZE,     # BlockSize
-                              1,               # FreeBlockMapBlock
-                              num_blocks,      # NumBlocks
-                              len(dir_data),   # NumDirectoryBytes
-                              0,               # Unknown
-                              block_map_block) # BlockMapAddr
-    file_data[:len(superblock)] = superblock
+    superblock += struct.pack(
+        "<IIIIII",
+        _BLOCK_SIZE,  # BlockSize
+        1,  # FreeBlockMapBlock
+        num_blocks,  # NumBlocks
+        len(dir_data),  # NumDirectoryBytes
+        0,  # Unknown
+        block_map_block,
+    )  # BlockMapAddr
+    file_data[: len(superblock)] = superblock
 
     # Write directory blocks
     dir_padded = _pad_block(dir_data, _BLOCK_SIZE)
     for i, blk in enumerate(dir_block_list):
         start = blk * _BLOCK_SIZE
-        chunk = dir_padded[i * _BLOCK_SIZE:(i + 1) * _BLOCK_SIZE]
-        file_data[start:start + len(chunk)] = chunk
+        chunk = dir_padded[i * _BLOCK_SIZE : (i + 1) * _BLOCK_SIZE]
+        file_data[start : start + len(chunk)] = chunk
 
     # Write block map (at block_map_block)
     bm_data = b""
     for blk in dir_block_list:
         bm_data += struct.pack("<I", blk)
     bm_offset = block_map_block * _BLOCK_SIZE
-    file_data[bm_offset:bm_offset + len(bm_data)] = bm_data
+    file_data[bm_offset : bm_offset + len(bm_data)] = bm_data
 
     # Write stream data
     for i, s in enumerate(streams):
         for j, blk in enumerate(stream_blocks[i]):
             start = blk * _BLOCK_SIZE
             chunk_start = j * _BLOCK_SIZE
-            chunk = s[chunk_start:chunk_start + _BLOCK_SIZE]
-            file_data[start:start + len(chunk)] = chunk
+            chunk = s[chunk_start : chunk_start + _BLOCK_SIZE]
+            file_data[start : start + len(chunk)] = chunk
 
     return bytes(file_data)
 
@@ -292,6 +305,7 @@ def _build_minimal_pdb(
 # ---------------------------------------------------------------------------
 # Helper: build CodeView type records
 # ---------------------------------------------------------------------------
+
 
 def _cv_cstring(name: str) -> bytes:
     """Null-terminated string."""
@@ -315,12 +329,18 @@ def _cv_numeric(value: int) -> bytes:
 
 def _make_lf_member(attr: int, type_ti: int, offset: int, name: str) -> bytes:
     """Build an LF_MEMBER sub-record (for inside LF_FIELDLIST)."""
-    return struct.pack("<HHI", LF_MEMBER, attr, type_ti) + _cv_numeric(offset) + _cv_cstring(name)
+    return (
+        struct.pack("<HHI", LF_MEMBER, attr, type_ti)
+        + _cv_numeric(offset)
+        + _cv_cstring(name)
+    )
 
 
 def _make_lf_enumerate(attr: int, value: int, name: str) -> bytes:
     """Build an LF_ENUMERATE sub-record."""
-    return struct.pack("<HH", LF_ENUMERATE, attr) + _cv_numeric(value) + _cv_cstring(name)
+    return (
+        struct.pack("<HH", LF_ENUMERATE, attr) + _cv_numeric(value) + _cv_cstring(name)
+    )
 
 
 def _make_lf_fieldlist(sub_records: list[bytes]) -> bytes:
@@ -339,35 +359,66 @@ def _make_lf_fieldlist(sub_records: list[bytes]) -> bytes:
 
 
 def _make_lf_structure(
-    count: int, prop: int, field_ti: int,
-    byte_size: int, name: str,
+    count: int,
+    prop: int,
+    field_ti: int,
+    byte_size: int,
+    name: str,
 ) -> bytes:
     """Build LF_STRUCTURE / LF_CLASS payload."""
-    return struct.pack("<HHIII", count, prop, field_ti, 0, 0) + _cv_numeric(byte_size) + _cv_cstring(name)
+    return (
+        struct.pack("<HHIII", count, prop, field_ti, 0, 0)
+        + _cv_numeric(byte_size)
+        + _cv_cstring(name)
+    )
 
 
-def _make_lf_union(count: int, prop: int, field_ti: int, byte_size: int, name: str) -> bytes:
+def _make_lf_union(
+    count: int, prop: int, field_ti: int, byte_size: int, name: str
+) -> bytes:
     """Build LF_UNION payload."""
-    return struct.pack("<HHI", count, prop, field_ti) + _cv_numeric(byte_size) + _cv_cstring(name)
+    return (
+        struct.pack("<HHI", count, prop, field_ti)
+        + _cv_numeric(byte_size)
+        + _cv_cstring(name)
+    )
 
 
-def _make_lf_enum(count: int, prop: int, utype_ti: int, field_ti: int, name: str) -> bytes:
+def _make_lf_enum(
+    count: int, prop: int, utype_ti: int, field_ti: int, name: str
+) -> bytes:
     """Build LF_ENUM payload."""
     return struct.pack("<HHII", count, prop, utype_ti, field_ti) + _cv_cstring(name)
 
 
-def _make_lf_procedure(rvtype: int, calltype: int, parmcount: int, arglist: int) -> bytes:
+def _make_lf_procedure(
+    rvtype: int, calltype: int, parmcount: int, arglist: int
+) -> bytes:
     """Build LF_PROCEDURE payload."""
     return struct.pack("<IBBHI", rvtype, calltype, 0, parmcount, arglist)
 
 
 def _make_lf_mfunction(
-    rvtype: int, classtype: int, thistype: int,
-    calltype: int, parmcount: int, arglist: int, thisadjust: int = 0,
+    rvtype: int,
+    classtype: int,
+    thistype: int,
+    calltype: int,
+    parmcount: int,
+    arglist: int,
+    thisadjust: int = 0,
 ) -> bytes:
     """Build LF_MFUNCTION payload."""
-    return struct.pack("<IIIBBHIi", rvtype, classtype, thistype,
-                       calltype, 0, parmcount, arglist, thisadjust)
+    return struct.pack(
+        "<IIIBBHIi",
+        rvtype,
+        classtype,
+        thistype,
+        calltype,
+        0,
+        parmcount,
+        arglist,
+        thisadjust,
+    )
 
 
 def _make_lf_pointer(referent_ti: int, size: int = 8, mode: int = 0) -> bytes:
@@ -377,7 +428,9 @@ def _make_lf_pointer(referent_ti: int, size: int = 8, mode: int = 0) -> bytes:
     return struct.pack("<II", referent_ti, attrs)
 
 
-def _make_lf_modifier(modified_ti: int, is_const: bool = False, is_volatile: bool = False) -> bytes:
+def _make_lf_modifier(
+    modified_ti: int, is_const: bool = False, is_volatile: bool = False
+) -> bytes:
     """Build LF_MODIFIER payload."""
     attr = 0
     if is_const:
@@ -394,12 +447,15 @@ def _make_lf_bitfield(underlying_ti: int, length: int, position: int) -> bytes:
 
 def _make_lf_array(elem_ti: int, idx_ti: int, byte_size: int, name: str = "") -> bytes:
     """Build LF_ARRAY payload."""
-    return struct.pack("<II", elem_ti, idx_ti) + _cv_numeric(byte_size) + _cv_cstring(name)
+    return (
+        struct.pack("<II", elem_ti, idx_ti) + _cv_numeric(byte_size) + _cv_cstring(name)
+    )
 
 
 # ---------------------------------------------------------------------------
 # Tests: numeric leaf decoding
 # ---------------------------------------------------------------------------
+
 
 class TestNumericLeaf:
     def test_inline_value(self) -> None:
@@ -469,6 +525,7 @@ class TestCString:
 # Tests: MSF parser
 # ---------------------------------------------------------------------------
 
+
 class TestMsfParser:
     def test_valid_pdb(self, tmp_path: Path) -> None:
         pdb_data = _build_minimal_pdb()
@@ -501,6 +558,7 @@ class TestMsfParser:
 # Tests: TPI stream parser
 # ---------------------------------------------------------------------------
 
+
 class TestTpiParser:
     def test_empty_tpi(self) -> None:
         tpi_data = _build_tpi_stream([])
@@ -510,18 +568,25 @@ class TestTpiParser:
         assert len(tpi.records) == 0
 
     def test_single_structure(self) -> None:
-        fieldlist_payload = _make_lf_fieldlist([
-            _make_lf_member(0, 0x74, 0, "x"),   # int x at offset 0
-            _make_lf_member(0, 0x74, 4, "y"),   # int y at offset 4
-        ])
-        struct_payload = _make_lf_structure(
-            count=2, prop=0, field_ti=0x1000,
-            byte_size=8, name="Point",
+        fieldlist_payload = _make_lf_fieldlist(
+            [
+                _make_lf_member(0, 0x74, 0, "x"),  # int x at offset 0
+                _make_lf_member(0, 0x74, 4, "y"),  # int y at offset 4
+            ]
         )
-        tpi_data = _build_tpi_stream([
-            (LF_FIELDLIST, fieldlist_payload),   # ti=0x1000
-            (LF_STRUCTURE, struct_payload),      # ti=0x1001
-        ])
+        struct_payload = _make_lf_structure(
+            count=2,
+            prop=0,
+            field_ti=0x1000,
+            byte_size=8,
+            name="Point",
+        )
+        tpi_data = _build_tpi_stream(
+            [
+                (LF_FIELDLIST, fieldlist_payload),  # ti=0x1000
+                (LF_STRUCTURE, struct_payload),  # ti=0x1001
+            ]
+        )
         tpi = parse_tpi_stream(tpi_data)
         assert len(tpi.records) == 2
         assert tpi.records[0].type_index == 0x1000
@@ -538,6 +603,7 @@ class TestTpiParser:
 # Tests: TypeDatabase
 # ---------------------------------------------------------------------------
 
+
 class TestTypeDatabase:
     def _make_db(self, records: list[tuple[int, bytes]]) -> TypeDatabase:
         tpi_data = _build_tpi_stream(records)
@@ -548,7 +614,7 @@ class TestTypeDatabase:
 
     def test_simple_type_names(self) -> None:
         db = self._make_db([])
-        assert db.type_name(0x74) == "int"       # int (kind=0x74)
+        assert db.type_name(0x74) == "int"  # int (kind=0x74)
         assert db.type_name(0x75) == "unsigned int"
         assert db.type_name(0x03) == "void"
         assert db.type_name(0x40) == "float"
@@ -556,10 +622,10 @@ class TestTypeDatabase:
 
     def test_simple_type_sizes(self) -> None:
         db = self._make_db([])
-        assert db.type_size(0x74) == 4   # int
-        assert db.type_size(0x41) == 8   # double
-        assert db.type_size(0x10) == 1   # signed char
-        assert db.type_size(0x03) == 0   # void
+        assert db.type_size(0x74) == 4  # int
+        assert db.type_size(0x41) == 8  # double
+        assert db.type_size(0x10) == 1  # signed char
+        assert db.type_size(0x03) == 0  # void
 
     def test_simple_pointer_type(self) -> None:
         db = self._make_db([])
@@ -570,18 +636,25 @@ class TestTypeDatabase:
         assert db.type_size(ti) == 8
 
     def test_struct_resolution(self) -> None:
-        fieldlist_payload = _make_lf_fieldlist([
-            _make_lf_member(0, 0x74, 0, "x"),
-            _make_lf_member(0, 0x74, 4, "y"),
-        ])
-        struct_payload = _make_lf_structure(
-            count=2, prop=0, field_ti=0x1000,
-            byte_size=8, name="Point",
+        fieldlist_payload = _make_lf_fieldlist(
+            [
+                _make_lf_member(0, 0x74, 0, "x"),
+                _make_lf_member(0, 0x74, 4, "y"),
+            ]
         )
-        db = self._make_db([
-            (LF_FIELDLIST, fieldlist_payload),
-            (LF_STRUCTURE, struct_payload),
-        ])
+        struct_payload = _make_lf_structure(
+            count=2,
+            prop=0,
+            field_ti=0x1000,
+            byte_size=8,
+            name="Point",
+        )
+        db = self._make_db(
+            [
+                (LF_FIELDLIST, fieldlist_payload),
+                (LF_STRUCTURE, struct_payload),
+            ]
+        )
 
         s = db.resolve_struct(0x1001)
         assert s is not None
@@ -601,21 +674,31 @@ class TestTypeDatabase:
     def test_forward_ref_resolution(self) -> None:
         """Forward-ref struct should resolve to the definition."""
         fwd_payload = _make_lf_structure(
-            count=0, prop=0x0080, field_ti=0,
-            byte_size=0, name="Foo",
+            count=0,
+            prop=0x0080,
+            field_ti=0,
+            byte_size=0,
+            name="Foo",
         )
-        fieldlist_payload = _make_lf_fieldlist([
-            _make_lf_member(0, 0x74, 0, "val"),
-        ])
+        fieldlist_payload = _make_lf_fieldlist(
+            [
+                _make_lf_member(0, 0x74, 0, "val"),
+            ]
+        )
         def_payload = _make_lf_structure(
-            count=1, prop=0, field_ti=0x1001,
-            byte_size=4, name="Foo",
+            count=1,
+            prop=0,
+            field_ti=0x1001,
+            byte_size=4,
+            name="Foo",
         )
-        db = self._make_db([
-            (LF_STRUCTURE, fwd_payload),       # ti=0x1000 (fwd ref)
-            (LF_FIELDLIST, fieldlist_payload),  # ti=0x1001
-            (LF_STRUCTURE, def_payload),        # ti=0x1002 (definition)
-        ])
+        db = self._make_db(
+            [
+                (LF_STRUCTURE, fwd_payload),  # ti=0x1000 (fwd ref)
+                (LF_FIELDLIST, fieldlist_payload),  # ti=0x1001
+                (LF_STRUCTURE, def_payload),  # ti=0x1002 (definition)
+            ]
+        )
 
         s = db.resolve_struct(0x1000)
         assert s is not None
@@ -623,18 +706,25 @@ class TestTypeDatabase:
         assert s.byte_size == 4
 
     def test_union(self) -> None:
-        fieldlist = _make_lf_fieldlist([
-            _make_lf_member(0, 0x74, 0, "i"),
-            _make_lf_member(0, 0x40, 0, "f"),
-        ])
-        union_payload = _make_lf_union(
-            count=2, prop=0, field_ti=0x1000,
-            byte_size=4, name="Data",
+        fieldlist = _make_lf_fieldlist(
+            [
+                _make_lf_member(0, 0x74, 0, "i"),
+                _make_lf_member(0, 0x40, 0, "f"),
+            ]
         )
-        db = self._make_db([
-            (LF_FIELDLIST, fieldlist),
-            (LF_UNION, union_payload),
-        ])
+        union_payload = _make_lf_union(
+            count=2,
+            prop=0,
+            field_ti=0x1000,
+            byte_size=4,
+            name="Data",
+        )
+        db = self._make_db(
+            [
+                (LF_FIELDLIST, fieldlist),
+                (LF_UNION, union_payload),
+            ]
+        )
         s = db.resolve_struct(0x1001)
         assert s is not None
         assert s.is_union
@@ -642,19 +732,26 @@ class TestTypeDatabase:
         assert s.byte_size == 4
 
     def test_enum(self) -> None:
-        fieldlist = _make_lf_fieldlist([
-            _make_lf_enumerate(0, 0, "RED"),
-            _make_lf_enumerate(0, 1, "GREEN"),
-            _make_lf_enumerate(0, 2, "BLUE"),
-        ])
-        enum_payload = _make_lf_enum(
-            count=3, prop=0, utype_ti=0x74,
-            field_ti=0x1000, name="Color",
+        fieldlist = _make_lf_fieldlist(
+            [
+                _make_lf_enumerate(0, 0, "RED"),
+                _make_lf_enumerate(0, 1, "GREEN"),
+                _make_lf_enumerate(0, 2, "BLUE"),
+            ]
         )
-        db = self._make_db([
-            (LF_FIELDLIST, fieldlist),
-            (LF_ENUM, enum_payload),
-        ])
+        enum_payload = _make_lf_enum(
+            count=3,
+            prop=0,
+            utype_ti=0x74,
+            field_ti=0x1000,
+            name="Color",
+        )
+        db = self._make_db(
+            [
+                (LF_FIELDLIST, fieldlist),
+                (LF_ENUM, enum_payload),
+            ]
+        )
         e = db.resolve_enum(0x1001)
         assert e is not None
         assert e.name == "Color"
@@ -666,9 +763,11 @@ class TestTypeDatabase:
 
     def test_procedure(self) -> None:
         proc_payload = _make_lf_procedure(0x74, 0x00, 2, 0x1001)
-        db = self._make_db([
-            (LF_PROCEDURE, proc_payload),
-        ])
+        db = self._make_db(
+            [
+                (LF_PROCEDURE, proc_payload),
+            ]
+        )
         p = db.get_procedure(0x1000)
         assert p is not None
         assert p.calling_convention == 0x00  # cdecl
@@ -677,9 +776,11 @@ class TestTypeDatabase:
 
     def test_mfunction(self) -> None:
         mf_payload = _make_lf_mfunction(0x74, 0x1002, 0x1003, 0x0B, 1, 0x1004)
-        db = self._make_db([
-            (LF_MFUNCTION, mf_payload),
-        ])
+        db = self._make_db(
+            [
+                (LF_MFUNCTION, mf_payload),
+            ]
+        )
         mf = db.get_mfunction(0x1000)
         assert mf is not None
         assert mf.calling_convention == 0x0B  # thiscall
@@ -687,51 +788,66 @@ class TestTypeDatabase:
 
     def test_pointer_type_name(self) -> None:
         ptr_payload = _make_lf_pointer(0x74, size=8)
-        db = self._make_db([
-            (LF_POINTER, ptr_payload),
-        ])
+        db = self._make_db(
+            [
+                (LF_POINTER, ptr_payload),
+            ]
+        )
         assert "int" in db.type_name(0x1000)
         assert "*" in db.type_name(0x1000)
 
     def test_modifier_const(self) -> None:
         mod_payload = _make_lf_modifier(0x74, is_const=True)
-        db = self._make_db([
-            (LF_MODIFIER, mod_payload),
-        ])
+        db = self._make_db(
+            [
+                (LF_MODIFIER, mod_payload),
+            ]
+        )
         name = db.type_name(0x1000)
         assert "const" in name
         assert "int" in name
 
     def test_bitfield(self) -> None:
         bf_payload = _make_lf_bitfield(0x74, length=3, position=5)
-        db = self._make_db([
-            (LF_BITFIELD, bf_payload),
-        ])
+        db = self._make_db(
+            [
+                (LF_BITFIELD, bf_payload),
+            ]
+        )
         # Bitfield type name resolves to underlying type
         assert db.type_name(0x1000) == "int"
         assert db.type_size(0x1000) == 4
 
     def test_array(self) -> None:
         arr_payload = _make_lf_array(0x74, 0x74, 40, "")
-        db = self._make_db([
-            (LF_ARRAY, arr_payload),
-        ])
+        db = self._make_db(
+            [
+                (LF_ARRAY, arr_payload),
+            ]
+        )
         assert "int" in db.type_name(0x1000)
         assert "[]" in db.type_name(0x1000)
         assert db.type_size(0x1000) == 40
 
     def test_packed_struct(self) -> None:
-        fieldlist = _make_lf_fieldlist([
-            _make_lf_member(0, 0x74, 0, "a"),
-        ])
-        struct_payload = _make_lf_structure(
-            count=1, prop=0x0800, field_ti=0x1000,  # packed flag
-            byte_size=4, name="Packed",
+        fieldlist = _make_lf_fieldlist(
+            [
+                _make_lf_member(0, 0x74, 0, "a"),
+            ]
         )
-        db = self._make_db([
-            (LF_FIELDLIST, fieldlist),
-            (LF_STRUCTURE, struct_payload),
-        ])
+        struct_payload = _make_lf_structure(
+            count=1,
+            prop=0x0800,
+            field_ti=0x1000,  # packed flag
+            byte_size=4,
+            name="Packed",
+        )
+        db = self._make_db(
+            [
+                (LF_FIELDLIST, fieldlist),
+                (LF_STRUCTURE, struct_payload),
+            ]
+        )
         s = db.resolve_struct(0x1001)
         assert s is not None
         assert s.is_packed
@@ -747,6 +863,7 @@ class TestTypeDatabase:
 # ---------------------------------------------------------------------------
 # Tests: DBI stream parser
 # ---------------------------------------------------------------------------
+
 
 class TestDbiParser:
     def test_minimal_dbi(self) -> None:
@@ -783,27 +900,32 @@ class TestDbiParser:
 # Tests: full PDB parse round-trip
 # ---------------------------------------------------------------------------
 
+
 class TestPdbRoundTrip:
     def test_full_parse(self, tmp_path: Path) -> None:
         """Build a PDB with struct + enum, parse it, verify types."""
         # Fieldlist for struct Point { int x; int y; }
-        fl_struct = _make_lf_fieldlist([
-            _make_lf_member(0, 0x74, 0, "x"),
-            _make_lf_member(0, 0x74, 4, "y"),
-        ])
+        fl_struct = _make_lf_fieldlist(
+            [
+                _make_lf_member(0, 0x74, 0, "x"),
+                _make_lf_member(0, 0x74, 4, "y"),
+            ]
+        )
         # Fieldlist for enum Color { RED=0, GREEN=1, BLUE=2 }
-        fl_enum = _make_lf_fieldlist([
-            _make_lf_enumerate(0, 0, "RED"),
-            _make_lf_enumerate(0, 1, "GREEN"),
-            _make_lf_enumerate(0, 2, "BLUE"),
-        ])
+        fl_enum = _make_lf_fieldlist(
+            [
+                _make_lf_enumerate(0, 0, "RED"),
+                _make_lf_enumerate(0, 1, "GREEN"),
+                _make_lf_enumerate(0, 2, "BLUE"),
+            ]
+        )
 
         records = [
-            (LF_FIELDLIST, fl_struct),                                    # 0x1000
-            (LF_STRUCTURE, _make_lf_structure(2, 0, 0x1000, 8, "Point")), # 0x1001
-            (LF_FIELDLIST, fl_enum),                                      # 0x1002
-            (LF_ENUM, _make_lf_enum(3, 0, 0x74, 0x1002, "Color")),       # 0x1003
-            (LF_PROCEDURE, _make_lf_procedure(0x74, 0x07, 1, 0)),        # 0x1004 stdcall
+            (LF_FIELDLIST, fl_struct),  # 0x1000
+            (LF_STRUCTURE, _make_lf_structure(2, 0, 0x1000, 8, "Point")),  # 0x1001
+            (LF_FIELDLIST, fl_enum),  # 0x1002
+            (LF_ENUM, _make_lf_enum(3, 0, 0x74, 0x1002, "Color")),  # 0x1003
+            (LF_PROCEDURE, _make_lf_procedure(0x74, 0x07, 1, 0)),  # 0x1004 stdcall
         ]
 
         pdb_bytes = _build_minimal_pdb(tpi_records=records)
@@ -811,6 +933,7 @@ class TestPdbRoundTrip:
         pdb_file.write_bytes(pdb_bytes)
 
         from abicheck.pdb_parser import parse_pdb
+
         pdb = parse_pdb(pdb_file)
 
         assert pdb.tpi is not None
@@ -837,6 +960,7 @@ class TestPdbRoundTrip:
 # ---------------------------------------------------------------------------
 # Tests: additional coverage for edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestNumericLeafExtended:
     def test_truncated_data(self) -> None:
@@ -910,9 +1034,11 @@ class TestTpiParserExtended:
 
     def test_tpi_get_method(self) -> None:
         """TpiStream.get() returns records by type index."""
-        fieldlist_payload = _make_lf_fieldlist([
-            _make_lf_member(0, 0x74, 0, "x"),
-        ])
+        fieldlist_payload = _make_lf_fieldlist(
+            [
+                _make_lf_member(0, 0x74, 0, "x"),
+            ]
+        )
         tpi_data = _build_tpi_stream([(LF_FIELDLIST, fieldlist_payload)])
         tpi = parse_tpi_stream(tpi_data)
         rec = tpi.get(0x1000)
@@ -1105,10 +1231,12 @@ class TestFieldlistExtended:
         # Second fieldlist: member "b"
         fl2_data = _make_lf_fieldlist([_make_lf_member(0, 0x74, 4, "b")])
 
-        db = self._make_db([
-            (LF_FIELDLIST, fl1_data),      # 0x1000
-            (LF_FIELDLIST, fl2_data),       # 0x1001
-        ])
+        db = self._make_db(
+            [
+                (LF_FIELDLIST, fl1_data),  # 0x1000
+                (LF_FIELDLIST, fl2_data),  # 0x1001
+            ]
+        )
         members = db.get_fieldlist(0x1000)
         names = [m.name for m in members]
         assert "a" in names
@@ -1125,10 +1253,12 @@ class TestFieldlistExtended:
 
     def test_padding_bytes(self) -> None:
         """Padding bytes (>= 0xF0) should be skipped correctly."""
-        fl = _make_lf_fieldlist([
-            _make_lf_member(0, 0x74, 0, "a"),
-            _make_lf_member(0, 0x74, 4, "b"),
-        ])
+        fl = _make_lf_fieldlist(
+            [
+                _make_lf_member(0, 0x74, 0, "a"),
+                _make_lf_member(0, 0x74, 4, "b"),
+            ]
+        )
         db = self._make_db([(LF_FIELDLIST, fl)])
         members = db.get_fieldlist(0x1000)
         assert len(members) == 2
@@ -1168,7 +1298,9 @@ class TestFieldlistExtended:
         # LF_INDEX sub-record needs 2-byte sub_leaf + 2-byte pad + 4-byte TI = 6 bytes.
         # Here we have 2 (sub_leaf) + 4 extra = 6 total, but sub_leaf already consumed 2,
         # so pos + 6 > len(d) check: pos=2, remaining=4 bytes → 2+6=8 > 6 → break.
-        data = struct.pack("<H", LF_INDEX) + b"\x00" * 4  # exactly 4 extra bytes (need 6)
+        data = (
+            struct.pack("<H", LF_INDEX) + b"\x00" * 4
+        )  # exactly 4 extra bytes (need 6)
         db = self._make_db([(LF_FIELDLIST, data)])
         members = db.get_fieldlist(0x1000)
         assert len(members) == 0

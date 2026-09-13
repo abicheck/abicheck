@@ -53,6 +53,7 @@ Real ABICC XML schema (``-report-format xml``):
 
 No formal DTD/XSD exists — the format is defined by the ABICC Perl source.
 """
+
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
@@ -101,7 +102,8 @@ def _compute_section(
     added = [c for c in filtered if kind_str(c) in ADDED_KINDS]
     # "problems" = breaking changes that are not simple removals/additions
     problems = [
-        c for c in breaking
+        c
+        for c in breaking
         if kind_str(c) not in REMOVED_KINDS and kind_str(c) not in ADDED_KINDS
     ]
 
@@ -203,11 +205,17 @@ def _add_problem_element(parent: ET.Element, change: object) -> None:
     # <overcome> — remediation hint for removals
     if ks in ("func_removed", "var_removed", "type_removed"):
         overcome_el = ET.SubElement(prob, "overcome")
-        overcome_el.text = "Recompile the client application against the new library version."
+        overcome_el.text = (
+            "Recompile the client application against the new library version."
+        )
 
 
 def _build_version_element(
-    parent: ET.Element, tag: str, version: str, arch: str, compiler: str,
+    parent: ET.Element,
+    tag: str,
+    version: str,
+    arch: str,
+    compiler: str,
 ) -> None:
     """Build a <version1> or <version2> sub-element with optional arch/gcc."""
     vel = ET.SubElement(parent, tag)
@@ -222,7 +230,10 @@ def _build_version_element(
 
 
 def _build_symbol_list(
-    parent: ET.Element, tag: str, changes: list[object], kind_set: frozenset[str],
+    parent: ET.Element,
+    tag: str,
+    changes: list[object],
+    kind_set: frozenset[str],
 ) -> None:
     """Build <added_symbols> or <removed_symbols> detail section."""
     matched = [c for c in changes if kind_str(c) in kind_set]
@@ -236,14 +247,17 @@ def _build_symbol_list(
 def _build_problem_details(parent: ET.Element, changes: list[object]) -> None:
     """Build severity-tiered <problems_with_types/symbols> detail sections."""
     problem_changes = [
-        c for c in changes
+        c
+        for c in changes
         if is_breaking(c)
         and kind_str(c) not in REMOVED_KINDS
         and kind_str(c) not in ADDED_KINDS
     ]
 
     for sev_label, sev_key in [("High", "high"), ("Medium", "medium"), ("Low", "low")]:
-        sev_changes = [c for c in problem_changes if _severity_lower(kind_str(c)) == sev_key]
+        sev_changes = [
+            c for c in problem_changes if _severity_lower(kind_str(c)) == sev_key
+        ]
         if not sev_changes:
             continue
 
@@ -296,12 +310,16 @@ def _build_report_element(
             old_el = ET.SubElement(file_info, "old_file")
             ET.SubElement(old_el, "path").text = getattr(old_meta, "path", "")
             ET.SubElement(old_el, "sha256").text = getattr(old_meta, "sha256", "")
-            ET.SubElement(old_el, "size_bytes").text = str(getattr(old_meta, "size_bytes", 0))
+            ET.SubElement(old_el, "size_bytes").text = str(
+                getattr(old_meta, "size_bytes", 0)
+            )
         if new_meta:
             new_el = ET.SubElement(file_info, "new_file")
             ET.SubElement(new_el, "path").text = getattr(new_meta, "path", "")
             ET.SubElement(new_el, "sha256").text = getattr(new_meta, "sha256", "")
-            ET.SubElement(new_el, "size_bytes").text = str(getattr(new_meta, "size_bytes", 0))
+            ET.SubElement(new_el, "size_bytes").text = str(
+                getattr(new_meta, "size_bytes", 0)
+            )
 
     # <test_results>
     test_results = ET.SubElement(report, "test_results")
@@ -374,7 +392,9 @@ def generate_xml_report(
     # Respect DiffResult.verdict for policy promotions (-strict, -warn-newsym)
     # which set verdict=BREAKING without changing individual change kinds.
     result_verdict: object = getattr(result, "verdict", None)
-    final_verdict_str = str(result_verdict.value if hasattr(result_verdict, "value") else result_verdict)
+    final_verdict_str = str(
+        result_verdict.value if hasattr(result_verdict, "value") else result_verdict
+    )
     verdict_override: str | None = None
     if final_verdict_str == "BREAKING":
         verdict_override = "incompatible"
@@ -396,8 +416,13 @@ def generate_xml_report(
     if verdict_override:
         binary_data["verdict"] = verdict_override
     binary_el = _build_report_element(
-        "binary", binary_data, lib_name, old_version, new_version,
-        arch=arch, compiler=compiler,
+        "binary",
+        binary_data,
+        lib_name,
+        old_version,
+        new_version,
+        arch=arch,
+        compiler=compiler,
     )
     root.append(binary_el)
 
@@ -407,8 +432,7 @@ def generate_xml_report(
     redundant_changes = getattr(result, "redundant_changes", []) or []
     if redundant_changes and redundant_count > 0:
         source_redundant = sum(
-            1 for c in redundant_changes
-            if kind_str(c) not in BINARY_ONLY_KINDS
+            1 for c in redundant_changes if kind_str(c) not in BINARY_ONLY_KINDS
         )
         source_data["redundant_count"] = source_redundant
     else:
@@ -418,8 +442,13 @@ def generate_xml_report(
     if verdict_override:
         source_data["verdict"] = verdict_override
     source_el = _build_report_element(
-        "source", source_data, lib_name, old_version, new_version,
-        arch=arch, compiler=compiler,
+        "source",
+        source_data,
+        lib_name,
+        old_version,
+        new_version,
+        arch=arch,
+        compiler=compiler,
     )
     root.append(source_el)
 

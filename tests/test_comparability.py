@@ -1130,6 +1130,8 @@ def test_unreadable_header_content_raises_snapshot_error(tmp_path):
             declared_includes=[IncludeDir(tmp_path / "dep")],
             depfile_resolved_paths=[missing],
         )
+
+
 # ---------------------------------------------------------------------------
 # manifest_tu_scope_field / scope_fingerprint TU-level coverage (ADR-050 D1,
 # G32 Phase E prerequisite): scope_fingerprint must hash each TU's own name,
@@ -1342,7 +1344,8 @@ def test_manifest_scope_fingerprint_ignores_symlink_target_and_checkout_depth(
         manifest_tu_scope=manifest_tu_scope_field(shallow),
     )
     deep_c = compute_extraction_contract(
-        declared_headers=list(deep.roots), manifest_tu_scope=manifest_tu_scope_field(deep)
+        declared_headers=list(deep.roots),
+        manifest_tu_scope=manifest_tu_scope_field(deep),
     )
     assert shallow_c.scope_fingerprint == deep_c.scope_fingerprint
 
@@ -1374,7 +1377,8 @@ def test_manifest_scope_fingerprint_external_absolute_path_ignores_checkout_dept
         manifest_tu_scope=manifest_tu_scope_field(shallow),
     )
     deep_c = compute_extraction_contract(
-        declared_headers=list(deep.roots), manifest_tu_scope=manifest_tu_scope_field(deep)
+        declared_headers=list(deep.roots),
+        manifest_tu_scope=manifest_tu_scope_field(deep),
     )
     assert shallow_c.scope_fingerprint == deep_c.scope_fingerprint
 

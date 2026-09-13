@@ -27,6 +27,7 @@ castxml XML handling note:
 This is a regression test ensuring we don't emit false positives for the
 anonymous union case that abicc had issues with.
 """
+
 from __future__ import annotations
 
 from xml.etree.ElementTree import Element, SubElement
@@ -63,7 +64,9 @@ def _snap_v2_anon_union_added() -> AbiSnapshot:
                 size_bits=32,
                 fields=[
                     TypeField(name="x", type="int", offset_bits=0),
-                    TypeField(name="y", type="int", offset_bits=0),  # same offset — union
+                    TypeField(
+                        name="y", type="int", offset_bits=0
+                    ),  # same offset — union
                 ],
             )
         ],
@@ -83,8 +86,10 @@ class TestAnonUnionFalsePositive:
         _kinds = {c.kind for c in result.changes}  # noqa: F841
         # x is still at offset 0 → should NOT be removed
         removed_changes = [
-            c for c in result.changes
-            if c.kind in (ChangeKind.TYPE_FIELD_REMOVED, ChangeKind.STRUCT_FIELD_REMOVED)
+            c
+            for c in result.changes
+            if c.kind
+            in (ChangeKind.TYPE_FIELD_REMOVED, ChangeKind.STRUCT_FIELD_REMOVED)
             and "x" in str(c.description)
         ]
         assert not removed_changes, (
@@ -99,7 +104,9 @@ class TestAnonUnionFalsePositive:
         kinds = {c.kind for c in result.changes}
         # This may be TYPE_FIELD_ADDED_COMPATIBLE or TYPE_FIELD_ADDED depending on
         # whether the struct is standard-layout; either way not BREAKING for same size
-        assert result.verdict != Verdict.BREAKING or ChangeKind.TYPE_SIZE_CHANGED in kinds, (
+        assert (
+            result.verdict != Verdict.BREAKING or ChangeKind.TYPE_SIZE_CHANGED in kinds
+        ), (
             "Adding a field at same offset in same-size struct should not be BREAKING "
             "unless the struct size actually changed"
         )
@@ -112,28 +119,42 @@ class TestAnonUnionFalsePositive:
     def test_struct_with_added_y_field_at_different_offset(self) -> None:
         """Adding field y at a NEW offset (after x) → compatible if non-polymorphic."""
         old = AbiSnapshot(
-            library="lib.so", version="1.0",
-            types=[RecordType(
-                name="S", kind="struct", size_bits=32,
-                fields=[TypeField(name="x", type="int", offset_bits=0)],
-            )],
+            library="lib.so",
+            version="1.0",
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    size_bits=32,
+                    fields=[TypeField(name="x", type="int", offset_bits=0)],
+                )
+            ],
         )
         new = AbiSnapshot(
-            library="lib.so", version="2.0",
-            types=[RecordType(
-                name="S", kind="struct", size_bits=64,
-                fields=[
-                    TypeField(name="x", type="int", offset_bits=0),
-                    TypeField(name="y", type="int", offset_bits=32),
-                ],
-            )],
+            library="lib.so",
+            version="2.0",
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    size_bits=64,
+                    fields=[
+                        TypeField(name="x", type="int", offset_bits=0),
+                        TypeField(name="y", type="int", offset_bits=32),
+                    ],
+                )
+            ],
         )
         result = compare(old, new)
         _kinds = {c.kind for c in result.changes}  # noqa: F841
         # x is NOT removed
-        removed_for_x = [c for c in result.changes
-                         if c.kind in (ChangeKind.TYPE_FIELD_REMOVED, ChangeKind.STRUCT_FIELD_REMOVED)
-                         and "x" in str(c.description)]
+        removed_for_x = [
+            c
+            for c in result.changes
+            if c.kind
+            in (ChangeKind.TYPE_FIELD_REMOVED, ChangeKind.STRUCT_FIELD_REMOVED)
+            and "x" in str(c.description)
+        ]
         assert not removed_for_x
 
     def test_castxml_anon_union_xml_parsing(self) -> None:
@@ -211,6 +232,7 @@ class TestCastxmlAnonUnionExpansion:
     def _make_xml_with_anon_union(self) -> Element:
         """Build castxml XML: struct S { union { int x; int y; }; };"""
         from xml.etree.ElementTree import Element, SubElement
+
         root = Element("CastXML")
 
         f1 = SubElement(root, "File")
@@ -246,7 +268,7 @@ class TestCastxmlAnonUnionExpansion:
         struct_s.set("file", "f1")
 
         anon_field = SubElement(struct_s, "Field")
-        anon_field.set("name", "")   # anonymous
+        anon_field.set("name", "")  # anonymous
         anon_field.set("type", "_u1")
         anon_field.set("offset", "0")
 
@@ -255,6 +277,7 @@ class TestCastxmlAnonUnionExpansion:
     def _make_xml_with_nested_anon(self) -> Element:
         """Build castxml XML: struct S { union { struct { int a; int b; }; int c; }; };"""
         from xml.etree.ElementTree import Element, SubElement
+
         root = Element("CastXML")
 
         f1 = SubElement(root, "File")
@@ -314,6 +337,7 @@ class TestCastxmlAnonUnionExpansion:
     def test_castxml_anon_union_expansion(self) -> None:
         """struct S { union { int x; int y; }; } — anon field must be expanded."""
         from abicheck.dumper import _CastxmlParser
+
         root = self._make_xml_with_anon_union()
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
         types = parser.parse_types()
@@ -328,6 +352,7 @@ class TestCastxmlAnonUnionExpansion:
     def test_castxml_nested_anon_struct_expansion(self) -> None:
         """struct S { union { struct { int a; int b; }; int c; }; } — all leaves."""
         from abicheck.dumper import _CastxmlParser
+
         root = self._make_xml_with_nested_anon()
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
         types = parser.parse_types()
@@ -345,17 +370,33 @@ class TestCastxmlAnonUnionExpansion:
         from abicheck.checker import ChangeKind, compare
         from abicheck.model import AbiSnapshot, RecordType, TypeField
 
-        old_snap = AbiSnapshot(library="lib.so", version="1.0", types=[
-            RecordType(name="S", kind="struct", fields=[
-                TypeField(name="x", type="int", offset_bits=0),
-            ])
-        ])
-        new_snap = AbiSnapshot(library="lib.so", version="2.0", types=[
-            RecordType(name="S", kind="struct", fields=[
-                TypeField(name="x", type="int", offset_bits=0),
-                TypeField(name="y", type="int", offset_bits=0),
-            ])
-        ])
+        old_snap = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="x", type="int", offset_bits=0),
+                    ],
+                )
+            ],
+        )
+        new_snap = AbiSnapshot(
+            library="lib.so",
+            version="2.0",
+            types=[
+                RecordType(
+                    name="S",
+                    kind="struct",
+                    fields=[
+                        TypeField(name="x", type="int", offset_bits=0),
+                        TypeField(name="y", type="int", offset_bits=0),
+                    ],
+                )
+            ],
+        )
         result = compare(old_snap, new_snap)
         kinds = {c.kind for c in result.changes}
         assert ChangeKind.TYPE_FIELD_REMOVED not in kinds, (
@@ -416,6 +457,10 @@ class TestCastxmlAnonUnionExpansion:
         s = next((t for t in types if t.name == "S"), None)
         assert s is not None
         field_names = {f.name for f in s.fields}
-        assert "x" in field_names, "x from anon union (members attr) must appear in S.fields"
-        assert "y" in field_names, "y from anon union (members attr) must appear in S.fields"
+        assert "x" in field_names, (
+            "x from anon union (members attr) must appear in S.fields"
+        )
+        assert "y" in field_names, (
+            "y from anon union (members attr) must appear in S.fields"
+        )
         assert "" not in field_names

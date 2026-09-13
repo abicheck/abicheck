@@ -585,7 +585,9 @@ def _opaque_option_source_tokens(tokens: list[str]) -> bool:
     for i, token in enumerate(tokens):
         if token.startswith("@") and len(token) > 1:
             return True
-        if token.startswith(("--config=", "--config-user-dir=", "--config-system-dir=")):
+        if token.startswith(
+            ("--config=", "--config-user-dir=", "--config-system-dir=")
+        ):
             return True
         if token == "--config" and i + 1 < len(tokens):
             return True

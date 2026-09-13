@@ -404,7 +404,9 @@ def _merge_consumer_impact_paths(
             alternatives.append(m.entry_path)
             m_start = m.entry_path[0].src
             alternatives.extend(
-                alt for alt in m.alternative_entry_paths if alt and alt[0].src == m_start
+                alt
+                for alt in m.alternative_entry_paths
+                if alt and alt[0].src == m_start
             )
     # primary's OWN alternative_entry_paths need the identical guard (Codex
     # review, fresh evidence): explain_required_symbols builds these from

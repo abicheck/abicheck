@@ -36,7 +36,9 @@ def test_ensure_loaded_imports_every_diff_module() -> None:
     # detectors never register). After ensure_loaded, every one must be present.
     registry.ensure_loaded()
     missing = _all_diff_module_names() - set(sys.modules)
-    assert not missing, f"diff_* modules not imported by ensure_loaded: {sorted(missing)}"
+    assert not missing, (
+        f"diff_* modules not imported by ensure_loaded: {sorted(missing)}"
+    )
 
 
 def test_ensure_loaded_includes_checker_local_detectors() -> None:
@@ -62,9 +64,7 @@ def test_standalone_discovery_registers_advanced_dwarf() -> None:
         "assert 'advanced_dwarf' in names, names\n"
         "print(len(names))\n"
     )
-    proc = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True
-    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     assert int(proc.stdout.strip()) >= 49
 
@@ -138,8 +138,13 @@ def test_param_qualifier_detectors_keep_their_registration_position() -> None:
     names = registry.detector_names
     order = {name: i for i, name in enumerate(names)}
 
-    for required in ("functions", "fingerprint_renames", "param_restrict",
-                     "param_va_list", "constants"):
+    for required in (
+        "functions",
+        "fingerprint_renames",
+        "param_restrict",
+        "param_va_list",
+        "constants",
+    ):
         assert required in order, f"{required} is not registered"
 
     # Both run after the core function/rename detectors...

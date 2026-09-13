@@ -54,8 +54,10 @@ if TYPE_CHECKING:
 def _resolve_compare_estimate_level(
     depth: str | None,
     source_method: str | None,
-    old_sources: Path | None, new_sources: Path | None,
-    old_build_info: Path | None, new_build_info: Path | None,
+    old_sources: Path | None,
+    new_sources: Path | None,
+    old_build_info: Path | None,
+    new_build_info: Path | None,
 ) -> tuple[SourceMethod, EvidenceDepth]:
     """The (S-method, L-depth) pair a compare's cost-preview probes are priced
     at -- mirrors ``cli_compare_helpers._resolve_compare_collect_mode``'s own
@@ -134,12 +136,18 @@ def _merge_layer_estimates(
 
 def estimate_compare_dry_run_cost(
     *,
-    old_input: Path, new_input: Path,
-    depth: str | None, source_method: str | None,
-    headers: tuple[Path, ...], includes: tuple[Path, ...],
-    old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
-    old_sources: Path | None, new_sources: Path | None,
-    old_build_info: Path | None, new_build_info: Path | None,
+    old_input: Path,
+    new_input: Path,
+    depth: str | None,
+    source_method: str | None,
+    headers: tuple[Path, ...],
+    includes: tuple[Path, ...],
+    old_headers_only: tuple[Path, ...],
+    new_headers_only: tuple[Path, ...],
+    old_sources: Path | None,
+    new_sources: Path | None,
+    old_build_info: Path | None,
+    new_build_info: Path | None,
 ) -> tuple[list[CostEstimate] | None, str | None]:
     """Combined old+new per-layer cost preview for ``compare --dry-run``.
 
@@ -152,7 +160,12 @@ def estimate_compare_dry_run_cost(
 
     try:
         resolved_level = _resolve_compare_estimate_level(
-            depth, source_method, old_sources, new_sources, old_build_info, new_build_info,
+            depth,
+            source_method,
+            old_sources,
+            new_sources,
+            old_build_info,
+            new_build_info,
         )
         common_headers = list(headers) + list(includes)
         old_side = InputSpec.of(

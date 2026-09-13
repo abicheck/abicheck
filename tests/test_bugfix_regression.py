@@ -10,6 +10,7 @@ Bug 7: JSON output missing old_file/new_file when metadata absent
 Bug 8: --lang c with C++ headers produces unhelpful castxml error
 Bug 9: Invalid header causes unhandled castxml timeout
 """
+
 from __future__ import annotations
 
 import json
@@ -31,6 +32,7 @@ from abicheck.serialization import snapshot_to_json
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _result(
     verdict: Verdict = Verdict.BREAKING,
@@ -55,8 +57,14 @@ def _snap(
     library: str = "libfoo.so",
 ) -> AbiSnapshot:
     if funcs is None:
-        funcs = [Function(name="foo", mangled="_Z3foov", return_type="int",
-                          visibility=Visibility.PUBLIC)]
+        funcs = [
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+        ]
     return AbiSnapshot(library=library, version=version, functions=funcs)
 
 
@@ -67,12 +75,14 @@ def _write_snap(path: Path, snap: AbiSnapshot) -> Path:
 
 def _invoke(*args: str) -> CliRunner.Result:  # type: ignore[type-arg]
     from abicheck.cli import main
+
     return CliRunner().invoke(main, list(args))
 
 
 # ===========================================================================
 # Bug 1: --show-only JSON summary/changes inconsistency
 # ===========================================================================
+
 
 class TestBug1ShowOnlySummary:
     """When --show-only is active, JSON must include filtered_summary."""
@@ -105,9 +115,15 @@ class TestBug1ShowOnlySummary:
         assert d["summary"]["total_changes"] == 2  # unfiltered
 
     def test_no_show_only_no_filtered_summary(self):
-        d = json.loads(to_json(_result(changes=[
-            Change(ChangeKind.FUNC_REMOVED, "foo", "removed"),
-        ])))
+        d = json.loads(
+            to_json(
+                _result(
+                    changes=[
+                        Change(ChangeKind.FUNC_REMOVED, "foo", "removed"),
+                    ]
+                )
+            )
+        )
         assert "filtered_summary" not in d
         assert "show_only_filter" not in d
 
@@ -116,14 +132,14 @@ class TestBug1ShowOnlySummary:
 # Bug 2: affected_pct exceeds 100%
 # ===========================================================================
 
+
 class TestBug2AffectedPctCapped:
     """affected_pct must never exceed 100.0."""
 
     def test_capped_at_100(self):
         # 5 breaking changes but only 2 old symbols → would be 250% uncapped
         changes = [
-            Change(ChangeKind.FUNC_REMOVED, f"f{i}", f"removed f{i}")
-            for i in range(5)
+            Change(ChangeKind.FUNC_REMOVED, f"f{i}", f"removed f{i}") for i in range(5)
         ]
         metrics = compatibility_metrics(changes, old_symbol_count=2)
         assert metrics.affected_pct <= 100.0
@@ -147,11 +163,13 @@ class TestBug2AffectedPctCapped:
 # Bug 3: -o silently creates parent directories
 # ===========================================================================
 
+
 class TestBug3OutputDirCreation:
     """_safe_write_output must emit a visible warning when creating dirs."""
 
     def test_creates_dirs_with_stderr_message(self, tmp_path: Path):
         from abicheck.frontends.cli.runtime import _safe_write_output
+
         target = tmp_path / "deep" / "nested" / "output.json"
         # Capture stderr via CliRunner
         _safe_write_output(target, '{"test": true}')
@@ -161,6 +179,7 @@ class TestBug3OutputDirCreation:
 
     def test_existing_dir_no_error(self, tmp_path: Path):
         from abicheck.frontends.cli.runtime import _safe_write_output
+
         target = tmp_path / "output.json"
         _safe_write_output(target, '{"test": true}')
         assert target.exists()
@@ -169,6 +188,7 @@ class TestBug3OutputDirCreation:
 # ===========================================================================
 # Bug 4: Policy file overrides don't update severity in JSON
 # ===========================================================================
+
 
 class TestBug4PolicyFileSeverity:
     """Policy file overrides must be reflected in change severity in JSON."""
@@ -203,14 +223,15 @@ class TestBug4PolicyFileSeverity:
 # Bug 5: --dso-only flag doesn't filter PIE executables
 # ===========================================================================
 
+
 def _make_elf_dso_no_interp(path: Path) -> None:
     """Write a minimal 64-bit ELF ET_DYN without PT_INTERP (true DSO)."""
     e_ident = b"\x7fELF"
-    e_ident += b"\x02"       # EI_CLASS: 64-bit
-    e_ident += b"\x01"       # EI_DATA: little-endian
-    e_ident += b"\x01"       # EI_VERSION
-    e_ident += b"\x00" * 9   # padding
-    e_type = struct.pack("<H", 3)   # ET_DYN
+    e_ident += b"\x02"  # EI_CLASS: 64-bit
+    e_ident += b"\x01"  # EI_DATA: little-endian
+    e_ident += b"\x01"  # EI_VERSION
+    e_ident += b"\x00" * 9  # padding
+    e_type = struct.pack("<H", 3)  # ET_DYN
     e_machine = struct.pack("<H", 0x3E)
     e_version = struct.pack("<I", 1)
     # e_entry(8) + e_phoff(8) + e_shoff(8) + e_flags(4) + e_ehsize(2)
@@ -226,29 +247,40 @@ def _make_elf_pie_with_interp(path: Path) -> None:
     # Build ELF header
     e_ident = b"\x7fELF\x02\x01\x01" + b"\x00" * 9  # 16 bytes
 
-    e_type = struct.pack("<H", 3)       # ET_DYN (PIE)
+    e_type = struct.pack("<H", 3)  # ET_DYN (PIE)
     e_machine = struct.pack("<H", 0x3E)
     e_version = struct.pack("<I", 1)
     e_entry = struct.pack("<Q", 0)
-    e_phoff = struct.pack("<Q", 64)     # program headers start at byte 64
+    e_phoff = struct.pack("<Q", 64)  # program headers start at byte 64
     e_shoff = struct.pack("<Q", 0)
     e_flags = struct.pack("<I", 0)
     e_ehsize = struct.pack("<H", 64)
-    e_phentsize = struct.pack("<H", 56) # program header entry size for 64-bit
-    e_phnum = struct.pack("<H", 1)      # one program header
+    e_phentsize = struct.pack("<H", 56)  # program header entry size for 64-bit
+    e_phnum = struct.pack("<H", 1)  # one program header
     e_shentsize = struct.pack("<H", 0)
     e_shnum = struct.pack("<H", 0)
     e_shstrndx = struct.pack("<H", 0)
 
     header = (
-        e_ident + e_type + e_machine + e_version + e_entry +
-        e_phoff + e_shoff + e_flags + e_ehsize + e_phentsize +
-        e_phnum + e_shentsize + e_shnum + e_shstrndx
+        e_ident
+        + e_type
+        + e_machine
+        + e_version
+        + e_entry
+        + e_phoff
+        + e_shoff
+        + e_flags
+        + e_ehsize
+        + e_phentsize
+        + e_phnum
+        + e_shentsize
+        + e_shnum
+        + e_shstrndx
     )
 
     # Build one program header: PT_INTERP (type=3)
-    p_type = struct.pack("<I", 3)       # PT_INTERP
-    p_flags = struct.pack("<I", 4)      # PF_R
+    p_type = struct.pack("<I", 3)  # PT_INTERP
+    p_flags = struct.pack("<I", 4)  # PF_R
     p_offset = struct.pack("<Q", 0)
     p_vaddr = struct.pack("<Q", 0)
     p_paddr = struct.pack("<Q", 0)
@@ -256,7 +288,9 @@ def _make_elf_pie_with_interp(path: Path) -> None:
     p_memsz = struct.pack("<Q", 0)
     p_align = struct.pack("<Q", 1)
 
-    phdr = p_type + p_flags + p_offset + p_vaddr + p_paddr + p_filesz + p_memsz + p_align
+    phdr = (
+        p_type + p_flags + p_offset + p_vaddr + p_paddr + p_filesz + p_memsz + p_align
+    )
 
     path.write_bytes(header + phdr)
 
@@ -266,12 +300,14 @@ class TestBug5PieDetection:
 
     def test_dso_without_interp_is_shared_object(self, tmp_path: Path):
         from abicheck.package import _is_elf_shared_object
+
         so = tmp_path / "libfoo.so"
         _make_elf_dso_no_interp(so)
         assert _is_elf_shared_object(so) is True
 
     def test_pie_with_interp_is_not_shared_object(self, tmp_path: Path):
         from abicheck.package import _is_elf_shared_object
+
         exe = tmp_path / "app"
         _make_elf_pie_with_interp(exe)
         assert _is_elf_shared_object(exe) is False
@@ -285,6 +321,7 @@ class TestBug5PieDetection:
         rather than guessing.
         """
         from abicheck.package import _is_elf_shared_object
+
         so = tmp_path / "libweird.so"
         _make_elf_pie_with_interp(so)
         data = bytearray(so.read_bytes())
@@ -295,6 +332,7 @@ class TestBug5PieDetection:
 
     def test_static_exec_et_exec_is_not_shared_object(self, tmp_path: Path):
         from abicheck.package import _is_elf_shared_object
+
         exe = tmp_path / "app"
         # ET_EXEC (type=2)
         e_ident = b"\x7fELF\x02\x01\x01" + b"\x00" * 9
@@ -307,6 +345,7 @@ class TestBug5PieDetection:
 # ===========================================================================
 # Bug 6: compare-release gives NO_CHANGE when library is removed
 # ===========================================================================
+
 
 class TestBug6RemovedLibraryVerdict:
     """A *proven* removed library must not produce NO_CHANGE (ADR-065 D2).
@@ -364,7 +403,11 @@ class TestBug6RemovedLibraryVerdict:
         _write_snap(new_dir / "libfoo.json", snap_foo)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "-o", "json=-",
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "-o",
+            "json=-",
         )
         d = json.loads(result.output)
         # Added-only should not elevate verdict beyond matched results
@@ -374,6 +417,7 @@ class TestBug6RemovedLibraryVerdict:
 # ===========================================================================
 # Bug 7: JSON output missing old_file/new_file when metadata absent
 # ===========================================================================
+
 
 class TestBug7JsonSchemaConsistency:
     """old_file and new_file keys must always be present in JSON."""
@@ -387,17 +431,25 @@ class TestBug7JsonSchemaConsistency:
 
     def test_with_metadata_keys_populated(self):
         from abicheck.checker import LibraryMetadata
+
         r = _result()
-        r.old_metadata = LibraryMetadata(path="/old/lib.so", sha256="aaa", size_bytes=100)
-        r.new_metadata = LibraryMetadata(path="/new/lib.so", sha256="bbb", size_bytes=200)
+        r.old_metadata = LibraryMetadata(
+            path="/old/lib.so", sha256="aaa", size_bytes=100
+        )
+        r.new_metadata = LibraryMetadata(
+            path="/new/lib.so", sha256="bbb", size_bytes=200
+        )
         d = json.loads(to_json(r))
         assert d["old_file"]["path"] == "/old/lib.so"
         assert d["new_file"]["path"] == "/new/lib.so"
 
     def test_partial_metadata_one_null(self):
         from abicheck.checker import LibraryMetadata
+
         r = _result()
-        r.old_metadata = LibraryMetadata(path="/old/lib.so", sha256="aaa", size_bytes=100)
+        r.old_metadata = LibraryMetadata(
+            path="/old/lib.so", sha256="aaa", size_bytes=100
+        )
         d = json.loads(to_json(r))
         assert d["old_file"] is not None
         assert d["new_file"] is None
@@ -407,17 +459,27 @@ class TestBug7JsonSchemaConsistency:
 # Bug 8: --lang c with C++ headers produces unhelpful castxml error
 # ===========================================================================
 
+
 class TestBug8CppHintOnCFailure:
     """castxml failure in C mode on C++ headers should include a hint."""
 
     def test_lang_c_with_cpp_header_shows_hint(self, tmp_path: Path):
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"),
-            patch("abicheck.dumper.deadline.run_bounded",
-                  return_value=self._failed_process("error: use of undeclared identifier 'class'")),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
+            patch(
+                "abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"
+            ),
+            patch(
+                "abicheck.dumper.deadline.run_bounded",
+                return_value=self._failed_process(
+                    "error: use of undeclared identifier 'class'"
+                ),
+            ),
+            patch(
+                "abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"
+            ),
         ):
             from abicheck.dumper import _castxml_dump
+
             header = tmp_path / "test.h"
             # Header with C++ syntax that _detect_cpp_headers will catch
             header.write_text("class Foo { int x; };", encoding="utf-8")
@@ -426,12 +488,19 @@ class TestBug8CppHintOnCFailure:
 
     def test_lang_c_with_pure_c_header_no_hint(self, tmp_path: Path):
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"),
-            patch("abicheck.dumper.deadline.run_bounded",
-                  return_value=self._failed_process("error: something else")),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
+            patch(
+                "abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"
+            ),
+            patch(
+                "abicheck.dumper.deadline.run_bounded",
+                return_value=self._failed_process("error: something else"),
+            ),
+            patch(
+                "abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"
+            ),
         ):
             from abicheck.dumper import _castxml_dump
+
             header = tmp_path / "test.h"
             header.write_text("int foo(void);", encoding="utf-8")
             with pytest.raises(RuntimeError, match="castxml failed") as exc_info:
@@ -451,17 +520,23 @@ class TestBug8CppHintOnCFailure:
 # Bug 9: Invalid header causes unhandled castxml timeout
 # ===========================================================================
 
+
 class TestBug9CastxmlTimeout:
     """subprocess.TimeoutExpired from castxml must be caught gracefully."""
 
     def test_timeout_raises_runtime_error(self, tmp_path: Path):
         timeout_exc = subprocess.TimeoutExpired(cmd=["castxml"], timeout=120)
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"),
+            patch(
+                "abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"
+            ),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
+            patch(
+                "abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"
+            ),
         ):
             from abicheck.dumper import _castxml_dump
+
             header = tmp_path / "test.h"
             header.write_text("int x;", encoding="utf-8")
             with pytest.raises(RuntimeError, match="timed out"):
@@ -470,11 +545,16 @@ class TestBug9CastxmlTimeout:
     def test_timeout_message_mentions_120_seconds(self, tmp_path: Path):
         timeout_exc = subprocess.TimeoutExpired(cmd=["castxml"], timeout=120)
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"),
+            patch(
+                "abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"
+            ),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
+            patch(
+                "abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"
+            ),
         ):
             from abicheck.dumper import _castxml_dump
+
             header = tmp_path / "test.h"
             header.write_text("int x;", encoding="utf-8")
             with pytest.raises(RuntimeError, match="120 seconds"):
@@ -482,14 +562,21 @@ class TestBug9CastxmlTimeout:
 
     def test_timeout_with_partial_stderr(self, tmp_path: Path):
         timeout_exc = subprocess.TimeoutExpired(
-            cmd=["castxml"], timeout=120, stderr=b"partial output here",
+            cmd=["castxml"],
+            timeout=120,
+            stderr=b"partial output here",
         )
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"),
+            patch(
+                "abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"
+            ),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
+            patch(
+                "abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"
+            ),
         ):
             from abicheck.dumper import _castxml_dump
+
             header = tmp_path / "test.h"
             header.write_text("int x;", encoding="utf-8")
             with pytest.raises(RuntimeError, match="partial output here"):
@@ -499,11 +586,16 @@ class TestBug9CastxmlTimeout:
         """Temp files are cleaned up even after timeout."""
         timeout_exc = subprocess.TimeoutExpired(cmd=["castxml"], timeout=120)
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"),
+            patch(
+                "abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"
+            ),
             patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
+            patch(
+                "abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"
+            ),
         ):
             from abicheck.dumper import _castxml_dump
+
             header = tmp_path / "test.h"
             header.write_text("int x;", encoding="utf-8")
             with pytest.raises(RuntimeError):
@@ -539,6 +631,7 @@ def test_castxml_rechecks_deadline_before_parsing_xml(tmp_path: Path) -> None:
         patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
     ):
         from abicheck.dumper import _castxml_dump
+
         header = tmp_path / "test.h"
         header.write_text("int x;", encoding="utf-8")
         with deadline.deadline_scope(0.01):
@@ -559,7 +652,9 @@ def test_validate_castxml_output_rechecks_deadline_after_parse(
 
     out_xml = tmp_path / "out.xml"
     out_xml.write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
-    result = subprocess.CompletedProcess(args=["castxml"], returncode=0, stdout="", stderr="")
+    result = subprocess.CompletedProcess(
+        args=["castxml"], returncode=0, stdout="", stderr=""
+    )
 
     real_parse = dumper.DefusedET.parse
 

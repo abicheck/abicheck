@@ -62,9 +62,7 @@ _OTHER_NON_COMPATIBILITY_CONTRIBUTIONS = st.sampled_from([0, 1, 5, 7, 8])
     audit_gate=_AUDIT_GATE_CONTRIBUTIONS,
     others=st.lists(_OTHER_NON_COMPATIBILITY_CONTRIBUTIONS, min_size=0, max_size=5),
 )
-def test_audit_gate_never_lowers_the_fold(
-    audit_gate: int, others: list[int]
-) -> None:
+def test_audit_gate_never_lowers_the_fold(audit_gate: int, others: list[int]) -> None:
     without = max([0, *others])
     with_gate = reduce(fold_audit_gate_exit, others, audit_gate)
     # `reduce` above folds every "other" axis through the audit-gate axis's

@@ -85,7 +85,9 @@ class TestEffectTransitions:
             attrs={"call_kind": "virtual", "resolution": "overapprox"},
         )
         SourceGraphSummary(edges=[edge])  # resolve facts into edge.resolved
-        assert _edge_effect_transition(CALL_GRAPH_TRAVERSAL_POLICY, edge) == "overapprox"
+        assert (
+            _edge_effect_transition(CALL_GRAPH_TRAVERSAL_POLICY, edge) == "overapprox"
+        )
 
     def test_reachability_marks_target_of_virtual_call_as_degraded(self) -> None:
         from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary

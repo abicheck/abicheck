@@ -656,7 +656,9 @@ def _reject_new_side_extraction_options_for_stored_pair(
             "NEW_INPUT are stored BundleFacts documents: neither side has "
             "any header re-extraction available."
         )
-    if kwargs.get("new_header_backend") is not None or kwargs.get("header_backend") not in (
+    if kwargs.get("new_header_backend") is not None or kwargs.get(
+        "header_backend"
+    ) not in (
         None,
         "auto",
     ):
@@ -775,7 +777,9 @@ def reject_explicit_compile_config_for_stored_pair(config_path: Path) -> None:
     try:
         bc = load_build_config(Path(config_path))
     except ValueError as exc:
-        raise click.UsageError(f"cannot parse build config {config_path}: {exc}") from exc
+        raise click.UsageError(
+            f"cannot parse build config {config_path}: {exc}"
+        ) from exc
     if (
         bc.compile_frontend is not None
         or bc.compile_std is not None

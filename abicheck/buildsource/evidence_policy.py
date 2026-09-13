@@ -39,11 +39,13 @@ if TYPE_CHECKING:
 # (std/visibility/packing flags, export policy, toolchain). The
 # ``build_context_drift: fail-on-abi-relevant`` knob only escalates these; the
 # rest (generated-file churn, parse-context drift) stay deployment risks.
-_ABI_RELEVANT_BUILD_KINDS: frozenset[str] = frozenset({
-    "abi_relevant_build_flag_changed",
-    "link_export_policy_changed",
-    "toolchain_version_changed",
-})
+_ABI_RELEVANT_BUILD_KINDS: frozenset[str] = frozenset(
+    {
+        "abi_relevant_build_flag_changed",
+        "link_export_policy_changed",
+        "toolchain_version_changed",
+    }
+)
 
 
 def tag_evidence_category(findings: list[Change], bucket: str) -> None:
@@ -176,9 +178,14 @@ def finding_bucket_counts(
     source-only come from each finding's ``evidence_category`` tag.
     """
     from ..model.change_catalog.kinds import ChangeKind
+
     injected_ids = {id(c) for c in injected_changes}
-    out = {"artifact_backed": 0, "build_context_drift": 0,
-           "source_only": 0, "evidence_required_missing": 0}
+    out = {
+        "artifact_backed": 0,
+        "build_context_drift": 0,
+        "source_only": 0,
+        "evidence_required_missing": 0,
+    }
     for c in changes:
         if c.kind == ChangeKind.EVIDENCE_REQUIRED_MISSING:
             out["evidence_required_missing"] += 1

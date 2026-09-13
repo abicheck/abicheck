@@ -148,13 +148,9 @@ class TestPackageArchiveInventoryProvesAbsence:
         old_dir, new_dir, old_pkg, new_pkg = _pair(tmp_path)
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text("gate:\n  fail_on_removed_library: true\n")
-        code, _ = _run(
-            "compare", str(old_pkg), str(new_pkg), "--config", str(cfg)
-        )
+        code, _ = _run("compare", str(old_pkg), str(new_pkg), "--config", str(cfg))
         assert code == 8
-        code, _ = _run(
-            "compare", str(old_dir), str(new_dir), "--config", str(cfg)
-        )
+        code, _ = _run("compare", str(old_dir), str(new_dir), "--config", str(cfg))
         assert code == 0
 
     def test_unmatched_old_is_reported_for_both_shapes(self, tmp_path: Path) -> None:
@@ -201,7 +197,9 @@ class TestSupportPromiseFindingsCli:
     ) -> None:
         _old_dir, _new_dir, old_pkg, new_pkg = _pair(tmp_path)
         code, report = _report(
-            "compare", str(old_pkg), str(new_pkg),
+            "compare",
+            str(old_pkg),
+            str(new_pkg),
             *_support_promise_config(tmp_path, "declared"),
         )
         entry = next(lib for lib in report["libraries"] if lib.get("support_promise"))
@@ -219,7 +217,9 @@ class TestSupportPromiseFindingsCli:
         same content, laid out as directories, invents no contract change."""
         old_dir, new_dir, _old_pkg, _new_pkg = _pair(tmp_path)
         code, report = _report(
-            "compare", str(old_dir), str(new_dir),
+            "compare",
+            str(old_dir),
+            str(new_dir),
             *_support_promise_config(tmp_path, "declared"),
         )
         assert all("support_promise" not in lib for lib in report["libraries"])
@@ -229,7 +229,9 @@ class TestSupportPromiseFindingsCli:
         """The symmetric rule, against a proven-complete OLD inventory."""
         _old_dir, _new_dir, old_pkg, new_pkg = _pair(tmp_path)
         code, report = _report(
-            "compare", str(new_pkg), str(old_pkg),
+            "compare",
+            str(new_pkg),
+            str(old_pkg),
             *_support_promise_config(tmp_path, "declared"),
         )
         entry = next(lib for lib in report["libraries"] if lib.get("support_promise"))
@@ -247,7 +249,9 @@ class TestSupportPromiseFindingsCli:
         to ``support_promise_changes()``'s own uncaught ``ValueError``."""
         _old_dir, _new_dir, old_pkg, new_pkg = _pair(tmp_path)
         code, out = _run(
-            "compare", str(old_pkg), str(new_pkg),
+            "compare",
+            str(old_pkg),
+            str(new_pkg),
             *_support_promise_config(tmp_path, "typo"),
         )
         assert code == 64, out

@@ -162,9 +162,9 @@ def test_category_b_platform_restrictions_are_honored_not_widened(
     # regardless of corpus composition.
     assert gen._category_b_platforms({"category": "B", "id": "x"}) == []
     assert gen._category_b_platforms({"category": "B", "platforms": []}) == []
-    assert gen._category_b_platforms(
-        {"category": "B", "platforms": ["linux"]}
-    ) == ["linux"]
+    assert gen._category_b_platforms({"category": "B", "platforms": ["linux"]}) == [
+        "linux"
+    ]
 
 
 def test_category_b_architecture_restrictions_are_honored_not_widened(
@@ -195,9 +195,9 @@ def test_category_b_architecture_restrictions_are_honored_not_widened(
     assert declared, "no scenario declares architectures — test would pass vacuously"
     for scenario_id, architectures in declared.items():
         assert pack["scenarios"][scenario_id]["category"] == "B", scenario_id
-        assert (
-            pack["scenarios"][scenario_id]["architectures"] == architectures
-        ), scenario_id
+        assert pack["scenarios"][scenario_id]["architectures"] == architectures, (
+            scenario_id
+        )
 
     # Negative control: a Category B scenario that does *not* declare
     # `architectures` — every one of them except the fixture above — must
@@ -544,13 +544,7 @@ def _bundle(pack: dict[str, Any], **overrides: Any) -> dict[str, Any]:
 
 
 def _write_bundle(tmp_path: Path, bundle: dict[str, Any]) -> Path:
-    meta = (
-        tmp_path
-        / "check-abi-compatibility"
-        / "removed-export"
-        / "0"
-        / "meta.json"
-    )
+    meta = tmp_path / "check-abi-compatibility" / "removed-export" / "0" / "meta.json"
     meta.parent.mkdir(parents=True)
     meta.write_text(json.dumps(bundle), encoding="utf-8")
     return meta

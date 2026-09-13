@@ -43,12 +43,19 @@ from abicheck.buildsource.check_report import (
 #: The clean `ExitDecision.to_dict()` shape, shared by every `augment_report`
 #: neutralization assertion below so a future schema bump touches one spot.
 _CLEAN_EXIT_BLOCK = {
-    "code": 0, "reasons": ["clean"], "compatibility_contribution": 0,
-    "contract_coverage_contribution": 0, "analysis_assurance_contribution": 0,
-    "crosscheck_promotion_contribution": 0, "operational_error_contribution": 0,
-    "evidence_contract_error_contribution": 0, "budget_overflow_contribution": 0,
-    "not_comparable_contribution": 0, "removed_required_library_contribution": 0,
-    "incomplete_scope_contribution": 0, "no_comparison_completed_contribution": 0,
+    "code": 0,
+    "reasons": ["clean"],
+    "compatibility_contribution": 0,
+    "contract_coverage_contribution": 0,
+    "analysis_assurance_contribution": 0,
+    "crosscheck_promotion_contribution": 0,
+    "operational_error_contribution": 0,
+    "evidence_contract_error_contribution": 0,
+    "budget_overflow_contribution": 0,
+    "not_comparable_contribution": 0,
+    "removed_required_library_contribution": 0,
+    "incomplete_scope_contribution": 0,
+    "no_comparison_completed_contribution": 0,
     "loadability_contribution": 0,
 }
 
@@ -167,6 +174,7 @@ class TestDeriveEffectiveDepth:
     def test_rejects_bad_requested_depth(self):
         with pytest.raises(ValueError):
             derive_effective_depth({}, "bogus")
+
 
 class TestAugmentReport:
     def _base_compare_report(

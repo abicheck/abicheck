@@ -52,20 +52,31 @@ class TestClassifyChange:
         assert classify_change(ChangeKind.FUNC_REMOVED) == IssueCategory.ABI_BREAKING
 
     def test_api_break_kind(self) -> None:
-        assert classify_change(ChangeKind.ENUM_MEMBER_RENAMED) == IssueCategory.POTENTIAL_BREAKING
+        assert (
+            classify_change(ChangeKind.ENUM_MEMBER_RENAMED)
+            == IssueCategory.POTENTIAL_BREAKING
+        )
 
     def test_risk_kind(self) -> None:
-        assert classify_change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED) == IssueCategory.POTENTIAL_BREAKING
+        assert (
+            classify_change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED)
+            == IssueCategory.POTENTIAL_BREAKING
+        )
 
     def test_addition_kind(self) -> None:
         assert classify_change(ChangeKind.FUNC_ADDED) == IssueCategory.ADDITION
 
     def test_quality_issue_kind(self) -> None:
-        assert classify_change(ChangeKind.VISIBILITY_LEAK) == IssueCategory.QUALITY_ISSUES
+        assert (
+            classify_change(ChangeKind.VISIBILITY_LEAK) == IssueCategory.QUALITY_ISSUES
+        )
 
     def test_compatible_noexcept_is_quality(self) -> None:
         # noexcept changes are COMPATIBLE but not additions → quality issues
-        assert classify_change(ChangeKind.FUNC_NOEXCEPT_ADDED) == IssueCategory.QUALITY_ISSUES
+        assert (
+            classify_change(ChangeKind.FUNC_NOEXCEPT_ADDED)
+            == IssueCategory.QUALITY_ISSUES
+        )
 
     def test_type_added_is_addition(self) -> None:
         assert classify_change(ChangeKind.TYPE_ADDED) == IssueCategory.ADDITION
@@ -77,10 +88,15 @@ class TestClassifyChange:
         assert classify_change(ChangeKind.ENUM_MEMBER_ADDED) == IssueCategory.ADDITION
 
     def test_soname_missing_is_quality(self) -> None:
-        assert classify_change(ChangeKind.SONAME_MISSING) == IssueCategory.QUALITY_ISSUES
+        assert (
+            classify_change(ChangeKind.SONAME_MISSING) == IssueCategory.QUALITY_ISSUES
+        )
 
     def test_dwarf_info_missing_is_quality(self) -> None:
-        assert classify_change(ChangeKind.DWARF_INFO_MISSING) == IssueCategory.QUALITY_ISSUES
+        assert (
+            classify_change(ChangeKind.DWARF_INFO_MISSING)
+            == IssueCategory.QUALITY_ISSUES
+        )
 
     @pytest.mark.parametrize("kind", list(ChangeKind), ids=lambda k: k.value)
     def test_exhaustive_all_kinds_classified(self, kind: ChangeKind) -> None:
@@ -92,6 +108,7 @@ class TestClassifyChange:
             QUALITY_KINDS,
             RISK_KINDS,
         )
+
         cat = classify_change(kind)
         assert cat in set(IssueCategory), f"{kind} classified as unknown category {cat}"
         # Verify classify_change agrees with the canonical kind sets
@@ -104,7 +121,9 @@ class TestClassifyChange:
         elif kind in QUALITY_KINDS:
             assert cat == IssueCategory.QUALITY_ISSUES
         else:
-            pytest.fail(f"{kind} not in any canonical kind set — update checker_policy.py")
+            pytest.fail(
+                f"{kind} not in any canonical kind set — update checker_policy.py"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +152,9 @@ class TestSeverityConfig:
     def test_level_for_kind(self) -> None:
         cfg = PRESET_DEFAULT
         assert cfg.level_for_kind(ChangeKind.FUNC_REMOVED) == SeverityLevel.ERROR
-        assert cfg.level_for_kind(ChangeKind.ENUM_MEMBER_RENAMED) == SeverityLevel.WARNING
+        assert (
+            cfg.level_for_kind(ChangeKind.ENUM_MEMBER_RENAMED) == SeverityLevel.WARNING
+        )
         assert cfg.level_for_kind(ChangeKind.VISIBILITY_LEAK) == SeverityLevel.WARNING
         assert cfg.level_for_kind(ChangeKind.FUNC_ADDED) == SeverityLevel.INFO
 
@@ -397,6 +418,7 @@ class TestInfoOnlyAlias:
 
     def test_alias_resolves(self) -> None:
         from abicheck.severity import SEVERITY_PRESETS
+
         assert SEVERITY_PRESETS["info_only"] is SEVERITY_PRESETS["info-only"]
 
 
@@ -496,7 +518,9 @@ class TestComputeGateDecision:
         decision = compute_gate_decision(changes, cfg)
         assert decision.blocking is True
         assert decision.blocking_categories == ("addition",)
-        assert "potential_breaking" not in decision.blocking_categories  # not error-level
+        assert (
+            "potential_breaking" not in decision.blocking_categories
+        )  # not error-level
 
 
 def test_classify_effective_change_verdict_shortcut_is_honored() -> None:

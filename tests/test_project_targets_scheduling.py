@@ -148,7 +148,9 @@ class TestActionYmlAgreesOnDependencySources:
     def test_check_target_forwards_the_input(self) -> None:
         """A per-cell value that check-target accepts but never forwards would
         be silently inert — the failure this whole phase is about."""
-        action = (REPO_ROOT / "actions" / "check-target" / "action.yml").read_text(encoding="utf-8")
+        action = (REPO_ROOT / "actions" / "check-target" / "action.yml").read_text(
+            encoding="utf-8"
+        )
         assert "dependency-source:" in action
         assert "dependency-source: ${{ inputs.dependency-source }}" in action
 

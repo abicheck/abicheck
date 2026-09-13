@@ -26,6 +26,7 @@ even when the real DWARF-visible ABI (e.g. a struct layout) had changed.
 Requires gcc + objcopy + strip (binutils) to build a real split-debug
 fixture — no synthetic bytes can stand in for real DWARF sections.
 """
+
 from __future__ import annotations
 
 import json
@@ -43,6 +44,7 @@ pytestmark = pytest.mark.integration
 
 _NEEDED_TOOLS = ("gcc", "objcopy", "strip", "readelf")
 
+
 #: Linux/ELF-specific by construction: build-id notes and
 #: `objcopy --only-keep-debug` split-DWARF are GNU/ELF conventions. On
 #: Windows, "gcc" is MinGW and emits PE, not ELF; on macOS it's usually a
@@ -58,7 +60,10 @@ def _missing_tools() -> list[str]:
 
 def _build_id(binary: Path) -> str:
     out = subprocess.run(
-        ["readelf", "-n", str(binary)], capture_output=True, text=True, check=True,
+        ["readelf", "-n", str(binary)],
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
     for line in out.splitlines():
         if "Build ID:" in line:
@@ -80,17 +85,20 @@ def _build_split_debug_lib(tmp_path: Path, name: str, source: str) -> tuple[Path
     so_path = src_dir / "libfoo.so"
     subprocess.run(
         ["gcc", "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_file)],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     debug_file = src_dir / "libfoo.so.debug"
     subprocess.run(
         ["objcopy", "--only-keep-debug", str(so_path), str(debug_file)],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     build_id = _build_id(so_path)
     subprocess.run(
         ["strip", "--strip-debug", "--strip-unneeded", str(so_path)],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     debug_root = tmp_path / f"debugroot_{name}"
     bid_dir = debug_root / ".build-id" / build_id[:2]
@@ -107,7 +115,8 @@ _POINT_V2 = (
 
 
 @pytest.mark.skipif(
-    bool(_missing_tools()), reason=f"Linux-only; requires {_NEEDED_TOOLS}: missing {_missing_tools()}"
+    bool(_missing_tools()),
+    reason=f"Linux-only; requires {_NEEDED_TOOLS}: missing {_missing_tools()}",
 )
 class TestDumpUsesResolvedDebugArtifact:
     def test_stripped_binary_without_debug_root_is_symbols_only(
@@ -116,7 +125,8 @@ class TestDumpUsesResolvedDebugArtifact:
         so_path, _debug_root = _build_split_debug_lib(tmp_path, "v1", _POINT_V1)
         out = tmp_path / "no_debug_root.json"
         result = CliRunner().invoke(
-            main, ["dump", str(so_path), "-o", str(out)],
+            main,
+            ["dump", str(so_path), "-o", str(out)],
         )
         assert result.exit_code == 0, result.output
         from abicheck.serialization import load_snapshot_document
@@ -143,7 +153,8 @@ class TestDumpUsesResolvedDebugArtifact:
 
 
 @pytest.mark.skipif(
-    bool(_missing_tools()), reason=f"Linux-only; requires {_NEEDED_TOOLS}: missing {_missing_tools()}"
+    bool(_missing_tools()),
+    reason=f"Linux-only; requires {_NEEDED_TOOLS}: missing {_missing_tools()}",
 )
 class TestCompareUsesResolvedDebugArtifacts:
     def test_compare_stripped_binaries_without_debug_root_is_false_green(

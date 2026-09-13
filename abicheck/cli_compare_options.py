@@ -428,7 +428,9 @@ def _set_input_flags_used(ctx: click.Context, flags: dict[str, str]) -> list[str
     """
     from .workflows.evidence_transport import all_probe_matrices
 
-    matrices_only = all_probe_matrices(p for _side, p in (ctx.params.get("build_info") or ()))
+    matrices_only = all_probe_matrices(
+        p for _side, p in (ctx.params.get("build_info") or ())
+    )
     return [
         flag
         for dest, flag in flags.items()

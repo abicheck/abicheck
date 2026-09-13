@@ -48,7 +48,10 @@ from abicheck.cli import main
 
 
 def _invoke_compare_inline_embed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, extra_args: list[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    extra_args: list[str],
 ) -> dict:
     """Drive `compare --sources old=<tree>` through the real CLI up to (but
     not through) its nested `dump_cmd` invocation, returning the kwargs that
@@ -89,8 +92,13 @@ def _invoke_compare_inline_embed(
         CliRunner().invoke(
             main,
             [
-                "compare", str(old_so), str(new_so),
-                "--sources", f"old={src}", "--depth", "build",
+                "compare",
+                str(old_so),
+                str(new_so),
+                "--sources",
+                f"old={src}",
+                "--depth",
+                "build",
                 *extra_args,
             ],
             catch_exceptions=False,
@@ -99,14 +107,16 @@ def _invoke_compare_inline_embed(
 
 
 def test_auto_discovered_config_is_not_forwarded(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No ``--config`` given, but a `.abicheck.yml` is auto-discoverable from
     cwd: the nested invocation's ``build_config`` must stay ``None`` -- an
     auto-discovered config is exactly the untrusted case ADR-032 D5 exists
     to distinguish from an operator-supplied one."""
     (tmp_path / ".abicheck.yml").write_text(
-        "severity:\n  addition: warning\n", encoding="utf-8",
+        "severity:\n  addition: warning\n",
+        encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
 
@@ -116,7 +126,8 @@ def test_auto_discovered_config_is_not_forwarded(
 
 
 def test_explicit_config_is_forwarded(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Positive control: an operator-supplied ``--config`` must still reach
     the nested invocation -- Block 7's own parity goal -- so the fix for the
@@ -125,7 +136,9 @@ def test_explicit_config_is_forwarded(
     explicit_cfg.write_text("severity:\n  addition: warning\n", encoding="utf-8")
 
     captured = _invoke_compare_inline_embed(
-        tmp_path, monkeypatch, extra_args=["--config", str(explicit_cfg)],
+        tmp_path,
+        monkeypatch,
+        extra_args=["--config", str(explicit_cfg)],
     )
 
     assert captured.get("build_config") == explicit_cfg

@@ -1,6 +1,7 @@
 # Copyright 2026 Nikolay Petrov
 # SPDX-License-Identifier: Apache-2.0
 """CLI helpers for data-source diagnostics."""
+
 from __future__ import annotations
 
 import copy
@@ -62,11 +63,11 @@ def print_data_sources(
 
         build_info_pack = (
             load_pack(build_source_path, "Build-info")
-            if build_source_path is not None else None
+            if build_source_path is not None
+            else None
         )
         sources_pack = (
-            load_pack(sources_path, "Sources")
-            if sources_path is not None else None
+            load_pack(sources_path, "Sources") if sources_path is not None else None
         )
 
         build_source_pack = _combine_diagnostic_packs(build_info_pack, sources_pack)
@@ -100,7 +101,9 @@ def _combine_diagnostic_packs(
         return build_info_pack
 
     combined = BuildSourcePack.empty(Path(""))
-    combined.build_evidence = build_info_pack.build_evidence or sources_pack.build_evidence
+    combined.build_evidence = (
+        build_info_pack.build_evidence or sources_pack.build_evidence
+    )
     combined.source_abi = sources_pack.source_abi or build_info_pack.source_abi
     combined.source_graph = sources_pack.source_graph or build_info_pack.source_graph
     combined.manifest = copy.deepcopy(build_info_pack.manifest)
@@ -128,7 +131,8 @@ def _combine_diagnostic_packs(
     coverage = [
         copy.deepcopy(c)
         for c in build_info_pack.manifest.coverage
-        if c.layer not in {
+        if c.layer
+        not in {
             DataLayer.L3_BUILD.value,
             DataLayer.L4_SOURCE_ABI.value,
             DataLayer.L5_SOURCE_GRAPH.value,
@@ -155,7 +159,9 @@ def _combine_diagnostic_packs(
         if row is None:
             row = LayerCoverage(
                 layer=layer,
-                status=CoverageStatus.PRESENT if present else CoverageStatus.NOT_COLLECTED,
+                status=CoverageStatus.PRESENT
+                if present
+                else CoverageStatus.NOT_COLLECTED,
             )
         coverage.append(row)
     combined.manifest.coverage = coverage

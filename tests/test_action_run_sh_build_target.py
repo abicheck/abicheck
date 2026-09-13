@@ -90,9 +90,13 @@ def _run_mode_branches(env_extra: dict[str, str]) -> subprocess.CompletedProcess
     input's own nonzero exit and `::error::` line can be asserted (`_run_cmd`
     treats a nonzero exit as a harness failure)."""
     require_bash()
-    script = _mode_branches_region() + '\nprintf \'%s\\x1f\' ${CMD[@]+"${CMD[@]}"}\n'
+    script = _mode_branches_region() + "\nprintf '%s\\x1f' ${CMD[@]+\"${CMD[@]}\"}\n"
     with tempfile.NamedTemporaryFile(
-        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
+        "w",
+        suffix=".sh",
+        delete=False,
+        encoding="utf-8",
+        newline="\n",
     ) as f:
         f.write(script)
         script_path = f.name
@@ -101,7 +105,10 @@ def _run_mode_branches(env_extra: dict[str, str]) -> subprocess.CompletedProcess
     try:
         return subprocess.run(
             [bash_executable(), script_path],
-            capture_output=True, text=True, encoding="utf-8", env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
         )
     finally:
         os.unlink(script_path)

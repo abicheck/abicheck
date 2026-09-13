@@ -101,9 +101,14 @@ int Widget::value() const { return hidden_; }
 """
 
 
-def test_clang_ast_does_not_assign_returned_callback_abi_to_factory(tmp_path: Path) -> None:
+def test_clang_ast_does_not_assign_returned_callback_abi_to_factory(
+    tmp_path: Path,
+) -> None:
     """Use Clang's real normalized AST spelling, not a hand-written fixture."""
-    if shutil.which("clang") is None or platform.machine().lower() not in {"x86_64", "amd64"}:
+    if shutil.which("clang") is None or platform.machine().lower() not in {
+        "x86_64",
+        "amd64",
+    }:
         pytest.skip("requires an x86-64 clang frontend")
     header = tmp_path / "api.h"
     header.write_text(
@@ -288,7 +293,9 @@ def test_hybrid_headers_recover_case64_ms_abi_from_gcc_debug_build(
     if platform.machine().lower() not in {"x86_64", "amd64"}:
         pytest.skip("ms_abi case is x86-64-specific")
     if not (_have("gcc") and _have("clang") and _have("castxml")):
-        pytest.skip("gcc, clang, and castxml are required for the hybrid case64 regression")
+        pytest.skip(
+            "gcc, clang, and castxml are required for the hybrid case64 regression"
+        )
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -303,7 +310,7 @@ def test_hybrid_headers_recover_case64_ms_abi_from_gcc_debug_build(
     old_src.write_text('#include "api.h"\nvoid api(int value) { (void)value; }\n')
     new_src.write_text(
         '#include "api.h"\n'
-        '__attribute__((ms_abi)) void api(int value) { (void)value; }\n'
+        "__attribute__((ms_abi)) void api(int value) { (void)value; }\n"
     )
     old_so = old_dir / "libapi.so"
     new_so = new_dir / "libapi.so"
@@ -313,8 +320,14 @@ def test_hybrid_headers_recover_case64_ms_abi_from_gcc_debug_build(
     ):
         subprocess.run(
             [
-                "gcc", "-g", "-shared", "-fPIC", "-o", str(output),
-                str(source), f"-I{include_dir}",
+                "gcc",
+                "-g",
+                "-shared",
+                "-fPIC",
+                "-o",
+                str(output),
+                str(source),
+                f"-I{include_dir}",
             ],
             check=True,
             capture_output=True,
@@ -1004,6 +1017,7 @@ def test_clang_backend_resolves_nested_specialization_base(tmp_path: Path) -> No
         pytest.skip(
             "clang and g++ are required for the clang L2 backend integration test"
         )
+
     def _header(extra: str) -> str:
         return (
             "template <class T>\nstruct Outer {\n"
@@ -1017,9 +1031,7 @@ def test_clang_backend_resolves_nested_specialization_base(tmp_path: Path) -> No
     old_header = old_dir / "api.h"
     old_header.write_text(_header(""))
     old_src = old_dir / "old.cpp"
-    old_src.write_text(
-        '#include "api.h"\ntemplate struct Outer<int>::A<double>;\n'
-    )
+    old_src.write_text('#include "api.h"\ntemplate struct Outer<int>::A<double>;\n')
     v1_so = tmp_path / "libv1.so"
     subprocess.run(
         ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
@@ -1032,9 +1044,7 @@ def test_clang_backend_resolves_nested_specialization_base(tmp_path: Path) -> No
     new_header = new_dir / "api.h"
     new_header.write_text(_header("    void f() override;\n"))
     new_src = new_dir / "new.cpp"
-    new_src.write_text(
-        '#include "api.h"\ntemplate struct Outer<int>::A<double>;\n'
-    )
+    new_src.write_text('#include "api.h"\ntemplate struct Outer<int>::A<double>;\n')
     v2_so = tmp_path / "libv2.so"
     subprocess.run(
         ["g++", "-shared", "-fPIC", "-o", str(v2_so), str(new_src), f"-I{new_dir}"],
@@ -1304,8 +1314,13 @@ def test_cli_dump_explicit_lang_cpp_forces_cpp_mode_on_ambiguous_header(
         suffix = lang or "default"
         out = tmp_path / f"out-{suffix}.json"
         cfg = tmp_path / f"config-{suffix}.yml"
-        cfg.write_text("compile:\n  frontend: clang\n" + (f"  lang: {lang}\n" if lang else ""))
-        result = runner.invoke(main, ["dump", str(so), "-H", str(header), "--config", str(cfg), "-o", str(out)])
+        cfg.write_text(
+            "compile:\n  frontend: clang\n" + (f"  lang: {lang}\n" if lang else "")
+        )
+        result = runner.invoke(
+            main,
+            ["dump", str(so), "-H", str(header), "--config", str(cfg), "-o", str(out)],
+        )
         assert result.exit_code == 0, result.output
         from abicheck.serialization import load_snapshot_document
 
@@ -1364,8 +1379,13 @@ def test_dump_request_and_compare_request_lang_explicit_forces_cpp_mode(
         so, [header], [], "1.0", "c++", header_backend="clang"
     )
     explicit_snap = service.resolve_input(
-        so, [header], [], "1.0", "c++",
-        lang_explicit=True, header_backend="clang",
+        so,
+        [header],
+        [],
+        "1.0",
+        "c++",
+        lang_explicit=True,
+        header_backend="clang",
     )
     auto_widget = next(t for t in auto_snap.types if t.name == "Widget")
     explicit_widget = next(t for t in explicit_snap.types if t.name == "Widget")
@@ -1375,10 +1395,13 @@ def test_dump_request_and_compare_request_lang_explicit_forces_cpp_mode(
     # DumpRequest (the typed Python API, G33 Phase 5).
     from abicheck.service_dump_pipeline import run_dump_request
 
-    dump_req_auto = DumpRequest(input=InputSpec(path=so, headers=(header,)), frontend="clang")
+    dump_req_auto = DumpRequest(
+        input=InputSpec(path=so, headers=(header,)), frontend="clang"
+    )
     dump_req_explicit = DumpRequest(
         input=InputSpec(path=so, headers=(header,)),
-        lang_explicit=True, frontend="clang",
+        lang_explicit=True,
+        frontend="clang",
     )
     dr_auto_widget = next(
         t for t in run_dump_request(dump_req_auto).types if t.name == "Widget"

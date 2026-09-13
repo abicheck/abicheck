@@ -831,7 +831,9 @@ def test_gate_flags_missing_command(
 
     findings = gate.Findings()
     gate.check_cli_contract(findings)
-    assert any("`compare` was not found" in m for _c, m in findings.errors), findings.errors
+    assert any("`compare` was not found" in m for _c, m in findings.errors), (
+        findings.errors
+    )
 
 
 def test_intentional_subset_decorator_is_not_flagged(

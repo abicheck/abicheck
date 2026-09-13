@@ -52,7 +52,9 @@ class TestSniffRecognizesALeadingSkippableFrame:
         real_frame = cctx.compress(payload)
         return _skippable(b"some-metadata") + real_frame
 
-    def _leading_and_trailing_skippable_zstd_json_with_eocd(self, payload: bytes) -> bytes:
+    def _leading_and_trailing_skippable_zstd_json_with_eocd(
+        self, payload: bytes
+    ) -> bytes:
         """A real, fully valid, independently-decodable zstd stream:
         [leading skippable frame][real data frame][trailing skippable
         frame whose user data is a minimal empty-ZIP EOCD, landing
@@ -74,14 +76,18 @@ class TestSniffRecognizesALeadingSkippableFrame:
         from abicheck.storage.bundle_archive import open_regular_file_for_format_sniff
 
         path = tmp_path / "envelope.json.zst"
-        path.write_bytes(self._leading_skippable_zstd_json(b'{"library": "x", "version": "1"}'))
+        path.write_bytes(
+            self._leading_skippable_zstd_json(b'{"library": "x", "version": "1"}')
+        )
 
         fp, fmt = open_regular_file_for_format_sniff(path)
         if fp is not None:
             fp.close()
         assert fmt == "json"
 
-    def test_a_crafted_trailing_eocd_still_does_not_fool_the_sniff(self, tmp_path: Path) -> None:
+    def test_a_crafted_trailing_eocd_still_does_not_fool_the_sniff(
+        self, tmp_path: Path
+    ) -> None:
         """The real regression: without the fix, this real, decodable
         zstd stream's leading skippable frame prevents direct magic
         recognition, so the sniff falls through to the ZIP-tail
@@ -93,7 +99,9 @@ class TestSniffRecognizesALeadingSkippableFrame:
 
         payload = b'{"library": "x", "version": "1"}'
         path = tmp_path / "envelope-with-crafted-eocd.json.zst"
-        path.write_bytes(self._leading_and_trailing_skippable_zstd_json_with_eocd(payload))
+        path.write_bytes(
+            self._leading_and_trailing_skippable_zstd_json_with_eocd(payload)
+        )
 
         # Premise: it's a real, fully decodable zstd stream.
         assert read_snapshot_bytes(path) == payload
@@ -107,7 +115,9 @@ class TestSniffRecognizesALeadingSkippableFrame:
         from abicheck.storage.bundle_archive import sniff_bundle_archive_format
 
         path = tmp_path / "envelope.json.zst"
-        path.write_bytes(self._leading_skippable_zstd_json(b'{"library": "x", "version": "1"}'))
+        path.write_bytes(
+            self._leading_skippable_zstd_json(b'{"library": "x", "version": "1"}')
+        )
         assert sniff_bundle_archive_format(path) == "json"
 
     def test_sniff_and_load_bundle_facts_treat_it_as_json(self, tmp_path: Path) -> None:

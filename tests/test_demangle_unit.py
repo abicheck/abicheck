@@ -1,4 +1,5 @@
 """Unit tests for abicheck.demangle — targeting ≥80% coverage."""
+
 from __future__ import annotations
 
 import subprocess
@@ -81,7 +82,10 @@ class TestDemangle:
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=1, stdout="", stderr="error",
+                    args=["c++filt"],
+                    returncode=1,
+                    stdout="",
+                    stderr="error",
                 )
                 result = _mod.demangle("_ZN3foo3barEv")
         assert result is None
@@ -131,7 +135,10 @@ class TestDemangle:
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=0, stdout="", stderr="",
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="",
+                    stderr="",
                 )
                 result = _mod.demangle("_ZN3foo3barEv")
         assert result is None
@@ -168,7 +175,9 @@ class TestDemangle:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = RuntimeError("no")
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("c++filt", 5)):
+            with patch(
+                "subprocess.run", side_effect=subprocess.TimeoutExpired("c++filt", 5)
+            ):
                 result = _mod.demangle("_ZN3foo3barEv")
         assert result is None
 
@@ -357,8 +366,10 @@ class TestDemangle:
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=0,
-                    stdout="foo::bar()\n", stderr="",
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="foo::bar()\n",
+                    stderr="",
                 )
                 result = _mod.demangle("__ZN3foo3barEv", accept_macho_prefix=True)
         assert result == "foo::bar()"
@@ -381,8 +392,10 @@ class TestDemangle:
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=0,
-                    stdout="_ZNOTVALID\n", stderr="",
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="_ZNOTVALID\n",
+                    stderr="",
                 )
                 result = _mod.demangle("__ZNOTVALID", accept_macho_prefix=True)
         assert result is None
@@ -398,8 +411,10 @@ class TestDemangle:
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=0,
-                    stdout="_ZNOTVALID\n", stderr="",
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="_ZNOTVALID\n",
+                    stderr="",
                 )
                 result = _mod.demangle("__ZNOTVALID", accept_macho_prefix=True)
         assert result is None
@@ -471,8 +486,10 @@ class TestDemangleBatch:
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=0,
-                    stdout="baz::qux()\n", stderr="",
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="baz::qux()\n",
+                    stderr="",
                 )
                 result = _mod.demangle_batch(["_ZN3foo3barEv", "_ZN3baz4quxEv"])
         assert "_ZN3foo3barEv" in result
@@ -483,8 +500,10 @@ class TestDemangleBatch:
         with patch.dict("sys.modules", {"cxxfilt": None}):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=0,
-                    stdout="foo::bar()\n", stderr="",
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="foo::bar()\n",
+                    stderr="",
                 )
                 result = _mod.demangle_batch(["_ZN3foo3barEv"])
         assert result == {"_ZN3foo3barEv": "foo::bar()"}
@@ -510,7 +529,9 @@ class TestDemangleBatch:
 
     def test_cppfilt_timeout_batch(self):
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("c++filt", 30)):
+            with patch(
+                "subprocess.run", side_effect=subprocess.TimeoutExpired("c++filt", 30)
+            ):
                 result = _mod.demangle_batch(["_ZN3foo3barEv"])
         assert result == {}
 
@@ -518,7 +539,10 @@ class TestDemangleBatch:
         with patch.dict("sys.modules", {"cxxfilt": None}):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=1, stdout="", stderr="err",
+                    args=["c++filt"],
+                    returncode=1,
+                    stdout="",
+                    stderr="err",
                 )
                 result = _mod.demangle_batch(["_ZN3foo3barEv"])
         assert result == {}
@@ -528,8 +552,10 @@ class TestDemangleBatch:
         with patch.dict("sys.modules", {"cxxfilt": None}):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=0,
-                    stdout="_ZN3foo3barEv\n", stderr="",
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="_ZN3foo3barEv\n",
+                    stderr="",
                 )
                 result = _mod.demangle_batch(["_ZN3foo3barEv"])
         assert result == {}
@@ -562,8 +588,10 @@ class TestDemangleBatch:
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=0,
-                    stdout="foo::bar()\n", stderr="",
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="foo::bar()\n",
+                    stderr="",
                 )
                 result = _mod.demangle_batch(["_ZN3foo3barEv"])
         assert result == {"_ZN3foo3barEv": "foo::bar()"}
@@ -592,10 +620,14 @@ class TestDemangleBatch:
         with patch.dict("sys.modules", {"cxxfilt": None}):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=0,
-                    stdout="foo::bar()\n", stderr="",
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="foo::bar()\n",
+                    stderr="",
                 )
-                result = _mod.demangle_batch(["__ZN3foo3barEv"], accept_macho_prefix=True)
+                result = _mod.demangle_batch(
+                    ["__ZN3foo3barEv"], accept_macho_prefix=True
+                )
         assert result == {"__ZN3foo3barEv": "foo::bar()"}
         sent_input = mock_run.call_args[1]["input"]
         assert sent_input == "_ZN3foo3barEv"
@@ -610,8 +642,10 @@ class TestDemangleBatch:
         with patch.dict("sys.modules", {"cxxfilt": None}):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=0,
-                    stdout="_ZNOTVALID\n", stderr="",
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="_ZNOTVALID\n",
+                    stderr="",
                 )
                 result = _mod.demangle_batch(["__ZNOTVALID"], accept_macho_prefix=True)
         assert result == {}
@@ -624,8 +658,10 @@ class TestDemangleBatch:
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=0,
-                    stdout="_ZNOTVALID\n", stderr="",
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="_ZNOTVALID\n",
+                    stderr="",
                 )
                 result = _mod.demangle_batch(["__ZNOTVALID"], accept_macho_prefix=True)
         assert result == {}
@@ -694,8 +730,10 @@ class TestFindingA_Phase2BroadExcept:
         with patch("builtins.__import__", side_effect=_bad_import):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=0,
-                    stdout="foo::bar()\n", stderr="",
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="foo::bar()\n",
+                    stderr="",
                 )
                 # Must not raise; must reach phase 3 and return the c++filt result.
                 result = _mod.demangle_batch(["_ZN3foo3barEv"])
@@ -717,8 +755,10 @@ class TestFindingA_Phase2BroadExcept:
         with patch("builtins.__import__", side_effect=_bad_import):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=0,
-                    stdout="foo::bar()\n", stderr="",
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="foo::bar()\n",
+                    stderr="",
                 )
                 _mod.demangle_batch([sym])
 
@@ -747,7 +787,9 @@ class TestFindingB_Phase3NoPoisonOnFailure:
         """Timed-out c++filt: FAIL cache stays empty."""
         sym = self._sym()
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("c++filt", 30)):
+            with patch(
+                "subprocess.run", side_effect=subprocess.TimeoutExpired("c++filt", 30)
+            ):
                 _mod.demangle_batch([sym])
         assert sym not in _mod._BATCH_CACHE_FAIL
 
@@ -765,7 +807,10 @@ class TestFindingB_Phase3NoPoisonOnFailure:
         with patch.dict("sys.modules", {"cxxfilt": None}):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=1, stdout="", stderr="error",
+                    args=["c++filt"],
+                    returncode=1,
+                    stdout="",
+                    stderr="error",
                 )
                 _mod.demangle_batch([sym])
         assert sym not in _mod._BATCH_CACHE_FAIL
@@ -778,7 +823,10 @@ class TestFindingB_Phase3NoPoisonOnFailure:
             # First call: c++filt returns non-zero.
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=1, stdout="", stderr="error",
+                    args=["c++filt"],
+                    returncode=1,
+                    stdout="",
+                    stderr="error",
                 )
                 first = _mod.demangle_batch([sym])
             assert first == {}
@@ -787,8 +835,10 @@ class TestFindingB_Phase3NoPoisonOnFailure:
             # Second call: c++filt now works.
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=0,
-                    stdout="foo::bar()\n", stderr="",
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="foo::bar()\n",
+                    stderr="",
                 )
                 second = _mod.demangle_batch([sym])
         assert second == {sym: "foo::bar()"}
@@ -801,8 +851,10 @@ class TestFindingB_Phase3NoPoisonOnFailure:
             with patch("subprocess.run") as mock_run:
                 # returncode=0 but output equals the mangled name → not demangled.
                 mock_run.return_value = subprocess.CompletedProcess(
-                    args=["c++filt"], returncode=0,
-                    stdout=f"{sym}\n", stderr="",
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout=f"{sym}\n",
+                    stderr="",
                 )
                 _mod.demangle_batch([sym])
         # c++filt ran successfully but couldn't demangle → FAIL cache entry is correct.
@@ -823,7 +875,9 @@ class TestDemangleText:
 
     def test_leaves_unresolved_tokens_unchanged(self, monkeypatch):
         monkeypatch.setattr(_mod, "demangle_batch", lambda syms, **kw: {})
-        assert _mod.demangle_text("_ZUnresolved stays as-is") == "_ZUnresolved stays as-is"
+        assert (
+            _mod.demangle_text("_ZUnresolved stays as-is") == "_ZUnresolved stays as-is"
+        )
 
     def test_noop_and_no_batch_call_without_tokens(self, monkeypatch):
         calls = {"n": 0}
@@ -833,7 +887,10 @@ class TestDemangleText:
             return {}
 
         monkeypatch.setattr(_mod, "demangle_batch", _fake)
-        assert _mod.demangle_text("just plain prose, no symbols") == "just plain prose, no symbols"
+        assert (
+            _mod.demangle_text("just plain prose, no symbols")
+            == "just plain prose, no symbols"
+        )
         assert calls["n"] == 0
 
     def test_real_demangler_when_available(self):
@@ -867,6 +924,7 @@ def test_demangle_reads_warmed_batch_cache(monkeypatch):
     # Any subprocess use here would be a regression — fail loudly if called.
     def _boom(*a, **k):
         raise AssertionError("demangle() spawned a subprocess despite a warm cache")
+
     monkeypatch.setattr(dm.subprocess, "run", _boom)
 
     try:
@@ -886,6 +944,7 @@ def test_demangle_batch_cache_fail_short_circuits(monkeypatch):
 
     def _boom(*a, **k):
         raise AssertionError("demangle() spawned a subprocess for a known-fail name")
+
     monkeypatch.setattr(dm.subprocess, "run", _boom)
 
     try:

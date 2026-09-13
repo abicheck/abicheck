@@ -93,7 +93,9 @@ def capture_bundle_facts(
                 filesystem_aliases[name] = stored_aliases
     return BundleFacts(
         schema_version=(
-            BUNDLE_FACTS_SCHEMA_VERSION if degraded_members else BUNDLE_FACTS_BASE_SCHEMA_VERSION
+            BUNDLE_FACTS_SCHEMA_VERSION
+            if degraded_members
+            else BUNDLE_FACTS_BASE_SCHEMA_VERSION
         ),
         variant_fingerprint=variant_fingerprint,
         per_library_snapshots=dict(per_library_snapshots),

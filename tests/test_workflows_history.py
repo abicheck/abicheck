@@ -354,9 +354,7 @@ class TestFindingEvolutionWiring:
         assert counts["resolved"] == 0
         assert summary.resolved == ()
 
-    def test_later_pair_classifies_against_the_prior_pair(
-        self, tmp_path: Path
-    ) -> None:
+    def test_later_pair_classifies_against_the_prior_pair(self, tmp_path: Path) -> None:
         """A finding introduced in one pairwise diff that stops appearing in
         the next is `resolved` and named in that pair's own `resolved` list;
         a finding new to the later diff is `introduced` -- classified
@@ -411,9 +409,7 @@ class TestFindingEvolutionWiring:
         assert pairwise_doc["evolution_counts"]["not_evaluated"] == 1
         assert pairwise_doc["resolved"] == []
 
-    def test_to_dict_projects_a_non_empty_resolved_list(
-        self, tmp_path: Path
-    ) -> None:
+    def test_to_dict_projects_a_non_empty_resolved_list(self, tmp_path: Path) -> None:
         """A pair whose own ``resolved`` list is non-empty must serialize
         each entry through ``_resolved_finding_dict`` -- finding_id/kind/
         symbol/description/old_value/new_value/source_location -- not just
@@ -437,6 +433,11 @@ class TestFindingEvolutionWiring:
         assert entry["kind"] == second.resolved[0].kind.value
         assert entry["finding_id"]
         assert set(entry) == {
-            "finding_id", "kind", "symbol", "description",
-            "old_value", "new_value", "source_location",
+            "finding_id",
+            "kind",
+            "symbol",
+            "description",
+            "old_value",
+            "new_value",
+            "source_location",
         }

@@ -50,8 +50,10 @@ def stack_to_html(result: StackCheckResult) -> str:
     load_val = result.loadability.value
     abi_val = result.abi_risk.value
     # Use the worse of loadability/abi_risk for overall styling
-    worst = "fail" if "fail" in (load_val, abi_val) else (
-        "warn" if "warn" in (load_val, abi_val) else "pass"
+    worst = (
+        "fail"
+        if "fail" in (load_val, abi_val)
+        else ("warn" if "warn" in (load_val, abi_val) else "pass")
     )
     fg, bg = _STACK_VERDICT_STYLE.get(worst, ("#212121", "#f5f5f5"))
     icon = _STACK_VERDICT_ICON.get(worst, "\u26aa")
@@ -66,7 +68,11 @@ def stack_to_html(result: StackCheckResult) -> str:
         f"<tr><th>Risk score</th><td><code>{h(str(result.risk_score))}</code></td></tr>",
     ]
 
-    if result.baseline_env and result.candidate_env and result.baseline_env != result.candidate_env:
+    if (
+        result.baseline_env
+        and result.candidate_env
+        and result.baseline_env != result.candidate_env
+    ):
         summary_rows += [
             f"<tr><th>Baseline env</th><td><code>{h(result.baseline_env)}</code></td></tr>",
             f"<tr><th>Candidate env</th><td><code>{h(result.candidate_env)}</code></td></tr>",
@@ -153,11 +159,19 @@ def stack_to_html(result: StackCheckResult) -> str:
                 abi_verdict = sc.abi_diff.verdict.value if sc.abi_diff else "unknown"
                 abi_breaking = len(sc.abi_diff.breaking) if sc.abi_diff else 0
                 abi_total = len(sc.abi_diff.changes) if sc.abi_diff else 0
-                icon_sc = "\u274c" if abi_verdict == "BREAKING" else (
-                    "\u26a0\ufe0f" if abi_verdict in ("API_BREAK", "COMPATIBLE_WITH_RISK") else "\u2705"
+                icon_sc = (
+                    "\u274c"
+                    if abi_verdict == "BREAKING"
+                    else (
+                        "\u26a0\ufe0f"
+                        if abi_verdict in ("API_BREAK", "COMPATIBLE_WITH_RISK")
+                        else "\u2705"
+                    )
                 )
                 detail = "Content changed"
-                abi_info = f"{h(abi_verdict)} ({abi_breaking} breaking / {abi_total} total)"
+                abi_info = (
+                    f"{h(abi_verdict)} ({abi_breaking} breaking / {abi_total} total)"
+                )
             sc_rows.append(
                 f"<tr><td>{icon_sc}</td>"
                 f"<td><code>{h(sc.library)}</code></td>"
@@ -266,7 +280,11 @@ def _render_node_html(
 
     h_esc = html.escape
     connector = "\u2514\u2500\u2500 " if is_last else "\u251c\u2500\u2500 "
-    reason = f" ({h_esc(node.resolution_reason)})" if node.depth > 0 and node.resolution_reason else ""
+    reason = (
+        f" ({h_esc(node.resolution_reason)})"
+        if node.depth > 0 and node.resolution_reason
+        else ""
+    )
     line = f"{h_esc(prefix)}{connector}<code>{h_esc(node.soname)}</code>{reason}"
 
     if key in on_path:
@@ -283,7 +301,16 @@ def _render_node_html(
     children = adj.get(key, [])
     child_prefix = prefix + ("    " if is_last else "\u2502   ")
     for i, child in enumerate(children):
-        _render_node_html(lines, nodes, adj, child, child_prefix, i == len(children) - 1, shown, on_path)
+        _render_node_html(
+            lines,
+            nodes,
+            adj,
+            child,
+            child_prefix,
+            i == len(children) - 1,
+            shown,
+            on_path,
+        )
 
     on_path.discard(key)
 

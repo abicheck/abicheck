@@ -4,6 +4,7 @@
 # you may not use this file except in compliance with the License.
 
 """Unit tests for matrix-aware build-configuration diff detectors."""
+
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
@@ -19,38 +20,51 @@ from abicheck.probe_harness import MatrixSnapshot, ProbeResult
 
 def _snap_fn(name: str) -> AbiSnapshot:
     return AbiSnapshot(
-        library="lib", version="0",
-        functions=[Function(
-            name=name, mangled=f"_Z{name}", return_type="void",
-            visibility=Visibility.PUBLIC,
-        )],
+        library="lib",
+        version="0",
+        functions=[
+            Function(
+                name=name,
+                mangled=f"_Z{name}",
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+            )
+        ],
     )
 
 
-def _matrix(cfgs: dict[str, list[str]],
-            cxx_stds: dict[str, int | None] | None = None,
-            defaults: dict[str, str] | None = None,
-            library: str = "lib",
-            version: str = "1") -> MatrixSnapshot:
+def _matrix(
+    cfgs: dict[str, list[str]],
+    cxx_stds: dict[str, int | None] | None = None,
+    defaults: dict[str, str] | None = None,
+    library: str = "lib",
+    version: str = "1",
+) -> MatrixSnapshot:
     results: list[ProbeResult] = []
     for cfg_id, fn_names in cfgs.items():
         if not fn_names:
             # Empty configuration — still register a probe result so the
             # configuration is visible to the matrix detectors.
-            results.append(ProbeResult(
-                configuration_id=cfg_id,
-                probe_id="p_empty",
-                snapshot=AbiSnapshot(library=library, version=version),
-            ))
+            results.append(
+                ProbeResult(
+                    configuration_id=cfg_id,
+                    probe_id="p_empty",
+                    snapshot=AbiSnapshot(library=library, version=version),
+                )
+            )
             continue
         for i, fn in enumerate(fn_names):
-            results.append(ProbeResult(
-                configuration_id=cfg_id,
-                probe_id=f"p{i}",
-                snapshot=_snap_fn(fn),
-            ))
+            results.append(
+                ProbeResult(
+                    configuration_id=cfg_id,
+                    probe_id=f"p{i}",
+                    snapshot=_snap_fn(fn),
+                )
+            )
     return MatrixSnapshot(
-        library=library, version=version, spec_name="test",
+        library=library,
+        version=version,
+        spec_name="test",
         cxx_stds=cxx_stds or {},
         defaults=defaults or {},
         results=results,
@@ -64,10 +78,12 @@ def _matrix(cfgs: dict[str, list[str]],
 
 class TestApiDependsOnConsumerEnv:
     def test_diverging_decl_fires(self) -> None:
-        m = _matrix({
-            "tbb": ["lib::sort"],
-            "omp": ["lib::sort", "lib::omp_only"],
-        })
+        m = _matrix(
+            {
+                "tbb": ["lib::sort"],
+                "omp": ["lib::sort", "lib::omp_only"],
+            }
+        )
         changes = detect_api_depends_on_consumer_env(m)
         names = {c.symbol for c in changes}
         assert "lib::omp_only" in names
@@ -82,11 +98,13 @@ class TestApiDependsOnConsumerEnv:
         assert detect_api_depends_on_consumer_env(m) == []
 
     def test_finding_describes_present_and_absent(self) -> None:
-        m = _matrix({
-            "a": ["lib::f"],
-            "b": [],
-            "c": ["lib::f"],
-        })
+        m = _matrix(
+            {
+                "a": ["lib::f"],
+                "b": [],
+                "c": ["lib::f"],
+            }
+        )
         changes = detect_api_depends_on_consumer_env(m)
         assert len(changes) == 1
         c = changes[0]
@@ -189,9 +207,9 @@ class TestDiffMatrix:
         assert ChangeKind.BEHAVIOURAL_DEFAULT_CHANGED in kinds
         # dedup: only one env-depends finding for lib::omp_only even
         # though both old and new have it.
-        env_findings = [c for c in changes
-                        if c.kind == ChangeKind.API_DEPENDS_ON_CONSUMER_ENV]
+        env_findings = [
+            c for c in changes if c.kind == ChangeKind.API_DEPENDS_ON_CONSUMER_ENV
+        ]
         env_symbols = {c.symbol for c in env_findings}
         assert "lib::omp_only" in env_symbols
-        assert len([c for c in env_findings
-                    if c.symbol == "lib::omp_only"]) == 1
+        assert len([c for c in env_findings if c.symbol == "lib::omp_only"]) == 1

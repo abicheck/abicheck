@@ -123,7 +123,9 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING, impact="x",
+                "test_kind",
+                Verdict.BREAKING,
+                impact="x",
                 policy_overrides={"not_a_real_policy": Verdict.COMPATIBLE},
             ),
         ]
@@ -142,7 +144,9 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING, impact="x",
+                "test_kind",
+                Verdict.BREAKING,
+                impact="x",
                 policy_overrides={"strict_abi": Verdict.COMPATIBLE},
             ),
         ]
@@ -160,7 +164,9 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING, impact="x",
+                "test_kind",
+                Verdict.BREAKING,
+                impact="x",
                 policy_overrides={"plugin_abi": Verdict.BREAKING},
             ),
         ]
@@ -198,7 +204,9 @@ class TestChangeKindRegistry:
         """
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING, impact="x",
+                "test_kind",
+                Verdict.BREAKING,
+                impact="x",
                 policy_overrides={policy: Verdict.API_BREAK},
             ),
         ]
@@ -236,7 +244,9 @@ class TestChangeKindRegistry:
         """A genuinely different, known-policy override passes construction."""
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING, impact="x",
+                "test_kind",
+                Verdict.BREAKING,
+                impact="x",
                 policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
             ),
             ChangeKindMeta(
@@ -283,7 +293,9 @@ class TestChangeKindRegistry:
         import pytest
 
         entry = ChangeKindMeta(
-            "test_kind", Verdict.BREAKING, impact="x",
+            "test_kind",
+            Verdict.BREAKING,
+            impact="x",
             policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
         )
         with pytest.raises(TypeError):
@@ -303,7 +315,9 @@ class TestChangeKindRegistry:
         import pytest
 
         entry = ChangeKindMeta(
-            "test_kind", Verdict.BREAKING, impact="x",
+            "test_kind",
+            Verdict.BREAKING,
+            impact="x",
             policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
         )
         with pytest.raises(TypeError):
@@ -329,7 +343,9 @@ class TestChangeKindRegistry:
         import pytest
 
         entry = ChangeKindMeta(
-            "test_kind", Verdict.BREAKING, impact="x",
+            "test_kind",
+            Verdict.BREAKING,
+            impact="x",
             policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
         )
         with pytest.raises(TypeError):
@@ -352,7 +368,9 @@ class TestChangeKindRegistry:
         import pytest
 
         entry = ChangeKindMeta(
-            "test_kind", Verdict.BREAKING, impact="x",
+            "test_kind",
+            Verdict.BREAKING,
+            impact="x",
             policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
         )
         with pytest.raises(TypeError):
@@ -402,7 +420,9 @@ class TestChangeKindRegistry:
         import pytest
 
         entry = ChangeKindMeta(
-            "test_kind", Verdict.BREAKING, impact="x",
+            "test_kind",
+            Verdict.BREAKING,
+            impact="x",
             policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
         )
 
@@ -467,8 +487,12 @@ class TestChangeKindRegistry:
         # field-declaration-order list shape a slotted dataclass restores
         # from.
         legacy_state = [
-            "test_kind", Verdict.BREAKING, "x", False,
-            {"plugin_abi": Verdict.COMPATIBLE}, None,
+            "test_kind",
+            Verdict.BREAKING,
+            "x",
+            False,
+            {"plugin_abi": Verdict.COMPATIBLE},
+            None,
         ]
         assert type(legacy_state[4]) is dict
 
@@ -528,14 +552,22 @@ class TestChangeKindRegistry:
         import pytest
 
         entry = ChangeKindMeta(
-            "test_kind", Verdict.BREAKING, impact="x",
+            "test_kind",
+            Verdict.BREAKING,
+            impact="x",
             policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
         )
         with pytest.raises(TypeError, match="already-initialized"):
-            entry.__setstate__([
-                "test_kind", Verdict.BREAKING, "x", False,
-                {"unknown": Verdict.API_BREAK}, None,
-            ])
+            entry.__setstate__(
+                [
+                    "test_kind",
+                    Verdict.BREAKING,
+                    "x",
+                    False,
+                    {"unknown": Verdict.API_BREAK},
+                    None,
+                ]
+            )
         # The live entry is completely unaffected by the rejected call.
         assert dict(entry.policy_overrides) == {"plugin_abi": Verdict.COMPATIBLE}
 
@@ -557,7 +589,9 @@ class TestChangeKindRegistry:
         import pytest
 
         entry = ChangeKindMeta(
-            "test_kind", Verdict.BREAKING, impact="x",
+            "test_kind",
+            Verdict.BREAKING,
+            impact="x",
             policy_overrides={"plugin_abi": Verdict.COMPATIBLE},
         )
         with pytest.raises(AttributeError):
@@ -598,7 +632,9 @@ class TestChangeKindRegistry:
         assert rehydrated.impact == ""
 
         entry2 = ChangeKindMeta(
-            "y", Verdict.BREAKING, impact="i",
+            "y",
+            Verdict.BREAKING,
+            impact="i",
             policy_overrides={"unknown": Verdict.API_BREAK},
         )
         rehydrated2 = pickle.loads(pickle.dumps(entry2))
@@ -628,7 +664,9 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING, impact="x",
+                "test_kind",
+                Verdict.BREAKING,
+                impact="x",
                 description_template="Changed: {bogus}",
             ),
         ]
@@ -646,7 +684,9 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING, impact="x",
+                "test_kind",
+                Verdict.BREAKING,
+                impact="x",
                 description_template="Changed: {}",
             ),
         ]
@@ -657,7 +697,9 @@ class TestChangeKindRegistry:
         """A template using only TEMPLATE_VOCAB fields passes construction."""
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING, impact="x",
+                "test_kind",
+                Verdict.BREAKING,
+                impact="x",
                 description_template="{symbol} changed from {old} to {new}",
             ),
         ]
@@ -680,7 +722,9 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING, impact="x",
+                "test_kind",
+                Verdict.BREAKING,
+                impact="x",
                 description_template="Changed: {symbol[0]}",
             ),
         ]
@@ -693,7 +737,9 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING, impact="x",
+                "test_kind",
+                Verdict.BREAKING,
+                impact="x",
                 description_template="Changed: {symbol.__class__}",
             ),
         ]
@@ -717,7 +763,9 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING, impact="x",
+                "test_kind",
+                Verdict.BREAKING,
+                impact="x",
                 description_template="Changed: {name:{bogus}}",
             ),
         ]
@@ -736,7 +784,9 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING, impact="x",
+                "test_kind",
+                Verdict.BREAKING,
+                impact="x",
                 description_template="Changed: {name!x}",
             ),
         ]
@@ -761,7 +811,9 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING, impact="x",
+                "test_kind",
+                Verdict.BREAKING,
+                impact="x",
                 description_template="Changed: {name:q}",
             ),
         ]
@@ -782,7 +834,9 @@ class TestChangeKindRegistry:
 
         entries = [
             ChangeKindMeta(
-                "test_kind", Verdict.BREAKING, impact="x",
+                "test_kind",
+                Verdict.BREAKING,
+                impact="x",
                 description_template="Changed: {old:>10}",
             ),
         ]

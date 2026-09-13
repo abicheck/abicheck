@@ -7,6 +7,7 @@ Covers:
 4. Verdict consistency (compute_verdict agrees with policy classification)
 5. Snapshot index consistency (function_map keys match mangled names)
 """
+
 from __future__ import annotations
 
 import json
@@ -51,7 +52,9 @@ _ident_alphabet = st.characters(whitelist_categories=("L", "N"))
 
 _ident_st = st.text(min_size=1, max_size=20, alphabet=_ident_alphabet)
 
-_type_names = st.sampled_from(["int", "void", "char*", "double", "float", "long", "unsigned int"])
+_type_names = st.sampled_from(
+    ["int", "void", "char*", "double", "float", "long", "unsigned int"]
+)
 
 _visibility_st = st.sampled_from(list(Visibility))
 _access_st = st.sampled_from(list(AccessLevel))
@@ -170,12 +173,22 @@ def snapshot_st(draw):
         variables=draw(st.lists(variable_st(), min_size=0, max_size=3)),
         types=draw(st.lists(record_type_st(), min_size=0, max_size=3)),
         enums=draw(st.lists(enum_type_st(), min_size=0, max_size=3)),
-        typedefs=draw(st.dictionaries(
-            keys=_ident_st, values=_type_names, min_size=0, max_size=3,
-        )),
-        constants=draw(st.dictionaries(
-            keys=_ident_st, values=st.text(min_size=1, max_size=10), min_size=0, max_size=3,
-        )),
+        typedefs=draw(
+            st.dictionaries(
+                keys=_ident_st,
+                values=_type_names,
+                min_size=0,
+                max_size=3,
+            )
+        ),
+        constants=draw(
+            st.dictionaries(
+                keys=_ident_st,
+                values=st.text(min_size=1, max_size=10),
+                min_size=0,
+                max_size=3,
+            )
+        ),
         elf_only_mode=draw(st.booleans()),
         platform=draw(st.none() | st.sampled_from(["elf", "pe", "macho"])),
         language_profile=draw(st.none() | st.sampled_from(["c", "cpp"])),
@@ -185,6 +198,7 @@ def snapshot_st(draw):
 # ---------------------------------------------------------------------------
 # 1. Serialization roundtrip
 # ---------------------------------------------------------------------------
+
 
 @given(snap=snapshot_st())
 @settings(max_examples=50)
@@ -295,6 +309,7 @@ def test_serialization_roundtrip_via_file(snap: AbiSnapshot):
 # 2. Policy classification completeness
 # ---------------------------------------------------------------------------
 
+
 def test_every_changekind_in_exactly_one_category_strict_abi():
     """Every ChangeKind member must appear in exactly one of the four
     kind sets under strict_abi policy."""
@@ -306,10 +321,16 @@ def test_every_changekind_in_exactly_one_category_strict_abi():
     assert not unclassified, f"Unclassified ChangeKinds: {unclassified}"
 
     # Check no overlaps between categories
-    assert not (breaking & api_break), f"Overlap breaking & api_break: {breaking & api_break}"
-    assert not (breaking & compatible), f"Overlap breaking & compatible: {breaking & compatible}"
+    assert not (breaking & api_break), (
+        f"Overlap breaking & api_break: {breaking & api_break}"
+    )
+    assert not (breaking & compatible), (
+        f"Overlap breaking & compatible: {breaking & compatible}"
+    )
     assert not (breaking & risk), f"Overlap breaking & risk: {breaking & risk}"
-    assert not (api_break & compatible), f"Overlap api_break & compatible: {api_break & compatible}"
+    assert not (api_break & compatible), (
+        f"Overlap api_break & compatible: {api_break & compatible}"
+    )
     assert not (api_break & risk), f"Overlap api_break & risk: {api_break & risk}"
     assert not (compatible & risk), f"Overlap compatible & risk: {compatible & risk}"
 
@@ -387,20 +408,25 @@ def test_show_only_filter_parse_roundtrip_idempotent(tokens: list[str]):
 
     filt1 = ShowOnlyFilter.parse(raw)
     # Reconstruct a canonical token string from the filter
-    reconstructed_tokens = sorted(filt1.severities) + sorted(filt1.elements) + sorted(filt1.actions)
+    reconstructed_tokens = (
+        sorted(filt1.severities) + sorted(filt1.elements) + sorted(filt1.actions)
+    )
     if reconstructed_tokens:
         raw2 = ",".join(reconstructed_tokens)
         filt2 = ShowOnlyFilter.parse(raw2)
         assert filt1 == filt2
 
 
-@given(invalid_tok=st.text(min_size=1, max_size=15, alphabet=_ident_alphabet).filter(
-    lambda t: t.lower() not in _all_valid_tokens
-))
+@given(
+    invalid_tok=st.text(min_size=1, max_size=15, alphabet=_ident_alphabet).filter(
+        lambda t: t.lower() not in _all_valid_tokens
+    )
+)
 @settings(max_examples=30)
 def test_show_only_filter_rejects_invalid_tokens(invalid_tok: str):
     """An invalid token should raise ValueError."""
     import pytest
+
     with pytest.raises(ValueError, match="Unknown --show-only token"):
         ShowOnlyFilter.parse(invalid_tok)
 
@@ -408,6 +434,7 @@ def test_show_only_filter_rejects_invalid_tokens(invalid_tok: str):
 # ---------------------------------------------------------------------------
 # 4. Verdict consistency
 # ---------------------------------------------------------------------------
+
 
 @settings(max_examples=50)
 @given(data=st.data())
@@ -418,8 +445,10 @@ def test_compute_verdict_empty_changes_is_no_change(data):
     assert verdict == Verdict.NO_CHANGE
 
 
-@given(kind=st.sampled_from(list(ChangeKind)),
-       policy=st.sampled_from(["strict_abi", "sdk_vendor", "plugin_abi"]))
+@given(
+    kind=st.sampled_from(list(ChangeKind)),
+    policy=st.sampled_from(["strict_abi", "sdk_vendor", "plugin_abi"]),
+)
 @settings(max_examples=50)
 def test_compute_verdict_single_change_matches_policy(kind: ChangeKind, policy: str):
     """A single-change verdict should match the policy classification for that kind."""
@@ -449,14 +478,19 @@ def test_compute_verdict_single_change_matches_policy(kind: ChangeKind, policy: 
         assert verdict == Verdict.BREAKING
 
 
-@given(kinds=st.lists(st.sampled_from(list(ChangeKind)), min_size=1, max_size=10),
-       policy=st.sampled_from(["strict_abi", "sdk_vendor", "plugin_abi"]))
+@given(
+    kinds=st.lists(st.sampled_from(list(ChangeKind)), min_size=1, max_size=10),
+    policy=st.sampled_from(["strict_abi", "sdk_vendor", "plugin_abi"]),
+)
 @settings(max_examples=50)
 def test_verdict_ordering_breaking_dominates(kinds: list[ChangeKind], policy: str):
     """If any kind is BREAKING, the overall verdict must be BREAKING."""
     breaking, api_break, compatible, risk = policy_kind_sets(policy)
 
-    changes = [Change(kind=k, symbol=f"sym_{i}", description="test") for i, k in enumerate(kinds)]
+    changes = [
+        Change(kind=k, symbol=f"sym_{i}", description="test")
+        for i, k in enumerate(kinds)
+    ]
     verdict = compute_verdict(changes, policy=policy)
 
     kind_set = set(kinds)
@@ -473,11 +507,14 @@ def test_verdict_ordering_breaking_dominates(kinds: list[ChangeKind], policy: st
 @given(
     compatible_kinds=st.lists(
         st.sampled_from(sorted(COMPATIBLE_KINDS, key=lambda k: k.value)),
-        min_size=1, max_size=5,
+        min_size=1,
+        max_size=5,
     )
 )
 @settings(max_examples=50)
-def test_only_compatible_kinds_give_compatible_verdict(compatible_kinds: list[ChangeKind]):
+def test_only_compatible_kinds_give_compatible_verdict(
+    compatible_kinds: list[ChangeKind],
+):
     """If all changes are from COMPATIBLE_KINDS (strict_abi), verdict must be COMPATIBLE."""
     changes = [
         Change(kind=k, symbol=f"sym_{i}", description="test")
@@ -490,6 +527,7 @@ def test_only_compatible_kinds_give_compatible_verdict(compatible_kinds: list[Ch
 # ---------------------------------------------------------------------------
 # 5. Snapshot index consistency
 # ---------------------------------------------------------------------------
+
 
 @given(functions=st.lists(function_st(), min_size=1, max_size=10))
 @settings(max_examples=50)

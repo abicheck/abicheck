@@ -52,7 +52,9 @@ def _is_real_gnu_gcc(cc: str | None) -> bool:
     if not cc:
         return False
     try:
-        out = subprocess.run([cc, "--version"], capture_output=True, text=True, timeout=20).stdout
+        out = subprocess.run(
+            [cc, "--version"], capture_output=True, text=True, timeout=20
+        ).stdout
     except (OSError, subprocess.SubprocessError):
         return False
     return "Free Software Foundation" in out or "(GCC)" in out
@@ -61,7 +63,10 @@ def _is_real_gnu_gcc(cc: str | None) -> bool:
 def _build(cc: str, src, out, record_flag: str) -> None:
     subprocess.run(
         [cc, "-shared", "-fPIC", "-g", record_flag, str(src), "-o", str(out)],
-        check=True, capture_output=True, text=True, timeout=120,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
 
 
@@ -82,7 +87,9 @@ def test_gcc_vs_clang_toolchain_drift_is_captured_and_surfaced(tmp_path):
 
     # Producer/toolchain identity recovered from each shipped artifact.
     assert any(t.compiler_id == "GNU" for t in gcc_ev.toolchains), gcc_ev.toolchains
-    assert any(t.compiler_id == "Clang" for t in clang_ev.toolchains), clang_ev.toolchains
+    assert any(t.compiler_id == "Clang" for t in clang_ev.toolchains), (
+        clang_ev.toolchains
+    )
 
     # The gcc↔clang swap surfaces as toolchain drift even though clang's
     # DW_AT_producer carries no language token (the asymmetry that previously
@@ -109,14 +116,35 @@ def test_clang_grecord_command_line_flag_drift_detected(tmp_path):
     src.write_text("enum E { A, B }; int f(enum E e) { return e; }\n")
     v1, v2 = tmp_path / "v1.so", tmp_path / "v2.so"
     subprocess.run(
-        [_CLANG, "-shared", "-fPIC", "-g", "-grecord-command-line",
-         str(src), "-o", str(v1)],
-        check=True, capture_output=True, timeout=120,
+        [
+            _CLANG,
+            "-shared",
+            "-fPIC",
+            "-g",
+            "-grecord-command-line",
+            str(src),
+            "-o",
+            str(v1),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=120,
     )
     subprocess.run(
-        [_CLANG, "-shared", "-fPIC", "-g", "-grecord-command-line",
-         "-fshort-enums", str(src), "-o", str(v2)],
-        check=True, capture_output=True, timeout=120,
+        [
+            _CLANG,
+            "-shared",
+            "-fPIC",
+            "-g",
+            "-grecord-command-line",
+            "-fshort-enums",
+            str(src),
+            "-o",
+            str(v2),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=120,
     )
     r = compare(resolve_input(v1), resolve_input(v2))
     kinds = {c.kind for c in r.changes}

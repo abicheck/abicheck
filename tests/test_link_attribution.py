@@ -96,7 +96,9 @@ class TestTargetGraphChannel:
             ]
         )
         attr = attribute_sources_to_targets(ev)
-        assert attr["src/common.cpp"] == frozenset({"target://common", "target://libfoo"})
+        assert attr["src/common.cpp"] == frozenset(
+            {"target://common", "target://libfoo"}
+        )
 
     def test_object_library_folds_transitively_through_static_library(self):
         ev = BuildEvidence(
@@ -240,7 +242,9 @@ class TestTargetGraphChannel:
 class TestLinkUnitGraphChannel:
     def test_direct_object_input_attributes_via_target_id(self):
         ev = BuildEvidence(
-            compile_units=[CompileUnit(id="cu://a", source="src/a.cpp", output="build/a.o")],
+            compile_units=[
+                CompileUnit(id="cu://a", source="src/a.cpp", output="build/a.o")
+            ],
             link_units=[
                 LinkUnit(
                     id="link://build/libfoo.so",
@@ -256,7 +260,9 @@ class TestLinkUnitGraphChannel:
 
     def test_no_target_id_falls_back_to_output_basename_identity(self):
         ev = BuildEvidence(
-            compile_units=[CompileUnit(id="cu://a", source="src/a.cpp", output="build/a.o")],
+            compile_units=[
+                CompileUnit(id="cu://a", source="src/a.cpp", output="build/a.o")
+            ],
             link_units=[
                 LinkUnit(
                     id="link://build/out/libfoo.so",
@@ -277,7 +283,9 @@ class TestLinkUnitGraphChannel:
             link_units=[
                 LinkUnit(
                     id="link://build/libstatic.a",
-                    output="build/libstatic.a", kind="static_library", inputs=["build/a.o"]
+                    output="build/libstatic.a",
+                    kind="static_library",
+                    inputs=["build/a.o"],
                 ),
                 LinkUnit(
                     id="link://build/app",
@@ -331,7 +339,9 @@ class TestLinkUnitGraphChannel:
         # mirrors the target-graph channel's SHARED_LIBRARY hard stop.
         ev = BuildEvidence(
             compile_units=[
-                CompileUnit(id="cu://a", source="src/a.cpp", output="build/liba_impl.o"),
+                CompileUnit(
+                    id="cu://a", source="src/a.cpp", output="build/liba_impl.o"
+                ),
                 CompileUnit(id="cu://b", source="src/b.cpp", output="build/b.o"),
             ],
             link_units=[
@@ -360,11 +370,15 @@ class TestLinkUnitGraphChannel:
         # -- a bare static-library link unit with nothing consuming it must
         # not appear as an identity anywhere in the result.
         ev = BuildEvidence(
-            compile_units=[CompileUnit(id="cu://a", source="src/a.cpp", output="build/a.o")],
+            compile_units=[
+                CompileUnit(id="cu://a", source="src/a.cpp", output="build/a.o")
+            ],
             link_units=[
                 LinkUnit(
                     id="link://build/libstatic.a",
-                    output="build/libstatic.a", kind="static_library", inputs=["build/a.o"],
+                    output="build/libstatic.a",
+                    kind="static_library",
+                    inputs=["build/a.o"],
                 )
             ],
         )
@@ -374,8 +388,18 @@ class TestLinkUnitGraphChannel:
     def test_link_unit_cycle_does_not_infinite_loop(self):
         ev = BuildEvidence(
             link_units=[
-                LinkUnit(id="link://a.so", output="a.so", kind="shared_library", inputs=["b.so"]),
-                LinkUnit(id="link://b.so", output="b.so", kind="shared_library", inputs=["a.so"]),
+                LinkUnit(
+                    id="link://a.so",
+                    output="a.so",
+                    kind="shared_library",
+                    inputs=["b.so"],
+                ),
+                LinkUnit(
+                    id="link://b.so",
+                    output="b.so",
+                    kind="shared_library",
+                    inputs=["a.so"],
+                ),
             ]
         )
         # Must simply terminate with no attribution (neither resolves to a
@@ -388,7 +412,9 @@ class TestCombinedChannels:
     def test_both_channels_agreeing_union_to_one_identity_set(self):
         ev = BuildEvidence(
             targets=[Target(id="target://libfoo", source_files=["src/foo.cpp"])],
-            compile_units=[CompileUnit(id="cu://a", source="src/foo.cpp", output="build/a.o")],
+            compile_units=[
+                CompileUnit(id="cu://a", source="src/foo.cpp", output="build/a.o")
+            ],
             link_units=[
                 LinkUnit(
                     id="link://build/libfoo.so",
@@ -409,7 +435,9 @@ class TestCombinedChannels:
         # resolved to a possibly-wrong single answer.
         ev = BuildEvidence(
             targets=[Target(id="target://libfoo", source_files=["src/foo.cpp"])],
-            compile_units=[CompileUnit(id="cu://a", source="src/foo.cpp", output="build/a.o")],
+            compile_units=[
+                CompileUnit(id="cu://a", source="src/foo.cpp", output="build/a.o")
+            ],
             link_units=[
                 LinkUnit(
                     id="link://build/libbar.so",

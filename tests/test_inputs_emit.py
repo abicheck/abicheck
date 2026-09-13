@@ -1672,7 +1672,9 @@ def test_emit_none_when_no_backend(tmp_path: Path, monkeypatch) -> None:
     assert out is None
 
 
-def test_emit_warns_when_no_backend_resolves(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_emit_warns_when_no_backend_resolves(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
     # The old silent-empty behavior (no diagnostic at all) is the bug being
     # regression-tested here, not just the return value.
     monkeypatch.setattr(
@@ -1832,7 +1834,9 @@ _LAUNCHER_PREFIXES: list[list[str]] = [
 
 
 @pytest.mark.parametrize("compiler", _CLANG_FAMILY_COMPILERS)
-@pytest.mark.parametrize("launcher_prefix", _LAUNCHER_PREFIXES, ids=lambda p: "+".join(p) or "bare")
+@pytest.mark.parametrize(
+    "launcher_prefix", _LAUNCHER_PREFIXES, ids=lambda p: "+".join(p) or "bare"
+)
 def test_clang_family_compiler_always_resolves_regardless_of_launcher(
     compiler: str, launcher_prefix: list[str], tmp_path: Path, monkeypatch
 ) -> None:
@@ -1841,7 +1845,9 @@ def test_clang_family_compiler_always_resolves_regardless_of_launcher(
 
 
 @pytest.mark.parametrize("compiler", _NON_CLANG_FAMILY_COMPILERS)
-@pytest.mark.parametrize("launcher_prefix", _LAUNCHER_PREFIXES, ids=lambda p: "+".join(p) or "bare")
+@pytest.mark.parametrize(
+    "launcher_prefix", _LAUNCHER_PREFIXES, ids=lambda p: "+".join(p) or "bare"
+)
 def test_non_clang_family_compiler_falls_back_to_plain_clang(
     compiler: str, launcher_prefix: list[str], tmp_path: Path, monkeypatch
 ) -> None:

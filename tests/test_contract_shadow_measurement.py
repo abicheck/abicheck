@@ -218,9 +218,7 @@ class TestUnresolvedLossMetric:
         # is already keyed by (Codex review).
         from abicheck.contract_relevance_types import ContractMode
 
-        case = next(
-            c for c in shadow.CORPUS if c.name == "ambiguous_namespaced_leaf"
-        )
+        case = next(c for c in shadow.CORPUS if c.name == "ambiguous_namespaced_leaf")
         measurement = shadow.measure_case(case, ContractMode.PUBLIC)
         (loss,) = measurement.unresolved_losses
         assert loss in shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES
@@ -229,9 +227,7 @@ class TestUnresolvedLossMetric:
         # The gap the previous, kind+symbol-only pin still admitted: swap
         # the finding id alone and the pin must fire.
         known = set(shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES)
-        original = next(
-            k for k in known if k.startswith("ambiguous_namespaced_leaf:")
-        )
+        original = next(k for k in known if k.startswith("ambiguous_namespaced_leaf:"))
         sibling = original.rsplit(":", 1)[0] + ":ffffffffffffffff"
         assert sibling not in known
         # Everything up to the id is identical, so every coarser projection
@@ -243,9 +239,7 @@ class TestUnresolvedLossMetric:
         # one finding for another *within* a pinned case and the pin fires,
         # where a case-name projection saw nothing.
         known = set(shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES)
-        original = next(
-            k for k in known if k.startswith("ambiguous_namespaced_leaf:")
-        )
+        original = next(k for k in known if k.startswith("ambiguous_namespaced_leaf:"))
         swapped = (known - {original}) | {
             "ambiguous_namespaced_leaf:public:type_field_removed:Cache:0000000000000000"
         }
@@ -257,8 +251,9 @@ class TestUnresolvedLossMetric:
     def test_the_known_list_is_consistent_with_the_budget(self) -> None:
         # Two statements of the same fact; if they drift, one of them is
         # lying about what is accepted.
-        assert len(shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES) == (
-            shadow.UNRESOLVED_LOSS_BASELINE["public"]
+        assert (
+            len(shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES)
+            == (shadow.UNRESOLVED_LOSS_BASELINE["public"])
         )
 
     def test_merge_carries_every_list_accumulator(self) -> None:

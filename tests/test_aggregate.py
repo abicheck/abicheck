@@ -951,7 +951,14 @@ class TestProfileMatrix:
                 "incomplete_profiles": [],
                 "unanalyzed_profiles": [],
                 "contract_incomplete_profiles": [],
-                **{k: [] for k in ("analysis_incomplete_profiles", "scope_incomplete_profiles", "audit_only_profiles")},
+                **{
+                    k: []
+                    for k in (
+                        "analysis_incomplete_profiles",
+                        "scope_incomplete_profiles",
+                        "audit_only_profiles",
+                    )
+                },
                 "verdict_by_profile": {
                     "linux-clang20": "COMPATIBLE",
                     "linux-gcc14": "BREAKING",

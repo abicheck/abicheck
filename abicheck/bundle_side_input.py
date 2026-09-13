@@ -178,7 +178,9 @@ def resolve_bundle_side(side: BundleSideInput) -> ResolvedBundleSide:
     from .workflows.bundle_facts_capture import bundle_snapshot_from_facts
 
     if isinstance(side, StoredBundleFactsInput):
-        facts = load_bundle_facts(side.path, max_json_object_nodes=side.max_json_object_nodes)
+        facts = load_bundle_facts(
+            side.path, max_json_object_nodes=side.max_json_object_nodes
+        )
         return ResolvedBundleSide(
             snapshot=bundle_snapshot_from_facts(facts),
             signature_evidence=dict(facts.per_library_snapshots),
@@ -230,7 +232,9 @@ def compare_bundle_sides(
     old_resolved = resolve_bundle_side(old)
     new_resolved = resolve_bundle_side(new)
     effective_manifest = (
-        manifest if manifest is not None else (old_resolved.manifest or new_resolved.manifest)
+        manifest
+        if manifest is not None
+        else (old_resolved.manifest or new_resolved.manifest)
     )
     return analyze_bundle(
         old_resolved.snapshot,
@@ -441,10 +445,14 @@ def compare_release_against_bundle_facts(
     from .workflows.input_resolution import resolve_input
     from .workflows.release_scope import mismatch_kind
 
-    old_facts = load_bundle_facts(old_facts_path, max_json_object_nodes=max_json_object_nodes)
+    old_facts = load_bundle_facts(
+        old_facts_path, max_json_object_nodes=max_json_object_nodes
+    )
 
     if new_dir.is_dir():
-        new_files = discover_shared_libraries(new_dir, include_private=include_private_dso)
+        new_files = discover_shared_libraries(
+            new_dir, include_private=include_private_dso
+        )
     else:
         new_files = [new_dir]
     # Version-aware duplicate resolution (the same rule the live release
@@ -571,7 +579,9 @@ def compare_release_against_bundle_facts(
             continue
         compared.append(key)
         per_library_results.append(diff)
-        new_signature_evidence[key] = BundleSignatureEvidence.from_snapshot(new_snapshot)
+        new_signature_evidence[key] = BundleSignatureEvidence.from_snapshot(
+            new_snapshot
+        )
 
     # *old_facts* is already loaded in memory (needed above for the
     # per-library matching loop) -- routed straight to
@@ -613,7 +623,9 @@ def compare_release_against_bundle_facts(
     # ADR-065 D2 (Codex review): a promise only an excluded member could
     # answer is withheld, not reported as manifest drift.
     manifest, manifest_note = scope_manifest_to_members(
-        load_manifest(manifest_path) if manifest_path is not None else old_facts.manifest,
+        load_manifest(manifest_path)
+        if manifest_path is not None
+        else old_facts.manifest,
         scope_record,
     )
     new_bundle_snapshot = build_bundle_snapshot(

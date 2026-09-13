@@ -479,7 +479,9 @@ class TestBundleAnalysisErrorsAreStructural:
             new_root=Path("/new"),
             analysis_errors=["synthetic failure"],
         )
-        lines = _release_md_bundle_findings(degraded_result, degraded_result.bundle_findings)
+        lines = _release_md_bundle_findings(
+            degraded_result, degraded_result.bundle_findings
+        )
         text = "\n".join(lines)
         assert "Bundle Analysis Warnings" in text
         assert "synthetic failure" in text
@@ -523,9 +525,7 @@ class TestBundleAnalysisForwardsPolicyFile:
             },
         ]
 
-    def test_policy_file_override_demotes_the_bundle_verdict(
-        self, monkeypatch
-    ) -> None:
+    def test_policy_file_override_demotes_the_bundle_verdict(self, monkeypatch) -> None:
         from abicheck.policy_file import PolicyFile
 
         monkeypatch.setattr(bundle_mod, "build_bundle_snapshot", self._fake_snapshot)

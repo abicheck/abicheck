@@ -278,9 +278,7 @@ def _diff_stable_abi_violations(
     # newly version-specific `pythonXY.dll` breaks the cross-interpreter promise
     # even if every imported symbol name is stable. Baselined like the imports:
     # only flag DLLs not already present on an abi3 old build.
-    dll_baseline = (
-        set(old.version_specific_python_dlls) if _is_abi3(old) else set()
-    )
+    dll_baseline = set(old.version_specific_python_dlls) if _is_abi3(old) else set()
     gained_dlls = sorted(
         d for d in new.version_specific_python_dlls if d not in dll_baseline
     )

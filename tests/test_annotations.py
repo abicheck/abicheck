@@ -41,6 +41,7 @@ def _result(
 # Escaping
 # ---------------------------------------------------------------------------
 
+
 class TestEscapeAnnotationValue:
     def test_colons(self):
         assert _escape_annotation_value("foo:bar") == "foo%3Abar"
@@ -87,6 +88,7 @@ class TestEscapeAnnotationData:
 # Source location parsing
 # ---------------------------------------------------------------------------
 
+
 class TestParseSourceLocation:
     def test_file_and_line(self):
         assert _parse_source_location("include/foo.h:42") == ("include/foo.h", "42")
@@ -105,7 +107,10 @@ class TestParseSourceLocation:
 
     def test_windows_path_with_line(self):
         """Windows path like C:\\include\\foo.h:42 should parse correctly."""
-        assert _parse_source_location("C:\\include\\foo.h:42") == ("C:\\include\\foo.h", "42")
+        assert _parse_source_location("C:\\include\\foo.h:42") == (
+            "C:\\include\\foo.h",
+            "42",
+        )
 
     def test_colon_at_position_zero(self):
         """Leading colon: empty file part, line number extracted."""
@@ -124,6 +129,7 @@ class TestParseSourceLocation:
 # _classify_change (direct unit tests)
 # ---------------------------------------------------------------------------
 
+
 class TestClassifyChange:
     """Direct unit tests for _classify_change with explicit kind sets."""
 
@@ -133,46 +139,89 @@ class TestClassifyChange:
     _compatible = frozenset({ChangeKind.FUNC_ADDED})
 
     def test_breaking_returns_error(self):
-        assert _classify_change(
-            ChangeKind.FUNC_REMOVED, self._breaking, self._api_break,
-            self._risk, self._compatible, False,
-        ) == "error"
+        assert (
+            _classify_change(
+                ChangeKind.FUNC_REMOVED,
+                self._breaking,
+                self._api_break,
+                self._risk,
+                self._compatible,
+                False,
+            )
+            == "error"
+        )
 
     def test_api_break_returns_warning(self):
-        assert _classify_change(
-            ChangeKind.ENUM_MEMBER_RENAMED, self._breaking, self._api_break,
-            self._risk, self._compatible, False,
-        ) == "warning"
+        assert (
+            _classify_change(
+                ChangeKind.ENUM_MEMBER_RENAMED,
+                self._breaking,
+                self._api_break,
+                self._risk,
+                self._compatible,
+                False,
+            )
+            == "warning"
+        )
 
     def test_risk_returns_warning(self):
-        assert _classify_change(
-            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, self._breaking, self._api_break,
-            self._risk, self._compatible, False,
-        ) == "warning"
+        assert (
+            _classify_change(
+                ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+                self._breaking,
+                self._api_break,
+                self._risk,
+                self._compatible,
+                False,
+            )
+            == "warning"
+        )
 
     def test_compatible_returns_none_by_default(self):
-        assert _classify_change(
-            ChangeKind.FUNC_ADDED, self._breaking, self._api_break,
-            self._risk, self._compatible, False,
-        ) is None
+        assert (
+            _classify_change(
+                ChangeKind.FUNC_ADDED,
+                self._breaking,
+                self._api_break,
+                self._risk,
+                self._compatible,
+                False,
+            )
+            is None
+        )
 
     def test_compatible_returns_notice_with_flag(self):
-        assert _classify_change(
-            ChangeKind.FUNC_ADDED, self._breaking, self._api_break,
-            self._risk, self._compatible, True,
-        ) == "notice"
+        assert (
+            _classify_change(
+                ChangeKind.FUNC_ADDED,
+                self._breaking,
+                self._api_break,
+                self._risk,
+                self._compatible,
+                True,
+            )
+            == "notice"
+        )
 
     def test_unknown_kind_returns_none_even_with_additions_flag(self):
         """A kind not in any set should return None even with annotate_additions=True."""
-        assert _classify_change(
-            ChangeKind.FUNC_REMOVED, frozenset(), frozenset(),
-            frozenset(), frozenset(), True,
-        ) is None
+        assert (
+            _classify_change(
+                ChangeKind.FUNC_REMOVED,
+                frozenset(),
+                frozenset(),
+                frozenset(),
+                frozenset(),
+                True,
+            )
+            is None
+        )
 
 
 # ---------------------------------------------------------------------------
 # _title_for_change (direct unit tests)
 # ---------------------------------------------------------------------------
+
 
 class TestTitleForChange:
     """Verify risk changes are labeled differently from API breaks."""
@@ -184,37 +233,52 @@ class TestTitleForChange:
 
     def test_breaking_title(self):
         title = _title_for_change(
-            ChangeKind.FUNC_REMOVED, self._breaking, self._api_break,
-            self._risk, self._compatible,
+            ChangeKind.FUNC_REMOVED,
+            self._breaking,
+            self._api_break,
+            self._risk,
+            self._compatible,
         )
         assert title == "ABI Break: func_removed"
 
     def test_api_break_title(self):
         title = _title_for_change(
-            ChangeKind.ENUM_MEMBER_RENAMED, self._breaking, self._api_break,
-            self._risk, self._compatible,
+            ChangeKind.ENUM_MEMBER_RENAMED,
+            self._breaking,
+            self._api_break,
+            self._risk,
+            self._compatible,
         )
         assert title == "API Break: enum_member_renamed"
 
     def test_risk_title(self):
         title = _title_for_change(
-            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, self._breaking, self._api_break,
-            self._risk, self._compatible,
+            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+            self._breaking,
+            self._api_break,
+            self._risk,
+            self._compatible,
         )
         assert title == "Deployment Risk: symbol_version_required_added"
 
     def test_addition_title(self):
         title = _title_for_change(
-            ChangeKind.FUNC_ADDED, self._breaking, self._api_break,
-            self._risk, self._compatible,
+            ChangeKind.FUNC_ADDED,
+            self._breaking,
+            self._api_break,
+            self._risk,
+            self._compatible,
         )
         assert title == "ABI Addition: func_added"
 
     def test_unknown_kind_title(self):
         """A kind not in any set gets a generic title."""
         title = _title_for_change(
-            ChangeKind.FUNC_REMOVED, frozenset(), frozenset(),
-            frozenset(), frozenset(),
+            ChangeKind.FUNC_REMOVED,
+            frozenset(),
+            frozenset(),
+            frozenset(),
+            frozenset(),
         )
         assert title == "ABI Change: func_removed"
 
@@ -223,10 +287,12 @@ class TestTitleForChange:
 # Annotation format (integration via emit_github_annotations)
 # ---------------------------------------------------------------------------
 
+
 class TestAnnotationFormat:
     def test_breaking_change_produces_error(self):
         c = Change(
-            ChangeKind.FUNC_REMOVED, "_Z3foov",
+            ChangeKind.FUNC_REMOVED,
+            "_Z3foov",
             "Public function removed: foo",
             source_location="include/foo.h:42",
         )
@@ -240,7 +306,8 @@ class TestAnnotationFormat:
 
     def test_api_break_produces_warning(self):
         c = Change(
-            ChangeKind.ENUM_MEMBER_RENAMED, "MyEnum::kOld",
+            ChangeKind.ENUM_MEMBER_RENAMED,
+            "MyEnum::kOld",
             "Enum member renamed: kOld -> kNew",
         )
         result = _result(Verdict.API_BREAK, [c])
@@ -250,7 +317,8 @@ class TestAnnotationFormat:
 
     def test_risk_change_produces_warning_with_deployment_risk_title(self):
         c = Change(
-            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, "libc.so.6",
+            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+            "libc.so.6",
             "New GLIBC_2.34 version requirement added",
         )
         result = _result(Verdict.COMPATIBLE_WITH_RISK, [c])
@@ -260,7 +328,8 @@ class TestAnnotationFormat:
 
     def test_compatible_addition_skipped_by_default(self):
         c = Change(
-            ChangeKind.FUNC_ADDED, "_Z6newapiv",
+            ChangeKind.FUNC_ADDED,
+            "_Z6newapiv",
             "New public function: new_api",
         )
         result = _result(Verdict.COMPATIBLE, [c])
@@ -269,7 +338,8 @@ class TestAnnotationFormat:
 
     def test_compatible_addition_emitted_with_flag(self):
         c = Change(
-            ChangeKind.FUNC_ADDED, "_Z6newapiv",
+            ChangeKind.FUNC_ADDED,
+            "_Z6newapiv",
             "New public function: new_api",
         )
         result = _result(Verdict.COMPATIBLE, [c])
@@ -279,7 +349,8 @@ class TestAnnotationFormat:
 
     def test_no_file_line_when_no_source_location(self):
         c = Change(
-            ChangeKind.FUNC_REMOVED, "_Z3foov",
+            ChangeKind.FUNC_REMOVED,
+            "_Z3foov",
             "Public function removed: foo",
         )
         result = _result(Verdict.BREAKING, [c])
@@ -290,7 +361,8 @@ class TestAnnotationFormat:
 
     def test_no_file_line_when_source_location_empty(self):
         c = Change(
-            ChangeKind.FUNC_REMOVED, "_Z3foov",
+            ChangeKind.FUNC_REMOVED,
+            "_Z3foov",
             "Public function removed: foo",
             source_location="",
         )
@@ -309,11 +381,13 @@ class TestAnnotationFormat:
 # Annotation limit
 # ---------------------------------------------------------------------------
 
+
 class TestAnnotationLimit:
     def test_max_50_annotations(self):
         changes = [
             Change(
-                ChangeKind.FUNC_REMOVED, f"_Z{i}foov",
+                ChangeKind.FUNC_REMOVED,
+                f"_Z{i}foov",
                 f"Public function removed: foo{i}",
             )
             for i in range(60)
@@ -330,7 +404,9 @@ class TestAnnotationLimit:
             for i in range(30)
         ]
         warnings = [
-            Change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, f"libc{i}", f"version req {i}")
+            Change(
+                ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, f"libc{i}", f"version req {i}"
+            )
             for i in range(30)
         ]
         result = _result(Verdict.BREAKING, errors + warnings)
@@ -358,15 +434,18 @@ class TestAnnotationLimit:
 # Sorting
 # ---------------------------------------------------------------------------
 
+
 class TestAnnotationSorting:
     def test_errors_before_warnings(self):
         changes = [
             Change(
-                ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, "libc.so.6",
+                ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+                "libc.so.6",
                 "New version requirement added",
             ),
             Change(
-                ChangeKind.FUNC_REMOVED, "_Z3foov",
+                ChangeKind.FUNC_REMOVED,
+                "_Z3foov",
                 "Public function removed: foo",
             ),
         ]
@@ -380,11 +459,13 @@ class TestAnnotationSorting:
     def test_warnings_before_notices(self):
         changes = [
             Change(
-                ChangeKind.FUNC_ADDED, "_Z6newapiv",
+                ChangeKind.FUNC_ADDED,
+                "_Z6newapiv",
                 "New public function: new_api",
             ),
             Change(
-                ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, "libc.so.6",
+                ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+                "libc.so.6",
                 "New version requirement added",
             ),
         ]
@@ -398,11 +479,13 @@ class TestAnnotationSorting:
     def test_errors_before_notices(self):
         changes = [
             Change(
-                ChangeKind.FUNC_ADDED, "_Z6newapiv",
+                ChangeKind.FUNC_ADDED,
+                "_Z6newapiv",
                 "New public function: new_api",
             ),
             Change(
-                ChangeKind.FUNC_REMOVED, "_Z3foov",
+                ChangeKind.FUNC_REMOVED,
+                "_Z3foov",
                 "Public function removed: foo",
             ),
         ]
@@ -417,6 +500,7 @@ class TestAnnotationSorting:
 # ---------------------------------------------------------------------------
 # is_github_actions
 # ---------------------------------------------------------------------------
+
 
 class TestIsGitHubActions:
     def test_true_when_set(self):
@@ -436,21 +520,27 @@ class TestIsGitHubActions:
 # Special characters in full annotations
 # ---------------------------------------------------------------------------
 
+
 class TestSpecialCharactersInAnnotations:
     def test_description_with_colons(self):
         c = Change(
-            ChangeKind.FUNC_PARAMS_CHANGED, "_Z3bazv",
+            ChangeKind.FUNC_PARAMS_CHANGED,
+            "_Z3bazv",
             "Parameter 1 of foo::baz changed from int to long (binary incompatible)",
             source_location="include/foo.h:42",
         )
         result = _result(Verdict.BREAKING, [c])
         output = emit_github_annotations(result)
         # Message body should preserve colons
-        assert "::Parameter 1 of foo::baz changed from int to long (binary incompatible)" in output
+        assert (
+            "::Parameter 1 of foo::baz changed from int to long (binary incompatible)"
+            in output
+        )
 
     def test_description_with_newlines(self):
         c = Change(
-            ChangeKind.FUNC_REMOVED, "_Z3foov",
+            ChangeKind.FUNC_REMOVED,
+            "_Z3foov",
             "Public function removed:\nfoo",
         )
         result = _result(Verdict.BREAKING, [c])
@@ -463,6 +553,7 @@ class TestSpecialCharactersInAnnotations:
 # ---------------------------------------------------------------------------
 # Message truncation
 # ---------------------------------------------------------------------------
+
 
 class TestMessageTruncation:
     def test_long_message_is_truncated(self):
@@ -488,6 +579,7 @@ class TestMessageTruncation:
 # emit_github_step_summary
 # ---------------------------------------------------------------------------
 
+
 class TestEmitGitHubStepSummary:
     def test_returns_none_when_env_unset(self):
         with patch.dict("os.environ", {}, clear=True):
@@ -502,9 +594,16 @@ class TestEmitGitHubStepSummary:
     def test_writes_markdown_and_returns_path(self, tmp_path):
         summary_file = tmp_path / "summary.md"
         with patch.dict("os.environ", {"GITHUB_STEP_SUMMARY": str(summary_file)}):
-            result = _result(Verdict.BREAKING, [
-                Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo"),
-            ])
+            result = _result(
+                Verdict.BREAKING,
+                [
+                    Change(
+                        ChangeKind.FUNC_REMOVED,
+                        "_Z3foov",
+                        "Public function removed: foo",
+                    ),
+                ],
+            )
             returned = emit_github_step_summary(result)
         assert returned == str(summary_file)
         content = summary_file.read_text(encoding="utf-8")
@@ -533,9 +632,12 @@ class TestEmitGitHubStepSummary:
 
         summary_file = tmp_path / "summary.md"
         with patch.dict("os.environ", {"GITHUB_STEP_SUMMARY": str(summary_file)}):
-            result = _result(Verdict.COMPATIBLE, [
-                Change(ChangeKind.FUNC_ADDED, "_Z3barv", "New function added: bar"),
-            ])
+            result = _result(
+                Verdict.COMPATIBLE,
+                [
+                    Change(ChangeKind.FUNC_ADDED, "_Z3barv", "New function added: bar"),
+                ],
+            )
             emit_github_step_summary(result, severity_config=PRESET_DEFAULT)
         content = summary_file.read_text(encoding="utf-8")
         assert "Severity Configuration" in content
@@ -544,6 +646,7 @@ class TestEmitGitHubStepSummary:
 # ---------------------------------------------------------------------------
 # collect_annotations / format_annotations
 # ---------------------------------------------------------------------------
+
 
 class TestCollectAndFormatAnnotations:
     """Test the building-block functions used for multi-library annotation."""
@@ -593,6 +696,7 @@ class TestCollectAndFormatAnnotations:
 # annotation_report_entries — the JSON-persistence path (CLI cleanup phase
 # two, PR E's persistence prerequisite; report_schema_version 2.43)
 # ---------------------------------------------------------------------------
+
 
 class TestAnnotationReportEntries:
     def test_error_entry_shape(self):
@@ -684,7 +788,9 @@ class TestAnnotationReportEntries:
         result.scoped_only_changes = (scoped,)  # type: ignore[attr-defined]
         entries = annotation_report_entries(result)
         assert entries
-        assert any("PE_ORDINAL_RETARGETED".lower() in e["annotation"].lower() for e in entries)
+        assert any(
+            "PE_ORDINAL_RETARGETED".lower() in e["annotation"].lower() for e in entries
+        )
         # collect_annotations (the stderr path) must agree -- both read
         # through the same _collect_annotations_detailed.
         assert collect_annotations(result)
@@ -763,6 +869,7 @@ class TestAnnotationReportEntries:
 # severity_config-aware annotation levels
 # ---------------------------------------------------------------------------
 
+
 class TestSeverityConfigAwareAnnotations:
     """Without severity_config, annotation levels follow the fixed kind-set
     mapping regardless of what actually gates CI. These guard the fix: when a
@@ -800,7 +907,9 @@ class TestSeverityConfigAwareAnnotations:
         assert collect_annotations(result, severity_config=cfg) == []
 
         annotations = collect_annotations(
-            result, severity_config=cfg, annotate_additions=True,
+            result,
+            severity_config=cfg,
+            annotate_additions=True,
         )
         assert len(annotations) == 1
         sort_key, line = annotations[0]
@@ -824,7 +933,9 @@ class TestSeverityConfigAwareAnnotations:
         from abicheck.severity import resolve_severity_config
 
         c = Change(
-            ChangeKind.SONAME_BUMP_UNNECESSARY, "libfoo.so", "unnecessary bump",
+            ChangeKind.SONAME_BUMP_UNNECESSARY,
+            "libfoo.so",
+            "unnecessary bump",
         )
         result = _result(Verdict.COMPATIBLE, [c])
         cfg = resolve_severity_config("default")  # quality_issues=warning
@@ -857,7 +968,9 @@ class TestSeverityConfigAwareAnnotations:
         from abicheck.severity import resolve_severity_config
 
         c = Change(
-            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, "f", "version req added",
+            ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+            "f",
+            "version req added",
         )
         c.effective_verdict = Verdict.API_BREAK
         result = _result(Verdict.API_BREAK, [c])
@@ -881,20 +994,29 @@ class TestSeverityConfigAwareAnnotations:
         from abicheck.severity import compute_exit_code, resolve_severity_config
 
         c = Change(
-            ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo",
+            ChangeKind.FUNC_REMOVED,
+            "_Z3foov",
+            "removed: foo",
             frozen_namespace_violation="**::detail::r1::*",
         )
         pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: _Verdict.COMPATIBLE})
         result = DiffResult(
-            old_version="1.0", new_version="2.0", library="libtest.so.1",
-            changes=[c], verdict=Verdict.BREAKING, policy_file=pf,
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[c],
+            verdict=Verdict.BREAKING,
+            policy_file=pf,
         )
         cfg = resolve_severity_config("default")  # abi_breaking=error
 
         # The actual gate: still fails at the frozen finding's raw severity.
         eff_sets = result._effective_kind_sets()
         exit_code = compute_exit_code(
-            result.changes, cfg, kind_sets=eff_sets, policy_file=result.policy_file,
+            result.changes,
+            cfg,
+            kind_sets=eff_sets,
+            policy_file=result.policy_file,
         )
         assert exit_code == 4
 
