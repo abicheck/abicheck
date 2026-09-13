@@ -111,7 +111,7 @@ def test_typed_api_raises_snapshot_error_for_a_corrupt_pack(
     snaps: tuple[Path, Path], corrupt_pack: Path
 ) -> None:
     """A Tier-2 caller gets ``SnapshotError``, never a Click exception."""
-    from abicheck.api_types import CompareRequest, InputSpec
+    from abicheck.service import CompareRequest, InputSpec
     from abicheck.service_compare_pipeline import run_compare_request
 
     old, new = snaps
@@ -167,7 +167,7 @@ def test_typed_api_raises_snapshot_error_for_a_bad_config(
     because ``InputSpec`` carries no ``build_config`` field -- this path is
     reachable from Tier-2 only through that function's own keyword.
     """
-    from abicheck.api_types import InputSpec
+    from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
     from abicheck.service_input_resolution import embed_side_build_source
 
@@ -238,9 +238,9 @@ class TestMalformedPackErrorsReachTheTypedContract:
     ):
         """An invalid pack is already a ``SnapshotError``; nothing rewraps it."""
         from abicheck import service
-        from abicheck.api_types import DumpRequest, InputSpec
         from abicheck.buildsource import embed as embed_mod
         from abicheck.errors import SnapshotError as _SnapshotError
+        from abicheck.service import DumpRequest, InputSpec
 
         def _boom(snap, *args, **kwargs):
             raise _SnapshotError("build pack is malformed")
@@ -264,9 +264,9 @@ class TestMalformedPackErrorsReachTheTypedContract:
         to its callers, and widening that would be a breaking API change.
         """
         from abicheck import service
-        from abicheck.api_types import DumpRequest, InputSpec
         from abicheck.buildsource import embed as embed_mod
         from abicheck.errors import ValidationError
+        from abicheck.service import DumpRequest, InputSpec
 
         def _boom(snap, *args, **kwargs):
             raise ValidationError("build.query must be a string")

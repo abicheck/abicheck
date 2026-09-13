@@ -70,8 +70,6 @@ from .workflows.contracts import (
 # call made *inside* `resolve_input`'s own body, same rule
 # `service_dump_native.py`'s own re-export block documents above). ────────
 from .workflows.input_resolution import (
-    _SNIFF_BYTES as _SNIFF_BYTES,
-    _resolve_raw_typeinfo as _resolve_raw_typeinfo,
     _resolve_symvers as _resolve_symvers,
     _typeinfo_functions as _typeinfo_functions,
     collect_metadata,
@@ -146,16 +144,8 @@ if TYPE_CHECKING:
 # siblings) along with `run_scan`/`run_scan_set`: `CompareRequest` ->
 # `CompareResult` is the one typed contract now. ────────────────────────────
 from .dry_run_estimate import (  # noqa: E402,F401
-    _HEADER_EXTS,
     CompileContext,
     CostEstimate,
-    _count_compile_db_tus,
-    _count_pack_tus,
-    _count_source_tus,
-    _discover_compile_db,
-    _is_header_path,
-    _is_source_tu_path,
-    _scan_imports,
     estimate_scan,
     expand_header_inputs,
     pair_wide_cxx20_std_override,
@@ -169,15 +159,9 @@ from .service_compare_pipeline import (  # noqa: E402,F401
     run_compare_request,
 )
 from .service_dump_native import (  # noqa: E402,F401
-    _HEADER_GRAPH_ENABLED as _HEADER_GRAPH_ENABLED,
-    _HEADER_GRAPH_INCLUDES_ENABLED as _HEADER_GRAPH_INCLUDES_ENABLED,
-    _apply_native_provenance,
     _dump_elf,
     _dump_macho,
     _dump_pe,
-    _emit,
-    _extract_pdb_debug,
-    _finish_native_snapshot,
     _run_dump_uncached,
     run_dump,
 )
@@ -219,7 +203,6 @@ from .service_metadata_attach import (  # noqa: E402,F401
 # its own docstring), so this introduces no real circular import either.
 from .service_render import (  # noqa: E402,F401
     _render_deps_section_md,
-    _render_json_output,
     render_output,
     # The summary-only documents, re-exported through `service_render` (which
     # renders with them) because they are the direct replacement for
@@ -246,7 +229,6 @@ from .service_render import (  # noqa: E402,F401
 # import keeps resolving -- and keeps being monkeypatchable -- exactly as
 # before this split.
 from .workflows.compare_policy import (  # noqa: E402,F401
-    _validate_contract_mode as _validate_contract_mode,
     compare_snapshots,
     dedup_policy_override_warnings,
     load_suppression_and_policy,

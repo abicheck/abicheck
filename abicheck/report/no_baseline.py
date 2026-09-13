@@ -350,7 +350,7 @@ def _coverage_failures(diff: Any) -> tuple[dict[str, Any], ...]:
     """The audit's contract-coverage ledger, already serialized.
 
     Derived from the run's own persisted contract context by the same
-    function the two-sided report uses (``contract_coverage_ledger.
+    function the two-sided report uses (``policy.coverage_ledger.
     coverage_failures_for_context``), rather than re-derived here -- so the
     failures a reader is shown are the ones the exit contribution beside them
     was computed from. Empty when no contract context exists, which is every

@@ -254,7 +254,7 @@ abicheck aggregate REPORTS_DIR --run-plan RUN_PLAN_JSON [...]
 expected-target set internally — `abicheck aggregate --manifest`'s
 `{"targets": [{"id", "required"}]}` wire shape (ADR-047 §5's required
 sub-task) — using each check's own `check_id` as the expected target id,
-**never** the bare target/bundle name. `abicheck/aggregate.py`'s target
+**never** the bare target/bundle name. `abicheck/workflows/aggregate/`'s target
 matching is an exact string comparison against each report's own
 `target_id`, and `check-target` (G30 P1.3) always writes that field as the
 identical `check_id`-shaped string; projecting to a bare name here would

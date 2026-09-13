@@ -17,14 +17,14 @@
 PR I).
 
 ``compare --old-bundle-facts`` used to be a flag that told the CLI "OLD_INPUT
-is a stored :class:`~abicheck.bundle_facts.BundleFacts` document, not a live
+is a stored :class:`~abicheck.model.bundle_facts.BundleFacts` document, not a live
 library/directory/package" -- a second, explicit selector living alongside
 the ordinary directory-vs-package-vs-single-file classification
 (:func:`abicheck.cli_resolve.classify_compare_operand`) that every other
 ``compare`` operand already goes through automatically. This module replaces
 that flag with the same kind of automatic classification, using the
 self-describing ``artifact_type`` marker
-(:data:`abicheck.bundle_facts.BUNDLE_FACTS_ARTIFACT_TYPE`) G38/PR I's own
+(:data:`abicheck.model.bundle_facts.BUNDLE_FACTS_ARTIFACT_TYPE`) G38/PR I's own
 prerequisite work added specifically so this classification could be cheap
 and unambiguous (see ``docs/contribute/plans/cli-cleanup-phase-two.md``'s "PR
 I" entry: "the artifact needs a strong discriminator first").
@@ -606,7 +606,7 @@ def _marker_lookup_at_window(path: Path, n: int) -> tuple[bool | None, bool]:
 
 def looks_like_stored_bundle_facts(path: Path) -> bool:
     """Cheap, safe classification of *path* as a stored
-    :class:`~abicheck.bundle_facts.BundleFacts` document -- either shape
+    :class:`~abicheck.model.bundle_facts.BundleFacts` document -- either shape
     (plain/compressed JSON, or the G40 zip archive).
 
     ``False`` for anything that is not a regular file (a directory), or

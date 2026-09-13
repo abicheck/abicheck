@@ -1283,8 +1283,12 @@ def test_compare_release_matches_service_run_compare(tmp_path: Path) -> None:
 
 def test_run_compare_request_equivalent_to_kwargs_shim(tmp_path: Path) -> None:
     """The kwargs ``run_compare`` shim and a hand-built ``CompareRequest`` agree."""
-    from abicheck.api_types import CompareRequest, InputSpec
-    from abicheck.service import run_compare, run_compare_request
+    from abicheck.service import (
+        CompareRequest,
+        InputSpec,
+        run_compare,
+        run_compare_request,
+    )
 
     old_p = _make_snap_file(tmp_path, "libbar", "1.0", [_func("a"), _func("b")])
     new_p = _make_snap_file(tmp_path, "libbar", "2.0", [_func("a")])
@@ -1309,7 +1313,7 @@ def test_run_compare_request_normalizes_lang(
     normalise so ``"C"`` is not silently treated as C++.
     """
     from abicheck import service
-    from abicheck.api_types import CompareRequest, InputSpec
+    from abicheck.service import CompareRequest, InputSpec
 
     old_p = _make_snap_file(tmp_path, "liblang", "1.0", [_func("a")])
     new_p = _make_snap_file(tmp_path, "liblang", "2.0", [_func("a")])

@@ -16,7 +16,7 @@
 """The set of header-AST frontends a header-only dump/parse may select
 (ADR-061 gap B).
 
-Split out of the former flat ``abicheck.api_types`` module (now
+Split out of the former flat ``abicheck.workflows.contracts`` module (now
 `workflows`-owned, see ``workflows/request_inputs.py``) because this one
 constant has a second, independent real need: ``buildsource/
 header_compile_context.py`` (`extract`) resolves a header-AST frontend

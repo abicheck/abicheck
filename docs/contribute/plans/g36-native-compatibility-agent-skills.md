@@ -828,7 +828,7 @@ ever being validated against it. Add the actual `scan_report.schema.json`
 and its published mirror as part of this change, either as one schema
 with explicit `oneOf` branches for the three shapes or as distinct schema
 families each with their own version — and cover all three with real
-validation tests, not just `scan --against`'s, `abicheck/aggregate.py`
+validation tests, not just `scan --against`'s, `abicheck/workflows/aggregate/`
 (`TargetReport.reason` is itself a bare `str | None` — `_load_report_file`
 reads a per-target report's structured `reason: {kind, message}` object
 and flattens it straight into that one string field, line ~1471 — so
@@ -844,7 +844,7 @@ shaped differently (`verdict: "NOT_COMPARABLE"`, reason nested under
 `diff`), so this extraction needs its own scan-specific branch reading
 `diff.reason_codes`, not just the compare-shaped path, or a `project`
 matrix backed by `scan` targets would still silently lose the field;
-bump `AGGREGATE_SCHEMA_VERSION` in `abicheck/aggregate.py` for this
+bump `AGGREGATE_SCHEMA_VERSION` in `abicheck/workflows/aggregate/` for this
 additive key, independently of the compare/scan report schema bumps —
 it's its own versioned contract, not implicitly covered by bumping
 theirs), `abicheck/stack_checker.py`

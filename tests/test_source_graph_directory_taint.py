@@ -312,7 +312,7 @@ def test_entity_resolver_remap_normalizes_canonical_values_too() -> None:
     # canonical_id_for() keeps returning a directory-tainted id that never
     # matches a freshly-resolved graph's canonical id (Codex review, fresh
     # evidence, second round).
-    from abicheck.buildsource.entity_resolver import EntityResolver
+    from abicheck.model.entity_resolver import EntityResolver
 
     old_id = "type://lambda at /old/checkout/lib.hpp:4:37"
     stale_canonical = "sig:lambda at /old/checkout/lib.hpp:4:37\x1frecord\x1f0"
@@ -477,7 +477,7 @@ def test_identity_attrs_are_normalized_alongside_label() -> None:
     assert old_node.attrs["name"] == new_node.attrs["name"]
     assert old_node.attrs["qualified_name"] == new_node.attrs["qualified_name"]
 
-    from abicheck.buildsource import entity_identity
+    from abicheck.model import entity_identity
 
     old_identity = entity_identity.resolve_identity_for_node(old_node)
     new_identity = entity_identity.resolve_identity_for_node(new_node)
@@ -855,9 +855,9 @@ def test_constructor_seeded_entity_resolver_is_rebuilt_after_normalization() -> 
     # persisted resolver after migration (Codex review, fresh evidence, eighteenth
     # round) -- otherwise the resolver stays keyed by the pre-normalization id and
     # canonical_id_for() on the real (normalized) node id returns None.
-    from abicheck.buildsource.entity_resolver import EntityResolver
     from abicheck.buildsource.graph_facts import GraphNode
     from abicheck.buildsource.source_graph import SourceGraphSummary
+    from abicheck.model.entity_resolver import EntityResolver
 
     raw_id = "type://lambda at /old/checkout/lib.hpp:4:37"
     stale_resolver = EntityResolver(aliases={raw_id: "some-stale-canonical-id"})

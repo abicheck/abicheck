@@ -373,12 +373,13 @@ def _write_stored_package(
     """A stored package whose capture asserted a complete inventory (the
     S2 proof) unless *inventory_complete* is ``False`` -- the shape a
     document imported without the assertion takes."""
-    from abicheck.bundle_facts import BundleFacts, capture_bundle_facts
-    from abicheck.bundle_facts_store import write_bundle_facts_package
+    from abicheck.model.bundle_facts import BundleFacts
     from abicheck.project_snapshot_store import (
         DirectoryObjectStore,
         write_project_manifest,
     )
+    from abicheck.storage.bundle_facts_package import write_bundle_facts_package
+    from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
     facts = capture_bundle_facts(libraries, variant_fingerprint="gcc13")
     facts = BundleFacts(
@@ -789,9 +790,9 @@ class TestDegradedStrandedCapture:
     def test_stored_pair_skips_a_degraded_member_and_says_so(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.bundle_facts import capture_bundle_facts
         from abicheck.elf_metadata import ElfMetadata, ElfSymbol
         from abicheck.serialization import save_bundle_facts
+        from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
         from abicheck.workflows.bundle_stored_pair_compare import (
             compare_stored_bundle_facts_pair,
         )
@@ -941,15 +942,15 @@ class TestPrComment:
 
 class TestDegradedPersistenceVersioning:
     def test_only_a_degraded_document_declares_the_reader_max(self) -> None:
-        from abicheck.bundle_facts import (
+        from abicheck.model.bundle_facts import (
             BUNDLE_FACTS_BASE_SCHEMA_VERSION,
             BUNDLE_FACTS_SCHEMA_VERSION,
-            capture_bundle_facts,
         )
-        from abicheck.bundle_facts_serialization import (
+        from abicheck.storage.bundle_facts_codec import (
             bundle_facts_from_dict,
             bundle_facts_to_dict,
         )
+        from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
         clean = capture_bundle_facts(
             {"liba.so": AbiSnapshot(library="liba.so", version="")}
@@ -1018,8 +1019,8 @@ def _facts_file(
     degraded: dict[str, str] | None = None,
     manifest: object | None = None,
 ) -> Path:
-    from abicheck.bundle_facts import capture_bundle_facts
     from abicheck.serialization import save_bundle_facts
+    from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
     path = tmp_path / name
     save_bundle_facts(

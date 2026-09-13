@@ -15,7 +15,7 @@
 """Anonymous/lambda-closure ordinal identity normalization for a stored or
 freshly-dumped snapshot (ADR-061 gap B).
 
-The real owner behind the flat ``abicheck.qualified_name_segments``
+The real owner behind the flat ``abicheck.compare.qualified_name_normalization``
 compatibility facade's ``renumber_anonymous_closure_identities`` half --
 the half that normalizes a snapshot's own string fields (``storage``'s
 job), as opposed to that facade's sibling diffing-decision half, which

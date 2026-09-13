@@ -693,7 +693,7 @@ Phase 7), and the exit code is the worst contribution across them:
   `contract_coverage_exit_contribution` (per-report field; see
   "Contract-coverage contribution" above) and folds it with `max`, same as
   the other axes — added to the aggregate schema alongside this axis
-  (`abicheck.aggregate.AGGREGATE_SCHEMA_VERSION` is the versioned fact
+  (`abicheck.workflows.aggregate.AGGREGATE_SCHEMA_VERSION` is the versioned fact
   owner); `aggregate` never recomputes it. This is a different question again from
   plain `coverage`: a required target can have reported successfully (no
   coverage gap) while its own evidence for the *selected contract domain*
@@ -781,7 +781,7 @@ the JSON output's `effective_policy` block, including which source
 (`manifest`/`run-plan`/`explicit`/`default`) it came from — `explicit` only
 appears for a direct Python-API caller of `aggregate()` forcing a value
 (there is no CLI spelling for it). The `-o json=...` output is versioned
-(`aggregate_schema_version` — see `abicheck.aggregate.AGGREGATE_SCHEMA_VERSION`
+(`aggregate_schema_version` — see `abicheck.workflows.aggregate.AGGREGATE_SCHEMA_VERSION`
 for the current value) and carries the six axes
 separately under `gate` / `coverage` / `compatibility` / `contract_coverage` /
 `analysis_assurance` / `scope_completeness` — the last three are

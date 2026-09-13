@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
+from abicheck.workflows.aggregate import ExpectedTargets, aggregate_reports_dir
 from tests.schema_validation import validate_instance
 
 LINUX = "linux-x86_64"

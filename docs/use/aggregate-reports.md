@@ -7,7 +7,7 @@ level: intermediate
 canonical_for:
   - aggregate-reporting
 depends_on:
-  - abicheck/aggregate.py
+  - abicheck/workflows/aggregate/__init__.py
   - abicheck/aggregate_findings.py
   - abicheck/cli_aggregate.py
 lifecycle: active
@@ -84,7 +84,7 @@ flowchart TD
 - **coverage** — did every **required** expected target actually report at
   all? A required target with no report is a coverage gap, exit `1` — never
   promoted to a fake ABI-break exit `4`.
-- **contract_coverage** (ADR-049 Phase 7, `abicheck.aggregate.AGGREGATE_SCHEMA_VERSION`
+- **contract_coverage** (ADR-049 Phase 7, `abicheck.workflows.aggregate.AGGREGATE_SCHEMA_VERSION`
   is the versioned fact owner) — for a target that
   *did* report, was its own selected `--contract` domain's evidence
   complete? Read back from that report's own
@@ -107,7 +107,7 @@ flowchart TD
   the JSON output records which targets caused which.
 
 An illustrative report (`aggregate_schema_version` is omitted here since
-`abicheck.aggregate.AGGREGATE_SCHEMA_VERSION` is its fact owner, not this
+`abicheck.workflows.aggregate.AGGREGATE_SCHEMA_VERSION` is its fact owner, not this
 example — every real report carries the field):
 
 ```json

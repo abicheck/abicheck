@@ -475,8 +475,8 @@ def test_compare_request_collapse_versioned_symbols_field_reaches_the_diff(tmp_p
     ``classify_compare_pair`` chokepoint every ``CompareRequest`` consumer
     shares (mirrors ``test_typed_api_gate_options.py``'s regression-class
     pattern: assert the decision changes, not only that the field exists)."""
-    from abicheck.api_types import CompareRequest, InputSpec
     from abicheck.serialization import snapshot_to_json
+    from abicheck.service import CompareRequest, InputSpec
     from abicheck.service_compare_evidence import SideEvidence
     from abicheck.service_compare_pipeline import (
         ResolvedComparePair,

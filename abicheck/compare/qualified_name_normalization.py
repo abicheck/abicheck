@@ -15,7 +15,7 @@
 """Qualified-name segmentation and versioned/inline-namespace identity
 decisions used for old/new declaration matching (ADR-061 gap B).
 
-The real owner behind the flat ``abicheck.qualified_name_segments``
+The real owner behind the flat ``abicheck.compare.qualified_name_normalization``
 compatibility facade's ``segments``/``version_strip_segments``/
 ``strip_inline_abi_namespaces``/``raw_segments`` half. The *recognition*
 primitives this half builds on (:func:`~abicheck.model.qualified_name_split.

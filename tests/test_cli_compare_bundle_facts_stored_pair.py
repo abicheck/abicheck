@@ -40,11 +40,11 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from abicheck.bundle_facts import capture_bundle_facts
 from abicheck.cli import main
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import save_bundle_facts
+from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
 #: Carries the marker so operand classification routes it to
 #: compare_bundle_facts.dispatch() -- see test_cli_compare_bundle_facts_

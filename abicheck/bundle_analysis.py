@@ -29,9 +29,9 @@ actually agrees).
 The live ``compare --release`` CLI path (``cli_compare_release_helpers.
 _run_bundle_analysis``) called both, in order, folding the second into the
 first's own ``bundle_findings`` list. The stored-baseline path
-(:func:`abicheck.bundle_facts.compare_bundle_from_facts`) called only the
+(:func:`abicheck.model.bundle_facts.compare_bundle_from_facts`) called only the
 first — a stored side had no full ``AbiSnapshot`` map (a
-:class:`~abicheck.bundle_facts.BundleFacts` document doesn't have to carry
+:class:`~abicheck.model.bundle_facts.BundleFacts` document doesn't have to carry
 one for the *new* side at all, only its own captured old side) and no
 second call site ever threaded one through. So a stored-baseline comparison
 never ran the Phase 4 gate, even when both sides' signature evidence was
@@ -67,7 +67,7 @@ Leaf module with respect to both halves it orchestrates:
 :mod:`abicheck.bundle` and :mod:`abicheck.bundle_signature_evidence` are
 each importable at module scope here with no cycle (neither imports this
 module, or anything that transitively would), so unlike
-:mod:`abicheck.bundle_facts` (which imports :mod:`abicheck.bundle` only
+:mod:`abicheck.model.bundle_facts` (which imports :mod:`abicheck.bundle` only
 lazily to avoid a real cycle through :mod:`abicheck.bundle_models`), this
 module needs no lazy-import dance of its own.
 """

@@ -110,7 +110,7 @@ def test_input_spec_carries_compile_context() -> None:
     pair, and ``None`` (rather than an inert default instance) is how a side
     says "no override", so call sites can still skip threading one.
     """
-    from abicheck.api_types import InputSpec
+    from abicheck.service import InputSpec
 
     cc = CompileContext(gcc_options="-DFOO=1", sysroot=Path("/sr"), nostdinc=True)
     side = InputSpec.of(Path("x.so"), compile=cc)

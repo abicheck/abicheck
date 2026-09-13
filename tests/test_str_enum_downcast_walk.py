@@ -60,13 +60,13 @@ import pytest
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.vocabulary import AccessLevel, ParamKind
 from abicheck.name_classification import strip_anonymous_type_location
-from abicheck.qualified_name_segments import (
-    _walk_rewrite_strings,
+from abicheck.qualified_name_segments_walk import _walk_rewrite_strings
+from abicheck.serialization import snapshot_from_dict
+from abicheck.storage.closure_identity import (
     apply_anonymous_type_ordinals,
     collect_anonymous_type_ordinals,
     renumber_anonymous_closure_identities,
 )
-from abicheck.serialization import snapshot_from_dict
 
 
 def _closure(header: str, line: int, col: int) -> str:

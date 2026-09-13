@@ -820,8 +820,8 @@ def test_resolve_side_snapshot_seeds_clang_cl_gcc_path_end_to_end(
     service.resolve_input, not just the intermediate
     resolve_header_compile_context result."""
     from abicheck import service_input_resolution as sir
-    from abicheck.api_types import InputSpec
     from abicheck.model import AbiSnapshot
+    from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
 
     header = tmp_path / "widget.h"

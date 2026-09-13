@@ -14,7 +14,9 @@ being a live `scan` option, per `plans/one-comparison-product.md`'s "One
 deferral's blocker re-attributed" note; with `scan` deleted, that blocker
 is gone and the flag is removed outright, old spelling exits 64, no
 alias), `compare --env-matrix` (`deployment:` in `.abicheck.yml`, PR
-#1221), and `compare --require-complete-analysis`
+#1221; its `CompareRequest.env_matrix_path` constructor shim has since
+been retired outright — see the 2026-09-13 amendment), and
+`compare --require-complete-analysis`
 (`assurance.require_complete` in `.abicheck.yml`, rulings.py
 deferred-option followup, this PR) — none remain open. See
 `docs/contribute/plans/one-comparison-product.md`'s Phase 6 section for the
@@ -716,22 +718,11 @@ documented, released `env_matrix_path: Path` field outright with
 `env_matrix: EnvironmentMatrix`, so a Tier-2 caller built exactly per the
 previously-published `CompareRequest(..., env_matrix_path=Path(...))` shape
 (credited in `CHANGELOG.md`'s 0.4.0 entry) hit an immediate `TypeError` at
-construction, not a graceful fallback. Fixed in the same review round:
-`CompareRequest.env_matrix_path` is kept as a genuine, still-accepted
-constructor parameter, but resolution into an `EnvironmentMatrix` is lazy
-rather than immediate — `__post_init__` only checks the structural
-"not both `env_matrix` and `env_matrix_path`" invariant (no file I/O), and
-the actual load (via `workflows.input_resolution.load_env_matrix`, the same
-loader the retired CLI flag itself used) happens later, at the
-plan/execution boundary, through `CompareRequest.effective_env_matrix()` —
-called from `resolve_compare_request()` and cached on
-`ResolvedComparePair.resolved_env_matrix` for `classify_compare_pair()` to
-read. So constructing a `CompareRequest(..., env_matrix_path=...)` succeeds
-even if the file doesn't exist yet (and does not cache stale contents from
-before a later edit); the two spellings become equivalent only once the
-request is resolved, not at construction — see
-`abicheck/workflows/contracts.py`'s own field docstring and
-`tests/test_environment_drift.py::TestCompareRequestEnvMatrixPathCompat`.
+construction, not a graceful fallback. Fixed in the same review round by keeping
+`CompareRequest.env_matrix_path` as a still-accepted constructor parameter
+with lazy, plan-boundary resolution. **Superseded by the 2026-09-13
+amendment below: that shim has since been retired outright — `env_matrix`
+is the only spelling, and `env_matrix_path` is no longer accepted.**
 Only the CLI flag surface and its
 `--support-promise`-shaped strict-schema enforcement moved.
 `compare --require-complete-analysis` and `dump --build-target` — this same
@@ -1055,6 +1046,52 @@ behavior).
 | [065](065-comparison-scope-selection-and-completeness.md) | Aligned and depended on: `declared_absent` joins its acquisition vocabulary; `--artifact-set` members become its selection model |
 | [008](008-full-stack-dependency-validation.md) | Amended: D6 states `deps`' user question and its convergence requirements |
 | [049](049-contract-relevance-and-compatibility-configuration.md) | Unchanged and protected: contract-mechanism consolidation waits on its own correctness prerequisites |
+
+## Amendment (2026-09-13): `CompareRequest.env_matrix_path` retired outright
+
+D5's correction above kept `env_matrix_path` as an accepted constructor
+parameter with lazy resolution, on backward-compatibility grounds. That
+shim is now **removed**: `CompareRequest(..., env_matrix_path=...)` raises
+`TypeError`, and `effective_env_matrix()` is gone with it.
+
+**Why the compatibility argument no longer holds.** It rested on the field
+having been published in `CHANGELOG.md`'s 0.4.0 entry. abicheck is
+pre-1.0, and ADR-043 already reset the CLI surface on exactly that basis;
+the same latitude applies to the typed API's own historical constructor
+shapes, which is what this is. Nothing about the *analysis* contract
+changes — this is compatibility of abicheck's own Python interface, not of
+the ABI compatibility the product reports.
+
+**What the shim cost.** It was not one field. It forced a second
+representation of the same input all the way down the pipeline: a
+`__post_init__` mutual-exclusion check, a lazy resolver, a
+`ResolvedComparePair.resolved_env_matrix` slot to carry the answer past
+side acquisition, and — because a bare `EnvironmentMatrix | None` default
+could not tell "resolved to nothing" from "never resolved" — a dedicated
+`_UnresolvedEnvMatrixType` sentinel plus a fallback branch in
+`classify_compare_pair()`. Four review rounds went into making those two
+spellings agree. `env_matrix` already carries the resolved
+`EnvironmentMatrix` that `.abicheck.yml`'s `deployment:` key produces, so
+with the path spelling gone there is no file to load at classify time, no
+ordering constraint against side acquisition, and no ambiguity to encode.
+
+**Migration**, for a caller still passing a path:
+
+```python
+from abicheck.workflows.input_resolution import load_env_matrix
+request = CompareRequest(..., env_matrix=load_env_matrix(Path("env.yaml")))
+```
+
+That is the same loader the retired shim called, now called by the caller
+that knows when it wants the file read.
+
+Behaviour is otherwise unchanged: a declared runtime floor still reaches
+classification and still flags `platform_baseline_floor_raised`, through
+both `resolve_compare_request()`/`classify_compare_pair()` and a
+caller-built `ResolvedComparePair` —
+`tests/test_service_compare_pipeline.py::TestRequestEnvMatrixReachesClassification`
+and `tests/test_api_types.py::TestCompareRequestEnvMatrix`.
+
 
 ## References
 

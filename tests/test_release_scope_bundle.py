@@ -219,7 +219,7 @@ class TestBundleAnalysisScope:
         assert "bundle_intra_dep_removed" not in kinds
 
     def test_restrict_bundle_facts_keeps_only_the_members(self) -> None:
-        from abicheck.bundle_facts import capture_bundle_facts
+        from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
         facts = capture_bundle_facts(
             _provider_and_consumer(), degraded_members={"libcore.so": "boom"}
@@ -472,7 +472,7 @@ class TestRunOutcomeSchemaVersion:
 
 
 def _degraded_facts_dict_facts():
-    from abicheck.bundle_facts import capture_bundle_facts
+    from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
     return capture_bundle_facts(
         {"liba.so": AbiSnapshot(library="liba.so", version="")},
@@ -481,7 +481,7 @@ def _degraded_facts_dict_facts():
 
 
 def _degraded_facts_dict() -> dict[str, object]:
-    from abicheck.bundle_facts_serialization import bundle_facts_to_dict
+    from abicheck.storage.bundle_facts_codec import bundle_facts_to_dict
 
     return dict(bundle_facts_to_dict(_degraded_facts_dict_facts()))
 
@@ -493,7 +493,7 @@ class TestDegradedMarkerVersionGate:
 
     @pytest.mark.parametrize("version", [1, 2])
     def test_json_reader_rejects_the_marker_below_version_3(self, version: int) -> None:
-        from abicheck.bundle_facts_serialization import bundle_facts_from_dict
+        from abicheck.storage.bundle_facts_codec import bundle_facts_from_dict
 
         d = _degraded_facts_dict()
         assert d["schema_version"] == 3
@@ -510,9 +510,11 @@ class TestDegradedMarkerVersionGate:
     def test_archive_reader_rejects_the_marker_below_version_3(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.bundle_facts import BUNDLE_ARCHIVE_ARTIFACT_TYPE
         from abicheck.serialization import load_bundle_facts
         from abicheck.storage.bundle_archive import BundleArchiveWriter
+        from abicheck.storage.bundle_facts_validation import (
+            BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+        )
 
         out = tmp_path / "old.bundlefacts.archive.zip"
         with BundleArchiveWriter(out) as writer:
@@ -551,8 +553,8 @@ class TestDegradedMarkerVersionGate:
         """An absent `schema_version` is a v1 document, not the current
         default the reader substitutes: a pre-S2 reader defaults it to its
         own maximum and ignores the marker (Codex review, eighth round)."""
-        from abicheck.bundle_facts_serialization import bundle_facts_from_dict
         from abicheck.serialization import SCHEMA_VERSION
+        from abicheck.storage.bundle_facts_codec import bundle_facts_from_dict
         from abicheck.storage.import_bundle_facts import import_bundle_facts
         from abicheck.storage.package import InMemoryObjectStore
 
@@ -843,7 +845,7 @@ class TestDegradedMarkerMustNameAStoredMember:
 
     @staticmethod
     def _doc() -> dict[str, object]:
-        from abicheck.bundle_facts_serialization import bundle_facts_to_dict
+        from abicheck.storage.bundle_facts_codec import bundle_facts_to_dict
 
         d = dict(bundle_facts_to_dict(_degraded_facts_dict_facts()))
         d["degraded_members"] = {"libghost.so": "ELF-only: boom"}
@@ -851,10 +853,13 @@ class TestDegradedMarkerMustNameAStoredMember:
 
     @pytest.mark.parametrize("reader", ["json", "import", "archive", "construct"])
     def test_a_ghost_member_is_rejected(self, tmp_path: Path, reader: str) -> None:
-        from abicheck.bundle_facts import BUNDLE_ARCHIVE_ARTIFACT_TYPE, BundleFacts
-        from abicheck.bundle_facts_serialization import bundle_facts_from_dict
+        from abicheck.model.bundle_facts import BundleFacts
         from abicheck.serialization import SCHEMA_VERSION, load_bundle_facts
         from abicheck.storage.bundle_archive import BundleArchiveWriter
+        from abicheck.storage.bundle_facts_codec import bundle_facts_from_dict
+        from abicheck.storage.bundle_facts_validation import (
+            BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+        )
         from abicheck.storage.import_bundle_facts import import_bundle_facts
         from abicheck.storage.package import InMemoryObjectStore
 
@@ -889,7 +894,7 @@ class TestDegradedMarkerMustNameAStoredMember:
                 )
 
     def test_a_marker_on_a_stored_member_still_loads(self) -> None:
-        from abicheck.bundle_facts_serialization import bundle_facts_from_dict
+        from abicheck.storage.bundle_facts_codec import bundle_facts_from_dict
 
         assert bundle_facts_from_dict(_degraded_facts_dict()).degraded_members == {
             "liba.so": "ELF-only: boom"
@@ -902,10 +907,12 @@ class TestExplicitNullMarkerIsRejected:
         """`"degraded_members": null` is a non-mapping, rejected like any
         other; only an absent key reads as empty (Codex review, fifteenth
         round)."""
-        from abicheck.bundle_facts import BUNDLE_ARCHIVE_ARTIFACT_TYPE
-        from abicheck.bundle_facts_serialization import bundle_facts_from_dict
         from abicheck.serialization import load_bundle_facts
         from abicheck.storage.bundle_archive import BundleArchiveWriter
+        from abicheck.storage.bundle_facts_codec import bundle_facts_from_dict
+        from abicheck.storage.bundle_facts_validation import (
+            BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+        )
 
         with pytest.raises(ValueError, match="degraded_members.*mapping"):
             if reader == "json":
@@ -927,7 +934,7 @@ class TestExplicitNullMarkerIsRejected:
                 load_bundle_facts(out, format="archive")
 
     def test_an_absent_key_still_reads_as_empty(self) -> None:
-        from abicheck.bundle_facts_serialization import bundle_facts_from_dict
+        from abicheck.storage.bundle_facts_codec import bundle_facts_from_dict
 
         d = _degraded_facts_dict()
         del d["degraded_members"]

@@ -42,8 +42,8 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from abicheck.model import AbiSnapshot, RecordType
-from abicheck.qualified_name_segments import renumber_anonymous_closure_identities
 from abicheck.service import run_dump
+from abicheck.storage.closure_identity import renumber_anonymous_closure_identities
 
 _RAW_BASE = "Base<(lambda:x.h:1:2)>"
 

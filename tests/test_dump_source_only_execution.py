@@ -41,8 +41,8 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.api_types import DumpRequest, InputSpec
 from abicheck.errors import ValidationError
+from abicheck.service import DumpRequest, InputSpec
 
 
 def _source_tree_with_compile_db(tmp_path: Path) -> Path:

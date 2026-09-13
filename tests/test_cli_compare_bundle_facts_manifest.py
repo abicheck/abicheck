@@ -36,10 +36,10 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from abicheck.bundle_facts import capture_bundle_facts
 from abicheck.cli import main
 from abicheck.cli_resolve import _resolve_input
 from abicheck.serialization import save_bundle_facts
+from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
 
 def _invoke(*args: str) -> tuple[int, str]:

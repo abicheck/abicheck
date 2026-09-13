@@ -726,8 +726,8 @@ class TestNoteIfSameBinaryCompared:
         """Public-surface regression test for Item 4: two byte-identical
         JSON snapshots, through the real ``CompareRequest``/
         ``run_compare_request`` path -- previously no warning at all."""
-        from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.serialization import snapshot_to_json
+        from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_pipeline import run_compare_request
 
         snap = _snap(functions=[_pub_func("foo", "_Z3foov", ret="int")])
@@ -748,8 +748,8 @@ class TestNoteIfSameBinaryCompared:
     def test_end_to_end_snapshot_input_compare_stays_quiet_on_real_diff(self, tmp_path):
         """Negative counterpart: two genuinely different snapshots must not
         trigger the fallback."""
-        from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.serialization import snapshot_to_json
+        from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_pipeline import run_compare_request
 
         old_snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
@@ -786,8 +786,8 @@ class TestNoteIfSameBinaryCompared:
         from unittest.mock import MagicMock
 
         from abicheck import dumper as dumper_mod
-        from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.serialization import snapshot_to_json
+        from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_pipeline import run_compare_request
 
         snap = _snap(functions=[_pub_func("foo", "_Z3foov")])
@@ -961,7 +961,7 @@ class TestNoteIfSameBinaryCompared:
         from unittest.mock import MagicMock
 
         from abicheck import dumper as dumper_mod
-        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_pipeline import run_compare_request
 
         real_so = tmp_path / "libfoo.so.1"
@@ -985,8 +985,8 @@ class TestNoteIfSameBinaryCompared:
         fixed for `scan --against` -- a JSON snapshot whose own serialized
         text matches the INPUT()/GROUP() probe must never be resolved as a
         linker script pointing at a same-named real DSO."""
-        from abicheck.api_types import CompareRequest, InputSpec
         from abicheck.serialization import snapshot_to_json
+        from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_pipeline import run_compare_request
 
         real_so = tmp_path / "libfoo.so"

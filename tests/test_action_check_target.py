@@ -528,7 +528,7 @@ class TestFinalizeAugmentMode:
         abicheck.aggregate.GateInfo.from_report_data and confirm it reads a
         blocking gate, for gate-mode: deferred specifically (the mode that
         actually depends on aggregate re-reading the report later)."""
-        from abicheck.aggregate import GateInfo
+        from abicheck.workflows.aggregate import GateInfo
 
         report_path = tmp_path / "analysis.json"
         _write_compare_report(report_path, verdict="COMPATIBLE_WITH_RISK", exit_code=0)

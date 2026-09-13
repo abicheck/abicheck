@@ -44,8 +44,8 @@ from test_lambda_identity_ordinal import _closure, _record
 
 from abicheck.model import AbiSnapshot
 from abicheck.model.fact import replace_with_fact_sync
-from abicheck.qualified_name_segments import renumber_anonymous_closure_identities
 from abicheck.qualified_name_segments_walk import _collect_strings
+from abicheck.storage.closure_identity import renumber_anonymous_closure_identities
 
 
 class TestQualifiedNameFactIsRenumberedToo:

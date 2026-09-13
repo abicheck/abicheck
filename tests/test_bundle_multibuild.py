@@ -22,7 +22,6 @@ from __future__ import annotations
 import pytest
 from hypothesis import given, settings, strategies as st
 
-from abicheck.bundle_facts import DEFAULT_VARIANT_FINGERPRINT, BundleFacts
 from abicheck.bundle_multibuild import (
     VariantOutcome,
     coverage_regression_findings,
@@ -31,6 +30,7 @@ from abicheck.bundle_multibuild import (
 )
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot
+from abicheck.model.bundle_facts import DEFAULT_VARIANT_FINGERPRINT, BundleFacts
 
 
 def _facts(fingerprint: str, libraries: tuple[str, ...] = ()) -> BundleFacts:

@@ -57,7 +57,10 @@ from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot, Function, Param, ParamKind
 from abicheck.name_classification import strip_anonymous_type_location
-from abicheck.qualified_name_segments import _collect_strings, _walk_rewrite_strings
+from abicheck.qualified_name_segments_walk import (
+    _collect_strings,
+    _walk_rewrite_strings,
+)
 from abicheck.serialization import snapshot_from_dict
 from abicheck.storage.snapshot_load_normalization import (
     normalize_anonymous_type_spellings_on_load,

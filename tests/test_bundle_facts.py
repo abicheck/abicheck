@@ -18,14 +18,6 @@ from pathlib import Path
 import pytest
 
 from abicheck.bundle import _compute_resolution_graph, compare_bundle
-from abicheck.bundle_facts import (
-    BUNDLE_FACTS_BASE_SCHEMA_VERSION,
-    BUNDLE_FACTS_SCHEMA_VERSION,
-    BundleFacts,
-    bundle_snapshot_from_facts,
-    capture_bundle_facts,
-    compare_bundle_from_facts,
-)
 from abicheck.bundle_manifest import (
     InstantiationManifest,
     ManifestEntry,
@@ -36,12 +28,22 @@ from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change, DiffResult
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model.bundle_facts import (
+    BUNDLE_FACTS_BASE_SCHEMA_VERSION,
+    BUNDLE_FACTS_SCHEMA_VERSION,
+    BundleFacts,
+)
 from abicheck.serialization import (
     bundle_facts_from_dict,
     bundle_facts_to_dict,
     load_bundle_facts,
     save_bundle_facts,
 )
+from abicheck.workflows.bundle_facts_capture import (
+    bundle_snapshot_from_facts,
+    capture_bundle_facts,
+)
+from abicheck.workflows.bundle_facts_compare import compare_bundle_from_facts
 
 # ---------------------------------------------------------------------------
 # Fixtures (mirrors tests/test_bundle.py's own helpers)

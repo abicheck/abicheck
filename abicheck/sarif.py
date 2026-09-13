@@ -691,7 +691,7 @@ def _coverage_notifications(result: object) -> dict[str, object]:
     invocation's ``exitCode`` *is* folded with the coverage floor now that
     ADR-049 Phase 7 applies it -- see :func:`to_sarif`.
     """
-    from .contract_coverage_ledger import coverage_failures_for_context
+    from .policy.coverage_ledger import coverage_failures_for_context
 
     ctx = getattr(result, "contract_context", None)
     if ctx is None:

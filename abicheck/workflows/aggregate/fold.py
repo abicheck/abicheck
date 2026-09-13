@@ -467,7 +467,7 @@ class AggregateResult:
 
         Where :attr:`profile_matrix` reconciles *verdicts* per profile, this
         reconciles the individual findings behind them, keyed by
-        :func:`~abicheck.aggregate_findings.resolve_report_change_identity`.
+        :func:`~abicheck.workflows.aggregate.reconcile.resolve_report_change_identity`.
         Same participation rule as :attr:`profile_matrix`: only targets whose
         ``target_id`` is ``check_id``-shaped (so a profile can be parsed out)
         are grouped, and ``unexpected_targets`` are excluded. Empty in the
@@ -479,7 +479,7 @@ class AggregateResult:
         aggregate_findings.ReportFindings`); *unaffected* only when every one
         of its reports enumerated its findings in full and none of them was
         this one. The reconciliation rules themselves live in
-        :func:`~abicheck.aggregate_findings.build_finding_matrix`; this
+        :func:`~abicheck.workflows.aggregate.reconcile.build_finding_matrix`; this
         property only projects this result's ``TargetReport`` grouping down
         to the plain per-check finding sets that function takes.
 

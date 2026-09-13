@@ -44,7 +44,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
+from abicheck.workflows.aggregate import ExpectedTargets, aggregate_reports_dir
 
 LINUX = "linux-x86_64"
 

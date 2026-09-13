@@ -439,7 +439,7 @@ use_cases:
     status: complete
     gap: G22
     evidence:
-      modules: [abicheck/api_types.py, abicheck/service.py, abicheck/cli_options.py, abicheck/buildsource/inline.py]
+      modules: [abicheck/workflows/request_inputs.py, abicheck/service.py, abicheck/cli_options.py, abicheck/buildsource/inline.py]
       tests: [tests/test_cli_contract.py, tests/test_api_types.py, tests/test_config_rebalance.py]
       docs: [docs/contribute/adr/037-cli-interface-contract.md]
     next_steps: >

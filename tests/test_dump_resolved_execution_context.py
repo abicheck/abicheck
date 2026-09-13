@@ -30,9 +30,9 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.api_types import DumpRequest, InputSpec
 from abicheck.model import AbiSnapshot, Function
 from abicheck.serialization import snapshot_to_json
+from abicheck.service import DumpRequest, InputSpec
 from abicheck.service_dump_pipeline import (
     ResolvedDumpRequest,
     execute_dump_request,

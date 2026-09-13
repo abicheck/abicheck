@@ -20,12 +20,12 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.api_types import CompareRequest, DumpRequest, InputSpec
 from abicheck.compile_context import CompileContext
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.errors import SnapshotError, ValidationError
 from abicheck.model import AbiSnapshot, Function
 from abicheck.serialization import snapshot_to_json
+from abicheck.service import CompareRequest, DumpRequest, InputSpec
 
 
 def _snapshot(version: str = "1.0") -> AbiSnapshot:
@@ -839,7 +839,7 @@ class TestAndroidFrontendIsNotAHeaderBackend:
         """The same defect existed for a typed ``compare`` caller, which is why
         the fix lives in the shared resolution rather than at either caller."""
         from abicheck import service
-        from abicheck.api_types import CompareRequest
+        from abicheck.service import CompareRequest
 
         captured = self._spy_on_compile_context(monkeypatch)
         side = InputSpec(

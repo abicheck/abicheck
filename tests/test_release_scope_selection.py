@@ -74,12 +74,13 @@ def _manifest(*entries: tuple[str, str | None]) -> InstantiationManifest:
 def _write_stored_package_with_manifest(
     root: Path, libraries: dict[str, AbiSnapshot], manifest: InstantiationManifest
 ) -> None:
-    from abicheck.bundle_facts import BundleFacts, capture_bundle_facts
-    from abicheck.bundle_facts_store import write_bundle_facts_package
+    from abicheck.model.bundle_facts import BundleFacts
     from abicheck.project_snapshot_store import (
         DirectoryObjectStore,
         write_project_manifest,
     )
+    from abicheck.storage.bundle_facts_package import write_bundle_facts_package
+    from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
     facts = capture_bundle_facts(libraries, variant_fingerprint="gcc13")
     facts = BundleFacts(
@@ -547,11 +548,11 @@ class TestDegradedMarkerIsValidatedBeforeAnyWrite:
         """`ObjectStore` has no rollback: the marker gate must run before
         the per-library snapshot imports, or a rejected document leaves
         unreferenced objects behind (CodeRabbit review)."""
-        from abicheck.bundle_facts import capture_bundle_facts
-        from abicheck.bundle_facts_serialization import bundle_facts_to_dict
         from abicheck.serialization import SCHEMA_VERSION
+        from abicheck.storage.bundle_facts_codec import bundle_facts_to_dict
         from abicheck.storage.import_bundle_facts import import_bundle_facts
         from abicheck.storage.package import InMemoryObjectStore
+        from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
         doc = dict(
             bundle_facts_to_dict(
@@ -671,7 +672,7 @@ class TestDirectBundleApiHonorsDegradation:
 
     @staticmethod
     def _facts():
-        from abicheck.bundle_facts import capture_bundle_facts
+        from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
         return capture_bundle_facts(
             {"libcore.so": _lib("libcore.so"), "libalgo.so": _lib("libalgo.so")},
@@ -679,11 +680,11 @@ class TestDirectBundleApiHonorsDegradation:
         )
 
     def test_compare_bundle_from_facts_refuses(self) -> None:
-        from abicheck.bundle_facts import (
+        from abicheck.workflows.bundle_facts_capture import (
             bundle_snapshot_from_facts,
             capture_bundle_facts,
-            compare_bundle_from_facts,
         )
+        from abicheck.workflows.bundle_facts_compare import compare_bundle_from_facts
 
         new_snapshot = bundle_snapshot_from_facts(
             capture_bundle_facts({"libalgo.so": _lib("libalgo.so")})
@@ -706,7 +707,7 @@ class TestDirectBundleApiHonorsDegradation:
             )
 
     def test_a_resolved_scope_passes(self) -> None:
-        from abicheck.bundle_facts import bundle_snapshot_from_facts
+        from abicheck.workflows.bundle_facts_capture import bundle_snapshot_from_facts
         from abicheck.workflows.release_scope import restrict_bundle_facts
 
         facts = self._facts()

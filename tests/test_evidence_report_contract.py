@@ -158,8 +158,7 @@ class TestEvidenceReportGoesToStderr:
 
     def test_typed_api_emits_no_evidence_report(self, tmp_path, capsys):
         """``run_compare_request`` has no stream, so it must write nothing."""
-        from abicheck.api_types import CompareRequest, InputSpec
-        from abicheck.service import run_compare_request
+        from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
         old, new = self._pair_with_embedded_evidence(tmp_path)
         capsys.readouterr()

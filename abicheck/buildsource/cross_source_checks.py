@@ -64,6 +64,17 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
+from abicheck.model.source_graph_query import (
+    DECL_NODE_KINDS,
+    INTERNAL_VISIBILITIES,
+    PUBLIC_VISIBILITIES,
+    UNANNOTATED_VISIBILITIES,
+    decl_declaring_files,
+    is_internal_dependency_node,
+    is_public_dependency_node,
+    looks_like_system_name,
+)
+
 from ..checker_types import Change
 from ..evidence_depth import resolve_l5_source_graph
 from ..model import (
@@ -95,16 +106,6 @@ from .export_accounting import (
     _external_dependency_origin,
     _library_self_names,
     _linked_library_names,
-)
-from .source_graph_query import (
-    DECL_NODE_KINDS,
-    INTERNAL_VISIBILITIES,
-    PUBLIC_VISIBILITIES,
-    UNANNOTATED_VISIBILITIES,
-    decl_declaring_files,
-    is_internal_dependency_node,
-    is_public_dependency_node,
-    looks_like_system_name,
 )
 
 #: Cross-check fact-schema version. Independent of every other buildsource

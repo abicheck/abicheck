@@ -433,9 +433,9 @@ class TestMalformedStoredAliasesRaise:
         from dataclasses import replace as dc_replace
 
         from abicheck import bundle
-        from abicheck.bundle_facts import BundleFacts
         from abicheck.elf_metadata import ElfMetadata
         from abicheck.errors import SnapshotError
+        from abicheck.model.bundle_facts import BundleFacts
         from abicheck.workflows.release_package import resolve_release_package_map
 
         libs = {

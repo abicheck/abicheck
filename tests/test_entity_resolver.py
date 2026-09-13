@@ -18,9 +18,9 @@
 
 from __future__ import annotations
 
-from abicheck.buildsource.entity_resolver import EntityConflict, EntityResolver
 from abicheck.buildsource.graph_facts import GraphNode
 from abicheck.buildsource.source_graph import SOURCE_GRAPH_VERSION, SourceGraphSummary
+from abicheck.model.entity_resolver import EntityConflict, EntityResolver
 
 
 def _node(node_id: str, **attrs: object) -> GraphNode:

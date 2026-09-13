@@ -307,7 +307,7 @@ def _run_bundle_analysis(
 
     G38 stabilization Phase 12: both stages run through the single
     :func:`abicheck.bundle_analysis.analyze_bundle` orchestrator (shared
-    with :func:`abicheck.bundle_facts.compare_bundle_from_facts`); this
+    with :func:`abicheck.model.bundle_facts.compare_bundle_from_facts`); this
     function only builds the two live ``BundleSnapshot``\\ s, resolves the
     manifest, and re-surfaces ``analysis_errors`` as stderr warnings.
 
@@ -506,7 +506,7 @@ def write_bundle_facts_out(
     inventory_complete: bool = False,
 ) -> None:
     """Persist the OLD side's per-library snapshots (plus manifest, if any)
-    to *bundle_facts_out* as a :class:`~abicheck.bundle_facts.BundleFacts`
+    to *bundle_facts_out* as a :class:`~abicheck.model.bundle_facts.BundleFacts`
     file (G38 Phase 2's ``--bundle-facts-out`` producer).
 
     *diff_pairs* is ``_compare_release_libraries``'s own
@@ -572,7 +572,7 @@ def write_bundle_facts_out(
     cycle -- builds the callable and owns the actual resolve.
 
     *old_map* itself (already canonical-key-keyed) is handed to
-    :func:`~abicheck.bundle_facts.capture_bundle_facts` as
+    :func:`~abicheck.model.bundle_facts.capture_bundle_facts` as
     ``library_paths``, so real filesystem aliases (symlink targets,
     hard-linked siblings) are captured while the files still exist on
     disk -- see that function's own docstring.

@@ -19,10 +19,10 @@ from __future__ import annotations
 import pytest
 
 from abicheck import schemas
-from abicheck.aggregate import AGGREGATE_SCHEMA_VERSION
 from abicheck.buildsource.build_output import BUILD_OUTPUT_SCHEMA
 from abicheck.buildsource.run_plan import RUN_PLAN_SCHEMA_GATE
 from abicheck.serialization import SCHEMA_VERSION
+from abicheck.workflows.aggregate import AGGREGATE_SCHEMA_VERSION
 
 
 class TestSchemasCurrent:

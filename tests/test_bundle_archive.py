@@ -1031,8 +1031,8 @@ class TestSniffDetectsAPrefixedArchive:
         `_prefixed_archive()`'s hand-rolled low-level manifest, this
         round-trips through the real `save_bundle_facts()` glue so
         `load_bundle_facts()` can actually parse what it reads back."""
-        from abicheck.bundle_facts import capture_bundle_facts
         from abicheck.serialization import save_bundle_facts
+        from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
         real = tmp_path / "real-facts.bundlefacts.archive.zip"
         save_bundle_facts(capture_bundle_facts({}), real, format="archive")
@@ -1170,9 +1170,9 @@ class TestSniffSkipsTailScanForRecognizedCompressionEnvelopes:
     def test_sniff_and_load_bundle_facts_treat_it_as_json(self, tmp_path: Path) -> None:
         """End-to-end pin through the public loader: the real regression
         this guards against."""
-        from abicheck.bundle_facts import capture_bundle_facts
         from abicheck.serialization import bundle_facts_to_dict, load_bundle_facts
         from abicheck.storage.bundle_archive import sniff_bundle_archive_format
+        from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
         facts = capture_bundle_facts({})
         payload = json.dumps(bundle_facts_to_dict(facts), indent=2).encode("utf-8")
