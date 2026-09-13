@@ -23,6 +23,7 @@ from typing import Any
 # Canonical stdlib/runtime RTTI prefixes (single source of truth in the
 # dependency-free name_classification leaf). Imported under the historical local
 # name; combined below with _STDLIB_PREFIXES to drop transitive runtime symbols.
+from .elf_metadata import SymbolType
 from .name_classification import STDLIB_RTTI_PREFIXES as _STDLIB_RTTI_PREFIXES
 
 # ELF symbol types (STT_*) that represent a callable function surface and a
@@ -34,6 +35,23 @@ from .name_classification import STDLIB_RTTI_PREFIXES as _STDLIB_RTTI_PREFIXES
 # enum, so these string values compare equal to its members.
 FUNCTION_SYMBOL_TYPES: frozenset[str] = frozenset({"func", "ifunc", "notype"})
 VARIABLE_SYMBOL_TYPES: frozenset[str] = frozenset({"object", "tls", "common", "notype"})
+
+#: Every symbol type the parser can produce, derived from ``SymbolType``
+#: itself rather than listed.
+#:
+#: For the one question that is about a *name* rather than a kind: "did this
+#: export exist at all before?" The two sets above are deliberately partial --
+#: their union omits ``other``, the bucket an unrecognised ``st_info`` type
+#: lands in (``elf_metadata``'s ``_TYPE_MAP.get(type_str, SymbolType.OTHER)``)
+#: -- so an ``OTHER -> FUNC`` rename-in-place still read as a brand-new export
+#: and was reported as an addition alongside the symbol-type-change finding
+#: that already described it (Codex review).
+#:
+#: Derived, not spelled, because that is the third time this exact question
+#: has been answered with a hand-listed subset: first one class, then the
+#: union of two, each fixing the instance in front of it. A set built from the
+#: enum covers whatever the parser learns to emit next without a fourth round.
+ALL_SYMBOL_TYPES: frozenset[str] = frozenset(member.value for member in SymbolType)
 
 # Prefixes that identify GCC/compiler-internal symbols which may leak into
 # .dynsym through statically-linked runtime (e.g. libgcc_s, SVML).

@@ -30,6 +30,7 @@ from ..detector_registry import registry
 from ..diff_helpers import make_change
 from ..diff_symbols_renames import _should_filter_transitive_runtime_symbols
 from ..elf_symbol_filter import (
+    ALL_SYMBOL_TYPES,
     FUNCTION_SYMBOL_TYPES,
     VARIABLE_SYMBOL_TYPES,
     exported_symbol_names,
@@ -119,14 +120,20 @@ def _diff_undeclared_exports(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
     # `-warn-newsym` and `semver.recommend_release`'s MINOR bump (Codex
     # review; reproduced on real binaries with a variable turned into a
     # function of the same name).
-    old_export_names: set[str] = set()
-    for types in (FUNCTION_SYMBOL_TYPES, VARIABLE_SYMBOL_TYPES):
-        old_export_names |= exported_symbol_names(
-            old_elf,
-            types,
-            abi_relevant_only=True,
-            filter_transitive_runtime_symbols=filter_transitive,
-        )
+    #
+    # `ALL_SYMBOL_TYPES`, not the union of the two class sets: that union
+    # omits `other`, the bucket an unrecognised `st_info` type lands in, so
+    # an `OTHER -> FUNC` rename-in-place still read as a brand-new export
+    # (Codex review, a round after the first). The question here is about a
+    # *name*, not a kind, so it takes every type the parser can produce --
+    # derived from the enum rather than listed, so the next type added does
+    # not need a fourth round.
+    old_export_names = exported_symbol_names(
+        old_elf,
+        ALL_SYMBOL_TYPES,
+        abi_relevant_only=True,
+        filter_transitive_runtime_symbols=filter_transitive,
+    )
 
     changes: list[Change] = []
     # Functions and data symbols, the same way. Splitting the loop was the

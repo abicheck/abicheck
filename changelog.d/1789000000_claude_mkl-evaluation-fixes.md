@@ -293,3 +293,12 @@
   The cost is accepted deliberately: a descriptor and a native run naming a
   bare `b.h` do achieve the same thing and are refused anyway, because
   nothing in the patterns alone proves which pairs are equivalent.
+- **"Did this export exist before?" now asks about every symbol type.** The
+  undeclared-export detector answered that question with a hand-listed subset
+  of types three times over -- one class, then the union of two -- and the
+  union omits `other`, the bucket an unrecognised ELF `st_info` type lands in.
+  So an `OTHER` -> `FUNC` rename-in-place still read as a brand-new export and
+  was counted as an addition alongside the symbol-type-change finding that
+  already described it. The set is now derived from `SymbolType` itself
+  (`elf_symbol_filter.ALL_SYMBOL_TYPES`), so a type added to the enum later is
+  covered without another round.
