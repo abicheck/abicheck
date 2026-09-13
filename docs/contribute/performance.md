@@ -871,6 +871,61 @@ header-scoped dump (`service._try_header_scoped_dump`) is no longer silently
 swallowed by the broad `except Exception` that falls back to export-table
 mode for a merely-unavailable header backend.
 
+### L2 acquisition: cache-key walk, AST cache write, include-map fan-out
+
+Three costs around the L2 header parse that are *not* the parse itself. All
+three were measured locally (this host: 4 CPUs, clang 20, Python 3.13) against
+current-main function bodies and synthetic-but-realistically-shaped inputs --
+**not** through a full oneDAL/SVS/PVXS `dump`/`compare` run, so read them as
+component figures, not an end-to-end speedup claim.
+
+- **Include-tree inventory for cache keys** (`extract/cache_header_scan.py`).
+  Every header-parse cache key walks each include root to fold in
+  (path, mtime) for every header-like descendant -- `dumper_ast_config.
+  _cache_key` for the AST cache, `snapshot_cache` for the whole-snapshot one.
+  `Path.rglob("*")` materializes a `Path` per entry *visited* and then sorts
+  those objects; carrying path strings through the traversal and building a
+  `Path` only for the surviving, already-ordered entries measured **2.4x**
+  faster (`/usr/include`, 4188 matching entries: 47 ms -> 19 ms; a generated
+  15k-header tree: 151 ms -> 62 ms) with a byte-identical key. Two traversal
+  behaviours are load-bearing and were matched deliberately rather than
+  "cleaned up": the order is component-wise (`PurePath` compares normcased
+  *parts*, so `a/b/c.h` precedes `a/b.h`) and symlinked directories are not
+  descended into (which is also what makes a symlink loop terminate). A
+  `sorted(str(p) ...)` "simplification" changes every cache key on disk while
+  looking like a no-op -- `tests/test_cache_header_walk.py` pins both against
+  a `sorted(rglob("*"))` oracle over generated trees.
+- **The clang AST cache write** (`dumper_cache._atomic_write_json`).
+  `json.dump` never reaches the C encoder: `JSONEncoder.iterencode` selects
+  `c_make_encoder` only under `_one_shot`, which is `dumps`' path. So the
+  DPC++ host/device cache write was encoding a large AST a fragment at a time
+  in pure Python. Descending the *large* containers in Python and handing each
+  bounded subtree to the one-shot C encoder is byte-identical and measured
+  **5x** faster on a deep-template AST fixture (0.25 s -> 0.05 s for 2.1 MB of
+  output; the ratio grows with document size). The obvious
+  `_atomic_write(path, json.dumps(obj).encode())` is *not* the fix -- it holds
+  a second full-size copy of a tree that can be multiple GB, which is why the
+  streaming write exists at all. The plain (non-DPC++) path still streams a raw
+  file copy of clang's own stdout and pays none of this.
+- **Per-header `clang -M` include-map fan-out**
+  (`buildsource/include_graph_workers.py`). The probes are independent
+  subprocesses, so the pass was wall-clock-bound on nothing but
+  serialization: 32 wrapper headers over a shared include took **1.71 s at
+  one worker, 0.44 s at four** (3.9x), with byte-identical depfiles; eight
+  workers bought nothing measurable on 4 CPUs, which is why the auto default
+  is CPU-derived rather than a fixed 8. This trades memory for wall time
+  rather than removing compiler work -- child CPU time is unchanged -- so the
+  pool is clamped by the same `process_resources` RAM probe the L4 pool uses
+  (at a much smaller per-worker budget: `clang -M` is preprocess-only). One
+  thing that is *not* a valid shortcut here, and was ruled out with a real
+  clang: replacing the per-header probes with a single umbrella TU. A header
+  with an include guard that a *previous* header in the umbrella already
+  pulled in disappears from the second header's dependency list entirely, so
+  the umbrella silently loses edges the per-header probes see. The safe win
+  is scheduling the same invocations better, never changing the compilation
+  context.
+
+
 ## L4 source-replay (dump-side) performance
 
 The scaling harness above is pure-Python and times the *compare* pipeline. The

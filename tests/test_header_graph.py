@@ -675,6 +675,7 @@ def test_header_include_extractor_returns_empty_without_clang(monkeypatch) -> No
 
 def test_header_include_extractor_parses_mocked_clang(tmp_path, monkeypatch) -> None:
     import abicheck.buildsource.include_graph as ig
+    import abicheck.buildsource.include_graph_workers as igw
 
     pub = tmp_path / "pub.h"
     pub.write_text('#include "detail/impl.h"\n')
@@ -688,7 +689,7 @@ def test_header_include_extractor_parses_mocked_clang(tmp_path, monkeypatch) -> 
         stdout = f"pub.o: {pub} {impl}"
         stderr = ""
 
-    monkeypatch.setattr(ig.deadline, "run_bounded", lambda *a, **k: _Proc())
+    monkeypatch.setattr(igw.deadline, "run_bounded", lambda *a, **k: _Proc())
 
     include_map, diags = ClangHeaderIncludeExtractor().extract(
         [str(pub)], [str(tmp_path)]
@@ -705,6 +706,7 @@ def test_header_include_extractor_forwards_gcc_options(tmp_path, monkeypatch) ->
     # must reach this pass exactly like the AST pass, not just the deferred
     # gcc_option_tokens.
     import abicheck.buildsource.include_graph as ig
+    import abicheck.buildsource.include_graph_workers as igw
 
     pub = tmp_path / "pub.h"
     pub.write_text("void f();\n")
@@ -720,13 +722,14 @@ def test_header_include_extractor_forwards_gcc_options(tmp_path, monkeypatch) ->
 
         return _Proc()
 
-    monkeypatch.setattr(ig.deadline, "run_bounded", _fake_run)
+    monkeypatch.setattr(igw.deadline, "run_bounded", _fake_run)
     ClangHeaderIncludeExtractor().extract([str(pub)], [], gcc_options="-DFOO=1")
     assert "-DFOO=1" in seen_argv["cmd"]
 
 
 def test_header_include_extractor_folds_into_graph(tmp_path, monkeypatch) -> None:
     import abicheck.buildsource.include_graph as ig
+    import abicheck.buildsource.include_graph_workers as igw
 
     pub = tmp_path / "pub.h"
     pub.write_text('#include "detail/impl.h"\n')
@@ -744,7 +747,7 @@ def test_header_include_extractor_folds_into_graph(tmp_path, monkeypatch) -> Non
         stdout = f"pub.o: {pub} {impl}"
         stderr = ""
 
-    monkeypatch.setattr(ig.deadline, "run_bounded", lambda *a, **k: _Proc())
+    monkeypatch.setattr(igw.deadline, "run_bounded", lambda *a, **k: _Proc())
 
     include_map, _diags = ClangHeaderIncludeExtractor().extract(
         [str(pub)], [str(tmp_path)]
@@ -895,6 +898,7 @@ def test_header_include_extractor_forwards_sysroot_and_nostdinc(
     tmp_path, monkeypatch
 ) -> None:
     import abicheck.buildsource.include_graph as ig
+    import abicheck.buildsource.include_graph_workers as igw
 
     pub = tmp_path / "pub.h"
     pub.write_text("void f();\n")
@@ -910,7 +914,7 @@ def test_header_include_extractor_forwards_sysroot_and_nostdinc(
 
         return _Proc()
 
-    monkeypatch.setattr(ig.deadline, "run_bounded", _fake_run)
+    monkeypatch.setattr(igw.deadline, "run_bounded", _fake_run)
     ClangHeaderIncludeExtractor().extract(
         [str(pub)], [], sysroot="/opt/cross-sysroot", nostdinc=True
     )

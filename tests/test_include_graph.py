@@ -438,6 +438,7 @@ def test_extractor_missing_clang_returns_empty() -> None:
 
 def test_extractor_parses_mocked_clang(monkeypatch) -> None:
     import abicheck.buildsource.include_graph as ig
+    import abicheck.buildsource.include_graph_workers as igw
 
     monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
 
@@ -451,7 +452,7 @@ def test_extractor_parses_mocked_clang(monkeypatch) -> None:
         seen["cmd"] = cmd
         return _Proc()
 
-    monkeypatch.setattr(ig.deadline, "run_bounded", _run)
+    monkeypatch.setattr(igw.deadline, "run_bounded", _run)
     build = BuildEvidence(
         compile_units=[
             CompileUnit(
@@ -474,13 +475,14 @@ def test_extractor_parses_mocked_clang(monkeypatch) -> None:
 
 def test_extractor_handles_subprocess_error(monkeypatch) -> None:
     import abicheck.buildsource.include_graph as ig
+    import abicheck.buildsource.include_graph_workers as igw
 
     monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
 
     def _boom(*_a, **_k):
         raise OSError("nope")
 
-    monkeypatch.setattr(ig.deadline, "run_bounded", _boom)
+    monkeypatch.setattr(igw.deadline, "run_bounded", _boom)
     build = BuildEvidence(compile_units=[CompileUnit(id="cu://foo", source="foo.cpp")])
     assert ClangIncludeExtractor().extract_from_build(build) == {}
 
@@ -499,6 +501,7 @@ def test_extractor_is_bound_by_active_scan_deadline(monkeypatch) -> None:
     local per-unit/aggregate cap makes that the case (Codex review, PR
     #591, round 3)."""
     import abicheck.buildsource.include_graph as ig
+    import abicheck.buildsource.include_graph_workers as igw
     from abicheck import deadline
 
     monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
@@ -506,7 +509,7 @@ def test_extractor_is_bound_by_active_scan_deadline(monkeypatch) -> None:
     def _raise(*_a, **_k):
         raise deadline.DeadlineExceeded(-1.0)
 
-    monkeypatch.setattr(ig.deadline, "run_bounded", _raise)
+    monkeypatch.setattr(igw.deadline, "run_bounded", _raise)
     build = BuildEvidence(
         compile_units=[
             CompileUnit(id="cu://a", source="a.cpp"),
@@ -529,6 +532,7 @@ def test_extractor_local_cap_timeout_does_not_abort_remaining_compile_units(
     overflow. Must degrade to a per-CU diagnostic and keep probing later
     compile units, not discard include maps for all of them."""
     import abicheck.buildsource.include_graph as ig
+    import abicheck.buildsource.include_graph_workers as igw
     from abicheck import deadline
 
     monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
@@ -545,7 +549,7 @@ def test_extractor_local_cap_timeout_does_not_abort_remaining_compile_units(
 
         return _R()
 
-    monkeypatch.setattr(ig.deadline, "run_bounded", _fake_run)
+    monkeypatch.setattr(igw.deadline, "run_bounded", _fake_run)
     build = BuildEvidence(
         compile_units=[
             CompileUnit(id="cu://a", source="a.cpp"),
@@ -574,6 +578,7 @@ def test_extractor_local_cap_binding_at_entry_but_outer_deadline_drains_during_e
     would misreport a genuine budget overflow as an ordinary per-CU
     timeout."""
     import abicheck.buildsource.include_graph as ig
+    import abicheck.buildsource.include_graph_workers as igw
     from abicheck import deadline
 
     monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
@@ -584,7 +589,7 @@ def test_extractor_local_cap_binding_at_entry_but_outer_deadline_drains_during_e
         clock["t"] += 40.0  # simulate run_bounded's real escalation cost
         raise deadline.DeadlineExceeded(-1.0)
 
-    monkeypatch.setattr(ig.deadline, "run_bounded", _fake_run)
+    monkeypatch.setattr(igw.deadline, "run_bounded", _fake_run)
     build = BuildEvidence(
         compile_units=[
             CompileUnit(id="cu://a", source="a.cpp"),
@@ -663,6 +668,7 @@ def test_extract_from_build_unredacts_home(monkeypatch) -> None:
     # argv/cwd persist with the home dir redacted to `~`; the depfile pass must
     # un-redact them before subprocess, which does not expand `~` (Codex review).
     import abicheck.buildsource.include_graph as ig
+    import abicheck.buildsource.include_graph_workers as igw
 
     captured: dict = {}
 
@@ -676,7 +682,7 @@ def test_extract_from_build_unredacts_home(monkeypatch) -> None:
         return _Result()
 
     monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
-    monkeypatch.setattr(ig.deadline, "run_bounded", _fake_run)
+    monkeypatch.setattr(igw.deadline, "run_bounded", _fake_run)
 
     cu = CompileUnit(
         id="cu://a",
@@ -705,6 +711,7 @@ def test_extract_uses_dash_m_and_preserves_c_language(monkeypatch) -> None:
     # -M (not -MM) so system-classified public headers appear; -x c so a C unit
     # replayed through clang++ is parsed as C (Codex review).
     import abicheck.buildsource.include_graph as ig
+    import abicheck.buildsource.include_graph_workers as igw
 
     captured: dict = {}
 
@@ -714,7 +721,7 @@ def test_extract_uses_dash_m_and_preserves_c_language(monkeypatch) -> None:
 
     monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
     monkeypatch.setattr(
-        ig.deadline, "run_bounded", lambda cmd, **kw: captured.update(cmd=cmd) or _R()
+        igw.deadline, "run_bounded", lambda cmd, **kw: captured.update(cmd=cmd) or _R()
     )
     cu = CompileUnit(
         id="cu://c", source="foo.c", language="C", argv=["cc", "-c", "foo.c"]
@@ -727,6 +734,7 @@ def test_extract_uses_dash_m_and_preserves_c_language(monkeypatch) -> None:
 
 def test_extract_from_build_caps_compile_units(monkeypatch) -> None:
     import abicheck.buildsource.include_graph as ig
+    import abicheck.buildsource.include_graph_workers as igw
 
     calls = []
 
@@ -739,7 +747,7 @@ def test_extract_from_build_caps_compile_units(monkeypatch) -> None:
         return _R()
 
     monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
-    monkeypatch.setattr(ig.deadline, "run_bounded", _fake_run)
+    monkeypatch.setattr(igw.deadline, "run_bounded", _fake_run)
     build = BuildEvidence(
         compile_units=[
             CompileUnit(id=f"cu://{i}", source=f"foo{i}.cpp") for i in range(3)
@@ -756,6 +764,7 @@ def test_extract_from_build_caps_compile_units(monkeypatch) -> None:
 
 def test_extract_from_build_enforces_aggregate_timeout(monkeypatch) -> None:
     import abicheck.buildsource.include_graph as ig
+    import abicheck.buildsource.include_graph_workers as igw
 
     calls = []
     now = {"value": 0.0}
@@ -770,8 +779,8 @@ def test_extract_from_build_enforces_aggregate_timeout(monkeypatch) -> None:
         return _R()
 
     monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
-    monkeypatch.setattr(ig.time, "monotonic", lambda: now["value"])
-    monkeypatch.setattr(ig.deadline, "run_bounded", _fake_run)
+    monkeypatch.setattr(igw.time, "monotonic", lambda: now["value"])
+    monkeypatch.setattr(igw.deadline, "run_bounded", _fake_run)
     build = BuildEvidence(
         compile_units=[
             CompileUnit(id=f"cu://{i}", source=f"foo{i}.cpp") for i in range(3)
@@ -799,6 +808,7 @@ def test_extractor_call_bounded_by_local_cap_not_full_scan_budget(monkeypatch) -
     assert the ContextVar deadline observed by the call is bound to the
     tight local cap, not the much larger outer scan budget."""
     import abicheck.buildsource.include_graph as ig
+    import abicheck.buildsource.include_graph_workers as igw
     from abicheck import deadline
 
     monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
@@ -813,7 +823,7 @@ def test_extractor_call_bounded_by_local_cap_not_full_scan_budget(monkeypatch) -
 
         return _R()
 
-    monkeypatch.setattr(ig.deadline, "run_bounded", fake_run)
+    monkeypatch.setattr(igw.deadline, "run_bounded", fake_run)
     ext = ClangIncludeExtractor(aggregate_timeout_s=5.0, per_unit_timeout_s=5.0)
     build = BuildEvidence(compile_units=[CompileUnit(id="cu://a", source="a.cpp")])
     with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget

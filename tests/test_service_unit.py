@@ -4232,7 +4232,7 @@ class TestRunDumpHeaderGraph:
                 lambda _b: "/usr/bin/clang++",
             ),
             patch(
-                "abicheck.buildsource.include_graph.deadline.run_bounded",
+                "abicheck.buildsource.include_graph_workers.deadline.run_bounded",
                 lambda *a, **k: _Proc(),
             ),
         ):
@@ -4276,7 +4276,7 @@ class TestRunDumpHeaderGraph:
                 lambda _b: "/usr/bin/clang++",
             ),
             patch(
-                "abicheck.buildsource.include_graph.deadline.run_bounded",
+                "abicheck.buildsource.include_graph_workers.deadline.run_bounded",
                 lambda *a, **k: _Proc(),
             ),
         ):
@@ -4334,7 +4334,7 @@ class TestRunDumpHeaderGraph:
                 lambda _b: "/usr/bin/clang++",
             ),
             patch(
-                "abicheck.buildsource.include_graph.deadline.run_bounded",
+                "abicheck.buildsource.include_graph_workers.deadline.run_bounded",
                 _fake_run,
             ),
         ):

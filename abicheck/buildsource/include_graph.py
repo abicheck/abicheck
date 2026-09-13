@@ -25,14 +25,12 @@ from __future__ import annotations
 
 import re
 import shutil
-import subprocess  # noqa: S404 - include extraction shells out to clang (never shell=True)
-import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .. import deadline
 from ..model.graph_facts import CONF_HIGH, GraphEdge, GraphNode
 from ..model.source_graph import _header_node_id, _source_node_id
+from .include_graph_workers import DepfileProbe, run_probes
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary
@@ -174,7 +172,9 @@ def _expand_argv_response_files(
 def _depfile_token_takes_value(tok: str) -> bool:
     """True for a flag whose *next* argv token is its value and must go too."""
     return tok == "--config" or tok in (
-        _DEPFILE_DROP_WITH_VALUE | _DEPFILE_UNSAFE_WITH_VALUE | _DEPFILE_OUTPUT_WITH_VALUE
+        _DEPFILE_DROP_WITH_VALUE
+        | _DEPFILE_UNSAFE_WITH_VALUE
+        | _DEPFILE_OUTPUT_WITH_VALUE
     )
 
 
@@ -402,12 +402,37 @@ class ClangIncludeExtractor:
     max_compile_units: int = 256
     aggregate_timeout_s: float = 30.0
     per_unit_timeout_s: float = 120.0
+    #: Worker count for the per-unit pass; ``None`` resolves it from
+    #: ``ABICHECK_INCLUDE_MAP_JOBS`` / host CPU+RAM (see
+    #: :func:`.include_graph_workers.resolve_jobs`).
+    jobs: int | None = None
 
     def available(self) -> bool:
         return shutil.which(self.clang_bin) is not None
 
     def extract_from_build(self, build: BuildEvidence) -> dict[str, list[str]]:
-        """Return ``{compile_unit_id: [included path, ...]}`` for every TU."""
+        """Return ``{compile_unit_id: [included path, ...]}`` for every TU.
+
+        Three phases, so the per-unit ``clang -M`` calls can overlap without
+        any of the sequential loop's decisions becoming order-dependent:
+
+        1. **Plan** (this method, cheap, no subprocess): argv sanitization,
+           ``~`` un-redaction and the ``max_compile_units`` budget, in
+           ``build.compile_units`` order.
+        2. **Run** (:func:`.include_graph_workers.run_probes`): each unit's own
+           ``deadline.run_bounded`` call, sequentially or through a bounded
+           thread pool. Every outcome is *returned*, never recorded on
+           ``self`` -- the worker touches no shared state.
+        3. **Fold** (this method): walk the outcomes back in *planned* order
+           and apply exactly the sequential loop's rules -- which diagnostics
+           are recorded, in what order, which failures count against
+           ``diagnostics_limit``, and where the walk stops.
+
+        Phase 3 is what keeps the result independent of completion order: the
+        returned map, the diagnostics list and the stopping point are all
+        functions of the planned order alone, so two runs over the same build
+        produce byte-identical output whatever the workers do.
+        """
         if not self.available():
             self.diagnostics.append(f"{self.clang_bin} not found in PATH")
             return {}
@@ -418,27 +443,14 @@ class ClangIncludeExtractor:
         # extractor does.
         from .source_extractors._argv import unredact_home
 
-        out: dict[str, list[str]] = {}
-        failures = 0
-        attempted = 0
-        aggregate_deadline = time.monotonic() + self.aggregate_timeout_s
+        planned: list[DepfileProbe] = []
+        budget_exhausted = False
         for cu in build.compile_units:
             if not cu.source:
                 continue
-            if attempted >= self.max_compile_units:
-                self.diagnostics.append(
-                    "clang -M include-map budget exhausted: "
-                    f"stopped after {attempted} compile units"
-                )
+            if len(planned) >= self.max_compile_units:
+                budget_exhausted = True
                 break
-            remaining = aggregate_deadline - time.monotonic()
-            if remaining <= 0:
-                self.diagnostics.append(
-                    "clang -M include-map time budget exhausted: "
-                    f"stopped after {attempted} compile units"
-                )
-                break
-            attempted += 1
             argv = (
                 depfile_args_from_argv(cu.argv, directory=cu.directory)
                 if cu.argv
@@ -461,82 +473,79 @@ class ClangIncludeExtractor:
                 *(unredact_home(a) for a in argv),
             ]
             cwd = unredact_home(cu.directory) if cu.directory else None
-            per_call_timeout = min(self.per_unit_timeout_s, remaining)
-            scan_remaining = deadline.remaining()
-            # Whether the OUTER scan --budget (not this extractor's own
-            # per-unit/aggregate cap) is what will actually bind the nested
-            # scope below — decides how a DeadlineExceeded from it is
-            # classified (Codex review, PR #591, round 3).
-            bound_by_scan_deadline = (
-                scan_remaining is not None and scan_remaining < per_call_timeout
-            )
-            if scan_remaining is not None:
-                # run_bounded() honors an active outer deadline verbatim (not
-                # min(timeout, left) — a generous --budget must not get
-                # silently re-capped), so a bare `timeout=` here would let a
-                # hung call eat the *whole* remaining scan budget instead of
-                # this extractor's own per-unit/aggregate ceiling. Nest a
-                # narrower scope so this call is bound by whichever is
-                # tighter (Codex review, PR #591).
-                per_call_timeout = min(per_call_timeout, scan_remaining)
-            try:
-                # Process-group-safe on timeout, same as the L2/L4/L5 clang calls.
-                with deadline.deadline_scope(per_call_timeout):
-                    proc = deadline.run_bounded(  # noqa: S603 - fixed argv, never shell=True
-                        cmd,
-                        cwd=cwd or None,
-                        capture_output=True,
-                        text=True,
-                        timeout=per_call_timeout,
-                    )
-            except deadline.DeadlineExceeded as exc:
-                if not bound_by_scan_deadline:
-                    # The entry-time snapshot said this extractor's OWN
-                    # per-unit/aggregate cap was binding, not the outer scan
-                    # deadline — but run_bounded's own escalation (SIGTERM
-                    # -> grace -> SIGKILL, plus a fixed 5s pipe-drain) can
-                    # push real elapsed time past that snapshot, so the
-                    # outer deadline can still be exhausted by now even
-                    # though it wasn't at entry. Re-check it directly
-                    # instead of trusting the stale snapshot alone (Codex
-                    # review, PR #591, round 3).
-                    try:
-                        deadline.check()
-                    except deadline.DeadlineExceeded:
-                        pass
-                    else:
-                        # Only this extractor's own per-unit/aggregate cap
-                        # expired (no active --budget, or one with plenty
-                        # left) — an ordinary per-CU timeout, not a
-                        # scan-budget overflow. Degrade like any other
-                        # single-CU failure instead of discarding include
-                        # maps for every remaining compile unit.
-                        self.diagnostics.append(
-                            f"clang -M timed out for {cu.id}: {exc}"
-                        )
-                        continue
-                self.diagnostics.append(
-                    f"scan deadline exceeded during clang -M include-map: {exc}"
-                )
+            planned.append(DepfileProbe(unit_id=cu.id, cmd=cmd, cwd=cwd or None))
+        outcomes = run_probes(
+            planned,
+            aggregate_timeout_s=self.aggregate_timeout_s,
+            per_unit_timeout_s=self.per_unit_timeout_s,
+            jobs=self.jobs,
+            diagnostics=self.diagnostics,
+        )
+
+        out: dict[str, list[str]] = {}
+        failures = 0
+        time_budget_exhausted = False
+        scan_deadline_exceeded = False
+        for planned_unit, outcome in zip(planned, outcomes, strict=True):
+            unit_id = planned_unit.unit_id
+            if outcome.kind == "aggregate_expired":
+                # The sequential loop never *started* a unit once its own
+                # aggregate wall-clock budget was gone; this is that same
+                # stop, reported from wherever the budget actually ran out.
+                time_budget_exhausted = True
                 break
-            except (OSError, subprocess.SubprocessError) as exc:
-                self.diagnostics.append(f"clang -M failed for {cu.id}: {exc}")
+            if outcome.kind == "scan_deadline":
+                self.diagnostics.append(
+                    f"scan deadline exceeded during clang -M include-map: {outcome.detail}"
+                )
+                scan_deadline_exceeded = True
+                break
+            if outcome.kind == "unit_timeout":
+                # Only this extractor's own per-unit/aggregate cap expired (no
+                # active --budget, or one with plenty left) -- an ordinary
+                # per-CU timeout, not a scan-budget overflow. Degrade like any
+                # other single-CU failure instead of discarding include maps
+                # for every remaining compile unit.
+                self.diagnostics.append(
+                    f"clang -M timed out for {unit_id}: {outcome.detail}"
+                )
                 continue
-            if proc.stdout.strip():
-                out[cu.id] = parse_depfile(proc.stdout)
-            elif proc.returncode != 0:
+            if outcome.kind == "error":
+                self.diagnostics.append(
+                    f"clang -M failed for {unit_id}: {outcome.detail}"
+                )
+                continue
+            if outcome.stdout.strip():
+                out[unit_id] = parse_depfile(outcome.stdout)
+            elif outcome.returncode != 0:
                 failures += 1
                 if len(self.diagnostics) < self.diagnostics_limit:
-                    detail = (proc.stderr or "").strip().splitlines()
+                    detail = (outcome.stderr or "").strip().splitlines()
                     msg = next(
                         (
                             line
                             for line in detail
                             if "error:" in line or "fatal error:" in line
                         ),
-                        detail[0] if detail else f"exit {proc.returncode}",
+                        detail[0] if detail else f"exit {outcome.returncode}",
                     )
-                    self.diagnostics.append(f"clang -M failed for {cu.id}: {msg}")
+                    self.diagnostics.append(f"clang -M failed for {unit_id}: {msg}")
+        stopped_early = time_budget_exhausted or scan_deadline_exceeded
+        if time_budget_exhausted:
+            self.diagnostics.append(
+                "clang -M include-map time budget exhausted: "
+                f"stopped after {len(out)} compile units"
+            )
+        elif budget_exhausted and not stopped_early:
+            # Recorded here, not at planning time, so the diagnostics order is
+            # the sequential loop's: the cap is what ended a walk that reached
+            # every planned unit, so it lands after their own diagnostics. A
+            # walk that stopped earlier (budget/deadline) never reached the cap
+            # at all in the sequential loop, and must not claim it did.
+            self.diagnostics.append(
+                "clang -M include-map budget exhausted: "
+                f"stopped after {len(planned)} compile units"
+            )
         if failures > self.diagnostics_limit:
             self.diagnostics.append(
                 f"clang -M failed for {failures - self.diagnostics_limit} more compile units"

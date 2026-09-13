@@ -29,7 +29,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .header_utils import iter_cache_header_files
+from .extract.cache_header_scan import iter_cache_header_files
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -374,7 +374,7 @@ def _hash_include_dir_headers(h: hashlib._Hash, inc: Path) -> None:
     through an ``-I``/``--include`` directory (never itself passed as an
     explicit ``headers`` entry) still invalidates the whole-snapshot cache.
 
-    Reuses :func:`abicheck.header_utils.iter_cache_header_files` (the same
+    Reuses :func:`abicheck.extract.cache_header_scan.iter_cache_header_files` (the same
     ``CACHE_HEADER_SUFFIXES`` set ``dumper._cache_key``'s own AST-level cache
     already walks) rather than a second, independently-maintained suffix
     list -- an earlier ad hoc set here was missing ``.tpp``/``.inc`` (Codex
@@ -386,7 +386,7 @@ def _hash_include_dir_headers(h: hashlib._Hash, inc: Path) -> None:
     module's existing "any read problem is cache-safe, never a crash"
     stance (see ``lookup``/``store``).
     """
-    from .header_utils import iter_cache_header_files
+    from .extract.cache_header_scan import iter_cache_header_files
 
     try:
         entries = iter_cache_header_files(inc)

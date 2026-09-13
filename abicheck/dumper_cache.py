@@ -179,24 +179,159 @@ def _atomic_copy(src: Path, dst: Path) -> None:
         raise
 
 
+#: Subtree size, in *nodes* (containers + scalars), at or below which
+#: :func:`_write_json_chunked` hands a subtree to the one-shot C encoder
+#: whole instead of descending into it. Sizing note: this is the knob that
+#: bounds peak transient memory, so it is deliberately modest -- an AST node
+#: averages well under 100 encoded bytes, so 200k nodes is single-digit MiB
+#: of encoded string held at once, against the hundreds of MiB to multiple GB
+#: the tree itself occupies.
+_JSON_CHUNK_NODE_LIMIT = 200_000
+
+#: Hard cap on how deep :func:`_write_json_chunked` descends before it
+#: delegates a subtree whole regardless of size. Bounds this module's own
+#: Python recursion independently of the size probe, which is also what makes
+#: a cyclic input (impossible from ``json.load``, but not from a hand-built
+#: dict) terminate here and raise from the C encoder's own circular-reference
+#: check rather than blowing the stack in this walk. Deliberately well past
+#: where a clang AST keeps anything *large*: the translation unit's top-level
+#: ``inner`` list and the per-declaration subtrees under it are the first few
+#: levels, and the genuinely deep nesting further down (expression trees) is
+#: small by then, so the memory bound below is reached in practice long
+#: before this cap is.
+_JSON_CHUNK_MAX_DEPTH = 40
+
+#: Encoded-fragment bytes buffered before one ``write`` call. Keeps the
+#: structural fragments ("{", "\"inner\": [", ", ") from costing one
+#: buffered-writer call each without ever holding a meaningful amount of the
+#: document.
+_JSON_WRITE_BUFFER = 1 << 18
+
+
+def _subtree_exceeds(obj: object, limit: int) -> bool:
+    """Whether *obj* holds more than *limit* JSON nodes.
+
+    Stops the moment the answer is known, so the probe costs O(*limit*)
+    regardless of how large the subtree really is -- that bound is what makes
+    it safe to call on the way down :func:`_write_json_chunked`'s descent
+    rather than measuring the whole tree up front.
+    """
+    stack: list[object] = [obj]
+    seen = 0
+    while stack:
+        cur = stack.pop()
+        seen += 1
+        if seen > limit:
+            return True
+        if type(cur) is dict:
+            stack.extend(cur.values())
+        elif type(cur) is list:
+            stack.extend(cur)
+    return False
+
+
+def _write_json_chunked(obj: object, write: Any, depth: int = 0) -> None:
+    """Write *obj* as JSON through *write*, one bounded chunk at a time.
+
+    Byte-identical to ``json.dump(obj, f)`` -- same default separators
+    (``", "``/``": "``), same ``ensure_ascii`` escaping, same key order --
+    but **much** faster on a large tree, because ``json.dump`` does not use
+    the C encoder at all: ``JSONEncoder.iterencode`` only selects
+    ``c_make_encoder`` under ``_one_shot``, which is ``dumps``' path, not
+    ``dump``'s. A streaming ``json.dump`` therefore encodes the entire
+    document with the pure-Python fallback encoder, a fragment at a time
+    (measured 27x slower than this function on a deep-template AST fixture,
+    1.9x on a real header AST).
+
+    The obvious alternative -- ``_atomic_write(path, json.dumps(obj)
+    .encode())`` -- is what the streaming write was introduced to avoid: it
+    holds the whole encoded document as a second full-size object on top of
+    the tree itself, which is exactly the doubling this cache path cannot
+    afford for a multi-GB DPC++ AST.
+
+    So: descend through the *large* containers with Python (cheap -- there
+    are few of them, and only their punctuation is written here) and hand
+    every subtree that is small enough to the one-shot C encoder whole.
+    "Small enough" is decided by :func:`_subtree_exceeds`, not by depth
+    alone, so a single enormous namespace subtree is still split rather than
+    encoded in one piece -- the peak transient string stays bounded by
+    :data:`_JSON_CHUNK_NODE_LIMIT` no matter how the tree is shaped.
+
+    Two shapes are deliberately delegated whole rather than descended into,
+    both on the "never re-implement a coercion" principle: a ``dict``/``list``
+    *subclass* (the exact-type tests below), and a ``dict`` with a non-``str``
+    key. Both encode correctly this way -- only the memory bound relaxes, and
+    neither occurs in a tree that came out of ``json.load``, which is the only
+    thing this cache path ever writes.
+
+    A dict with a non-``str`` key is delegated whole rather than split:
+    ``json`` coerces such keys (``1`` -> ``"1"``, ``True`` -> ``"true"``) and
+    re-deriving that coercion here would be a second implementation of it to
+    keep byte-identical. Clang ASTs never contain one, so nothing is lost.
+    """
+    parts: list[str] = []
+    size = 0
+
+    def emit(fragment: str) -> None:
+        nonlocal size
+        parts.append(fragment)
+        size += len(fragment)
+        if size >= _JSON_WRITE_BUFFER:
+            write("".join(parts))
+            parts.clear()
+            size = 0
+
+    def walk(node: object, depth: int) -> None:
+        if depth < _JSON_CHUNK_MAX_DEPTH and _subtree_exceeds(
+            node, _JSON_CHUNK_NODE_LIMIT
+        ):
+            if type(node) is dict:
+                if all(type(k) is str for k in node):
+                    emit("{")
+                    first = True
+                    for key, value in node.items():
+                        emit(
+                            json.dumps(key) + ": "
+                            if first
+                            else ", " + json.dumps(key) + ": "
+                        )
+                        first = False
+                        walk(value, depth + 1)
+                    emit("}")
+                    return
+            elif type(node) is list:
+                emit("[")
+                first = True
+                for value in node:
+                    if not first:
+                        emit(", ")
+                    first = False
+                    walk(value, depth + 1)
+                emit("]")
+                return
+        emit(json.dumps(node))
+
+    walk(obj, depth)
+    if parts:
+        write("".join(parts))
+
+
 def _atomic_write_json(path: Path, obj: object) -> None:
     """Serialize *obj* as JSON straight into *path* via a same-directory
     temp file + ``os.replace``, without ever materializing the fully
     encoded document as one Python ``str``/``bytes`` object first.
 
-    ``json.dump`` writes incrementally to the file object as it encodes,
-    unlike ``_atomic_write(path, json.dumps(obj).encode(...))`` -- the
-    latter's ``json.dumps`` call builds the entire encoded string in memory
-    before ``_atomic_write`` ever sees it, doubling peak memory again on
-    top of *obj* itself for exactly the kind of multi-GB DPC++ AST tree
-    this cache path exists to write out (Codex review).
+    The encoding itself goes through :func:`_write_json_chunked` rather than
+    ``json.dump`` -- same bytes, same bounded peak memory, without paying
+    ``json.dump``'s pure-Python encoder for the whole document (see that
+    function's own docstring for why ``dump`` never reaches the C encoder).
     """
     fd, tmp_name = tempfile.mkstemp(
         dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
     )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(obj, f)
+            _write_json_chunked(obj, f.write)
         os.replace(tmp_name, path)
     except OSError:
         try:
