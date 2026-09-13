@@ -23,13 +23,13 @@ inside an evidence pack.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 #: Build-evidence schema version, independent of the pack/snapshot versions.
+from ..env_flags import env_flag
 from .comdat_groups import ComdatScan, collect_vague_linkage_symbols
 
 BUILD_EVIDENCE_VERSION: int = 1
@@ -423,11 +423,7 @@ def comdat_scan_requested() -> bool:
     review). Lives here rather than at the call site so ``inline.py``, which
     sits on its line-count cap, spends one line on the gate.
     """
-    return os.environ.get("ABICHECK_COLLECT_COMDAT", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
+    return env_flag("ABICHECK_COLLECT_COMDAT")
 
 
 def _resolved_object(cu: CompileUnit) -> Path | None:

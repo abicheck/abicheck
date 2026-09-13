@@ -40,6 +40,7 @@ from pathlib import Path
 
 from . import deadline
 from .dumper_clang import _is_clang_family_binary
+from .env_flags import env_flag
 
 #: Env knob to disable the castxml↔clang system-include auto-detection. On by
 #: default; set to a falsey value to suppress the host-compiler probe (e.g. for a
@@ -49,12 +50,7 @@ _AUTO_SYSINC_ENV = "ABICHECK_AUTO_SYSTEM_INCLUDES"
 
 def _auto_system_includes_enabled() -> bool:
     """True unless the user disabled the system-include probe via the env knob."""
-    return os.environ.get(_AUTO_SYSINC_ENV, "1").strip().lower() not in (
-        "0",
-        "false",
-        "no",
-        "off",
-    )
+    return env_flag(_AUTO_SYSINC_ENV)
 
 
 def _parse_gnu_include_search_dirs(stderr: str) -> list[str]:

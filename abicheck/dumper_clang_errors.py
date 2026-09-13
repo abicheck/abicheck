@@ -38,6 +38,7 @@ from typing import Any
 from . import deadline
 from .dumper_cache import _atomic_copy, _atomic_write_json, ast_memoize_active
 from .dumper_clang_streaming import load_pruned_clang_ast, streaming_prune_suppressed
+from .env_flags import env_flag
 from .errors import SnapshotError
 from .sycl_context import decode_and_select_frontend_context_from_path
 
@@ -579,7 +580,7 @@ def _streaming_prune_enabled() -> bool:
     # the separate "full/unscoped dump requested" case.
     if ast_memoize_active():
         return False
-    return os.environ.get(STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR, "").strip() == "1"
+    return env_flag(STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR)
 
 
 def _parse_clang_ast_result(

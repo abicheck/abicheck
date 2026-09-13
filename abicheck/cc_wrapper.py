@@ -39,7 +39,9 @@ Configuration is by environment so the wrapper stays argv-transparent:
 ``ABICHECK_CC_HEADERS``     ``os.pathsep``-joined public-header roots (ADR-015)
 ``ABICHECK_CC_LIBRARY``     library name stamped into the manifest / target id
 ``ABICHECK_CC_VERSION``     version stamped into the manifest
-``ABICHECK_CC_DISABLE``     set (non-empty) → pure pass-through, no extraction
+``ABICHECK_CC_DISABLE``     truthy (``1``/``true``/``yes``/``on``) → pure
+                            pass-through, no extraction; falsey or unset → capture
+                            runs (``env_flags.env_flag``)
 ==========================  ===================================================
 """
 
@@ -66,6 +68,7 @@ from .buildsource.inputs_emit import (
     init_inputs_pack,
 )
 from .buildsource.source_abi import SourceAbiTu
+from .env_flags import env_flag
 
 #: Tokens that mark an invocation as preprocess-/dependency-only — it produces no
 #: object that ships in the artifact, so capturing facts for it would pollute the
@@ -245,7 +248,7 @@ def run_cc_wrapper(
     run = runner if runner is not None else _default_runner
     rc = run(command).returncode
 
-    if rc != 0 or environ.get("ABICHECK_CC_DISABLE"):
+    if rc != 0 or env_flag("ABICHECK_CC_DISABLE", environ):
         return rc
     try:
         emit(

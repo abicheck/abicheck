@@ -50,13 +50,13 @@ from __future__ import annotations
 
 import concurrent.futures
 import dataclasses
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .compile_context import CompileContext
 from .confidence import note_if_same_binary_compared
 from .dependency_info import populate_pair_dependency_info
+from .env_flags import env_flag
 from .environment_matrix import EnvironmentMatrix
 from .errors import ValidationError
 from .policy.depth_projection import (
@@ -176,11 +176,7 @@ def resolve_sides_sequentially(request: CompareRequest) -> bool:
       concurrently — so the guard has to live here, where both front ends
       now share one resolution, rather than in the CLI's own copy of it.
     """
-    if os.environ.get("ABICHECK_PARALLEL_EXTRACTION", "1").strip().lower() in (
-        "0",
-        "false",
-        "no",
-    ):
+    if not env_flag("ABICHECK_PARALLEL_EXTRACTION"):
         return True
     return (
         request.old.dump_manifest is not None or request.new.dump_manifest is not None
