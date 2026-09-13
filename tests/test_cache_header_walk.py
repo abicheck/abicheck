@@ -36,7 +36,7 @@ from __future__ import annotations
 import itertools
 import os
 import random
-from pathlib import Path, PurePath
+from pathlib import Path
 
 import pytest
 
@@ -73,10 +73,34 @@ _NAMES = (
 )
 
 
+def _oracle_suffix(name: str) -> str:
+    """The walk's documented suffix rule, derived independently of the walk.
+
+    Deliberately **not** ``PurePath(name).suffix``. That looks like the
+    obvious oracle and was one until CPython 3.14 changed how ``suffix``
+    treats leading and trailing dots -- ``"..h"`` and ``"h."`` both answer
+    differently there than on 3.13. Since this walk's entry set *is* part of
+    the AST/snapshot cache key, tying the key to a definition that moves
+    between interpreters would make the same header tree hash differently on
+    two Pythons, which is exactly the stale-evidence failure the walk exists
+    to prevent. So the rule is pinned here in the tests' own terms: the
+    suffix starts at the last dot that has something before it *and*
+    something after it.
+
+    Stated with ``rpartition`` rather than the implementation's ``rfind``
+    plus index arithmetic, so this stays a second derivation of the contract
+    and not a copy of the code under test.
+    """
+    head, dot, tail = name.rpartition(".")
+    return dot + tail if head and tail else ""
+
+
 def _oracle(directory: Path) -> list[Path]:
     """The documented contract, evaluated independently of the implementation."""
     return sorted(
-        p for p in directory.rglob("*") if p.suffix.lower() in CACHE_HEADER_SUFFIXES
+        p
+        for p in directory.rglob("*")
+        if _oracle_suffix(p.name).lower() in CACHE_HEADER_SUFFIXES
     )
 
 
@@ -190,20 +214,24 @@ def test_scan_half_returns_relative_parts(tmp_path: Path) -> None:
     assert set(_cache_header_rel_parts(tmp_path)) == {("a", "x.h"), ("y.hpp",)}
 
 
-def test_path_suffix_matches_purepath_over_a_generated_name_space() -> None:
-    """``_path_suffix`` is ``PurePath.suffix``, not ``os.path.splitext``.
+def test_path_suffix_matches_the_contract_over_a_generated_name_space() -> None:
+    """``_path_suffix`` implements the walk's own rule, not ``os.path.splitext``.
 
     The two look interchangeable and are not: ``splitext`` skips leading dots,
-    so it reports no suffix for ``"..h"``/``"...h"``/``"..hpp"`` where
-    ``PurePath`` reports ``".h"``/``".hpp"``. Because the entry set is part of
-    the cache key, the walk's first version silently dropped such a header from
-    both the AST and snapshot keys -- an edit to it would then reuse stale
-    cached evidence.
+    so it reports no suffix for ``"..h"``/``"...h"``/``"..hpp"`` where the rule
+    reports ``".h"``/``".hpp"``. Because the entry set is part of the cache
+    key, the walk's first version silently dropped such a header from both the
+    AST and snapshot keys -- an edit to it would then reuse stale cached
+    evidence.
+
+    The oracle is ``_oracle_suffix``, not ``PurePath.suffix``: see its
+    docstring for why a stdlib definition that changed in 3.14 cannot be what
+    a *cache key* is pinned to.
 
     Enumerated exhaustively over a small dot-heavy alphabet rather than pinning
-    those three names, because the bug class is "two similar-looking stdlib
-    functions are not the same function": any name where they disagree is a
-    cache-key divergence, and only an enumeration finds the next one.
+    those three names, because the bug class is "two similar-looking functions
+    are not the same function": any name where they disagree is a cache-key
+    divergence, and only an enumeration finds the next one.
     """
     alphabet = ".hHp_0"
     checked = 0
@@ -214,14 +242,14 @@ def test_path_suffix_matches_purepath_over_a_generated_name_space() -> None:
             if name in (".", ".."):  # not legal directory entry names
                 continue
             checked += 1
-            if _path_suffix(name) != PurePath(name).suffix:
+            if _path_suffix(name) != _oracle_suffix(name):
                 disagreeing.append(name)
     assert checked > 9000, "the enumeration must actually be exhaustive"
     assert disagreeing == []
     # Vacuity guard: the oracle really does distinguish these from splitext,
     # so a helper that simply called splitext would have been caught above.
     assert [os.path.splitext(n)[1] for n in ("..h", "...h", "..hpp")] == ["", "", ""]
-    assert [PurePath(n).suffix for n in ("..h", "...h", "..hpp")] == [
+    assert [_oracle_suffix(n) for n in ("..h", "...h", "..hpp")] == [
         ".h",
         ".h",
         ".hpp",

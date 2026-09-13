@@ -1,0 +1,778 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+"""Ordinal part 1 of ``symbols.py``'s entry list -- not a separate owner.
+
+``symbols.py`` remains the taxonomy and the single public name
+(``SYMBOLS_ENTRIES``); see its docstring for this taxonomy's scope, its
+boundary against the other four, and the methodology the entries were
+categorized by. This file holds a contiguous slice of that one list and
+claims no responsibility of its own, so nothing should import it directly.
+
+The split is by declaration-order line position, not by concern, purely so
+each file stays under ADR-061's 800-line ceiling -- the same reason and the
+same shape as ``kind_names_{1,2,3}.py``, whose own docstring records that an
+ordinal split is the right tool when the content is a data table rather than
+behavior. Partitioning *this* list by a named sub-concern would be a
+different change: it would move the D9 ownership boundary that
+``symbols``/``types``/``platform``/``build``/``source`` already draws, and
+the "Adding a new ChangeKind" procedure names those five modules by name.
+"""
+
+from __future__ import annotations
+
+from .registry import ChangeEntity, ChangeKindMeta, ChangeOperation, Verdict
+
+_B = Verdict.BREAKING
+_C = Verdict.COMPATIBLE
+_A = Verdict.API_BREAK
+_R = Verdict.COMPATIBLE_WITH_RISK
+_E = ChangeKindMeta
+_ENT = ChangeEntity
+_OP = ChangeOperation
+
+SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
+    _E(
+        "anon_field_changed",
+        _B,
+        impact="An anonymous struct/union member changed — either its type "
+        "changed at the same offset, or it was removed entirely (this "
+        "detector reports both under one kind, and only compares the "
+        "anonymous member's own type spelling — it never inspects "
+        "the new type's own nested member names). When the type "
+        "changed: since it has no name to distinguish it, every "
+        "named member reached through it may have shifted offset — "
+        "an already-compiled consumer (or a mixed build linking old "
+        "objects against the new library) still reading/writing at "
+        "the old offsets now hits the wrong bytes. Recompiled source "
+        "picks up the new offsets and is unaffected only if the new "
+        "anonymous type promotes the same named members as before; "
+        "if the replacement type renamed or dropped one of them "
+        "(e.g. `s.member` no longer exists), recompiling fails too, "
+        "the same as the removed-entirely case below. When it was "
+        "removed: every named member promoted from it (e.g. "
+        "`s.member`, reached directly through the enclosing "
+        "struct/union) is simply gone, so source referencing any of "
+        "them fails to compile against the new headers too — "
+        "recompilation does not make this case safe.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "calling_convention_changed",
+        _B,
+        impact="Function calling convention changed; registers/stack usage differs, call crashes.",
+        policy_overrides={"plugin_abi": _C},
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "constant_added",
+        _C,
+        is_addition=True,
+        impact="A new public const/constexpr declaration appeared in the "
+        "public headers (`parse_constants()` extracts public "
+        "`const`/`constexpr` variables and static data members with "
+        "a compile-time initializer, not preprocessor macros — a "
+        "separate detector family, `PUBLIC_MACRO_*`, covers those; "
+        "this can be a plain internal-linkage namespace-scope "
+        "constant or a `static constexpr` member/`inline constexpr` "
+        "variable carrying external linkage and a real exported "
+        "symbol — this detector doesn't distinguish the two). "
+        "Either way, an already-compiled binary is unaffected by an "
+        "*addition* specifically — there's no pre-existing reference "
+        "to break. Source is not unconditionally safe, though: this "
+        "detector checks only that the constant is new, not whether "
+        "its name collides with an identifier a consumer already "
+        "declares at the same scope — an ordinary redeclaration/"
+        "ambiguity error, not a macro textual-substitution hazard.",
+        description_template="New preprocessor constant: {name}",
+        entity=_ENT.VARIABLE,
+        operation=_OP.ADDED,
+    ),
+    _E(
+        "constant_changed",
+        _A,
+        impact="A public const/constexpr declaration's value changed "
+        "(`parse_constants()` extracts public `const`/`constexpr` "
+        "variables and static data members with a compile-time "
+        "initializer, not preprocessor macros — a separate detector "
+        "family, `PUBLIC_MACRO_*`, covers those). For a plain "
+        "internal-linkage namespace-scope constant, any consumer "
+        "that was compiled against the old value has that value "
+        "baked in via ordinary compile-time constant folding, not "
+        "looked up at link/load time, so it keeps behaving as if the "
+        "constant were still the old value until it is recompiled. "
+        "This detector doesn't distinguish that case from a "
+        "`static constexpr` member/`inline constexpr` variable "
+        "carrying external linkage and a real exported symbol: if a "
+        "consumer took the constant's address rather than only "
+        "using its value, it reads the new value at load time "
+        "(through the exported symbol) instead of keeping the old "
+        "one until recompiled.",
+        description_template="Preprocessor constant value changed: {name} ({old} → {new})",
+        entity=_ENT.VARIABLE,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "constant_removed",
+        _A,
+        impact="A public const/constexpr declaration was removed from the "
+        "public headers (`parse_constants()` extracts public "
+        "`const`/`constexpr` variables and static data members with "
+        "a compile-time initializer, not preprocessor macros — a "
+        "separate detector family, `PUBLIC_MACRO_*`, covers those); "
+        "source code referencing it by name fails to compile against "
+        "the new headers either way. For a plain internal-linkage "
+        "namespace-scope constant, an already-compiled binary is "
+        "unaffected (the old value was already folded in at its own "
+        "compile time, and the declaration never had an exported "
+        "symbol) — but this detector doesn't distinguish that case "
+        "from a `static constexpr` member/`inline constexpr` "
+        "variable carrying external linkage and a real exported "
+        "symbol, whose removal breaks an already-linked consumer "
+        "resolving that symbol at load time the same way a removed "
+        "function or variable would.",
+        description_template="Preprocessor constant removed: {name}",
+        entity=_ENT.VARIABLE,
+        operation=_OP.REMOVED,
+    ),
+    _E(
+        "ctor_explicit_added",
+        _A,
+        impact="A constructor or conversion operator gained the `explicit` "
+        "specifier. Source code that relied on implicit conversion "
+        "(copy-initialization like `Foo f = 42;`, pass-by-value at a "
+        "call site, or return-by-implicit-conversion) no longer "
+        "compiles. The mangled name is unchanged so binaries keep "
+        "running, but recompilation against the new header fails.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "ctor_explicit_removed",
+        _R,
+        impact="A constructor or conversion operator lost the `explicit` "
+        "specifier. Existing code keeps compiling, but implicit "
+        "conversion paths that previously did not consider this "
+        "function now do, potentially selecting a different overload "
+        "than before and causing silent behavioral drift.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "ctor_overload_ambiguity_risk",
+        _R,
+        impact="A class gained a second (or later) non-explicit, single-"
+        "argument constructor. Any call site whose argument type is "
+        "implicitly convertible to more than one of the class's "
+        "converting constructors becomes ambiguous — it either stops "
+        "compiling or silently resolves to a different constructor "
+        "than before. This cannot be proven from a header/binary "
+        "snapshot alone (it depends on actual call-site argument "
+        "types), so it is reported as a risk to review, not a "
+        "certain break.",
+        description_template="Class '{name}' gained a 2nd+ non-explicit converting constructor: {new}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "field_access_changed",
+        _A,
+        impact="Field access level narrowed; old code accessing it won't compile.",
+        policy_overrides={"sdk_vendor": _C},
+        description_template="Field access level narrowed: {name}::{detail} ({old} → {new})",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_added",
+        _C,
+        is_addition=True,
+        impact="New function available; existing binaries are unaffected.",
+        description_template="New public function: {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.ADDED,
+    ),
+    _E(
+        "func_became_inline",
+        _A,
+        impact="A function gained the inline attribute. This detector "
+        "(`_check_inline_transitions()`) only compares the `is_inline` "
+        "specifier and export presence, with no language gate — it "
+        "can't establish whether the function's actual definition is "
+        "still visible to a recompiling consumer's translation unit, "
+        "nor which language's inline rules apply, so source "
+        "compatibility isn't guaranteed unconditionally. If the "
+        "header now declares the function inline without exposing a "
+        "definition at all (e.g. the definition still lives in a "
+        "source file the consumer doesn't include), an odr-used "
+        "inline function with no visible definition in that "
+        "translation unit fails to link, in C++ and C alike. When a "
+        "definition is visible, the two languages still differ: in "
+        "C++, recompiled source keeps working (each translation unit "
+        "gets its own copy, folded together at link time). In C99/"
+        "GNU C, a visible `inline` definition (without `extern`) "
+        "does not itself guarantee an external definition exists "
+        "anywhere — a non-static function's recompiled callers can "
+        "still be left with an unresolved external reference at "
+        "link time unless some translation unit provides a real "
+        "out-of-line instantiation (an `extern` declaration paired "
+        "with a matching definition, or a definition without "
+        "`inline` at all). An already-linked consumer's outcome "
+        "separately depends on what the new library actually ships: "
+        "the exported symbol commonly disappears once nothing forces "
+        "an out-of-line definition, in which case a caller resolving "
+        "it at link/load time gets an undefined-symbol error, while "
+        "a symbol kept exported (e.g. still ODR-used elsewhere in "
+        "the library) leaves already-linked callers unaffected. This "
+        "C99/GNU C description assumes the default ISO C99/C11 "
+        "`inline` semantics; under the older GNU89 inline dialect "
+        "(`-std=gnu89` or `-fgnu89-inline`, GCC's default before "
+        "adopting C99 semantics), the plain-`inline`/`extern inline` "
+        "correspondence is inverted — a non-`extern` `inline` "
+        "definition itself produces an external definition — so this "
+        "specific unresolved-reference risk does not apply to code "
+        "compiled under that dialect.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_contract_attribute_added",
+        _R,
+        impact="The function gained a semantic contract attribute (nonnull, "
+        "noreturn, format, alloc_size, malloc, returns_nonnull, "
+        "warn_unused_result, sentinel, ...). The compiler now optimizes "
+        "callers and the callee under the new contract — e.g. a NULL "
+        "argument that used to be handled becomes undefined behaviour, "
+        "or code after a call is deleted as unreachable.",
+        description_template="Contract attribute added to {name}: {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_contract_attribute_removed",
+        _R,
+        impact="The function lost a semantic contract attribute callers may "
+        "rely on (e.g. returns_nonnull dropped means callers that "
+        "skipped NULL checks are now wrong; noreturn dropped means the "
+        "function can return into code compiled as unreachable).",
+        description_template="Contract attribute removed from {name}: {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_deleted",
+        _B,
+        impact="Function marked = delete; old binaries still call it, getting link error or UB.",
+        description_template="Function explicitly deleted (= delete): {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
+    ),
+    _E(
+        "func_deleted_dwarf",
+        _B,
+        impact="Function marked as deleted (= delete) detected via DWARF debug info. "
+        "The function was previously callable; callers will fail to link.",
+        description_template="Function explicitly deleted (= delete): {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
+    ),
+    _E(
+        "func_deprecated_added",
+        _C,
+        impact="Function gained [[deprecated]]; callers now get a compiler "
+        "warning when calling it. This detector matches functions by "
+        "mangled name and only checks the deprecated flag — it "
+        "doesn't verify the signature is otherwise unchanged (a "
+        "return-type change, for instance, doesn't affect Itanium "
+        "mangling), so a companion finding for such a change is "
+        "possible. A consumer whose own "
+        "build treats warnings as errors (e.g. "
+        "-Werror=deprecated-declarations) has this turn a previously "
+        "clean build into a failing one, so it isn't unconditionally "
+        '"not a break" for source compatibility.',
+        description_template="Function marked deprecated: {name} ({detail})",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_deprecated_removed",
+        _C,
+        impact="Function's [[deprecated]] marker was removed; the compiler "
+        "warning stops, with no effect on the function's ABI.",
+        description_template="Function no longer marked deprecated: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_exception_spec_changed",
+        _R,
+        impact="The function's dynamic exception specification (throw(...)) "
+        "changed in a way the noexcept kinds do not cover. Old callers "
+        "compiled against the previous specification may have exception "
+        "tables and unwind assumptions that no longer match; a "
+        "violated specification calls std::unexpected/std::terminate.",
+        description_template="Exception specification changed: {name} ({old} → {new})",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_language_linkage_changed",
+        _B,
+        impact='Language linkage changed (extern "C" ↔ C++); the mangled symbol name '
+        "changes, so old binaries reference a symbol that no longer exists under "
+        "that name.",
+        description_template="Language linkage changed: {name} ({old} → {new})",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_likely_renamed",
+        _B,
+        impact="Function likely renamed (binary fingerprint match: identical code size and hash, "
+        "different symbol name). Old binaries reference the old name and will fail to "
+        "resolve at load time. This is a heuristic signal — verify the rename is intentional.",
+        description_template="Function likely renamed: {old} → {new} (size={detail}B, confidence={name}%)",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_lost_inline",
+        _C,
+        impact="A function lost its explicit inline attribute. This "
+        "detector (`_check_inline_transitions()`) fires the same way "
+        "regardless of language, but the two languages' `inline` "
+        "semantics differ enough that the consequence does too. In "
+        "C++, an ordinary function already has external linkage "
+        "regardless of inline — the attribute only permits the "
+        "compiler to fold identical out-of-line definitions emitted "
+        "by multiple translation units into one, so losing it "
+        "doesn't itself create or guarantee a new export (this "
+        "detector doesn't verify the new binary's export table). "
+        "None of the C-specific risk below applies to a function "
+        "with internal linkage either, in C or C++ — `static`, or, "
+        "in C++, declared inside an unnamed namespace: either gives "
+        "the function internal linkage regardless of `inline`, so "
+        "each translation unit keeps its own private definition and "
+        "there is no cross-TU multiple-definition to create. This "
+        "detector's `Function.is_static` captures only the `static` "
+        "keyword, not unnamed-namespace membership, and gates on "
+        "neither — a C++ function in an unnamed namespace still "
+        "reads as non-static here even though it has the same "
+        "internal linkage `static` gives. In C (C99/GNU C `inline` "
+        "rules), for a function with external linkage the opposite "
+        "risk applies: an "
+        "`inline` function definition kept in a public header "
+        "normally produces no external definition on its own, but "
+        "removing `inline` from a definition every including "
+        "translation unit sees turns it into an ordinary external "
+        "definition — so multiple translation units that each "
+        "`#include` the header and get recompiled can each emit "
+        "their own external definition of the same name, producing "
+        "multiple-definition link errors that don't arise in the "
+        "C++ case. This C description assumes the default ISO C99/"
+        "C11 `inline` semantics; under the older GNU89 inline "
+        "dialect (`-std=gnu89` or `-fgnu89-inline`, GCC's default "
+        "before adopting C99 semantics), the plain-`inline`/`extern "
+        "inline` correspondence is inverted — a non-`extern` "
+        "`inline` definition already produces an external "
+        "definition — so losing `inline` there does not create this "
+        "specific multiple-definition risk the same way. This "
+        "detector matches functions by mangled name "
+        "and only checks `is_inline` — it doesn't verify the "
+        "signature is otherwise unchanged, and a mangled name alone "
+        "doesn't guarantee that: a return-type change, for "
+        "instance, doesn't affect Itanium mangling, so a companion "
+        "`func_return_changed` finding is possible on the same "
+        "matched pair and takes precedence over this one's low-risk "
+        "read. When no companion signature finding fires, the "
+        "function's own signature and calling convention are "
+        "unchanged, so this is low-risk for already-linked "
+        "consumers.",
+        description_template="Function lost inline attribute: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_noexcept_added",
+        _C,
+        impact="In C++17 noexcept is part of the function type; old callers compiled against non-noexcept signature get a different mangled name.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_noexcept_removed",
+        _R,
+        impact="`noexcept` removed from a function. Old binaries keep resolving "
+        "the symbol, so this is not a binary break — but since C++17 "
+        "`noexcept` is part of the function *type*, so it is encoded in "
+        "function-pointer and template-argument mangling: consumers that "
+        "form a `void(*)() noexcept` pointer or pass the function as a "
+        "non-type template argument no longer compile, and code relying on "
+        "the guarantee can hit `std::terminate`. KDE's C++ binary-"
+        "compatibility policy treats removing `noexcept` as a change to "
+        "avoid unless it was `noexcept(false)`. Verdict is policy-"
+        "adjustable; raise to API_BREAK under a strict source profile.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_override_specifier_added",
+        _C,
+        impact="A virtual method gained the explicit `override` specifier. "
+        "Purely a compiler self-check on the declaration; the method's "
+        "signature and ABI are unchanged.",
+        description_template="Method gained `override` specifier: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_override_specifier_removed",
+        _R,
+        impact="A virtual method lost the explicit `override` specifier while "
+        "remaining virtual. The signature may be unchanged (informational "
+        "only), but this can also be the visible symptom of the base "
+        "declaration it used to override having changed or disappeared "
+        "elsewhere — worth a quick check even though this fact alone "
+        "does not prove a break.",
+        description_template="Method lost `override` specifier: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_params_changed",
+        _B,
+        impact="Callers push arguments with the old layout; callee reads wrong data from stack/registers.",
+        description_template="Parameters changed: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_removed",
+        _B,
+        impact="Old binaries call a symbol that no longer exists; dynamic linker will refuse to load or crash at call site.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
+    ),
+    _E(
+        "func_added_elf_only",
+        _C,
+        is_addition=True,
+        impact="An exported function symbol appeared in the new binary that no "
+        "public header declares on either side. Existing consumers are "
+        "unaffected -- it is an addition, and the release needs a MINOR bump "
+        "like any other -- but the evidence for it is the export table alone, "
+        "so nothing is known about its signature. The weaker-evidence "
+        "counterpart of func_removed_elf_only, and the reason it exists: a "
+        "header-aware comparison builds its function map from the header AST, "
+        "so an export with no declaration never entered that map and its "
+        "addition was invisible. The same release reported Additions (1) at "
+        "--depth binary and Additions (0) with -H. Orthogonal to "
+        "exported_not_public, which asks whether the export *should* be "
+        "undeclared; this one only reports that the export set grew.",
+        description_template="New exported symbol not declared in any public header: {name}",
+        # Merged from main: this kind arrived while slice 7o was in flight, so
+        # it had no display dimensions. FUNCTION/ADDED matches its own sibling
+        # `func_removed_elf_only` and is corroborated by `workflows/history.py`,
+        # which already maps it to ENTITY_KIND_FUNCTION.
+        entity=_ENT.FUNCTION,
+        operation=_OP.ADDED,
+    ),
+    _E(
+        "var_added_elf_only",
+        _C,
+        is_addition=True,
+        impact="An exported data symbol (STT_OBJECT/STT_TLS/STT_COMMON) "
+        "appeared in the new binary that no public header declares on either "
+        "side. The data counterpart of func_added_elf_only, and it exists for "
+        "the same reason: a header-aware comparison builds its variable map "
+        "from the header AST, so an undeclared export never entered that map "
+        "and _diff_variables could not report VAR_ADDED for it -- the "
+        "addition disappeared entirely rather than being reported weakly. "
+        "Existing consumers are unaffected, but the evidence is the export "
+        "table alone, so nothing is known about the object's type or size.",
+        description_template="New exported data symbol not declared in any public header: {name}",
+        # Merged from main, same as its function counterpart above:
+        # VARIABLE/ADDED matches `var_removed_elf_only` and `workflows/
+        # history.py`'s own ENTITY_KIND_VARIABLE mapping for this kind.
+        entity=_ENT.VARIABLE,
+        operation=_OP.ADDED,
+    ),
+    _E(
+        "func_removed_elf_only",
+        _B,
+        impact="Exported function symbol removed from the binary; old binaries that link or dlsym() it can fail even without header evidence.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
+    ),
+    _E(
+        "func_return_changed",
+        _B,
+        impact="Callers expect the old return type layout in registers/stack; misinterpretation causes data corruption.",
+        description_template="Return type changed: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_variadic_added",
+        _B,
+        impact="The function gained a trailing C ellipsis (...). Variadic and "
+        "non-variadic calls use different conventions on common ABIs "
+        "(SysV x86-64 callers must set %al to the vector-register "
+        "count; Apple AArch64 passes variadic args on the stack), so "
+        "old callers invoke it with the wrong convention.",
+        description_template="Function became variadic: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_variadic_removed",
+        _B,
+        impact="The function lost its trailing C ellipsis (...). Callers that "
+        "passed extra arguments now invoke a mismatched signature, and "
+        "on ABIs with distinct variadic conventions the call sequence "
+        "itself differs.",
+        description_template="Function no longer variadic: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_virtual_added",
+        _B,
+        impact="Vtable layout changes; old binaries call wrong virtual function slot, leading to crashes or wrong behavior.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_virtual_removed",
+        _B,
+        impact="Vtable entry removed; old binaries that dispatch through the vtable call the wrong slot.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_visibility_changed",
+        _B,
+        impact="Symbol hidden from dynamic linking; old binaries can't find it at load time.",
+        description_template="Function visibility changed to hidden: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "var_visibility_changed",
+        _B,
+        impact="Data symbol no longer exported for dynamic linking while its "
+        "declaration remains; an already-linked consumer that resolves "
+        "it fails at load time, and nothing in the headers signals it.",
+        description_template="Variable no longer exported by the binary: {name}",
+        entity=_ENT.VARIABLE,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_export_added",
+        _C,
+        is_addition=True,
+        impact="An already-declared function gained a binary export -- a "
+        "version script, visibility attribute or link-map change now "
+        "emits a dynamic symbol for a declaration that was already "
+        "promised. Pure addition: every consumer that could bind "
+        "before still can, and one that could not now can. Reported "
+        "rather than dropped because the declaration is present on "
+        "both sides, so the pair matches and no added-symbol path "
+        "sees it -- leaving the run silent about a real, observed "
+        "change to the export table.",
+        description_template="Function now exported by the binary: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.ADDED,
+    ),
+    _E(
+        "var_export_added",
+        _C,
+        is_addition=True,
+        impact="Data symbol gained a binary export while its declaration was "
+        "already present; the `func_export_added` counterpart for data "
+        "symbols. Pure addition, and reported for the same reason: a "
+        "matched pair reaches no added-symbol path.",
+        description_template="Variable now exported by the binary: {name}",
+        entity=_ENT.VARIABLE,
+        operation=_OP.ADDED,
+    ),
+    _E(
+        "hidden_friend_added",
+        _C,
+        is_addition=True,
+        impact="A new in-class `friend` declaration was added. Pure "
+        "addition: existing code keeps compiling, no symbol "
+        "disappears, and the new operator/function only "
+        "participates in overload resolution at call sites that "
+        "trigger ADL on one of its argument types.",
+        description_template="Hidden friend declaration added: {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.ADDED,
+    ),
+    _E(
+        "hidden_friend_removed",
+        _A,
+        impact="An in-class `friend` declaration (a 'hidden friend' — "
+        "findable only via ADL on one of its argument types) was "
+        "removed. Inline hidden friends never receive an external "
+        "symbol, so the break is invisible at the binary layer, but "
+        "every consumer that wrote `a + b` (or any other ADL-driven "
+        "call site) fails to compile against the new headers. When "
+        "the friend was also defined out-of-line, removal "
+        "additionally surfaces as FUNC_REMOVED at link time.",
+        description_template="Hidden friend declaration removed: {old}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
+    ),
+    _E(
+        "internal_symbol_required_by_public_api",
+        _B,
+        impact="An internal-namespaced decl (e.g. ::detail::, ::impl::, "
+        "::internal::) that already changed in an artifact-proven "
+        "breaking way (e.g. func_removed) is called or referenced from "
+        "a public entry point over the optional L5 source/call graph "
+        "(--sources/--build-info/--header-graph). Although the symbol "
+        "is conceptually internal, it is part of the effective public "
+        "ABI: an application built against the old public entry point "
+        "can fail to resolve it at load time. Call-graph analogue of "
+        "INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API (ADR-044 P1 items 1-2), for "
+        "the pure-call shape that walk's layout-only reachability model "
+        "cannot see (no field/base/signature evidence, only a call "
+        "edge).",
+        entity=_ENT.FUNCTION,
+        entity_from_field="entity_discriminator",  # var_removed -> variable
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "method_access_changed",
+        _A,
+        impact="Method access level narrowed (e.g. public→private); old code calling it won't compile.",
+        policy_overrides={"sdk_vendor": _C},
+        description_template="Method access level narrowed: {name} ({old} → {new})",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "param_became_va_list",
+        _C,
+        impact="A parameter's type became va_list; source recompiled "
+        "against the new header sees a different, variadic-style "
+        "parameter. This detector only checks the declared type "
+        "flip, not whether the two representations agree: va_list's "
+        "own layout is platform-defined (an opaque struct/array on "
+        "many ABIs, not a plain pointer), so an already-linked "
+        "caller still passing its old, non-variadic argument has "
+        "that value reinterpreted by the new callee as a va_list "
+        "handle — safe only if the caller already happened to pass "
+        "a genuine, compatible va_list object (e.g. a forwarding "
+        "wrapper).",
+        description_template="Parameter became va_list: {name} param {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "param_default_value_changed",
+        _C,
+        impact="A parameter's default argument value changed; a default "
+        "argument is substituted at the *caller's* compile time, so "
+        "an already-compiled consumer that omitted the argument "
+        "keeps using the old value baked in, while source recompiled "
+        "from a call site that omits the argument picks up the new "
+        "one.",
+        description_template="Parameter default changed: {name} param {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "param_default_value_removed",
+        _A,
+        impact="A parameter's default argument was removed; source code "
+        "that relied on omitting this argument no longer compiles "
+        "and must now supply it explicitly. An already-compiled "
+        "consumer is unaffected, since the default was already "
+        "substituted in at its own compile time.",
+        policy_overrides={"sdk_vendor": _C},
+        description_template="Parameter default removed: {name} param {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "param_lost_va_list",
+        _C,
+        impact="A parameter that was previously typed va_list now has a "
+        "fixed type; source recompiled against the new header sees "
+        "a stricter, non-variadic parameter type. This detector "
+        "only checks the declared type flip, not whether the two "
+        "representations agree: since va_list's own layout is "
+        "platform-defined (an opaque struct/array on many ABIs, not "
+        "a plain pointer), an already-linked caller still "
+        "constructing and passing a va_list object has that value "
+        "reinterpreted by the new callee as the fixed type — safe "
+        "only if the caller already happened to pass a value "
+        "compatible with the new fixed type.",
+        description_template="Parameter was va_list, now fixed: {name} param {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "param_pointer_level_changed",
+        _B,
+        impact="A parameter's pointer indirection depth changed (e.g. T* → "
+        "T** or the reverse); the value passed for that argument is "
+        "interpreted differently by callee and caller, so a caller "
+        "compiled against the old signature passes the wrong kind "
+        "of value — silent misinterpretation or a crash.",
+        description_template="Parameter pointer level changed: {name} param {detail} (depth {old} → {new})",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "param_renamed",
+        _A,
+        impact="A parameter's name changed; this has no effect on the "
+        "compiled ABI (parameter names aren't part of the mangled "
+        "signature or calling convention), but source using named-"
+        "argument-style calls, or documentation/IDE tooling relying "
+        "on the old name, may be affected.",
+        policy_overrides={"sdk_vendor": _C},
+        description_template="Parameter renamed: {name} param {detail}: {old} → {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "param_restrict_changed",
+        _C,
+        impact="A parameter's restrict qualifier was added or removed "
+        "(direction recorded in this finding's own detail); restrict "
+        "is a compiler hint affecting how the library's own "
+        "implementation of the function is optimized, not the "
+        "calling convention. The two directions carry different "
+        "risk: when restrict is ADDED, the new library's own "
+        "compiled code may now assume the parameter doesn't alias "
+        "other arguments — an already-compiled caller that still "
+        "passes aliased pointers for that parameter can hit "
+        "undefined behavior in the new callee's optimized code, with "
+        "no recompilation of the caller involved. When restrict is "
+        "REMOVED, the callee simply becomes more conservative "
+        "(drops an optimization assumption), which is safe for every "
+        "caller.",
+        description_template="Parameter restrict qualifier {detail}: {name} param {old}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+]

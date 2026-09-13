@@ -34,6 +34,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from _descriptor_paths import descriptor_include_flag
 from click.testing import CliRunner
 
 from abicheck._compiler_options import split_gcc_options
@@ -230,7 +231,7 @@ class TestTheDescriptorsCompileAndSkipFieldsAreApplied:
         )
         assert result.exit_code == 0, result.output
         tokens = split_gcc_options(captured["gcc_options"] or "")
-        assert "-I/opt/inc" in tokens
+        assert descriptor_include_flag("/opt/inc") in tokens
         assert "-DFOO=1" in tokens
 
     def test_a_descriptor_without_those_elements_passes_none(self, tree):

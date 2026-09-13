@@ -35,6 +35,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from _descriptor_paths import descriptor_absolute, descriptor_include_flag
 
 from abicheck._compiler_options import join_gcc_options, split_gcc_options
 from abicheck.compat.descriptor import parse_descriptor
@@ -62,7 +63,9 @@ class TestAValueMayContainASpace:
                 "<include_paths>\n  /opt/Program Files/inc\n</include_paths>\n",
             )
         )
-        assert [str(p) for p in desc.include_paths] == ["/opt/Program Files/inc"]
+        assert [str(p) for p in desc.include_paths] == [
+            str(descriptor_absolute("/opt/Program Files/inc"))
+        ]
 
     def test_a_define_with_a_space_stays_one_define(self, tmp_path):
         desc = parse_descriptor(
@@ -111,7 +114,7 @@ class TestEmittedFlagsSurviveReSplitting:
             )
         )
         tokens = split_gcc_options(_descriptor_compile_options(desc))
-        assert tokens == ["-I/opt/Program Files/inc"]
+        assert tokens == [descriptor_include_flag("/opt/Program Files/inc")]
 
     @pytest.mark.parametrize(
         "tokens",

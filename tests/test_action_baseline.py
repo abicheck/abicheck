@@ -181,8 +181,9 @@ class TestBuildConfigReachesTheDocumentedPublishers:
     @pytest.mark.parametrize("workflow", WORKFLOWS)
     def test_the_input_is_declared_and_forwarded(self, workflow: str) -> None:
         import yaml
+        from _workflow_files import read_repo_text
 
-        document = yaml.safe_load((REPO_ROOT / workflow).read_text())
+        document = yaml.safe_load(read_repo_text(REPO_ROOT / workflow))
         # PyYAML parses the bare `on:` key as the boolean True.
         triggers = document.get("on", document.get(True, {}))
         declared = triggers["workflow_call"]["inputs"]

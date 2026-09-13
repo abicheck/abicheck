@@ -1002,7 +1002,7 @@ class TestDescriptorOptionsDoNotOverrideTheCommandLine:
             defines=["ONLY=1"],
         )
         combined = self._combined(_descriptor_compile_options(desc), "")
-        assert "-I/opt/inc" in combined
+        assert f"-I{Path('/opt/inc')}" in combined
         assert "-DONLY=1" in combined
 
 

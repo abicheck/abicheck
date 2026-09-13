@@ -59,11 +59,36 @@ def _named_function_source(name: str) -> str:
     return text[start:end]
 
 
+def _os_detection_source() -> str:
+    """`run.sh`'s own `$OSTYPE` -> `_RUNNING_ON_WINDOWS` block, not restated."""
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index('case "$OSTYPE" in')
+    end = text.index("esac", start) + len("esac")
+    return text[start:end]
+
+
 def _function_source() -> str:
-    """The real `_is_release_style_operand`, plus the helpers it calls."""
+    """The real `_is_release_style_operand`, plus the helpers it calls.
+
+    The host-detection block is run.sh's own, not a hardcoded `false`. That
+    default was wrong on exactly one platform and silently so: with
+    `_RUNNING_ON_WINDOWS=false` on a Windows runner,
+    `_is_path_already_qualified` does not recognise a drive-absolute
+    `C:\\...` operand, so `_is_release_style_operand` anchors it a second
+    time as `$PWD/C:\\...`, stats a path that cannot exist, and answers "not
+    a package" for every absolutely-spelled operand. The relative-operand
+    cases pass either way, which is why only the absolute ones failed and
+    the cause read as "the probe is broken on Windows" rather than "the
+    harness told it the wrong platform".
+
+    Still `:-`-guarded so the parametrised callers that set the flag
+    themselves (`_predicate`, the recorder) keep choosing their own value.
+    """
     return "\n".join(
         (
-            '_RUNNING_ON_WINDOWS="${_RUNNING_ON_WINDOWS:-false}"',
+            'if [[ -z "${_RUNNING_ON_WINDOWS:-}" ]]; then',
+            _os_detection_source(),
+            "fi",
             _named_function_source("_is_path_already_qualified"),
             _named_function_source("_is_release_style_operand"),
         )

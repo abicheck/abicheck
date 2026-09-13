@@ -352,7 +352,7 @@ class TestReleaseAssuranceThroughTheCli:
     def test_the_output_dir_sidecar_agrees_with_the_real_exit_code(
         self, bundle: dict[str, Path], tmp_path: Path
     ) -> None:
-        """`--output-dir`'s `summary.json` builds its own `exit` block through
+        """A directory export's `summary.json` builds its own `exit` block through
         the same resolver, so it must carry this axis too.
 
         Found by reading the wiring, not by a failing gate: the sidecar had
@@ -367,8 +367,8 @@ class TestReleaseAssuranceThroughTheCli:
         run = _compare(
             str(bundle["v1"]),
             str(bundle["v1_nodebug"]),
-            "--output-dir",
-            str(out),
+            "-o",
+            f"json={out}/",
             bundle=bundle,
         )
         assert run.returncode == 1, run.stdout + run.stderr
@@ -439,8 +439,8 @@ class TestReleaseAssuranceThroughTheCli:
         run = _compare(
             str(bundle["v1"]),
             str(bundle["v1_nodebug"]),
-            "--output-dir",
-            str(out),
+            "-o",
+            f"json={out}/",
             bundle=bundle,
         )
         assert run.returncode == 1, run.stdout + run.stderr
@@ -469,8 +469,8 @@ class TestReleaseAssuranceThroughTheCli:
         run = _compare(
             str(bundle["v1"]),
             str(bundle["v2"]),
-            "--output-dir",
-            str(out),
+            "-o",
+            f"json={out}/",
             headers_for=_LIBS,
             bundle=bundle,
         )
@@ -499,8 +499,8 @@ class TestReleaseAssuranceThroughTheCli:
         gated = _compare(
             str(bundle["v1"]),
             str(bundle["v1_nodebug"]),
-            "--output-dir",
-            str(out),
+            "-o",
+            f"json={out}/",
             bundle=bundle,
         )
         assert gated.returncode == 1, gated.stdout + gated.stderr
@@ -538,7 +538,7 @@ class TestReleaseAssuranceThroughTheCli:
         `compare_bundle_facts.dispatch` is a separate renderer and a separate
         set of writes from the live release fan-out, and Codex (P1) found it
         resolving the fold only *after* `_render` and every per-library write --
-        so it exited 1 while its own report and each `--output-dir` file read 0
+        so it exited 1 while its own report and each directory-export file read 0
         to `aggregate`/the Action's deferred gate. Same invariant as
         `test_every_report_the_run_writes_agrees_with_the_real_exit`, asserted
         on this driver because sharing the fold function does not mean sharing
@@ -561,8 +561,8 @@ class TestReleaseAssuranceThroughTheCli:
         run = _compare(
             str(facts),
             str(bundle["v1_nodebug"]),
-            "--output-dir",
-            str(out),
+            "-o",
+            f"json={out}/",
             bundle=bundle,
         )
         assert run.returncode == 1, run.stdout + run.stderr
