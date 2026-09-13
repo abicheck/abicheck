@@ -756,7 +756,7 @@ class TestToJsonBranches:
         assert "verdict" in d
         assert "summary" in d
 
-    def test_to_json_leaf_mode(self):
+    def test_to_json_root_cause_mode(self):
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED,
             symbol="MyType",
@@ -765,9 +765,10 @@ class TestToJsonBranches:
             caused_count=1,
         )
         result = _make_diff(changes=[c], verdict=Verdict.BREAKING, redundant_count=2)
-        out = to_json(result, report_mode="leaf")
+        # `leaf` retired in plan slice 7o -- `root-cause` replaced it.
+        out = to_json(result, report_mode="root-cause")
         d = json.loads(out)
-        assert "leaf_changes" in d
+        assert "root_causes" in d
         assert d["redundant_count"] == 2
 
     def test_to_json_with_show_only(self):
@@ -787,16 +788,16 @@ class TestToJsonBranches:
         d = json.loads(out)
         assert d["show_only_applied"] is False
 
-    def test_to_json_leaf_with_show_only(self):
+    def test_to_json_root_cause_with_show_only(self):
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED,
             symbol="T",
             description="size changed",
         )
         result = _make_diff(changes=[c], verdict=Verdict.BREAKING)
-        out = to_json(result, report_mode="leaf", show_only="types")
+        out = to_json(result, report_mode="root-cause", show_only="types")
         d = json.loads(out)
-        assert "leaf_changes" in d
+        assert "root_causes" in d
 
     def test_to_json_redundant_count_omitted_when_zero(self):
         result = _make_diff(verdict=Verdict.NO_CHANGE)
@@ -825,7 +826,7 @@ class TestToMarkdownBranches:
         out = to_markdown(result, show_impact=True)
         assert "Impact Summary" in out
 
-    def test_to_markdown_leaf_mode(self):
+    def test_to_markdown_root_cause_mode(self):
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED,
             symbol="MyStruct",
@@ -834,24 +835,21 @@ class TestToMarkdownBranches:
             caused_count=3,
         )
         result = _make_diff(changes=[c], verdict=Verdict.BREAKING)
-        out = to_markdown(result, report_mode="leaf")
-        assert "leaf-change view" in out
+        out = to_markdown(result, report_mode="root-cause")
         assert "MyStruct" in out
-        assert "Affected interfaces" in out
-        assert "3 derived change(s)" in out
 
     def test_to_markdown_leaf_mode_with_show_only(self):
         c1 = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="A", description="size")
         c2 = Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="removed")
         result = _make_diff(changes=[c1, c2], verdict=Verdict.BREAKING)
-        out = to_markdown(result, report_mode="leaf", show_only="types")
+        out = to_markdown(result, report_mode="root-cause", show_only="types")
         assert "Filtered by" in out
 
     def test_to_markdown_leaf_no_changes_with_filter(self):
         """Leaf mode with show_only that filters everything -> 'No changes match'."""
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="removed")
         result = _make_diff(changes=[c], verdict=Verdict.BREAKING)
-        out = to_markdown(result, report_mode="leaf", show_only="enums")
+        out = to_markdown(result, report_mode="root-cause", show_only="enums")
         assert "No changes match the current filter" in out
 
     def test_to_markdown_no_changes(self):
@@ -949,8 +947,9 @@ class TestToMarkdownBranches:
         out = to_markdown(result)
         assert "filtered as non-public ABI surface" not in out
 
-    def test_to_markdown_leaf_with_many_affected_symbols(self):
-        """Leaf mode with >10 affected symbols triggers truncation."""
+    def test_to_markdown_root_cause_with_many_affected_symbols(self):
+        """Many affected symbols still render under the grouping mode
+        (this asserted `leaf`'s own truncation until 7o retired it)."""
         symbols = [f"fn_{i}" for i in range(15)]
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED,
@@ -959,8 +958,8 @@ class TestToMarkdownBranches:
             affected_symbols=symbols,
         )
         result = _make_diff(changes=[c], verdict=Verdict.BREAKING)
-        out = to_markdown(result, report_mode="leaf")
-        assert "5 more" in out
+        out = to_markdown(result, report_mode="root-cause")
+        assert "BigType" in out
 
     def test_to_markdown_leaf_show_impact(self):
         c = Change(
@@ -971,7 +970,7 @@ class TestToMarkdownBranches:
             caused_count=1,
         )
         result = _make_diff(changes=[c], verdict=Verdict.BREAKING)
-        out = to_markdown(result, report_mode="leaf", show_impact=True)
+        out = to_markdown(result, report_mode="root-cause", show_impact=True)
         assert "Impact Summary" in out
 
     def test_to_markdown_risk_changes_section(self):

@@ -84,7 +84,10 @@ class TestDemangleTriState:
         monkeypatch.setattr(
             _dem,
             "demangle_text",
-            lambda text: text.replace("_Z3foov", "foo()"),
+            # Mirrors the real contract since plan slice 7o: a demangled
+            # name keeps its exact mangled spelling beside it, so human
+            # output stays copyable and no `no-demangle` toggle is needed.
+            lambda text: text.replace("_Z3foov", "foo() [_Z3foov]"),
         )
 
     def test_markdown_demangles_by_default(self, tmp_path, monkeypatch):
@@ -94,9 +97,9 @@ class TestDemangleTriState:
             main,
             ["compare", str(old_p), str(new_p), "-o", "markdown=-"],
         )
-        # markdown requests demangling by default -> stub rewrites the symbol.
-        assert "foo()" in result.output
-        assert "_Z3foov" not in result.output
+        # markdown requests demangling by default -> stub rewrites the
+        # symbol, keeping the exact spelling beside it (plan slice 7o).
+        assert "foo() [_Z3foov]" in result.output
 
     def test_json_keeps_mangled_by_default(self, tmp_path):
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
@@ -129,7 +132,9 @@ class TestDemangleTriState:
         assert "foo()" in result.output
         assert '<abbr title="_Z3foov">foo()</abbr>' in result.output
 
-    def test_no_demangle_override_on_markdown(self, tmp_path, monkeypatch):
+    def test_markdown_keeps_the_exact_symbol_beside_the_demangled_one(
+        self, tmp_path, monkeypatch
+    ):
         self._patch_demangler(monkeypatch)
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
@@ -140,11 +145,12 @@ class TestDemangleTriState:
                 str(new_p),
                 "-o",
                 "markdown=-",
-                "--view",
-                "no-demangle",
             ],
         )
-        # --no-demangle suppresses demangling even on markdown -> stub not run.
+        # Plan slice 7o: markdown always demangles now, and keeps the exact
+        # mangled spelling beside the readable name -- which is precisely
+        # why `--view no-demangle` could retire without losing anything
+        # this assertion cared about.
         assert "_Z3foov" in result.output
 
     def test_json_stays_mangled_even_with_demangle(self, tmp_path):
@@ -153,10 +159,11 @@ class TestDemangleTriState:
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "-o", "json=-", "--view", "demangle"],
+            ["compare", str(old_p), str(new_p), "-o", "json=-"],
         )
+        # `symbol` stays raw on a machine format; the readable name travels
+        # in its own `demangled_symbol` field rather than replacing it.
         assert "_Z3foov" in result.output
-        assert "foo()" not in result.output
 
 
 # ── §4 exit-scheme announcement ─────────────────────────────────────────────

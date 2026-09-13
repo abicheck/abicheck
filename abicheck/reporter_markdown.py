@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from .report.finding import ReportFinding
     from .severity import KindSets, SeverityConfig
 
+from .change_registry import REGISTRY
 from .checker import (
     Change,
     DiffResult,
@@ -43,10 +44,10 @@ from .checker import (
 )
 from .finding_identity import missing_contract_kind, report_finding_id
 from .model.change_catalog.kinds import HasKind
+from .model.change_catalog.registry import ChangeEntity, ChangeOperation
 from .policy.classification import (
     evidence_status_for_result,
     impact_for,
-    policy_kind_sets as _policy_kind_sets,
 )
 from .policy.contract_finding_relevance import is_evaluated
 from .policy.evidence_status import EvidenceStatus
@@ -147,124 +148,70 @@ def to_stat(
 # Show-only filter
 # ---------------------------------------------------------------------------
 
-# Kind-name suffixes that identify an additive vs. a removal finding — shared
-# between ShowOnlyFilter's "added"/"removed"/"changed" action tokens and the
-# JSON report's structured per-finding "operation" field (schema 2.3), so the
-# two never drift apart.
-_ADDED_SUFFIXES = ("_added", "_added_compatible")
-_REMOVED_SUFFIXES = (
-    "_removed",
-    "_deleted",
-    "_elf_only",
-    "_elf_fallback",
-    "_const_overload",
-)
+#: CLI ``--view show=`` element tokens -> the canonical
+#: :class:`~abicheck.model.change_catalog.registry.ChangeEntity` each names.
+#: The plural CLI spellings and the ``elf`` alias for ``BINARY`` are kept
+#: exactly as the vocabulary has always spelled them (plan slice 7o's
+#: acceptance bar: the old user task keeps a simple, supported invocation);
+#: ``build``, ``source`` and ``analysis`` are new tokens for the three
+#: dimensions the superseded name-prefix table could not express at all.
+ELEMENT_TOKEN_ENTITIES: dict[str, ChangeEntity] = {
+    "functions": ChangeEntity.FUNCTION,
+    "variables": ChangeEntity.VARIABLE,
+    "types": ChangeEntity.TYPE,
+    "enums": ChangeEntity.ENUM,
+    "elf": ChangeEntity.BINARY,
+    "binary": ChangeEntity.BINARY,
+    "build": ChangeEntity.BUILD,
+    "source": ChangeEntity.SOURCE,
+    "analysis": ChangeEntity.ANALYSIS,
+}
 
-# Kinds whose name doesn't end in one of the suffixes above but still name a concrete symbol/entity appearing or disappearing (Codex review on #557: operation_for_kind() reported these as "modified"). Checked before the suffix rule. Deliberately does NOT include kinds naming a *property* gained/lost on an entity that still exists — e.g. the "*_lost_*" family (`field_lost_const`, `func_lost_inline`, ...) or the "*_introduced" family (`vptr_introduced`, `static_tls_introduced`, ...): those are trait changes on a persisting entity, which is what "modified" means here, not an addition/removal of the entity itself.
-_OPERATION_OVERRIDES: dict[str, str] = {
-    # Ends in "_added_compat", not "_added"/"_added_compatible".
-    "symbol_version_required_added_compat": "added",
-    # Ends in "_removed_without_replacement", not "_removed".
-    "experimental_removed_without_replacement": "removed",
-    # Ends in "_deleted_dwarf", not "_deleted".
-    "func_deleted_dwarf": "removed",
-    # ADR-065 S3: a component leaves (or joins) the release's declared
-    # component set. Ends in "_retired"/"_introduced", neither of which is a
-    # suffix the heuristic below knows -- and both are genuinely an added/
-    # removed *entity*, not a property change on a persisting one.
-    "support_promise_component_retired": "removed",
-    "support_promise_component_introduced": "added",
-    # A whole ISA-dispatch family's concrete symbols vanish (case83), not a
-    # property change on a persisting symbol.
-    "cpu_dispatch_isa_dropped": "removed",
-    # A stable name is added alongside the still-present experimental alias
-    # (case99) -- without the dedicated detector this would just be a plain
-    # func_added; ADDITION_KINDS already classifies it as an addition
-    # (Codex review on #557).
-    "experimental_graduated": "added",
-    # These four end in "_added" but each names a trait *gained by an
-    # existing, persisting function* ("Function became virtual: {name}",
-    # "noexcept specifier added: {name}", "Function became variadic (gained
-    # ...): {name}" -- verified against their diff_symbols.py descriptions
-    # and change_registry.py entries, none of which set is_addition=True /
-    # belong to ADDITION_KINDS) -- the same "*_lost_*"/"*_introduced" trait-
-    # change pattern above, just spelled with "_added" (Codex review, PR
-    # #557). `func_pure_virtual_added` ("Function became pure virtual:
-    # {name}") is the identical pattern applied to its sibling kind
-    # `func_virtual_became_pure`, which already classifies correctly as
-    # "modified" since it doesn't end in "_added".
-    "func_noexcept_added": "modified",
-    "func_virtual_added": "modified",
-    "func_variadic_added": "modified",
-    "func_pure_virtual_added": "modified",
-    # A field inserted into an existing struct/class shifts every
-    # subsequent field's offset -- this modifies the *layout of the
-    # existing type*, not merely a new field appearing in isolation.
-    # `type_field_added_compatible` (append-at-end, no offset shift) is the
-    # dedicated addition-kind carve-out and is unaffected by this override
-    # (it doesn't end in plain "_added"). (Codex review, PR #557.)
-    "type_field_added": "modified",
-    # The identical layout-modification pattern applied to virtual methods
-    # instead of fields: a new virtual method on an already-existing class
-    # grows/relayouts the vtable (gains a hidden vtable pointer if it had
-    # none, or a new slot otherwise), breaking derived classes compiled
-    # against the old layout -- KDE's "do not add virtuals to a non-leaf
-    # class" rule. Not in ADDITION_KINDS (Codex review, PR #557).
-    "virtual_method_added": "modified",
-    # More of the same trait-gained-by-a-persisting-entity pattern, found on
-    # a second audit pass (Codex review, PR #557): a constructor/conversion
-    # operator gaining `explicit` (`ctor_explicit_added`), a template
-    # parameter that was defaulted/deduced becoming mandatory
-    # (`mandatory_template_param_added`), a Python-visible function gaining
-    # a new *required* parameter (`python_api_parameter_added`), and a
-    # function gaining a semantic contract attribute like nonnull/noreturn
-    # (`func_contract_attribute_added`) all describe an already-existing
-    # callable/template's signature or contract changing, not a new one
-    # appearing. None of these four is in ADDITION_KINDS either.
-    "ctor_explicit_added": "modified",
-    "mandatory_template_param_added": "modified",
-    "python_api_parameter_added": "modified",
-    "func_contract_attribute_added": "modified",
-    # Removed-side counterparts of the trait-change pattern: these end in
-    # plain "_removed" (so the suffix rule alone reports "removed"), but
-    # each names a trait *lost by* an entity that still exists — mirroring
-    # `func_noexcept_added`/`func_variadic_added`/etc. above, just the
-    # opposite direction of the same specifier gain/loss (Codex review, PR
-    # #557).
-    "func_noexcept_removed": "modified",
-    "func_variadic_removed": "modified",
-    "func_contract_attribute_removed": "modified",
-    "ctor_explicit_removed": "modified",
-    # A third audit pass turned up more of the same (Codex review, PR #557):
-    # `func_virtual_removed` ("Vtable entry removed" -- the sibling of
-    # `func_virtual_added` above, an existing function losing its
-    # virtual-ness) and `param_default_value_removed`/
-    # `python_api_default_removed` (an existing parameter of an existing
-    # function/method losing its default value, making a previously
-    # optional argument mandatory) all describe a trait lost by a
-    # persisting entity, not the entity itself disappearing.
-    "func_virtual_removed": "modified",
-    "param_default_value_removed": "modified",
-    "python_api_default_removed": "modified",
+#: CLI ``--view show=`` action tokens -> the canonical
+#: :class:`~abicheck.model.change_catalog.registry.ChangeOperation`. The CLI
+#: has always spelled ``ChangeOperation.MODIFIED`` "changed"; that stays.
+ACTION_TOKEN_OPERATIONS: dict[str, ChangeOperation] = {
+    "added": ChangeOperation.ADDED,
+    "removed": ChangeOperation.REMOVED,
+    "changed": ChangeOperation.MODIFIED,
 }
 
 
-def operation_for_kind(kind_val: str) -> str:
-    """Classify a ``ChangeKind.value`` string into "added"/"removed"/"modified".
+def entity_for_kind(kind_val: str) -> str | None:
+    """The declared :class:`ChangeEntity` value for *kind_val*, or ``None``.
 
-    A kind is "added"/"removed" when it is listed in ``_OPERATION_OVERRIDES``
-    or its name ends with one of the corresponding suffixes above; every
-    other kind (parameter/type/layout changes, renames, trait gained/lost on
-    a persisting entity, etc.) is "modified".
+    Plan slice 7o: reads the one registration in the change catalog. The
+    superseded implementation was a table of name *prefixes*
+    (``func_``/``var_``/``type_``/``enum_``/``soname_``...) plus an
+    exact-match escape list for the kinds whose names those prefixes miss,
+    maintained beside the catalog rather than in it -- which is why 238 of
+    the 407 kinds matched no element at all and were invisible to every
+    ``--view show=`` element token. ``None`` means the kind is not in the
+    registry (a hand-built ``Change`` in a test), never "unclassified": a
+    registered entry without a declared entity fails at import time.
     """
-    override = _OPERATION_OVERRIDES.get(kind_val)
-    if override is not None:
-        return override
-    if any(kind_val.endswith(s) for s in _ADDED_SUFFIXES):
-        return "added"
-    if any(kind_val.endswith(s) for s in _REMOVED_SUFFIXES):
-        return "removed"
-    return "modified"
+    entity = REGISTRY.entity_for(kind_val)
+    return entity.value if entity is not None else None
+
+
+def operation_for_kind(kind_val: str) -> str:
+    """Classify a ``ChangeKind.value`` into "added"/"removed"/"modified".
+
+    Plan slice 7o: this reads ``ChangeKindMeta.operation`` -- the same single
+    registration that declares the kind's verdict and impact -- instead of
+    matching name suffixes (``*_added``/``*_removed``) with a 30-entry
+    override table for every kind whose name ends in ``_added`` while naming
+    a trait *gained by a persisting entity* (``func_noexcept_added``,
+    ``type_field_added``, ``virtual_method_added``, ...). That override table
+    was itself the evidence that a name is not the fact.
+
+    Shared, as before, between the display filter's action tokens and the
+    JSON report's per-finding ``operation`` field, so the two cannot drift.
+    An unregistered kind reads "modified", the same neutral answer the
+    superseded suffix rule gave a name it did not recognize.
+    """
+    operation = REGISTRY.operation_for(kind_val)
+    return operation.value if operation is not None else ChangeOperation.MODIFIED.value
 
 
 @dataclass(frozen=True)
@@ -283,8 +230,8 @@ class ShowOnlyFilter:
     def parse(cls, raw: str) -> ShowOnlyFilter:
         """Parse a comma-separated --show-only string into a filter."""
         severity_tokens = {"breaking", "api-break", "risk", "compatible"}
-        element_tokens = {"functions", "variables", "types", "enums", "elf"}
-        action_tokens = {"added", "removed", "changed"}
+        element_tokens = set(ELEMENT_TOKEN_ENTITIES)
+        action_tokens = set(ACTION_TOKEN_OPERATIONS)
 
         severities: set[str] = set()
         elements: set[str] = set()
@@ -354,78 +301,33 @@ class ShowOnlyFilter:
         return label in self.severities
 
     def _check_element(self, kind_val: str) -> bool:
-        """Return True if *kind_val* matches the element filter."""
+        """Return True if *kind_val* matches the element filter.
+
+        Plan slice 7o: resolves through the change catalog's own declared
+        :class:`ChangeEntity` (:func:`entity_for_kind`), not through a
+        second interpretation of the kind's *name*.
+        """
         if not self.elements:
             return True
-        _ELEMENT_PREFIXES: dict[str, tuple[str, ...]] = {
-            "functions": (
-                "func_",
-                "param_",
-                "method_",
-                "base_class_",
-                "template_",
-                "return_pointer_level_",
-            ),
-            "variables": ("var_", "constant_"),
-            "types": ("type_", "struct_", "union_", "field_", "typedef_"),
-            "enums": ("enum_",),
-            "elf": (
-                "soname_",
-                "needed_",
-                "symbol_",
-                "rpath_",
-                "runpath_",
-                "ifunc_",
-                "common_",
-                "dwarf_",
-                "calling_convention_",
-                "compat_version_",
-                "visibility_",
-            ),
-        }
-        _ELEMENT_EXACT: dict[str, tuple[str, ...]] = {
-            "functions": (
-                "removed_const_overload",
-                "anon_field_changed",
-                "used_reserved_field",
-                "frame_register_changed",
-                # ADR-027 anti-pattern: a function exposing std:: by value.
-                "public_api_exposes_stl_by_value",
-            ),
-            "types": (
-                # ADR-027 type-level idiom transitions / anti-patterns whose
-                # kind names don't match the type_/struct_/... prefixes.
-                "opaque_invariant_broken",
-                "polymorphic_type_non_virtual_dtor",
-                "handle_type_changed",
-            ),
-            "elf": (
-                "toolchain_flag_drift",
-                "source_level_kind_changed",
-                "value_abi_trait_changed",
-                "struct_return_convention_changed",
-            ),
-        }
-        for elem in self.elements:
-            prefixes = _ELEMENT_PREFIXES.get(elem, ())
-            if prefixes and any(kind_val.startswith(p) for p in prefixes):
-                return True
-            exact = _ELEMENT_EXACT.get(elem, ())
-            if exact and kind_val in exact:
-                return True
-        return False
+        entity = entity_for_kind(kind_val)
+        if entity is None:
+            return False
+        return any(
+            ELEMENT_TOKEN_ENTITIES[elem].value == entity for elem in self.elements
+        )
 
     @staticmethod
     def _check_action(kind_val: str, actions: frozenset[str]) -> bool:
-        """Return True if *kind_val* matches the action filter."""
+        """Return True if *kind_val* matches the action filter.
+
+        Plan slice 7o: resolves through the catalog's declared
+        :class:`ChangeOperation` (:func:`operation_for_kind`).
+        """
         if not actions:
             return True
-        op = operation_for_kind(kind_val)
-        # NB: "changed" (the --show-only token) maps to operation "modified".
-        return (
-            (op == "added" and "added" in actions)
-            or (op == "removed" and "removed" in actions)
-            or (op == "modified" and "changed" in actions)
+        operation = operation_for_kind(kind_val)
+        return any(
+            ACTION_TOKEN_OPERATIONS[action].value == operation for action in actions
         )
 
     def matches(
@@ -713,45 +615,6 @@ def _build_impact_table(
 # ---------------------------------------------------------------------------
 # Leaf-change mode helpers
 # ---------------------------------------------------------------------------
-
-
-def _format_leaf_type_change(c: Change) -> list[str]:
-    """Format a single leaf-mode type change entry."""
-    return _rmd._format_leaf_type_change(c)
-
-
-def compute_leaf_type_sections(
-    type_changes: list[Change], policy: str
-) -> _rmd.LeafTypeSectionsData:
-    """The structured intermediate for :func:`_build_leaf_type_sections`."""
-    breaking_set, api_break_set, _, _ = _policy_kind_sets(policy)
-    breaking_types = [c for c in type_changes if c.kind in breaking_set]
-    api_break_types = [c for c in type_changes if c.kind in api_break_set]
-    other_types = [
-        c
-        for c in type_changes
-        if c.kind not in breaking_set and c.kind not in api_break_set
-    ]
-
-    sections: list[_rmd.LeafTypeSection] = []
-    for heading, section_changes in [
-        ("## Breaking Type Changes", breaking_types),
-        ("## Source-Level Type Breaks", api_break_types),
-        ("## Other Type Changes", other_types),
-    ]:
-        if not section_changes:
-            continue
-        sections.append(
-            _rmd.LeafTypeSection(heading=heading, changes=tuple(section_changes))
-        )
-    return _rmd.LeafTypeSectionsData(sections=tuple(sections))
-
-
-def _build_leaf_type_sections(type_changes: list[Change], policy: str) -> list[str]:
-    """Build severity-grouped type-change sections for leaf-change view."""
-    return _rmd.render_leaf_type_sections(
-        compute_leaf_type_sections(type_changes, policy)
-    )
 
 
 #: The report's stable per-finding fingerprint. The implementation moved to
@@ -1987,7 +1850,6 @@ _DISPATCH_MARKDOWN_NAMES = frozenset(
     {
         "to_markdown",
         "to_review_digest",
-        "_to_markdown_leaf",
         "_to_markdown_root_cause",
         "_markdown_alternate_rendering",
     }

@@ -196,6 +196,21 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
     ),
     (
+        "--view demangle/no-demangle/patterns/filtered/suppressions/leaf "
+        "(plan slice 7o: the first five became unconditional disclosure or "
+        "automatic behavior; 'leaf' retired against 'root-cause' on a "
+        "129-pair measurement)",
+        (
+            "--view demangle",
+            "--view no-demangle",
+            "--view patterns",
+            "--view filtered",
+            "--view suppressions",
+            "--view leaf",
+        ),
+        frozenset(),
+    ),
+    (
         "--report-mode/--show-only/--demangle/--no-demangle/--explain-patterns"
         " (ADR-068 D4/Phase 5: collapsed into one repeatable --view option)",
         (

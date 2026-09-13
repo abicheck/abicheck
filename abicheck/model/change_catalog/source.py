@@ -36,13 +36,15 @@ line-count reasons before this migration.
 
 from __future__ import annotations
 
-from .registry import ChangeKindMeta, Verdict
+from .registry import ChangeEntity, ChangeKindMeta, ChangeOperation, Verdict
 
 _B = Verdict.BREAKING
 _C = Verdict.COMPATIBLE
 _A = Verdict.API_BREAK
 _R = Verdict.COMPATIBLE_WITH_RISK
 _E = ChangeKindMeta
+_ENT = ChangeEntity
+_OP = ChangeOperation
 
 SOURCE_ENTRIES: list[ChangeKindMeta] = [
     _E(
@@ -55,6 +57,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "Detected only when abicheck is given a probe matrix "
         "(snapshots taken under multiple configurations).",
         description_template="{detail} '{name}' is present in configurations {old} but absent in {new}. Consumers compiling under different toolchains see different public APIs.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "build_option_reaches_public_symbol",
@@ -63,6 +67,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "produces an exported public symbol (per the build/source graph). "
         "It localizes a flag-drift risk to the public surface it can affect; "
         "a risk to review, never on its own an artifact-proven ABI break.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "call_graph_public_entry_reachability_changed",
@@ -71,12 +77,16 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "an exported entry point changed (per the approximate Clang call "
         "graph). A quality/behavioral signal that the implementation behind "
         "a stable public symbol moved; never an ABI break on its own.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "concept_tightened",
         _A,
         impact="A public C++20 concept became more constrained; consumer templates or calls that satisfied the old constraint may no longer compile against the new headers.",
         description_template="Concept constraint tightened: {name}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "constexpr_value_changed",
@@ -85,6 +95,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "constant, the old value may be baked into consumer code; a "
         "source/API break until consumers are recompiled against the new "
         "headers.",
+        entity=_ENT.VARIABLE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "consumer_required_symbol_removed",
@@ -98,6 +110,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "load, or crash the first time it calls the symbol, with no "
         "recompilation involved.",
         description_template="Consumer '{name}' requires symbol '{symbol}', which the new library no longer exports",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "declaration_coordinates_shifted",
@@ -118,6 +132,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "record-before-disposing rule -- it explains what would "
         "otherwise look like an unrelated remove-then-add pair in the "
         "graph diff, the same way its RISK-tier siblings do.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "declaration_identity_reconciled_unresolved",
@@ -140,6 +156,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "reconciliation siblings -- an unresolved difference is weaker "
         "evidence, which narrows the conclusion; it does not license a "
         "clean one. Informational: does not by itself indicate a break.",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "declaration_identity_unchanged",
@@ -163,6 +181,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "dropped, per this repo's record-before-disposing rule -- it "
         "explains what would otherwise look like an unrelated "
         "remove-then-add pair in the graph diff.",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "declaration_identity_reconciled",
@@ -175,6 +195,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "change would show up as an unrelated remove-then-add pair in "
         "the graph diff. Informational: does not by itself indicate a "
         "break.",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "declaration_moved",
@@ -185,6 +207,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "Without this reconciliation the move would show up as an "
         "unrelated remove-then-add pair in the graph diff. Informational: "
         "does not by itself indicate a break.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "declaration_renamed",
@@ -197,6 +221,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "remove-then-add pair in the graph diff. Informational: does not "
         "by itself indicate a break — any artifact-level finding for "
         "either spelling stands on its own evidence.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "default_argument_changed",
@@ -206,6 +232,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "newly compiled callers that omit the argument get a different "
         "value — a source-visible behavioral break. Build-context replay "
         "adds provenance over header-only detection.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "evidence_required_missing",
@@ -215,6 +243,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "compare, so the run is failed rather than passing on a silently "
         "degraded scan (ADR-033 D7). Supply the missing evidence pack or "
         "relax the policy.",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "exported_not_public",
@@ -227,6 +257,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "script) or document it; respects the ABI-relevant-symbol filter and "
         "public-surface scoping so intentional internal exports can be "
         "suppressed.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "exported_symbol_source_owner_changed",
@@ -240,6 +272,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "can change consumers' include paths, inlining, or introduce an ODR "
         "risk if the old location still declares it. A source-graph risk to "
         "review, never on its own an artifact-proven ABI break.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "generated_header_changed",
@@ -249,6 +283,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "API surface, so a change can alter declarations or macro contracts "
         "seen by consumers. Policy may escalate to an API break; by default "
         "a risk to review.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "generated_header_reaches_public_api",
@@ -257,6 +293,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "closure (it is a public header, or it declares a reachable public "
         "entity). Build-time-generated content now shapes the public API "
         "surface, so its provenance and reproducibility warrant review.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "identity_collision_detected",
@@ -273,6 +311,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "ABI break — no action is required unless a finding under that name "
         "looks wrong, in which case treat it as ambiguous between the two USRs "
         "named in the finding detail.",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "include_graph_public_header_drift",
@@ -281,6 +321,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "(per the depfile/-M include graph). Consumers may now pull in "
         "different declarations or macros; a source/API risk to review, "
         "never on its own an artifact-proven ABI break.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "inline_body_changed",
@@ -290,6 +332,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "old behavior until recompiled, so a mixed-build deployment can run "
         "two versions of the same function. A deployment/ODR risk, not a "
         "proven binary break.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "inline_function_removed",
@@ -300,6 +344,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "Source that called the inline no longer compiles. A source/API "
         "break — keep a compatible declaration or move the removal behind a "
         "documented deprecation.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "internal_template_leaks_via_public_api",
@@ -312,6 +358,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "public ABI — every consumer must be rebuilt. Function-"
         "template analogue of INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API.",
         description_template="Internal-namespace function template '{name}' has changed instantiations: {detail}. These mangled names participate in consumer symbol tables; every consumer must rebuild.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "internal_type_leaks_via_public_api",
@@ -324,6 +372,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "vtable, or compiled code of every consumer of the public type. "
         "Common in libraries that wrap implementation in a "
         "'detail' namespace (for example oneDAL).",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "odr_source_conflict",
@@ -332,6 +382,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "translation units (One Definition Rule conflict). Linking or "
         "loading code that mixes the definitions is undefined behavior; a "
         "correctness risk surfaced by comparing per-TU source surfaces.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "odr_type_variant",
@@ -344,6 +396,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "break surfaced from one merged snapshot's L4 evidence; never on its own "
         "an artifact-proven shipped-ABI break. Reconcile the conflicting "
         "definitions (usually a macro/flag that changes the type per TU).",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "private_header_leak",
@@ -355,6 +409,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "not shipped, so their build breaks once the private header is absent "
         "from the install tree — a packaging-hygiene risk. Make the public header "
         "self-contained or install the leaked header.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "public_api_internal_dependency_added",
@@ -368,6 +424,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "behavioral risk to the API. The version-over-version analogue of the "
         "intra-version public-to-internal cross-check; a risk to review, "
         "never on its own an artifact-proven ABI break.",
+        entity=_ENT.SOURCE,
+        operation=_OP.ADDED,
     ),
     _E(
         "public_macro_removed",
@@ -378,6 +436,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "(a constant, a feature guard, or a function-like macro) no longer "
         "compiles. A source/API break; provide a replacement or a deprecation "
         "shim, or document the removal for consumers.",
+        entity=_ENT.SOURCE,
+        operation=_OP.REMOVED,
     ),
     _E(
         "public_macro_value_changed",
@@ -387,6 +447,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "(array sizes, switch labels, struct layout) silently mismatches a "
         "library built with the new value. A source/API break; recompile "
         "consumers against the new headers.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "public_not_exported",
@@ -398,6 +460,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "to declarations with a real export obligation — inline/templated/"
         "constexpr/hidden-visibility decls are public source surface that "
         "legitimately emit no dynamic symbol and are excluded.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "public_reachability_changed",
@@ -406,6 +470,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "closure (target → public header → declaration → exported symbol) "
         "between versions. Explains and prioritizes impact derived from the "
         "source graph; never on its own decides an ABI break.",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "public_surface_grew",
@@ -418,6 +484,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "--surface-metrics is accepted for compatibility but no longer "
         "changes whether this finding is emitted.",
         description_template="public surface grew: {old} → {new} declarations (+{detail})",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "public_surface_shrank",
@@ -429,6 +497,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "--surface-metrics is accepted for compatibility but no longer "
         "changes whether this finding is emitted.",
         description_template="public surface shrank: {old} → {new} declarations ({detail})",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "public_to_internal_dependency",
@@ -441,6 +511,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "API. Elevated when the internal entity is among the revision's changed "
         "files. Explains and localizes risk from the source graph; never on its "
         "own an artifact-proven ABI break.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "public_typedef_removed",
@@ -450,6 +522,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "replay surfaces the removal. Consumer source that named the alias "
         "(variables, casts, template arguments) no longer compiles. A "
         "source/API break; retain the alias or provide a replacement name.",
+        entity=_ENT.TYPE,
+        operation=_OP.REMOVED,
     ),
     _E(
         "public_typedef_target_changed",
@@ -461,6 +535,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "consumer-owned struct — can change meaning or fail to compile. "
         "Surfaced by source replay because a bare typedef leaves no exported "
         "symbol of its own; a source/API break until consumers recompile.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "rtti_for_internal_type",
@@ -473,6 +549,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "class. Hide the internal type (anonymous namespace / "
         "`-fvisibility=hidden`) or stop exporting its typeinfo. A single-release "
         "hygiene risk, never on its own an artifact-proven ABI break.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "runtime_symbol_provider_changed",
@@ -486,6 +564,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "new provider's signature is compatible; review the new "
         "provider's own diff for this symbol.",
         description_template="Runtime binding for '{symbol}' in consumer '{name}' moved from provider '{old}' to '{new}' between the baseline and candidate environments.",
+        entity=_ENT.BINARY,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "runtime_weak_resolution_changed",
@@ -498,6 +578,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "implementation (the consumer's optional-feature code path "
         "activates for the first time).",
         description_template="Weak symbol '{symbol}' resolution for consumer '{name}' changed from '{old}' to '{new}' between the baseline and candidate environments.",
+        entity=_ENT.BINARY,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "source_binary_provenance_mismatch",
@@ -508,6 +590,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "wrong tag/commit). All L4/L5 source findings for this pair are then "
         "untrustworthy; re-check the source out at the binary's build tag. "
         "Per ADR-028 D3 this is a context risk, never a proven binary break.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "source_decl_binary_symbol_mismatch",
@@ -517,6 +601,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "the library's exports. With artifact backing this escalates to the "
         "authoritative removed-export finding; on its own it is a "
         "surface/export consistency risk to investigate.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "source_fact_coverage_incomplete",
@@ -530,6 +616,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "proof nothing changed in that family; treat this pair's other "
         "source-replay findings as unreliable until re-collected with a "
         "consistent, complete fact set.",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "source_surface_dso_mismatch",
@@ -542,6 +630,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "binary may be mis-scoped (AC-009). A source-tooling risk, never an "
         "artifact-proven ABI break: relink/rebuild the source surface "
         "per-DSO against this binary's own exports.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "source_to_binary_mapping_changed",
@@ -550,6 +640,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "exported binary symbol (or its source↔symbol mapping changed) "
         "without a clear artifact ABI diff. A surface/mapping consistency "
         "risk to investigate, surfaced by comparing source graph summaries.",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "suppression_reachability_unknown",
@@ -561,6 +653,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "of being silently hidden by absence-of-evidence. Add "
         "`allow_unknown_reachability: true` to the rule to suppress it "
         "anyway once you have manually confirmed it is safe.",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "suppression_would_hide_public_break",
@@ -571,6 +665,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "break rather than internal noise. Review the finding; if the "
         "suppression is intentional even though the symbol is "
         "public-reachable, add `allow_public_break: true` to that rule.",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "target_dependency_added",
@@ -582,6 +678,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "and the added dependency's own ABI now transitively affects "
         "consumers. A packaging/deployment risk to review; the artifact's "
         "DT_NEEDED diff proves any concrete new load-time dependency.",
+        entity=_ENT.BUILD,
+        operation=_OP.ADDED,
     ),
     _E(
         "template_body_changed",
@@ -591,6 +689,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "so this is invisible to artifact comparison; consumers that "
         "instantiate the template pick up the new body on recompile. A "
         "source-visible risk surfaced only by source replay.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "undocumented_export_ratio_increased",
@@ -603,6 +703,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "for compatibility but no longer changes whether this finding "
         "is emitted.",
         description_template="undocumented-export ratio rose: {old} → {new} (symbols exported without a public header)",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "uninstantiated_template_removed",
@@ -611,6 +713,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "was removed from the headers. Source that instantiates it no longer "
         "compiles; there is no binary footprint, so only source replay sees "
         "it. A source/API break.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "unversioned_exported_symbol",
@@ -622,5 +726,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "release silently changes what they resolve to. Add the symbol to the "
         "version script (or hide it if it is not public API). A single-release "
         "hygiene risk, never on its own an artifact-proven ABI break.",
+        entity=_ENT.BINARY,
+        operation=_OP.MODIFIED,
     ),
 ]

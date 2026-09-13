@@ -571,7 +571,18 @@ def demangle_text(text: str) -> str:
     Tokens that are not valid C++ mangled names, or that cannot be demangled
     because no demangler is available, are left unchanged. Intended for
     human-facing report output only — machine formats (JSON/SARIF/JUnit) keep
-    the raw mangled symbols so downstream tooling can match on them.
+    the raw mangled symbols so downstream tooling can match on them (and,
+    since plan slice 7o, carry the demangled name too, in a separate
+    ``demangled_symbol`` field).
+
+    **Every successfully demangled token keeps its exact mangled spelling**,
+    appended in brackets: ``_ZN3Foo3barEi`` renders as
+    ``Foo::bar(int) [_ZN3Foo3barEi]``. That is what let slice 7o retire the
+    ``--view demangle``/``no-demangle`` decision entirely: the only reason
+    to ask for the mangled form was that demangling *replaced* it, leaving
+    nothing to paste into ``nm``/``objdump``, a suppression rule's selector,
+    or a bug report. Both names are now always present, so human output
+    demangles automatically for every human format and nothing is lost.
 
     Resolves a Mach-O ``__Z...`` token (``accept_macho_prefix=True``) since
     this function has no other, correctness-critical caller to put at risk
@@ -586,6 +597,8 @@ def demangle_text(text: str) -> str:
     def _repl(m: re.Match[str]) -> str:
         tok = m.group(0)
         demangled = mapping.get(tok)
-        return demangled if demangled and demangled != tok else tok
+        if not demangled or demangled == tok:
+            return tok
+        return f"{demangled} [{tok}]"
 
     return _MANGLED_TOKEN_RE.sub(_repl, text)

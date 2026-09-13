@@ -104,7 +104,7 @@ def render_pattern_modulations(result: DiffResult) -> str:
     mods = result.pattern_modulations
     if not mods:
         return "\nNo pattern-aware modulations applied."
-    lines = [f"\nPattern-aware modulations ({len(mods)}, --view patterns):"]
+    lines = [f"\nPattern-aware modulations ({len(mods)}):"]
     for m in mods:
         sym = m.get("symbol", "?")
         rule = m.get("rule_id", "?")

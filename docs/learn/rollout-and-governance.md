@@ -135,7 +135,7 @@ rule is actually doing — matched nothing (stale), matched a breaking change
 
 ```bash
 abicheck compare old.json new.so -H include/ \
-  --suppress suppressions.yaml --view suppressions
+  --suppress suppressions.yaml
 ```
 
 The rule above with the broad `namespace` selector has one more property:

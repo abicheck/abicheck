@@ -934,7 +934,31 @@ _ARTIFACT_NAMES = frozenset(
 #:       ``not_evaluated`` where a pre-4.5 run reported ``introduced``/
 #:       ``resolved`` from the current runner's filesystem. No verdict,
 #:       severity, or exit code moves -- this block never reached any of them.
-REPORT_SCHEMA_VERSION = "4.5"  #: 4.5 -- see the comment immediately above.
+#: 4.6 -- plan slice 7o (`--view`'s internal grammar). Three machine-contract
+#:       changes, one of them a removal:
+#:       * additive per-finding ``entity``: the canonical ``ChangeEntity``
+#:         (``function``/``variable``/``type``/``enum``/``binary``/``build``/
+#:         ``source``/``analysis``) the change catalog declares, emitted
+#:         beside the ``operation`` field it has always been rendered with.
+#:       * per-finding ``operation`` values *may move* for a kind the
+#:         superseded name-suffix heuristic classified wrongly: the field is
+#:         now read off the same single registration that declares the kind's
+#:         verdict, rather than re-derived from the kind's name plus a
+#:         30-entry override table. Only the display dimension moves -- no
+#:         verdict, gate, exit code, coverage contribution or assurance value
+#:         depends on it.
+#:       * ``demangled_symbol`` is now resolved for *every* Itanium-mangled
+#:         finding, not only an ``ELF_ONLY``-visibility one, so a machine
+#:         consumer carries both names (additive in practice: the key
+#:         appears on more findings, never with a different meaning).
+#:       * **removed**: the ``leaf`` report mode and with it the
+#:         ``leaf_changes``/``non_type_changes`` keys. Retired on a
+#:         measurement, not an argument -- over the 129 catalog library pairs
+#:         that build in this environment, ``leaf`` and ``root-cause``
+#:         exposed the identical finding set in all 93 cases that had
+#:         findings, and ``leaf``'s headline section was empty in 40 of them.
+#:         ``root_causes``/``root_cause_count`` is the supported grouping.
+REPORT_SCHEMA_VERSION = "4.6"  #: 4.6 -- see the comment immediately above.
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

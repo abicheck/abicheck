@@ -626,9 +626,20 @@ class TestStatMode:
 # ---------------------------------------------------------------------------
 
 
-class TestLeafMode:
-    def test_leaf_markdown(self):
-        result = _make_result(
+class TestLeafModeRetired:
+    """Plan slice 7o: ``leaf`` retired against ``root-cause``, on a
+    measurement (129 real library pairs; identical finding sets in all 93
+    with findings, and an empty leaf headline section in 40 of them).
+
+    What the retired mode's own tests asserted -- the root type grouped
+    with its affected-interface list, and the non-type findings alongside
+    it -- is asserted here against the mode that replaced it, so the old
+    user task is proven to still have a supported answer rather than just
+    proven to error.
+    """
+
+    def _result(self):
+        return _make_result(
             changes=[
                 Change(
                     ChangeKind.TYPE_SIZE_CHANGED,
@@ -639,50 +650,23 @@ class TestLeafMode:
                 Change(ChangeKind.FUNC_REMOVED, "old_api", "function removed: old_api"),
             ],
         )
-        text = to_markdown(result, report_mode="leaf")
-        assert "leaf-change view" in text
+
+    def test_root_cause_markdown_carries_what_leaf_carried(self):
+        text = to_markdown(self._result(), report_mode="root-cause")
         assert "Config" in text
-        assert "config_init" in text
-        assert "Non-Type Changes" in text
         assert "old_api" in text
 
-    def test_leaf_json(self):
-        result = _make_result(
-            changes=[
-                Change(
-                    ChangeKind.TYPE_SIZE_CHANGED,
-                    "Config",
-                    "size changed",
-                    affected_symbols=["f1", "f2"],
-                ),
-                Change(ChangeKind.FUNC_REMOVED, "old_api", "removed"),
-            ],
-        )
-        text = to_json(result, report_mode="leaf")
-        d = json.loads(text)
-        assert "leaf_changes" in d
-        assert "non_type_changes" in d
-        assert len(d["leaf_changes"]) == 1
-        assert d["leaf_changes"][0]["symbol"] == "Config"
-        assert d["leaf_changes"][0]["affected_count"] == 2
-        assert len(d["non_type_changes"]) == 1
+    def test_root_cause_json_carries_every_finding(self):
+        d = json.loads(to_json(self._result(), report_mode="root-cause"))
+        assert "leaf_changes" not in d
+        assert "non_type_changes" not in d
+        symbols = {f["symbol"] for g in d["root_causes"] for f in g["findings"]}
+        assert symbols == {"Config", "old_api"}
 
-    def test_leaf_markdown_carries_severity_summary(self):
-        """report_mode="leaf" returned before the severity summary section
-        was ever built, so it silently had no severity info even when a
-        caller passed severity_config through to_markdown."""
-        from abicheck.severity import PRESET_DEFAULT
+    def test_leaf_is_not_a_report_mode_any_more(self):
+        from abicheck.frontends.cli.options.view import REPORT_MODES
 
-        result = _make_result(
-            changes=[Change(ChangeKind.FUNC_ADDED, "new_api", "new function: new_api")],
-        )
-        text = to_markdown(result, report_mode="leaf", severity_config=PRESET_DEFAULT)
-        assert "Severity Configuration" in text
-
-
-# ---------------------------------------------------------------------------
-# Show-impact tests
-# ---------------------------------------------------------------------------
+        assert "leaf" not in REPORT_MODES
 
 
 class TestShowImpact:

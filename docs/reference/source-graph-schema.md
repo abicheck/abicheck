@@ -776,7 +776,7 @@ reachability/impact evidence at all won't have this key, only
 `reachability_state: "unknown"`.
 
 Both fields appear everywhere a finding is serialized: the full `changes[]`
-list, `--view leaf`'s `leaf_changes[]`/`changes[]` union (root type
+list, `--view root-cause`'s `root_causes[].findings[]` (root type
 changes route through a separate builder that mirrors the same fields), and
 each entry in `suppression.suppressed_changes[]` — a suppressed finding's
 `decision.state` is always `"suppressed"` there, so its `impact_assessment`

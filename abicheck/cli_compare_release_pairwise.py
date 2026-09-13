@@ -114,7 +114,6 @@ _CompareReleaseCommonArgs = tuple[
     "CompileContext | None",
     "str | None",
     "str | None",
-    bool,
     "list[Path] | None",
     bool,
     "dict[Any, Any] | None",
@@ -295,7 +294,6 @@ def _compare_one_library(
     compile_context: CompileContext | None = None,
     depth: str | None = None,
     show_only: str | None = None,
-    explain_patterns: bool = False,
     public_header_dirs: list[Path] | None = None,
     collapse_versioned_symbols: bool = False,
     project_policy_overrides: dict[Any, Any] | None = None,
@@ -324,8 +322,8 @@ def _compare_one_library(
     ``findings``/``findings_view`` split lives one level up, in
     :func:`~abicheck.cli_compare_release_matrix._strip_diff_results_and_adjust_verdict`,
     which has the real live ``DiffResult`` to filter from.
-    *explain_patterns* renders this library's pattern-verdict modulation
-    ledger (``cli_audit.render_pattern_modulations``, same content a
+    This library's pattern-verdict modulation ledger is always rendered
+    (plan slice 7o: disclosure is unconditional, ADR-067) (``cli_audit.render_pattern_modulations``, same content a
     single-pair `compare --view patterns` echoes) and stashes it under
     ``"_pattern_modulations_text"`` rather than echoing it directly --
     this function runs inside a `ThreadPoolExecutor` worker when the
@@ -371,10 +369,14 @@ def _compare_one_library(
             env_matrix=env_matrix,
         )
         result = compare_result.diff
-        pattern_modulations_text: str | None = None
-        if explain_patterns:
-            from .cli_audit import render_pattern_modulations
+        # Plan slice 7o: unconditional, like every other disposition ledger
+        # (ADR-067). Captured as text rather than echoed here because a
+        # per-library worker thread's echo could interleave with a sibling's
+        # -- see `render_pattern_modulations`'s own docstring.
+        from .cli_audit import render_pattern_modulations
 
+        pattern_modulations_text: str | None = None
+        if result.pattern_modulations:
             pattern_modulations_text = (
                 f"\n== {old_path.name} ==\n{render_pattern_modulations(result)}"
             )
@@ -710,7 +712,6 @@ def _compare_release_libraries(
     compile_context: CompileContext | None = None,
     depth: str | None = None,
     show_only: str | None = None,
-    explain_patterns: bool = False,
     public_header_dirs: list[Path] | None = None,
     collapse_versioned_symbols: bool = False,
     project_policy_overrides: dict[Any, Any] | None = None,
@@ -789,7 +790,6 @@ def _compare_release_libraries(
         compile_context,
         depth,
         show_only,
-        explain_patterns,
         public_header_dirs,
         collapse_versioned_symbols,
         project_policy_overrides,

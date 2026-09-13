@@ -36,13 +36,15 @@ line-count reasons before this migration.
 
 from __future__ import annotations
 
-from .registry import ChangeKindMeta, Verdict
+from .registry import ChangeEntity, ChangeKindMeta, ChangeOperation, Verdict
 
 _B = Verdict.BREAKING
 _C = Verdict.COMPATIBLE
 _A = Verdict.API_BREAK
 _R = Verdict.COMPATIBLE_WITH_RISK
 _E = ChangeKindMeta
+_ENT = ChangeEntity
+_OP = ChangeOperation
 
 TYPES_ENTRIES: list[ChangeKindMeta] = [
     _E(
@@ -54,6 +56,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "varies across compilers, so layout and calling convention "
         "diverge and old code is miscompiled.",
         description_template="_Atomic {detail} on {name}: {old} → {new}. _Atomic size/alignment may differ from the unqualified type and varies across compilers.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "base_class_offset_changed",
@@ -64,6 +68,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "pointer adjustment for that base and every field after it shifts; old "
         "binaries read the wrong addresses.",
         description_template="Base class '{detail}' moved within '{name}' ({old} → {new} bits). The `this`-pointer adjustment for that base and the offset of every field after it shift; existing binaries read the wrong addresses.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "base_class_position_changed",
@@ -80,6 +86,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "layout accesses inherited members and virtual dispatch "
         "through the wrong offset.",
         description_template="Base class order reordered: {name} — this-pointer adjustments changed",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "base_class_virtual_changed",
@@ -91,6 +99,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "code compiled against the previous scheme locates the base "
         "subobject incorrectly.",
         description_template="Base class virtual inheritance changed: {name} — {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "bundle_soname_skew",
@@ -102,6 +112,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "metadata; binaries dynamically loading the mixed cohort can fetch "
         "incompatible internal contracts and corrupt at the first cross-"
         "library call.",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "cpo_kind_changed",
@@ -114,6 +126,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "extern templates, trait specializations, and any code that "
         "took the CPO's address.",
         description_template="Public name '{name}' was a {old} in old and is a {new} in new. Call syntax preserved; decltype, extern templates, and trait specializations break.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "cpu_dispatch_isa_dropped",
@@ -125,6 +139,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "Reported as one grouped finding listing the affected algorithm "
         "stems.",
         description_template="CPU dispatch ISA '{name}' tier removed: {detail}. Runtime dispatcher continues to work; consumers that pinned directly to '{name}' symbols get unresolved references at load time.",
+        entity=_ENT.BINARY,
+        operation=_OP.REMOVED,
     ),
     _E(
         "default_template_arg_changed",
@@ -138,6 +154,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "default parameter changes (NO_CHANGE), template default arguments "
         "ARE part of the substituted type and affect mangling.",
         description_template="Template instantiation '{name}' substitutes to different arguments than its surviving sibling '{detail}'. This is consistent with a change to a default template argument in the declaring header: consumer source compiles unchanged, but the substituted mangled symbol differs. Consumers built against the old default get unresolved symbols.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "enum_became_scoped",
@@ -150,6 +168,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "from an integer to the enum was never implicit either way —  "
         "only the enum-to-integer direction changes here.)",
         description_template="Enum became scoped: {name} — unqualified enumerator lookup and implicit int conversion no longer compile",
+        entity=_ENT.ENUM,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "enum_deprecated_added",
@@ -163,6 +183,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "with warnings as errors (e.g. -Werror=deprecated-declarations) "
         "has this turn a previously clean build into a failing one.",
         description_template="Enum marked deprecated: {name} ({detail})",
+        entity=_ENT.ENUM,
+        operation=_OP.ADDED,
     ),
     _E(
         "enum_deprecated_removed",
@@ -170,12 +192,16 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         impact="Enum type's [[deprecated]] marker was removed; the "
         "compiler warning stops, with no effect on the enum's ABI.",
         description_template="Enum no longer marked deprecated: {name}",
+        entity=_ENT.ENUM,
+        operation=_OP.REMOVED,
     ),
     _E(
         "enum_last_member_value_changed",
         _R,
         impact="Sentinel/MAX value changed; old code using it for array sizes allocates wrong amount.",
         description_template="Enum member value changed: {name}::{detail}",
+        entity=_ENT.ENUM,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "enum_lost_scoped",
@@ -188,6 +214,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "longer gets that protection, a silent behavior change to "
         "review rather than a hard break.",
         description_template="Enum lost scoped status: {name} — implicit int conversion silently reappears",
+        entity=_ENT.ENUM,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "enum_member_added",
@@ -195,12 +223,16 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         is_addition=True,
         impact="New enumerator may shift subsequent values in non-fixed enums; switch defaults may miss the new case.",
         description_template="Enum member added: {name}::{detail}",
+        entity=_ENT.ENUM,
+        operation=_OP.ADDED,
     ),
     _E(
         "enum_member_removed",
         _B,
         impact="Old code uses a constant that no longer exists; compile error for source, stale value for binaries.",
         description_template="Enum member removed: {name}::{detail}",
+        entity=_ENT.ENUM,
+        operation=_OP.REMOVED,
     ),
     _E(
         "enum_member_renamed",
@@ -208,12 +240,16 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         impact="Enumerator name changed but value is the same; source code using old name won't compile.",
         policy_overrides={"sdk_vendor": _C},
         description_template="Enum member renamed: {name}::{old} → {new} (value={detail})",
+        entity=_ENT.ENUM,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "enum_member_value_changed",
         _B,
         impact="Old binaries use stale numeric values; logic comparisons and switch statements silently break.",
         description_template="Enum member value changed: {name}::{detail}",
+        entity=_ENT.ENUM,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "experimental_graduated",
@@ -225,6 +261,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "Compatible: existing consumers keep compiling; new consumers "
         "are encouraged to migrate to the stable name.",
         description_template="Experimental {detail} '{old}' graduated to stable name '{new}'; experimental alias retained.",
+        entity=_ENT.TYPE,
+        operation=_OP.ADDED,
     ),
     _E(
         "experimental_removed_without_replacement",
@@ -238,6 +276,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "the experimental graduation pattern is named explicitly so "
         "users see whether a replacement was published.",
         description_template="Experimental {detail} '{old}' was removed and no {detail} with leaf '{name}' was published at a stable namespace in the new headers.",
+        entity=_ENT.TYPE,
+        operation=_OP.REMOVED,
     ),
     _E(
         "field_became_const",
@@ -251,6 +291,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "that wrote to it directly (not through a cast) no longer "
         "compiles.",
         description_template="Field became const: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "field_became_mutable",
@@ -265,6 +307,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "guarantee callers holding a const reference could previously "
         "rely on.",
         description_template="Field became mutable: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "field_became_volatile",
@@ -280,12 +324,16 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "see more memory traffic where it previously assumed the "
         "compiler could cache a read.",
         description_template="Field became volatile: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "field_bitfield_changed",
         _B,
         impact="Bit-field width or offset changed; old code reads/writes wrong bits.",
         description_template="Bitfield layout changed: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "field_default_initializer_changed",
@@ -294,6 +342,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "source still compiles; objects default-constructed against the "
         "new header silently pick up the new value.",
         description_template="Field default initializer changed: {name}::{detail} ({old} → {new})",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "field_default_initializer_removed",
@@ -308,6 +358,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "still copy-initialized from an empty initializer list, not "
         "left indeterminate.)",
         description_template="Field lost its default initializer: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.REMOVED,
     ),
     _E(
         "field_deprecated_added",
@@ -322,6 +374,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "(e.g. -Werror=deprecated-declarations) has this turn a "
         "previously clean build into a failing one.",
         description_template="Field marked deprecated: {name}::{detail} ({new})",
+        entity=_ENT.TYPE,
+        operation=_OP.ADDED,
     ),
     _E(
         "field_deprecated_removed",
@@ -329,6 +383,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         impact="A field's [[deprecated]] marker was removed; the compiler "
         "warning stops, with no effect on the field's layout.",
         description_template="Field no longer marked deprecated: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.REMOVED,
     ),
     _E(
         "field_lost_const",
@@ -342,6 +398,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "compiler enforcing (or optimizing based on) read-only "
         "access to it no longer gets that guarantee.",
         description_template="Field lost const: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "field_lost_mutable",
@@ -355,6 +413,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "source code doing so via a const-qualified path no longer "
         "compiles.",
         description_template="Field lost mutable: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "field_lost_volatile",
@@ -370,6 +430,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "memory-mapped hardware state) can break once recompiled "
         "against the new declaration.",
         description_template="Field lost volatile: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "field_renamed",
@@ -377,6 +439,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         impact="Field name changed but offset is the same; source code using old name won't compile.",
         policy_overrides={"sdk_vendor": _C},
         description_template="Field renamed: {name}::{old} → {new}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "flexible_array_member_changed",
@@ -385,18 +449,24 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "zero/unknown array size was added, removed, or changed type. The struct "
         "binary layout is unchanged (FAM has zero static size), but runtime "
         "allocation patterns may differ.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_cv_changed",
         _B,
         impact="const/volatile on 'this' changes the mangled name; old binaries link to the wrong symbol.",
         description_template="CV qualifier changed: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_pure_virtual_added",
         _B,
         impact="Old subclasses don't implement the pure virtual; instantiation causes linker error or UB.",
         description_template="Function became pure virtual: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_ref_qual_changed",
@@ -405,18 +475,24 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "Itanium C++ ABI mangled name and overload resolution, so old binaries "
         "link to the wrong symbol or fail to resolve it.",
         description_template="Ref-qualifier changed: {name} ({old} → {new})",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_static_changed",
         _B,
         impact="Static/non-static transition changes calling convention (implicit this pointer); ABI mismatch.",
         description_template="Static qualifier changed: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_virtual_became_pure",
         _B,
         impact="Concrete virtual became pure; old binaries calling it get unresolved dispatch.",
         description_template="Function became pure virtual: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "handle_type_changed",
@@ -425,6 +501,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "forward-declared struct) changed its underlying token type in a way "
         "callers can observe. Code that stored or compared the old handle "
         "representation now operates on an incompatible token.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "inline_body_references_renamed_member",
@@ -438,6 +516,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "accesses a field at the wrong offset (or by a name that no "
         "longer exists), producing silent wrong data or crashes.",
         description_template="Public class '{name}' has inline accessors {detail} by name. Field '{old}' was renamed to '{new}' in the new internal layout. Consumers compiled against the old header have the old member name baked into their inline accessor bodies; running against the new library reads the wrong offset or fails to resolve the member.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "inline_namespace_version_bumped",
@@ -451,6 +531,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "moved that fires from declared-name evidence (works even "
         "when the library ships no .so).",
         description_template="Inline namespace version bumped: '{old}' → '{new}' (version segment changed from {detail}); mangled names change so old and new TUs of the same program ODR-violate.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "instantiation_missing_from_binary",
@@ -461,6 +543,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "build trim drops a Float/Method/Task combination without updating "
         "the public header's `extern template` declarations.",
         description_template="Template instantiation '{name}' was exported by the old library but is missing from the new binary. Other instantiations of '{detail}' still exist, so the public header very likely still advertises this one. Consumers built against the old header link cleanly but fail at load time with an undefined-symbol error.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "layout_unverifiable",
@@ -471,6 +555,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "Informational and non-escalating; rebuild with debug info (or supply "
         "headers) to confirm.",
         description_template="'{name}' layout could not be verified: one side carries a layout descriptor but the other has no layout evidence (no size/offsets). A real layout change cannot be ruled out — rebuild with debug info (or supply headers) to confirm. Informational and non-escalating.",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "libcpp_abi_version_changed",
@@ -481,6 +567,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "value are laid out differently. Rebuild consumers against the matching "
         "libc++ ABI version.",
         description_template="libc++ ABI version changed ({old} → {new}). libc++ selects incompatible internal layouts for std:: types via an inline namespace (std::__{old} vs std::__{new}); types embedding them by value are laid out differently. Rebuild consumers against the matching libc++ ABI version.",
+        entity=_ENT.BINARY,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "mandatory_template_param_added",
@@ -491,6 +579,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "compiles. Mangled symbols also change because the "
         "instantiation tuple differs.",
         description_template="Template '{name}' minimum effective argument count grew from {old} to {new}. Consumers that wrote '{name}<...{old} args...>' without supplying the new parameter no longer compile.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "opaque_invariant_broken",
@@ -502,6 +592,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "never seeing the layout can now `sizeof`/embed it, so the type's "
         "size and fields have joined the ABI and any later change to them is "
         "a hard break.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "overload_added",
@@ -517,6 +609,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "avoid. Verdict is policy-adjustable — raise to API_BREAK under a "
         "strict source-compatibility profile.",
         description_template="Overload added to previously non-overloaded function: {name} — `&{name}` becomes ambiguous and overload resolution may change",
+        entity=_ENT.FUNCTION,
+        operation=_OP.ADDED,
     ),
     _E(
         "overload_set_rerouted",
@@ -529,6 +623,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "changing the called function. Compiles, links, runs — but "
         "runs different code.",
         description_template="Overload set for '{name}' changed: {detail}. Call sites that previously resolved to a removed overload may silently re-route to a different overload.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "polymorphic_type_non_virtual_dtor",
@@ -538,6 +634,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "a derived object through a base pointer is undefined behaviour: the "
         "derived destructor never runs and the wrong amount of memory may be "
         "freed. Declare the base destructor `virtual`.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "removed_const_overload",
@@ -545,6 +643,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         impact="Const overload removed; source code calling const version breaks.",
         policy_overrides={"sdk_vendor": _C},
         description_template="Const method overload removed: {name} (non-const version still exists)",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "rtti_inheritance_changed",
@@ -558,6 +658,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "by-value users are miscompiled. Recovered from the ELF symbol size without "
         "DWARF — the binary-only analogue of TYPE_BASE_CHANGED.",
         description_template="RTTI typeinfo for '{name}' changed size: {old} → {new} bytes ({detail}). The base-class shape changed, which shifts this-pointer adjustments, member offsets, and the vtable. Detected from the ELF symbol size without debug info.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "secondary_vtable_group_changed",
@@ -574,6 +676,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "(L1), catching a cross-type effect the per-type base/field diff — "
         "which only sees the unchanged derived class — cannot.",
         description_template="Secondary vtable groups changed for '{name}': {old} → {new} — a base's polymorphism changed, restructuring the derived vtable",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "source_level_kind_changed",
@@ -590,6 +694,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "implicitly public becoming implicitly private).",
         policy_overrides={"sdk_vendor": _C},
         description_template="Aggregate kind changed: {name} ({old} → {new})",
+        entity=_ENT.BINARY,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "standard_layout_lost",
@@ -599,6 +705,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "C interoperability are no longer guaranteed and tail-padding reuse "
         "rules change; review code that relies on the C-compatible layout.",
         description_template="'{name}' is no longer standard-layout. `offsetof` and C interoperability are no longer guaranteed and tail-padding reuse rules change; review code relying on the C-compatible layout.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "std_reexport_removed",
@@ -611,6 +719,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "Source break only — no symbol disappears, but every TU that "
         "named the library alias must be edited.",
         description_template="Public re-export '{name}' of standard-library entity '{detail}' was removed. Consumer code that named '{name}' no longer compiles; '{detail}' is still available under its std:: name.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "stdlib_implementation_changed",
@@ -621,41 +731,55 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "any public type embedding a std:: container/string by value gets a "
         "different layout, and inline std:: code can ODR-conflict. Pin a single "
         "implementation or rebuild consumers against the matching runtime.",
+        entity=_ENT.BINARY,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "struct_alignment_changed",
         _B,
         impact="Struct alignment changed; may cause misaligned access in embedded structs.",
         description_template="Struct alignment changed: {name} ({old} → {new})",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "struct_field_offset_changed",
         _B,
         impact="Field moved to different offset; old code accesses wrong memory.",
         description_template="Field offset changed: {name}::{detail} (+{old} → +{new})",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "struct_field_removed",
         _B,
         impact="Field removed from struct; old code accessing it reads/writes garbage.",
         description_template="Struct field removed: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.REMOVED,
     ),
     _E(
         "struct_field_type_changed",
         _B,
         impact="Field type changed in binary; old code misinterprets the field data.",
         description_template="Field type changed: {name}::{detail} {old} → {new}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "struct_packing_changed",
         _B,
         impact="Packing attribute changed; field offsets differ from what old code expects.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "struct_size_changed",
         _B,
         impact="sizeof(T) changed in debug info; confirms layout break visible at binary level.",
         description_template="Struct size changed: {name} ({old} → {new} bytes)",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "sycl_overload_set_removed",
@@ -667,6 +791,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "level event ('the GPU/SYCL overload family was withdrawn') "
         "visible at a glance.",
         description_template="SYCL overload family withdrawn: {detail}. This is the deployment-level event 'DPC++ build disabled' rather than independent API removals — consumers built against the SYCL surface need a DPC++-enabled rebuild.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "tag_type_renamed",
@@ -679,6 +805,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "unresolved-symbol errors at load time. Common with "
         "method::* / task::* tag families.",
         description_template="Empty tag struct '{old}' renamed to '{new}'. The type has no fields or vtable, so layout-based detectors see no change, but {detail}. Consumers built against the old header fail to resolve the instantiation at load time.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "tail_padding_reuse_changed",
@@ -688,6 +816,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "class may reuse a base's tail padding, so this can silently shift a "
         "derived layout even though the base's sizeof is unchanged.",
         description_template="'{name}' data size changed ({old} → {new} bits) while sizeof stayed {detail} bits. A derived class may reuse this type's tail padding, so a derived layout can shift even though sizeof is unchanged.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "template_param_type_changed",
@@ -704,6 +834,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "the old instantiation's ABI is no longer compatible with "
         "the new one.",
         description_template="Template parameter inner type changed: {name} param {detail} ({old} → {new})",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "template_return_type_changed",
@@ -719,6 +851,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "caller compiled against the old return type reads the "
         "result incorrectly.",
         description_template="Template return type inner argument changed: {name} ({old} → {new})",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "trivially_copyable_lost",
@@ -729,6 +863,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "differently (via a hidden reference / not in registers), so the calling "
         "convention for any function taking or returning it by value changes.",
         description_template="'{name}' is no longer trivially copyable. It is now passed and returned by value differently (via a hidden reference / not in registers), so the calling convention of any function taking or returning it by value changes.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_added",
@@ -736,17 +872,23 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         is_addition=True,
         impact="New type available; existing binaries are unaffected.",
         description_template="New type: {name}",
+        entity=_ENT.TYPE,
+        operation=_OP.ADDED,
     ),
     _E(
         "type_alignment_changed",
         _B,
         impact="Misaligned access can cause bus errors on strict architectures or silent data corruption with SIMD.",
         description_template="Alignment changed: {name} ({old} → {new} bits)",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_base_changed",
         _B,
         impact="Base class layout change shifts derived member offsets and vtable pointers; this-pointer arithmetic breaks.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_became_abstract",
@@ -757,6 +899,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "`new Foo()`) no longer compiles. Not recorded in DWARF/the "
         "binary, so detected only in header (castxml) mode.",
         description_template="Class became abstract: {name} — direct instantiation no longer compiles",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_became_final",
@@ -769,12 +913,16 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "`final` is not recorded in DWARF or the object file, so this is "
         "detected only in header (castxml) mode.",
         description_template="Class gained `final` specifier: {name} — consumers that derive from it no longer compile",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_became_opaque",
         _B,
         impact="Type became forward-declaration only; old code using sizeof or accessing fields fails.",
         description_template="Type became opaque (forward-declaration only): {name} — stack allocation no longer possible",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_deprecated_added",
@@ -788,6 +936,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "(e.g. -Werror=deprecated-declarations) has this turn a "
         "previously clean build into a failing one.",
         description_template="Type marked deprecated: {name} ({detail})",
+        entity=_ENT.TYPE,
+        operation=_OP.ADDED,
     ),
     _E(
         "type_deprecated_removed",
@@ -795,12 +945,16 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         impact="Type's [[deprecated]] marker was removed; the compiler "
         "warning stops, with no effect on the type's ABI.",
         description_template="Type no longer marked deprecated: {name}",
+        entity=_ENT.TYPE,
+        operation=_OP.REMOVED,
     ),
     _E(
         "type_field_added",
         _B,
         impact="New field shifts subsequent fields; old code reads wrong offsets for all fields after insertion point.",
         description_template="Field added: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_field_added_compatible",
@@ -808,24 +962,32 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         is_addition=True,
         impact="Field appended without changing existing offsets; old code works but won't initialize the new field.",
         description_template="Field added: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.ADDED,
     ),
     _E(
         "type_field_offset_changed",
         _B,
         impact="Old code reads/writes fields at stale offsets; silent data corruption.",
         description_template="Field offset changed: {name}::{detail} ({old} → {new} bits)",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_field_removed",
         _B,
         impact="Old code accesses a field that no longer exists at the expected offset; reads garbage or writes out of bounds.",
         description_template="Field removed: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.REMOVED,
     ),
     _E(
         "type_field_type_changed",
         _B,
         impact="Field has different size or representation; old code misinterprets the data.",
         description_template="Field type changed: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_kind_changed",
@@ -848,6 +1010,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "member's own effective offset/size actually differs "
         "between the two layouts, not member count by itself.",
         description_template="Aggregate kind changed: {name} ({old} → {new})",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_lost_abstract",
@@ -866,6 +1030,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "consequences for callers and overriders, not covered by "
         "this kind's own newly-instantiable read.",
         description_template="Class lost abstract status: {name}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_lost_final",
@@ -880,17 +1046,23 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "policy lists removing `final` as a change to avoid; surfaced as a "
         "deployment risk for review rather than a hard break.",
         description_template="Class lost `final` specifier: {name}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_removed",
         _B,
         impact="Old code references a type that no longer exists; compilation or link failure.",
+        entity=_ENT.TYPE,
+        operation=_OP.REMOVED,
     ),
     _E(
         "type_size_changed",
         _B,
         impact="Old code allocates or copies the type with the old size; heap/stack corruption, out-of-bounds access.",
         description_template="Size changed: {name} ({old} → {new} bits)",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_visibility_changed",
@@ -901,23 +1073,31 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "exception matching) or virtual dispatch across the library "
         "boundary can fail to find the expected typeinfo/vtable once "
         "the visibility narrows.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "type_vtable_changed",
         _B,
         impact="Vtable slot reordering; virtual dispatch calls wrong method.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "typedef_base_changed",
         _B,
         impact="Underlying type changed; old code using the typedef operates on wrong representation.",
         description_template="Typedef base type changed: {name}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "typedef_removed",
         _B,
         impact="Old code using the typedef name won't compile; binary impact depends on usage.",
         description_template="Typedef removed: {name}",
+        entity=_ENT.TYPE,
+        operation=_OP.REMOVED,
     ),
     _E(
         "typedef_version_sentinel",
@@ -926,6 +1106,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "this is a compile-time sentinel that changes every release by design; "
         "it is never exported as an ELF symbol and does not affect binary ABI.",
         description_template="Version-stamped typedef removed (compile-time sentinel, not an ABI break): {name}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "union_field_added",
@@ -933,18 +1115,24 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         is_addition=True,
         impact="Union size may grow; old code allocating with old sizeof gets truncated data.",
         description_template="Union field added: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.ADDED,
     ),
     _E(
         "union_field_removed",
         _B,
         impact="Old code accessing removed alternative reads uninitialized memory.",
         description_template="Union field removed: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.REMOVED,
     ),
     _E(
         "union_field_type_changed",
         _B,
         impact="Old code interprets the union member with wrong type layout.",
         description_template="Union field type changed: {name}::{detail}",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "unnamed_type_in_public_abi",
@@ -957,6 +1145,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "so exporting one is an ABI time bomb: a rebuilt consumer can fail to "
         "resolve the symbol. RISK / hygiene — reported when newly introduced.",
         description_template="Unnamed type leaks into the public ABI: {name} ({detail}) — its mangled name is compiler-ordering-fragile",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "unspecified_return_now_named",
@@ -967,6 +1157,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "stored the result with the deduced spelling (`auto x = "
         "make_X();`) keeps compiling; source that wrote out the "
         "type fails to compile.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "used_reserved_field",
@@ -985,6 +1177,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "passes it to the new library can hand the new callee "
         "indeterminate bytes that it now interprets as real data.",
         description_template="Reserved field put into use: {name}::{old} → {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "var_value_changed",
@@ -999,6 +1193,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "value via constant propagation keep using it until "
         "recompiled.",
         description_template="Global data value changed: {name} ({old} → {new})",
+        entity=_ENT.VARIABLE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "virtual_base_offset_changed",
@@ -1013,6 +1209,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "virtual-base reorder is invisible to the non-virtual "
         "base_class_position_changed check.",
         description_template="Virtual base order changed for '{name}': {old} → {new} — vbase offset table reordered; old binaries mis-adjust `this` to virtual bases",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "virtual_method_added",
@@ -1026,6 +1224,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         '"do not add virtuals to a non-leaf class" rule, caught even when the '
         "snapshot carries no diff-able vtable array (DWARF/symbol-only mode).",
         description_template="New virtual method added to existing class {detail}: {new} — grows/relayouts the vtable, breaking derived classes and old binaries",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "vptr_introduced",
@@ -1035,6 +1235,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "member's offset shifts by a pointer width; existing binaries that embed "
         "or derive from the type are laid out incompatibly.",
         description_template="'{name}' gained a vtable pointer (became polymorphic). sizeof grows and every data member's offset shifts by a pointer width; binaries that embed or derive from the type are laid out incompatibly.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "vtable_slot_count_changed",
@@ -1048,6 +1250,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "symbol size without DWARF — the binary-only analogue of FUNC_VIRTUAL_ADDED "
         "/ TYPE_VTABLE_CHANGED; identifying which slot moved needs DWARF or headers.",
         description_template="Vtable for '{name}' changed size: {old} → {new} bytes ({detail}). Virtual functions were net added or removed, or the inheritance shape changed — the symbol size cannot distinguish them; existing binaries dispatch through fixed vtable offsets and may call the wrong slot. Detected from the ELF symbol size without debug info.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "vtable_thunk_offset_changed",
@@ -1063,6 +1267,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "is caught even on stripped binaries where the primary-vtable _ZTV "
         "size is unchanged.",
         description_template="Vtable thunk offset changed for {name}: {old} → {new} — a base subobject moved; old binaries mis-adjust `this` on virtual dispatch",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "vtable_thunk_set_changed",
@@ -1076,6 +1282,8 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "invisible to the slot-count diff. Old binaries dispatch to the "
         "wrong target through the secondary vtable.",
         description_template="Vtable thunk set changed for {name}: {detail} — a secondary-base override was added or removed",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "vtt_slot_count_changed",
@@ -1088,5 +1296,7 @@ TYPES_ENTRIES: list[ChangeKindMeta] = [
         "so a constructor compiled against the old VTT installs the wrong "
         "vptrs. Recovered from the `_ZTT` symbol size alone (no DWARF).",
         description_template="VTT size changed for '{name}': {old} → {new} bytes — virtual-base construction scaffolding changed",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
 ]

@@ -239,12 +239,6 @@ def reject_unsupported_options(
         required_symbols=tuple(kwargs.get("required_symbols_opt") or ()),
         use_cases_manifest=kwargs.get("use_cases_manifest"),
         diagnostic_comparison=bool(kwargs.get("diagnostic_comparison", False)),
-        audit_suppressions=bool(kwargs.get("audit_suppressions", False)),
-        # CodeRabbit/Codex review on PR #1154: --audit-suppressions with no
-        # --suppress is a harmless no-op on every other `compare` path now
-        # (nothing to audit) -- only a real --suppress alongside it is a
-        # genuine conflict this driver's per-library fan-out can't honor
-        # (see _reject_set_input_flags's own comment for the full reasoning).
         suppress=kwargs.get("suppress"),
         include_labels=kwargs.get("include_labels"),
     )
@@ -425,16 +419,18 @@ def reject_unsupported_options(
             "--view show=... is not supported together with a "
             "stored-bundle-facts OLD_INPUT (was --show-only)."
         )
-    if kwargs.get("report_mode") not in (None, "full") or kwargs.get("show_filtered"):
+    if kwargs.get("report_mode") not in (None, "full"):
         # Codex review: same root cause as --show-only above -- report_mode
-        # has no channel into to_json(diff) here (always "full"), and
-        # show_filtered needs the _finalize_compare_result merge step this
-        # dispatcher never calls. Same identical pre-existing gap on the
-        # live release fan-out's own per-library to_json() calls.
+        # has no channel into to_json(diff) here (always "full"). Same
+        # identical pre-existing gap on the live release fan-out's own
+        # per-library to_json() calls. (The `show_filtered` half of this
+        # check went with `--view filtered` in plan slice 7o: the scope
+        # ledger is unconditional now, and this dispatcher never runs the
+        # `_finalize_compare_result` merge step that echoes it, so there is
+        # no request left to refuse.)
         raise click.UsageError(
-            "--view <mode>/--show-filtered are not supported together "
-            "with a stored-bundle-facts OLD_INPUT (was --report-mode/"
-            "--show-filtered)."
+            "--view <mode> is not supported together "
+            "with a stored-bundle-facts OLD_INPUT (was --report-mode)."
         )
     # --no-bundle-analysis is gone (Phase 7d, one-comparison-product.md
     # §4.1, ADR-068 D5) -- bundle-level analysis always runs now, matching
@@ -575,48 +571,17 @@ def reject_unsupported_options(
             "a stored-bundle-facts OLD_INPUT: OLD_FACTS's own per-library "
             "snapshots already carry whatever version they were captured with."
         )
-    if kwargs.get("demangle") is not None:
-        # Codex review, fresh evidence: --demangle/--no-demangle is
-        # documented to apply to markdown output, but this dispatcher's
-        # markdown rendering calls bundle.render_bundle_findings_markdown()
-        # directly, which has no demangle parameter at all -- the live
-        # release fan-out's own bundle-findings markdown section
-        # (cli_compare_release_helpers._release_md_bundle_findings) has
-        # this identical pre-existing gap, so implementing it only here
-        # would disagree with what that shared renderer already does.
-        # Rejected only when the flag is given explicitly: the silent
-        # default (demangle ON) is left alone
-        # since json/the common per-library table never show a mangled
-        # symbol at all -- only a rare bundle_* finding on a C++ symbol
-        # would show one.
-        raise click.UsageError(
-            "--view demangle/--view no-demangle is not supported together "
-            "with a stored-bundle-facts OLD_INPUT (was --demangle/"
-            "--no-demangle)."
-        )
-    if kwargs.get("explain_patterns"):
-        # Codex review, fresh evidence ("Honor pattern views for stored-
-        # bundle comparisons"): a per-library stored-BundleFacts comparison
-        # now genuinely can populate DiffResult.pattern_modulations (ADR-068
-        # D4's pattern-verdict modulation is unconditional as of the Tier-2
-        # fix above), but `--view patterns`'s own stderr-echo side channel
-        # (cli_audit.echo_pattern_modulations) is only wired for the live
-        # single-pair/release-fan-out paths -- this dispatcher's own
-        # `_render` never calls it, so the flag was silently accepted and
-        # did nothing. Same "no channel here" class of gap `demangle` above
-        # already has, and the same fix: reject explicitly rather than
-        # silently no-op. The ledger itself is unaffected -- `pattern_
-        # modulations` still appears in this comparison's own JSON output
-        # unconditionally (reporter.to_json's existing, flag-independent
-        # behavior), so no information is lost -- only the diagnostic
-        # stderr echo is unavailable here.
-        raise click.UsageError(
-            "--view patterns is not supported together with a "
-            "stored-bundle-facts OLD_INPUT: there is no per-library stderr "
-            "echo channel for this comparison shape. The pattern-"
-            "modulation ledger itself still appears in this comparison's "
-            "own JSON output unconditionally."
-        )
+    # Plan slice 7o retired `--view demangle`/`no-demangle` and
+    # `--view patterns`, so the two rejections that used to stand here have
+    # nothing left to reject. Neither gap they named is closed by that: this
+    # dispatcher's markdown still renders bundle findings through
+    # `bundle.render_bundle_findings_markdown()` (no demangling), and it
+    # still has no stderr echo channel for the pattern-modulation ledger.
+    # Both are now simply *absent* rather than refused -- which is the same
+    # answer every other unsupported-here rendering detail already gets, and
+    # neither loses information: the ledger is in this comparison's own JSON
+    # output unconditionally, and every machine projection carries both the
+    # mangled and demangled symbol names.
     if new_is_single_file and (dso_only or include_private_dso):
         raise click.UsageError(
             "release.dso_only/release.include_private_dso are not supported "

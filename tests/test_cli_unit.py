@@ -238,22 +238,32 @@ class TestResolveDemangle:
         defaulting it off the way the machine formats correctly are."""
         from abicheck.cli_compare_helpers import _resolve_demangle
 
-        assert _resolve_demangle("markdown", None) is True
-        assert _resolve_demangle("review", None) is True
-        assert _resolve_demangle("html", None) is True
+        assert _resolve_demangle("markdown") is True
+        assert _resolve_demangle("review") is True
+        assert _resolve_demangle("html") is True
+        # Plan slice 7o widened the set to every human-facing format: the
+        # retired `--view demangle` was the only way a `text`/`oneline`
+        # render could ask for it, so leaving those two off would have been
+        # a capability loss rather than an automatic default.
+        assert _resolve_demangle("text") is True
+        assert _resolve_demangle("oneline") is True
 
     @pytest.mark.parametrize("fmt", ["json", "sarif", "junit"])
     def test_defaults_off_for_machine_formats(self, fmt):
         from abicheck.cli_compare_helpers import _resolve_demangle
 
-        assert _resolve_demangle(fmt, None) is False
+        assert _resolve_demangle(fmt) is False
 
-    def test_explicit_flag_always_wins(self):
+    def test_there_is_no_flag_left_to_win(self):
+        """Plan slice 7o: the tri-state is gone -- demangling is resolved
+        from the format alone, because a demangled name now carries its
+        exact mangled spelling with it and every machine projection carries
+        both names, so there is nothing a caller could want to override."""
+        import inspect
+
         from abicheck.cli_compare_helpers import _resolve_demangle
 
-        assert _resolve_demangle("json", True) is True
-        assert _resolve_demangle("markdown", False) is False
-        assert _resolve_demangle("html", False) is False
+        assert list(inspect.signature(_resolve_demangle).parameters) == ["fmt"]
 
 
 # ── _resolve_compare_collect_mode (CLI-audit P1: --depth inference) ──────
@@ -409,12 +419,12 @@ class TestCompareWrite:
                 "-o",
                 f"json={secondary_out}",
                 "--view",
-                "leaf",
+                "root-cause",
             ],
         )
         assert result.exit_code == 4
         parsed = json.loads(secondary_out.read_text(encoding="utf-8"))
-        assert "leaf_changes" in parsed
+        assert "root_causes" in parsed
 
     def test_secondary_format_resolves_own_demangle_default(self, tmp_path):
         # demangle is resolved per-format (markdown/review default ON, json/
@@ -439,8 +449,11 @@ class TestCompareWrite:
         )
         assert result.exit_code == 4
         secondary_text = secondary_out.read_text(encoding="utf-8")
-        assert "_Z3barv" not in secondary_text
+        # Demangled *and* still carrying the exact symbol (plan slice 7o):
+        # the markdown secondary resolves its own human-format default even
+        # though the primary format is a machine one.
         assert "bar" in secondary_text
+        assert "_Z3barv" in secondary_text
 
     def test_json_then_sarif_secondary_calls_assess_change_twice_per_change(
         self, tmp_path

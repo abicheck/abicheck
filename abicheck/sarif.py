@@ -58,6 +58,7 @@ from abicheck.reporter import (
     _finding_id,
     _suppress_dangling_correlation_notes,
     apply_show_only,
+    resolve_demangled_symbol,
 )
 from abicheck.reporter_markdown import (
     _root_cause_key_and_display,
@@ -273,12 +274,11 @@ def _change_detail_properties(change: Change) -> dict[str, Any]:
     # symbol_binding property for the full rationale) -- Codex review.
     if change.symbol_binding:
         props["symbolBinding"] = change.symbol_binding
-    # Human-readable demangling for an export-table-only (ELF_ONLY) removal
-    # (see reporter.py's identical demangled_symbol field for the full
-    # rationale, Codex review item 8) -- `symbol`/`old_value` stay the raw
-    # mangled spelling deliberately.
-    if change.demangled_symbol:
-        props["demangledSymbol"] = change.demangled_symbol
+    # Plan slice 7o: both names on every machine projection, not only on an
+    # ELF_ONLY finding that carries its own -- `symbol`/`old_value` stay raw
+    # (see `reporter.resolve_demangled_symbol` for the full rationale).
+    if demangled := resolve_demangled_symbol(change):
+        props["demangledSymbol"] = demangled
     return props
 
 

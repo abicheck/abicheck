@@ -983,8 +983,6 @@ class TestScopeCli:
                 str(op),
                 str(np_),
                 "--scope-public-headers",
-                "--view",
-                "filtered",
             ],
         )
         assert result.exit_code == 0, result.output

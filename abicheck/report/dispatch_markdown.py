@@ -142,14 +142,6 @@ def _markdown_alternate_rendering(
     public spelling (``render_output(fmt="oneline")``, or ``to_stat``
     directly). Call the function you want.
     """
-    if report_mode == "leaf":
-        return _to_markdown_leaf(
-            result,
-            show_impact=show_impact,
-            show_only=show_only,
-            show_recommendation=show_recommendation,
-            severity_config=severity_config,
-        )
     if report_mode == "root-cause":
         return _to_markdown_root_cause(
             result,
@@ -160,39 +152,6 @@ def _markdown_alternate_rendering(
             contract_evaluation=contract_evaluation,
         )
     return None
-
-
-def _to_markdown_leaf(
-    result: DiffResult,
-    show_impact: bool = False,
-    show_only: str | None = None,
-    show_recommendation: bool = False,
-    *,
-    severity_config: SeverityConfig | None = None,
-) -> str:
-    """Leaf-change mode: root type changes with affected interface lists.
-
-    *severity_config*, when given, adds the same "Severity Configuration"
-    summary section the full-mode report has — without it, ``report_mode=
-    "leaf"`` returned before that section was ever built, so it silently had
-    no severity information even when a caller passed *severity_config*
-    through :func:`to_markdown`.
-
-    ADR-061 Phase 2 item 1: crosses the canonical ``ReportDocument`` boundary
-    via ``report/render_markdown_alternate.py``, the same fact/formatting
-    split JSON/SARIF/JUnit/``--stat``/HTML/full-mode markdown already use.
-    """
-    from .render_markdown_alternate import build_leaf_document, render_leaf_document
-
-    return render_leaf_document(
-        build_leaf_document(
-            result,
-            show_impact=show_impact,
-            show_only=show_only,
-            show_recommendation=show_recommendation,
-            severity_config=severity_config,
-        )
-    )
 
 
 def _to_markdown_root_cause(

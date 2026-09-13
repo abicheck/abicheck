@@ -97,9 +97,7 @@ from .dump import dump_cmd
 _RELEASE_FORMATS = frozenset({"json", "markdown", "junit", "oneline"})
 
 
-def reject_release_incompatible_view_mode(
-    report_mode: str, *, show_filtered: bool = False
-) -> None:
+def reject_release_incompatible_view_mode(report_mode: str) -> None:
     """Reject a ``--view`` mode/token a directory/package release fan-out
     can't honor: ``leaf``/``root-cause`` restructure a single comparison's
     own root-cause graph, and the release summary is an aggregate report
@@ -107,26 +105,15 @@ def reject_release_incompatible_view_mode(
     and ``impact`` (each library already has its own ``DiffResult`` to
     compute an impact table from) are the only accepted report modes here.
 
-    ``filtered`` (Codex review, PR #1180, fresh evidence) is rejected the
-    same way rather than silently accepted-and-ignored: unlike
-    ``report_mode``, ``_dispatch_release_compare`` never threads
-    ``show_filtered`` through to the release engine's own renderer at all
-    (``cli_compare_release.py`` has no such concept), so ``--view
-    filtered`` on a directory/package operand used to produce the
-    identical output an invocation without the token would -- the one
-    thing a rendering selector must never do (ADR-068 D4). Wiring the
-    ledger into the per-library release renderer is a real feature, not a
-    rename fix; a directory/package caller who needs it compares one
-    library pair at a time in the meantime, same as ``leaf``/``root-cause``
-    above.
-
-    ``suppressions``/``audit_suppressions`` is deliberately NOT checked
-    here: ``cli_compare_options._reject_set_input_flags`` already rejects
-    it, but only together with a real ``--suppress`` file -- with no
-    ``--suppress`` at all it is a harmless no-op on a directory/package
-    operand, the same as on a single-pair `compare` (CodeRabbit/Codex
-    review, PR #1154). Checking it unconditionally here would regress that
-    no-op back to a blanket rejection.
+    Plan slice 7o removed this predicate's second half. ``--view filtered``
+    used to be rejected here too, because the release engine never threaded
+    ``show_filtered`` into its own renderer and so would have produced
+    output identical to an invocation without the token. The token is gone
+    -- the scope/reconciliation ledger is unconditional now -- so there is
+    no request left to refuse; what remains is the same missing feature it
+    always was (the release renderer still shows no per-library ledger),
+    recorded in the plan's 7o section rather than expressed as a usage
+    error for a spelling that no longer exists.
 
     Shared by ``_dispatch_release_compare``'s own check below and
     ``cli_compare_helpers.py``'s pre-``--dry-run`` rejection point (Codex
@@ -144,13 +131,6 @@ def reject_release_incompatible_view_mode(
             "report across every library with no single such graph to "
             "restructure. Compare one library at a time (a single old/new "
             f".so pair) to use --view {report_mode}."
-        )
-    if show_filtered:
-        raise click.UsageError(
-            "--view filtered is not available when comparing directories or "
-            "packages: the release engine does not yet render this ledger "
-            "per library. Compare one library at a time (a single old/new "
-            ".so pair) to use --view filtered."
         )
 
 
@@ -179,48 +159,24 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     identically to before.
     """
     fmt = kwargs.get("fmt", "markdown")
-    # Codex review (PR #1154 follow-up): --view's derived values used to be
-    # silently dropped here. show_only/demangle/explain_patterns are threaded
-    # through the release engine below (cli_compare_release.py); demangle
-    # stays an unresolved tri-state since --write can name a different
-    # secondary format, resolved per-format inside compare_release_cmd.
-    # report_mode's "leaf"/"root-cause" restructure a single DiffResult's own
-    # root-cause graph -- the release report has no such graph to
-    # restructure (the same mismatch -o sarif=.../html/review hits below),
-    # so those two are rejected. "impact" (Codex review, PR #1154 second
-    # follow-up: "Reject unsupported impact views instead of silently
-    # dropping them") is neither implemented as a real aggregate nor
-    # rejected here as a usage error -- it is threaded through as
-    # show_impact, since (unlike leaf/root-cause) an impact summary is
-    # naturally per-library: each library already has its own DiffResult,
-    # so `_strip_diff_results_and_adjust_verdict` computes one impact table
-    # per library from it, the same way it already computes one findings
-    # list per library. See that function's own docstring for the full
-    # account.
+    # --view's derived values: show_only is threaded through the release
+    # engine below (cli_compare_release.py). report_mode's "leaf"/
+    # "root-cause" restructure a single DiffResult's own root-cause graph --
+    # the release report has no such graph to restructure (the same mismatch
+    # -o sarif=.../html/review hits below), so those two are rejected.
+    # "impact" is threaded through as show_impact, since (unlike leaf/
+    # root-cause) an impact summary is naturally per-library: each library
+    # already has its own DiffResult, so
+    # `_strip_diff_results_and_adjust_verdict` computes one impact table per
+    # library from it. Demangling is no longer a value to thread at all
+    # (plan slice 7o): it is resolved per format, from the format alone.
     report_mode = kwargs.pop("report_mode", "full")
     kwargs["show_only"] = kwargs.pop("show_only", None)
-    kwargs["demangle"] = kwargs.pop("demangle", None)
-    kwargs["explain_patterns"] = kwargs.pop("explain_patterns", False)
-    # `show_filtered`/`audit_suppressions` are popped (not forwarded):
-    # `compare_release_cmd` has no such parameter at all -- the release
-    # engine doesn't render either ledger per library yet (Codex review, PR
-    # #1180). `show_filtered`'s only role here is the unconditional
-    # rejection immediately below; `audit_suppressions` is popped purely so
-    # it never reaches `compare_release_cmd` as an unexpected kwarg --
-    # cli_compare_options._reject_set_input_flags (run ahead of this call,
-    # same as the pre-dry-run block below) already rejects it together with
-    # a real --suppress file, and is a no-op without one, so it is not
-    # rejected a second time (unconditionally) here.
-    view_show_filtered = kwargs.pop("show_filtered", False)
-    kwargs.pop("audit_suppressions", False)
     # Already validated ahead of the --dry-run emit (cli_compare_helpers.py's
     # pre-dry-run block) -- re-checked here too since _dispatch_release_
     # compare has its own direct callers/tests and must reject on its own,
     # not merely rely on an upstream caller having done so.
-    reject_release_incompatible_view_mode(
-        report_mode,
-        show_filtered=view_show_filtered,
-    )
+    reject_release_incompatible_view_mode(report_mode)
     kwargs["show_impact"] = report_mode == "impact"
     if report_mode == "impact":
         report_mode = "full"
@@ -636,17 +592,17 @@ def _embed_inline_source_side(
     metavar="TOKEN",
     help="Repeatable rendering selector (ADR-068 D4): never changes the "
     "verdict, findings, or exit code. TOKEN: "
-    "'full' (default)/'leaf'/'impact'/'root-cause' (report mode); "
-    "'show=<tokens>' (severity/element/action filter, same vocabulary "
-    "as the old --show-only, repeatable to OR groups together); "
-    "'demangle'/'no-demangle' (C++ demangling, default ON for "
-    "markdown/review/html); 'patterns' (explain pattern-verdict "
-    "modulation, which always runs where evidence exists); 'filtered' "
-    "(echo the scope/disposition ledger of findings excluded from the "
-    "verdict, always computed and always in -o json=...); "
-    "'suppressions' (echo the --suppress rule audit, likewise always "
-    "computed -- a no-op without --suppress, never an error). Example: "
-    "--view leaf --view demangle --view show=breaking,functions.",
+    "'full' (default)/'impact'/'root-cause' (report mode); "
+    "'show=<tokens>' (display filter over severity "
+    "[breaking/api-break/risk/compatible], element "
+    "[functions/variables/types/enums/elf/build/source/analysis] and "
+    "action [added/removed/changed] -- AND across dimensions, OR within "
+    "one, repeatable to OR whole groups together). Example: --view root-cause "
+    "--view show=breaking,functions. Disclosure is not a token: the "
+    "pattern-modulation ledger, the scope/reconciliation ledger and the "
+    "--suppress audit are always reported (ADR-067), and C++ symbols are "
+    "always demangled in human output with the exact mangled name kept "
+    "beside them.",
 )
 # Policy + suppression family (ADR-037 D3). The strict/justification pair
 # lives only in .abicheck.yml's suppression: block now (ADR-037 D4).
@@ -709,7 +665,7 @@ def _embed_inline_source_side(
     help="Scope the comparison to a POST Python export manifest's committed ABI "
     "surface. Only changes to the manifest's pp_*/ufunc-loop symbols count; "
     "private __pp_* kernel churn and other non-committed exports are demoted "
-    "to the filtered ledger (see --view filtered).",
+    "to the filtered ledger, which every run discloses.",
 )
 # one-comparison-product.md Phase 7n: --probe-matrix is gone. A probe-matrix
 # snapshot is build evidence, so it is one of --build-info's operands now,
@@ -904,10 +860,9 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
         ]
     )
 
-    # ADR-068 D4/Phase 5: resolve --view (frontends.cli.options.view) into
-    # the same report_mode/show_only/demangle/explain_patterns dest names
-    # those retired flags used to populate, so every downstream consumer
-    # needs no change of its own. No profile injects those dests.
+    # ADR-068 D4/Phase 5, rewritten by plan slice 7o: resolve --view
+    # (frontends.cli.options.view) into the two dest names it still carries,
+    # report_mode/show_only. No profile injects those dests.
     from ..options.view import parse_view_tokens
 
     kwargs.update(parse_view_tokens(kwargs.pop("view", ())))

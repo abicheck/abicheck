@@ -220,15 +220,6 @@ $ abicheck compare old.json new.json -o json=-
 {"library": "libfoo", "verdict": "BREAKING", "summary": {...}, "changes": [...]}
 ```
 
-## `--view leaf`
-
-Groups output by root type changes with affected interface lists, instead of
-listing every change individually. Available in Markdown and JSON formats.
-
-```bash
-abicheck compare old.json new.json --view leaf
-```
-
 ## `--view root-cause`
 
 Groups findings that share a root cause under one entry, instead of listing
@@ -740,7 +731,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "4.5",
+  "report_schema_version": "4.6",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }

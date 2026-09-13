@@ -38,8 +38,8 @@ mechanisms, each with its own guard function, none of which
 against the real CLI before this widening, not merely read from source):
 
 - ``_reject_view_tokens_for_no_baseline`` -- any non-default ``--view``
-  token (verified live: ``compare --no-baseline <snap> --view leaf`` exits
-  64).
+  token (verified live: ``compare --no-baseline <snap> --view root-cause``
+  exits 64; ``leaf`` retired in plan slice 7o).
 - ``_reject_old_sided_inputs`` -- an explicitly OLD-scoped evidence input
   (``_OLD_ONLY_DESTS``'s bare ``old=``-only flags, plus ``_SIDED_SINGLE_
   DESTS``/``_SIDED_LABEL_DESTS``'s ``old=``-prefixed sided flags; verified
@@ -313,7 +313,7 @@ def test_yaml_folded_block_scalar_flow_entry_is_caught() -> None:
 @pytest.mark.parametrize(
     ("injected_flag", "label"),
     [
-        ("--view leaf", "view-token"),
+        ("--view root-cause", "view-token"),
         ("--header old=include/foo.h", "old-sided (bare-table)"),
         ("--sources old=./src", "old-sided (sided-single-table)"),
         ("--version old=1.2", "old-sided (sided-label-table)"),

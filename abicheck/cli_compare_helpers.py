@@ -203,7 +203,6 @@ def _normalize_compare_options(
     old_headers_only: tuple[Path, ...],
     new_headers_only: tuple[Path, ...],
     debug_format_opt: str | None,
-    demangle: bool | None,
     fmt: str,
     report_mode: str,
     old_sources: Path | None = None,
@@ -230,7 +229,7 @@ def _normalize_compare_options(
     # passed through verbatim.
     effective_debug_format = resolve_dump_debug_format(debug_format_opt)
 
-    demangle_resolved = _resolve_demangle(fmt, demangle)
+    demangle_resolved = _resolve_demangle(fmt)
 
     # --report-mode impact is sugar for a "full" report with the impact table
     # on -- the one way to ask for that table (the separate --show-impact flag
@@ -383,10 +382,6 @@ def _preflight_manifests_and_audit(
     *,
     old_dump_manifest: Path | None,
     new_dump_manifest: Path | None,
-    # ADR-068 D4/Phase 5: no longer read here -- `--audit-suppressions`
-    # without `--suppress` is a no-op now, not a rejection (see below).
-    # Kept on the signature so the caller's kwargs-forwarding stays uniform.
-    audit_suppressions: bool,
     suppress: Path | None,
     pack_paths: Any,
     policy_file_path: Path | None,
@@ -866,9 +861,7 @@ def _report_compare_result(
     layer_coverage_rows: Any,
     evidence_metrics: Any,
     extra_changes: Any,
-    explain_patterns: bool,
     show_redundant: bool,
-    show_filtered: bool,
     contract_evaluation: bool,
     policy: str,
     pf: PolicyFile | None,
@@ -877,13 +870,11 @@ def _report_compare_result(
     used_by_old_input: Path,
     used_by_new_input: Path,
     suppression: Any,
-    audit_suppressions: bool,
     fmt: str,
     output: Path | None,
     show_only: str | None,
     report_mode: str,
     show_impact: bool,
-    demangle_explicit: bool | None,
     follow_deps: bool,
     secondary_writes: tuple[tuple[str, Path], ...],
     require_complete_analysis: bool = False,
@@ -989,7 +980,14 @@ def _report_compare_result(
     result.old_evidence_depth = evidence_depth_label(old, old_pack)
     result.new_evidence_depth = evidence_depth_label(new, new_pack)
 
-    if explain_patterns:
+    # Plan slice 7o: unconditional. The pattern-modulation ledger used to be
+    # gated on `--view patterns`; ADR-067's record-before-disposing rule makes
+    # a disposition's own reason part of the result, not a display preference.
+    # Echoed only when there is something to disclose -- an unconditional
+    # "no modulations applied" line on every run would be noise, not
+    # accounting, and would make every quiet run differ from before for no
+    # reader's benefit.
+    if result.pattern_modulations:
         echo_pattern_modulations(result)
 
     # used_by_old_input/used_by_new_input are the *original* library paths, captured before _embed_inline_source_sides may have rewritten old_input/new_input to a temporary embedded-snapshot .abi.json path (Codex review) -- passing the post-embed operands here would silently drop the same-binary coverage warning for a --old/new-sources or raw --build-info comparison even when the two real binaries are identical.
@@ -998,7 +996,6 @@ def _report_compare_result(
         used_by_old_input,
         used_by_new_input,
         show_redundant=show_redundant,
-        show_filtered=show_filtered,
         severity_config=report_severity,
         contract_evaluation=contract_evaluation,
         old_snapshot=old,
@@ -1112,10 +1109,9 @@ def _report_compare_result(
                 report_mode=report_mode,
                 show_impact=show_impact,
                 severity_config=report_severity,
-                demangle=_resolve_demangle(target_fmt, demangle_explicit),
+                demangle=_resolve_demangle(target_fmt),
                 contract_evaluation=contract_evaluation,
                 require_complete_analysis=require_complete_analysis,
-                audit_suppressions=audit_suppressions,
             )
             rendered[target_fmt] = text
         _write_or_echo(target_output, text)
@@ -1187,7 +1183,6 @@ def run_compare(
     old_version: str,
     new_version: str,
     fmt: str,
-    demangle: bool | None,
     output: Path | None,
     suppress: Path | None,
     policy: str,
@@ -1200,7 +1195,6 @@ def run_compare(
     include_dependencies: bool,
     show_only: str | None,
     scope_public_headers: bool,
-    show_filtered: bool,
     post_manifest_path: Path | None,
     report_mode: str,
     debug_roots: tuple[Path, ...],
@@ -1208,9 +1202,10 @@ def run_compare(
     debug_roots_new: tuple[Path, ...],
     # ADR-068 D4/Phase 5: --pattern-verdicts/--surface-metrics are gone --
     # both run unconditionally now (compare_snapshots() passes True for
-    # both below). explain_patterns renders the always-on ledger via
-    # `--view patterns`, same as show_filtered/audit_suppressions below.
-    explain_patterns: bool,
+    # both below). Plan slice 7o did the same to the three *disclosure*
+    # tokens that used to gate rendering the ledgers those analyses produce
+    # (`--view patterns`/`filtered`/`suppressions`), so no parameter
+    # corresponds to them here any more either.
     verbose: bool,
     use_cases_manifest: Path | None = None,
     old_build_info: Path | None = None,
@@ -1229,7 +1224,6 @@ def run_compare(
     required_symbols_opt: tuple[str, ...] = (),
     diagnostic_comparison: bool = False,
     contract_mode: str | None = None,
-    audit_suppressions: bool = False,
     pack_paths: tuple[Path, ...] = (),
     include_labels: dict[Path, str] | None = None,
     old_dump_manifest: Path | None = None,
@@ -1405,7 +1399,6 @@ def run_compare(
             used_by_apps=used_by_apps,
             required_symbols=required_symbols,
             diagnostic_comparison=diagnostic_comparison,
-            audit_suppressions=audit_suppressions,
             include_labels=include_labels,
             use_cases_manifest=use_cases_manifest,
             suppress=suppress,
@@ -1426,10 +1419,7 @@ def run_compare(
             reject_release_incompatible_view_mode,
         )
 
-        reject_release_incompatible_view_mode(
-            report_mode,
-            show_filtered=show_filtered,
-        )
+        reject_release_incompatible_view_mode(report_mode)
         # Resolved unconditionally, not only under `--pack` (finding 1,
         # round 4): a no-pack run's own project-backed `.abicheck.yml`
         # `policy.overrides` still needs to reach a real config for
@@ -1494,7 +1484,6 @@ def run_compare(
     old_manifest_obj, new_manifest_obj = _preflight_manifests_and_audit(
         old_dump_manifest=old_dump_manifest,
         new_dump_manifest=new_dump_manifest,
-        audit_suppressions=audit_suppressions,
         suppress=suppress,
         pack_paths=pack_paths,
         policy_file_path=policy_file_path,
@@ -1655,11 +1644,6 @@ def run_compare(
             # _dispatch_release_compare resolves and validates them.
             report_mode=report_mode,
             show_only=show_only,
-            demangle=demangle,
-            explain_patterns=explain_patterns,
-            # Forwarded so _dispatch_release_compare can reject (no per-library ledger yet).
-            show_filtered=show_filtered,
-            audit_suppressions=audit_suppressions,
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.
@@ -1670,11 +1654,6 @@ def run_compare(
         select=select,
         select_required=select_required,
     )
-
-    # Preserved before _normalize_compare_options resolves `demangle` against
-    # the *primary* fmt below — the secondary render needs the same tri-state
-    # input resolved against `secondary_fmt` instead (see its call site).
-    demangle_explicit = demangle
 
     (
         collect_mode,
@@ -1692,7 +1671,6 @@ def run_compare(
         old_headers_only=old_headers_only,
         new_headers_only=new_headers_only,
         debug_format_opt=debug_format_opt,
-        demangle=demangle,
         fmt=fmt,
         report_mode=report_mode,
         old_sources=old_sources,
@@ -1966,11 +1944,6 @@ def run_compare(
         strict_suppressions=strict_suppressions,
         require_justification=require_justification,
     )
-    # audit_suppressions=True implies suppress is not None (guarded earlier,
-    # before the --dry-run emit above) -- _load_suppression_and_policy only
-    # returns None here when suppress itself was None, so suppression is
-    # guaranteed non-None at this point too.
-
     # One read for both consumers -- the live overlay and the ADR-049 receipt
     # that names this file with its digest (see the helper for why).
     force_public, symbols_list = resolve_force_public_scope(
@@ -2180,9 +2153,7 @@ def run_compare(
         layer_coverage_rows=layer_coverage_rows,
         evidence_metrics=evidence_metrics,
         extra_changes=extra_changes,
-        explain_patterns=explain_patterns,
         show_redundant=show_redundant,
-        show_filtered=show_filtered,
         contract_evaluation=contract_evaluation,
         policy=policy,
         pf=pf,
@@ -2191,13 +2162,11 @@ def run_compare(
         used_by_old_input=used_by_old_input,
         used_by_new_input=used_by_new_input,
         suppression=suppression,
-        audit_suppressions=audit_suppressions,
         fmt=fmt,
         output=output,
         show_only=show_only,
         report_mode=report_mode,
         show_impact=show_impact,
-        demangle_explicit=demangle_explicit,
         follow_deps=follow_deps,
         secondary_writes=secondary_writes,
         require_complete_analysis=require_complete_analysis,

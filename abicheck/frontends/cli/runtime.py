@@ -654,7 +654,6 @@ def _finalize_compare_result(
     metadata_new_input: Path,
     *,
     show_redundant: bool,
-    show_filtered: bool,
     severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
     old_snapshot: AbiSnapshot | None = None,
@@ -722,9 +721,15 @@ def _finalize_compare_result(
 
     if show_redundant and result.redundant_changes:
         _merge_redundant_changes(result)
-    if show_filtered and result.out_of_surface_changes:
+    # Plan slice 7o: both ledgers are unconditional. They used to be gated
+    # on `--view filtered`, which made an exclusion invisible unless a token
+    # was typed -- ADR-067's record-before-disposing accounting rule is that
+    # a disposition is part of the result, not a display preference. Each
+    # still renders nothing at all when its own collection is empty, so a
+    # run with no scoping and no reconciliation is unchanged.
+    if result.out_of_surface_changes:
         echo_filtered_surface(result, contract_evaluation=contract_evaluation)
-    if show_filtered and result.reconciled_changes:
+    if result.reconciled_changes:
         echo_reconciled(result, contract_evaluation=contract_evaluation)
 
     # The scoping fallback warning goes to stderr so it never corrupts the

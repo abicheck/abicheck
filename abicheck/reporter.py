@@ -47,7 +47,6 @@ from .report.contract_fields import (
     add_contract_evaluation_fields as _add_contract_evaluation_fields,
 )
 from .report.dispatch_markdown import (
-    _to_markdown_leaf as _to_markdown_leaf,
     _to_markdown_root_cause as _to_markdown_root_cause,
     to_markdown as to_markdown,
     to_review_digest as to_review_digest,
@@ -81,19 +80,18 @@ from .reporter_markdown import (
     _append_suppression_note as _append_suppression_note,
     _build_impact_table as _build_impact_table,
     _build_internal_rtti_note as _build_internal_rtti_note,
-    _build_leaf_type_sections as _build_leaf_type_sections,
     _build_severity_summary_md as _build_severity_summary_md,
     _finding_id as _finding_id,
     _fmt_size as _fmt_size,
     _footer_lines as _footer_lines,
     _format_change_md as _format_change_md,
-    _format_leaf_type_change as _format_leaf_type_change,
     _group_changes_by_root_cause as _group_changes_by_root_cause,
     _resolve_scoped_gate_findings as _resolve_scoped_gate_findings,
     _root_cause_key_and_display as _root_cause_key_and_display,
     _section_severity_label as _section_severity_label,
     _suppress_dangling_correlation_notes as _suppress_dangling_correlation_notes,
     apply_show_only as apply_show_only,
+    entity_for_kind as entity_for_kind,
     operation_for_kind as operation_for_kind,
     parse_show_only_groups as parse_show_only_groups,
     root_cause_evidence_lookup_for_changes as root_cause_evidence_lookup_for_changes,
@@ -364,267 +362,6 @@ def _displayed_with_scoped_only(
     differently.
     """
     return changes + scoped_only_changes_filtered(result, show_only)
-
-
-def _to_json_leaf(
-    result: DiffResult,
-    indent: int = 2,
-    show_only: str | None = None,
-    *,
-    severity_config: SeverityConfig | None = None,
-    require_complete_analysis: bool = False,
-    include_exit_decision: bool = True,
-    contract_evaluation: bool = False,
-) -> str:
-    """Leaf-change mode JSON output.
-
-    *severity_config*, when given, adds the same top-level ``severity`` block
-    the full-mode JSON report has (see :func:`_build_severity_json`) —
-    without it, ``--report-mode leaf`` returned before that block was ever
-    built, so it silently had no severity information even when a caller
-    passed ``severity_config`` through :func:`to_json`.
-    """
-    from .checker import _ROOT_TYPE_CHANGE_KINDS
-
-    summary = build_summary(result)
-    changes = list(result.changes)
-    if show_only:
-        changes = apply_show_only(
-            changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
-        changes = _suppress_dangling_correlation_notes(changes)
-    type_changes = [c for c in changes if c.kind in _ROOT_TYPE_CHANGE_KINDS]
-    non_type_changes = [c for c in changes if c.kind not in _ROOT_TYPE_CHANGE_KINDS]
-    # G29 Phase 3 follow-up (ADR-052): computed once over the full filtered
-    # `changes` (not type_changes/non_type_changes separately) so a
-    # TYPE_* change and a non-type change sharing a root cause still get
-    # the same root_cause_id, matching --report-mode root-cause's own
-    # whole-`changes`-scoped grouping. extra_causes folds in
-    # scoped_only_changes the same way _to_json_root_cause does (review
-    # finding) -- without it, a leaf-mode finding correlating only via a
-    # scoped-only overlay's caused_by_type silently lost its
-    # impact_assessment.root_cause_id, disagreeing with root-cause/SARIF/JUnit.
-    _rc_lookup = root_cause_lookup_for_changes(
-        changes, extra_causes=_scoped_only_extra_causes(result, show_only)
-    )
-    _rc_evidence = scoped_only_evidence_lookup(result, changes, show_only)
-
-    effective_policy = result.policy or "strict_abi"
-    eff_sets = result._effective_kind_sets()
-
-    def _leaf_entry(c: Change) -> dict[str, object]:
-        entry: dict[str, object] = {
-            "kind": c.kind.value,
-            "symbol": c.symbol,
-            "description": c.description,
-            "severity": _effective_severity_label(
-                c,
-                eff_sets,
-                policy=result.policy,
-                policy_file=result.policy_file,
-            ),
-            # Schema 2.3/2.4 fields (Codex review on #557): _leaf_entry builds
-            # its own dict rather than routing through _change_to_dict, so
-            # root type changes in leaf_changes[]/changes[] were missing
-            # operation/finding_id/recommended_action even though non-type
-            # leaf entries (via _change_to_dict below) and full-mode entries
-            # all have them — breaking a consumer relying on finding_id
-            # correlation across --report-mode leaf and full-mode reports.
-            "operation": operation_for_kind(c.kind.value),
-            "finding_id": _finding_id(c),
-            "recommended_action": _recommended_action_for_change(
-                c,
-                policy=result.policy,
-                kind_sets=eff_sets,
-                policy_file=result.policy_file,
-            ),
-            "affected_count": len(c.affected_symbols) if c.affected_symbols else 0,
-            "affected_symbols": c.affected_symbols or [],
-            "caused_count": c.caused_count,
-            "old_value": getattr(c, "old_value", None),
-            "new_value": getattr(c, "new_value", None),
-        }
-        reviewer_action = _reviewer_action_for_change(
-            c,
-            policy=result.policy,
-            kind_sets=eff_sets,
-            policy_file=result.policy_file,
-        )
-        if reviewer_action is not None:
-            entry["reviewer_action"] = reviewer_action
-        evidence_status = evidence_status_for_result(
-            cast(HasKind, c), result.evidence_tiers
-        )
-        if evidence_status is not None:
-            entry["evidence_status"] = evidence_status.value
-        # ADR-027 A4: keep the modulation audit trail in leaf mode too, so a
-        # demoted root type change still explains *why* it reads compatible.
-        mod_reason = getattr(c, "modulation_reason", None)
-        if mod_reason:
-            entry["modulation_reason"] = mod_reason
-            entry["modulation_rule"] = getattr(c, "modulation_rule", None)
-            eff = getattr(c, "effective_verdict", None)
-            if isinstance(eff, Verdict):
-                entry["effective_verdict"] = eff.value
-        # Same "leaf mode duplicates the full-mode builder" gap as the rest
-        # of this function (Codex review) -- shares _change_to_dict's own
-        # helper so the two entry builders can't drift on this field.
-        _reclassified_by = _reclassified_by_for_change(c, result.policy_file)
-        if _reclassified_by:
-            entry["reclassified_by"] = _reclassified_by
-        # ADR-044 P1 item 4: same structured reachability fields
-        # _change_to_dict adds for non-type changes — a root TYPE_* change is
-        # exactly the category the layout-reachability walk tags most often.
-        if getattr(c, "public_reachable", False):
-            entry["public_reachable"] = True
-            reach_kind = getattr(c, "reachability_kind", None)
-            if reach_kind:
-                entry["reachability_kind"] = reach_kind
-            proof_path = getattr(c, "reachability_proof_path", None)
-            if proof_path:
-                entry["reachability_proof_path"] = proof_path
-        # G29 Phase 3 slice 1 (ADR-052, Codex review): _leaf_entry duplicates
-        # _change_to_dict's reachability fields rather than routing through
-        # it (see the ADR-044 block above) -- reachability_state/
-        # impact_assessment follow the same precedent so a root TYPE_*
-        # change (exactly the category the layout-reachability walk tags
-        # most often) doesn't lose them in --report-mode leaf.
-        assessment = assess_change(
-            c,
-            root_cause=_rc_lookup.get(_finding_id(c)),
-            root_cause_evidence=_rc_evidence.get(_finding_id(c)),
-        )
-        entry["reachability_state"] = assessment.reachability_state.value
-        if assessment.has_signal():
-            entry["impact_assessment"] = assessment.to_dict()
-        # ADR-049 Phase 3: _leaf_entry builds its own dict rather than
-        # routing through _change_to_dict (see the schema 2.3/2.4 comment
-        # above -- this is the same, long-standing "leaf mode duplicates
-        # the full-mode entry builder" gap, now including the shadow
-        # contract-evaluation fields _change_to_dict already carries. A
-        # root TYPE_* change under --report-mode leaf previously lost
-        # contract_relevance/contract_reason_code/contract_assurance even
-        # though the identical finding kept them under --report-mode full
-        # (Codex review, fresh evidence).
-        #
-        # The gate contribution is computed, not left at the helper's default
-        # `0`: that default is right for the audit ledgers (an out-of-surface
-        # or suppressed finding reaches no gate), but a leaf entry is an
-        # ordinary `result.changes` finding that does. Without this, an
-        # evaluated `type_size_changed` driving a real exit 4 serialized as
-        # `compatibility_decision: BREAKING` beside `gate_contribution: 0`
-        # under --report-mode leaf alone (Codex review, fresh evidence).
-        from .severity import gate_contribution_for_change
-
-        _add_contract_evaluation_fields(
-            entry,
-            c,
-            gate_contribution=gate_contribution_for_change(
-                cast(HasKind, c),
-                severity_config,
-                policy=effective_policy,
-                kind_sets=eff_sets,
-                policy_file=result.policy_file,
-            ),
-        )
-        return entry
-
-    leaf_changes_list = [_leaf_entry(c) for c in type_changes]
-    non_type_list = [
-        _change_to_dict(
-            c,
-            policy=effective_policy,
-            kind_sets=eff_sets,
-            root_cause=_rc_lookup.get(_finding_id(c)),
-            root_cause_evidence=_rc_evidence.get(_finding_id(c)),
-            policy_file=result.policy_file,
-            evidence_tiers=result.evidence_tiers,
-            severity_config=severity_config,
-        )
-        for c in non_type_changes
-    ]
-
-    d: dict[str, object] = {
-        "report_schema_version": REPORT_SCHEMA_VERSION,
-        "library": result.library,
-        "old_version": result.old_version,
-        "new_version": result.new_version,
-        "verdict": result.verdict.value,
-        "policy": effective_policy,
-        "summary": {
-            "breaking": summary.breaking,
-            "source_breaks": summary.source_breaks,
-            "risk_changes": summary.risk_count,
-            "compatible_additions": summary.compatible_additions,
-            "quality_issues": summary.quality_issues,
-            "total_changes": summary.total_changes,
-        },
-        "leaf_changes": leaf_changes_list,
-        "non_type_changes": non_type_list,
-        # FIX-H: populate changes with union for backward-compat consumers
-        "changes": leaf_changes_list + non_type_list,
-    }
-    _reporter_contract_blocks.add_env_matrix_digest(d, result)
-    # ADR-067 D3: a compact view may collapse detail; it may not omit the
-    # raw-versus-effective counts.
-    _add_disposition_audit(d, result, severity_config)
-    _add_surface_changes(d, result, changes)
-    _add_finding_evolution(d, result)
-    _add_check_identity(d, result)
-    gate = gate_decision_for_result(result, severity_config)
-    if gate is not None:
-        assert severity_config is not None  # gate is None otherwise
-        d["severity"] = _build_severity_json(
-            changes,
-            severity_config,
-            gate=gate,
-            policy=result.policy,
-            kind_sets=eff_sets,
-            policy_file=result.policy_file,
-        )
-    # Release recommendation — always present in JSON, including leaf mode.
-    d["release_recommendation"] = recommend_release(result).to_dict()
-    if result.redundant_count > 0:
-        d["redundant_count"] = result.redundant_count
-    # ADR-027 A4 — pattern-aware modulation ledger, carried in leaf mode too.
-    if result.pattern_modulations:
-        d["pattern_modulations"] = result.pattern_modulations
-    # Confidence & evidence metadata
-    d["confidence"] = result.confidence.value
-    d["evidence_tier"] = result.evidence_tier.value
-    d["evidence_tiers"] = list(result.evidence_tiers)
-    if result.coverage_warnings:
-        d["coverage_warnings"] = list(result.coverage_warnings)
-    _add_surface_scope(d, result)
-    _add_reconciled(d, result)
-    _add_contract_context(
-        d,
-        result,
-        _displayed_with_scoped_only(result, changes, show_only),
-        require_complete_analysis=require_complete_analysis,
-        severity_config=severity_config,
-        include_exit_decision=include_exit_decision,
-    )
-    # Codex review: full/root-cause mode call this; leaf mode never did,
-    # silently dropping policy_overrides/policy_reclassify here.
-    _add_policy_overrides(d, result)
-    scope = _scope_dict(result)
-    if scope is not None:
-        d["scope"] = scope
-    return _reporter_contract_blocks.render_json_with_side_facts(
-        d,
-        result,
-        indent=indent,
-        helpers=_SCOPED_GATE_HELPERS,
-        severity_config=severity_config,
-        gate=gate,
-        show_only=show_only,
-        contract_evaluation=contract_evaluation,
-    )
 
 
 def _add_entries_to_root_causes(
@@ -1077,7 +814,7 @@ def _suppressed_change_entry(
     # projection of this same Change -- a suppressed one must not lose it
     # just because it's rendered through this narrower audit-entry shape
     # instead of _change_to_dict.
-    demangled_symbol = getattr(c, "demangled_symbol", None)
+    demangled_symbol = resolve_demangled_symbol(c)
     if demangled_symbol:
         entry["demangled_symbol"] = demangled_symbol
     # ADR-049 Phase 3 (Codex review, fresh evidence): suppression is a
@@ -1274,17 +1011,12 @@ def to_json(
     # A `stat` parameter used to short-circuit to `to_stat_json` here. Call
     # `to_stat_json` directly for the summary-only document; this function
     # renders the full report.
-    if report_mode == "leaf":
-        return _to_json_leaf(
-            result,
-            indent=indent,
-            show_only=show_only,
-            severity_config=severity_config,
-            require_complete_analysis=require_complete_analysis,
-            include_exit_decision=include_exit_decision,
-            contract_evaluation=contract_evaluation,
-        )
-
+    # Plan slice 7o: every finding's dict now resolves a `demangled_symbol`
+    # (resolve_demangled_symbol). One batched `c++filt` call up front keeps
+    # that from forking a subprocess per symbol on a host without the
+    # in-process `cxxfilt` package -- the same prewarm appcompat_html.py
+    # already does for its own per-row demangling.
+    _prewarm_change_demangling(result)
     if report_mode == "root-cause":
         return _to_json_root_cause(
             result,
@@ -1531,6 +1263,48 @@ def release_finding_detail_lines(entry: dict[str, object]) -> list[str]:
     return lines
 
 
+def _prewarm_change_demangling(result: Any) -> None:
+    """Batch-demangle every finding's symbol once, ahead of serialization."""
+    from .demangle import prewarm_demangle_batch
+
+    changes = list(getattr(result, "changes", ()) or ())
+    changes += list(getattr(result, "suppressed_changes", ()) or ())
+    changes += list(getattr(result, "out_of_surface_changes", ()) or ())
+    if changes:
+        prewarm_demangle_batch(changes, attrs=("symbol",))
+
+
+def resolve_demangled_symbol(c: Any) -> str | None:
+    """The demangled spelling of *c*'s symbol, for a machine projection.
+
+    Plan slice 7o, deliverable 2: every machine format carries **both**
+    names -- the exact mangled ``symbol`` it always carried, plus the
+    readable one. Before this, ``demangled_symbol`` was emitted only for an
+    ``ELF_ONLY``-visibility finding (``compare.elf_only_demangle``, the one
+    case whose ``symbol``/``description`` were *unreadable* without it), so
+    a JSON/SARIF consumer of an ordinary C++ removal had the mangled name
+    and no way to show a human one. Reading a report and grepping the
+    binary are then the same string, which is what makes the human side's
+    automatic demangling lossless.
+
+    Returns ``None`` when the symbol is not an Itanium-mangled name, or no
+    demangler is available -- never a copy of ``symbol`` itself, so a
+    consumer can treat the field's presence as "this differs from symbol".
+    A finding that already carries one (the ``ELF_ONLY`` path) keeps it
+    verbatim rather than being re-derived.
+    """
+    existing = getattr(c, "demangled_symbol", None)
+    if existing:
+        return str(existing)
+    symbol = getattr(c, "symbol", "") or ""
+    if not symbol:
+        return None
+    from .demangle import demangle
+
+    demangled = demangle(symbol)
+    return demangled if demangled and demangled != symbol else None
+
+
 def _change_to_dict(
     c: object,
     *,
@@ -1625,12 +1399,13 @@ def _change_to_dict(
     # mangled -- the "machine format" branch demangle.demangle_text
     # describes), and `surface_facts`, the three split surface facts emitted
     # whole, "unknown" included (report schema 4.4, model/surface_facts.py).
-    if demangled_symbol := getattr(c, "demangled_symbol", None):
+    if demangled_symbol := resolve_demangled_symbol(c):
         d["demangled_symbol"] = demangled_symbol
     if surface_facts := getattr(c, "surface_facts", None):
         d["surface_facts"] = dict(surface_facts)
     if isinstance(kind, ChangeKind):
         d["operation"] = operation_for_kind(kind.value)
+        d["entity"] = entity_for_kind(kind.value)
         d["finding_id"] = _finding_id(c)
         # Backend-independent sibling of finding_id (schema 2.36).
         from .finding_identity import report_canonical_finding_id

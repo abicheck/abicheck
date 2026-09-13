@@ -37,13 +37,15 @@ line-count reasons before this migration.
 
 from __future__ import annotations
 
-from .registry import ChangeKindMeta, Verdict
+from .registry import ChangeEntity, ChangeKindMeta, ChangeOperation, Verdict
 
 _B = Verdict.BREAKING
 _C = Verdict.COMPATIBLE
 _A = Verdict.API_BREAK
 _R = Verdict.COMPATIBLE_WITH_RISK
 _E = ChangeKindMeta
+_ENT = ChangeEntity
+_OP = ChangeOperation
 
 SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
     _E(
@@ -69,12 +71,16 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "struct/union) is simply gone, so source referencing any of "
         "them fails to compile against the new headers too — "
         "recompilation does not make this case safe.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "calling_convention_changed",
         _B,
         impact="Function calling convention changed; registers/stack usage differs, call crashes.",
         policy_overrides={"plugin_abi": _C},
+        entity=_ENT.BINARY,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "constant_added",
@@ -97,6 +103,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "declares at the same scope — an ordinary redeclaration/"
         "ambiguity error, not a macro textual-substitution hazard.",
         description_template="New preprocessor constant: {name}",
+        entity=_ENT.VARIABLE,
+        operation=_OP.ADDED,
     ),
     _E(
         "constant_changed",
@@ -119,6 +127,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "(through the exported symbol) instead of keeping the old "
         "one until recompiled.",
         description_template="Preprocessor constant value changed: {name} ({old} → {new})",
+        entity=_ENT.VARIABLE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "constant_removed",
@@ -140,6 +150,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "resolving that symbol at load time the same way a removed "
         "function or variable would.",
         description_template="Preprocessor constant removed: {name}",
+        entity=_ENT.VARIABLE,
+        operation=_OP.REMOVED,
     ),
     _E(
         "ctor_explicit_added",
@@ -150,6 +162,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "call site, or return-by-implicit-conversion) no longer "
         "compiles. The mangled name is unchanged so binaries keep "
         "running, but recompilation against the new header fails.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "ctor_explicit_removed",
@@ -159,6 +173,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "conversion paths that previously did not consider this "
         "function now do, potentially selecting a different overload "
         "than before and causing silent behavioral drift.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "ctor_overload_ambiguity_risk",
@@ -173,6 +189,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "types), so it is reported as a risk to review, not a "
         "certain break.",
         description_template="Class '{name}' gained a 2nd+ non-explicit converting constructor: {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "field_access_changed",
@@ -180,6 +198,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         impact="Field access level narrowed; old code accessing it won't compile.",
         policy_overrides={"sdk_vendor": _C},
         description_template="Field access level narrowed: {name}::{detail} ({old} → {new})",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_added",
@@ -187,6 +207,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         is_addition=True,
         impact="New function available; existing binaries are unaffected.",
         description_template="New public function: {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.ADDED,
     ),
     _E(
         "func_became_inline",
@@ -228,6 +250,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "definition itself produces an external definition — so this "
         "specific unresolved-reference risk does not apply to code "
         "compiled under that dialect.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_contract_attribute_added",
@@ -239,6 +263,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "argument that used to be handled becomes undefined behaviour, "
         "or code after a call is deleted as unreachable.",
         description_template="Contract attribute added to {name}: {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_contract_attribute_removed",
@@ -248,12 +274,16 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "skipped NULL checks are now wrong; noreturn dropped means the "
         "function can return into code compiled as unreachable).",
         description_template="Contract attribute removed from {name}: {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_deleted",
         _B,
         impact="Function marked = delete; old binaries still call it, getting link error or UB.",
         description_template="Function explicitly deleted (= delete): {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "func_deleted_dwarf",
@@ -261,6 +291,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         impact="Function marked as deleted (= delete) detected via DWARF debug info. "
         "The function was previously callable; callers will fail to link.",
         description_template="Function explicitly deleted (= delete): {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "func_deprecated_added",
@@ -277,6 +309,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "clean build into a failing one, so it isn't unconditionally "
         '"not a break" for source compatibility.',
         description_template="Function marked deprecated: {name} ({detail})",
+        entity=_ENT.FUNCTION,
+        operation=_OP.ADDED,
     ),
     _E(
         "func_deprecated_removed",
@@ -284,6 +318,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         impact="Function's [[deprecated]] marker was removed; the compiler "
         "warning stops, with no effect on the function's ABI.",
         description_template="Function no longer marked deprecated: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "func_exception_spec_changed",
@@ -294,6 +330,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "tables and unwind assumptions that no longer match; a "
         "violated specification calls std::unexpected/std::terminate.",
         description_template="Exception specification changed: {name} ({old} → {new})",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_language_linkage_changed",
@@ -302,6 +340,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "changes, so old binaries reference a symbol that no longer exists under "
         "that name.",
         description_template="Language linkage changed: {name} ({old} → {new})",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_likely_renamed",
@@ -310,6 +350,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "different symbol name). Old binaries reference the old name and will fail to "
         "resolve at load time. This is a heuristic signal — verify the rename is intentional.",
         description_template="Function likely renamed: {old} → {new} (size={detail}B, confidence={name}%)",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_lost_inline",
@@ -365,11 +407,15 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "unchanged, so this is low-risk for already-linked "
         "consumers.",
         description_template="Function lost inline attribute: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_noexcept_added",
         _C,
         impact="In C++17 noexcept is part of the function type; old callers compiled against non-noexcept signature get a different mangled name.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_noexcept_removed",
@@ -384,6 +430,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "compatibility policy treats removing `noexcept` as a change to "
         "avoid unless it was `noexcept(false)`. Verdict is policy-"
         "adjustable; raise to API_BREAK under a strict source profile.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_override_specifier_added",
@@ -392,6 +440,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "Purely a compiler self-check on the declaration; the method's "
         "signature and ABI are unchanged.",
         description_template="Method gained `override` specifier: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.ADDED,
     ),
     _E(
         "func_override_specifier_removed",
@@ -403,28 +453,38 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "elsewhere — worth a quick check even though this fact alone "
         "does not prove a break.",
         description_template="Method lost `override` specifier: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "func_params_changed",
         _B,
         impact="Callers push arguments with the old layout; callee reads wrong data from stack/registers.",
         description_template="Parameters changed: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_removed",
         _B,
         impact="Old binaries call a symbol that no longer exists; dynamic linker will refuse to load or crash at call site.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "func_removed_elf_only",
         _B,
         impact="Exported function symbol removed from the binary; old binaries that link or dlsym() it can fail even without header evidence.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "func_return_changed",
         _B,
         impact="Callers expect the old return type layout in registers/stack; misinterpretation causes data corruption.",
         description_template="Return type changed: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_variadic_added",
@@ -435,6 +495,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "count; Apple AArch64 passes variadic args on the stack), so "
         "old callers invoke it with the wrong convention.",
         description_template="Function became variadic: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_variadic_removed",
@@ -444,22 +506,30 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "on ABIs with distinct variadic conventions the call sequence "
         "itself differs.",
         description_template="Function no longer variadic: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_virtual_added",
         _B,
         impact="Vtable layout changes; old binaries call wrong virtual function slot, leading to crashes or wrong behavior.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_virtual_removed",
         _B,
         impact="Vtable entry removed; old binaries that dispatch through the vtable call the wrong slot.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_visibility_changed",
         _B,
         impact="Symbol hidden from dynamic linking; old binaries can't find it at load time.",
         description_template="Function visibility changed to hidden: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "var_visibility_changed",
@@ -468,6 +538,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "declaration remains; an already-linked consumer that resolves "
         "it fails at load time, and nothing in the headers signals it.",
         description_template="Variable no longer exported by the binary: {name}",
+        entity=_ENT.VARIABLE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "func_export_added",
@@ -483,6 +555,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "sees it -- leaving the run silent about a real, observed "
         "change to the export table.",
         description_template="Function now exported by the binary: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.ADDED,
     ),
     _E(
         "var_export_added",
@@ -493,6 +567,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "symbols. Pure addition, and reported for the same reason: a "
         "matched pair reaches no added-symbol path.",
         description_template="Variable now exported by the binary: {name}",
+        entity=_ENT.VARIABLE,
+        operation=_OP.ADDED,
     ),
     _E(
         "hidden_friend_added",
@@ -504,6 +580,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "participates in overload resolution at call sites that "
         "trigger ADL on one of its argument types.",
         description_template="Hidden friend declaration added: {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.ADDED,
     ),
     _E(
         "hidden_friend_removed",
@@ -517,6 +595,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "the friend was also defined out-of-line, removal "
         "additionally surfaces as FUNC_REMOVED at link time.",
         description_template="Hidden friend declaration removed: {old}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "internal_symbol_required_by_public_api",
@@ -533,6 +613,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "the pure-call shape that walk's layout-only reachability model "
         "cannot see (no field/base/signature evidence, only a call "
         "edge).",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "method_access_changed",
@@ -540,6 +622,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         impact="Method access level narrowed (e.g. public→private); old code calling it won't compile.",
         policy_overrides={"sdk_vendor": _C},
         description_template="Method access level narrowed: {name} ({old} → {new})",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "param_became_va_list",
@@ -556,6 +640,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "a genuine, compatible va_list object (e.g. a forwarding "
         "wrapper).",
         description_template="Parameter became va_list: {name} param {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "param_default_value_changed",
@@ -567,6 +653,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "from a call site that omits the argument picks up the new "
         "one.",
         description_template="Parameter default changed: {name} param {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "param_default_value_removed",
@@ -578,6 +666,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "substituted in at its own compile time.",
         policy_overrides={"sdk_vendor": _C},
         description_template="Parameter default removed: {name} param {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "param_lost_va_list",
@@ -594,6 +684,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "only if the caller already happened to pass a value "
         "compatible with the new fixed type.",
         description_template="Parameter was va_list, now fixed: {name} param {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "param_pointer_level_changed",
@@ -604,6 +696,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "compiled against the old signature passes the wrong kind "
         "of value — silent misinterpretation or a crash.",
         description_template="Parameter pointer level changed: {name} param {detail} (depth {old} → {new})",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "param_renamed",
@@ -615,6 +709,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "on the old name, may be affected.",
         policy_overrides={"sdk_vendor": _C},
         description_template="Parameter renamed: {name} param {detail}: {old} → {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "param_restrict_changed",
@@ -634,6 +730,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "(drops an optimization assumption), which is safe for every "
         "caller.",
         description_template="Parameter restrict qualifier {detail}: {name} param {old}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "public_api_exposes_stl_by_value",
@@ -645,6 +743,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "boundary is fragile: a consumer built with a different STL silently "
         "reads the wrong layout. Pass an opaque handle or a C-style view "
         "instead.",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "python_abi3_dropped",
@@ -658,6 +758,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "support; the promise lived in the wheel/SOABI tag. A deployment "
         "RISK for anyone not on the exact new interpreter.",
         description_template="extension '{name}' dropped its abi3 promise: {old} → {new}",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "python_abi3_floor_raised",
@@ -673,6 +775,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "min-of-imports inference). A deployment RISK: whether it breaks "
         "depends on which interpreters the consumer must support.",
         description_template="abi3 extension '{name}' raised its Py_LIMITED_API floor: {old} → {new}",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "python_api_callable_kind_changed",
@@ -687,6 +791,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "— so it breaks callers. The compiled binary is unchanged. "
         "Source-level (`API_BREAK`).",
         description_template="Python callable kind changed for {name}: {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "python_api_class_added",
@@ -695,6 +801,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         impact="A new public class was added to the module's Python-visible API. "
         "Additive — existing callers are unaffected.",
         description_template="New Python class in extension API: {name}",
+        entity=_ENT.TYPE,
+        operation=_OP.ADDED,
     ),
     _E(
         "python_api_class_removed",
@@ -704,6 +812,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "reference the class break at import/attribute-access time. A "
         "source-level (`API_BREAK`) change invisible to the C-ABI view.",
         description_template="Python class removed from extension API: {name}",
+        entity=_ENT.TYPE,
+        operation=_OP.REMOVED,
     ),
     _E(
         "python_api_default_removed",
@@ -713,6 +823,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "mandatory. Callers relying on the default now raise a "
         "missing-argument `TypeError`. Source-level (`API_BREAK`).",
         description_template="Python parameter default removed in {name}: {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "python_api_function_added",
@@ -721,6 +833,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         impact="A new public top-level function was added to the module's "
         "Python-visible API. Additive — existing callers are unaffected.",
         description_template="New Python function in extension API: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.ADDED,
     ),
     _E(
         "python_api_function_removed",
@@ -733,6 +847,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "A source-level (`API_BREAK`) change the native-ABI check cannot "
         "see.",
         description_template="Python function removed from extension API: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "python_api_method_added",
@@ -742,6 +858,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "module's Python-visible API. Additive — existing callers are "
         "unaffected.",
         description_template="New Python method in extension API: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.ADDED,
     ),
     _E(
         "python_api_method_removed",
@@ -751,6 +869,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "attribute-access time even though the class and the compiled "
         "binary are otherwise unchanged. Source-level (`API_BREAK`).",
         description_template="Python method removed from extension API: {name}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "python_api_overload_removed",
@@ -763,6 +883,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "Adding an overload is compatible and not reported. "
         "Source-level (`API_BREAK`).",
         description_template="Python overload removed from {name}: {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "python_api_parameter_added",
@@ -773,6 +895,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "`TypeError`. Source-level (`API_BREAK`); a new *optional* "
         "parameter would be compatible and is not reported.",
         description_template="Required Python parameter added to {name}: {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "python_api_parameter_kind_changed",
@@ -787,6 +911,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "compiled binary is unchanged; the break lives in the call shape. "
         "Source-level (`API_BREAK`).",
         description_template="Python parameter binding changed in {name}: {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "python_api_parameter_removed",
@@ -797,6 +923,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "unchanged; the break lives in the Python signature. "
         "Source-level (`API_BREAK`).",
         description_template="Python parameter removed from {name}: {detail}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.REMOVED,
     ),
     _E(
         "python_api_parameter_renamed",
@@ -807,6 +935,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "byte-identical — this is the canonical break the native-ABI "
         "check misses. Source-level (`API_BREAK`).",
         description_template="Python parameter renamed in {name}: {old} → {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "python_api_parameter_type_changed",
@@ -817,6 +947,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "but static analysis and callers relying on the old contract may "
         "be affected. A `RISK`.",
         description_template="Python parameter type changed in {name}: {detail} ({old} → {new})",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "python_api_return_type_changed",
@@ -826,6 +958,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "value, but existing calls still execute — a behavioural / "
         "type-checker `RISK`, not a hard break.",
         description_template="Python return type changed for {name}: {old} → {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "python_api_stub_invalid",
@@ -835,6 +969,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "limit). The Python API surface is therefore untrusted and must "
         "fail closed rather than disabling Python-level API checks.",
         description_template="Invalid Python API stub for extension module: {detail}",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "python_gil_abi_changed",
@@ -850,6 +986,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "free-threaded build can never be `abi3`). A deployment RISK: "
         "whether it breaks depends on which interpreter the consumer runs.",
         description_template="extension '{name}' changed GIL/free-threaded ABI: {old} → {new}",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "python_stable_abi_violation",
@@ -865,6 +1003,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "deployment RISK: whether it breaks depends on the target "
         "interpreter, not on the module's own consumers.",
         description_template="abi3 extension '{name}' imports non-stable CPython symbol: {detail}",
+        entity=_ENT.BUILD,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "return_pointer_level_changed",
@@ -874,6 +1014,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "the returned value as the wrong kind of pointer — silent "
         "misinterpretation or a crash.",
         description_template="Return pointer level changed: {name} (depth {old} → {new})",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "serialization_tag_changed",
@@ -885,6 +1027,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "from the old library deserialize as the wrong class against the new "
         "library, silently corrupting data. Common in "
         "SerializationIface-style designs.",
+        entity=_ENT.TYPE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "symbol_renamed_batch",
@@ -892,12 +1036,16 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         impact="Multiple symbols renamed (e.g. namespace prefix added/removed); "
         "old binaries reference the old names and will get undefined symbol errors at load time.",
         description_template="Batch symbol rename detected (namespace refactoring): prefix '{name}' added to {detail}",
+        entity=_ENT.BINARY,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "symbol_size_changed",
         _B,
         impact="ELF symbol size changed; copy relocations or memcpy-based consumers get truncated/oversized data.",
         description_template="Symbol size changed: {name} ({old} → {new} bytes)",
+        entity=_ENT.BINARY,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "symbol_size_changed_const_object",
@@ -906,6 +1054,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "Old non-PIE consumers may have copy relocations sized from the old DSO symbol, so a later DSO can "
         "truncate or otherwise mis-copy data at load time.",
         description_template="Symbol size changed: {name} ({old} → {new} bytes)",
+        entity=_ENT.BINARY,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "symbol_size_changed_internal",
@@ -914,6 +1064,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "exported data remains part of the dynamic ABI and size changes can break copy relocations "
         "or direct data consumers. Override severity via --policy only when the symbol is known private.",
         description_template="Symbol size changed: {name} ({old} → {new} bytes)",
+        entity=_ENT.BINARY,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "var_access_changed",
@@ -924,6 +1076,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "exported symbol directly is unaffected, since binary "
         "access control isn't enforced at link/load time.",
         description_template="Variable access level narrowed: {name} ({old} → {new})",
+        entity=_ENT.VARIABLE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "var_access_widened",
@@ -932,6 +1086,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "this only grants new source-level access and cannot break "
         "anything that already compiled successfully.",
         description_template="Variable access level widened: {name} ({old} → {new})",
+        entity=_ENT.VARIABLE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "var_added",
@@ -939,6 +1095,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         is_addition=True,
         impact="New variable available; existing binaries are unaffected.",
         description_template="New public variable: {name}",
+        entity=_ENT.VARIABLE,
+        operation=_OP.ADDED,
     ),
     _E(
         "var_alignment_changed",
@@ -949,11 +1107,15 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "reduced alignment faults strict-alignment/SIMD access, and any "
         "change breaks layout assumptions baked into old binaries.",
         description_template="Variable alignment changed: {name} ({old} → {new} bits)",
+        entity=_ENT.VARIABLE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "var_became_const",
         _B,
         impact="Variable moved to read-only section; old code writing to it gets SIGSEGV.",
+        entity=_ENT.VARIABLE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "var_deprecated_added",
@@ -968,6 +1130,8 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         "warnings as errors (e.g. -Werror=deprecated-declarations) "
         "has this turn a previously clean build into a failing one.",
         description_template="Variable marked deprecated: {name} ({detail})",
+        entity=_ENT.VARIABLE,
+        operation=_OP.ADDED,
     ),
     _E(
         "var_deprecated_removed",
@@ -975,22 +1139,30 @@ SYMBOLS_ENTRIES: list[ChangeKindMeta] = [
         impact="Variable's [[deprecated]] marker was removed; the compiler "
         "warning stops, with no effect on the variable's ABI.",
         description_template="Variable no longer marked deprecated: {name}",
+        entity=_ENT.VARIABLE,
+        operation=_OP.REMOVED,
     ),
     _E(
         "var_lost_const",
         _B,
         impact="Variable no longer const; ODR violations possible if old code inlined the value.",
+        entity=_ENT.VARIABLE,
+        operation=_OP.MODIFIED,
     ),
     _E(
         "var_removed",
         _B,
         impact="Old binaries reference a global variable that no longer exists; link or load failure.",
         description_template="Public variable removed: {name}",
+        entity=_ENT.VARIABLE,
+        operation=_OP.REMOVED,
     ),
     _E(
         "var_type_changed",
         _B,
         impact="Old binaries read/write the variable with wrong size or layout; data corruption or segfault.",
         description_template="Variable type changed: {name}",
+        entity=_ENT.VARIABLE,
+        operation=_OP.MODIFIED,
     ),
 ]
