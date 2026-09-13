@@ -1,0 +1,695 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Bug class ``extraction.implicit_language_rule_read_off_one_explicit_key``.
+
+The reported instance: on real public headers abicheck demanded that a
+``constexpr`` constructor be exported by the library, warning that a consumer
+would otherwise hit an undefined-symbol error. Consumers built against those
+headers link and run fine under both GCC and Clang -- the definition comes
+from the header.
+
+The mechanism: the clang header backend set ``Function.is_inline`` from
+``bool(node.get("inline"))``, and clang's JSON AST emits that key **only** for
+the explicit ``inline`` keyword. C++ makes three further shapes implicitly
+inline, and clang signals none of them through that key. castxml's frontend
+resolves implicit inline before emitting, so it reported ``inline="1"`` for
+all of them -- the two backends disagreed on the same declaration while
+``scripts/backend_capabilities.py`` claimed full parity for the fact.
+
+Why the class is wider than ``constexpr``. Fixing only ``constexpr`` (the
+shape in the report) leaves an ordinary member defined in its class body --
+``int get() const { return v_; }``, which carries neither ``inline`` nor
+``constexpr`` in clang's JSON -- still false-positive. That residual is
+asserted directly in ``test_constexpr_only_fix_would_leave_a_residual``, so
+the narrower fix cannot be reintroduced without failing here.
+
+Oracles, in order of independence:
+
+* castxml -- a different frontend resolving the same language rule. This is
+  the primary oracle and the one the class is really about; it is not derived
+  from anything under test.
+* real clang output -- the tables below are transcribed from measured
+  ``-ast-dump=json`` attributes, not from what the parser wants to see.
+* the export-obligation consumer, end to end through the CLI over a real
+  ``g++`` library, which is where the report came from.
+
+``is_inline`` remains a fact about the declaration's *linkage*: it is True for
+``inline int f();`` with no body, and says nothing about what a consumer
+emitted. See ``docs/contribute/known-gaps.md``'s linkage-blind-removal entry.
+"""
+
+from __future__ import annotations
+
+import itertools
+import json
+import os
+import shutil
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+
+import pytest
+from click.testing import CliRunner
+
+from abicheck.cli import main
+from abicheck.dumper import _CastxmlParser, _ClangAstParser
+from abicheck.extract.headers.clang.inline_semantics import (
+    encloses_class_scope,
+    is_effectively_inline,
+)
+from abicheck.model.identity import Anonymous, InlineNamespace, Namespace, Record
+
+_RECORD = (Record("W"),)
+_NAMESPACE = (Namespace("ns"),)
+_NESTED = (Namespace("ns"), Record("W"))
+_ANON_RECORD = (Anonymous("struct", 0),)
+_ANON_UNION = (Anonymous("union", 0),)
+_ANON_NAMESPACE = (Anonymous("namespace", 0),)
+_MEMBER_KINDS = (
+    "CXXMethodDecl",
+    "CXXConstructorDecl",
+    "CXXDestructorDecl",
+    "CXXConversionDecl",
+)
+_BODY = {"kind": "CompoundStmt", "inner": []}
+_TRY_BODY = {"kind": "CXXTryStmt", "inner": []}
+
+
+def _node(kind, **attrs):
+    node = {"kind": kind, "name": "f"}
+    body = attrs.pop("body", False)
+    if body:
+        kind_by_alias = {"try": "CXXTryStmt", "coro": "CoroutineBodyStmt"}
+        tail = {"kind": kind_by_alias.get(body, "CompoundStmt"), "inner": []}
+        node["inner"] = [{"kind": "ParmVarDecl"}, tail]
+    node.update(attrs)
+    return node
+
+
+# ── the primitive, over its whole input domain ──────────────────────────────
+
+
+def test_encloses_class_scope_reads_only_the_innermost_segment():
+    """A record *anywhere* outward is not the same as a record enclosing."""
+    assert encloses_class_scope(_RECORD) is True
+    assert encloses_class_scope(_NESTED) is True
+    assert encloses_class_scope(()) is False
+    assert encloses_class_scope(_NAMESPACE) is False
+    assert encloses_class_scope((InlineNamespace("v1"),)) is False
+    # A record enclosing a *namespace* is not an in-class definition.
+    assert encloses_class_scope((Record("W"), Namespace("ns"))) is False
+    assert encloses_class_scope((Record("W"), Anonymous("namespace", 0))) is False
+
+
+@pytest.mark.parametrize("scope", [_ANON_RECORD, _ANON_UNION])
+def test_unnamed_record_is_a_class_scope(scope):
+    """`typedef struct { int f() { … } } W;` -- ordinary C-compatible header
+    style, and the parser spells its scope `Anonymous(kind="struct")`, never
+    `Record`, so matching on `Record` alone left every such member non-inline
+    and owing an export. castxml reports them inline (checked against 0.7.0).
+    """
+    assert encloses_class_scope(scope) is True
+    assert is_effectively_inline(_node("CXXMethodDecl", body=True), scope) is True
+
+
+def test_anonymous_namespace_is_not_a_class_scope():
+    """The other `Anonymous` kind, which must keep answering False.
+
+    An anonymous namespace is not a class scope, so widening on the bare
+    `Anonymous` type rather than its `kind` would have been wrong.
+    """
+    assert encloses_class_scope(_ANON_NAMESPACE) is False
+    assert (
+        is_effectively_inline(_node("FunctionDecl", body=True), _ANON_NAMESPACE)
+        is False
+    )
+    assert (
+        is_effectively_inline(_node("CXXMethodDecl", body=True), _ANON_NAMESPACE)
+        is False
+    )
+
+
+@pytest.mark.parametrize("scope", [(), _NAMESPACE, _RECORD, _NESTED])
+@pytest.mark.parametrize("kind", ("FunctionDecl",) + _MEMBER_KINDS)
+def test_explicit_inline_keyword_always_wins(kind, scope):
+    """The one key clang does emit keeps working, in every position."""
+    assert is_effectively_inline(_node(kind, inline=True), scope) is True
+
+
+@pytest.mark.parametrize("scope", [(), _NAMESPACE, _RECORD, _NESTED])
+@pytest.mark.parametrize("kind", ("FunctionDecl",) + _MEMBER_KINDS)
+@pytest.mark.parametrize("extra", [{}, {"immediate": True}])
+def test_constexpr_is_implicitly_inline_everywhere(kind, scope, extra):
+    """``constexpr`` -- and ``consteval``, which clang spells with it too."""
+    assert is_effectively_inline(_node(kind, constexpr=True, **extra), scope) is True
+
+
+@pytest.mark.parametrize("kind", _MEMBER_KINDS)
+def test_member_defined_in_class_body_is_implicitly_inline(kind):
+    """The shape a ``constexpr``-only fix misses: no ``inline``, no ``constexpr``."""
+    assert is_effectively_inline(_node(kind, body=True), _RECORD) is True
+    assert is_effectively_inline(_node(kind, body=True), _NESTED) is True
+
+
+@pytest.mark.parametrize("kind", _MEMBER_KINDS)
+def test_function_try_block_body_counts_as_a_definition(kind):
+    """`void f() try { … } catch (...) { … }` -- the other `function-body`
+    production in the C++ grammar. Clang emits a `CXXTryStmt` with no
+    `CompoundStmt` at this level, so matching only `CompoundStmt` left such a
+    definition non-inline. castxml reports it inline (checked against 0.7.0).
+    """
+    assert is_effectively_inline(_node(kind, body="try"), _RECORD) is True
+    # Still bounded by scope: the same node out of line is not inline.
+    assert is_effectively_inline(_node(kind, body="try"), ()) is False
+
+
+@pytest.mark.parametrize("kind", _MEMBER_KINDS)
+def test_coroutine_body_counts_as_a_definition(kind):
+    """`Task f() { co_return; }` -- clang wraps a coroutine body in a
+    `CoroutineBodyStmt` with no `CompoundStmt` at this level.
+
+    This is why body detection is by *exclusion* now. An earlier revision
+    enumerated `{CompoundStmt, CXXTryStmt}` and called it closed, citing the
+    C++ grammar's `function-body` production -- but that grammar describes the
+    language, while this predicate reads clang's AST, which is free to wrap a
+    body in a node of its own. castxml reports the coroutine inline.
+    """
+    assert is_effectively_inline(_node(kind, body="coro"), _RECORD) is True
+    assert is_effectively_inline(_node(kind, body="coro"), ()) is False
+
+
+@pytest.mark.parametrize(
+    "body_kind",
+    ["CompoundStmt", "CXXTryStmt", "CoroutineBodyStmt", "SomeFutureBodyStmt"],
+)
+def test_any_statement_child_is_a_body(body_kind):
+    """The generalization itself, including a kind clang does not emit today.
+
+    A body is a statement, and every clang statement kind ends in `Stmt`; the
+    non-body children a function node carries (parameters, member-init lists,
+    attributes, doc comments) never do. Stating it over a made-up
+    `SomeFutureBodyStmt` is the point -- the rule must not need editing the
+    next time clang introduces a wrapper, which is exactly what the previous
+    enumeration did need.
+    """
+    node = {"kind": "CXXMethodDecl", "name": "f", "inner": [{"kind": body_kind}]}
+    assert is_effectively_inline(node, _RECORD) is True
+
+
+@pytest.mark.parametrize(
+    "child_kind",
+    ["ParmVarDecl", "CXXCtorInitializer", "OverrideAttr", "FullComment"],
+)
+def test_non_statement_children_are_not_bodies(child_kind):
+    """The other half: the real non-body children must not read as a body, or
+    every *declaration* would become inline and the export obligation would
+    stop existing.
+    """
+    node = {"kind": "CXXMethodDecl", "name": "f", "inner": [{"kind": child_kind}]}
+    assert is_effectively_inline(node, _RECORD) is False
+
+
+@pytest.mark.parametrize("kind", _MEMBER_KINDS)
+def test_defaulted_in_class_is_implicitly_inline(kind):
+    """``= default`` is a definition, though clang attaches no CompoundStmt."""
+    assert (
+        is_effectively_inline(_node(kind, explicitlyDefaulted="default"), _RECORD)
+        is True
+    )
+
+
+@pytest.mark.parametrize("kind", _MEMBER_KINDS)
+def test_member_declared_but_not_defined_keeps_its_export_obligation(kind):
+    """The negative half. Without it the fix could be "always True".
+
+    A member *declared* in the class and defined out of line really does owe
+    an exported symbol; reporting it inline would trade this false positive
+    for a false negative on the check's whole reason to exist.
+    """
+    assert is_effectively_inline(_node(kind), _RECORD) is False
+
+
+@pytest.mark.parametrize("kind", _MEMBER_KINDS)
+def test_out_of_line_definition_is_not_implicitly_inline(kind):
+    """Same node kind, same body, same mangled name -- only the scope differs.
+
+    ``void W::f() {}`` written at namespace scope is not implicitly inline.
+    The enclosing scope is the only thing that separates it from the in-class
+    definition, which is why the primitive takes a scope path at all.
+    """
+    assert is_effectively_inline(_node(kind, body=True), ()) is False
+    assert is_effectively_inline(_node(kind, body=True), _NAMESPACE) is False
+
+
+@pytest.mark.parametrize("scope", [_RECORD, _NESTED])
+def test_hidden_friend_defined_in_class_is_implicitly_inline(scope):
+    """A `FunctionDecl`, not a member node -- the shape node-kind matching missed.
+
+    `friend bool operator==(const W&, const W&) { ... }` is the canonical
+    spelling of a comparison operator. Clang emits it as a plain
+    `FunctionDecl` under a `FriendDecl` with a record-ending scope path, so
+    gating on member node kinds alone left every hidden friend non-inline and
+    owing an export it can never have.
+    """
+    node = _node("FunctionDecl", body=True)
+    assert is_effectively_inline(node, scope, in_friend=True) is True
+    # Without the friend context it is an ordinary free function: not inline.
+    assert is_effectively_inline(node, scope) is False
+
+
+def test_friend_declared_in_class_but_defined_out_of_line_keeps_its_obligation():
+    """`in_friend` alone is not the test -- the body is.
+
+    `friend void f(const W&);` names a function defined elsewhere, which does
+    owe an exported symbol.
+    """
+    assert (
+        is_effectively_inline(_node("FunctionDecl"), _RECORD, in_friend=True) is False
+    )
+
+
+def test_free_function_with_a_body_is_not_implicitly_inline():
+    """A non-inline definition in a header is an ODR bug in the user's code,
+    not something to silently reclassify as vague linkage."""
+    assert is_effectively_inline(_node("FunctionDecl", body=True), ()) is False
+    assert is_effectively_inline(_node("FunctionDecl", body=True), _NAMESPACE) is False
+    # Even lexically inside a record, a plain FunctionDecl is not a member.
+    assert is_effectively_inline(_node("FunctionDecl", body=True), _RECORD) is False
+
+
+@pytest.mark.parametrize("scope", [(), _NAMESPACE, _RECORD, _NESTED])
+@pytest.mark.parametrize("kind", ("FunctionDecl",) + _MEMBER_KINDS)
+def test_deleted_function_is_implicitly_inline_at_any_scope(kind, scope):
+    """[dcl.fct.def.delete]/4: "A deleted function is implicitly an inline
+    function." Checked at every scope, because unlike the in-class rules this
+    one does not depend on where the declaration sits -- a namespace-scope
+    `void f(int) = delete;` is inline too.
+
+    Excluding these (as an earlier revision did) made a plain
+    `inline void f();` turning into `void f() = delete;` emit a spurious
+    FUNC_LOST_INLINE beside the real FUNC_DELETED.
+    """
+    assert is_effectively_inline(_node(kind, explicitlyDeleted=True), scope) is True
+
+
+@pytest.mark.parametrize("kind", _MEMBER_KINDS)
+def test_defaulted_but_deleted_member_is_still_inline(kind):
+    """Clang spells `explicitlyDefaulted: "deleted"` for a defaulted definition
+    that resolves to deleted -- e.g. `bool operator==(const W&) const =
+    default;` in a class whose base has no `operator==`.
+
+    [dcl.fct.def.default]/5 makes a function defaulted on its *first*
+    declaration implicitly inline, and that declaration was defaulted there
+    regardless of what it resolved to, so any `explicitlyDefaulted` value
+    counts in class scope -- not just "default".
+    """
+    assert (
+        is_effectively_inline(_node(kind, explicitlyDefaulted="deleted"), _RECORD)
+        is True
+    )
+    # Out of line it is not a first declaration, so the scope gate still wins.
+    assert (
+        is_effectively_inline(_node(kind, explicitlyDefaulted="deleted"), ()) is False
+    )
+
+
+def test_plain_declaration_is_never_inline():
+    """The resting case, plus two malformed nodes that must not raise.
+
+    A node with no `inner` at all, and one whose `inner` is `None` rather
+    than a list, both reach this predicate from real clang output for a
+    declaration with no body.
+    """
+    assert is_effectively_inline(_node("FunctionDecl"), ()) is False
+    assert is_effectively_inline({"kind": "FunctionDecl"}, ()) is False
+    # Missing/garbage `inner` must not raise.
+    assert (
+        is_effectively_inline({"kind": "CXXMethodDecl", "inner": None}, _RECORD)
+        is False
+    )
+
+
+def test_exhaustive_domain_sweep_has_both_outcomes_and_is_order_free():
+    """Vacuity guard over the whole cartesian product.
+
+    A sweep whose oracle collapsed to a constant would pass every assertion
+    above that happens to agree with it; this states that the domain really
+    does produce both answers, and that the result never depends on dict
+    insertion order (the node is a parsed JSON object, whose key order is the
+    compiler's, not ours).
+    """
+    seen = set()
+    domain = itertools.product(
+        ("FunctionDecl",) + _MEMBER_KINDS,
+        ((), _NAMESPACE, _RECORD, _NESTED, _ANON_RECORD, _ANON_NAMESPACE),
+        (None, True),
+        (None, True),
+        (False, True, "try", "coro"),
+        (None, "default", "deleted"),
+        (False, True),
+    )
+    for kind, scope, inline, constexpr, body, defaulted, in_friend in domain:
+        attrs: dict[str, object] = {"body": body}
+        if inline:
+            attrs["inline"] = True
+        if constexpr:
+            attrs["constexpr"] = True
+        if defaulted:
+            attrs["explicitlyDefaulted"] = defaulted
+        node = _node(kind, **attrs)
+        got = is_effectively_inline(node, scope, in_friend=in_friend)
+        seen.add(got)
+        reversed_node = dict(reversed(list(node.items())))
+        assert is_effectively_inline(reversed_node, scope, in_friend=in_friend) is got
+    assert seen == {True, False}
+
+
+# ── differential against castxml, the independent oracle ────────────────────
+
+_CORPUS = """
+#pragma once
+#include <coroutine>
+namespace lib {
+struct Task {
+  struct promise_type {
+    Task get_return_object() { return {}; }
+    std::suspend_never initial_suspend() { return {}; }
+    std::suspend_never final_suspend() noexcept { return {}; }
+    void return_void() {}
+    void unhandled_exception() {}
+  };
+};
+class W {
+public:
+  constexpr W(bool b) : v_(b) {}
+  constexpr bool cget() const { return v_; }
+  int get() const { return v_; }
+  int get_ref() const noexcept { return v_; }
+  void try_body() try { } catch (...) { }
+  Task coro_body() { co_return; }
+  Task coro_declared();
+  W() = default;
+  ~W() = default;
+  W(const W&) = default;
+  W& operator=(const W&) = default;
+  void declared_only() const;
+  static int counter() { return 0; }
+  operator bool() const { return v_; }
+  friend bool operator==(const W& a, const W& b) { return a.v_ == b.v_; }
+  friend bool operator!=(const W& a, const W& b);
+private:
+  bool v_;
+};
+typedef struct { int anon_member() const { return k; } int k; } Unnamed;
+struct Outer {
+  static int stat_body() { return 1; }
+  static int stat_declared();
+  virtual void v() { }
+  virtual ~Outer() = default;
+  Outer();
+  struct Nested { int f() { return 2; } void g(); };
+};
+inline Outer::Outer() = default;
+void Outer::Nested::g() { }
+void free_declared(int);
+inline void free_inline(int) {}
+constexpr int free_constexpr(int x) { return x; }
+consteval int free_consteval(int x) { return x; }
+}
+"""
+
+_NEEDS_CLANG = pytest.mark.skipif(
+    shutil.which("clang++") is None, reason="needs clang++ for a real JSON AST"
+)
+_NEEDS_CASTXML = pytest.mark.skipif(
+    shutil.which("castxml") is None, reason="needs castxml as the independent oracle"
+)
+_LINUX_ONLY = pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="Itanium-vs-MSVC mangling makes the two backends' keys incomparable elsewhere",
+)
+
+
+def _clang_functions(header):
+    out = subprocess.run(
+        [
+            "clang++",
+            "-std=c++20",
+            "-Xclang",
+            "-ast-dump=json",
+            "-fsyntax-only",
+            str(header),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    parser = _ClangAstParser(
+        json.loads(out.stdout),
+        set(),
+        set(),
+        public_header_paths=[str(header)],
+        no_binary_evidence=True,
+    )
+    return parser.parse_functions()
+
+
+def _castxml_functions(header, tmp_path):
+    xml = tmp_path / "cx.xml"
+    subprocess.run(
+        ["castxml", "--castxml-output=1", "-std=c++20", "-o", str(xml), str(header)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    parser = _CastxmlParser(
+        # Not untrusted input: castxml produced this file moments ago from a
+        # header this test itself wrote into tmp_path.
+        ET.parse(xml).getroot(),  # nosec B314  # noqa: S314
+        set(),
+        set(),
+        public_header_paths=[str(header)],
+        no_binary_evidence=True,
+    )
+    return parser.parse_functions()
+
+
+@_LINUX_ONLY
+@_NEEDS_CLANG
+@_NEEDS_CASTXML
+@pytest.mark.integration
+def test_two_backends_agree_on_is_inline_for_every_shared_declaration(tmp_path):
+    """The class invariant, against an oracle outside this codebase.
+
+    Keyed by mangled name, over every declaration both frontends resolve. A
+    declaration the two spell differently (castxml's synthetic ctor/dtor keys)
+    is a separate, pre-existing identity matter and is excluded rather than
+    silently compared; the assertion below proves the comparison did not
+    reduce to nothing.
+    """
+    header = tmp_path / "api.hpp"
+    header.write_text(_CORPUS)
+
+    def index(functions):
+        out: dict[str, set[bool]] = {}
+        for fn in functions:
+            # Scoped to the corpus's own `namespace lib` (`3lib` in Itanium
+            # encoding). `#include <coroutine>` drags libstdc++'s
+            # `std::coroutine_handle` members in, and the two backends
+            # genuinely disagree on those template members -- a pre-existing
+            # divergence in *system-header template* handling that has nothing
+            # to do with this predicate. Judging declarations this corpus did
+            # not write would make the test about that instead.
+            # `startswith`, not `in`: `std::coroutine_handle<lib::Task::
+            # promise_type>` *contains* `3lib` as a template argument while
+            # being declared in `std`. The enclosing scope is what decides.
+            if fn.mangled and fn.mangled.startswith(("_ZN3lib", "_ZNK3lib")):
+                out.setdefault(fn.mangled, set()).add(fn.is_inline)
+        return out
+
+    clang_idx = index(_clang_functions(header))
+    castxml_idx = index(_castxml_functions(header, tmp_path))
+    shared = sorted(set(clang_idx) & set(castxml_idx))
+
+    assert len(shared) >= 6, f"differential compared too little: {shared}"
+    disagreements = {
+        key: (sorted(castxml_idx[key]), sorted(clang_idx[key]))
+        for key in shared
+        if castxml_idx[key] != clang_idx[key]
+    }
+    assert not disagreements, f"backends disagree on is_inline: {disagreements}"
+    # Both answers must occur, or agreement would be trivially satisfiable.
+    assert {v for key in shared for v in clang_idx[key]} == {True, False}
+
+
+_SPACESHIP_HEADER = """
+#include <compare>
+namespace lib {
+struct P {
+  int a;
+  bool operator==(const P&) const = default;
+  auto operator<=>(const P&) const = default;
+};
+}
+"""
+
+
+@_LINUX_ONLY
+@_NEEDS_CLANG
+def test_cpp20_defaulted_comparisons_are_inline(tmp_path):
+    """Covered here rather than in the differential: castxml 0.7.0 cannot parse
+    `operator<=>` at all, so this shape has no cross-backend oracle and would
+    break the corpus. Asserted against real clang instead.
+
+    A defaulted comparison operator is a definition in the class body, so it is
+    implicitly inline and owes no export -- and unlike the other shapes, both
+    frontends being silent here would look like agreement rather than a gap,
+    which is the one blind spot a differential cannot see.
+    """
+    header = tmp_path / "spaceship.hpp"
+    header.write_text(_SPACESHIP_HEADER)
+    by_name = {fn.name: fn for fn in _clang_functions(header)}
+    assert by_name["operator=="].is_inline is True
+    assert by_name["operator<=>"].is_inline is True
+
+
+# ── end to end, where the report came from ──────────────────────────────────
+
+_E2E_HEADER = """
+#pragma once
+namespace svs {
+class OptionalBool {
+public:
+  constexpr OptionalBool(bool v) : value_(v) {}
+  constexpr bool cget() const { return value_; }
+  int plain() const { return value_; }
+  void exported_impl() const;
+private:
+  bool value_;
+};
+void real_api(int);
+}
+"""
+
+_E2E_SOURCE = """
+#include "svs.hpp"
+namespace svs {
+void OptionalBool::exported_impl() const {}
+void real_api(int) {}
+}
+"""
+
+
+@_LINUX_ONLY
+@_NEEDS_CLANG
+@pytest.mark.skipif(shutil.which("g++") is None, reason="needs g++ to build a library")
+def test_header_defined_members_raise_no_export_obligation_end_to_end(tmp_path):
+    """The user-facing result, through the real CLI over a real library.
+
+    Nothing here is header-only: the library is built by ``g++`` and genuinely
+    does not export the header-defined members, which is exactly the input
+    that produced three ``public_not_exported`` findings at
+    ``Confidence.HIGH``. ``exported_impl``/``real_api`` are exported and must
+    stay unflagged, so the run cannot pass by disabling the check.
+    """
+    (tmp_path / "svs.hpp").write_text(_E2E_HEADER)
+    (tmp_path / "svs.cpp").write_text(_E2E_SOURCE)
+    lib = tmp_path / "libsvs.so"
+    subprocess.run(
+        [
+            "g++",
+            "-shared",
+            "-fPIC",
+            "-O2",
+            "-g0",
+            "-o",
+            str(lib),
+            str(tmp_path / "svs.cpp"),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    report = tmp_path / "out.json"
+    env = dict(os.environ, ABICHECK_AST_FRONTEND="clang")
+    runner = CliRunner(env=env)
+    result = runner.invoke(
+        main,
+        [
+            "compare",
+            str(lib),
+            str(lib),
+            "--header",
+            str(tmp_path / "svs.hpp"),
+            "-o",
+            f"json={report}",
+        ],
+        env=env,
+    )
+    assert report.exists(), result.output
+
+    data = json.loads(report.read_text())
+    flagged = [
+        c for c in (data.get("changes") or []) if c.get("kind") == "public_not_exported"
+    ]
+    assert not flagged, [c.get("symbol") for c in flagged]
+    assert data.get("verdict") == "NO_CHANGE", data.get("verdict")
+
+
+@_LINUX_ONLY
+@_NEEDS_CLANG
+def test_constexpr_only_fix_would_leave_a_residual(tmp_path):
+    """The class, not the instance: pins why ``constexpr`` alone is not enough.
+
+    ``plain()`` is an ordinary member defined in the class body. Clang's JSON
+    gives it neither ``inline`` nor ``constexpr``, so the narrower fix leaves
+    it non-inline and still owing an export. Asserted against the measured
+    clang attributes so the claim rests on what the compiler emits.
+    """
+    header = tmp_path / "api.hpp"
+    header.write_text(_E2E_HEADER)
+    by_name = {fn.name: fn for fn in _clang_functions(header)}
+
+    plain = by_name["plain"]
+    assert plain.is_inline is True
+    # …and the narrow predicate, evaluated here rather than described in prose.
+    node = next(n for n in _raw_function_nodes(header) if n.get("name") == "plain")
+    assert not (node.get("inline") or node.get("constexpr"))
+
+
+def _raw_function_nodes(header):
+    out = subprocess.run(
+        [
+            "clang++",
+            "-std=c++20",
+            "-Xclang",
+            "-ast-dump=json",
+            "-fsyntax-only",
+            str(header),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    def walk(node):
+        if not isinstance(node, dict):
+            return
+        if node.get("kind") in ("FunctionDecl",) + _MEMBER_KINDS:
+            yield node
+        for child in node.get("inner") or []:
+            yield from walk(child)
+
+    return list(walk(json.loads(out.stdout)))

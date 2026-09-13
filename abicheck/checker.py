@@ -121,7 +121,7 @@ from .diff_vtable_layout import (  # noqa: F401 — triggers detector registrati
 from .dwarf_advanced import (
     diff_advanced_dwarf,  # noqa: F401 — re-export for monkeypatching
 )
-from .model import AbiSnapshot
+from .model import AbiSnapshot, advanced_facts_collected as _advanced_collected
 from .model.change_catalog.kinds import ChangeKind
 from .model.surface_facts import is_abi_visible
 from .policy.classification import (
@@ -502,7 +502,7 @@ def _apply_pattern_verdicts_step(
 @_detector_registry.detector(
     "advanced_dwarf",
     requires_support=lambda o, n: (
-        o.dwarf_advanced is not None and n.dwarf_advanced is not None,
+        _advanced_collected(o.dwarf_advanced) and _advanced_collected(n.dwarf_advanced),
         "missing DWARF advanced metadata",
     ),
 )

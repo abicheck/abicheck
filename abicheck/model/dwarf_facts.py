@@ -156,3 +156,103 @@ class AdvancedDwarfMetadata:
     # Presence of rdi/rsi in the saved-registers set is a strong ELF-level signal
     # that the function uses ms_abi, even when DW_AT_calling_convention is absent (GCC gap).
     callee_saved_regs: dict[str, frozenset[str]] = field(default_factory=dict)
+
+
+def debug_info_present(*metadata: DwarfMetadata | AdvancedDwarfMetadata | None) -> bool:
+    """Whether any of *metadata* records debug info that was actually collected.
+
+    The one supported way to ask "does this snapshot have L1 evidence?".
+    ``bool(snap.dwarf)`` is **not** that question and never was: both metadata
+    classes are plain dataclasses with no ``__bool__``, so an empty
+    ``DwarfMetadata(has_dwarf=False)`` is truthy -- and every ELF dump attaches
+    one unconditionally, including the symbols-only path that logs "no DWARF
+    debug info" while doing so (``dumper_elf_fallback``,
+    ``dwarf_presence.cheap_dwarf_presence_metadata``, which also returns that
+    shape on *any* extraction exception). Object presence therefore proves
+    nothing about content, and reading it as evidence reports a stripped binary
+    as fully DWARF-covered.
+
+    ``has_dwarf`` is the content flag, and it is already the signal BTF and CTF
+    reduce to (``BtfMetadata.to_dwarf_metadata`` /
+    ``CtfMetadata.to_dwarf_metadata`` set it), so this predicate counts those
+    kernel debug formats as L1 evidence without naming them.
+
+    This is a fact about what *was collected*, not about what a binary could
+    have carried: a run that never attempted debug extraction answers ``False``
+    here, which is "no evidence in hand", the reading AGENTS.md's "weaker
+    evidence narrows conclusions" rule requires -- never a claim that the
+    artifact is stripped.
+    """
+    return any(meta is not None and meta.has_dwarf for meta in metadata)
+
+
+def advanced_facts_collected(meta: AdvancedDwarfMetadata | None) -> bool:
+    """Whether *meta* carries advanced DWARF facts that were actually parsed.
+
+    A strictly narrower question than :func:`debug_info_present`, because
+    ``AdvancedDwarfMetadata.has_dwarf`` is overloaded: on the presence-only
+    paths (``--depth binary``, ``symbols_only``) ``dwarf_presence`` sets it
+    from a **section lookup** and deliberately parses none of the payload --
+    that is the whole point of those paths, and several tests pin it. So the
+    flag answers "the binary has debug info", which is what the L1 coverage
+    row wants, and not "advanced facts are available", which is what a
+    detector consuming those fields needs.
+
+    Answered from the payload the detector actually reads -- every field, see
+    the per-sub-diff list below -- so a presence-only snapshot
+    reports its ``advanced_dwarf`` detector as *not evaluated* rather than as
+    having run and found nothing. Deliberately conservative in one direction:
+    a real parse that genuinely established nothing is indistinguishable from
+    one that never ran, and this answers ``False`` for both -- understating
+    assurance, never overstating it.
+    """
+    if meta is None or not meta.has_dwarf:
+        return False
+    # Every field `dwarf_advanced.diff_advanced_dwarf` reads, one per sub-diff:
+    #   _diff_calling_conventions  -> calling_conventions
+    #   _diff_callee_saved_regs    -> callee_saved_regs
+    #   _diff_value_abi_traits     -> value_abi_traits, return_value_sizes,
+    #                                 return_memory_classified
+    #   _diff_struct_packing       -> packed_structs, all_struct_names
+    #   _diff_frame_registers      -> frame_registers
+    #   _diff_toolchain_flags      -> toolchain.abi_flags
+    #   _diff_vector_abi_flags     -> toolchain.vector_abi_flags
+    #   _diff_wchar_flags          -> toolchain.wchar_flags
+    # Omitting any of them turns this guard into a false negative: the whole
+    # detector is skipped on both sides and real drift in the omitted family
+    # goes unreported. The three `toolchain` flag sets were missed in the first
+    # revision for exactly that reason (Codex review), so
+    # `tests/test_debug_evidence_presence.py` now parametrizes over this list
+    # rather than spot-checking one field.
+    #
+    # `producer_string` is not read by any sub-diff -- it is set on the
+    # extraction path -- but it is still proof that advanced extraction ran, so
+    # a snapshot carrying only it is "collected" rather than "never evaluated".
+    # `target_arch` is the one non-findings discriminator, and it is what makes
+    # this sound for a *successful but empty* parse: `dwarf_advanced` sets it
+    # from the ELF header immediately after `has_dwarf=True`, while the
+    # presence-only helpers leave it "". So a full parse of a CU with no
+    # DW_AT_producer and no recognized functions or records -- every payload
+    # field below empty -- is still distinguishable from "never parsed", and no
+    # longer silently disables the detector on both sides (Codex review).
+    #
+    # An explicit "advanced extraction completed" status on the dataclass would
+    # be better than inferring it, and is the durable fix; it is a persisted-
+    # model change with its own schema bump, so it is recorded in
+    # docs/contribute/known-gaps.md rather than folded in here.
+    if meta.target_arch:
+        return True
+    return bool(
+        meta.calling_conventions
+        or meta.value_abi_traits
+        or meta.return_value_sizes
+        or meta.return_memory_classified
+        or meta.packed_structs
+        or meta.all_struct_names
+        or meta.frame_registers
+        or meta.callee_saved_regs
+        or meta.toolchain.abi_flags
+        or meta.toolchain.vector_abi_flags
+        or meta.toolchain.wchar_flags
+        or meta.toolchain.producer_string
+    )

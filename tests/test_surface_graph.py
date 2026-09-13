@@ -549,8 +549,16 @@ def test_dwarf_tier_without_headers() -> None:
     from abicheck.dwarf_metadata import DwarfMetadata
 
     snap = _bare_snap()
-    snap.dwarf = DwarfMetadata()
+    # has_dwarf=True, not a bare DwarfMetadata(): the tier follows collected
+    # debug info, and every ELF dump attaches an object either way.
+    snap.dwarf = DwarfMetadata(has_dwarf=True)
     assert compute_surface_metrics(snap).evidence_tier == "dwarf_aware"
+
+    # The complementary half, which this file could not state before: an
+    # attached-but-empty object is the elf_only tier, not dwarf_aware.
+    empty = _bare_snap()
+    empty.dwarf = DwarfMetadata()
+    assert compute_surface_metrics(empty).evidence_tier == "elf_only"
 
 
 def test_closure_handles_namespaces_diamonds_typedefs_vbases() -> None:

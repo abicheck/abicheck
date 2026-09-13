@@ -244,7 +244,20 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _OTHER,
         note="Set from DWARF's `DW_AT_deleted` (`dwarf_snapshot.py`).",
     ),
-    FactRow("Function", "is_inline", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "is_inline",
+        _FULL,
+        _FULL,
+        note=(
+            "Inline linkage, explicit or implicit. castxml's frontend resolves "
+            "implicit inline before emitting; clang's JSON emits its `inline` "
+            "key only for the written keyword, so the clang backend "
+            "reconstructs the implicit forms (`extract/headers/clang/"
+            "inline_semantics.py`). This row read _FULL/_FULL while the two "
+            "actually disagreed on every constexpr/in-class declaration."
+        ),
+    ),
     FactRow("Function", "access", _FULL, _FULL),
     FactRow("Function", "return_pointer_depth", _FULL, _FULL),
     FactRow("Function", "elf_visibility", _OTHER, _OTHER, note=_DYNSYM),
