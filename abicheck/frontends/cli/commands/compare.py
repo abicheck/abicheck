@@ -75,6 +75,7 @@ from ....frontends.cli.operand_diagnostics import (  # noqa: F401  — re-export
     _reject_application_operand as _reject_application_operand,
     _warn_unused_set_flags as _warn_unused_set_flags,
 )
+from ....report.report_modes import normalize_report_mode
 from ..dump_debug_config import DumpDebugConfig, resolve_stored_bundle_lang
 from ..options.evidence_roles import reject_unsupported_detached_debug
 from ..options.params import (
@@ -177,9 +178,11 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     # compare has its own direct callers/tests and must reject on its own,
     # not merely rely on an upstream caller having done so.
     reject_release_incompatible_view_mode(report_mode)
-    kwargs["show_impact"] = report_mode == "impact"
-    if report_mode == "impact":
-        report_mode = "full"
+    # The `impact` -> (`full`, show_impact) fold is shared with every public
+    # Python rendering path rather than re-spelled here (Codex review,
+    # PR #1284): two private copies of it were why `report_mode="impact"`
+    # worked through the CLI and silently did nothing through the typed API.
+    report_mode, kwargs["show_impact"] = normalize_report_mode(report_mode)
     if fmt not in _RELEASE_FORMATS:
         raise click.UsageError(
             f"-o {fmt}=... is not available when comparing directories or "

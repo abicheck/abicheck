@@ -118,6 +118,26 @@ class RenderOptions:
     require_complete_analysis: bool = False
     contract_evaluation: bool = False
 
+    def __post_init__(self) -> None:
+        """Fold ``report_mode="impact"`` into ``("full", show_impact=True)``.
+
+        ``impact`` is sugar for a full report with the Impact Summary
+        section on, and this is the *only* point that covers both readers of
+        these options: ``build_report_envelope`` bakes the shared document
+        before any projection runs, so folding at render time is already too
+        late -- measured, the JSON projection still rendered
+        ``report_mode="impact"`` identically to ``full`` when the fold sat in
+        ``render_envelope`` (Codex review, PR #1284).
+
+        Translation only, deliberately not validation: a retired or unknown
+        mode is still rejected by the public rendering boundaries
+        (``report_modes.reject_unsupported_report_mode``), so *where* that
+        error surfaces does not move to dataclass construction.
+        """
+        if self.report_mode == "impact":
+            object.__setattr__(self, "report_mode", "full")
+            object.__setattr__(self, "show_impact", True)
+
 
 @dataclass(frozen=True, slots=True)
 class ReportEnvelope:

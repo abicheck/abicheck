@@ -107,6 +107,7 @@ from .frontends.cli.runtime import (
     _setup_verbosity,
     _write_or_echo,
 )
+from .report.report_modes import normalize_report_mode
 from .serialization import run_scoped_digest_cache
 from .service_render import ONELINE_FORMAT, resolve_demangle_for_format
 from .workflows.public_header_boundary import (
@@ -232,10 +233,12 @@ def _normalize_compare_options(
 
     # --report-mode impact is sugar for a "full" report with the impact table
     # on -- the one way to ask for that table (the separate --show-impact flag
-    # it used to duplicate is gone).
-    show_impact = report_mode == "impact"
-    if show_impact:
-        report_mode = "full"
+    # it used to duplicate is gone). The fold itself is *not* this layer's to
+    # own: it used to live here and in `_dispatch_release_compare` as two
+    # private copies, which is why every public Python rendering path silently
+    # ignored `report_mode="impact"` (Codex review, PR #1284). One function,
+    # shared with those paths.
+    report_mode, show_impact = normalize_report_mode(report_mode)
 
     return _NormalizedCompareOptions(
         collect_mode,

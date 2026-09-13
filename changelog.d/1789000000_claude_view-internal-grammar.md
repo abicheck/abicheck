@@ -178,3 +178,14 @@
   field), so one fixed entity was wrong for one owner by construction; the
   producing branch now states which. `value_abi_trait_changed` is emitted once
   per function, like the sibling return-convention finding.
+
+- **`report_mode="impact"` works through the typed API.** `impact` is sugar for
+  a `full` report with the Impact Summary section on, and the fold lived only in
+  two private Click-layer copies -- so `render_output`, `reporter.to_json` and
+  `report.dispatch_markdown.to_markdown` each accepted the mode and rendered a
+  report measured byte-identical to `full`, with no section and no error. The
+  translation now lives at the shared rendering boundary the mode vocabulary
+  already lives at, and both CLI copies call it instead of re-spelling it.
+  `RenderOptions` folds it at construction too, since an envelope bakes its
+  shared document before any projection runs -- so the stored options and the
+  baked document cannot disagree about whether the section was asked for.

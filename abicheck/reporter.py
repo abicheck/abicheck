@@ -1063,9 +1063,9 @@ def to_json(
     # (report/report_modes.py): enforcing the ``leaf`` retirement only in
     # `service_render` left this one silently rendering a *full* report for
     # a retired mode (CodeRabbit review, PR #1284).
-    from .report.report_modes import reject_unsupported_report_mode
+    from .report.report_modes import normalize_report_mode
 
-    reject_unsupported_report_mode(report_mode)
+    report_mode, show_impact = normalize_report_mode(report_mode, show_impact)
     if report_mode == "root-cause":
         return _to_json_root_cause(
             result,

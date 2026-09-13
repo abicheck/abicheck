@@ -30,7 +30,7 @@ from .model import AbiSnapshot
 from .report.build import build_report_envelope
 from .report.envelope import RenderOptions, ReportEnvelope
 from .report.report_modes import (
-    reject_unsupported_report_mode as _reject_unsupported_report_mode,
+    normalize_report_mode as _normalize_report_mode,
 )
 from .reporter import (
     to_json,
@@ -142,7 +142,7 @@ def render_output(
     # sit in front of the check, so a retired or unknown mode reached
     # ``--stat``'s summary and got a report rather than a ValidationError
     # (CodeRabbit review, PR #1284).
-    _reject_unsupported_report_mode(report_mode)
+    report_mode, show_impact = _normalize_report_mode(report_mode, show_impact)
     if fmt == ONELINE_FORMAT:
         return to_stat(result, severity_config=severity_config)
 
@@ -256,7 +256,14 @@ def render_envelope(fmt: str, envelope: ReportEnvelope) -> str:
     # mode rendered (HTML in particular ignores the field entirely) instead
     # of raising. Every *other* public rendering entry point checks; this
     # one is one of them (CodeRabbit review, PR #1284).
-    _reject_unsupported_report_mode(envelope.options.report_mode)
+    # Validation only: the ``impact`` -> (``full``, ``show_impact``) fold is
+    # `RenderOptions`' own (see its ``__post_init__``), because this envelope's
+    # shared document was already built by the time a projection runs -- a
+    # fold here left the JSON projection still rendering ``impact``
+    # identically to ``full`` (Codex review, PR #1284). So by here the mode
+    # is always a non-sugar one, and what remains is to reject a retired or
+    # unknown spelling.
+    _normalize_report_mode(envelope.options.report_mode)
     # Demangling is a property of the format being projected, not of the
     # envelope -- one envelope is rendered into several formats, and a
     # single stored bool cannot be right for a human format and a machine

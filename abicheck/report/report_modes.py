@@ -71,3 +71,36 @@ def reject_unsupported_report_mode(report_mode: str) -> None:
             f"Unsupported report mode: {report_mode!r} "
             f"(expected one of {sorted(SUPPORTED_REPORT_MODES)})"
         )
+
+
+def normalize_report_mode(
+    report_mode: str, show_impact: bool = False
+) -> tuple[str, bool]:
+    """Validate *report_mode*, then fold the ``impact`` sugar into a flag.
+
+    ``impact`` is not a distinct document: it is a ``full`` report with the
+    Impact Summary section on, and the section is driven by a *separate*
+    ``show_impact`` boolean. Until this function existed the fold lived only
+    in the Click layer (two private copies of ``show_impact = report_mode ==
+    "impact"``), so every public Python rendering path accepted
+    ``report_mode="impact"`` and silently rendered an ordinary full report
+    -- measured byte-identical to ``report_mode="full"`` through
+    ``render_output``, ``dispatch_markdown.to_markdown`` and
+    ``reporter.to_json`` alike (Codex review, PR #1284).
+
+    That is the same failure this module was created to stop for ``leaf``:
+    the caller keeps rendering and never learns the request did nothing.
+    ``leaf`` is answerable with an error because it is retired; ``impact``
+    is *supported*, so the honest answer is to honor it -- which means the
+    translation has to live at the shared boundary rather than in one of the
+    front ends in front of it.
+
+    Idempotent, so a boundary that normalizes and then delegates to another
+    that normalizes again is not a bug: ``("full", True)`` maps to itself.
+    An explicit ``show_impact=True`` is never downgraded by a non-``impact``
+    mode -- the two ways to ask are OR-ed, not overridden.
+    """
+    reject_unsupported_report_mode(report_mode)
+    if report_mode == "impact":
+        return "full", True
+    return report_mode, show_impact

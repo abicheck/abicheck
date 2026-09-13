@@ -1987,6 +1987,46 @@ mechanism* first and an option count second:
   remaining two pass when run individually -- `-n auto` cross-test
   interference in two files whose siblings are in that same pre-existing set.
 
+  **The `impact` mode, folded at the shared boundary (post-merge review).**
+  Codex read the mode vocabulary this slice centralized and asked the right
+  question of it: `report_modes.py` declares `impact` *supported*, so what
+  honors it? Measured rather than reasoned about, on a real compiled ELF
+  pair: `render_output`, `reporter.to_json` and
+  `report.dispatch_markdown.to_markdown` each rendered `report_mode="impact"`
+  byte-identical to `report_mode="full"` (2,636 characters, no Impact Summary
+  section), because `impact` is sugar for `full` plus a separate
+  `show_impact` boolean and the fold existed only as two private copies in
+  the Click layer. A typed-API caller asking for the mode got no section and
+  no error -- the exact failure this module was created to stop for `leaf`,
+  differing only in that `impact` is supported, so the honest answer is to
+  honor it rather than to raise. This is the slice's own thesis applied to a
+  decision it had not yet looked inside: one translation, at the boundary the
+  vocabulary already lives at, with both CLI copies calling it.
+  The fold needed two homes, which only measurement revealed. Putting it at
+  the rendering boundaries fixed `render_output` and the direct renderers but
+  left `render_envelope`'s JSON projection still rendering `impact`
+  identically to `full`: `build_report_envelope` bakes the shared document at
+  *construction* time, so a fold applied at render time is already too late,
+  and the `replace()` that applied it there actively overwrote the values the
+  JSON boundary's own fold would have resolved correctly while the baked
+  document ignored the replacement. `RenderOptions.__post_init__` owns the
+  translation instead -- the one point both the document build and every
+  projection see -- so the stored options and the baked document agree by
+  construction and the sugar spelling never survives into an envelope at all.
+  It is translation only, deliberately not validation, so where a retired
+  mode's error surfaces does not move to dataclass construction.
+
+  `normalize_report_mode` gets the primitive-level property class AGENTS.md
+  requires (`TestNormalizeReportModeProperties`) -- exhaustive over the mode
+  domain and both flag values, stating idempotence (boundaries delegate to
+  boundaries), that an explicit `show_impact=True` is never downgraded, that
+  the sugar spelling never survives normalization, and that folding did not
+  become a way around the retirement check. The cross-boundary equivalence is
+  stated against the documented meaning of the mode rather than against
+  `normalize_report_mode`, so a fold that agrees only with itself fails, and
+  a vacuity guard fails if `show_impact=True` ever stops changing the
+  document. Each fold is separately mutation-checked, because the renderer-level equivalences survive removing the envelope one (the downstream boundaries normalize too, masking it): removing the boundary fold fails three tests, and removing the envelope fold fails three different ones, which is what `TestRenderOptionsNeverStoresTheSugarSpelling` exists to state.
+
   The surviving parsing primitive gets the treatment AGENTS.md requires:
   `TestParseViewTokensProperties` (`tests/test_view_internal_grammar.py`)
   states `parse_view_tokens`'s contract as invariants — last mode wins under

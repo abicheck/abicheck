@@ -767,3 +767,267 @@ class TestThePatternModulationLedgerRendersWhatTheProducerWrites:
         row = self._row(md, "detail_ns_rule")
         assert "operator" in row, row
         assert len(re.split(r"(?<!\\)\|", row.strip().strip("|"))) == 3, row
+
+
+def _snapshot(version: str = "1.0"):
+    from abicheck.model import AbiSnapshot
+
+    return AbiSnapshot(library="libfoo.so", version=version)
+
+
+def _result_with_a_finding():
+    """A `DiffResult` carrying a finding the Impact Summary will report on.
+
+    The section is computed from the findings, so an empty result would make
+    every `impact`-vs-`full` comparison trivially equal and the whole class
+    vacuous -- which is why `test_the_oracle_is_not_vacuous` guards it rather
+    than trusting this helper.
+    """
+    from abicheck.change_registry_types import Verdict
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.checker_types import Change, DiffResult
+
+    return DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libfoo.so",
+        changes=[
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol="_ZN3lib4goneEi",
+                description="removed",
+            )
+        ],
+        verdict=Verdict.BREAKING,
+    )
+
+
+def _render_envelope(fmt: str, result, **options):
+    from abicheck.report.build import build_report_envelope
+    from abicheck.report.envelope import RenderOptions
+    from abicheck.service_render import render_envelope
+
+    envelope = build_report_envelope(
+        result, _snapshot(), _snapshot(), options=RenderOptions(**options)
+    )
+    return render_envelope(fmt, envelope)
+
+
+class TestImpactModeIsFoldedAtTheSharedBoundary:
+    """``report_mode="impact"`` is honored wherever it is accepted.
+
+    ``impact`` is not a distinct document -- it is ``full`` plus the Impact
+    Summary section, and the section is driven by a *separate*
+    ``show_impact`` boolean. The fold used to live in two private Click-layer
+    copies, so every public Python rendering path accepted
+    ``report_mode="impact"`` and rendered an ordinary full report: measured
+    byte-identical to ``report_mode="full"`` through ``render_output``,
+    ``dispatch_markdown.to_markdown`` and ``reporter.to_json`` alike (Codex
+    review, PR #1284).
+
+    That is the ``leaf`` failure in a new place -- the caller keeps rendering
+    and never learns the request did nothing -- except ``impact`` is
+    *supported*, so the honest answer is to honor it rather than to raise.
+
+    The oracle here is deliberately **not** ``normalize_report_mode``: each
+    equivalence is stated against the documented meaning of the mode
+    (``impact`` renders what ``full`` plus ``show_impact=True`` renders), so
+    a fold that agrees with itself but with nothing else fails.
+    """
+
+    def _entry_points(self):
+        """Every public renderer taking *both* ``report_mode`` and
+        ``show_impact``. A renderer that takes only ``report_mode``
+        (``to_sarif``, ``to_junit_xml``) has no section to switch on and is
+        covered by the retired-mode sweep above instead.
+        """
+        from abicheck.report.dispatch_markdown import to_markdown
+        from abicheck.reporter import to_json
+        from abicheck.service_render import render_output
+
+        return {
+            "to_markdown": lambda result, **kw: to_markdown(result, **kw),
+            "to_json": lambda result, **kw: to_json(result, **kw),
+            "render_output/markdown": lambda result, **kw: render_output(
+                "markdown", result, _snapshot(), _snapshot(), **kw
+            ),
+            "render_output/json": lambda result, **kw: render_output(
+                "json", result, _snapshot(), _snapshot(), **kw
+            ),
+            # The envelope path is not redundant with `render_output`: it
+            # bakes the shared document *before* any projection runs, so a
+            # fold applied at render time is already too late. Measured --
+            # with the fold in `render_envelope` the JSON projection here
+            # still rendered `impact` identically to `full` while every
+            # `render_output` entry above was already correct, which is why
+            # the fold lives in `RenderOptions.__post_init__` instead.
+            "render_envelope/markdown": lambda result, **kw: _render_envelope(
+                "markdown", result, **kw
+            ),
+            "render_envelope/json": lambda result, **kw: _render_envelope(
+                "json", result, **kw
+            ),
+        }
+
+    def test_every_such_renderer_honors_impact(self):
+        """The reported defect, stated over every affected boundary at once.
+
+        Batched so a failure names every disagreeing renderer rather than
+        only the first, per this repository's matrix-test guidance.
+        """
+        result = _result_with_a_finding()
+        silently_ignored = []
+        not_equal_to_the_oracle = []
+        for name, render in self._entry_points().items():
+            full = render(result, report_mode="full")
+            impact = render(result, report_mode="impact")
+            oracle = render(result, report_mode="full", show_impact=True)
+            if impact == full:
+                silently_ignored.append(name)
+            if impact != oracle:
+                not_equal_to_the_oracle.append(name)
+        assert not silently_ignored, (
+            f"these renderers accepted report_mode='impact' and rendered an "
+            f"ordinary full report: {silently_ignored}"
+        )
+        assert not not_equal_to_the_oracle, (
+            f"these renderers rendered something other than a full report "
+            f"with the impact section on: {not_equal_to_the_oracle}"
+        )
+
+    def test_the_oracle_is_not_vacuous(self):
+        """Guard on the oracle itself.
+
+        If ``show_impact=True`` stopped changing the document, every
+        equivalence above would hold against a renderer that ignores the
+        mode entirely -- the original bug passing its own test.
+        """
+        result = _result_with_a_finding()
+        for name, render in self._entry_points().items():
+            assert render(result, report_mode="full") != render(
+                result, report_mode="full", show_impact=True
+            ), f"{name}: show_impact=True changed nothing, so the oracle proves nothing"
+
+
+class TestRenderOptionsNeverStoresTheSugarSpelling:
+    """`RenderOptions` folds ``impact`` at construction, before anything reads it.
+
+    This is a distinct claim from "the renderers honor impact", and it needs
+    its own test because the renderer-level equivalences above survive
+    removing this fold -- the downstream boundaries (`to_markdown`,
+    `to_json`) normalize too, so they mask it.
+
+    It is not redundant defense. `build_report_envelope` bakes the shared
+    document at *construction* time, so an options object still holding the
+    sugar bakes a document with the section off and then hands a projection
+    a `report_mode` its own fold would have resolved differently -- two
+    answers from one envelope. Folding in ``__post_init__`` is what makes
+    the baked document and the stored options agree by construction. The
+    concrete failure that taught this: folding at *render* time instead
+    (`replace()` in `render_envelope`) overwrote the very values the JSON
+    boundary would have folded correctly, while the already-baked document
+    ignored the replacement -- the JSON projection then rendered
+    ``impact`` identically to ``full`` (Codex review, PR #1284).
+    """
+
+    def _options(self, **kw):
+        from abicheck.report.envelope import RenderOptions
+
+        return RenderOptions(**kw)
+
+    def test_impact_is_folded_at_construction(self):
+        opts = self._options(report_mode="impact")
+        assert opts.report_mode == "full"
+        assert opts.show_impact is True
+
+    def test_the_sugar_never_survives_construction(self):
+        """Whatever else is set, the stored mode is never ``impact``."""
+        for extra in ({}, {"show_impact": True}, {"show_impact": False}):
+            assert self._options(report_mode="impact", **extra).report_mode != "impact"
+
+    def test_a_non_sugar_mode_is_stored_unchanged(self):
+        for mode in ("full", "root-cause"):
+            for flag in (False, True):
+                opts = self._options(report_mode=mode, show_impact=flag)
+                assert (opts.report_mode, opts.show_impact) == (mode, flag)
+
+    def test_the_envelope_document_is_built_from_the_folded_options(self):
+        """The reason the fold has to happen here and not at render time."""
+        from abicheck.report.build import build_report_envelope
+
+        envelope = build_report_envelope(
+            _result_with_a_finding(),
+            _snapshot(),
+            _snapshot(),
+            options=self._options(report_mode="impact"),
+        )
+        assert envelope.options.report_mode == "full"
+        assert envelope.options.show_impact is True
+
+    def test_construction_does_not_validate(self):
+        """Translation only -- a retired mode's error stays at the rendering
+        boundaries, so this fold cannot move where that error surfaces."""
+        assert self._options(report_mode="leaf").report_mode == "leaf"
+
+
+class TestNormalizeReportModeProperties:
+    """Contract of the shared primitive, stated independently of any caller.
+
+    A reusable fold gets its own property class per ``AGENTS.md``'s
+    primitive-level guidance: the domain-level tests above pin what the
+    renderers do, these pin what the function promises regardless of who
+    calls it.
+    """
+
+    def _fn(self):
+        from abicheck.report.report_modes import normalize_report_mode
+
+        return normalize_report_mode
+
+    def _supported(self):
+        from abicheck.report.report_modes import SUPPORTED_REPORT_MODES
+
+        return sorted(SUPPORTED_REPORT_MODES)
+
+    def test_the_result_is_always_a_supported_non_sugar_mode(self):
+        """Exhaustive over the small domain, both flag values."""
+        fn = self._fn()
+        for mode in self._supported():
+            for flag in (False, True):
+                out_mode, _ = fn(mode, flag)
+                assert out_mode in self._supported()
+                assert out_mode != "impact", (
+                    f"{mode!r} normalized to the sugar spelling, so a "
+                    "downstream `== 'impact'` branch stays unreachable"
+                )
+
+    def test_it_is_idempotent(self):
+        """Boundaries delegate to boundaries, so double folding must be safe."""
+        fn = self._fn()
+        for mode in self._supported():
+            for flag in (False, True):
+                once = fn(mode, flag)
+                assert fn(*once) == once, f"not idempotent for {(mode, flag)!r}"
+
+    def test_an_explicit_flag_is_never_downgraded(self):
+        """The two ways to ask for the section are OR-ed, not overridden."""
+        fn = self._fn()
+        for mode in self._supported():
+            assert fn(mode, True)[1] is True, (
+                f"report_mode={mode!r} discarded an explicit show_impact=True"
+            )
+
+    def test_only_impact_sets_the_flag_on_its_own(self):
+        fn = self._fn()
+        for mode in self._supported():
+            assert fn(mode, False)[1] is (mode == "impact"), (
+                f"report_mode={mode!r} disagreed about the impact section"
+            )
+
+    @pytest.mark.parametrize("mode", ["leaf", "not-a-mode", ""])
+    def test_it_validates_before_folding(self, mode):
+        """Normalizing did not become a way around the retirement check."""
+        from abicheck.errors import ValidationError
+
+        with pytest.raises(ValidationError):
+            self._fn()(mode)
