@@ -156,3 +156,31 @@ class AdvancedDwarfMetadata:
     # Presence of rdi/rsi in the saved-registers set is a strong ELF-level signal
     # that the function uses ms_abi, even when DW_AT_calling_convention is absent (GCC gap).
     callee_saved_regs: dict[str, frozenset[str]] = field(default_factory=dict)
+
+
+def debug_info_present(*metadata: DwarfMetadata | AdvancedDwarfMetadata | None) -> bool:
+    """Whether any of *metadata* records debug info that was actually collected.
+
+    The one supported way to ask "does this snapshot have L1 evidence?".
+    ``bool(snap.dwarf)`` is **not** that question and never was: both metadata
+    classes are plain dataclasses with no ``__bool__``, so an empty
+    ``DwarfMetadata(has_dwarf=False)`` is truthy -- and every ELF dump attaches
+    one unconditionally, including the symbols-only path that logs "no DWARF
+    debug info" while doing so (``dumper_elf_fallback``,
+    ``dwarf_presence.cheap_dwarf_presence_metadata``, which also returns that
+    shape on *any* extraction exception). Object presence therefore proves
+    nothing about content, and reading it as evidence reports a stripped binary
+    as fully DWARF-covered.
+
+    ``has_dwarf`` is the content flag, and it is already the signal BTF and CTF
+    reduce to (``BtfMetadata.to_dwarf_metadata`` /
+    ``CtfMetadata.to_dwarf_metadata`` set it), so this predicate counts those
+    kernel debug formats as L1 evidence without naming them.
+
+    This is a fact about what *was collected*, not about what a binary could
+    have carried: a run that never attempted debug extraction answers ``False``
+    here, which is "no evidence in hand", the reading AGENTS.md's "weaker
+    evidence narrows conclusions" rule requires -- never a claim that the
+    artifact is stripped.
+    """
+    return any(meta is not None and meta.has_dwarf for meta in metadata)

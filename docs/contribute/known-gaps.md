@@ -2162,10 +2162,16 @@ looked like the obvious fix and wasn't.
   *"every consumer already emitted its own copy"*, and both attempts
   established something else:
 
-  1. **`Function.is_inline`** proves the `inline` *specifier*, not that a
-     definition exists. Verified against real clang: `inline int f();` yields
-     `inline=True, has_body=False`, and both AST parsers assign the field
-     straight from the specifier attribute with no body check.
+  1. **`Function.is_inline`** proves the declaration's inline *linkage*, not
+     that a definition exists. Verified against real clang: `inline int f();`
+     yields `inline=True, has_body=False`. This stays true after the
+     implicit-inline fix (`extract/headers/clang/inline_semantics.py`), which
+     widened the field to cover `constexpr`/`consteval`, in-class definitions
+     and in-class `= default` so the two backends agree: those are all still
+     *linkage* facts about the library's own declaration, and none of them
+     says a consumer emitted a copy — which is the shared shape this entry
+     exists to name. Read it as "may have vague linkage", never as "every
+     consumer already has its own definition".
   2. **COMDAT-group membership** proves the *library* used vague linkage, not
      that its *consumers* did. `extern template` is the counterexample, and it
      is ordinary code: a public header carrying `extern template struct

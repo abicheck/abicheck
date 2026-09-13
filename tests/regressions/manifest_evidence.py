@@ -248,4 +248,130 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="evidence.container_presence_read_as_evidence_content",
+        invariant=(
+            "Whether evidence was collected is answered from the evidence's "
+            "own content flag, never from whether a container object was "
+            "attached to hold it. An extractor that ran and found nothing, "
+            "one that was never asked, and one that raised all attach the "
+            "same empty, truthy metadata object, so object presence is a "
+            "fact about the pipeline's shape and carries no information "
+            "about the artifact; reading it as evidence reports a stripped "
+            "binary as fully debug-covered and makes the lower evidence tier "
+            "unreachable on the normal path. The answer is consistent across "
+            "every consumer of the same fact -- coverage row, evidence tier, "
+            "key-shape trust, and detector support gate -- since a detector "
+            "declared supported over empty input reports 'ran, found "
+            "nothing' where the truth is 'never evaluated'. Status, "
+            "confidence and human-readable detail agree with one another, so "
+            "no single corrected field leaves a reader equally misled, and "
+            "no-evidence-in-hand is reported as such rather than as a claim "
+            "about what the artifact contains."
+        ),
+        fixed_by=(),
+        seed_tests=("tests/test_debug_evidence_presence.py",),
+        public_surfaces=("compare --format json: layer_coverage[].status",),
+        axes={
+            "slot": ("dwarf", "dwarf_advanced"),
+            "state": ("absent", "empty", "empty_with_payload_keys", "collected"),
+            "consumer": (
+                "intrinsic_coverage",
+                "surface_graph evidence tier",
+                "typedef key-shape trust",
+                "detector support gate",
+            ),
+            "producer": ("elf-dump", "symbols-only fallback", "btf/ctf", "g++ -g/-g0"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The sweep is exhaustive over the two debug slots, which "
+                    "is where the reported defect lived, but the underlying "
+                    "shape -- a dataclass with no __bool__ standing in for "
+                    "its own content flag -- is not confined to them. There "
+                    "is no repo-wide gate (an AST check in the shape of "
+                    "`fact-detector-misuse`) that would fail a newly "
+                    "introduced `if snap.<metadata>` presence test on some "
+                    "other extractor's slot, so a sibling instance elsewhere "
+                    "is caught by review rather than mechanically."
+                ),
+                reference="abicheck/model/dwarf_facts.py, debug_info_present",
+                canary_test=None,
+            ),
+        ),
+    ),
+    BugClass(
+        id="extraction.implicit_language_rule_read_off_one_explicit_key",
+        invariant=(
+            "A language-level property is extracted from the language's own "
+            "rule, not from the one syntactic key a particular frontend "
+            "happens to emit for the explicit spelling of it. Where a rule "
+            "has an explicit form and implicit forms (inline: the keyword, "
+            "but also constexpr/consteval, a member defined in its class "
+            "body, and an in-class `= default`), every form yields the same "
+            "answer, and a backend whose serialization omits the implicit "
+            "ones reconstructs them from what it does carry rather than "
+            "reporting the negation. The property therefore agrees across "
+            "backends for the same declaration, which is what keeps a "
+            "baseline captured with one frontend comparable against a "
+            "candidate captured with another, and what makes a declared "
+            "parity claim true. The reconstruction is bounded by the same "
+            "rule in both directions: a member merely declared in its class, "
+            "an out-of-line definition at namespace scope, and a deleted "
+            "member keep the negative answer, so removing a false positive "
+            "never introduces a false negative in the consumer -- here an "
+            "export obligation, whose whole purpose is to flag exactly those."
+        ),
+        fixed_by=(),
+        seed_tests=("tests/test_clang_inline_semantics.py",),
+        public_surfaces=(
+            "compare --format json: changes[].kind == public_not_exported",
+        ),
+        axes={
+            "form": (
+                "explicit inline",
+                "constexpr",
+                "consteval",
+                "in-class definition",
+                "in-class = default",
+            ),
+            "negative_form": (
+                "declared-only member",
+                "out-of-line definition",
+                "= delete",
+                "free function with body",
+            ),
+            "decl_kind": (
+                "FunctionDecl",
+                "CXXMethodDecl",
+                "CXXConstructorDecl",
+                "CXXDestructorDecl",
+                "CXXConversionDecl",
+            ),
+            "scope": ("translation unit", "namespace", "record", "nested record"),
+            "backend": ("clang JSON AST", "castxml"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Templates are still excluded from the export obligation "
+                    "by `_looks_templated`, a spelling heuristic over the "
+                    "declaration's name rather than a template-ness fact, so "
+                    "an uninstantiated template whose name carries no angle "
+                    "brackets rests on a different, weaker mechanism than "
+                    "the one this class fixed. The cross-backend "
+                    "differential also compares only declarations both "
+                    "frontends key identically: castxml spells ctors/dtors "
+                    "with synthetic keys, so those are excluded from the "
+                    "comparison rather than verified across backends."
+                ),
+                reference=(
+                    "abicheck/buildsource/cross_source_checks.py, "
+                    "_has_export_obligation"
+                ),
+                canary_test=None,
+            ),
+        ),
+    ),
 )

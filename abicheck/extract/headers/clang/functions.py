@@ -90,6 +90,7 @@ from .context import (
     symbol_candidates as _symbol_candidates,
     visibility_and_surface_facts as _visibility_and_surface_facts,
 )
+from .inline_semantics import is_effectively_inline
 from .param_kind import param_kind as _param_kind
 from .return_type import return_type as _return_type
 
@@ -666,7 +667,11 @@ def parse_functions(
                 is_volatile=is_volatile,
                 is_pure_virtual=bool(node.get("pure")),
                 is_deleted=bool(node.get("explicitlyDeleted")),
-                is_inline=bool(node.get("inline")),
+                # NOT `bool(node.get("inline"))`: clang emits that key only for
+                # the explicit keyword, so implicit inline (constexpr/consteval,
+                # in-class definitions and `= default`) read as non-inline while
+                # castxml folds all three in. See `inline_semantics`.
+                is_inline=is_effectively_inline(node, entry.scope_path),
                 access=_access_level(entry.access),
                 return_pointer_depth=_pointer_depth(ret_type),
                 ref_qualifier=ref_qualifier,

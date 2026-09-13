@@ -43,6 +43,7 @@ from .model import (
     Variable,
     resolved_fact_value,
 )
+from .model.dwarf_facts import debug_info_present
 from .model.surface_facts import in_public_surface, is_binary_exported
 from .surface import _type_identifiers
 
@@ -346,7 +347,9 @@ class SurfaceMetrics:
 def _evidence_tier(snap: AbiSnapshot) -> str:
     if snap.from_headers:
         return EvidenceTier.HEADER_AWARE.value
-    if snap.dwarf is not None:
+    # `is not None` would make ELF_ONLY unreachable on the normal dump path,
+    # which always attaches a (possibly empty) metadata object.
+    if debug_info_present(snap.dwarf):
         return EvidenceTier.DWARF_AWARE.value
     return EvidenceTier.ELF_ONLY.value
 

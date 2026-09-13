@@ -121,7 +121,13 @@ class Function:
     is_pure_virtual: bool = False
     is_deleted: bool = False  # = delete; previously callable → BREAKING
     deleted_from_dwarf: bool = False  # True when is_deleted was set via DW_AT_deleted
-    is_inline: bool = False  # inline keyword / attribute in header
+    # Inline linkage, explicit or implicit: the `inline` keyword/attribute, a
+    # `constexpr`/`consteval` function, or a member defined (or `= default`ed)
+    # in its class body. Both header backends agree on this
+    # (`extract/headers/clang/inline_semantics.py`). It is a fact about the
+    # DECLARATION's linkage, not about a definition existing (`inline int f();`
+    # is True with no body) and not about what a consumer emitted.
+    is_inline: bool = False
     access: AccessLevel = AccessLevel.PUBLIC  # public/protected/private
     return_pointer_depth: int = 0  # T=0, T*=1, T**=2
     elf_visibility: ElfVisibility | None = None  # ELF st_other (populated from .dynsym)
