@@ -21,7 +21,7 @@
   unchanged declaration reads as an *addition* when it is the old side that
   lacks the evidence. The surviving declaration is then compared rather than
   dropped, so a real return-type or variable-type change on it is still
-  reported -- in every per-pair detector, including the five that select
+  reported -- in every per-pair detector, including the nine that select
   their own surface rather than the shared one: the internal-template-leak
   pass, the ELF deleted-symbol fallback, the global-data-value comparison
   (where a `const` variable's value moving from `1` to `2` had reported

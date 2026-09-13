@@ -50,8 +50,8 @@ from typing import TYPE_CHECKING
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .compare.template_surface import (
+    reconciled_cpo_surfaces,
     reconciled_public_functions,
-    reconciled_public_variables,
 )
 from .diff_helpers import make_change
 from .model.surface_facts import is_public_export
@@ -782,12 +782,11 @@ def detect_cpo_kind_changed(
     # Reconciled populations on both halves of this comparison -- see
     # compare/template_surface.py. Functions *and* variables: this detector
     # compares one against the other, so an asymmetry in either is enough.
-    reconciled_old_funcs, reconciled_new_funcs = reconciled_public_functions(old, new)
-    reconciled_old_vars, reconciled_new_vars = reconciled_public_variables(old, new)
-    old_funcs = _func_names(reconciled_old_funcs)
-    old_vars = _var_names(reconciled_old_vars)
-    new_funcs = _func_names(reconciled_new_funcs)
-    new_vars = _var_names(reconciled_new_vars)
+    old_fs, old_vs, new_fs, new_vs = reconciled_cpo_surfaces(old, new)
+    old_funcs = _func_names(old_fs)
+    old_vars = _var_names(old_vs)
+    new_funcs = _func_names(new_fs)
+    new_vars = _var_names(new_vs)
 
     changes: list[Change] = []
 

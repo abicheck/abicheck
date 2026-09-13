@@ -48,7 +48,7 @@ loses a population it had before.
 from __future__ import annotations
 
 from collections.abc import Callable, Container
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from .export_transition import surface_exit_is_evidence_gap
 
@@ -68,6 +68,13 @@ __all__ = [
 ]
 
 _Decl = TypeVar("_Decl", "Function", "Variable")
+#: The two sides of a *cross-kind* reconciliation, where one side's
+#: declaration is a ``Function`` and the other's is a ``Variable`` -- a
+#: customization point that became an object, or the reverse. The admission
+#: rule is identical; only the types differ, so it is parameterized rather
+#: than copied (Codex review, P2).
+_Old = TypeVar("_Old", "Function", "Variable")
+_New = TypeVar("_New", "Function", "Variable")
 
 #: Resolve one side's key to the other side's declaration when the two sides
 #: spell it differently, using the caller's own ambiguity-safe identity tier
@@ -78,16 +85,16 @@ _Resolver = Callable[[str, "_Decl"], "_Decl | None"]
 
 
 def reconcile_surfaces(
-    old_map: Mapping[str, _Decl],
-    new_map: Mapping[str, _Decl],
+    old_map: Mapping[str, _Old],
+    new_map: Mapping[str, _New],
     *,
-    old_all: Mapping[str, _Decl],
-    new_all: Mapping[str, _Decl],
+    old_all: Mapping[str, _Old],
+    new_all: Mapping[str, _New],
     old_exported: Container[str] = frozenset(),
     new_exported: Container[str] = frozenset(),
-    resolve_in_old: _Resolver[_Decl] | None = None,
-    resolve_in_new: _Resolver[_Decl] | None = None,
-) -> tuple[dict[str, _Decl], dict[str, _Decl]]:
+    resolve_in_old: _Resolver[_Old] | None = None,
+    resolve_in_new: _Resolver[_New] | None = None,
+) -> tuple[dict[str, _Old], dict[str, _New]]:
     """Both surfaces, with evidence-gap-only differences reconciled.
 
     *old_map*/*new_map* are the two compared public surfaces;
@@ -100,8 +107,8 @@ def reconcile_surfaces(
     absent from both full maps, is untouched -- so a comparison with
     symmetric evidence gets back exactly what it passed in.
     """
-    reconciled_old = dict(old_map)
-    reconciled_new = dict(new_map)
+    reconciled_old: dict[str, _Old] = dict(old_map)
+    reconciled_new: dict[str, _New] = dict(new_map)
     _admit(
         src=old_map,
         dst=reconciled_new,
@@ -123,12 +130,12 @@ def reconcile_surfaces(
 
 def _admit(
     *,
-    src: Mapping[str, _Decl],
-    dst: dict[str, _Decl],
-    other: Mapping[str, _Decl],
-    other_all: Mapping[str, _Decl],
+    src: Mapping[str, _Old],
+    dst: dict[str, _New],
+    other: Mapping[str, _New],
+    other_all: Mapping[str, _New],
     exported: Container[str],
-    resolve: _Resolver[_Decl] | None,
+    resolve: _Resolver[_New] | None,
 ) -> None:
     """Re-admit, into *dst*, each of *src*'s declarations the other side
     dropped from its surface purely for want of contract evidence.
@@ -148,7 +155,7 @@ def _admit(
     # inventing signature/linkage changes (Codex review, P2). One-to-one or
     # not at all, which is the same ambiguity-safety the alias tier already
     # applies in its own direction.
-    proposals: dict[str, _Decl] = {}
+    proposals: dict[str, _New] = {}
     claims: dict[int, int] = {}
     for key in src.keys() - other.keys():
         peer = other_all.get(key)
@@ -160,7 +167,13 @@ def _admit(
             # alias tier. An exact-key-only lookup missed it, so the pair
             # read as a removal on one side and an addition on the other,
             # instead of the linkage change it is.
-            peer = resolve(key, src[key])
+            # The resolver is the *other* side's alias tier, so it is typed
+            # for that side's declaration kind; the declaration handed to it
+            # is this side's. Those differ only in a cross-kind
+            # reconciliation, where the tier resolves on a spelling both
+            # kinds carry (the declared name), so the cast states what the
+            # types cannot: the tier reads identity, not kind.
+            peer = resolve(key, cast("Any", src[key]))
             if peer is not None and any(p is peer for p in other.values()):
                 # Already in the other side's surface under its own key: the
                 # symbol join's own alias tier pairs them, and admitting a
@@ -219,16 +232,16 @@ def store_reconciliation(
 
 
 def reconcile_declaration_lists(
-    old_decls: Sequence[_Decl],
-    new_decls: Sequence[_Decl],
+    old_decls: Sequence[_Old],
+    new_decls: Sequence[_New],
     *,
-    old_all: Sequence[_Decl],
-    new_all: Sequence[_Decl],
-    key: Callable[[_Decl], str],
-    alias_key: Callable[[_Decl], str] | None = None,
+    old_all: Sequence[_Old],
+    new_all: Sequence[_New],
+    key: Callable[[Any], str],
+    alias_key: Callable[[Any], str] | None = None,
     old_exported: Container[str] = frozenset(),
     new_exported: Container[str] = frozenset(),
-) -> tuple[list[_Decl], list[_Decl]]:
+) -> tuple[list[_Old], list[_New]]:
     """:func:`reconcile_surfaces` for a caller whose surface is a *list*.
 
     ``diff_symbols`` keys its surfaces by mangled name, but two sibling
@@ -274,7 +287,7 @@ def reconcile_declaration_lists(
 
 
 def _alias_resolver(
-    decls: Sequence[_Decl], alias_key: Callable[[_Decl], str] | None
+    decls: Sequence[_Decl], alias_key: Callable[[Any], str] | None
 ) -> _Resolver[_Decl] | None:
     """Resolve a declaration to the single peer in *decls* sharing its alias.
 
@@ -298,7 +311,7 @@ def _alias_resolver(
 
 
 def _first_by_key(
-    decls: Sequence[_Decl], key: Callable[[_Decl], str]
+    decls: Sequence[_Decl], key: Callable[[Any], str]
 ) -> dict[str, _Decl]:
     """*decls* keyed by *key*, first occurrence winning -- so a duplicate key
     never silently replaces the declaration the caller's own list order put

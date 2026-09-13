@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 __all__ = [
     "public_functions",
     "public_variables",
+    "reconciled_cpo_surfaces",
     "reconciled_public_variables",
     "reconciled_public_function_maps",
     "reconciled_public_functions",
@@ -81,6 +82,12 @@ def reconciled_public_functions(
         old_all=old.functions,
         new_all=new.functions,
         key=lambda f: f.mangled or f.name,
+        # Same second tier as the keyed variant below, and needed for the
+        # same reason: a change can move the mangled key itself (an ABI-tag
+        # gain or loss *is* a mangling change, `_Z3fooB3barv` ->
+        # `_Z3foov`), leaving the exact-key lookup with no peer to admit
+        # (Codex review, P2).
+        alias_key=lambda f: f.name,
         old_exported=exported_symbol_names(
             getattr(old, "elf", None), FUNCTION_SYMBOL_TYPES
         ),
@@ -168,3 +175,56 @@ def reconciled_public_variables(
             getattr(new, "elf", None), VARIABLE_SYMBOL_TYPES
         ),
     )
+
+
+def reconciled_cpo_surfaces(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[list[Function], list[Variable], list[Function], list[Variable]]:
+    """Both sides' function and variable populations for the CPO detector,
+    reconciled *across* kinds as well as within them.
+
+    That detector's whole subject is a declaration changing kind -- a
+    customization point that was a function becoming an object, or the
+    reverse -- so its two populations are joined by qualified name, not by
+    kind. Same-kind reconciliation cannot restore the evidence-poor side's
+    declaration there: the function pass never looks in ``new.variables``
+    and the variable pass never looks in ``old.functions``, so under either
+    asymmetry the transition read as a bare removal plus addition and
+    ``CPO_KIND_CHANGED`` was lost (Codex review, P2).
+
+    The cross-kind pass reuses the same admission rule, parameterized over
+    the two declaration types rather than copied, and resolves on the
+    declared name -- the one spelling both kinds carry, and the same
+    ambiguity-safe "single peer or nothing" tier used everywhere else here.
+    """
+    old_funcs, new_funcs = reconciled_public_functions(old, new)
+    old_vars, new_vars = reconciled_public_variables(old, new)
+    cross_old_funcs, cross_new_vars = reconcile_declaration_lists(
+        old_funcs,
+        new_vars,
+        old_all=old.functions,
+        new_all=new.variables,
+        key=lambda d: d.name,
+        alias_key=lambda d: d.name,
+        old_exported=exported_symbol_names(
+            getattr(old, "elf", None), FUNCTION_SYMBOL_TYPES
+        ),
+        new_exported=exported_symbol_names(
+            getattr(new, "elf", None), VARIABLE_SYMBOL_TYPES
+        ),
+    )
+    cross_old_vars, cross_new_funcs = reconcile_declaration_lists(
+        old_vars,
+        new_funcs,
+        old_all=old.variables,
+        new_all=new.functions,
+        key=lambda d: d.name,
+        alias_key=lambda d: d.name,
+        old_exported=exported_symbol_names(
+            getattr(old, "elf", None), VARIABLE_SYMBOL_TYPES
+        ),
+        new_exported=exported_symbol_names(
+            getattr(new, "elf", None), FUNCTION_SYMBOL_TYPES
+        ),
+    )
+    return (cross_old_funcs, cross_old_vars, cross_new_funcs, cross_new_vars)

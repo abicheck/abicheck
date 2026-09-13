@@ -740,6 +740,104 @@ class TestEveryTemplatePatternDetector:
         }
 
 
+class TestAbiTagAndCrossKindDetectors:
+    """Two detectors whose subject *is* the thing the join keys on.
+
+    An ABI-tag change is a mangled-name change (`_Z3fooB3barv` ->
+    `_Z3foov`), and a CPO kind change moves a declaration between the
+    function and variable populations. Both were lost under the asymmetry
+    rather than falsified -- reported as a bare removal plus addition
+    (Codex review, two P2s).
+    """
+
+    @staticmethod
+    def _fn(name: str, mangled: str, *, evidence: bool) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libgen.so",
+            version="1",
+            functions=[
+                Function(
+                    name=name,
+                    mangled=mangled,
+                    return_type="void",
+                    visibility=Visibility.HIDDEN,
+                    in_public_contract_fact=_contract(evidence),
+                )
+            ],
+            elf=ElfMetadata(
+                soname="libgen.so.1",
+                symbols=[ElfSymbol(name="_Z6anchorv", visibility="default")],
+            ),
+            from_headers=True,
+        )
+
+    @staticmethod
+    def _var(name: str, mangled: str, *, evidence: bool) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libgen.so",
+            version="1",
+            variables=[
+                Variable(
+                    name=name,
+                    mangled=mangled,
+                    type="S",
+                    visibility=Visibility.HIDDEN,
+                    in_public_contract_fact=_contract(evidence),
+                )
+            ],
+            elf=ElfMetadata(
+                soname="libgen.so.1",
+                symbols=[ElfSymbol(name="_Z6anchorv", visibility="default")],
+            ),
+            from_headers=True,
+        )
+
+    @given(
+        evidence_on_old=st.booleans(),
+        tag=st.from_regex(r"\A[a-z]{2,5}\Z", fullmatch=True),
+    )
+    @settings(deadline=None, max_examples=20)
+    def test_an_abi_tag_change_survives_an_evidence_gap(
+        self, evidence_on_old: bool, tag: str
+    ) -> None:
+        from abicheck.diff_abi_tags import _diff_abi_tags
+
+        tagged = f"_Z3fooB{len(tag)}{tag}v"
+        old = self._fn("foo", tagged, evidence=evidence_on_old)
+        new = self._fn("foo", "_Z3foov", evidence=not evidence_on_old)
+        assert [c.kind for c in _diff_abi_tags(old, new)] == [
+            ChangeKind.ABI_TAG_CHANGED
+        ]
+
+    @given(evidence_on_old=st.booleans(), function_first=st.booleans())
+    @settings(deadline=None, max_examples=20)
+    def test_a_cpo_kind_change_survives_an_evidence_gap(
+        self, evidence_on_old: bool, function_first: bool
+    ) -> None:
+        """Both transition directions: function -> variable and back."""
+        from abicheck.diff_templates import detect_cpo_kind_changed
+
+        as_fn = self._fn("ns::sort", "_ZN2ns4sortE", evidence=evidence_on_old)
+        as_var = self._var("ns::sort", "_ZN2ns4sortE", evidence=not evidence_on_old)
+        old, new = (as_fn, as_var) if function_first else (as_var, as_fn)
+        assert [c.kind for c in detect_cpo_kind_changed(old, new)] == [
+            ChangeKind.CPO_KIND_CHANGED
+        ]
+
+    @given(evidence_on_old=st.booleans())
+    @settings(deadline=None, max_examples=10)
+    def test_an_unchanged_kind_reports_nothing_under_an_evidence_gap(
+        self, evidence_on_old: bool
+    ) -> None:
+        """The complement: reconciling across kinds must not invent a
+        transition where the declaration stayed the kind it was."""
+        from abicheck.diff_templates import detect_cpo_kind_changed
+
+        old = self._fn("ns::sort", "_ZN2ns4sortE", evidence=evidence_on_old)
+        new = self._fn("ns::sort", "_ZN2ns4sortE", evidence=not evidence_on_old)
+        assert detect_cpo_kind_changed(old, new) == []
+
+
 class TestReconciliationIsScopedToOneComparison:
     """The per-pair memo may not outlive the comparison that built it.
 
