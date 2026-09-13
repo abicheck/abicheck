@@ -392,6 +392,74 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="test_infra.caller_owned_directory_fabricated",
+        invariant=(
+            "A harness that runs something INSIDE a directory its caller "
+            "populated must never create that directory. The sibling of "
+            "`test_infra.autouse_allocator_cannot_recover`, and its exact "
+            "inverse: an allocator owns the directory it makes, so it must "
+            "recover the tree; a harness is HANDED one whose contents it did "
+            "not create and cannot reproduce -- a stub on `$PATH`, input "
+            "binaries, seeded workspace files -- so recreating it is not "
+            "recovery but fabrication. The distinction is invisible in the "
+            "code: `mkdir(parents=True, exist_ok=True)` reads as harmless "
+            "housekeeping in both. It is the OUTCOME that differs. A step run "
+            "in a fabricated empty directory does not necessarily fail: one "
+            "that happens not to need what was lost exits 0 and returns "
+            "plausible output for state that no longer exists, so the harness "
+            "reports a pass for a fixture set that is gone -- strictly worse "
+            "than the crash it replaced, and invisible to every test of the "
+            "surrounding feature, which passes because the feature works. "
+            "The same judgement applies to re-running a step at all: a retry "
+            "may only be claimed by a caller that owns and resets every sink "
+            "the step writes, since a step appending to a caller-supplied file "
+            "returns, after one recovered loss, a state no single run "
+            "produces."
+        ),
+        # PR #1292 introduced the recovery and #1293 corrected it. The
+        # fabricating `mkdir` survived a commit whose message and review reply
+        # both claimed it had been removed -- the edit matched nothing and the
+        # file was not re-read -- which is why the surviving invariant is
+        # structural (`run_step` must contain no call creating the workspace)
+        # rather than only behavioural: a reaper landing before the output file
+        # is prepared trips the environment-file guard first, so no end-to-end
+        # test can distinguish a fabricating harness from a refusing one.
+        fixed_by=(1292, 1293),
+        seed_tests=(
+            "tests/test_tmp_tree_resilience.py",
+            "tests/test_workflow_exec_harness.py",
+        ),
+        # The seed tests drive test harnesses directly, so per this field's
+        # rule they claim no public surface.
+        public_surfaces=(),
+        axes={
+            "removed_level": ("file", "directory", "ancestor"),
+            "moment": ("before_the_step", "during_the_step"),
+            "retry": ("opted_in", "default_off"),
+            "oracle": ("structural_absence_of_a_creating_call", "seeded_fixture"),
+            "vacuity": ("intact_tree_unaffected", "mutation_restores_the_mkdir"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only the two shared harnesses are covered. A repo-wide "
+                    "search finds ~19 further modules carrying an independent "
+                    "copy of the same create -> subprocess -> read sequence "
+                    "(`tests/_check_target_exec.py`, `test_action_baseline.py`, "
+                    "`test_action_collect_facts.py`, the `test_action_run_sh_*` "
+                    "family), each with its own env shape and extra outputs; "
+                    "consolidating them is a refactor with its own regression "
+                    "surface and was deliberately left out of the PR that "
+                    "unbroke main. Nothing detects the shape mechanically "
+                    "either: creating a directory is not by itself a defect, "
+                    "only creating one the caller populated is, and no gate "
+                    "distinguishes them."
+                ),
+                reference="https://github.com/abicheck/abicheck/pull/1292",
+            ),
+        ),
+    ),
+    BugClass(
         id="status.container_existence_taken_for_completed_work",
         invariant=(
             "A status that asserts work was COMPLETED may never be "
