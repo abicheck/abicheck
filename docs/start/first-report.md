@@ -98,19 +98,28 @@ reading only that key. They are not the same statement.
   `--depth` is not always loud.** DWARF, build data and source evidence are
   optional throughout; their absence narrows what can be concluded and is
   reported. What happens when you *pin* a depth the evidence cannot reach
-  depends on which rung:
-    - `--depth build` / `--depth source` without their required inputs is a
-      fail-loud evidence contract — **exit `7`**, no comparison.
-    - `--depth headers` on inputs with no headers **falls back and exits
-      `0`**. The shortfall is reported only in the JSON, as
-      `analysis_assurance.status: "failed"` with `depth_satisfied: false`
-      and `effective_depth` below what you asked for. Verified on two
-      headerless ELF inputs.
+  depends on which rung. **Either way a shallower comparison still runs and
+  still reports a verdict** — what differs is whether the shortfall reaches
+  the exit code. Measured on two headerless ELF inputs:
 
-    So a pinned `--depth headers` that silently degraded still looks clean
-    at the exit code. Read `analysis_assurance`, or set
-    `assurance.require_complete: true` to make the shortfall contribute
-    exit `1`.
+    | Pinned | Exit | `verdict` | `analysis_assurance.status` |
+    |---|---|---|---|
+    | `--depth headers` | `0` | `NO_CHANGE` | `failed` |
+    | `--depth build` / `--depth source` | `7` | `NO_CHANGE` | `failed` |
+
+    Both fell back to `effective_depth: binary` with
+    `depth_satisfied: false`. `build`/`source` are fail-loud evidence
+    contracts, so the shortfall raises the exit to `7`; `headers` falls back
+    silently and the run still exits `0`.
+
+    Two consequences. A pinned `--depth headers` that degraded to
+    symbols-only looks clean at the exit code — read `analysis_assurance`,
+    or set `assurance.require_complete: true` to make the shortfall
+    contribute exit `1`. And **exit `7` is not "no result"**: the findings
+    and verdict are real, just shallower than you asked for, and `verdict`
+    never reads `EVIDENCE_CONTRACT_ERROR` — a JSON consumer must check the
+    `exit` block, not `verdict`, to notice
+    ([Exit Codes](../reference/exit-codes.md)).
 - **An advisory run is not proof of compatibility.** A gate configured not
   to act is a policy decision, not a result.
 - **`NOT_COMPARABLE` is not an ABI break.** It means the pair could not be
