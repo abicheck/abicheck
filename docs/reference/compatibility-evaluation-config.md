@@ -53,7 +53,7 @@ generated: false
       incomplete. See [Exit Codes](exit-codes.md).
 
     Outside both `--contract` and a selected `--pack`, a
-    `compare`/`scan` run resolves nothing from this object at all and every
+    `compare` run resolves nothing from this object at all and every
     other command is unaffected — contract evaluation is still an opt-in
     feature, not a default-on one. A selected `--pack` **alone** (no
     `--contract`) still resolves and applies its own fields,
@@ -216,7 +216,7 @@ assignments:
 |---|---|---|
 | `contract` | `contract.unresolved`, `contract.overlays`, `surface.internal_namespaces`, `assurance.require_evidence` | `surface.internal_namespaces` and `contract.unresolved` |
 | `policy` | any `ChangeKind` slug → `break` / `warn` / `risk` / `ignore` | all |
-| `gate` | `gate.severity.abi_breaking`, `gate.severity.potential_breaking`, `gate.severity.quality_issues`, `gate.severity.addition` | all (`compare`, single-pair or directory/package; not `scan`) |
+| `gate` | `gate.severity.abi_breaking`, `gate.severity.potential_breaking`, `gate.severity.quality_issues`, `gate.severity.addition` | all (`compare`, single-pair or directory/package) |
 
 Deliberately **not** assignable: `contract.mode` (which evidence domain a run
 judges against stays the user's own per-run choice — ADR-049 D3 forbids a
@@ -247,13 +247,9 @@ before merge for exactly that reason.
 The "Applied today" column above is enforced, not documentation:
 a manifest assigning a field this build resolves but does not yet act on is a
 usage error naming the field and the reason, rather than an assignment silently
-recorded as active configuration (`abicheck.pack_application`). The same rule
-rejects a `kind: gate` pack on `scan`, whose exit code follows its
-compatibility verdict directly and so has no gate to move.
+recorded as active configuration (`abicheck.pack_application`).
 
-A further restriction, for the same "configure or reject" reason: `--pack`
-needs `--against` on `scan` (a pack's only application there is the baseline
-comparison's policy). On a directory/package (release) `compare`, a `kind:
+On a directory/package (release) `compare`, a `kind:
 policy`/`kind: contract`/`kind: gate` pack's `policy.overrides`/`surface.
 internal_namespaces`/`contract.unresolved`/`gate.severity.<category>` all
 apply to every library uniformly (CLI cleanup phase two, "PR B" slices 1

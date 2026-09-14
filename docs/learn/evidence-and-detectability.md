@@ -326,8 +326,8 @@ finding's `evidence_status` field spells out in machine-readable form — see
 
 ## The `--depth` dial: how much evidence to collect
 
-The layers above describe *what* abicheck can see. `dump`, `compare`, and
-`scan` share **one** knob that decides how much of it to gather — `--depth`,
+The layers above describe *what* abicheck can see. `dump` and `compare`
+share **one** knob that decides how much of it to gather — `--depth`,
 each rung **named by the evidence you get** (ADR-037 D5) and additive over the
 one below it. As of the pre-1.0 CLI reset, the ladder has **exactly four
 public rungs — no more, no fewer:**
@@ -348,16 +348,18 @@ for the full removal list and migration mapping.
 
 **Scope rule — which translation units `--depth source` actually replays:**
 
-- On `dump` and `compare`, `--depth source` always uses **TARGET scope** — it
-  replays the whole current library target. There is no seed-driven narrowing
-  on these two commands.
-- `--depth source` uses **CHANGED scope** (just the TUs touched by
-  a `--since`/`--changed-path` seed) **only when a valid seed is present**;
-  otherwise it falls back to **TARGET scope** (the whole current library),
-  never an empty replay. This is a deliberate bug fix: previously, pinning
-  `--depth source` with no seed could silently collect **zero**
-  translation units and report clean by omission. That gap is closed — an
-  unseeded `--depth source` run now always replays *something*.
+- On `dump`, `--depth source` always uses **TARGET scope** — it replays the
+  whole current library target. `dump` takes no seed, so there is no
+  narrowing to apply.
+- On `compare`, `--depth source` uses **CHANGED scope** (just the TUs touched
+  by a `--since`/`--changed-path` seed) **when a valid seed is present**, and
+  **TARGET scope** (the whole current library) otherwise — never an empty
+  replay. That fallback is a deliberate bug fix: pinning `--depth source`
+  with no seed could once silently collect **zero** translation units and
+  report clean by omission.
+
+  So a seeded `compare --depth source` analysed *less* than the whole
+  library. If you need the whole target replayed, omit the seed.
 
 **Omit `--depth` for `auto`** — the default. `auto` names the
 state "you didn't pin a rung"; it resolves to the fixed **`headers`** rung,
@@ -369,24 +371,24 @@ ADR-068's second 2026-09-09 amendment retired that along with `--risk-rules`.
 evidence must pin `--depth build` or `--depth source` explicitly, or it will
 not collect it. A seed (`--since`/`--changed-path`) now only *scopes* a rung
 you pinned; it no longer selects one.
-`scan` without `--against` is already a one-build audit/hygiene/source
-consistency scan — that's not a separate `--audit` flag (there isn't one
-anymore), it's simply what omitting `--against` means; passing `--against`
-additionally compares `ARTIFACT` against it.
+
+`compare --no-baseline` is the one-build audit/hygiene/source-consistency
+run — not a separate `--audit` flag (there isn't one), simply what declaring
+no baseline means; supply an OLD operand instead and the run compares the
+two sides.
 
 !!! warning "A pinned deep depth is a contract (fail-loud)"
     Pinning `--depth build|source` with **no source input**
     (`--sources`/`--build-info`) is an error, not a silent shallow scan: there
     is nothing to collect L3/L4/L5 from. Pass the evidence, or pin
     `--depth binary`/`--depth headers` for a shallower run that is honest
-    about its rung. Omitting `--depth` on `scan` is *not* the way to ask for a
-    best-effort binary scan any more: since ADR-068's second 2026-09-09
+    about its rung. Omitting `--depth` is *not* the way to ask for a
+    best-effort binary run any more: since ADR-068's second 2026-09-09
     amendment it resolves to a fixed `headers`, not to whatever the inputs
     happen to support.
 
-`scan` is a front-end over `dump`/`compare`: the resolved depth selects an
-internal collection mode, which decides which L-layers get collected and at
-what replay scope:
+The resolved depth selects an internal collection mode, which decides which
+L-layers get collected and at what replay scope:
 
 ```mermaid
 flowchart LR
@@ -418,12 +420,13 @@ Three properties of the dial worth internalizing:
 - **Cost has exactly one cliff, at L4.** `binary`/`headers`/`build` are one
   cheap price; `source` pays for clang per-TU AST replay, and the cliff
   height tracks C++ template/STL instantiation depth, not TU count. On
-  `scan`, a `--since`/`--changed-path` seed keeps that replay to the changed
-  TUs (CHANGED scope); without one, `scan` (and always, on `dump`/`compare`)
-  pays the cliff for the whole target (TARGET scope). Flag-level detail:
+  `compare`, a `--since`/`--changed-path` seed keeps that replay to the
+  changed TUs (CHANGED scope); without one — and always on `dump`, which
+  takes no seed — it pays the cliff for the whole target (TARGET scope).
+  Flag-level detail:
   [Evidence Depth](../use/evidence-depth.md); measured numbers:
   [Performance § scan-level cost model](../contribute/performance.md#scan-level-cost-model-one-cliff-at-l4).
-- **Coverage is honest.** A scan can request a deep level and only reach a
+- **Coverage is honest.** A run can request a deep level and only reach a
   shallow one (clang missing, no sources); abicheck never reports that as
   "scan failed" — every scan states the L-depth it *actually reached* and, for
   each disabled check, the precise input or tool to add (the capability report

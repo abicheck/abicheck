@@ -106,6 +106,32 @@ def _shell_command_lines(text: str) -> list[tuple[int, str]]:
     return out
 
 
+def _config_keys_in(argv: str, known_keys: frozenset[str]) -> list[str]:
+    """Every `.abicheck.yml` key *argv* passes as a positional operand.
+
+    One matcher for both callers. The shell-command branch and the
+    ``extra-args`` branch are the same failure -- ``extra-args`` is raw argv
+    by another name -- so they must not drift on which spellings they
+    recognise. They did: the bare (list-typed) variant was added to the
+    command branch only, leaving ``extra-args: 'scope.public_symbols
+    my_stub'`` unflagged, which is the exact class this check exists to
+    catch, one branch over (Codex review).
+
+    Both spellings, colon-form first so a ``key.subkey:`` token is reported
+    once rather than twice (the bare pattern also matches its prefix).
+    """
+    out: list[str] = []
+    seen: set[int] = set()
+    for m in _CONFIG_KEY_OPERAND_RE.finditer(argv):
+        seen.add(m.start(1))
+        out.append(m.group(1))
+    for m in _BARE_CONFIG_KEY_RE.finditer(argv):
+        if m.start(1) in seen or m.group(1) not in known_keys:
+            continue
+        out.append(m.group(1))
+    return out
+
+
 def check_config_keys_as_cli_operands(
     f: Any,
     scan_targets: Iterable[tuple[Path, str]],
@@ -133,37 +159,23 @@ def check_config_keys_as_cli_operands(
     for path, _rel_unused in scan_targets:
         text = path.read_text(encoding="utf-8")
         for line_no, command in _shell_command_lines(text):
-            seen: set[int] = set()
-            for m in _CONFIG_KEY_OPERAND_RE.finditer(command):
-                seen.add(m.start(1))
+            for key in _config_keys_in(command, known_keys):
                 f.warn(
                     "config-key-as-cli-operand",
-                    f"{rel(path)}:{line_no}: {m.group(1)!r} is a "
+                    f"{rel(path)}:{line_no}: {key!r} is a "
                     ".abicheck.yml key, not a CLI operand -- this command "
                     "exits 64 (Click reads it as unexpected positional "
                     "arguments). Show a config file, or the flag that "
                     "really exists.",
                 )
-            for m in _BARE_CONFIG_KEY_RE.finditer(command):
-                if m.start(1) in seen or m.group(1) not in known_keys:
-                    continue
-                f.warn(
-                    "config-key-as-cli-operand",
-                    f"{rel(path)}:{line_no}: {m.group(1)!r} is a "
-                    ".abicheck.yml key, not a CLI operand -- this command "
-                    "exits 64 (Click reads it as unexpected positional "
-                    "arguments). A list-typed key is spelled without a "
-                    "colon, which is why it reads like an argument. Show a "
-                    "config file, or the flag that really exists.",
-                )
         for i, line in enumerate(text.splitlines(), start=1):
             em = _EXTRA_ARGS_RE.match(line)
             if em is None:
                 continue
-            for m in _CONFIG_KEY_OPERAND_RE.finditer(em.group(1)):
+            for key in _config_keys_in(em.group(1), known_keys):
                 f.warn(
                     "config-key-as-cli-operand",
-                    f"{rel(path)}:{i}: {m.group(1)!r} is a .abicheck.yml "
+                    f"{rel(path)}:{i}: {key!r} is a .abicheck.yml "
                     "key, but `extra-args` is raw argv -- it reaches Click "
                     "as unexpected positional arguments. Put it in the "
                     "repository's .abicheck.yml instead.",
