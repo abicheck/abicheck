@@ -103,6 +103,54 @@ compare, which `compare` already fans out to a per-library comparison
 "bundle compare" mode or CLI command is invoked. `new-library` is the
 caller-provided directory of the candidate build's own member binaries.
 
+### Two different questions a bundle answers
+
+Don't conflate these; they are separate axes with separate exit
+contributions, and either can hold without the other.
+
+| Axis | Question | Owner |
+|---|---|---|
+| **Inventory / scope completeness** | Were the required *selected members* actually compared? | `scope.on_incomplete` (ADR-065) |
+| **Analysis assurance** | For the comparisons that **did** run, how trustworthy was the evidence? | `assurance.require_complete` (ADR-071) |
+
+Neither is the compatibility verdict. A release can be scope-`complete`
+with `partial` assurance (every member compared, one missing its headers) or
+scope-`incomplete` with complete assurance (one member never supplied, the
+rest fully analysed).
+
+The assurance fold is `max` over compared members: **an incomplete member is
+never hidden by complete siblings**, and over a one-member package the fold
+is the identity, so it gates exactly as comparing that one library alone
+would. See
+[Multi-binary → Analysis assurance across a bundle](../use/multi-binary.md#analysis-assurance-across-a-bundle-adr-071).
+
+### Three bundle paths, three sets of restrictions
+
+"Bundles support X" is not a statement this documentation can make once.
+Three different paths reach a multi-library comparison and they do not share
+capabilities:
+
+| Path | What it is | Restrictions |
+|---|---|---|
+| Direct CLI | `abicheck compare OLD_DIR NEW_DIR` (a directory/package operand, fanned out per library) | The CLI's own; not bound by this Action's input validation |
+| Stored member / bundle-facts | a stored `ProjectSnapshot` package or a `BundleFacts` document as an operand | Limited by what the capture recorded |
+| Managed `kind: bundle` | this Action, driven by `check-project` | The table below |
+
+A managed `kind: bundle` check is validated up front, before any setup work.
+These combinations are **rejected**, and each rejection reflects an evidence
+path that does not exist — not a documentation choice:
+
+| Rejected | Why |
+|---|---|
+| `requested-depth: headers\|build\|source` | A bundle's baseline is staged raw binaries with no historical per-member header/build/source evidence. Only `binary` is supported. Use `kind: target` to compare one library at a deeper rung. |
+| `baseline-channel: none` | There is no no-baseline bundle audit path: a bundle always compares directories, which `compare`'s audit-only shape cannot do. |
+| `allow-new-target: true` | A bundle comparison needs one coherent release where every member already coexisted. Scope a new member with its own `kind: target` check. |
+
+`analysis-assurance-complete` is **not** in that list — see its row in
+[Inputs](#inputs). Supporting a release-level assurance gate is a different
+capability from supporting historical header-aware bundle capture; the first
+landed (ADR-071), the second has not.
+
 ## Inputs
 
 | Input | Required | Default | Meaning |
@@ -130,7 +178,7 @@ caller-provided directory of the candidate build's own member binaries.
 | `consumer-binary` | when `target-kind: app-consumer` | — | Forwarded as `--used-by`. |
 | `contract-file` | when `target-kind: plugin-contract` | — | Forwarded as the root Action's `required-symbols` input (translated to the CLI's `--required-symbol @FILE`). |
 | `require-complete-analysis` | no | `false` | RETIRED (rulings.py deferred-option followup — hard removal, no deprecation window, mirroring the root Action's own `require-complete-analysis` retirement, which this input forwarded to). The root Action's input it mapped onto is gone: P0.4's orthogonal `ANALYSIS_INCOMPLETE` axis is config-only now, `.abicheck.yml`'s `assurance.require_complete: true`, with no CLI or Action-input override. Still declared so a workflow that sets it gets an explicit `::error::` instead of a silently-ignored input. See `analysis-assurance-complete` below for how `checks[].analysis.assurance: complete` (product-gaps audit §3) is now enforced instead. |
-| `analysis-assurance-complete` | no | `false` | Set to `'true'` when this cell declared `checks[].analysis.assurance: complete` (`RunPlanCheck.analysis_assurance`, validated at run-plan generation time by `project_targets.py`'s `analysis_assurance_gate.py`, which still accepts only `'complete'`). This is the config-overlay replacement `require-complete-analysis`'s own docstring names as its successor: since neither a CLI flag nor an Action input can carry `assurance.require_complete` any more, this Action instead merges an `assurance: {require_complete: true}` fragment into whichever `build-config` the internal analysis step would otherwise read — the same config-only mechanism a project author's own `.abicheck.yml` line would produce. `check-project.yml` is the intended caller (it already validates and carries `checks[].analysis.assurance` on the run-plan); rejected outright for `kind: bundle` (a bundle/directory comparison has no single `analysis_assurance` result to gate on) — validated up front in `validate-inputs.sh`, before any setup work. |
+| `analysis-assurance-complete` | no | `false` | Set to `'true'` when this cell declared `checks[].analysis.assurance: complete` (`RunPlanCheck.analysis_assurance`, validated at run-plan generation time by `project_targets.py`'s `analysis_assurance_gate.py`, which still accepts only `'complete'`). This is the config-overlay replacement `require-complete-analysis` names as its successor: since neither a CLI flag nor an Action input can carry `assurance.require_complete` any more, this Action merges an `assurance: {require_complete: true}` fragment into whichever `build-config` the internal analysis step would otherwise read — the same config-only mechanism a project author's own `.abicheck.yml` line would produce. `check-project.yml` is the intended caller; a direct `check-target` caller may also set it explicitly. **Supported for `kind: bundle` too** (ADR-071): the release fan-out a bundle check runs folds every compared member's own `analysis_assurance` with `max` into the same exit axis a single-library check uses, so a one-member bundle gates identically to a `kind: target` check and any member that fell short floors the whole bundle. It was rejected outright for a bundle before ADR-071; that guard is retired. |
 | `header`, `old-header`, `new-header`, `include`, `old-include`, `new-include`, `lang`, `ast-frontend`, `gcc-path`, `gcc-prefix`, `gcc-options`, `sysroot`, `sources`, `build-info`, `compile-db`, `build-config`, `policy`, `policy-file`, `suppress`, `severity-preset`, `severity-addition`, `extra-args`, `python-version`, `install-deps`, `dependency-source` | no | (mirror the root Action) | Forwarded straight through to the internal analysis step. `dependency-source` (G34 Phase C) is what `check-project.yml` sets per cell from the profile's own `dependency_source:`; the root Action owns its accepted-value list and its fallback to `install-deps`. |
 
 ## Outputs
