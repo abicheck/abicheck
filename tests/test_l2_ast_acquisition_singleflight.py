@@ -24,6 +24,7 @@ from abicheck.dumper_cache import (
 from abicheck.errors import SnapshotError
 from abicheck.extract.header_ast_fields import parse_header_ast_fields
 from abicheck.model import Function, Visibility
+from abicheck.model.identity import entity_id_for_function
 
 
 def _run_in_context(ctx: contextvars.Context, key: str, producer: object) -> object:
@@ -153,8 +154,11 @@ def test_waiter_deadline_does_not_cancel_shared_producer() -> None:
 def test_waiter_preserves_completed_producer_timeout_error() -> None:
     entered = threading.Event()
     release = threading.Event()
+    calls = 0
 
     def produce() -> str:
+        nonlocal calls
+        calls += 1
         entered.set()
         assert release.wait(timeout=2)
         raise TimeoutError("compiler-owned timeout")
@@ -171,6 +175,7 @@ def test_waiter_preserves_completed_producer_timeout_error() -> None:
                 owner.result(timeout=2)
             with pytest.raises(TimeoutError, match="compiler-owned timeout"):
                 waiter.result(timeout=2)
+            assert calls == 1
 
 
 def test_normalized_header_evidence_is_shared_after_per_binary_parsing() -> None:
@@ -185,9 +190,11 @@ def test_normalized_header_evidence_is_shared_after_per_binary_parsing() -> None
         _is_cxx = True
         _no_binary_evidence = False
 
-        def __init__(self, exports: set[str]) -> None:
+        def __init__(self, exports: set[str], *, neutral: bool = False) -> None:
             self._exported_dynamic = exports
             self._exported_static = set(exports)
+            self._neutral = neutral
+            self._abicheck_neutral_factory = lambda: Parser(set(), neutral=True)
 
         def parse_functions(self) -> list[Function]:
             nonlocal calls
@@ -196,8 +203,11 @@ def test_normalized_header_evidence_is_shared_after_per_binary_parsing() -> None
                 Function(
                     name="api",
                     mangled="_Z3apiv",
-                    return_type="int",
+                    return_type=(
+                        "int" if self._neutral or self._exported_dynamic else "long"
+                    ),
                     visibility=Visibility.PUBLIC,
+                    entity_id=entity_id_for_function((), "api", mangled_name="_Z3apiv"),
                 )
             ]
 
@@ -234,8 +244,12 @@ def test_normalized_header_evidence_is_shared_after_per_binary_parsing() -> None
     # parser owns nuanced export/fallback binding. Canonical normalization is
     # shared for the two clang consumers, while a distinct producer stays
     # isolated.
-    assert calls == 3
+    # Three member-specific parses plus one neutral parse for each producer.
+    assert calls == 5
     assert exporting.functions[0] is not hidden.functions[0]
+    assert exporting.functions[0].return_type == "int"
+    assert hidden.functions[0].return_type == "long"
+    assert exporting.semantic_ir.occurrences
     assert exporting.semantic_ir is hidden.semantic_ir
     assert c_linkage.semantic_ir is not exporting.semantic_ir
 

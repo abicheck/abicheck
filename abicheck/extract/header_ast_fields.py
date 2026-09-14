@@ -120,11 +120,24 @@ def parse_header_ast_fields(
                 getattr(parser, "_is_cxx", None),
             )
         )
-        semantic_ir = run_ast_acquisition(
-            f"{producer}-normalized",
-            scope_key,
-            lambda: _normalize_header_ast_fields(legacy, producer=producer),
-        )
+        neutral_factory = getattr(parser, "_abicheck_neutral_factory", None)
+
+        def _normalize_context() -> SemanticIR:
+            if neutral_factory is None:
+                # A structural parser without a neutral factory cannot prove
+                # that export evidence did not affect its occurrences. Keep
+                # its normalization member-local rather than publishing the
+                # first binary's view under a shared context key.
+                return _normalize_header_ast_fields(legacy, producer=producer)
+            neutral = _parse_header_ast_legacy(neutral_factory())
+            return _normalize_header_ast_fields(neutral, producer=producer)
+
+        if neutral_factory is None:
+            semantic_ir = _normalize_context()
+        else:
+            semantic_ir = run_ast_acquisition(
+                f"{producer}-normalized", scope_key, _normalize_context
+            )
     return replace(legacy, semantic_ir=semantic_ir)
 
 

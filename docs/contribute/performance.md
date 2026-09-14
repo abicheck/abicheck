@@ -930,9 +930,11 @@ component figures, not an end-to-end speedup claim.
 
 Scalar comparison and release-member fan-out now own one request-local L2
 acquisition table. A content-addressed frontend context has one in-flight
-clang/CastXML producer; its parsed declarations and `SemanticIR` are normalized
-once, then copied into independently mutable legacy declaration projections and
-bound against each binary's own export set. Waiters have deadline-bounded queue
+clang/CastXML producer and one export-neutral `SemanticIR` normalization. Each
+binary still runs the concrete parser's legacy declaration construction against
+its own export set: those parsers own inclusion, fallback identity, and surface
+facts, so reconstructing their binding from a neutral parse was experimentally
+rejected after it lost real removal findings. Waiters have deadline-bounded queue
 time, do not cancel a producer another member still needs, and failed or
 input-mutated acquisitions are never retained as reusable results.
 
@@ -954,8 +956,11 @@ caller's current working directory.
 A six-library local control used one real shared public header declaring six C
 functions and six separately compiled DSOs, each exporting a different one.
 Cold-cache clang acquisition changed from **6 compiler + 6 normalization calls,
-4.253 s** to **1 + 1, 3.375 s**; CastXML 0.6.11 changed from **6 + 6, 1.900 s**
-to **1 + 1, 1.492 s**. Every member retained all six header declarations and
+4.253 s** to **1 compiler + 1 neutral normalization, 3.375 s**; CastXML 0.6.11
+changed from **6 + 6, 1.900 s** to **1 compiler + 1 neutral normalization,
+1.492 s**. Legacy declaration binding remains one pass per member and is not
+included in the eliminated-call claim. Every member retained all six header
+declarations and
 only its own export was marked binary-exported. These are small-fixture local
 measurements, not oneDAL results; the periodic real-profile lane remains the
 owner of oneDAL/SVS/PVXS claims.
