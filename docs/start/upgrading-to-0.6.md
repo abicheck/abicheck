@@ -250,8 +250,16 @@ be sided.
 override. It is side-aware and it now carries the whole separate-debug-info
 role: a directory to search, a detached `.debug` file, or a debug *package*
 are three transports of one input, told apart by content rather than by
-filename. `compare`'s own sided `--pdb-path old=`/`new=` is likewise
-unaffected.
+filename.
+
+!!! warning "There is no per-side PDB input"
+    `--pdb-path` does not exist on any command — `compare --pdb-path` exits
+    `64`. `debug.pdb_path` in `.abicheck.yml` is the only spelling the PE
+    dump path consumes, and it is **a single value, not side-aware**: you
+    cannot point old and new at different PDBs. `--debug-info` does not
+    cover the gap — it refuses a named `.pdb` rather than accepting it as a
+    silent no-op. A two-sided PE comparison needing distinct PDBs has no
+    supported invocation today.
 
 ### C3. Header / development-package inputs
 

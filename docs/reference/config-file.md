@@ -293,8 +293,9 @@ headers are available (was `--dwarf-only`); `debuginfod:` (default `false`)
 enables debuginfod network resolution (was `--debuginfod`); `debuginfod_url:`
 overrides `DEBUGINFOD_URLS` (was `--debuginfod-url`); `pdb_path:` — explicit
 path to a Windows PE PDB file, overriding automatic PDB discovery (was
-`dump --pdb-path`; `compare`'s own sided `--pdb-path old=`/`new=` flag is
-unrelated and unaffected).
+`dump --pdb-path`). **This key is the only PDB input that survives**, on
+any command, and it is a single value — not side-aware, so a two-sided PE
+comparison cannot point old and new at different PDBs.
 
 ---
 

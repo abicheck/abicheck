@@ -235,7 +235,7 @@ removed outright rather than left hidden). See the
 | `--dwarf-only` | `debug.dwarf_only: true` |
 | `--debuginfod` | `debug.debuginfod: true` |
 | `--debuginfod-url URL` | `debug.debuginfod_url: URL` |
-| `dump --pdb-path` | `debug.pdb_path: PATH` (`compare`'s own sided `--pdb-path old=`/`new=` flag is unaffected) |
+| `dump --pdb-path` | `debug.pdb_path: PATH`. **No `--pdb-path` survives on any command**, and the config key is a single value — there is no per-side PDB input. |
 | `--ast-frontend` | `compile.frontend: castxml\|clang\|hybrid\|auto` |
 | `--allow-ast-frontend-fallback` | `compile.ast_frontend_fallback: true` |
 | `--allow-unsupported-castxml` | `compile.allow_unsupported_castxml: true` |

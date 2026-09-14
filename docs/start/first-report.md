@@ -94,10 +94,23 @@ reading only that key. They are not the same statement.
 - **No findings is not a complete analysis.** Check `analysis_assurance` and
   the evidence-coverage block. A symbols-only run finds fewer things because
   it sees less, not because less changed.
-- **Missing optional DWARF is not a failed analysis.** DWARF, build data and
-  source evidence are optional throughout. Their absence narrows what can be
-  concluded, and is reported; it is a failure only where a `--depth` was
-  pinned that the evidence could not reach (exit `7`).
+- **Missing optional DWARF is not a failed analysis — but an unmet
+  `--depth` is not always loud.** DWARF, build data and source evidence are
+  optional throughout; their absence narrows what can be concluded and is
+  reported. What happens when you *pin* a depth the evidence cannot reach
+  depends on which rung:
+    - `--depth build` / `--depth source` without their required inputs is a
+      fail-loud evidence contract — **exit `7`**, no comparison.
+    - `--depth headers` on inputs with no headers **falls back and exits
+      `0`**. The shortfall is reported only in the JSON, as
+      `analysis_assurance.status: "failed"` with `depth_satisfied: false`
+      and `effective_depth` below what you asked for. Verified on two
+      headerless ELF inputs.
+
+    So a pinned `--depth headers` that silently degraded still looks clean
+    at the exit code. Read `analysis_assurance`, or set
+    `assurance.require_complete: true` to make the shortfall contribute
+    exit `1`.
 - **An advisory run is not proof of compatibility.** A gate configured not
   to act is a policy decision, not a result.
 - **`NOT_COMPARABLE` is not an ABI break.** It means the pair could not be
