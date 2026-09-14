@@ -353,6 +353,66 @@ def test_a_backslash_continued_command_is_joined_before_matching(
     assert "suppression.strict" in f.warnings[0][1]
 
 
+def test_a_bare_list_typed_config_key_is_flagged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A *list*-typed key is spelled without a trailing colon, so the
+    colon-anchored pattern never saw it.
+
+    This is not hypothetical: `docs/use/output-formats.md` shipped
+    ``abicheck compare old.so new.so --scope-public-headers
+    scope.public_symbols my_asm_stub`` and this check passed on it. Two
+    sibling keys are exercised, not only the one that shipped.
+    """
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    for key in ("scope.public_symbols", "sources.public_headers"):
+        _page(
+            tmp_path,
+            "# Page\n\n```bash\nabicheck compare old.so new.so "
+            "--scope-public-headers \\\n"
+            f"    {key} my_asm_stub\n```\n",
+        )
+        f = dc.Findings()
+        dc._check_config_keys_as_cli_operands(f)
+        assert len(f.warnings) == 1, (key, f.warnings)
+        assert key in f.warnings[0][1]
+
+
+def test_a_bare_token_that_is_not_a_real_config_key_is_not_flagged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The bare-token variant matches only against `BuildConfig`'s real key
+    set. Without that restriction it would flag every ordinary operand, since
+    `libfoo.so`/`foo.h`/`compile_commands.json` all have the same shape."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    _page(
+        tmp_path,
+        "# Page\n\n```bash\nabicheck compare old.so new.so "
+        "-H foo.h --build-info compile_commands.json\n```\n",
+    )
+    f = dc.Findings()
+    dc._check_config_keys_as_cli_operands(f)
+    assert f.warnings == [], f.warnings
+
+
+def test_the_known_config_key_set_is_not_empty(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Vacuity guard on the bare-token scan's own oracle.
+
+    `_known_config_keys()` degrades to an empty set when the package will
+    not import, which silently disables the whole variant above -- the two
+    tests before this one would still pass in full (one asserts a warning
+    from a *page* built around a key, the other asserts no warning). Assert
+    the set is real and carries the key that produced the original defect.
+    """
+    import config_key_operands
+
+    keys = config_key_operands._known_config_keys()
+    assert "scope.public_symbols" in keys
+    assert len(keys) > 20, sorted(keys)
+
+
 def test_a_config_key_in_extra_args_is_flagged(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
