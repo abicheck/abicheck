@@ -75,17 +75,21 @@ compile:
   lang: c++
 ```
 
-!!! note "The single-release audit still needs `scan`"
+!!! note "The single-release audit"
     Auditing **one** conda build with no previous version — an accidental
     export, a private-header leak, an unversioned symbol — is
     [Scenario S5](../integration/scenarios/single-build-audit.md). Its
-    declared spelling is `compare --no-baseline`, which does not report
-    those findings yet ([known
-    gap](../contribute/known-gaps.md#compare-no-baseline-does-not-yet-reproduce-scans-audit-mode-findings)),
-    so `abicheck scan lib/libtbb.so.12.18 -H include --public-header-dir
-    include --depth headers` is still the working command for that one case.
-    `scan` is being retired with no deprecation window (ADR-068 D8) — don't
-    build anything else on it.
+    spelling is:
+
+    ```bash
+    abicheck compare --no-baseline lib/libtbb.so.12.18 -H include --depth headers
+    ```
+
+    That gap is closed — the audit now reproduces the candidate-side
+    findings the retired `scan` reported. Note it is **advisory by
+    default**: add `--severity-preset default` to gate on a breaking
+    finding. See [Understand your first
+    report](first-report.md#audit-runs-no-baseline).
 
 !!! tip "Prefer the umbrella over the include *directory*"
     Passing `-H <include-dir>` makes abicheck parse **every** header in the
