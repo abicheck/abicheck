@@ -28,23 +28,111 @@ compatibility rules, and its top-level structure.
 
 ---
 
-## Schema version
+## What `dump` writes today
 
-Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`48`** (see
-`abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
-up-to-date value and the full per-version history comment).
+A snapshot is a single JSON document with a **sectioned envelope**: three
+top-level keys, and every field this page describes lives inside one of the
+named sections.
 
 ```json
 {
   "schema_version": 48,
-  "library": "libfoo.so.1",
-  "version": "1.2.3"
+  "sections": {
+    "binary":       {"section_kind": "binary",       "section_schema_version": 1, "payload": {"...": "..."}},
+    "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {"...": "..."}},
+    "types":        {"section_kind": "types",        "section_schema_version": 1, "payload": {"...": "..."}},
+    "layout":       {"...": "..."},
+    "debug":        {"...": "..."},
+    "build":        {"...": "..."},
+    "graph":        {"...": "..."},
+    "provenance":   {"...": "..."},
+    "semantic_ir":  {"...": "..."}
+  },
+  "section_schema_versions": {
+    "binary": 1, "build": 1, "debug": 1, "declarations": 1, "graph": 1,
+    "layout": 1, "provenance": 1, "semantic_ir": 1, "types": 1
+  }
 }
 ```
 
-The field is placed at the top level so a loader can inspect it without parsing
-the full snapshot. Its history is additive: each bump added fields without
+*(Excerpt reduced from a real `abicheck dump libfoo.so.1 -H foo.h -o snap.json`
+on this repository's own test fixture — the section list and both version
+maps are verbatim; each `payload` is elided.)*
+
+| Key | Meaning |
+|---|---|
+| `schema_version` | The **document's** version — one integer, currently **`48`**. Top-level so a loader can read it without parsing the rest. |
+| `sections` | The nine named sections. Each carries its own `section_kind`, `section_schema_version` and `payload`. |
+| `section_schema_versions` | A flat map of the same per-section versions, so a reader can check them without walking `sections`. |
+
+Every `dump` invocation produces this, with no flag. Compression
+(`--compression`, see [Storage encoding](#storage-encoding-adr-059)) wraps it
+but never changes it.
+
+> **This is not the same number as the report's.** `schema_version` versions
+> *one library's snapshot*. The JSON `compare` emits is a separate document
+> with its own `report_schema_version`, and the product version
+> (`abicheck --version`) is a third, independent number. See
+> [Two contracts](#two-contracts-snapshot-vs-report).
+
+### Read a snapshot through the public loader
+
+The physical layout is an implementation detail and has already changed once
+(see below). Consumers should go through the supported API, which unwraps the
+envelope and every legacy shape transparently:
+
+```python
+from abicheck.serialization import load_snapshot
+
+snap = load_snapshot("baseline.abi.json")
+snap.library, snap.version, snap.functions, snap.types
+```
+
+`load_snapshot` / `save_snapshot` / `write_snapshot` are the public
+compatibility surface. A consumer doing `json.load(f)["functions"]` is
+reading a physical layout it does not own.
+
+### Reading an older snapshot
+
+The envelope changed at schema **v42**. Two separate compatibility questions
+follow from that, and they have different answers:
+
+| Question | Answer |
+|---|---|
+| Can the current abicheck read a pre-v42 flat `.abi.json`? | **Yes.** `snapshot_from_dict`/`load_snapshot` detect the shape and read it exactly as before. Stored baselines keep working. |
+| Can a pre-v42 abicheck read a current snapshot? | **No.** v42 was bumped specifically so an older reader hard-rejects instead of silently reading every field as absent. |
+| Does an external JSON consumer written against the flat shape still work? | **No.** It sees `sections` where it expected `functions`. Use the loader above. |
+
+Loading an older snapshot **warns**, and the warning is the point:
+
+```text
+UserWarning: Snapshot schema_version 8 predates this abicheck's schema_version 48:
+header_cv_facts_reliable, param_kind_facts_reliable are marked unreliable on this
+snapshot, so the affected detectors will decline to trust these stale facts rather
+than risk a false positive purely from this tool upgrade.
+```
+
+**Loading and re-saving does not upgrade the evidence.** A re-saved snapshot
+carries `schema_version: 48` and the current envelope, but the warning
+persists — it then says so explicitly — and the affected facts stay
+unestablished. Serialization cannot invent evidence an older extractor never
+collected. If you need those facts, **re-run `dump`** against the artifact.
+This is why a release baseline should be regenerated when you upgrade
+abicheck, rather than round-tripped.
+
+## Schema version history
+
+`schema_version` is a single integer, not `MAJOR.MINOR`.
+The current value is **`48`**. See
+`abicheck/storage/snapshot_schema_versions.py`'s `SCHEMA_VERSION` for the
+authoritative, up-to-date value and the full per-version comment.
+
+This section is a lookup aid, not reading material — skip it unless you are
+tracing one specific field back to the version that introduced it.
+
+### Per-version history (v12 onward)
+
+Its history is additive: each bump added fields without
 changing the meaning of existing ones — provenance metadata, PE/Mach-O
 support, build-mode capture, declaration provenance (`source_header`/`origin`),
 embedded build/source evidence, CastXML CV-qualifier reliability, the hybrid
@@ -286,7 +374,7 @@ snapshots produce when compared.
 | gzip | `.abicheck.json.gz` / `.abi.json.gz` | universal interoperability |
 | zstd | `.abicheck.json.zst` / `.abi.json.zst` | **preferred** for baseline/release/cache storage |
 
-`compare`, `scan --against`, and the Python API
+`compare` and the Python API
 (`abicheck.serialization.load_snapshot`) all *read* every encoding
 transparently — detected from magic bytes, not just the filename suffix.
 `abicheck dump` *produces* one: it infers the encoding from `-o/--output`'s
@@ -298,25 +386,30 @@ decompression limits, and what's still deferred).
 
 ### Sectioned packaging (ADR-062/063 Phase 8)
 
-Orthogonal to compression, and likewise never changing anything below this
-line: the payload every `dump`/`write_snapshot` invocation actually writes
-today is this page's flat structure *packaged* into named, independently
-versioned sections (`binary`/`declarations`/`types`/`layout`/`debug`/
-`build`/`graph`/`provenance` — see
-[Project Snapshot Format](project-snapshot-format.md)), not the bare flat
-object shown below. `snapshot_from_dict`/`load_snapshot` unwrap this
-transparently before any of the fields below are read, and an older flat
-`.abi.json` a prior build wrote is still read exactly as it always was —
-this page's field-level contract is unaffected either way; only the
-outermost envelope differs.
+Orthogonal to compression: the envelope shown in
+[What `dump` writes today](#what-dump-writes-today) is this page's field set
+*packaged* into named, independently versioned sections
+(`binary`/`declarations`/`types`/`layout`/`debug`/`build`/`graph`/
+`provenance`/`semantic_ir`). Every `dump`/`write_snapshot` invocation writes
+it; no flag selects it.
+
+`snapshot_from_dict`/`load_snapshot` unwrap it before any field below is
+read, and an older flat `.abi.json` is still read exactly as it always was —
+the field-level contract below is unaffected either way; only the outermost
+envelope differs. The directory-backed content-addressed package is a
+separate, advanced storage shape with its own page: see
+[Project Snapshot Format](project-snapshot-format.md).
 
 ---
 
-## Top-level structure
+## Field reference
 
-A snapshot is a single JSON object. The keys below are the ones written by the
-serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
-(`abicheck/model/snapshot.py`). Optional keys are omitted or `null` when there is no data
+The keys below are the `AbiSnapshot` model's fields
+(`abicheck/model/snapshot.py`), as encoded by the serializer. In the current
+envelope they live inside the matching `sections[...]` payload; in a
+pre-v42 flat document they are top-level. `load_snapshot` presents them
+identically either way, which is why this reference is written against the
+model rather than against either physical layout. Optional keys are omitted or `null` when there is no data
 (for example, a pure-ELF dump has no `dwarf` or `build_source`).
 
 ### Identity and provenance
@@ -334,7 +427,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 | `created_at` | string \| null | ISO 8601 timestamp set at dump time. |
 | `build_id` | string \| null | Opaque CI identifier (run ID, build number). |
 | `contract` | object \| null | ADR-050 D1 extraction-contract fingerprints (schema v14, *verdict-blocking* — see "Forward / backward compatibility" above): `profile_fingerprint`/`scope_fingerprint` plus their named resolved sub-inputs, proving two snapshots were extracted under a comparable profile/scope. `null` when no producer populated it yet. |
-| `dependency_scope` | string \| null | (schema v18) `"filtered"` when the toolchain/system-header exclusion (`dumper_scoping.py`) was applied, `"full"` when opted out via `--include-system-declarations`. `dump` and `compare`'s live-binary dumping (`service.run_dump`) both filter by default (`include_dependencies=False`) and tag `"filtered"`; a Python API caller of `service.run_dump`/`resolve_input` gets the opposite default (`include_dependencies=True`, tagging `"full"`), preserving every existing caller that doesn't opt in explicitly. `scan`'s own candidate is the one exception: it also filters by default, but derives its actual mode from a `--against`/`--baseline` JSON snapshot's own explicit tag (`scan_engine._scan_candidate_include_dependencies`) — unfiltered only when that baseline is itself explicitly tagged `"full"`, since `scan` has no `--include-system-declarations` flag of its own to request that directly. `null` on any pre-v18 snapshot or any snapshot with no header-derived declarations. `comparability.check_contracts_comparable` raises `ScopeMismatchError` only when BOTH sides carry an explicit, non-null value and they differ — `null` is deliberately NOT treated as `"full"` (an ordinary pre-v18 baseline is usually already-filtered content that simply predates this tag; assuming `"full"` for it would spuriously flag the routine "compare a cached baseline against a fresh dump" workflow), so a genuinely ambiguous untagged snapshot is left unchecked on this axis rather than guessed at. |
+| `dependency_scope` | string \| null | (schema v18) `"filtered"` when the toolchain/system-header exclusion (`dumper_scoping.py`) was applied, `"full"` when opted out via `--include-system-declarations`. **Every front end filters by default** (`include_dependencies=False`): the `dump`/`compare` CLI, `service.run_dump` and `InputSpec` all share that default since the 0.6 defaults-alignment pass — before it, a typed-API caller that omitted the field got the *unfiltered* surface while the identical CLI invocation got the filtered one, and the two were not comparable. `null` on any pre-v18 snapshot or any snapshot with no header-derived declarations. `comparability.check_contracts_comparable` raises `ScopeMismatchError` only when BOTH sides carry an explicit, non-null value and they differ — `null` is deliberately NOT treated as `"full"` (an ordinary pre-v18 baseline is usually already-filtered content that simply predates this tag; assuming `"full"` for it would spuriously flag the routine "compare a cached baseline against a fresh dump" workflow), so a genuinely ambiguous untagged snapshot is left unchecked on this axis rather than guessed at. |
 | `header_only` | boolean | (schema v44) `true` only for a snapshot built by the binary-less header-AST dump path — either `dump -H api.h` (no `SO_PATH`/`--sources`/`--build-info`) or a pathless `dump --dump-manifest m.yaml` naming real header-AST roots (workstream F S1, "Header-only comparison"). Explicit, not inferred from `platform`/`from_headers`: a pre-existing `--sources`/`--build-info` source-only dump also has `platform: null`, but carries no header-AST declarations at all. **`public_header_dirs` alone does NOT select this path** — it is a declaration-provenance (public-vs-internal) classifier only, never a source of headers to parse; a binary-less request naming only `public_header_dirs` (no header file, no manifest) is rejected before extraction. `false` (the default) for every snapshot predating this field and every ordinary binary dump. |
 
 ### Compile-context provenance (schema v15, header-AST parses only)
