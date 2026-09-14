@@ -40,7 +40,7 @@ def resolve_dump_depth(
     """Resolve the ``--depth`` dial into the internal collect-mode value.
 
     ``--depth`` is the friendly evidence-depth dial (same vocabulary as
-    ``scan --depth``: binary/headers/build/source); it expands to the
+    ``compare --depth``: binary/headers/build/source); it expands to the
     underlying ADR-033 collect mode via the shared ``scan_levels`` mapping so the
     commands stay consistent. When no depth preset is supplied, the command's
     *default_mode* is returned (``dump`` embeds at ``source-target``;

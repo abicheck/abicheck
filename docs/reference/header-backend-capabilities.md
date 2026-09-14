@@ -15,14 +15,17 @@ generated: false
 abicheck's L2 (header) evidence layer has two interchangeable parsers behind
 one backend selector, plus a merge of the two.
 
-> **Phase 7 note:** `--ast-frontend`/`--allow-ast-frontend-fallback` (and the
-> whole compile-context family this page's exception box discusses, including
-> the per-side `--ast-frontend old=`/`new=` overrides) are CLI options on
-> `scan` only now. On `compare`/`dump` the identical selection is made via
-> `.abicheck.yml`'s `compile.frontend`/`compile.ast_frontend_fallback` keys —
-> the resolution semantics below (auto/fallback/device-context rejection) are
-> unchanged, only the spelling moved. See
-> [Dump & Compare Flags](../use/dump-compare-flags.md).
+> **There is no `--ast-frontend` flag.** The backend selector, and the whole
+> compile-context family this page's exception box discusses, are
+> `.abicheck.yml` keys only — `compile.frontend`,
+> `compile.ast_frontend_fallback`, `compile.allow_unsupported_castxml`. No CLI
+> override survives on any command, and there is no per-side spelling. The
+> resolution semantics below (auto/fallback/device-context rejection) are
+> unchanged; only the spelling moved. The column headings below keep the
+> historical flag spelling as the *name of each backend*; read
+> `compile.frontend: castxml` wherever a table says `--ast-frontend castxml`.
+> See [Dump & Compare Flags](../use/dump-compare-flags.md) and the
+> [Config File Reference](../reference/config-file.md).
 
 | `--ast-frontend` | What runs | When to pick it |
 |------------------|-----------|-----------------|
@@ -119,9 +122,9 @@ Across the 149 fields of the 6 declaration types the two header-AST backends bui
 | `is_explicit_fact` | ✅ Yes | ✅ Yes | ✅ Yes | ADR-063 Phase 5: Fact[bool \| None] sibling of is_explicit. Both backends now construct it directly as an explicit kwarg -- Fact.present(is_explicit) for a Constructor/Method/Converter (castxml) or CXXConstructorDecl/CXXConversionDecl (clang), Fact.not_applicable() otherwise -- since a kind where `explicit` is conceptually inapplicable is a confirmed non-gap, not missing evidence the generic bridge should read as NOT_COLLECTED (Codex review, PR #982). |
 | `is_hidden_friend` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `is_hidden_friend_fact` | ❌ No | ❌ No | ❌ No | Same shape as is_explicit_fact -- see that row's own note. |
-| `source_header` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `scan --public-header-dir`), not by either backend. |
+| `source_header` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `.abicheck.yml`'s `scope.public_header_dirs`), not by either backend. |
 | `source_header_fact` | — n/a | — n/a | — n/a | ADR-063 Phase 5 (fifth batch): Fact[str \| None] sibling of source_header, mirroring RecordType/EnumType/Variable.source_header_fact exactly -- another layer (provenance.tag_provenance()) owns it. |
-| `origin` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `scan --public-header-dir`), not by either backend. |
+| `origin` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `.abicheck.yml`'s `scope.public_header_dirs`), not by either backend. |
 | `is_variadic` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `is_variadic_fact` | ❌ No | ❌ No | ❌ No | Same shape as is_explicit_fact -- see that row's own note. |
 | `contract_attributes` | ✅ Yes | ✅ Yes | ✅ Yes | — |
@@ -158,9 +161,9 @@ Across the 149 fields of the 6 declaration types the two header-AST backends bui
 | `access` | ✅ Yes | ❌ No | ✅ Yes | castxml side wired in G31 Phase C continued (schema v24), reusing the same structured `access` attribute already read for `Function`/`TypeField` — verified against real castxml output that a static class member's `<Variable>` element carries it too. `diff_symbols._diff_var_access` requires `ast_producer == "castxml"` specifically (not "hybrid" — see `AbiSnapshot.castxml_var_access_facts_reliable`'s own docstring) and gates on that reliability flag for the pre-v24-legacy-baseline case. |
 | `access_fact` | ❌ No | ❌ No | ❌ No | ADR-063 Phase 5 (tenth batch): Fact[AccessLevel] sibling of access. NONE for both backends because neither names the keyword -- each passes the real value and Variable.__post_init__'s bridge derives the Fact. Availability is carried by AbiSnapshot.castxml_var_access_facts_reliable. |
 | `elf_visibility` | — n/a | — n/a | — n/a | Read from the binary's own symbol table (`dumper_elf_symbols.py`). |
-| `source_header` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `scan --public-header-dir`), not by either backend. |
+| `source_header` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `.abicheck.yml`'s `scope.public_header_dirs`), not by either backend. |
 | `source_header_fact` | — n/a | — n/a | — n/a | ADR-063 Phase 5 (fourth batch): Fact[str \| None] sibling of source_header, mirroring RecordType.source_header_fact/EnumType.source_header_fact exactly -- another layer (provenance.tag_provenance()) owns it. |
-| `origin` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `scan --public-header-dir`), not by either backend. |
+| `origin` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `.abicheck.yml`'s `scope.public_header_dirs`), not by either backend. |
 | `alignment_bits` | ✅ Yes | ⚠️ Partial | ✅ Yes | castxml reports the compiler-computed alignment for any variable; clang reads only an explicit `alignas`/`__attribute__((aligned))` override, never a type's natural alignment — a tracked gap that leaves `exported_object_alignment_reduced` without corroboration on a clang-only host (see `dumper_clang.py`'s module docstring). |
 | `alignment_bits_fact` | ❌ No | ❌ No | ❌ No | ADR-063 Phase 5 (fourth batch): Fact[int \| None] sibling of alignment_bits. Deliberately NOT constructed as an explicit keyword the way qualified_name_fact is -- neither backend passes it literally at Variable(...) construction; it is correctly derived by the generic bridge_legacy_and_fact bridge in __post_init__ from whatever legacy value the constructor call actually supplies, so NONE here reflects literal-keyword evidence only, not runtime behavior (same shape as RecordType.data_size_bits_fact/is_abstract_fact). |
 | `deprecated` | ✅ Yes | ✅ Yes | ✅ Yes | clang side wired in G31 Phase C (schema v19). |
@@ -215,9 +218,9 @@ Across the 149 fields of the 6 declaration types the two header-AST backends bui
 | `is_final_fact` | ✅ Yes | ✅ Yes | ✅ Yes | ADR-063 Phase 5: `Fact[bool \| None]` sibling of `is_final`. Same convention as `bases_fact`/`vtable_fact` above: both backends construct it directly, as an explicit kwarg (`Fact.present(is_final)`) rather than relying on `RecordType.__post_init__`'s generic legacy-value bridge, since `is_final` is always a concrete bool on the header-AST path (never a placeholder), matching `is_final`'s own row. |
 | `is_template_pattern` | ❌ No | ✅ Yes | ✅ Yes | castxml emits template *instantiations*, never the uninstantiated pattern, so it has nothing to mark. OR-merged by the hybrid merge since PR #719 (a plain bool, not an Optional tri-state -- castxml's own `False` is never itself the backfill trigger the way a `None` is elsewhere in this table) -- verified against real castxml 0.6.3 + clang 18 output that this is empirically inert for the current producer pair, since a clang template pattern never shares a type_map_key with any castxml-matched concrete type; a pattern reaches a hybrid snapshot only through the clang-only append path, which already preserves the flag on its own. |
 | `has_anonymous_aggregate_fields` | ❌ No | ✅ Yes | ✅ Yes | clang flattens an anonymous struct/union into its parent and records that it did, which `dumper_layout_backfill.py` uses when matching DWARF fields. OR-merged by the hybrid merge since PR #719 (same plain-bool OR-merge as `is_template_pattern` above, not the `None`-check pattern) -- unlike that field this one is not provably inert: an opaque/incomplete castxml record could legitimately reach the merge with an empty `fields` list for a genuinely anonymous-aggregate-only record, where clang's `True` is the only signal available. |
-| `source_header` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `scan --public-header-dir`), not by either backend. |
+| `source_header` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `.abicheck.yml`'s `scope.public_header_dirs`), not by either backend. |
 | `source_header_fact` | — n/a | — n/a | — n/a | ADR-063 Phase 5: `Fact[str \| None]` sibling of `source_header`. Same non-header ownership as the legacy field — `provenance.tag_provenance()` keeps both representations in sync via an explicit post-construction update (mirroring `resolve_vptr_offset_bits()`'s pattern), since it sets `source_header` by plain attribute assignment, which never re-runs `RecordType.__post_init__`'s bridge. |
-| `origin` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `scan --public-header-dir`), not by either backend. |
+| `origin` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `.abicheck.yml`'s `scope.public_header_dirs`), not by either backend. |
 | `data_size_bits` | ❌ No | 🔧 Companion tool | 🔧 Companion tool | The tail-padding-excluded size. Neither backend's own parse computes it; it arrives from the layout companion tool or DWARF. |
 | `data_size_bits_fact` | ❌ No | ❌ No | ❌ No | ADR-063 Phase 5: `Fact[int \| None]` sibling of `data_size_bits`. Unlike `bases_fact`/`vtable_fact`/`is_final_fact`, neither backend passes this keyword literally at `RecordType(...)` construction — it is correctly derived by the generic `bridge_legacy_and_fact` bridge in `__post_init__` from whatever legacy value the constructor call (or a later `replace_with_fact_sync` layout backfill — `dumper_layout_backfill.py`, `clang_layout_tool.py`) actually supplies, so `NONE` here reflects literal-keyword evidence, not runtime behavior (see fact_registry.py's own entry for this field's real, correct availability semantics). |
 | `is_standard_layout` | ❌ No | ✅ Yes | ✅ Yes | A semantic trait clang computes independent of any layout pass (`definitionData.isStandardLayout`, present only when true), and one castxml's schema genuinely does not expose. Wiring it in G31 Phase C activated `STANDARD_LAYOUT_LOST`, dead code until then. |
@@ -243,9 +246,9 @@ Across the 149 fields of the 6 declaration types the two header-AST backends bui
 | `members` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `underlying_type` | ✅ Yes | ⚠️ Partial | ✅ Yes | clang reads `fixedUnderlyingType` — the REAL, correct value for a fixed enum (`enum E : short`) — but hard-codes `"int"` for an unfixed enum (Codex review, PR #719, follow-up), since clang's AST JSON exposes no compiler-selected-underlying-type fact for the unfixed case at all; the true value can differ (e.g. `unsigned int`, chosen from the member value range). castxml reads the `<Enumeration type=...>` id, which resolves to the real compiler-picked underlying integer type either way — fixed or implementation-chosen (verified against real castxml 0.6.3 output) — so it stays `_FULL`. Not hybrid-backfilled (see `hybrid_backfilled` above), but since castxml itself is now a real producer, hybrid inherits a real answer instead of the previous silent `int` default. No diff detector reads this field — `enum_underlying_size_changed` is computed from DWARF — but `tu_merge.py`'s ODR conflict check does. |
 | `source_location` | ✅ Yes | ✅ Yes | ✅ Yes | — |
-| `source_header` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `scan --public-header-dir`), not by either backend. |
+| `source_header` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `.abicheck.yml`'s `scope.public_header_dirs`), not by either backend. |
 | `source_header_fact` | — n/a | — n/a | — n/a | ADR-063 Phase 5 (third batch): Fact[str \| None] sibling of source_header, mirroring RecordType.source_header_fact -- another layer (provenance.tag_provenance()) owns it, kept in sync explicitly since it sets source_header by attribute assignment, never re-running __post_init__. |
-| `origin` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `scan --public-header-dir`), not by either backend. |
+| `origin` | — n/a | — n/a | — n/a | Set after parsing by `provenance.apply_provenance()` from the public-header set (`-H`/`--header`, plus `.abicheck.yml`'s `scope.public_header_dirs`), not by either backend. |
 | `is_scoped` | ✅ Yes | ✅ Yes | ✅ Yes | clang side wired in G31 Phase C (schema v19). |
 | `is_scoped_fact` | ❌ No | ❌ No | ❌ No | ADR-063 Phase 5 (ninth batch): Fact[bool \| None] sibling of is_scoped, guarded by the same clang_deprecation_facts_reliable flag its own conversion batch shares. NONE for the same bridge-derived reason as Function.deprecated_fact. |
 | `deprecated` | ✅ Yes | ✅ Yes | ✅ Yes | clang side wired in G31 Phase C (schema v19). |

@@ -134,14 +134,18 @@ application actually uses via `extra-args`:
     extra-args: '--used-by myapp'
 ```
 
-`--used-by <app-binary>` (repeatable) runs the full library comparison once,
-then scopes the primary verdict/exit code to the worst app-affecting result;
-the full verdict and unrelated changes stay as informational context. The
-`OLD`/`NEW` operands may be real library binaries or JSON snapshots that
-carry binary evidence (a `dump` of a real library, not headers-only).
+`--used-by <app-binary>` (repeatable) runs the full library comparison once
+and **reports the consumer's impact beside it — it never replaces the
+verdict or the exit code**, which always describe the full library. The
+consumer's own assessment is carried informationally in the report's
+`consumer_scope` and `used_by` blocks. (An earlier design did swap the
+primary verdict for the app-scoped one; that was reverted — see
+[Application Compatibility](appcompat.md).) The `OLD`/`NEW` operands may be
+real library binaries or JSON snapshots that carry binary evidence (a `dump`
+of a real library, not headers-only).
 
 > The dedicated `used-by` input (space-separated, mutually exclusive with
-> `required-symbol`/`required-symbols`) is available in `v0.6.0`; prefer
+> `required-symbol`/`required-symbols`) is available from `v0.6.0` on; prefer
 > `used-by: myapp` over `extra-args` for the same effect.
 
 ### Version labels
@@ -452,13 +456,23 @@ own page:
 ## Versioning
 
 The action follows [semantic versioning](https://semver.org/). While abicheck
-is pre-1.0, pin an exact release tag (the examples in this guide use the latest,
-`v0.6.0`); a floating major tag is not published yet:
+is pre-1.0, pin an exact release tag; a floating major tag is not published
+yet:
 
 ```yaml
 uses: abicheck/abicheck@v0.6.0     # exact release tag (recommended, reproducible)
 uses: abicheck/abicheck@abc123def  # exact commit SHA (most secure)
 ```
+
+!!! warning "`v0.6.0` is the version these examples require, not the latest published tag"
+    This site is built from `main`, and the examples throughout this guide
+    pin **`v0.6.0`** — the version whose behaviour they document. The latest
+    **published** release is **v{{ latest_published_version }}**. Until
+    `v0.6.0` is tagged, a workflow copied from here will fail to resolve the
+    action. Either pin `v{{ latest_published_version }}` and follow the docs
+    for that release, or wait for the tag. See
+    [Upgrading from 0.5 to 0.6](../start/upgrading-to-0.6.md) for what
+    differs.
 
 **Pin to the commit SHA, not just the tag, whenever the job grants an
 elevated permission** — `security-events: write` (SARIF/Code Scanning

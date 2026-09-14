@@ -91,12 +91,7 @@ def pack_option(f: F) -> F:
         "gate.severity.<category> all apply to every "
         "library uniformly (folded into the release's own resolved "
         "GateOptions); contract.unresolved still needs --contract on that "
-        "release comparison, same as everywhere else. On `scan` "
-        "this requires --against (a pack's only application there is "
-        "the baseline comparison), and a 'kind: gate' pack's "
-        "gate.severity.<category> applies to the baseline "
-        "comparison's exit code the same way --severity-preset "
-        "given directly already does.",
+        "release comparison, same as everywhere else.",
     )(f)
     return f
 

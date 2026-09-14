@@ -1730,68 +1730,13 @@ def test_test_ratio_recursive_discovery(car, tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# M1-4: repo_facts.json / action-version-freshness synthetic tests
+# M1-4: repo_facts.json synthetic tests
+#
+# The `action-version-freshness` check's own tests live in
+# tests/test_action_version_freshness.py -- moved out of this module rather
+# than trimmed, per CLAUDE.md's debt-baseline rule ("move responsibility out
+# to a properly-owned module, never trim the file to fit").
 # ---------------------------------------------------------------------------
-
-
-def test_action_version_freshness_catches_stale_reference(car, tmp_path, monkeypatch):
-    import json
-
-    (tmp_path / "repo_facts.json").write_text(
-        json.dumps({"latest_release": "0.5.0"}), encoding="utf-8"
-    )
-    docs = tmp_path / "docs"
-    docs.mkdir()
-    (tmp_path / "README.md").write_text(
-        "uses: abicheck/abicheck@v0.3.0\n", encoding="utf-8"
-    )
-    monkeypatch.setattr(car, "ROOT", tmp_path)
-    monkeypatch.setattr(car, "DOCS", docs)
-    f = car.Findings()
-    car.check_action_version_freshness(f)
-    assert any("v0.3.0" in msg and "0.5.0" in msg for _, msg in f.errors), f.errors
-
-
-def test_action_version_freshness_passes_when_current(car, tmp_path, monkeypatch):
-    import json
-
-    (tmp_path / "repo_facts.json").write_text(
-        json.dumps({"latest_release": "0.5.0"}), encoding="utf-8"
-    )
-    docs = tmp_path / "docs"
-    docs.mkdir()
-    (tmp_path / "README.md").write_text(
-        "uses: abicheck/abicheck@v0.5.0\n", encoding="utf-8"
-    )
-    monkeypatch.setattr(car, "ROOT", tmp_path)
-    monkeypatch.setattr(car, "DOCS", docs)
-    f = car.Findings()
-    car.check_action_version_freshness(f)
-    assert f.errors == []
-
-
-def test_action_version_freshness_exempts_adr_dir(car, tmp_path, monkeypatch):
-    import json
-
-    (tmp_path / "repo_facts.json").write_text(
-        json.dumps({"latest_release": "0.5.0"}), encoding="utf-8"
-    )
-    docs = tmp_path / "docs"
-    adr_dir = docs / "contribute" / "adr"
-    adr_dir.mkdir(parents=True)
-    (adr_dir / "001-historical.md").write_text(
-        "uses: abicheck/abicheck@v0.3.0\n", encoding="utf-8"
-    )
-    monkeypatch.setattr(car, "ROOT", tmp_path)
-    monkeypatch.setattr(car, "DOCS", docs)
-    # _ACTION_VERSION_EXEMPT_DIRS is computed from DOCS at module-load time
-    # (like REQUIRED_CLAUDE_MD_DIRS etc.), so monkeypatching DOCS alone
-    # doesn't retroactively change it — patch it directly, same pattern used
-    # for the other module-level dir tuples in this file.
-    monkeypatch.setattr(car, "_ACTION_VERSION_EXEMPT_DIRS", (adr_dir,))
-    f = car.Findings()
-    car.check_action_version_freshness(f)
-    assert f.errors == []
 
 
 def test_repo_facts_json_exists_and_is_fresh():

@@ -7,15 +7,24 @@ lifecycle: migration
 generated: false
 ---
 
-# Migrating to the Current CLI (pre-1.0)
+# Historical CLI Migrations (pre-0.5 and 0.5-era)
 
-abicheck's CLI went through two rounds of change before 1.0: a 0.5.0 flag
+!!! info "Upgrading from the latest published release? Start elsewhere."
+    **[Upgrading from 0.5 to 0.6](../start/upgrading-to-0.6.md) is the
+    authoritative migration guide** and the only page that describes the
+    *current* CLI. This page is a historical record of the two earlier
+    resets, kept for anyone migrating a command line written against
+    **0.4.x or earlier**. Every mapping below is labelled with the release
+    that made it, and a replacement named here may itself have been
+    superseded by 0.6 — always cross-check the 0.6 guide before adopting one.
+
+abicheck's CLI went through two rounds of change before 0.6: a **0.5.0** flag
 reset ([ADR-040](../contribute/adr/040-compare-surface-reduction.md)) that
-reshaped `compare`'s flags, followed by a larger command-surface reset
+reshaped `compare`'s flags, and a **0.5-era** command-surface reset
 ([ADR-043](../contribute/adr/043-cli-pre-1.0-surface-reset.md)) that removed
 or folded most of the standalone companion commands. This page is the
-combined map: which commands survive, which became flags, which are gone,
-and which flags/inputs were renamed.
+combined map for those two: which commands survived them, which became
+flags, which were gone by 0.5, and which flags/inputs were renamed.
 
 ## Removed commands
 
@@ -25,7 +34,7 @@ that's noted — none of these are documented as a public CLI path anymore.
 
 | Deleted command | Status |
 |---|---|
-| `baseline` (registry group: push/pull/list/delete) | No replacement command. Use `scan --against OLD` for point-in-time comparisons, or keep JSON snapshots yourself (plain files, your own storage/naming convention). See [Baseline Management](baseline-management.md). |
+| `baseline` (registry group: push/pull/list/delete) | No replacement command. Use `compare OLD NEW` for point-in-time comparisons, or keep JSON snapshots yourself (plain files, your own storage/naming convention). See [Baseline Management](baseline-management.md). |
 | `collect`, `merge`, `recommend-collect-mode` | Gone from the CLI. `dump --sources`/`--build-info` auto-collects build/source evidence inline; `compare` auto-ingests each side's embedded build-source pack, or an out-of-band pack via `--build-info old=PATH`/`--build-info new=PATH` (auto-detects `abicheck_inputs/` packs too). Library functions survive for internal/programmatic use only. |
 | `debian-symbols` | No CLI replacement. Library functions still exist in `abicheck/debian_symbols.py` (`generate_symbols_file`, `validate_symbols`, `diff_symbols_files`, `parse_symbols_file`, etc.) for programmatic/Python API use only. See [Debian Symbols](debian-symbols.md). |
 | `doctor` | No replacement command. |
@@ -35,7 +44,7 @@ that's noted — none of these are documented as a public CLI path anymore.
 | `graph compare` / `graph explain` | No replacement command. |
 | `pr-comment` | Moved off the public CLI. Now invoked only as `python -m abicheck.cli_pr_comment`, used internally by the GitHub Action — not a documented end-user command. |
 | `suggest-suppressions` | No replacement command. |
-| `probe` (`probe run`, etc.) | No replacement command. `compare --probe-matrix` still consumes a previously captured matrix snapshot file, but there's no CLI to *generate* one anymore. |
+| `probe` (`probe run`, etc.) | No replacement command, and no CLI to *generate* a probe matrix any more. A previously captured matrix snapshot is consumed as one of `--build-info`'s transports (`compare --build-info m.json`); the separate `--probe-matrix` spelling that once did this was itself removed in 0.6 — see [Upgrading to 0.6 §C4](../start/upgrading-to-0.6.md#c4-build-probe-evidence). |
 
 ## Folded into `compare` flags
 
@@ -64,10 +73,18 @@ examples as the ones that matter, this page only summarizes the mapping.
 
 ## Removed scan axes (`s0…s6`, `--mode`, `--source-method`, `--max`)
 
+!!! warning "`scan` itself no longer exists"
+    The `scan` command was retired outright in 0.6 (ADR-068 Phase 6).
+    `abicheck scan` exits `64`. The table below is a **historical**
+    evidence-axis mapping, useful for reading an old command line; its
+    `--depth` right-hand column is still the live spelling, but it now
+    belongs to `compare`. See
+    [Upgrading to 0.6 §A1](../start/upgrading-to-0.6.md#a1-scan-is-retired).
+
 Earlier releases let you pick evidence in two other ways. As of the ADR-043
-pre-1.0 CLI reset, both are **removed outright, not deprecated** — `scan`
-no longer accepts `--mode`/`--source-method`/`--max` at all; passing any of
-them is a plain "no such option" usage error (exit 64), same as any other
+CLI reset, both were **removed outright, not deprecated** — `scan`
+stopped accepting `--mode`/`--source-method`/`--max` at all; passing any of
+them was a plain "no such option" usage error (exit 64), same as any other
 unrecognized flag. There is no warn-and-map compatibility shim: this table is
 here only for anyone migrating an old command line, not as a live alias list.
 The internal `s0`…`s6` / `ScanMode` vocabulary still exists inside the engine
@@ -85,7 +102,7 @@ reports, the config schema, or GitHub Action inputs. Prefer `--depth`.
 | `s2` | preprocessor macro/include capture | folded into `--depth build` (runs when `clang -E` + a compile DB are present) |
 | `s4` | symbol/reference index → the *cheap* L5 structural graph (no L4 replay, no call edges) | **no user-facing `--depth` rung**: the graph-only level is internal. `--depth source` gives L5 edges but pays for the L4 replay; there is no cheap graph-only depth |
 | `s5` | semantic AST replay of changed TUs (L4) | `--depth source` |
-| `s6` | full AST replay of all TUs (L4) | `--depth source` — the old `full` rung collapsed into `source` (ADR-043 D6); they only ever differed in replay *scope*, and `scan --depth source` with no `--since`/`--changed-path` seed already analyses the whole target, matching what `s6`/`full` used to give |
+| `s6` | full AST replay of all TUs (L4) | `--depth source` — the old `full` rung collapsed into `source` (ADR-043 D6); they only ever differed in replay *scope*, and `--depth source` with no `--since`/`--changed-path` seed already analyses the whole target, matching what `s6`/`full` used to give |
 
 **`--mode`** presets:
 
@@ -94,13 +111,13 @@ reports, the config schema, or GitHub Action inputs. Prefer `--depth`.
 | `pr` | diff-seeded L4 replay (per-PR gate) | `--depth source --since <ref>` — pin the rung; omitting `--depth` resolves to `headers` and collects no L4 evidence at all |
 | `pr-deep` | `pr` + the *whole-library* L5 reachability graph (`GRAPH`) | no exact `--depth` equivalent — the full graph is internal-only. `--depth source` gives the change-scoped edges; the full-graph preset is reachable only via the internal Python service API now |
 | `baseline` | whole-library replay of a release | `--depth source` with no `--since`/`--changed-path` seed (resolves to TARGET scope — the whole current library target, ADR-043 D7) |
-| `audit` | intra-version hygiene lint, no baseline | omit `--against` — the always-on hygiene/cross-source checks run on every scan regardless, and omitting `--against` is already a one-build audit (the old standalone `--audit` flag was itself removed as redundant, ADR-043 D5) |
+| `audit` | intra-version hygiene lint, no baseline | `compare --no-baseline NEW` (the old standalone `--audit` flag was removed as redundant in ADR-043 D5; `scan` with no `--against` then took its place, and 0.6 moved that onto `compare`). **Note the gate change**: `--severity-preset` is now required to make the audit gate — see [Upgrading to 0.6 §A2](../start/upgrading-to-0.6.md#a2-re-arming-an-audit-gate) |
 
 `--source-method auto`'s **risk-driven escalation is gone**, not relocated:
 ADR-068's second 2026-09-09 amendment retired it along with `--risk-rules`
-(ruling (b)). Omitting `--depth` still means `auto`, but `auto` now resolves
+(ruling (b)). Omitting `--depth` still means `auto`, but `auto` resolves
 to the fixed `headers` rung — the same default `compare` uses — so a workflow
-that relied on a high-risk diff escalating itself to `build`/`source` must now
+that relied on a high-risk diff escalating itself to `build`/`source` must
 pin that rung explicitly.
 
 ## Still commands today
@@ -113,13 +130,13 @@ Some of the old companion functionality survives as a **command**:
 | [`deps compare`](#deps-compare) | Diff a binary's full dependency stack across two environments (was `stack-check`). |
 | `compat check` / `compat dump` | ABICC-compatible drop-in replacement commands — see [Migrating from ABICC](from-abicc.md) if you're moving from `abi-compliance-checker`. |
 
-The CLI surface today has five core per-library analysis commands
-(`compare`, `compat`, `deps`, `dump`, `scan`) plus project-orchestration
-commands — `aggregate` and the `project` group (`project plan`/`project
-validate`, ADR-054) — that compose those five
-across a multi-target project — neither group is part of the
+The root surface **today** is `dump`, `compare`, `deps`, `compat`,
+`aggregate` and `project` — `scan` was retired in 0.6. None of the
+orchestration commands (`aggregate`, the `project` group) are part of the
 companion-command consolidation this page describes; see the
-[CLI Reference](../reference/cli-reference.md) for the full command tree.
+[CLI Reference](../reference/cli-reference.md) for the full current command
+tree, and [Upgrading to 0.6](../start/upgrading-to-0.6.md) for what changed
+most recently.
 
 ### `deps tree`
 
@@ -199,9 +216,8 @@ Notes:
 - The **version** flag defaults per side stay `old` / `new` — pass `--version`
   only when your `.so` files need explicit labels.
 - The `--ast-frontend` per-side overrides (`--ast-frontend old=` /
-  `--ast-frontend new=`) are **gone from `compare`/`dump`** (Phase 7, CONFIG
-  class, no CLI override survives) — `scan` still carries the full family
-  unchanged. See "Config removal (Phase 7)" below.
+  `--ast-frontend new=`) are **gone** (Phase 7, CONFIG class, no CLI
+  override survives on any command). See "Config removal (Phase 7)" below.
 
 ### Config removal (Phase 7)
 
@@ -219,7 +235,7 @@ removed outright rather than left hidden). See the
 | `--dwarf-only` | `debug.dwarf_only: true` |
 | `--debuginfod` | `debug.debuginfod: true` |
 | `--debuginfod-url URL` | `debug.debuginfod_url: URL` |
-| `dump --pdb-path` | `debug.pdb_path: PATH` (`compare`'s own sided `--pdb-path old=`/`new=` flag is unaffected) |
+| `dump --pdb-path` | `debug.pdb_path: PATH`. **No `--pdb-path` survives on any command**, and the config key is a single value — there is no per-side PDB input. |
 | `--ast-frontend` | `compile.frontend: castxml\|clang\|hybrid\|auto` |
 | `--allow-ast-frontend-fallback` | `compile.ast_frontend_fallback: true` |
 | `--allow-unsupported-castxml` | `compile.allow_unsupported_castxml: true` |
@@ -256,8 +272,7 @@ earlier and has no CLI spelling left either.
 debug-artifact override, side-aware, and since Phase 7n the whole
 separate-debug-info role — see the table above); and
 `--scope-public-headers` / `--no-scope-public-headers` (the everyday on/off
-switch for public-surface scoping). `scan` is unaffected by any row in the
-table above — it keeps every one of these flags as a real CLI option.
+switch for public-surface scoping).
 
 ### Run profiles: added, then removed
 
@@ -279,6 +294,7 @@ flags internally. No workflow edits were needed for Action users at the time.
 
 ## Related pages
 
+- **[Upgrading from 0.5 to 0.6](../start/upgrading-to-0.6.md) — the authoritative current migration**
 - [CLI Usage](cli-usage.md) — the core `dump`/`compare` flow
 - [Application Compatibility](appcompat.md) — `compare --used-by`
 - [Plugin & Host Systems](plugin-systems.md) — `compare --required-symbol(s)`

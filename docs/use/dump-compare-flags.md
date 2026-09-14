@@ -15,8 +15,7 @@ resolving debug info that isn't in the binary itself.
 ## Language mode
 
 By default castxml uses C++ mode. For pure C libraries, set `compile.lang`
-in `.abicheck.yml` (Phase 7: there is no `--lang` flag on `dump`/`compare`
-any more — `scan` still has one):
+in `.abicheck.yml`. There is no `--lang` flag on any command:
 
 ```yaml
 # .abicheck.yml
@@ -64,8 +63,7 @@ cross-toolchain in `.abicheck.yml`'s `compile:` block. Phase 7
 off `dump`/`compare`'s CLI entirely — a stable project/toolchain property,
 not a per-run choice — so there is **no `--compiler`/`--compiler-prefix`/
 `--compiler-option`/`--sysroot`/`--nostdinc`/`--ast-frontend`/`--lang` flag
-left on those two commands at all (`scan` still has every one of them as a
-CLI flag, unaffected by this change):
+left on any command at all:
 
 ```yaml
 # .abicheck.yml
@@ -119,13 +117,11 @@ the PE/Mach-O header parse alike. A malformed **explicit** `--config` fails loud
 rather than silently dropping the settings; an auto-discovered one warns and falls
 back.
 
-`scan` keeps the CLI flags this section used to document for `dump`/`compare`
-too (`--compiler`/`--compiler-prefix`/`--compiler-option`/`--sysroot`/
-`--nostdinc`/`--ast-frontend`/`--lang`), still overriding the same `compile:`
-block (`CLI > config`) — the per-side `--ast-frontend old=`/`--ast-frontend
-new=` sided override is a `scan`/legacy-CLI-only concept `compare` never
-regains under Phase 7, since there is no CLI spelling left there to be sided
-at all.
+There is **no** surviving CLI override for any key in this block, on any
+command, and no per-side spelling: the sided `--ast-frontend old=`/`new=`
+override is gone too, since there is no CLI spelling left to be sided. A
+script still passing one of these flags exits `64` — see
+[Upgrading from 0.5 to 0.6 → compiler/frontend](../start/upgrading-to-0.6.md#c1-compiler-frontend).
 
 ## Build-context capture (`compile_commands.json`) — evidence layer L3
 

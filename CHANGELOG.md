@@ -22,7 +22,14 @@ They are consolidated into a concise release summary when a version ships.
 
 <!-- scriv-insert-here -->
 
-## [0.6.0] — 2026-09-13
+## [0.6.0] — not yet released
+
+> **This release has not been published.** The latest release on PyPI,
+> conda-forge and GitHub Releases is **0.5.0**. The entries below describe
+> what `main` currently carries and will ship as `0.6.0`; the date will be
+> filled in when the tag is cut. See
+> [Upgrading from 0.5 to 0.6](docs/start/upgrading-to-0.6.md) for the
+> migration.
 
 ### Comparison, release, and assurance
 
@@ -241,8 +248,8 @@ They are consolidated into a concise release summary when a version ships.
   pin versions in automation and keep source/debug artifacts alongside the
   binaries being checked.
 
-[Unreleased]: https://github.com/abicheck/abicheck/compare/v0.6.0...HEAD
-[0.6.0]: https://github.com/abicheck/abicheck/releases/tag/v0.6.0
+[Unreleased]: https://github.com/abicheck/abicheck/compare/v0.5.0...HEAD
+[0.6.0]: https://github.com/abicheck/abicheck/compare/v0.5.0...HEAD
 [0.5.0]: https://github.com/abicheck/abicheck/releases/tag/v0.5.0
 [0.4.0]: https://github.com/abicheck/abicheck/releases/tag/v0.4.0
 [0.3.0]: https://github.com/abicheck/abicheck/releases/tag/v0.3.0

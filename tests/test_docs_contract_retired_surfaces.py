@@ -353,6 +353,121 @@ def test_a_backslash_continued_command_is_joined_before_matching(
     assert "suppression.strict" in f.warnings[0][1]
 
 
+def test_a_bare_list_typed_config_key_is_flagged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A *list*-typed key is spelled without a trailing colon, so the
+    colon-anchored pattern never saw it.
+
+    This is not hypothetical: `docs/use/output-formats.md` shipped
+    ``abicheck compare old.so new.so --scope-public-headers
+    scope.public_symbols my_asm_stub`` and this check passed on it. Two
+    sibling keys are exercised, not only the one that shipped.
+    """
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    for key in ("scope.public_symbols", "sources.public_headers"):
+        _page(
+            tmp_path,
+            "# Page\n\n```bash\nabicheck compare old.so new.so "
+            "--scope-public-headers \\\n"
+            f"    {key} my_asm_stub\n```\n",
+        )
+        f = dc.Findings()
+        dc._check_config_keys_as_cli_operands(f)
+        assert len(f.warnings) == 1, (key, f.warnings)
+        assert key in f.warnings[0][1]
+
+
+def test_a_bare_token_that_is_not_a_real_config_key_is_not_flagged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The bare-token variant matches only against `BuildConfig`'s real key
+    set. Without that restriction it would flag every ordinary operand, since
+    `libfoo.so`/`foo.h`/`compile_commands.json` all have the same shape."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    _page(
+        tmp_path,
+        "# Page\n\n```bash\nabicheck compare old.so new.so "
+        "-H foo.h --build-info compile_commands.json\n```\n",
+    )
+    f = dc.Findings()
+    dc._check_config_keys_as_cli_operands(f)
+    assert f.warnings == [], f.warnings
+
+
+def test_a_bare_list_typed_config_key_in_extra_args_is_flagged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`extra-args` is raw argv by another name, so it fails identically --
+    and it is one branch over from the command-line scan, which is where the
+    bare-key variant was originally added and *only* added (Codex review).
+
+    The two branches now share one matcher (`_config_keys_in`), so this is
+    the test that stops them drifting again: a spelling recognised on a
+    command line must be recognised here.
+    """
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    _page(
+        tmp_path,
+        "# Page\n\n```yaml\n- uses: abicheck/abicheck@v0.6.0\n  with:\n"
+        "    extra-args: 'scope.public_symbols my_stub'\n```\n",
+    )
+    f = dc.Findings()
+    dc._check_config_keys_as_cli_operands(f)
+    assert len(f.warnings) == 1, f.warnings
+    assert "scope.public_symbols" in f.warnings[0][1]
+    assert "extra-args" in f.warnings[0][1]
+
+
+def test_both_branches_recognise_the_same_spellings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The drift itself, stated as an invariant over both spellings and both
+    branches rather than as two fixed examples.
+
+    Every (spelling, branch) cell must flag. Asserting the whole matrix at
+    once is what catches a future change that adds a spelling to one branch
+    and forgets the other -- the original defect -- instead of only the one
+    cell a reviewer happened to name.
+    """
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    spellings = {
+        "colon": "severity.addition: error",
+        "bare-list": "scope.public_symbols my_stub",
+    }
+    branches = {
+        "command": "# Page\n\n```bash\nabicheck compare old.so new.so {v}\n```\n",
+        "extra-args": "# Page\n\n```yaml\n    extra-args: '{v}'\n```\n",
+    }
+    missed = []
+    for sname, value in spellings.items():
+        for bname, template in branches.items():
+            _page(tmp_path, template.format(v=value))
+            f = dc.Findings()
+            dc._check_config_keys_as_cli_operands(f)
+            if not f.warnings:
+                missed.append((sname, bname))
+    assert not missed, f"unflagged (spelling, branch) cells: {missed}"
+
+
+def test_the_known_config_key_set_is_not_empty(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Vacuity guard on the bare-token scan's own oracle.
+
+    `_known_config_keys()` degrades to an empty set when the package will
+    not import, which silently disables the whole variant above -- the two
+    tests before this one would still pass in full (one asserts a warning
+    from a *page* built around a key, the other asserts no warning). Assert
+    the set is real and carries the key that produced the original defect.
+    """
+    import config_key_operands
+
+    keys = config_key_operands._known_config_keys()
+    assert "scope.public_symbols" in keys
+    assert len(keys) > 20, sorted(keys)
+
+
 def test_a_config_key_in_extra_args_is_flagged(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

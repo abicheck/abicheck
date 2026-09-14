@@ -72,8 +72,25 @@ JUnit-specific redundancy metadata is emitted.
 ## Public-header surface scoping
 
 Public-header surface scoping (ADR-024) restricts findings to the *public* ABI
-surface — the symbols exported **and** declared in the public headers you
-supplied, plus the types reachable from them. Changes that fall outside that
+surface, plus the types reachable from it.
+
+"Public" is **not** simply "exported AND declared". abicheck models three
+independent facts per declaration, each answerable `true` / `false` /
+`unknown`:
+
+| Fact | Question |
+|---|---|
+| `declared_in_headers` | Does a declaration for it exist in the headers this run parsed? |
+| `in_public_contract` | Does it belong to the promised public contract for this run's scope/contract selection? |
+| `binary_exported` | Does the artifact's export table carry a symbol for it? |
+
+They are reported per finding under `surface_facts` (report schema 4.4). The
+distinction is load-bearing, not pedantic: a **public inline or header-only
+declaration** is genuinely `declared_in_headers: true`,
+`in_public_contract: true`, `binary_exported: false` — it is part of your
+public API and has no exported symbol. A two-fact "exported AND declared"
+model explains it out of existence. Likewise, a headerless snapshot answers
+`declared_in_headers: unknown`, which is not the same as `false`. Changes that fall outside that
 surface (e.g. a layout change to an internal struct no public API references)
 are **not dropped**: they are moved to an audit ledger so the "why was this
 excluded" trail stays inspectable. Internal-type leaks are never filtered.
@@ -85,7 +102,9 @@ reported, so the default never hides anything it cannot place. Pass
 `--no-scope-public-headers` to force the unscoped report (every finding,
 regardless of surface).
 
-Use `--show-filtered` to print the ledger on the terminal.
+The ledger is **always** reported — there is no switch. (`--show-filtered`
+was removed; the scope/reconciliation ledger, the pattern-modulation ledger
+and the `--suppress` audit are unconditional, ADR-067.)
 
 ### Widening the surface (`scope.public_symbols`)
 
@@ -95,15 +114,28 @@ MSVC mangling castxml can't match. The **widening overlay** (ADR-024 §D6) force
 such symbols back into the public surface so their changes are reported rather
 than demoted:
 
-```bash
-# Force individual symbols (repeatable), à la abi-compliance-checker -symbols-list
-abicheck compare old.so new.so --scope-public-headers \
-    scope.public_symbols my_asm_stub scope.public_symbols _ZN3foo3barEv
+`scope.public_symbols` is a **`.abicheck.yml` key, not a command-line
+argument**. The per-run CLI spellings it replaced no longer exist (see
+[Upgrading to 0.6 §C3](../start/upgrading-to-0.6.md#c3-header-development-package-inputs)),
+so a project states this once:
 
-# Or from a file (one symbol per line; '#' comments and blank lines ignored)
-abicheck compare old.so new.so --scope-public-headers \
-    scope.public_symbols public.syms
+```yaml
+# .abicheck.yml
+scope:
+  public: true
+  public_symbols:
+    - my_asm_stub
+    - _ZN3foo3barEv
 ```
+
+```bash
+abicheck compare old.so new.so --scope-public-headers --config .abicheck.yml
+```
+
+Entries match **exactly** — the raw symbol, or a qualified name's trailing
+`::` segment (so `foo` also matches `ns::foo`). Globs are not supported
+(`mylib_*` matches nothing); list each symbol. See
+[Config File Reference](../reference/config-file.md#scope).
 
 Matching is on the symbol as recorded on the finding (mangled or demangled),
 plus the trailing `::` segment of a qualified name. Widening only ever *keeps* a
@@ -148,8 +180,7 @@ itself (ADR-024 §D5.3), distinct from the overall verdict confidence:
   as `scope_fallback`), or `no-provenance` (the surface resolved without any
   declaration provenance).
 
-**Text**: With `--show-filtered`, an audit block on stderr (the reason is shown
-in parentheses):
+**Text**: an audit block on stderr (the reason is shown in parentheses):
 ```text
 Filtered as non-public ABI surface (1 finding, --scope-public-headers):
   - type_size_changed: InternalCache (non-public-type)
