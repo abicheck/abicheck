@@ -829,11 +829,17 @@ class TestUnitTestsPerPlatformTimeout:
         )
 
 
-# --- ci.yml's unit-tests job log volume -----------------------------------
+# --- ci.yml's test-running jobs: log volume --------------------------------
+
+#: Every ci.yml job that runs the pytest suite. `slow-tests` was a step of
+#: `unit-tests` until it was split into its own concurrently-running job; the
+#: guards below are written over both so the split did not quietly drop the
+#: slow lane's invocations out of their coverage.
+_PYTEST_JOBS = ("unit-tests", "slow-tests")
 
 
 class TestUnitTestJobLogVolume:
-    """Every `pytest` invocation in ci.yml's `unit-tests` job must stay quiet.
+    """Every `pytest` invocation in ci.yml's suite-running jobs must stay quiet.
 
     `-v` prints one line per test; on a ~26k-test suite spread over five
     matrix legs that is enough console output for GitHub to truncate the
@@ -850,18 +856,21 @@ class TestUnitTestJobLogVolume:
         yaml = pytest.importorskip("yaml")
         workflow = yaml.safe_load(_read(".github/workflows/ci.yml"))
         commands: list[str] = []
-        for step in workflow["jobs"]["unit-tests"]["steps"]:
-            for line in str(step.get("run", "")).splitlines():
-                line = line.strip()
-                if line.startswith("pytest "):
-                    commands.append(line)
-        assert commands, "no pytest invocation found in ci.yml's unit-tests job"
+        for job in _PYTEST_JOBS:
+            found = False
+            for step in workflow["jobs"][job]["steps"]:
+                for line in str(step.get("run", "")).splitlines():
+                    line = line.strip()
+                    if line.startswith("pytest "):
+                        commands.append(line)
+                        found = True
+            assert found, f"no pytest invocation found in ci.yml's {job} job"
         return commands
 
     def test_no_invocation_is_verbose(self) -> None:
         offenders = [c for c in self._invocations() if " -v" in f" {c} "]
         assert not offenders, (
-            "ci.yml's unit-tests job must not run pytest verbosely — one line "
+            "ci.yml's suite-running jobs must not run pytest verbosely — one line "
             f"per test truncates the CI log: {offenders}"
         )
 
@@ -900,11 +909,37 @@ class TestUnitTestJobLogVolume:
             )
 
     def test_result_files_are_unique_per_matrix_leg(self) -> None:
-        for command in self._invocations():
-            path = self._junit_path(command)
-            assert "runner.os" in path and "matrix.python-version" in path, (
-                f"JUnit XML path must vary per OS/Python leg, else matrix legs "
-                f"collide in the upload artifact: {path}"
+        # Scoped to the matrix job. `slow-tests` runs one fixed configuration,
+        # so it has no `matrix` context to interpolate and nothing to collide
+        # with -- but it must still not reuse the matrix job's own artifact
+        # name, which the sibling assertion below pins.
+        yaml = pytest.importorskip("yaml")
+        workflow = yaml.safe_load(_read(".github/workflows/ci.yml"))
+        for step in workflow["jobs"]["unit-tests"]["steps"]:
+            for line in str(step.get("run", "")).splitlines():
+                if not line.strip().startswith("pytest "):
+                    continue
+                path = self._junit_path(line.strip())
+                assert "runner.os" in path and "matrix.python-version" in path, (
+                    f"JUnit XML path must vary per OS/Python leg, else matrix "
+                    f"legs collide in the upload artifact: {path}"
+                )
+
+    def test_the_slow_job_writes_its_own_distinct_result_files(self) -> None:
+        yaml = pytest.importorskip("yaml")
+        workflow = yaml.safe_load(_read(".github/workflows/ci.yml"))
+        paths = [
+            self._junit_path(line.strip())
+            for step in workflow["jobs"]["slow-tests"]["steps"]
+            for line in str(step.get("run", "")).splitlines()
+            if line.strip().startswith("pytest ")
+        ]
+        assert paths, "the slow-tests job writes no JUnit XML"
+        assert len(set(paths)) == len(paths), f"results would overwrite: {paths}"
+        for path in paths:
+            assert path.startswith("test-results-slow"), (
+                "the slow job's results must be distinguishable from the unit "
+                f"lane's in the uploaded artifacts: {path}"
             )
 
     def test_the_coverage_table_skips_fully_covered_modules(self) -> None:
@@ -913,3 +948,54 @@ class TestUnitTestJobLogVolume:
         for command in covered:
             assert "--cov-report=term:skip-covered" in command, command
             assert "--cov-report=term-missing" not in command, command
+
+
+class TestTheSlowLaneHasExactlyOneOwner:
+    """The `slow` marker lane is required, runs once, and runs on its own.
+
+    Splitting it out of `unit-tests` is only a critical-path win if it is not
+    *also* still run there; and it is only safe if something still runs it at
+    all. Both halves are asserted structurally rather than trusted to review,
+    because a partial revert of either side is invisible in a green run --
+    duplicating the work looks like a pass, and dropping it looks like a pass
+    too.
+    """
+
+    @staticmethod
+    def _job_invocations(job: str) -> list[str]:
+        yaml = pytest.importorskip("yaml")
+        workflow = yaml.safe_load(_read(".github/workflows/ci.yml"))
+        return [
+            line.strip()
+            for step in workflow["jobs"][job]["steps"]
+            for line in str(step.get("run", "")).splitlines()
+            if line.strip().startswith("pytest ")
+        ]
+
+    def test_the_slow_tests_job_runs_both_slow_invocations(self) -> None:
+        commands = self._job_invocations("slow-tests")
+        parallel = [c for c in commands if '-m "slow"' in c and "-n auto" in c]
+        serial = [
+            c
+            for c in commands
+            if '-m "slow"' in c and "-n auto" not in c and "test_performance.py" in c
+        ]
+        assert parallel, f"the parallel slow lane is not run anywhere: {commands}"
+        assert serial, (
+            "the wall-clock-timed perf tests must still run, and serially "
+            f"(concurrency makes scheduler contention part of the measurement): {commands}"
+        )
+
+    def test_unit_tests_no_longer_runs_the_slow_lane(self) -> None:
+        offenders = [c for c in self._job_invocations("unit-tests") if '-m "slow"' in c]
+        assert not offenders, (
+            "the slow lane moved to its own `slow-tests` job; running it in "
+            f"`unit-tests` too puts it back on that job's critical path: {offenders}"
+        )
+
+    def test_the_unit_lane_still_excludes_slow_tests(self) -> None:
+        # The complement: `unit-tests` must keep *excluding* the marker, or the
+        # split silently turns into the slow tests running twice.
+        commands = self._job_invocations("unit-tests")
+        offenders = [c for c in commands if "not slow" not in c]
+        assert not offenders, f"unit-tests must exclude the slow marker: {offenders}"

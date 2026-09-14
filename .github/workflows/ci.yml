@@ -278,6 +278,25 @@ jobs:
       # agreement: it probes what coverage.py actually selects and fails if
       # this is requested under a configuration where it silently falls
       # back without the repo saying so.
+      #
+      # That move was measured and is BLOCKED -- do not re-attempt it as a
+      # speedup without re-measuring the floor first. On 3.14.0rc2 with
+      # coverage 7.16.0, `COVERAGE_CORE=sysmon` does engage under
+      # `branch = true` (`tracer_name()` reports `SysMonitor`, no fallback
+      # warning) and removes essentially all instrumentation overhead: on a
+      # 2,173-test subset, uninstrumented 21.9s / sysmon 19.9s / CTracer
+      # 35.1s, and on the full canonical selection at `-n 4`, 12m15s against
+      # 17m30s on 3.13 -- a ~30% reduction. But the same two full runs, same
+      # selection, same machine, near-identical test counts (48,708 vs
+      # 48,710 passed, with `repo_facts.json`'s `canonical_python` flipped so
+      # the canonical-only cases actually ran), report 93.73% on 3.14 against
+      # 96.30% on 3.13: 1,339 fewer branches covered, below this lane's 95%
+      # floor. The gap is interpreter-specific, not a backend artifact -- on
+      # one interpreter the two cores agree to four decimal places on the
+      # total and differ by a single branch arc in each direction. Lowering
+      # the floor to buy the speedup is not an option, so the lane stays on
+      # 3.13 until that 2.57 points is understood and closed, which is its
+      # own investigation.
       COVERAGE_CORE: sysmon
     strategy:
       fail-fast: false
@@ -376,6 +395,86 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           pytest tests/ -q --tb=short -r fE -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25 --durations-min=1 --junitxml=test-results-${{ runner.os }}-py${{ matrix.python-version }}.xml
+      - name: Test-time report (slowest tests → run summary)
+        # Renders the captured durations into the GitHub run summary. Reporting
+        # only — a hard per-test wall-time gate would be flaky given CI-runner
+        # variance; the uploaded artifact is the durable record for trends.
+        # continue-on-error keeps it truly non-blocking: a hiccup rendering the
+        # report must never fail an otherwise-green test job.
+        if: always() && matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
+        continue-on-error: true
+        run: python scripts/summarize_test_durations.py test-durations.json --top 25
+      - name: Upload test-durations artifact
+        if: always() && matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: test-durations
+          path: test-durations.json
+          if-no-files-found: ignore
+      - name: Upload JUnit test results
+        # `if: always()` on purpose: the failing run is the one whose result
+        # file is worth reading, and `-q` above deliberately keeps the console
+        # log short, so this XML is the durable per-test record. One artifact
+        # name per OS/Python leg, since a shared name would have the matrix
+        # legs overwrite each other.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: test-results-${{ runner.os }}-py${{ matrix.python-version }}
+          path: test-results-*.xml
+          if-no-files-found: ignore
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v7
+        with:
+          use_oidc: true
+          files: coverage.xml
+          flags: unit
+          fail_ci_if_error: false
+
+
+  slow-tests:
+    # Split out of `unit-tests`' canonical (ubuntu, 3.13) leg, where it ran as
+    # a step *after* the coverage-collecting main suite and so sat on that
+    # job's critical path: on run 34787831201 the main test step took 22m58s
+    # and this step a further 3m38s, serialized behind it for no reason —
+    # nothing it runs depends on the main suite's result, and it collects no
+    # coverage (the canonical lane's 95% floor is measured by `unit-tests`
+    # alone and is unaffected by this move). As its own job it runs
+    # concurrently instead, taking its wall time off the longest job in the
+    # workflow rather than adding to it. Total compute is unchanged; what
+    # changes is PR feedback time.
+    #
+    # Still a required check, and still every `slow`-marked test: this is a
+    # relocation, not an opt-out, and it deliberately is NOT moved to a
+    # nightly or manual trigger.
+    #
+    # One configuration on purpose, matching the `if:` guard it carried as a
+    # step (`matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'`)
+    # — these tests were never run on any other matrix leg, so no executed
+    # case set changes.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+      - name: Keep this job's temporary files off the shared /tmp
+        # Same reason as `unit-tests`' identical step: something prunes `/tmp`
+        # on these runners mid-job, and `$RUNNER_TEMP` is job-private. Set from
+        # a step rather than `jobs.<id>.env` because the `runner` context is
+        # not available there (a workflow *validation* error that takes the
+        # whole file offline).
+        shell: bash
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
       - name: Run slow tests (hypothesis / property-based)
         # -n auto --dist worksteal, matching every other step in this job:
         # this step ran fully serial (no `-n`) while its siblings didn't,
@@ -438,46 +537,16 @@ jobs:
         # `-m "slow"` selector (and re-including it in the serial
         # invocation, where `-m "slow"` again narrows it to just this one
         # test) has no effect on them either way.
-        if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
         run: |
-          pytest tests/ -q --tb=short -r fE -m "slow" --ignore=tests/test_performance.py --ignore=tests/test_header_scan_deadline_integration.py -n auto --dist worksteal --junitxml=test-results-slow-${{ runner.os }}-py${{ matrix.python-version }}.xml
-          pytest tests/test_performance.py tests/test_header_scan_deadline_integration.py -q --tb=short -r fE -m "slow" --junitxml=test-results-slow-perf-${{ runner.os }}-py${{ matrix.python-version }}.xml
-      - name: Test-time report (slowest tests → run summary)
-        # Renders the captured durations into the GitHub run summary. Reporting
-        # only — a hard per-test wall-time gate would be flaky given CI-runner
-        # variance; the uploaded artifact is the durable record for trends.
-        # continue-on-error keeps it truly non-blocking: a hiccup rendering the
-        # report must never fail an otherwise-green test job.
-        if: always() && matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
-        continue-on-error: true
-        run: python scripts/summarize_test_durations.py test-durations.json --top 25
-      - name: Upload test-durations artifact
-        if: always() && matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
-        with:
-          name: test-durations
-          path: test-durations.json
-          if-no-files-found: ignore
+          pytest tests/ -q --tb=short -r fE -m "slow" --ignore=tests/test_performance.py --ignore=tests/test_header_scan_deadline_integration.py -n auto --dist worksteal --junitxml=test-results-slow-Linux-py3.13.xml
+          pytest tests/test_performance.py tests/test_header_scan_deadline_integration.py -q --tb=short -r fE -m "slow" --junitxml=test-results-slow-perf-Linux-py3.13.xml
       - name: Upload JUnit test results
-        # `if: always()` on purpose: the failing run is the one whose result
-        # file is worth reading, and `-q` above deliberately keeps the console
-        # log short, so this XML is the durable per-test record. One artifact
-        # name per OS/Python leg, since a shared name would have the matrix
-        # legs overwrite each other.
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
-          name: test-results-${{ runner.os }}-py${{ matrix.python-version }}
-          path: test-results-*.xml
+          name: test-results-slow-Linux-py3.13
+          path: test-results-slow*.xml
           if-no-files-found: ignore
-      - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v7
-        with:
-          use_oidc: true
-          files: coverage.xml
-          flags: unit
-          fail_ci_if_error: false
 
   integration-tests:
     # Path-gated through the existing heavy-parity-gate rather than a

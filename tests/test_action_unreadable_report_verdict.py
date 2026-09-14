@@ -74,26 +74,61 @@ UNUSABLE_PAYLOADS = (
 
 
 class TestExitZeroWithoutAReadableReport:
-    @pytest.mark.parametrize(
-        "label,payload", UNUSABLE_PAYLOADS, ids=[p[0] for p in UNUSABLE_PAYLOADS]
-    )
-    def test_never_publishes_compatible(
-        self, tmp_path: Path, label: str, payload: bytes | None
-    ) -> None:
-        bindir = _stub_abicheck(tmp_path, exit_code=0, payload=payload)
-        outputs = _run_action(tmp_path, _compare_env(tmp_path), bindir)
-        assert outputs.get("verdict") != "COMPATIBLE", f"{label}: {outputs}"
-        assert outputs.get("verdict") == "REPORT_UNREADABLE", f"{label}: {outputs}"
+    """One arranged run per payload, every observation checked against it.
+
+    The four default-environment observations (verdict, step exit code, Job
+    Summary text, error annotation) were four separately parametrized tests
+    that each re-executed the *identical* arrangement -- same stub, same
+    `_compare_env`, same payload -- so each payload launched `run.sh` four
+    times to read four fields of one result. They are now checked against one
+    execution, which removes 33 of the 55 shell invocations this class made
+    while asserting exactly the same things.
+
+    What is deliberately NOT merged in: the `fail-on-breaking: false` case
+    below runs under a genuinely different environment, so it keeps its own
+    execution per payload.
+    """
 
     @pytest.mark.parametrize(
         "label,payload", UNUSABLE_PAYLOADS, ids=[p[0] for p in UNUSABLE_PAYLOADS]
     )
-    def test_fails_the_step(
+    def test_the_run_is_reported_as_establishing_no_result(
         self, tmp_path: Path, label: str, payload: bytes | None
     ) -> None:
         bindir = _stub_abicheck(tmp_path, exit_code=0, payload=payload)
         outputs = _run_action(tmp_path, _compare_env(tmp_path), bindir)
-        assert outputs["_exit"] == 1, f"{label}: {outputs}"
+
+        # The published verdict: never a compatibility claim, and specifically
+        # the value that says no result was established.
+        assert outputs.get("verdict") != "COMPATIBLE", f"{label}: verdict: {outputs}"
+        assert outputs.get("verdict") == "REPORT_UNREADABLE", (
+            f"{label}: verdict: {outputs}"
+        )
+
+        # The gate: a consumer that branches on the exit code, not the output.
+        assert outputs["_exit"] == 1, f"{label}: exit: {outputs}"
+
+        # The Job Summary. A `case` arm was added for this verdict specifically
+        # because a bash `case` with no match renders *nothing* -- the failure
+        # mode that once left COMPATIBLE_WITH_RISK with an empty summary. A
+        # verdict whose whole job is to say "no result" must not render as
+        # silence.
+        summary = outputs["_summary"]
+        assert "REPORT_UNREADABLE" in summary, f"{label}: summary: {summary!r}"
+        assert "no compatibility result" in summary.lower(), (
+            f"{label}: summary: {summary!r}"
+        )
+        assert "No binary ABI break detected" not in summary, (
+            f"{label}: summary: {summary!r}"
+        )
+
+        # The error annotation naming the cause.
+        assert "::error::" in outputs["_stdout"], (
+            f"{label}: annotation: {outputs['_stdout']!r}"
+        )
+        assert "JSON report" in outputs["_stdout"], (
+            f"{label}: annotation: {outputs['_stdout']!r}"
+        )
 
     @pytest.mark.parametrize(
         "label,payload", UNUSABLE_PAYLOADS, ids=[p[0] for p in UNUSABLE_PAYLOADS]
@@ -113,34 +148,6 @@ class TestExitZeroWithoutAReadableReport:
         bindir = _stub_abicheck(tmp_path, exit_code=0, payload=payload)
         outputs = _run_action(tmp_path, env, bindir)
         assert outputs["_exit"] == 1, f"{label}: {outputs}"
-
-    @pytest.mark.parametrize(
-        "label,payload", UNUSABLE_PAYLOADS, ids=[p[0] for p in UNUSABLE_PAYLOADS]
-    )
-    def test_the_summary_says_no_result_was_established(
-        self, tmp_path: Path, label: str, payload: bytes | None
-    ) -> None:
-        # A `case` arm was added for this verdict specifically because a bash
-        # `case` with no match renders *nothing* -- the failure mode that once
-        # left COMPATIBLE_WITH_RISK with an empty summary. A verdict whose
-        # whole job is to say "no result" must not render as silence.
-        bindir = _stub_abicheck(tmp_path, exit_code=0, payload=payload)
-        outputs = _run_action(tmp_path, _compare_env(tmp_path), bindir)
-        summary = outputs["_summary"]
-        assert "REPORT_UNREADABLE" in summary, f"{label}: {summary!r}"
-        assert "no compatibility result" in summary.lower(), f"{label}: {summary!r}"
-        assert "No binary ABI break detected" not in summary, f"{label}: {summary!r}"
-
-    @pytest.mark.parametrize(
-        "label,payload", UNUSABLE_PAYLOADS, ids=[p[0] for p in UNUSABLE_PAYLOADS]
-    )
-    def test_an_error_annotation_names_the_cause(
-        self, tmp_path: Path, label: str, payload: bytes | None
-    ) -> None:
-        bindir = _stub_abicheck(tmp_path, exit_code=0, payload=payload)
-        outputs = _run_action(tmp_path, _compare_env(tmp_path), bindir)
-        assert "::error::" in outputs["_stdout"], f"{label}: {outputs['_stdout']!r}"
-        assert "JSON report" in outputs["_stdout"], f"{label}: {outputs['_stdout']!r}"
 
 
 class TestAReadableReportIsUnaffected:
@@ -230,36 +237,37 @@ class TestContradictoryAssuranceSchema:
         )
         return _run_action(tmp_path, _compare_env(tmp_path), bindir)
 
-    def test_fails_the_step(self, tmp_path: Path) -> None:
+    def test_the_contradiction_is_reported_on_every_channel(
+        self, tmp_path: Path
+    ) -> None:
+        """Gate, published verdict and Job Summary, against one execution.
+
+        These were three tests re-running the identical arrangement. They are
+        kept as three *observations* because the exit code is not the only
+        thing a consumer reads -- that is this class's whole point -- but one
+        `run.sh` execution answers all three.
+
+        Regression for a real defect in this very change (Codex review, P2,
+        reproduced): the contradiction was detected only at the FINAL_EXIT
+        fold, which runs *after* the verdict output, the job summary and the
+        PR comment are published. So the step failed while publishing
+        `verdict=COMPATIBLE` and "No binary ABI break detected" -- a false
+        clean result for any workflow that branches on the output or runs
+        under `continue-on-error`, which is the exact failure this axis exists
+        to prevent, reintroduced one layer out. Asserting the exit code and
+        the log text alone did not catch it, which is why the verdict and the
+        summary are asserted independently here rather than assumed to agree.
+        """
         outputs = self._contradictory(tmp_path)
+
         assert outputs["_exit"] == 1, outputs
         assert "analysis_assurance_exit_contribution" in outputs["_stdout"], outputs[
             "_stdout"
         ]
 
-    def test_the_published_verdict_is_not_compatible(self, tmp_path: Path) -> None:
-        """The exit code is not the only thing a consumer reads.
-
-        Regression for a real defect in this very change (Codex review, P2,
-        reproduced): the contradiction was detected only at the FINAL_EXIT fold,
-        which runs *after* the verdict output, the job summary and the PR comment
-        are published. So the step failed while publishing
-        `verdict=COMPATIBLE` and "No binary ABI break detected" -- a false clean
-        result for any workflow that branches on the output or runs under
-        `continue-on-error`, which is the exact failure this axis exists to
-        prevent, reintroduced one layer out.
-
-        `test_fails_the_step` above did not catch it because it asserted the exit
-        code and the log text only. That is why this file's contract row is
-        "verdict, gate and exit code checked independently" -- asserting one and
-        assuming the others agree is how they came to disagree.
-        """
-        outputs = self._contradictory(tmp_path)
         assert outputs["verdict"] == "REPORT_UNREADABLE", outputs
         assert outputs["verdict"] != "COMPATIBLE", outputs
 
-    def test_the_summary_does_not_claim_no_break(self, tmp_path: Path) -> None:
-        outputs = self._contradictory(tmp_path)
         summary = outputs["_summary"]
         assert "No binary ABI break detected" not in summary, summary
         assert "REPORT_UNREADABLE" in summary, summary
@@ -469,21 +477,16 @@ class TestAContradictoryReportAtANonZeroExit:
         return _run_action(tmp_path, _compare_env(tmp_path), bindir)
 
     @pytest.mark.parametrize("exit_code,verdict", ((2, "API_BREAK"), (4, "BREAKING")))
-    def test_the_real_compatibility_verdict_survives(
+    def test_the_verdict_survives_while_the_step_still_fails(
         self, tmp_path: Path, exit_code: int, verdict: str
     ) -> None:
+        # One arrangement, both observations: keeping the real compatibility
+        # verdict must not cost the gate or the diagnostic, which are what the
+        # assurance axis owes regardless of which label is published. These
+        # were two tests re-running the same stub to read two fields.
         outputs = self._contradictory_at(tmp_path, exit_code=exit_code, verdict=verdict)
         assert outputs["verdict"] == verdict, outputs
         assert outputs["verdict"] != "REPORT_UNREADABLE", outputs
-
-    @pytest.mark.parametrize("exit_code,verdict", ((2, "API_BREAK"), (4, "BREAKING")))
-    def test_the_step_still_fails_and_still_explains_itself(
-        self, tmp_path: Path, exit_code: int, verdict: str
-    ) -> None:
-        # Keeping the verdict must not cost the gate or the diagnostic: those
-        # are what the assurance axis owes regardless of which label is
-        # published.
-        outputs = self._contradictory_at(tmp_path, exit_code=exit_code, verdict=verdict)
         assert outputs["_exit"] == 1, outputs
         assert "analysis_assurance_exit_contribution" in outputs["_stdout"], outputs[
             "_stdout"
@@ -590,24 +593,16 @@ class TestAnOperationalOutcomeIsNotACompatibilityResult:
         OPERATIONAL_OUTCOMES,
         ids=[o[0] for o in OPERATIONAL_OUTCOMES],
     )
-    def test_the_legacy_verdict_sentinel_is_not_compatible(
+    def test_the_legacy_verdict_sentinel_is_reported_as_operational(
         self, tmp_path: Path, sentinel: str, expected: str
     ) -> None:
+        # Verdict and gate against one execution -- previously two tests per
+        # sentinel building the identical stub and environment.
         payload = json.dumps({"report_schema_version": "4.4", "verdict": sentinel})
         bindir = _stub_abicheck(tmp_path, exit_code=0, payload=payload.encode("utf-8"))
         outputs = _run_action(tmp_path, _compare_env(tmp_path), bindir)
         assert outputs.get("verdict") != "COMPATIBLE", (sentinel, outputs)
         assert outputs.get("verdict") == expected, (sentinel, outputs)
-
-    @pytest.mark.parametrize(
-        "sentinel,expected",
-        OPERATIONAL_OUTCOMES,
-        ids=[o[0] for o in OPERATIONAL_OUTCOMES],
-    )
-    def test_the_step_fails(self, tmp_path: Path, sentinel: str, expected: str) -> None:
-        payload = json.dumps({"report_schema_version": "4.4", "verdict": sentinel})
-        bindir = _stub_abicheck(tmp_path, exit_code=0, payload=payload.encode("utf-8"))
-        outputs = _run_action(tmp_path, _compare_env(tmp_path), bindir)
         assert outputs["_exit"] != 0, (sentinel, outputs)
 
     @pytest.mark.parametrize(
