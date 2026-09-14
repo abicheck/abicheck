@@ -273,16 +273,20 @@ class TestEveryRequestedDestinationIsJudgedOnItsOwn:
     def test_one_unusable_destination_is_never_masked_by_the_other(
         self, tmp_path: Path, broken: str, state: str
     ) -> None:
+        """Verdict, gate and diagnostic for one arranged scenario.
+
+        The verdict/exit assertions and the diagnostic assertions were two
+        parametrized tests over the identical 12-cell `broken x state` matrix,
+        each re-executing `run.sh` against the same arrangement -- 24 shell
+        invocations to read two halves of 12 results. The matrix is unchanged;
+        only the duplicate execution is gone.
+        """
         bindir, env = self._arrange(tmp_path, broken, state)
         outputs = _run_action(tmp_path, env, bindir)
+
         assert outputs.get("verdict") == "REPORT_UNREADABLE", (broken, state, outputs)
         assert outputs["_exit"] == 1, (broken, state, outputs)
 
-    @pytest.mark.parametrize("broken", ("primary", "secondary"))
-    @pytest.mark.parametrize("state", UNUSABLE_DESTINATION_STATES)
-    def test_the_diagnostic_names_the_destination_that_failed(
-        self, tmp_path: Path, broken: str, state: str
-    ) -> None:
         # A verdict alone leaves the user hunting; and naming the *other*
         # destination is exactly the confusion the fallback chain caused.
         #
@@ -290,8 +294,6 @@ class TestEveryRequestedDestinationIsJudgedOnItsOwn:
         # destination path also appears in the echoed command line, so a
         # substring search over all output passes even when no diagnostic was
         # emitted at all (caught by mutation-testing this assertion).
-        bindir, env = self._arrange(tmp_path, broken, state)
-        outputs = _run_action(tmp_path, env, bindir)
         primary, secondary = self._paths(tmp_path)
         named = primary if broken == "primary" else secondary
         other = secondary if broken == "primary" else primary
@@ -383,12 +385,19 @@ class TestADestinationPathCannotForgeAWorkflowCommand:
     """
 
     @pytest.mark.parametrize("payload", DESTINATION_INJECTION_PAYLOADS)
-    def test_no_raw_percent_escape_from_the_path_reaches_the_log(
+    def test_the_payload_is_neither_decodable_nor_a_line_of_its_own(
         self, tmp_path: Path, payload: str
     ) -> None:
+        # Two independent defenses against the same hostile payload, checked
+        # against one execution of it: previously two parametrized tests
+        # building the identical destination, stub and environment. Both
+        # assertions are kept in full -- they protect different failure modes
+        # (a raw escape reaching the log at all, versus a decoded one becoming
+        # its own runner-parsed line), so neither is redundant with the other.
         dest = tmp_path / payload
         bindir = self._stub_that_writes_nothing(tmp_path)
         outputs = _run_action(tmp_path, self._env(tmp_path, dest), bindir)
+
         # The step must still fail -- the attack must not be prevented by the
         # destination quietly being treated as satisfied.
         assert outputs.get("verdict") == "REPORT_UNREADABLE", outputs
@@ -407,15 +416,8 @@ class TestADestinationPathCannotForgeAWorkflowCommand:
             assert payload not in line, (payload, line)
             assert "%250A" in line or "%250D" in line or "%25" in line, (payload, line)
 
-    @pytest.mark.parametrize("payload", DESTINATION_INJECTION_PAYLOADS)
-    def test_the_forged_command_never_becomes_its_own_line(
-        self, tmp_path: Path, payload: str
-    ) -> None:
         # Even if a future change decoded before emitting, the smuggled command
         # must not end up as a line of its own that a runner would execute.
-        dest = tmp_path / payload
-        bindir = self._stub_that_writes_nothing(tmp_path)
-        outputs = _run_action(tmp_path, self._env(tmp_path, dest), bindir)
         smuggled = payload.split("%0A")[-1].split("%0D")[-1]
         for line in outputs["_stdout"].splitlines():
             assert line.strip() != smuggled.strip(), (payload, line)
@@ -549,23 +551,14 @@ class TestAnExtraArgsOutputOverrideIsHonoured:
         return env
 
     @pytest.mark.parametrize("spelling", ("--output", "-o", "--output="))
-    def test_an_override_with_no_output_file_input_is_not_unreadable(
+    def test_the_override_is_recognised_and_actually_read(
         self, tmp_path: Path, spelling: str
     ) -> None:
-        dest = f"json={tmp_path / 'override.json'}"
-        joiner = "" if spelling.endswith("=") else " "
-        bindir = self._stub(tmp_path, tmp_path / "override.json")
-        outputs = _run_action(
-            tmp_path, self._env(tmp_path, f"{spelling}{joiner}{dest}", None), bindir
-        )
-        assert outputs.get("verdict") != "REPORT_UNREADABLE", (spelling, outputs)
-
-    @pytest.mark.parametrize("spelling", ("--output", "-o", "--output="))
-    def test_the_report_at_the_override_is_actually_read(
-        self, tmp_path: Path, spelling: str
-    ) -> None:
-        # The half that a fix to the inventory alone would miss: the verdict
-        # must come from the overridden path, not fall through to COMPATIBLE.
+        # One arrangement, both halves. Recognising the spelling (the run is
+        # not reported unreadable) is the half a fix to the inventory alone
+        # would get; the verdict coming *from the overridden path* rather than
+        # falling through to COMPATIBLE is the half it would miss. These were
+        # two parametrized tests re-running the same stub.
         dest = tmp_path / "override.json"
         joiner = "" if spelling.endswith("=") else " "
         bindir = self._stub(tmp_path, dest, verdict="BREAKING")
@@ -574,6 +567,7 @@ class TestAnExtraArgsOutputOverrideIsHonoured:
             self._env(tmp_path, f"{spelling}{joiner}json={dest}", None),
             bindir,
         )
+        assert outputs.get("verdict") != "REPORT_UNREADABLE", (spelling, outputs)
         assert outputs.get("verdict") == "BREAKING", (spelling, outputs)
 
     def test_an_override_supersedes_the_output_file_input(self, tmp_path: Path) -> None:
@@ -1054,23 +1048,19 @@ class TestEveryOutputSpellingNamesTheDestination:
         }
 
     @pytest.mark.parametrize("spelling", OUTPUT_SPELLINGS)
-    def test_the_report_is_found_and_read(self, tmp_path: Path, spelling: str) -> None:
+    def test_the_report_is_read_and_its_path_published(
+        self, tmp_path: Path, spelling: str
+    ) -> None:
+        # The verdict and the published `report-path` are two observations of
+        # one run, and were two parametrized tests over the identical stub and
+        # environment. Both are still asserted: reading the report and naming
+        # where it was read from are separate promises of this boundary.
         dest = tmp_path / "out.json"
         bindir = self._stub(tmp_path, dest)
         outputs = _run_action(
             tmp_path, self._env(tmp_path, spelling.format(dest=dest)), bindir
         )
         assert outputs.get("verdict") == "BREAKING", (spelling, outputs)
-
-    @pytest.mark.parametrize("spelling", OUTPUT_SPELLINGS)
-    def test_the_effective_path_is_published(
-        self, tmp_path: Path, spelling: str
-    ) -> None:
-        dest = tmp_path / "out.json"
-        bindir = self._stub(tmp_path, dest)
-        outputs = _run_action(
-            tmp_path, self._env(tmp_path, spelling.format(dest=dest)), bindir
-        )
         assert outputs.get("report-path") == str(dest), (spelling, outputs)
 
     @pytest.mark.parametrize("spelling", OUTPUT_SPELLINGS)

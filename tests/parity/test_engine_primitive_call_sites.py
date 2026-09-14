@@ -87,6 +87,24 @@ _ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...], str | None]] = {
 }
 
 
+#: The two primitives Phase 2b closes outright (plan §3 #6/#8): function
+#: name -> (defining module, the exact caller set now expected). Neither
+#: backs a remaining scan-only gap key, so unlike `_ENGINE_PRIMITIVES`
+#: above these carry no `tests/parity/gaps.py` cross-reference -- this
+#: table's own job is narrower: pin the caller set so a *third* caller
+#: (or the loss of either expected one) is still caught structurally.
+_CLOSED_ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "find_pattern_facts": (
+        "buildsource/pattern_facts.py",
+        ("workflows/pattern_preprocessor_scan.py",),
+    ),
+    "collect_preprocessor_facts": (
+        "buildsource/preprocessor_facts.py",
+        ("workflows/pattern_preprocessor_scan.py",),
+    ),
+}
+
+
 def _posix(path: Path) -> str:
     """POSIX-style repo-relative spelling, independent of host OS separator
     (Windows CI reports ``abicheck\\scan_engine.py`` from ``str(path)``)."""
@@ -151,41 +169,90 @@ def _bindings_for(
     return direct, module_aliases
 
 
-def _call_sites(function_name: str, defining_module: str) -> dict[Path, int]:
-    """Repo-relative module -> number of *call expressions* resolving to
-    ``function_name`` from *defining_module* (a repo-relative path, e.g.
-    ``buildsource/cross_source_checks.py``) -- ``foo()`` after a direct import,
-    ``mod.foo()``/``alias.foo()`` after a module import, an aliased import
-    of either shape, or a relative import. Not a bare textual mention (a
-    docstring, a comment, an unrelated ``foo`` in a different module)."""
-    target_module = f"abicheck.{defining_module[:-3].replace('/', '.')}"
-    hits: dict[Path, int] = {}
+def _targets() -> dict[str, str]:
+    """Every ``(function_name -> defining module)`` pair the tables below
+    audit, resolved in one place so the scan can answer all of them from a
+    single traversal."""
+    targets = {fn: mod for fn, (mod, *_rest) in _ENGINE_PRIMITIVES.items()}
+    targets.update({fn: mod for fn, (mod, _cs) in _CLOSED_ENGINE_PRIMITIVES.items()})
+    return targets
+
+
+#: Memoized result of the one repo traversal, keyed by nothing: the scan reads
+#: `abicheck/**/*.py`, which no test in this process mutates.
+_CALL_SITE_CACHE: dict[str, dict[Path, int]] | None = None
+
+
+def _scan_every_target() -> dict[str, dict[Path, int]]:
+    """One pass over ``abicheck/**/*.py``, resolving *every* audited primitive.
+
+    Previously `_call_sites` re-read and re-parsed all ~790 modules of the
+    package once per target function -- three full traversals for three
+    parametrized tests asking about three names, at ~3.6s each. The scan is
+    the same AST resolution as before (direct import, module-qualified call,
+    either aliased, relative imports resolved); only the loop nesting is
+    inverted, so each file is read and parsed once and every target is
+    answered from that one tree.
+
+    Deliberately **not** a retained repository AST: each tree is discarded as
+    soon as its file has been scanned, so peak memory is one module rather
+    than the whole package (measured at ~795 MiB if held, per worker).
+    """
+    targets = _targets()
+    resolved = {
+        fn: f"abicheck.{mod[:-3].replace('/', '.')}" for fn, mod in targets.items()
+    }
+    hits: dict[str, dict[Path, int]] = {fn: {} for fn in targets}
+
     for path in sorted(_ABICHECK_ROOT.rglob("*.py")):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         except (SyntaxError, UnicodeDecodeError):
             continue
         current_module = _module_dotted_name(path)
-        direct, module_aliases = _bindings_for(
-            tree, current_module, target_module, function_name
-        )
-        count = 0
+        bindings = {
+            fn: _bindings_for(tree, current_module, target_module, fn)
+            for fn, target_module in resolved.items()
+        }
+        if not any(direct or aliases for direct, aliases in bindings.values()):
+            continue
+        counts = {fn: 0 for fn in targets}
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            if isinstance(func, ast.Name) and func.id in direct:
-                count += 1
-            elif (
-                isinstance(func, ast.Attribute)
-                and func.attr == function_name
-                and isinstance(func.value, ast.Name)
-                and func.value.id in module_aliases
-            ):
-                count += 1
-        if count:
-            hits[path.relative_to(_ABICHECK_ROOT.parent)] = count
+            if isinstance(func, ast.Name):
+                for fn, (direct, _aliases) in bindings.items():
+                    if func.id in direct:
+                        counts[fn] += 1
+            elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                direct_aliases = bindings.get(func.attr)
+                if direct_aliases is not None and func.value.id in direct_aliases[1]:
+                    counts[func.attr] += 1
+        rel = path.relative_to(_ABICHECK_ROOT.parent)
+        for fn, count in counts.items():
+            if count:
+                hits[fn][rel] = count
     return hits
+
+
+def _call_sites(function_name: str, defining_module: str) -> dict[Path, int]:
+    """Repo-relative module -> number of *call expressions* resolving to
+    ``function_name`` from *defining_module* (a repo-relative path, e.g.
+    ``buildsource/cross_source_checks.py``) -- ``foo()`` after a direct import,
+    ``mod.foo()``/``alias.foo()`` after a module import, an aliased import
+    of either shape, or a relative import. Not a bare textual mention (a
+    docstring, a comment, an unrelated ``foo`` in a different module).
+
+    Answered from the one shared traversal above."""
+    global _CALL_SITE_CACHE
+    if _CALL_SITE_CACHE is None:
+        _CALL_SITE_CACHE = _scan_every_target()
+    assert _targets()[function_name] == defining_module, (
+        f"{function_name} is audited as defined in {_targets()[function_name]!r}, "
+        f"not {defining_module!r}"
+    )
+    return dict(_CALL_SITE_CACHE[function_name])
 
 
 @pytest.mark.parametrize("function_name", sorted(_ENGINE_PRIMITIVES))
@@ -217,24 +284,6 @@ def test_only_scan_engine_calls_it(function_name: str) -> None:
         f"{function_name}() has no production caller at all under abicheck/ "
         f"-- expected exactly {sorted(expected)} (ADR-068 §1)"
     )
-
-
-#: The two primitives Phase 2b closes outright (plan §3 #6/#8): function
-#: name -> (defining module, the exact caller set now expected). Neither
-#: backs a remaining scan-only gap key, so unlike `_ENGINE_PRIMITIVES`
-#: above these carry no `tests/parity/gaps.py` cross-reference -- this
-#: table's own job is narrower: pin the caller set so a *third* caller
-#: (or the loss of either expected one) is still caught structurally.
-_CLOSED_ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...]]] = {
-    "find_pattern_facts": (
-        "buildsource/pattern_facts.py",
-        ("workflows/pattern_preprocessor_scan.py",),
-    ),
-    "collect_preprocessor_facts": (
-        "buildsource/preprocessor_facts.py",
-        ("workflows/pattern_preprocessor_scan.py",),
-    ),
-}
 
 
 @pytest.mark.parametrize("function_name", sorted(_CLOSED_ENGINE_PRIMITIVES))
