@@ -345,7 +345,7 @@ def build_source_dump_options(func: F) -> F:
         "depth",
         type=DEPTH_PARAM,
         default=None,
-        help="Evidence-depth dial (same vocabulary as `compare`/`scan --depth`): "
+        help="Evidence-depth dial (same vocabulary as `compare --depth`): "
         "binary=symbols only, headers=+header AST (default), build=+build "
         "context, source=+source replay & call graph.",
     )(func)

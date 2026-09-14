@@ -44,8 +44,8 @@ finding is scored exactly as before and every exit code below is unchanged.
 
 ## Contract-coverage contribution (ADR-049)
 
-`compare` and `scan --against` carry an **orthogonal contract-coverage axis**
-under `--contract`. Complete coverage of the mode-selected evidence
+`compare` carries an **orthogonal contract-coverage axis**
+under `--contract` (the retired `scan --against` carried the same one). Complete coverage of the mode-selected evidence
 domain contributes `0`; missing, partial, stale, failed, contradictory, or
 identity-incomplete **required domain evidence** is recorded as a
 `CoverageFailure` in the run-level `contract_coverage_failures` ledger and
@@ -247,7 +247,7 @@ is the natural follow-up, and would make it exit nonzero there too).
 
 ## Analysis-assurance contribution (P0.4)
 
-`compare`, and `scan --against`, always compute and report
+`compare` always computes and reports
 `analysis_assurance` — a third, orthogonal axis alongside the compatibility
 verdict and the policy/severity gate, answering "how complete and
 trustworthy was the evidence behind this comparison" independently of
@@ -315,11 +315,10 @@ and later additive fields, e.g. `annotations` at 2.43) stating the
 already-resolved decision behind the axes above as one explainable
 value, rather than requiring a reader to separately combine
 `severity.exit_code`/`verdict`, `contract_coverage_exit_contribution`, and
-`analysis_assurance_exit_contribution` themselves. `scan --against
--o json=-` carries the identical object too (scan schema 1.18), nested
-at `diff.exit` rather than the report's top level — matching where its own
-constituent contribution fields already live, since `scan` and `compare`
-keep their own report shapes:
+`analysis_assurance_exit_contribution` themselves. A stored report from
+the retired `scan --against` carries the identical object (scan schema
+1.18), nested at `diff.exit` rather than at the top level — matching where
+its own constituent contribution fields lived:
 
 ```json
 "exit": {
@@ -338,9 +337,9 @@ names every axis whose own contribution equals `code` (a lower,
 non-winning contribution is excluded, since it did not determine the
 result); `["clean"]` when `code` is `0`.
 
-`crosscheck_promotion_contribution` (schema 2.42) is always `0` on a native
-`compare` report — it has no meaning outside `scan --against`'s own
-maintainer-promoted `--crosscheck KEY=error` finding
+`crosscheck_promotion_contribution` (schema 2.42) is always `0` on a
+`compare` report — it never had meaning outside the retired `scan
+--against`'s own maintainer-promoted `--crosscheck KEY=error` finding
 (`scan_engine._promote_published_gate`), which reconstructs the whole
 `diff.exit` block through the same resolver whenever the crosscheck
 contributes anything positive, so `reasons` can carry `promoted_crosscheck`
@@ -365,10 +364,11 @@ boundary.
 
 **`evidence_contract_error_contribution`/`budget_overflow_contribution`
 (schema 3.3, `docs/contribute/plans/one-comparison-product.md` P3).** Native
-`compare` shares `scan --against`'s own evidence-contract-error (`7`) and
-budget-overflow (`5`) `ExitDecision` axes — `resolve_compare_exit_decision`
+`compare` carries the evidence-contract-error (`7`) and
+budget-overflow (`5`) `ExitDecision` axes `scan --against` originated —
+`resolve_compare_exit_decision`
 folds `DiffResult.evidence_contract_error`/`.budget_overflow` through the
-identical precedence rule `scan` uses
+identical precedence rule `scan` used
 (`exit_decision_precedence.resolve_scan_exit_decision`), reused rather than
 re-derived, so the two commands can never disagree on which axis wins when
 both apply. Phase 2d gave the evidence-contract axis its first
@@ -594,7 +594,7 @@ ran a one-build audit/hygiene/source-consistency scan only; pass it and
 > once per library. Exit `1` on a `scan` was unchanged there and meant a
 > genuine CLI/operational error.
 
-### `scan --against` and severity (mirrors `compare`)
+### `scan --against` and severity (retired; mirrored `compare`)
 
 `scan --against` accepts the same severity surface as `compare` —
 `--severity-preset` and the hidden per-category `--severity-*` overrides
@@ -969,7 +969,7 @@ mapping — the default — and the value right of it applies once `scan
 --against` resolves the `severity` scheme (any `--severity-preset`/
 `--severity-*`, or a config `severity:` block),
 where it follows the same `compare` exit (severity) column; see
-["`scan --against` and severity"](#scan-against-and-severity-mirrors-compare)
+["`scan --against` and severity"](#scan-against-and-severity-retired-mirrored-compare)
 above.
 
 App/plugin-scoped comparisons (`compare --used-by`/`--required-symbol`) reuse
@@ -1007,7 +1007,7 @@ or a config `severity:` block) `scan` follows
 the `compare` exit (severity) column on the same `*` terms, in **both**
 directions: `severity.addition: error` exits `1` on an additions-only diff,
 and `--severity-preset info-only` exits `0` on a `BREAKING` one. See
-["`scan --against` and severity"](#scan-against-and-severity-mirrors-compare).
+["`scan --against` and severity"](#scan-against-and-severity-retired-mirrored-compare).
 
 ---
 

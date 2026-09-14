@@ -91,7 +91,7 @@ actually validate that block's contents, deeply and independently of this
 loader.
 
 A *separate* load of the same `.abicheck.yml` — the `compile:` block shared
-by `compare`/`dump`/`scan`'s L2 compile context (`compiler`, includes,
+by `compare`/`dump`'s L2 compile context (`compiler`, includes,
 sysroot, …), resolved by `merge_compile_config()` in `cli_options.py` — does
 distinguish explicit from auto-discovered: an explicit `--config` that
 fails to parse still fails loudly, but an
@@ -228,14 +228,12 @@ See [Evidence depth](../use/evidence-depth.md) and the
 
 ### `compile:`
 
-The L2 header compile context (ADR-037 D4). On `compare`/`dump` this is
-Phase 7's CONFIG surface (one-comparison-product.md §4.1/§4.2, ADR-037
-D8.1) — every field below has **no CLI spelling at all** on those two
-commands, with no escape hatch (ADR-068 D5 guard #2); `scan` still exposes
-the identical family as CLI flags (`--ast-frontend`/`--compiler`/
-`--compiler-prefix`/`--compiler-option`/`--sysroot`/`--nostdinc`/
-`--allow-ast-frontend-fallback`/`--allow-unsupported-castxml`/
-`--frontend-context`/`--lang`, `CLI > config`).
+The L2 header compile context (ADR-037 D4). This is Phase 7's CONFIG
+surface (one-comparison-product.md §4.1/§4.2, ADR-037 D8.1) — every field
+below has **no CLI spelling at all**, on any command, with no escape hatch
+(ADR-068 D5 guard #2) and no per-side spelling. See
+[Upgrading to 0.6 §C1](../start/upgrading-to-0.6.md#c1-compiler-frontend)
+for the flag→key mapping.
 
 - `frontend:` — AST frontend (`auto`/`castxml`/`clang`/`hybrid`,
   case-insensitive — `hybrid` runs castxml and clang together and merges
@@ -542,7 +540,7 @@ error), but they are handled outside the `compare` config merge:
 
 Recognized top-level keys (so they do not trigger the unknown-key error),
 but — like `risk_rules:`/`crosschecks:` above — not parsed by `BuildConfig`
-itself. `dump`/`compare`/`scan` never read this block; it exists solely for
+itself. `dump`/`compare` never read this block; it exists solely for
 G30's GitHub Actions CI-integration primitives: `abicheck project validate`
 validates it, and `abicheck project plan` consumes it to generate
 `run-plan.json`. Parsed and validated by `buildsource/project_targets.py`;

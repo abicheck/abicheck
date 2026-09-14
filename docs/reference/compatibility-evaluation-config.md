@@ -39,7 +39,7 @@ generated: false
       still do so, orthogonally, via contract coverage below.
     - **Run-level contract coverage.** An orthogonal axis, independent of
       any single finding's decision: by default, if the selected domain's
-      required evidence is incomplete, `compare`/`scan --against` contribute
+      required evidence is incomplete, `compare` contributes
       an exit `1`, folded with `max` against the ordinary gate — it can
       raise a clean `0` to `1`, never lower a `2`/`4`, and it never rewrites
       any finding's `compatibility_decision`. The one exception is a
@@ -237,8 +237,7 @@ as in a `--policy`, so a renamed kind cannot silently disable a rule.
 
 ### Selecting a pack
 
-`compare --pack PATH` and `scan --against ... --pack PATH` select one
-(repeatable). A selected pack **configures the run**: a `kind: policy` pack
+`compare --pack PATH` selects one (repeatable). A selected pack **configures the run**: a `kind: policy` pack
 overriding `func_removed` changes the verdict and the exit code, and a
 `kind: gate` pack's severity moves what blocks CI. That is worth stating
 plainly, because the opposite would be worse than having no flag — a first

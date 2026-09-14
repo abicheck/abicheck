@@ -191,7 +191,8 @@ _OTHER = Capability.OTHER_LAYER
 
 _PROVENANCE_PASS = (
     "Set after parsing by `provenance.apply_provenance()` from the "
-    "public-header set (`-H`/`--header`, plus `scan --public-header-dir`), "
+    "public-header set (`-H`/`--header`, plus `.abicheck.yml`'s "
+    "`scope.public_header_dirs`), "
     "not by either backend."
 )
 _DYNSYM = "Read from the binary's own symbol table (`dumper_elf_symbols.py`)."

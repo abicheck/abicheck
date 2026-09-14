@@ -351,15 +351,15 @@ for the full removal list and migration mapping.
 - On `dump` and `compare`, `--depth source` always uses **TARGET scope** — it
   replays the whole current library target. There is no seed-driven narrowing
   on these two commands.
-- On `scan`, `--depth source` uses **CHANGED scope** (just the TUs touched by
+- `--depth source` uses **CHANGED scope** (just the TUs touched by
   a `--since`/`--changed-path` seed) **only when a valid seed is present**;
   otherwise it falls back to **TARGET scope** (the whole current library),
   never an empty replay. This is a deliberate bug fix: previously, pinning
-  `scan --depth source` with no seed could silently collect **zero**
+  `--depth source` with no seed could silently collect **zero**
   translation units and report clean by omission. That gap is closed — an
-  unseeded `--depth source` scan now always replays *something*.
+  unseeded `--depth source` run now always replays *something*.
 
-**Omit `--depth` for `auto`** (on `scan`) — the default. `auto` names the
+**Omit `--depth` for `auto`** — the default. `auto` names the
 state "you didn't pin a rung"; it resolves to the fixed **`headers`** rung,
 the same default `compare` has always used. It is *not* risk-driven: through
 2026-09-09 an omitted depth was scored from the `--since`/`--changed-path`

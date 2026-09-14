@@ -74,7 +74,7 @@ Two binaries built under different profiles — a different optimisation
 level, sanitizer, standard-library mode, or scope setting on one side —
 differ in ways that are not contract changes. The comparability gate sits
 in front of the verdict: an incomparable pair produces no verdict at all
-(`compare` exits 16; `scan --against` exits 6), with a `reason` object
+(`compare` exits 16), with a `reason` object
 naming the fingerprint that differed. That is not a finding to triage;
 rebuild one side under the other's profile. If you need to look anyway:
 
