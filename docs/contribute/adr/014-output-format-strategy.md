@@ -131,18 +131,18 @@ CI integration.
 ### Format selection
 
 ```bash
-abicheck compare old.so new.so                              # Markdown (default)
-abicheck compare old.so new.so --format json                 # JSON
-abicheck compare old.so new.so --format sarif                # SARIF
-abicheck compare old.so new.so --format html                 # HTML
-abicheck compare old.so new.so --format html -o report.html  # HTML written to file
-abicheck compare old.so new.so --format junit -o results.xml # JUnit XML
+abicheck compare old.so new.so                         # bounded review (default)
+abicheck compare old.so new.so -o markdown=-           # detailed Markdown
+abicheck compare old.so new.so -o json=report.json     # JSON
+abicheck compare old.so new.so -o sarif=report.sarif   # SARIF
+abicheck compare old.so new.so -o html=report.html     # HTML
+abicheck compare old.so new.so -o junit=results.xml    # JUnit XML
 ```
 
-The format must be explicitly selected via `--format`. The `-o` / `--output`
-flag only controls where output is written — it does not infer format from
-the file extension. If `--format` is omitted, the default is `markdown`
-regardless of the output filename.
+The format and destination are selected together with repeatable
+`-o FORMAT=DESTINATION` exports; the file extension never infers a format.
+With no export the default is `review=-`. See ADR-036's 2026-09-14 amendment
+for the bounded-human-output migration.
 
 ### Information preservation
 
@@ -162,7 +162,8 @@ or reshape some `DiffResult` fields relative to JSON).
 - Every consumer has a first-class output format
 - GitHub Code Scanning integration via standard SARIF — no custom tooling
 - Self-contained HTML enables offline report archival
-- Markdown default works everywhere with zero configuration
+- Bounded review output works everywhere with zero configuration; detailed
+  Markdown remains an explicit export
 - JSON/SARIF preserve enough structured detail for automation; see the
   amendment note above and ADR-036 for what each format actually carries
   (it is not uniform across formats)

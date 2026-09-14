@@ -343,7 +343,10 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "type_vtable_changed",
         _B,
-        impact="Vtable slot reordering; virtual dispatch calls wrong method.",
+        impact="The observed virtual-interface sequence changed. Added, removed, "
+        "replaced, or reordered entries can affect fixed vtable offsets; inspect "
+        "the recorded delta. An append-only header sequence does not by itself "
+        "prove the emitted layout or all consumers are compatible.",
         entity=_ENT.TYPE,
         operation=_OP.MODIFIED,
     ),

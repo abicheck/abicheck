@@ -9,6 +9,23 @@ and route the Markdown/text/JSON/SARIF/JUnit reporters). Increment 3 (routing
 remaining local bucketing, e.g. `pr_comment._bucket_changes`) is still open —
 see "Rollout" below.
 
+## 2026-09-14 presentation amendment
+
+The ordinary `compare` human output now defaults to the bounded `review`
+projection rather than the exhaustive Markdown document.  This is an
+intentional presentation default change only: comparison, classification,
+suppression, gating, and exit-code computation are unchanged.  Users and
+automation that require the detailed prose report must request it explicitly
+with `-o markdown=-` (or write it beside a compact summary with repeated
+exports). JSON, SARIF, JUnit, HTML, `oneline`, and explicit Markdown requests
+retain their existing contracts.
+
+The review projection is bounded across public-surface entries and always
+discloses omitted counts. Public-surface operation/entity classification comes
+from `ChangeKindMeta`, not kind-name suffixes or effective severity; dependency
+imports and environment requirements are consequently not presented as public
+API operations. This amendment changes no finding or report schema.
+
 ## Context
 
 abicheck renders a comparison result in many formats (JSON, Markdown, text,

@@ -32,17 +32,12 @@ struct of plain values; :func:`render_surface_changes_lines`/
 :func:`add_surface_changes` is this section's JSON attachment point, the
 counterpart of ``disposition_audit.add_disposition_audit``.
 
-**Grouping, not a new policy decision.** "Addition" is
-``policy.severity.IssueCategory.ADDITION`` -- the same category
-``ReportFinding.category`` already resolves for every other view, so this
-section cannot disagree with the severity-grouped one about which finding is
-an addition. "Removal" is any change whose kind spells the ``model``-layer's
-own ``*_removed`` naming convention (enforced by the "Adding a new
-ChangeKind" procedure in the root ``AGENTS.md`` -- a kind that removes a
-declaration is named ``<noun>_removed``); everything else is a
-"modification". This is a display grouping, not a severity/gate
-classification, so it does not need (and must not read) a fourth kind-set
-membership test the way ``ADDITION_KINDS``/``BREAKING_KINDS`` do.
+**Grouping, not a new policy decision.** Operation and entity are read from
+the change catalog through :mod:`abicheck.report.change_operation`.  They are
+facts about what was observed, and therefore do not change when policy
+reclassifies a finding.  Only public-surface entities belong here: imported
+symbols, runtime requirements, and build/environment findings remain in their
+own report dimensions rather than masquerading as API declarations.
 """
 
 from __future__ import annotations
@@ -51,6 +46,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from .change_operation import entity_for_change, operation_for_kind
 from .finding import ReportFinding, build_report_findings, report_findings_for
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -132,10 +128,7 @@ class SurfaceChangeSection:
         )
 
 
-def _is_removal(finding: ReportFinding) -> bool:
-    kind = finding.change.kind
-    value = kind.value if hasattr(kind, "value") else str(kind)
-    return value.endswith("_removed")
+_PUBLIC_SURFACE_ENTITIES = frozenset({"function", "variable", "type", "enum"})
 
 
 def _entry_for(finding: ReportFinding) -> SurfaceChangeEntry:
@@ -172,8 +165,6 @@ def compute_surface_changes(
     out (workstream G's "rendering never changes a gate" invariant is about
     verdicts/exit codes, not about which findings a filtered view lists).
     """
-    from ..policy.severity import IssueCategory
-
     if findings is not None:
         resolved = findings
     elif changes is not None:
@@ -189,10 +180,15 @@ def compute_surface_changes(
     removals: list[SurfaceChangeEntry] = []
     modifications: list[SurfaceChangeEntry] = []
     for finding in resolved:
+        kind = finding.change.kind
+        kind_value = kind.value if hasattr(kind, "value") else str(kind)
+        if entity_for_change(finding.change, kind_value) not in _PUBLIC_SURFACE_ENTITIES:
+            continue
         entry = _entry_for(finding)
-        if finding.category is IssueCategory.ADDITION:
+        operation = operation_for_kind(kind_value)
+        if operation == "added":
             additions.append(entry)
-        elif _is_removal(finding):
+        elif operation == "removed":
             removals.append(entry)
         else:
             modifications.append(entry)
@@ -237,7 +233,12 @@ def _declaration_line(entry: SurfaceChangeEntry) -> str:
     return f"- **{entry.symbol}** — {decl}{loc}"
 
 
-def render_surface_changes_lines(section: SurfaceChangeSection) -> list[str]:
+MAX_COMPACT_SURFACE_ITEMS = 12
+
+
+def render_surface_changes_lines(
+    section: SurfaceChangeSection, *, limit: int = MAX_COMPACT_SURFACE_ITEMS
+) -> list[str]:
     """The Markdown form: one sub-heading per group, each entry itemized
     with its old/new declaration so a reviewer can act on it directly."""
     if section.total == 0:
@@ -248,13 +249,18 @@ def render_surface_changes_lines(section: SurfaceChangeSection) -> list[str]:
         ("Removals", section.removals),
         ("Modifications", section.modifications),
     )
+    remaining = max(0, limit)
     for label, entries in groups:
         lines.append(f"**{label}** ({len(entries)})")
         lines.append("")
-        if entries:
-            lines.extend(_declaration_line(e) for e in entries)
+        shown = entries[:remaining]
+        if shown:
+            lines.extend(_declaration_line(e) for e in shown)
+            remaining -= len(shown)
+            if len(entries) > len(shown):
+                lines.append(f"- … {len(entries) - len(shown)} more {label.lower()} omitted")
         else:
-            lines.append("- none")
+            lines.append("- none" if not entries else f"- … all {len(entries)} omitted")
         lines.append("")
     return lines
 

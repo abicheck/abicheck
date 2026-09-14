@@ -573,7 +573,7 @@ def _embed_inline_source_side(
 # ── Compare options (unchanged) ──────────────────────────────────────────────
 @export_options(
     ["json", "markdown", "sarif", "html", "junit", "review", "oneline"],
-    default_format="markdown",
+    default_format="review",
     supports_directory=True,
     directory_formats=["json"],
     help_extra=" 'review' emits a compact GitHub-facing digest (verdict + "
@@ -845,7 +845,29 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # downstream consumer (run_compare, the release fan-out, the abort
     # renderers, the exit fold) already threads, so the grammar change stops
     # at this boundary rather than rippling through the whole compare stack.
-    from ..options.export import expand_export_kwargs, reject_dry_run_with_exports
+    from ..options.export import (
+        ExportSet,
+        ExportTarget,
+        expand_export_kwargs,
+        reject_dry_run_with_exports,
+    )
+
+    # The compact default describes one completed pair. Release/package
+    # fan-out and explicit alternate views retain the detailed Markdown
+    # projection they already support. This fallback applies only when the
+    # user supplied no export; an explicit `-o review=...` is still validated
+    # normally and never silently rewritten.
+    exports = kwargs["exports"]
+    assert isinstance(exports, ExportSet)
+    operands = (kwargs.get("old_input"), kwargs.get("new_input"))
+    non_full_view = any(token != "full" for token in kwargs.get("view", ()))
+    release_operand = any(
+        value is not None and Path(value).is_dir() for value in operands
+    )
+    if not exports.explicit and (non_full_view or release_operand):
+        kwargs["exports"] = ExportSet(
+            targets=(ExportTarget(fmt="markdown", destination=None),), explicit=False
+        )
 
     reject_dry_run_with_exports(bool(kwargs.get("dry_run")), kwargs["exports"])
     expand_export_kwargs(kwargs)

@@ -358,19 +358,19 @@ def detect_coverage_asymmetry(
 #: from a bare binary up through debug symbols, headers, build data, and sources.
 CHECK_CAPABILITIES: tuple[tuple[str, str, str, str], ...] = (
     (
-        "Symbol presence & linkage (added/removed/SONAME)",
+        "Exports, linkage, SONAME, and emitted ELF vtable-group sizes",
         "L0",
         "from the binary's dynamic symbol table",
         "needs the built binary",
     ),
     (
-        "Type layout, members, vtables, signatures",
+        "Debug-derived compiled type layout and member offsets",
         "L1",
         "from DWARF/PDB debug info",
-        "no debug info: checks limited to symbol-level, not struct/member/layout",
+        "no debug info: compiled layout/member offsets are not verified",
     ),
     (
-        "API decls absent from the symbol table; public-surface scoping",
+        "Public declarations, signatures, and declared virtual sequence",
         "L2",
         "from the public header AST",
         "no headers: header-only/inline-API declarations are invisible",
