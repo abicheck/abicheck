@@ -249,9 +249,10 @@ a manifest assigning a field this build resolves but does not yet act on is a
 usage error naming the field and the reason, rather than an assignment silently
 recorded as active configuration (`abicheck.pack_application`).
 
-On a directory/package (release) `compare`, a `kind:
-policy`/`kind: contract`/`kind: gate` pack's `policy.overrides`/`surface.
-internal_namespaces`/`contract.unresolved`/`gate.severity.<category>` all
+On a directory/package (release) `compare`, a
+`kind: policy`/`kind: contract`/`kind: gate` pack's `policy.overrides`,
+`surface.internal_namespaces`, `contract.unresolved` and
+`gate.severity.<category>` all
 apply to every library uniformly (CLI cleanup phase two, "PR B" slices 1
 and 2, and Track 2's 7B residual) — the gate half is folded into the
 release fan-out's own resolved `GateOptions` object (ADR-064, landed

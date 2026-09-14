@@ -132,8 +132,12 @@ tracing one specific field back to the version that introduced it.
 
 ### Per-version history (v12 onward)
 
-Its history is additive: each bump added fields without
-changing the meaning of existing ones — provenance metadata, PE/Mach-O
+**One bump was not additive: v42 replaced the flat document with the
+sectioned envelope** described in [What `dump` writes
+today](#what-dump-writes-today) — the only wire-format change in this list,
+and the one that breaks an external consumer reading the physical layout.
+Every *other* bump added fields without changing the meaning of existing
+ones — provenance metadata, PE/Mach-O
 support, build-mode capture, declaration provenance (`source_header`/`origin`),
 embedded build/source evidence, CastXML CV-qualifier reliability, the hybrid
 AST frontend's per-fact producer map, the resolved AST toolchain identity,

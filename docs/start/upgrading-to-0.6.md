@@ -336,9 +336,9 @@ abicheck compare libfoo.so.1 libfoo.so.2 \
 ## D. Python API
 
 The supported import surface is `abicheck.service`. The request/result types
-are defined in `abicheck.workflows.contracts` and `abicheck.workflows.
-request_inputs`, but **import them from `abicheck.service`** — that is the
-stable re-export point:
+are defined in `abicheck.workflows.contracts` and
+`abicheck.workflows.request_inputs`, but **import them from
+`abicheck.service`** — that is the stable re-export point:
 
 ```python
 from abicheck.service import (
@@ -377,9 +377,10 @@ run-scoped level arguments rather than a request.
 ### D3. There is no typed one-sided audit entry point
 
 `compare --no-baseline` has **no** `CompareRequest`-shaped Python
-equivalent in 0.6. `abicheck.workflows.no_baseline_compare.
-run_no_baseline_compare` exists but is not re-exported from
-`abicheck.service` and is not part of the documented API surface. Until a
+equivalent in 0.6.
+`abicheck.workflows.no_baseline_compare.run_no_baseline_compare` exists but
+is not re-exported from `abicheck.service` and is not part of the documented
+API surface. Until a
 typed entry point lands, call the CLI. Do not assume parity here.
 
 ### D4. Default changes worth re-checking
@@ -387,8 +388,9 @@ typed entry point lands, call the CLI. Do not assume parity here.
 - **`include_dependencies` now defaults to `False` everywhere.** In 0.5 a
   typed-API caller that omitted the field got the *unfiltered* declaration
   surface while the identical CLI invocation got the filtered one — and the
-  two were not even comparable (`scope_mismatch`, no verdict). `InputSpec.
-  include_dependencies`, `run_dump` and the CLI now share one default:
+  two were not even comparable (`scope_mismatch`, no verdict).
+  `InputSpec.include_dependencies`, `run_dump` and the CLI now share one
+  default:
   toolchain/system declarations are excluded. Pass `True`, or
   `compare/dump --include-system-declarations`, for the old typed-API
   behaviour.

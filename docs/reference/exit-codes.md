@@ -338,8 +338,8 @@ non-winning contribution is excluded, since it did not determine the
 result); `["clean"]` when `code` is `0`.
 
 `crosscheck_promotion_contribution` (schema 2.42) is always `0` on a
-`compare` report — it never had meaning outside the retired `scan
---against`'s own maintainer-promoted `--crosscheck KEY=error` finding
+`compare` report — it never had meaning outside the retired
+`scan --against`'s own maintainer-promoted `--crosscheck KEY=error` finding
 (`scan_engine._promote_published_gate`), which reconstructs the whole
 `diff.exit` block through the same resolver whenever the crosscheck
 contributes anything positive, so `reasons` can carry `promoted_crosscheck`
