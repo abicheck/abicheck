@@ -62,6 +62,8 @@ from .errors import AstContextAmbiguousError, AstContextMissingError, SnapshotEr
 _CC1_INVOCATION_RE = re.compile(
     r"-cc1\b.*?-triple\s+(?P<target>\S+).*?-fsycl-is-(?P<kind>host|device)\b"
 )
+_JSON_STRUCTURAL_TOKEN_RE = re.compile(r'["{}\[\]]')
+_JSON_STRING_TOKEN_RE = re.compile(r'["\\]')
 
 
 @dataclass(frozen=True)
@@ -321,14 +323,52 @@ class _ChunkCursor:
                     )
                 piece_start = self.pos  # == 0, freshly replaced `cur`
                 continue
-            closed = state.feed(self.cur[self.pos])
-            self.pos += 1
+            closed = self._scan_current_chunk(state)
             if closed:
                 break
         if not collect:
             return None
         pieces.append(self.cur[piece_start : self.pos])
         return _join_pieces(pieces)
+
+    def _scan_current_chunk(self, state: _BracketState) -> bool:
+        """Skip ordinary bytes with C-backed regular-expression searches."""
+
+        text = self.cur
+        end = len(text)
+        while self.pos < end:
+            if state.in_string:
+                if state.escape:
+                    state.escape = False
+                    self.pos += 1
+                    continue
+                match = _JSON_STRING_TOKEN_RE.search(text, self.pos)
+                if match is None:
+                    self.pos = end
+                    return False
+                token = match.start()
+                self.pos = token + 1
+                if text[token] == "\\":
+                    state.escape = True
+                else:
+                    state.in_string = False
+                continue
+            match = _JSON_STRUCTURAL_TOKEN_RE.search(text, self.pos)
+            if match is None:
+                self.pos = end
+                return False
+            token = match.start()
+            char = text[token]
+            self.pos = token + 1
+            if char == '"':
+                state.in_string = True
+            elif char in "{[":
+                state.depth += 1
+            else:
+                state.depth -= 1
+                if state.depth == 0:
+                    return True
+        return False
 
 
 def _join_pieces(pieces: list[str]) -> str:
@@ -353,15 +393,15 @@ def _iter_json_documents(
 
     Each document must be a top-level JSON **object or array** (``{...}``/
     ``[...]``) -- always true for a clang ``-ast-dump=json`` document, never
-    a bare scalar. Boundary detection is a hand-rolled bracket/string-escape
-    scan over the CURRENT chunk only, never a growing list of chunks and
+    a bare scalar. Boundary detection is a bracket/string-escape scan using
+    C-backed token searches over the CURRENT chunk only, never a growing list of chunks and
     never an ever-growing single ``str`` -- see :class:`_ChunkCursor` for why
     the obvious ``raw_decode``-over-a-growing-buffer approach was quadratic,
     and :class:`_BracketState` for why a naive brace counter is wrong.
 
     *want_text*, if given, is called with each document's 0-based index
     BEFORE that document is scanned at all -- when it returns ``False``,
-    this function still scans through the document character-by-character
+    this function still scans through the document
     (so the boundary of the NEXT one can be found) but discards each chunk
     the moment it's fully consumed, never retaining more than the single
     chunk currently being scanned, and yields ``None`` for that document

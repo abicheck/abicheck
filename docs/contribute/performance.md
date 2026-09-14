@@ -926,6 +926,40 @@ current-main function bodies and synthetic-but-realistically-shaped inputs --
 **not** through a full oneDAL/SVS/PVXS `dump`/`compare` run, so read them as
 component figures, not an end-to-end speedup claim.
 
+#### Request-local context sharing
+
+Scalar comparison and release-member fan-out now own one request-local L2
+acquisition table. A content-addressed frontend context has one in-flight
+clang/CastXML producer; its parsed declarations and `SemanticIR` are normalized
+once, then copied into independently mutable legacy declaration projections and
+bound against each binary's own export set. Waiters have deadline-bounded queue
+time, do not cancel a producer another member still needs, and failed or
+input-mutated acquisitions are never retained as reusable results.
+
+For Intel DPC++ the ordinary host context is also acquired directly with
+`-fsycl -fsycl-host-only`. This prevents the compiler from serializing a full
+unused device JSON document before the shared host evidence can be normalized.
+An explicit device request continues through the multi-context framing route:
+host-only and device ASTs are different parse contexts and must never share a
+cache entry merely because their entry headers match.
+
+The compact result retained after each release-member comparison also carries
+that member's already-validated `ElfMetadata` and recorded native filename.
+Final bundle-graph assembly consumes those fields directly; it falls back to a
+stored-snapshot decode or live ELF parse only for a member that did not resolve
+earlier. Filesystem alias probing remains enabled only for genuinely live paths,
+so carrying metadata forward does not re-resolve a stored identity against the
+caller's current working directory.
+
+A six-library local control used one real shared public header declaring six C
+functions and six separately compiled DSOs, each exporting a different one.
+Cold-cache clang acquisition changed from **6 compiler + 6 normalization calls,
+4.253 s** to **1 + 1, 3.375 s**; CastXML 0.6.11 changed from **6 + 6, 1.900 s**
+to **1 + 1, 1.492 s**. Every member retained all six header declarations and
+only its own export was marked binary-exported. These are small-fixture local
+measurements, not oneDAL results; the periodic real-profile lane remains the
+owner of oneDAL/SVS/PVXS claims.
+
 - **Include-tree inventory for cache keys** (`extract/cache_header_scan.py`).
   Every header-parse cache key walks each include root to fold in
   (path, mtime) for every header-like descendant -- `dumper_ast_config.

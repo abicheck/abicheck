@@ -49,6 +49,7 @@ Two mechanical notes:
 from __future__ import annotations
 
 import concurrent.futures
+import contextvars
 import dataclasses
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -56,6 +57,7 @@ from typing import TYPE_CHECKING, Any
 from .compile_context import CompileContext
 from .confidence import note_if_same_binary_compared
 from .dependency_info import populate_pair_dependency_info
+from .dumper_cache import ast_acquisition_scope
 from .environment_matrix import EnvironmentMatrix
 from .errors import ValidationError
 from .extract.env_flags import env_flag
@@ -415,22 +417,30 @@ def resolve_compare_request(
             new_public_header_dirs,
         )
 
-    if not allow_parallel or resolve_sides_sequentially(request):
-        old_res = _resolve_old_side()
-        new_res = _resolve_new_side()
-    else:
-        # ADR-068 §3 #19 (Codex review): re-enter the captured deadline in
-        # each worker -- see `_deadline_bound_side_worker`'s own docstring.
-        _deadline_ts = deadline.current_deadline_ts()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-            old_future = pool.submit(
-                _deadline_bound_side_worker, _deadline_ts, _resolve_old_side
-            )
-            new_future = pool.submit(
-                _deadline_bound_side_worker, _deadline_ts, _resolve_new_side
-            )
-            old_res = old_future.result()
-            new_res = new_future.result()
+    with ast_acquisition_scope():
+        if not allow_parallel or resolve_sides_sequentially(request):
+            old_res = _resolve_old_side()
+            new_res = _resolve_new_side()
+        else:
+            # ADR-068 §3 #19 (Codex review): re-enter the captured deadline in
+            # each worker -- see `_deadline_bound_side_worker`'s own docstring.
+            _deadline_ts = deadline.current_deadline_ts()
+            acquisition_context = contextvars.copy_context()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                old_future = pool.submit(
+                    acquisition_context.copy().run,
+                    _deadline_bound_side_worker,
+                    _deadline_ts,
+                    _resolve_old_side,
+                )
+                new_future = pool.submit(
+                    acquisition_context.copy().run,
+                    _deadline_bound_side_worker,
+                    _deadline_ts,
+                    _resolve_new_side,
+                )
+                old_res = old_future.result()
+                new_res = new_future.result()
     old, new = old_res.snapshot, new_res.snapshot
 
     # ADR-055 D1: `--follow-deps`'s transitive DependencyInfo. After both sides

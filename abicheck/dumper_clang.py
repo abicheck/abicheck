@@ -308,6 +308,25 @@ def _resolve_dpcpp_multi_context(
     return is_dpcpp and not sycl_explicitly_off
 
 
+def _resolve_dpcpp_acquisition(
+    clang_bin: str,
+    frontend_context: str,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+) -> tuple[bool, bool]:
+    """Return ``(multi_context, direct_host)`` for one DPC++ request."""
+    multi = _resolve_dpcpp_multi_context(
+        clang_bin, frontend_context, gcc_options, gcc_option_tokens
+    )
+    tokens = (split_gcc_options(gcc_options) if gcc_options else []) + list(
+        gcc_option_tokens
+    )
+    direct_host = (
+        multi and frontend_context == "host" and "-fsycl-device-only" not in tokens
+    )
+    return multi and not direct_host, direct_host
+
+
 def _needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:
     """True if *tokens* enable SYCL on a driver that needs a pinned single pass.
 

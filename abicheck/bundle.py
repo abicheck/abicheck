@@ -67,7 +67,7 @@ docstring.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
@@ -102,6 +102,7 @@ from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
     DEFAULT_SYSTEM_PROVIDERS as DEFAULT_SYSTEM_PROVIDERS,
     BundleDiffResult as BundleDiffResult,
     BundleFinding as BundleFinding,
+    BundleSignatureEvidence as BundleSignatureEvidence,
     BundleSnapshot as BundleSnapshot,
     ConsumerEntry as ConsumerEntry,
     ProviderEntry as ProviderEntry,
@@ -111,6 +112,7 @@ from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
 from .bundle_soname import hard_link_alias_basenames
 from .checker_types import DiffResult
 from .elf_metadata import ElfMetadata, parse_elf_metadata
+from .model import AbiSnapshot
 from .policy.classification import Verdict, compute_verdict
 from .workflows.bundle_unresolved_audit import (  # noqa: F401
     _detect_unresolved_intra_dependency as _detect_unresolved_intra_dependency,
@@ -213,7 +215,12 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
     )
 
 
-def build_bundle_snapshot_mixed(libraries: dict[str, Path]) -> BundleSnapshot:
+def build_bundle_snapshot_mixed(
+    libraries: dict[str, Path],
+    *,
+    resolved_evidence: Mapping[str, AbiSnapshot | BundleSignatureEvidence]
+    | None = None,
+) -> BundleSnapshot:
     """`build_bundle_snapshot`'s ADR-062 A1.7 counterpart: *libraries* may
     map some names to a live ELF file (parsed exactly as
     `build_bundle_snapshot` already does) and others to a stored,
@@ -259,8 +266,9 @@ def build_bundle_snapshot_mixed(libraries: dict[str, Path]) -> BundleSnapshot:
     intra-bundle break going unreported for exactly the case this function
     exists to catch).
     """
+    resolved_evidence = resolved_evidence or {}
     stored = {name: path for name, path in libraries.items() if _is_stored_member(path)}
-    if not stored:
+    if not stored and not resolved_evidence:
         return build_bundle_snapshot(libraries)
 
     metadata: dict[str, ElfMetadata] = {}
@@ -272,7 +280,17 @@ def build_bundle_snapshot_mixed(libraries: dict[str, Path]) -> BundleSnapshot:
     # multi-gigabyte header-depth snapshot twice.
     file_backed_filenames: dict[str, Path] = {}
     for name, path in stored.items():
-        if path.is_dir():
+        resolved = resolved_evidence.get(name)
+        elf = resolved.elf if resolved is not None else None
+        recovered_name = (
+            resolved.library_filename
+            if isinstance(resolved, BundleSignatureEvidence)
+            else (resolved.library if isinstance(resolved, AbiSnapshot) else "")
+        )
+        recovered = _stored_document_library_filename({"library": recovered_name})
+        if elf is not None and recovered is not None:
+            file_backed_filenames[name] = recovered
+        elif path.is_dir():
             elf = _stored_elf_metadata(path)
         else:
             elf, recovered = _stored_file_snapshot_evidence(path)
@@ -304,8 +322,15 @@ def build_bundle_snapshot_mixed(libraries: dict[str, Path]) -> BundleSnapshot:
             extra_aliases[name] = aliases
 
     live = {name: path for name, path in libraries.items() if name not in stored}
-    if live:
-        metadata.update(build_bundle_snapshot(live).metadata)
+    unresolved_live: dict[str, Path] = {}
+    for name, path in live.items():
+        resolved = resolved_evidence.get(name)
+        if resolved is not None and resolved.elf is not None:
+            metadata[name] = resolved.elf
+        else:
+            unresolved_live[name] = path
+    if unresolved_live:
+        metadata.update(build_bundle_snapshot(unresolved_live).metadata)
 
     # `probe_filesystem_names=frozenset(live)` -- *not* the merged `paths`
     # below -- is what actually keeps the real-filesystem symlink-resolve/

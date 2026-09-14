@@ -41,14 +41,17 @@ Protocol structurally, so no change is needed on their side.
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
-from ..model import EnumType, Function, RecordType, Variable
+from ..dumper_cache import retain_ast_context_object, run_ast_acquisition
+from ..model import AccessLevel, EnumType, Function, RecordType, Variable, Visibility
 from ..model.identity import EntityId
 from ..model.semantic_ir import SemanticIR
 from .semantic_normalizer import normalize_header_ast
+from .surface_fact_producers import header_ast_surface_facts
 
 __all__ = ["HeaderAstFields", "parse_header_ast_fields"]
 
@@ -97,6 +100,52 @@ def parse_header_ast_fields(
     own docstring for why this exists as a dedicated function rather than
     inline calls at each call site.
     """
+    root = getattr(parser, "_root", None)
+    retain_ast_context_object(root)
+    exported_dynamic = set(getattr(parser, "_exported_dynamic", ()))
+    exported_static = set(getattr(parser, "_exported_static", ()))
+    no_binary_evidence = bool(
+        getattr(
+            parser,
+            "_no_binary_evidence",
+            getattr(getattr(parser, "_ctx", None), "no_binary_evidence", False),
+        )
+    )
+    scope_key = repr(
+        (
+            id(root),
+            tuple(getattr(parser, "_pub_header_segs", ())),
+            tuple(getattr(parser, "_pub_dir_segs", ())),
+            getattr(parser, "_target_triple", None),
+            getattr(parser, "_is_cxx", None),
+        )
+    )
+
+    def _normalize_once() -> HeaderAstFields:
+        factory = getattr(parser, "_abicheck_neutral_factory", None)
+        neutral = parser if no_binary_evidence or factory is None else factory()
+        return _parse_header_ast_fields_uncached(neutral, producer=producer)
+
+    base = run_ast_acquisition(f"{producer}-normalized", scope_key, _normalize_once)
+    # The normalized/context-owned result is read-only by convention. Every
+    # snapshot receives independent legacy declarations because provenance,
+    # ELF layout corroboration and policy projections still mutate those
+    # objects after extraction. Binary export membership is the deliberately
+    # small binding applied after the shared parse/normalization.
+    fields = copy.deepcopy(base)
+    if no_binary_evidence:
+        return fields
+    return _bind_binary_exports(
+        fields,
+        exported_dynamic=exported_dynamic,
+        exported_static=exported_static,
+        producer=producer,
+    )
+
+
+def _parse_header_ast_fields_uncached(
+    parser: _HeaderAstParser, *, producer: str
+) -> HeaderAstFields:
     functions = tuple(parser.parse_functions())
     variables = tuple(parser.parse_variables())
     types = tuple(parser.parse_types())
@@ -127,3 +176,85 @@ def parse_header_ast_fields(
             constant_entity_ids=constant_entity_ids,
         ),
     )
+
+
+def _symbol_visibility(
+    mangled: str, name: str, dynamic: set[str], static: set[str]
+) -> tuple[Visibility, bool]:
+    candidates = {mangled, name}
+    if mangled.startswith("__Z"):
+        candidates.add(mangled[1:])
+    if candidates & dynamic:
+        return Visibility.PUBLIC, True
+    if candidates & static:
+        return Visibility.ELF_ONLY, True
+    return Visibility.HIDDEN, False
+
+
+def _bind_binary_exports(
+    fields: HeaderAstFields,
+    *,
+    exported_dynamic: set[str],
+    exported_static: set[str],
+    producer: str,
+) -> HeaderAstFields:
+    functions: list[Function] = []
+    for function in fields.functions:
+        visibility, exported = _symbol_visibility(
+            function.mangled,
+            function.name,
+            exported_dynamic,
+            exported_static,
+        )
+        leaf = function.name.rsplit("::", 1)[-1]
+        owner = function.name.rsplit("::", 2)[-2] if "::" in function.name else ""
+        judged_public = (
+            producer == "castxml"
+            and not exported
+            and function.access is AccessLevel.PUBLIC
+            and not function.is_deleted
+            and not function.is_compiler_generated
+            and (leaf == owner or leaf == f"~{owner}")
+        )
+        if judged_public:
+            visibility = Visibility.PUBLIC
+        functions.append(
+            replace(
+                function,
+                visibility=visibility,
+                **header_ast_surface_facts(
+                    exported=exported,
+                    judged_public=judged_public,
+                    producer=producer,
+                ),
+            )
+        )
+    variables: list[Variable] = []
+    for variable in fields.variables:
+        visibility, exported = _symbol_visibility(
+            variable.mangled,
+            variable.name,
+            exported_dynamic,
+            exported_static,
+        )
+        judged_public = (
+            producer == "castxml"
+            and not exported
+            and not variable.is_static
+            and "_GLOBAL__N_1" not in variable.mangled
+            and not variable.mangled.startswith("_ZL")
+        )
+        if judged_public:
+            visibility = Visibility.PUBLIC
+        variables.append(
+            replace(
+                variable,
+                visibility=visibility,
+                **header_ast_surface_facts(
+                    exported=exported,
+                    judged_public=judged_public,
+                    producer=producer,
+                ),
+            )
+        )
+    return replace(fields, functions=tuple(functions), variables=tuple(variables))

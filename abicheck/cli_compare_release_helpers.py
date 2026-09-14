@@ -343,8 +343,12 @@ def _run_bundle_analysis(
         # rather than build_bundle_snapshot's live-only ELF parse, which
         # would otherwise silently drop every stored-side library from
         # bundle-level analysis (Codex review, security finding); an empty map still builds a valid, empty BundleSnapshot.
-        old_snap = build_bundle_snapshot_mixed(dict(old_map))
-        new_snap = build_bundle_snapshot_mixed(dict(new_map))
+        old_snap = build_bundle_snapshot_mixed(
+            dict(old_map), resolved_evidence=old_snapshots
+        )
+        new_snap = build_bundle_snapshot_mixed(
+            dict(new_map), resolved_evidence=new_snapshots
+        )
     except Exception as exc:
         # Treat snapshot-build failures as additive degradation: the
         # per-library compare-release report is still useful, and the
