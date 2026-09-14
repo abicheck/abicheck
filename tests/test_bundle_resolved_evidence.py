@@ -51,3 +51,22 @@ def test_stored_member_uses_compact_evidence_without_snapshot_decode(
     )
     assert result.metadata["libready.so"] is evidence.elf
     assert result.libraries["libready.so"] == Path("libready.so.1")
+
+
+def test_stored_directory_falls_back_to_resolved_native_filename(
+    tmp_path: Path, monkeypatch
+) -> None:
+    stored = tmp_path / "stored-member"
+    stored.mkdir()
+    evidence = BundleSignatureEvidence.from_snapshot(_snapshot("libready.so.1"))
+    monkeypatch.setattr(bundle, "_is_stored_member", lambda path: path == stored)
+    monkeypatch.setattr(
+        bundle,
+        "_stored_library_identity",
+        lambda path, count: (None, ("libready-alias.so",), count + 1),
+    )
+    result = bundle.build_bundle_snapshot_mixed(
+        {"libready.so": stored}, resolved_evidence={"libready.so": evidence}
+    )
+    assert result.libraries["libready.so"] == Path("libready.so.1")
+    assert result.resolution.soname_to_name["libready-alias.so"] == "libready.so"

@@ -30,7 +30,7 @@ caller is ``storage/closure_identity.py``, the real owner behind the flat
 from __future__ import annotations
 
 import dataclasses as _dataclasses
-from collections.abc import Callable as _Callable
+from collections.abc import Callable as _Callable, Mapping as _Mapping
 from enum import Enum as _Enum
 
 __all__ = [
@@ -138,7 +138,7 @@ def _collect_strings(value: object, out: list[str]) -> None:
     elif isinstance(value, (list, tuple)):
         for item in value:
             _collect_strings(item, out)
-    elif isinstance(value, dict):
+    elif isinstance(value, _Mapping):
         for k, v in value.items():
             if isinstance(k, str) and not isinstance(k, _Enum):
                 out.append(k)
@@ -306,4 +306,11 @@ def _walk_rewrite_strings(
             value.clear()
             value.update(rewritten)
         return value
+    if isinstance(value, _Mapping):
+        return {
+            _walk_rewrite_strings(
+                k, rewrite, field_name=field_name
+            ): _walk_rewrite_strings(v, rewrite, field_name=field_name)
+            for k, v in value.items()
+        }
     return value

@@ -247,6 +247,7 @@ def _clang_header_dump(
     pruning_header_roots: tuple[str, ...] | None = None,
     exported_symbols: frozenset[str] = frozenset(),
     _coordinated: bool = False,
+    _expected_acquisition_key: str | None = None,
 ) -> tuple[dict[str, Any], str | None, bool]:
     """Run clang over *headers* and return ``(root, resolved_kind, resolved_force_cpp)``.
 
@@ -255,10 +256,7 @@ def _clang_header_dump(
     ``force_cpp`` (Codex review: the provenance probe must not re-derive a
     stale guess once this already resolved the real answer).
 
-    ``frontend_context`` (ADR-050 D5, G32 Phase D) is ``"host"``/``"device"``.
-    ``resolved_kind`` identifies a selected DPC++ context, else ``None``.
-    An unavailable or explicitly disabled device context raises
-    :class:`abicheck.errors.AstContextMissingError`; it is never re-enabled.
+    ``frontend_context`` selects the host or device DPC++ evidence.
     """
     clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
     dpcpp_multi_context, dpcpp_host_context = _resolve_dpcpp_acquisition(
@@ -314,26 +312,23 @@ def _clang_header_dump(
             frontend_context=frontend_context,
         )
 
-    # Both include sets feed the *lookup* key: whichever the retry settles on, a
-    # toolchain change to either invalidates the cached AST. Equal when already
-    # in C++ mode — pass once so existing C++ cache keys are stable.
     key = _make_key(
         force_cpp,
         force_cpp20,
         system_includes if force_cpp else (*system_includes, *cpp_system_includes),
     )
+    if _expected_acquisition_key is not None and key != _expected_acquisition_key:
+        raise SnapshotError("header inputs changed before clang acquisition started")
     resolved_kind = (
         frontend_context if dpcpp_multi_context or dpcpp_host_context else None
     )
     cached = _cache_path(key, backend="clang")
-    # A memo hit (G31 Phase C) skips the disk read/JSON re-parse entirely.
     _memoize = dumper_cache.ast_memoize_active() if memoize is None else memoize
     _cached_result = dumper_cache.load_cached_ast(
         key, "clang", cached, memoize=_memoize
     )
     if _cached_result is not None:
         return cast("dict[str, Any]", _cached_result), resolved_kind, force_cpp
-
     if not _coordinated and dumper_cache.ast_acquisition_active():
         return dumper_cache.run_ast_acquisition(
             "clang",
@@ -355,6 +350,7 @@ def _clang_header_dump(
                 pruning_header_roots=pruning_header_roots,
                 exported_symbols=exported_symbols,
                 _coordinated=True,
+                _expected_acquisition_key=key,
             ),
         )
 
@@ -884,6 +880,7 @@ def _castxml_dump(
     _selected_meta_out: list[tuple[str, bool]] | None = None,
     exported_symbols: frozenset[str] = frozenset(),
     _coordinated: bool = False,
+    _expected_acquisition_key: str | None = None,
 ) -> Element:
     """Run CastXML on *headers* and return its parsed XML root."""
     castxml_bin = _resolve_gated_castxml_bin(castxml_bin)
@@ -926,6 +923,8 @@ def _castxml_dump(
         )
 
     key = _make_key()
+    if _expected_acquisition_key is not None and key != _expected_acquisition_key:
+        raise SnapshotError("header inputs changed before CastXML acquisition started")
     cached = _cache_path(key)
     if cached.exists():
         deadline.check()
@@ -956,6 +955,7 @@ def _castxml_dump(
                 _selected_meta_out=produced_meta,
                 exported_symbols=exported_symbols,
                 _coordinated=True,
+                _expected_acquisition_key=key,
             )
             return produced, produced_meta[-1]
 

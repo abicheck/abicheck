@@ -57,7 +57,8 @@ def test_occurrences_are_deeply_immutable_and_shareable() -> None:
         semantic_ir.occurrences[occurrence] = CanonicalEntity(  # type: ignore[index]
             canonical_spelling=Fact.present("mutated")
         )
-    assert pickle.loads(pickle.dumps(semantic_ir)) == semantic_ir
+    assert pickle.loads(pickle.dumps(semantic_ir)) == semantic_ir  # nosec B301
+    assert "FrozenMapping" in repr(semantic_ir.occurrences)
 
 
 _names = st.text(

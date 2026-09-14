@@ -191,8 +191,7 @@ class _BracketState:
 
     A naive brace counter is wrong in general -- a JSON string value can itself
     contain a literal ``{``/``}`` -- so string and escape state are tracked
-    alongside nesting depth. Fed one character at a time so the caller can
-    stream, never needing the document in memory to find its end.
+    alongside nesting depth while the cursor skips ordinary spans in C.
     """
 
     __slots__ = ("depth", "escape", "in_string")
@@ -201,32 +200,6 @@ class _BracketState:
         self.depth = 0
         self.in_string = False
         self.escape = False
-
-    def feed(self, c: str) -> bool:
-        """Consume one character; ``True`` when it closed the top-level
-        document."""
-        if self.in_string:
-            self._feed_in_string(c)
-            return False
-        return self._feed_structural(c)
-
-    def _feed_in_string(self, c: str) -> None:
-        if self.escape:
-            self.escape = False
-        elif c == "\\":
-            self.escape = True
-        elif c == '"':
-            self.in_string = False
-
-    def _feed_structural(self, c: str) -> bool:
-        if c == '"':
-            self.in_string = True
-        elif c in "{[":
-            self.depth += 1
-        elif c in "}]":
-            self.depth -= 1
-            return self.depth == 0
-        return False
 
 
 class _ChunkCursor:

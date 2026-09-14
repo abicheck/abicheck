@@ -100,6 +100,8 @@ class AstAcquisitionScope:
             try:
                 result = future.result(timeout=left)
             except FutureTimeoutError:
+                if future.done():
+                    return cast("_T", future.result())
                 # Do not cancel the shared producer: another member may still
                 # need it.  The waiter's own request deadline is nevertheless
                 # authoritative and must bound queue time as well as compiler
