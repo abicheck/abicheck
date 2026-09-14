@@ -278,6 +278,25 @@ jobs:
       # agreement: it probes what coverage.py actually selects and fails if
       # this is requested under a configuration where it silently falls
       # back without the repo saying so.
+      #
+      # That move was measured and is BLOCKED -- do not re-attempt it as a
+      # speedup without re-measuring the floor first. On 3.14.0rc2 with
+      # coverage 7.16.0, `COVERAGE_CORE=sysmon` does engage under
+      # `branch = true` (`tracer_name()` reports `SysMonitor`, no fallback
+      # warning) and removes essentially all instrumentation overhead: on a
+      # 2,173-test subset, uninstrumented 21.9s / sysmon 19.9s / CTracer
+      # 35.1s, and on the full canonical selection at `-n 4`, 12m15s against
+      # 17m30s on 3.13 -- a ~30% reduction. But the same two full runs, same
+      # selection, same machine, near-identical test counts (48,708 vs
+      # 48,710 passed, with `repo_facts.json`'s `canonical_python` flipped so
+      # the canonical-only cases actually ran), report 93.73% on 3.14 against
+      # 96.30% on 3.13: 1,339 fewer branches covered, below this lane's 95%
+      # floor. The gap is interpreter-specific, not a backend artifact -- on
+      # one interpreter the two cores agree to four decimal places on the
+      # total and differ by a single branch arc in each direction. Lowering
+      # the floor to buy the speedup is not an option, so the lane stays on
+      # 3.13 until that 2.57 points is understood and closed, which is its
+      # own investigation.
       COVERAGE_CORE: sysmon
     strategy:
       fail-fast: false
