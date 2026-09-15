@@ -129,8 +129,18 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
         # reason and source file. And the JUnit projection published only
         # the total exit code where JSON/Markdown/oneline/SARIF all named
         # the orthogonal axis that fired.
-        fixed_by=(1176, 1185),
+        fixed_by=(1176, 1185, 1304),
         seed_tests=(
+            # ADR-072: the PR comment was a third instance of this exact
+            # shape, and the largest -- `confidence`, `evidence_tier(s)`,
+            # `coverage_warnings` and every per-finding *one-sided*
+            # `old_value`/`new_value` were published by the JSON projection
+            # and dropped by the comment adapter at every detail level,
+            # `full` included. The seed test states the class as an
+            # invariant over the whole old/new x present/absent/zero/false/
+            # empty-string product plus a JSON-vs-comment agreement check,
+            # rather than one assertion per dropped field.
+            "tests/test_pr_comment_reporting.py",
             "tests/test_disposition_reclassification.py",
             # The audit's own suppression-provenance suite moved here when
             # `test_no_baseline_report_formats.py` crossed its module-size
@@ -150,8 +160,16 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             # contributor to write a test that already exists, the mirror of
             # the overstating case the known gap below describes (Codex
             # review, P2).
-            "renderer": ("json", "markdown", "sarif", "junit"),
-            "record": ("suppression-provenance", "exit-axis"),
+            "renderer": ("json", "markdown", "sarif", "junit", "pr-comment"),
+            "record": (
+                "suppression-provenance",
+                "exit-axis",
+                # ADR-072's three, each a fact the JSON published and the
+                # comment adapter dropped.
+                "evidence-and-coverage",
+                "finding-value",
+                "entity-operation-rollup",
+            ),
         },
         known_gaps=(
             KnownGap(
