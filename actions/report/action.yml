@@ -1,0 +1,72 @@
+name: 'abicheck report'
+description: >-
+  Render a bounded, report-only GitHub Actions summary from existing abicheck
+  component reports. This Action never runs ABI analysis and never requires a
+  GitHub token.
+
+branding:
+  icon: 'file-text'
+  color: 'blue'
+
+inputs:
+  reports-dir:
+    description: 'Directory containing component report JSON files produced by abicheck check-target.'
+    required: true
+  manifest:
+    description: >-
+      Expected-target manifest or abicheck run-plan.json. Required unless
+      discovered-only is true; it is consumed as data, never executed.
+    required: false
+    default: ''
+  discovered-only:
+    description: 'Set true to summarize exactly the component reports present, without a coverage gate.'
+    required: false
+    default: 'false'
+  summary-file:
+    description: 'Workspace-relative Markdown file to write.'
+    required: false
+    default: 'abicheck-report-summary.md'
+  max-report-files:
+    description: 'Maximum component JSON files accepted (1-200).'
+    required: false
+    default: '100'
+  max-report-bytes:
+    description: 'Maximum bytes accepted for each component report or manifest (1024-1048576).'
+    required: false
+    default: '262144'
+  max-summary-bytes:
+    description: 'Maximum UTF-8 bytes written to the Markdown summary (1024-65536).'
+    required: false
+    default: '32768'
+  add-job-summary:
+    description: 'Append the rendered Markdown to GITHUB_STEP_SUMMARY when available.'
+    required: false
+    default: 'true'
+
+outputs:
+  report-path:
+    description: 'Workspace-relative path of the bounded Markdown summary.'
+    value: ${{ steps.render.outputs.report-path }}
+  exit-code:
+    description: 'Canonical aggregate gate exit code, reported only; this Action itself always succeeds after rendering.'
+    value: ${{ steps.render.outputs.exit-code }}
+  verdict:
+    description: 'Canonical aggregate compatibility verdict.'
+    value: ${{ steps.render.outputs.verdict }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Render existing abicheck reports
+      id: render
+      shell: bash
+      env:
+        INPUT_REPORTS_DIR: ${{ inputs.reports-dir }}
+        INPUT_MANIFEST: ${{ inputs.manifest }}
+        INPUT_DISCOVERED_ONLY: ${{ inputs.discovered-only }}
+        INPUT_SUMMARY_FILE: ${{ inputs.summary-file }}
+        INPUT_MAX_REPORT_FILES: ${{ inputs.max-report-files }}
+        INPUT_MAX_REPORT_BYTES: ${{ inputs.max-report-bytes }}
+        INPUT_MAX_SUMMARY_BYTES: ${{ inputs.max-summary-bytes }}
+        INPUT_ADD_JOB_SUMMARY: ${{ inputs.add-job-summary }}
+      run: python3 "${{ github.action_path }}/report.py"
