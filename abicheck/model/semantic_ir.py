@@ -54,6 +54,7 @@ from dataclasses import dataclass, field, fields
 from typing import Any
 
 from .fact import Fact
+from .frozen_mapping import FrozenMapping
 from .identity import EntityId, _packed
 from .occurrence import OccurrenceId, canonical_key
 
@@ -198,6 +199,10 @@ class SemanticIR:
     """
 
     occurrences: Mapping[OccurrenceId, CanonicalEntity] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.occurrences, FrozenMapping):
+            object.__setattr__(self, "occurrences", FrozenMapping(self.occurrences))
 
     def occurrences_for(self, entity_id: EntityId) -> tuple[OccurrenceId, ...]:
         """Every occurrence key naming *entity_id*, in this IR's own order.

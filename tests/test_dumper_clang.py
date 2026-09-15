@@ -4885,7 +4885,7 @@ def test_clang_header_dump_host_context_selects_real_fixture(
     stdout_text, stderr_text = _dpcpp_fixture_texts()
     monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx")
+    monkeypatch.setattr(dumper, "_resolve_dpcpp_acquisition", lambda *a: (True, False))
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
 
     def _run(cmd, **kwargs):

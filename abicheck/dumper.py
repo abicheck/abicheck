@@ -74,7 +74,7 @@ from .dumper_clang import (
     _is_dpcpp_family_binary as _is_dpcpp_family_binary,
     _needs_sycl_host_only as _needs_sycl_host_only,
     _resolve_clang_bin as _resolve_clang_bin,
-    _resolve_dpcpp_multi_context,
+    _resolve_dpcpp_acquisition,
     clang_bin_is_explicitly_configured as _clang_bin_is_explicitly_configured,
 )
 from .dumper_clang_errors import (
@@ -88,8 +88,6 @@ from .dumper_contract import (
     # ADR-050 D1 extraction-contract attachment lives in the sibling module
     # (dumper.py is at the file-size cap); re-exported here so
     # ``dumper._attach_extraction_contract`` remains a valid bare-name call
-    # in ``dump()`` and a valid import target for ``service.py``'s
-    # PE/Mach-O header-scoped dump path.
     _attach_extraction_contract as _attach_extraction_contract,
 )
 from .dumper_debug import (
@@ -248,6 +246,8 @@ def _clang_header_dump(
     memoize: bool | None = None,
     pruning_header_roots: tuple[str, ...] | None = None,
     exported_symbols: frozenset[str] = frozenset(),
+    _coordinated: bool = False,
+    _expected_acquisition_key: str | None = None,
 ) -> tuple[dict[str, Any], str | None, bool]:
     """Run clang over *headers* and return ``(root, resolved_kind, resolved_force_cpp)``.
 
@@ -256,38 +256,10 @@ def _clang_header_dump(
     ``force_cpp`` (Codex review: the provenance probe must not re-derive a
     stale guess once this already resolved the real answer).
 
-    Formerly a known residual (Codex review, two rounds): the LOOKUP key
-    doesn't distinguish a C-mode success from an initially-C-mode call's
-    self-healed C++ success (both are computed before clang ever runs --
-    see the key's own ``system_includes`` comment below), so a cache HIT
-    used to return the pre-retry ``force_cpp`` instead of the mode that
-    actually produced the cached content. Closed at the WRITE side instead
-    of a cache-format change: the entry is written under a key/path
-    recomputed from ``cur_fcpp`` whenever self-heal changed it, not the
-    stale pre-retry ``key``/``cached``. A later identical call that would
-    self-heal now simply misses the unused pre-retry key and re-runs fresh
-    -- always correct, at the cost of caching's benefit for that one input
-    shape rather than a wrong answer.
-
-    The clang-frontend counterpart of :func:`_castxml_dump`: aggregates the
-    headers into one ``#include`` TU, runs ``clang -ast-dump=json``, returns
-    the JSON dict :class:`abicheck.dumper_clang._ClangAstParser` consumes.
-    Disk-cached like the castxml path, and memoized in-process (G31 Phase C)
-    for ``_attach_header_graph``'s reuse (``memoize=False``: final consumer;
-    ``None`` defers to ``ast_memoize_active()``, set only in ``run_dump``'s
-    primary-dump call). Raises :class:`SnapshotError` when clang is missing,
-    times out, or emits no usable AST.
-
-    ``frontend_context`` (ADR-050 D5, G32 Phase D) is ``"host"``/``"device"``.
-    ``resolved_kind`` is *frontend_context* when the multi-pass SYCL decode
-    path is engaged, else ``None``. A non-``"host"`` request fails immediately
-    with :class:`abicheck.errors.AstContextMissingError` when *clang_bin*
-    isn't DPC++-capable, or when its own ``gcc_options``/``gcc_option_tokens``
-    explicitly disable SYCL (``-fno-sycl``) -- never silently resolved by
-    re-enabling SYCL ourselves (Codex review, P2).
+    ``frontend_context`` selects the host or device DPC++ evidence.
     """
     clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
-    dpcpp_multi_context = _resolve_dpcpp_multi_context(
+    dpcpp_multi_context, dpcpp_host_context = _resolve_dpcpp_acquisition(
         clang_bin, frontend_context, gcc_options, gcc_option_tokens
     )
     force_cpp, force_cpp20, explicit_c_request, cc_id = _resolve_clang_langmode(
@@ -299,9 +271,6 @@ def _clang_header_dump(
         exported_symbols,
     )
 
-    # castxml↔clang parity: probe the host GNU compiler for its ``-isystem`` dirs
-    # so clang resolves libstdc++/libc the way castxml does via ``--castxml-cc-gnu``.
-    # Folded into the cache key so a toolchain change invalidates a stale dump.
     def _resolve_sysinc(*, force_cpp: bool) -> tuple[str, ...]:
         return _resolve_clang_system_includes(
             compiler,
@@ -315,18 +284,10 @@ def _clang_header_dump(
         )
 
     system_includes = _resolve_sysinc(force_cpp=force_cpp)
-    # Pre-resolve the C++ system include set so it folds into the cache key (the
-    # C-mode probe omits the versioned libstdc++ dirs, so without this a
-    # libstdc++/GCC upgrade would not change the key and reuse a stale C++ AST —
-    # Codex review) and is reused by the C→C++ retry without a second probe. Costs
-    # a C-mode dump one extra ``g++ -E -v`` probe — the price of a retry-stable key.
     cpp_system_includes = (
         system_includes if force_cpp else _resolve_sysinc(force_cpp=True)
     )
     frontend_identity = _tool_identity(clang_bin)
-    # Clang is both frontend and compiler here. A GNU driver is only an
-    # optional include-path probe; clang-only hosts must not acquire a fake
-    # hard dependency on g++ merely for cache identity/provenance.
     compiler_identity = frontend_identity
 
     def _make_key(fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]) -> str:
@@ -351,23 +312,47 @@ def _clang_header_dump(
             frontend_context=frontend_context,
         )
 
-    # Both include sets feed the *lookup* key: whichever the retry settles on, a
-    # toolchain change to either invalidates the cached AST. Equal when already
-    # in C++ mode — pass once so existing C++ cache keys are stable.
     key = _make_key(
         force_cpp,
         force_cpp20,
         system_includes if force_cpp else (*system_includes, *cpp_system_includes),
     )
-    resolved_kind = frontend_context if dpcpp_multi_context else None
+    if _expected_acquisition_key is not None and key != _expected_acquisition_key:
+        raise SnapshotError("header inputs changed before clang acquisition started")
+    resolved_kind = (
+        frontend_context if dpcpp_multi_context or dpcpp_host_context else None
+    )
     cached = _cache_path(key, backend="clang")
-    # A memo hit (G31 Phase C) skips the disk read/JSON re-parse entirely.
     _memoize = dumper_cache.ast_memoize_active() if memoize is None else memoize
     _cached_result = dumper_cache.load_cached_ast(
         key, "clang", cached, memoize=_memoize
     )
     if _cached_result is not None:
         return cast("dict[str, Any]", _cached_result), resolved_kind, force_cpp
+    if not _coordinated and dumper_cache.ast_acquisition_active():
+        return dumper_cache.run_ast_acquisition(
+            "clang",
+            key,
+            lambda: _clang_header_dump(
+                headers,
+                extra_includes,
+                compiler,
+                gcc_path=gcc_path,
+                gcc_prefix=gcc_prefix,
+                gcc_options=gcc_options,
+                gcc_option_tokens=gcc_option_tokens,
+                sysroot=sysroot,
+                nostdinc=nostdinc,
+                lang=lang,
+                extra_hash_dirs=extra_hash_dirs,
+                frontend_context=frontend_context,
+                memoize=memoize,
+                pruning_header_roots=pruning_header_roots,
+                exported_symbols=exported_symbols,
+                _coordinated=True,
+                _expected_acquisition_key=key,
+            ),
+        )
 
     agg_ext = ".hpp" if force_cpp else ".h"
     with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
@@ -399,6 +384,7 @@ def _clang_header_dump(
             force_cpp20=fcpp20,
             system_includes=sysinc,
             dpcpp_multi_context=dpcpp_multi_context,
+            dpcpp_host_context=dpcpp_host_context,
         )
         # DeadlineExceeded propagates uncaught, mapped by run_scan_core to _BudgetOverflow.
         deadline.check()
@@ -432,11 +418,6 @@ def _clang_header_dump(
             result = _run_clang(cur_fcpp, cur_fcpp20, cur_sysinc)
         else:
             cur_fcpp, cur_fcpp20, cur_sysinc = force_cpp, force_cpp20, system_includes
-        # Graceful #error handling: when ``-H`` expands to a public include dir,
-        # some headers are not meant to be included directly and raise a
-        # preprocessor ``#error`` (preview / internal ``detail`` headers) that
-        # would otherwise abort the whole aggregate compile. Drop the offending
-        # headers and re-parse the rest (see dumper_clang_errors).
         result = retry_excluding_error_headers(
             result=result,
             run_clang=lambda: _run_clang(cur_fcpp, cur_fcpp20, cur_sysinc),
@@ -459,6 +440,16 @@ def _clang_header_dump(
         write_cached = (
             cached if cur_fcpp == force_cpp else _cache_path(write_key, backend="clang")
         )
+        stability_includes = (
+            (system_includes if force_cpp else (*system_includes, *cpp_system_includes))
+            if cur_fcpp == force_cpp
+            else cur_sysinc
+        )
+        if _make_key(cur_fcpp, cur_fcpp20, stability_includes) != write_key:
+            raise SnapshotError(
+                "header inputs changed while clang was acquiring L2 evidence; "
+                "discarding the unstable result"
+            )
         root = _parse_clang_ast_result(
             result,
             write_cached,
@@ -582,22 +573,9 @@ def _header_ast_parser(
 
     Both parser implementations expose the same format-builder interface.
 
-    ``frontend_context`` (ADR-050 D5, G32 Phase D) is only satisfiable by the
-    clang backend (:func:`abicheck.sycl_context`'s host/device selector).
-    An explicit ``--ast-frontend castxml`` with a non-``"host"`` request
-    fails immediately rather than silently returning an ordinary castxml
-    dump; under ``"auto"`` a non-``"host"`` request skips castxml entirely.
-
-    ``no_binary_evidence`` (workstream F S1, "Header-only comparison"):
-    forwarded unchanged to whichever parser is constructed -- see
-    ``extract.headers.castxml.location.visibility``'s own docstring for what
-    it changes. ``False`` (the default) for every ordinary binary dump.
+    Frontend context selection and header-only evidence semantics are
+    forwarded unchanged to the selected backend.
     """
-    # `_resolve_effective_ast_backend` both validates (raising for a request
-    # no single parser can satisfy) and predicts the dispatch below in one
-    # call — the same "selection" function `resolve_dump_request` now calls
-    # for its own reporting-only preview, so the two can never disagree
-    # about what this function is about to do.
     effective = _resolve_effective_ast_backend(backend, frontend_context)
 
     def _stamp_parser(
@@ -646,11 +624,6 @@ def _header_ast_parser(
             else tuple(public_header_paths + public_dir_paths),
             exported_symbols=frozenset(exported_dynamic | exported_static),
         )
-        # Probe-failure fallback (Codex/CodeRabbit review, fresh evidence): explicit `--target=`; a bare
-        # re-probe (both driver modes, since a CL-style ``-print-target-triple`` is honored too) plus its
-        # own `--driver-mode=`; else `sys.platform` under GNU mode only, gated on real identity AND not
-        # explicit `--compiler` provenance (a wrapper can share the default's basename). No fallback
-        # while `@response-file`/`--config[-*-dir]=` may hide the real target.
         is_cl_mode = _effective_driver_mode_is_cl(
             _is_cl_style_driver_name(clang_bin), gcc_options, gcc_option_tokens
         )
@@ -660,8 +633,6 @@ def _header_ast_parser(
         )
 
         def _bare_reprobe() -> str | None:
-            # Deferred (Codex review, fresh evidence): eagerly evaluating this would
-            # start a second compiler subprocess (its own 10s timeout) on every call.
             return (
                 _configured_target_triple(None, _bare_reprobe_args, clang_bin)
                 if _target_known
@@ -695,6 +666,20 @@ def _header_ast_parser(
             no_binary_evidence=no_binary_evidence,
             is_cxx=resolved_force_cpp,
         )
+        setattr(
+            parser,
+            "_abicheck_neutral_factory",
+            lambda: _ClangAstParser(
+                ast_root,
+                set(),
+                set(),
+                public_header_paths=public_header_paths,
+                public_dir_paths=public_dir_paths,
+                target_triple=target_triple,
+                no_binary_evidence=False,
+                is_cxx=resolved_force_cpp,
+            ),
+        )
         stamped = cast(
             _ClangAstParser,
             _stamp_parser(
@@ -705,16 +690,12 @@ def _header_ast_parser(
                 resolved_force_cpp=resolved_force_cpp,
             ),
         )
-        # ADR-050 D5: resolved SYCL kind, None for a plain clang dump --
-        # read by dumper_contract._attach_extraction_contract.
         setattr(stamped, "_abicheck_frontend_context_kind", resolved_kind)
         return stamped
 
     if effective == "clang":
         return _run_clang()
 
-    # Auto mode may use the explicit opt-in fallback for known toolchain or
-    # direct-inclusion failures. Explicit CastXML remains fail-closed.
     auto_selected = _auto_ast_fallback_eligible(backend)
     selected_castxml: list[str] = []
     selected_meta: list[tuple[str, bool]] = []
@@ -753,6 +734,18 @@ def _header_ast_parser(
         public_header_paths=public_header_paths,
         public_dir_paths=public_dir_paths,
         no_binary_evidence=no_binary_evidence,
+    )
+    setattr(
+        parser,
+        "_abicheck_neutral_factory",
+        lambda: _CastxmlParser(
+            xml_root,
+            set(),
+            set(),
+            public_header_paths=public_header_paths,
+            public_dir_paths=public_dir_paths,
+            no_binary_evidence=False,
+        ),
     )
     meta = selected_meta[0] if selected_meta else (None, None)
     return cast(
@@ -886,44 +879,17 @@ def _castxml_dump(
     _selected_tool_out: list[str] | None = None,
     _selected_meta_out: list[tuple[str, bool]] | None = None,
     exported_symbols: frozenset[str] = frozenset(),
+    _coordinated: bool = False,
+    _expected_acquisition_key: str | None = None,
 ) -> Element:
-    """Run castxml on headers and return parsed XML root.
-
-    Args:
-        compiler: "c++" (maps to g++) or "cc" (maps to gcc).
-        gcc_path: Explicit path to a GCC/G++ cross-compiler binary.
-        gcc_prefix: Cross-toolchain prefix (e.g. "aarch64-linux-gnu-").
-        gcc_options: Extra compiler flags passed through to castxml.
-        sysroot: Alternative system root directory.
-        nostdinc: If True, do not search standard system include paths.
-        lang: Force language ("C" or "C++").  If "C", aggregated header uses .h extension.
-        _selected_meta_out: when given, appended with
-            ``(resolved_compiler, resolved_force_cpp)`` -- the force_cpp-aware
-            compiler spelling (e.g. ``"cc"``, not the caller's original
-            ``"c++"``) actually used to pick ``cc_bin``, and the real,
-            post-retry language mode that produced *root* (mirrors the clang
-            backend's ``resolved_force_cpp`` return value). So a caller
-            stamping provenance records what castxml actually invoked, not a
-            re-derivation from the unresolved request (Codex review: a
-            C-mode dump under the default ``compiler="c++"`` otherwise
-            recorded ``g++``'s identity while castxml ran ``gcc``, and a
-            self-healed retry otherwise still probed the pre-retry C
-            default).
-    """
+    """Run CastXML on *headers* and return its parsed XML root."""
     castxml_bin = _resolve_gated_castxml_bin(castxml_bin)
     if _selected_tool_out is not None:
         _selected_tool_out.append(castxml_bin)
 
-    # Determine language before selecting the emulated compiler: C mode uses
-    # gcc/cc, not g++, and both cache identity and execution must describe the
-    # same driver.
     force_cpp = _resolve_force_cpp(
         lang, headers, gcc_options, gcc_option_tokens, exported_symbols
     )
-    # Same expression _run_castxml_attempt uses for its (non-retry) call below —
-    # folded into the cache key ahead of time so the resolved dialect decision,
-    # not just the explicit --lang, invalidates a stale cache entry (Codex
-    # review).
     force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
     resolved_compiler = compiler
     if not force_cpp and not gcc_path and not gcc_prefix:
@@ -933,40 +899,70 @@ def _castxml_dump(
             "clang++": "clang",
         }.get(compiler, compiler)
     cc_bin, cc_id = _resolve_compiler_binary(resolved_compiler, gcc_path, gcc_prefix)
-    # Freeze PATH selection for the actual CastXML invocation. Keep an explicit
-    # unresolved path/name intact so CastXML can provide its native diagnostic.
     cc_bin = shutil.which(cc_bin) or cc_bin
     frontend_identity = _tool_identity(castxml_bin)
     compiler_identity = _tool_identity(cc_bin)
 
-    # Check disk cache
-    key = _cache_key(
-        headers,
-        extra_includes,
-        compiler,
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
-        gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        lang=lang,
-        extra_hash_dirs=extra_hash_dirs,
-        frontend_identity=frontend_identity,
-        compiler_identity=compiler_identity,
-        force_cpp=force_cpp,
-        force_cpp20=force_cpp20,
-    )
+    def _make_key() -> str:
+        return _cache_key(
+            headers,
+            extra_includes,
+            compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
+            extra_hash_dirs=extra_hash_dirs,
+            frontend_identity=frontend_identity,
+            compiler_identity=compiler_identity,
+            force_cpp=force_cpp,
+            force_cpp20=force_cpp20,
+        )
+
+    key = _make_key()
+    if _expected_acquisition_key is not None and key != _expected_acquisition_key:
+        raise SnapshotError("header inputs changed before CastXML acquisition started")
     cached = _cache_path(key)
     if cached.exists():
-        # Same reasoning as the clang cache-hit path (_clang_header_dump, Codex review).
         deadline.check()
         _cached_root = _read_castxml_cache(cached)
         if _cached_root is not None:
-            deadline.check()  # parsing a huge cached tree can eat the rest of the budget
+            deadline.check()
             if _selected_meta_out is not None:
                 _selected_meta_out.append((resolved_compiler, force_cpp))
             return _cached_root
+
+    if not _coordinated and dumper_cache.ast_acquisition_active():
+
+        def _produce() -> tuple[Element, tuple[str, bool]]:
+            produced_meta: list[tuple[str, bool]] = []
+            produced = _castxml_dump(
+                headers,
+                extra_includes,
+                compiler,
+                gcc_path=gcc_path,
+                gcc_prefix=gcc_prefix,
+                gcc_options=gcc_options,
+                gcc_option_tokens=gcc_option_tokens,
+                sysroot=sysroot,
+                nostdinc=nostdinc,
+                lang=lang,
+                extra_hash_dirs=extra_hash_dirs,
+                castxml_bin=castxml_bin,
+                _selected_meta_out=produced_meta,
+                exported_symbols=exported_symbols,
+                _coordinated=True,
+                _expected_acquisition_key=key,
+            )
+            return produced, produced_meta[-1]
+
+        root, selected_meta = dumper_cache.run_ast_acquisition("castxml", key, _produce)
+        if _selected_meta_out is not None:
+            _selected_meta_out.append(selected_meta)
+        return root
 
     with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp:
         out_xml = Path(tmp.name)
@@ -1018,16 +1014,20 @@ def _castxml_dump(
                 # error (and its hint), not the fallback's, so the diagnostic
                 # matches what the user asked for.
                 raise primary from None
-        _write_castxml_cache(
-            cached,
-            out_xml,
-            castxml_bin=castxml_bin,
-            cc_bin=cc_bin,
-            frontend_identity=frontend_identity,
-            compiler_identity=compiler_identity,
-        )
-        # Re-reading/caching a huge fresh tree can itself consume real time;
-        # re-check before returning (mirrors _validate_castxml_output's pre-cache-write check, Codex review).
+        if final_force_cpp == force_cpp:
+            if _make_key() != key:
+                raise SnapshotError(
+                    "header inputs changed while CastXML was acquiring L2 "
+                    "evidence; discarding the unstable result"
+                )
+            _write_castxml_cache(
+                cached,
+                out_xml,
+                castxml_bin=castxml_bin,
+                cc_bin=cc_bin,
+                frontend_identity=frontend_identity,
+                compiler_identity=compiler_identity,
+            )
         deadline.check()
         if _selected_meta_out is not None:
             _selected_meta_out.append((resolved_compiler, final_force_cpp))

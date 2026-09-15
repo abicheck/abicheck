@@ -10,10 +10,12 @@ import os
 import shutil
 import sys
 import tempfile
-from collections.abc import Iterator
+import threading
+from collections.abc import Callable, Iterator
+from concurrent.futures import Future, TimeoutError as FutureTimeoutError
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar, cast
 
 from . import deadline
 
@@ -57,6 +59,119 @@ _ast_memoize_scope: contextvars.ContextVar[bool] = contextvars.ContextVar(
 _ast_memo_slot: contextvars.ContextVar[tuple[str, str, Any] | None] = (
     contextvars.ContextVar("_ast_memo_slot", default=None)
 )
+
+_T = TypeVar("_T")
+
+
+class AstAcquisitionScope:
+    """Request-owned, per-key coordination for expensive header acquisition.
+
+    Values are retained only for the lifetime of the owning dump/compare
+    request.  The lock protects the small future table; producers run after
+    releasing it, so unrelated compiler contexts proceed independently.
+    ``Future`` gives waiters the producer's exact completion/failure while a
+    cancelled waiter cannot cancel work another member still needs.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._entries: dict[tuple[str, str], Future[Any]] = {}
+        self._retained_context_objects: list[Any] = []
+
+    def retain(self, value: Any) -> None:
+        """Keep an identity-keyed context object alive for this request."""
+
+        with self._lock:
+            self._retained_context_objects.append(value)
+
+    def run(self, backend: str, key: str, producer: Callable[[], _T]) -> _T:
+        lookup = (backend, key)
+        with self._lock:
+            future = self._entries.get(lookup)
+            if future is None:
+                future = Future()
+                self._entries[lookup] = future
+                owns_production = True
+            else:
+                owns_production = False
+        if not owns_production:
+            deadline.check()
+            left = deadline.remaining()
+            try:
+                result = future.result(timeout=left)
+            except FutureTimeoutError:
+                if future.done():
+                    return cast("_T", future.result())
+                # Do not cancel the shared producer: another member may still
+                # need it.  The waiter's own request deadline is nevertheless
+                # authoritative and must bound queue time as well as compiler
+                # time.
+                left_after = deadline.remaining()
+                raise deadline.DeadlineExceeded(
+                    left_after if left_after is not None else 0.0
+                )
+            deadline.check()
+            return cast("_T", result)
+        try:
+            result = producer()
+        except BaseException as exc:
+            future.set_exception(exc.with_traceback(None))
+            # A failed acquisition is retryable within the request.  Removing
+            # only our own entry avoids racing a later successful producer.
+            with self._lock:
+                if self._entries.get(lookup) is future:
+                    del self._entries[lookup]
+            raise
+        future.set_result(result)
+        return result
+
+
+_ast_acquisition_scope: contextvars.ContextVar[AstAcquisitionScope | None] = (
+    contextvars.ContextVar("_ast_acquisition_scope", default=None)
+)
+
+
+@contextmanager
+def ast_acquisition_scope() -> Iterator[AstAcquisitionScope]:
+    """Install one request-local shared acquisition table.
+
+    Nested workflow layers reuse the existing table rather than hiding it.
+    Context copies used by release workers consequently share the same table.
+    """
+
+    existing = _ast_acquisition_scope.get()
+    if existing is not None:
+        yield existing
+        return
+    scope = AstAcquisitionScope()
+    token = _ast_acquisition_scope.set(scope)
+    try:
+        yield scope
+    finally:
+        _ast_acquisition_scope.reset(token)
+
+
+def run_ast_acquisition(backend: str, key: str, producer: Callable[[], _T]) -> _T:
+    """Run *producer* once per request and effective AST cache key."""
+
+    scope = _ast_acquisition_scope.get()
+    if scope is None:
+        return producer()
+    return scope.run(backend, key, producer)
+
+
+def ast_acquisition_active() -> bool:
+    """Whether the current execution context shares request acquisition."""
+
+    return _ast_acquisition_scope.get() is not None
+
+
+def retain_ast_context_object(value: Any) -> None:
+    """Prevent ``id(value)`` reuse while request-local normalized facts exist."""
+
+    scope = _ast_acquisition_scope.get()
+    if scope is not None:
+        scope.retain(value)
 
 
 @contextmanager

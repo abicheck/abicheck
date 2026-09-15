@@ -79,6 +79,7 @@ class TuFragment:
     # None for an ordinary non-DPC++ TU parse. Mirrors the other AST
     # provenance fields above.
     frontend_context_kind: str | None = None
+    semantic_ir: SemanticIR | None = None
 
 
 @dataclass(frozen=True)

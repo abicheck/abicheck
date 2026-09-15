@@ -546,9 +546,10 @@ class BundleSignatureEvidence:
     analysis ran, even when neither JUnit nor ``--bundle-facts-out`` needed
     it. Confirmed by reading every attribute
     ``find_unverified_signature_findings``'s own helpers touch on a
-    snapshot: exactly ``function_map``, ``variable_map``, and
-    ``elf_only_mode`` -- never a type, a record, the source graph, or any
-    other field. This type exposes only those three, built once right
+    snapshot: its function/variable indexes and ``elf_only_mode`` for
+    signature checks, plus compact ELF/native-name evidence used to assemble
+    the bundle graph without rereading the full snapshot. This type exposes
+    only those fields, built once right
     after a per-library comparison completes
     (:meth:`from_snapshot`), so the caller can drop its reference to the
     full ``AbiSnapshot`` and let the rest of it (the part that actually
@@ -568,6 +569,8 @@ class BundleSignatureEvidence:
     function_map: Mapping[str, Function]
     variable_map: Mapping[str, Variable]
     elf_only_mode: bool
+    elf: ElfMetadata | None
+    library_filename: str
 
     @classmethod
     def from_snapshot(cls, snapshot: AbiSnapshot) -> BundleSignatureEvidence:
@@ -582,6 +585,8 @@ class BundleSignatureEvidence:
             function_map=snapshot.function_map,
             variable_map=snapshot.variable_map,
             elf_only_mode=snapshot.elf_only_mode,
+            elf=snapshot.elf,
+            library_filename=snapshot.library,
         )
 
 

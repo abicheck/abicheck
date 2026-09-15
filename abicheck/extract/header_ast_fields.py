@@ -42,9 +42,14 @@ Protocol structurally, so no change is needed on their side.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
+from ..dumper_cache import (
+    ast_acquisition_active,
+    retain_ast_context_object,
+    run_ast_acquisition,
+)
 from ..model import EnumType, Function, RecordType, Variable
 from ..model.identity import EntityId
 from ..model.semantic_ir import SemanticIR
@@ -92,11 +97,51 @@ class HeaderAstFields:
 def parse_header_ast_fields(
     parser: _HeaderAstParser, *, producer: str
 ) -> HeaderAstFields:
-    """Run *parser*'s own ``parse_*()`` methods once each and normalize the
-    result into a :class:`SemanticIR` alongside them -- see this module's
-    own docstring for why this exists as a dedicated function rather than
-    inline calls at each call site.
+    """Parse member facts once and share only member-independent normalization.
+
+    The concrete parsers deliberately use export evidence while constructing
+    their legacy declarations (including constructor/destructor fallbacks and
+    surface facts).  Reconstructing those decisions after a neutral parse is
+    both slower and lossy.  Keep that established per-member binding path, and
+    single-flight only the canonical ``SemanticIR`` derived from it.
     """
+    legacy = _parse_header_ast_legacy(parser)
+    if not ast_acquisition_active():
+        semantic_ir = _normalize_header_ast_fields(legacy, producer=producer)
+    else:
+        root = getattr(parser, "_root", None)
+        retain_ast_context_object(root)
+        scope_key = repr(
+            (
+                id(root),
+                tuple(getattr(parser, "_pub_header_segs", ())),
+                tuple(getattr(parser, "_pub_dir_segs", ())),
+                getattr(parser, "_target_triple", None),
+                getattr(parser, "_is_cxx", None),
+            )
+        )
+        neutral_factory = getattr(parser, "_abicheck_neutral_factory", None)
+
+        def _normalize_context() -> SemanticIR:
+            if neutral_factory is None:
+                # A structural parser without a neutral factory cannot prove
+                # that export evidence did not affect its occurrences. Keep
+                # its normalization member-local rather than publishing the
+                # first binary's view under a shared context key.
+                return _normalize_header_ast_fields(legacy, producer=producer)
+            neutral = _parse_header_ast_legacy(neutral_factory())
+            return _normalize_header_ast_fields(neutral, producer=producer)
+
+        if neutral_factory is None:
+            semantic_ir = _normalize_context()
+        else:
+            semantic_ir = run_ast_acquisition(
+                f"{producer}-normalized", scope_key, _normalize_context
+            )
+    return replace(legacy, semantic_ir=semantic_ir)
+
+
+def _parse_header_ast_legacy(parser: _HeaderAstParser) -> HeaderAstFields:
     functions = tuple(parser.parse_functions())
     variables = tuple(parser.parse_variables())
     types = tuple(parser.parse_types())
@@ -115,15 +160,22 @@ def parse_header_ast_fields(
         constants=constants,
         typedef_entity_ids=typedef_entity_ids,
         constant_entity_ids=constant_entity_ids,
-        semantic_ir=normalize_header_ast(
-            types=types,
-            enums=enums,
-            typedefs_qualified=typedefs_qualified,
-            typedef_entity_ids=typedef_entity_ids,
-            producer=producer,
-            functions=functions,
-            variables=variables,
-            constants=constants,
-            constant_entity_ids=constant_entity_ids,
-        ),
+        # Replaced before this private intermediate leaves this module.
+        semantic_ir=SemanticIR(),
+    )
+
+
+def _normalize_header_ast_fields(
+    fields: HeaderAstFields, *, producer: str
+) -> SemanticIR:
+    return normalize_header_ast(
+        types=fields.types,
+        enums=fields.enums,
+        typedefs_qualified=fields.typedefs_qualified,
+        typedef_entity_ids=fields.typedef_entity_ids,
+        producer=producer,
+        functions=fields.functions,
+        variables=fields.variables,
+        constants=fields.constants,
+        constant_entity_ids=fields.constant_entity_ids,
     )

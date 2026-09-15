@@ -35,7 +35,7 @@ from .header_utils import drop_include_tokens_duplicating_paths
 #: write-side key fix (see `dumper._clang_header_dump`) closes only for
 #: entries written from here on. Bump again if the clang cache format ever
 #: changes in some other incompatible way.
-_CLANG_CACHE_SCHEMA_VERSION = 2
+_CLANG_CACHE_SCHEMA_VERSION = 3
 
 
 def _cache_key(
@@ -488,6 +488,7 @@ def _build_clang_header_command(
     force_cpp20: bool = False,
     system_includes: tuple[str, ...] = (),
     dpcpp_multi_context: bool = False,
+    dpcpp_host_context: bool = False,
 ) -> list[str]:
     """Build the ``clang -ast-dump=json`` command for the aggregate header.
 
@@ -508,7 +509,9 @@ def _build_clang_header_command(
     :func:`_needs_sycl_host_only` (PR #643) -- skipped when
     ``dpcpp_multi_context`` is set, since that request wants both passes.
 
-    ``dpcpp_multi_context`` (ADR-050 D5, G32 Phase D) adds ``-fsycl -v``
+    ``dpcpp_host_context`` requests the same SYCL-enabled host compilation
+    directly, rather than producing a complete device AST only to frame and
+    discard it. ``dpcpp_multi_context`` (ADR-050 D5, G32 Phase D) adds ``-fsycl -v``
     when *cc_bin* is DPC++-capable (:func:`_is_dpcpp_family_binary`) --
     ``-fsycl`` splits the driver into a host + one-or-more-device
     compilation passes, and ``-v`` emits the ``-cc1 ... -triple <T> ...
@@ -529,7 +532,12 @@ def _build_clang_header_command(
     # `extra_includes` — see `drop_include_tokens_duplicating_paths`'s own
     # docstring for why this can otherwise happen and what it broke.
     cmd += drop_include_tokens_duplicating_paths(gcc_option_tokens, cmd)
-    if not dpcpp_multi_context and _needs_sycl_host_only(cc_bin, cmd):
+    if dpcpp_host_context:
+        if "-fsycl" not in cmd:
+            cmd.append("-fsycl")
+        if "-fsycl-host-only" not in cmd:
+            cmd.append("-fsycl-host-only")
+    elif not dpcpp_multi_context and _needs_sycl_host_only(cc_bin, cmd):
         cmd.append("-fsycl-host-only")
     # Auto-probed host system dirs go *after* the user's pass-through flags, so a
     # user-supplied -isystem (cross/hermetic SDK) keeps higher priority (Codex review).
