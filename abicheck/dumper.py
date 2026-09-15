@@ -249,9 +249,7 @@ def _clang_header_dump(
     _coordinated: bool = False,
     _expected_acquisition_key: str | None = None,
 ) -> tuple[dict[str, Any], str | None, bool]:
-    """Run clang over *headers* and return ``(root, resolved_kind, resolved_force_cpp)``.
-
-    ``resolved_force_cpp`` is the mode that actually produced *root* -- the
+    """Run clang over headers; ``resolved_force_cpp`` is the mode that produced *root* -- the
     post-retry ``True`` when a C-mode parse self-healed into C++, else
     ``force_cpp`` (Codex review: the provenance probe must not re-derive a
     stale guess once this already resolved the real answer).
@@ -323,12 +321,6 @@ def _clang_header_dump(
         frontend_context if dpcpp_multi_context or dpcpp_host_context else None
     )
     cached = _cache_path(key, backend="clang")
-    _memoize = dumper_cache.ast_memoize_active() if memoize is None else memoize
-    _cached_result = dumper_cache.load_cached_ast(
-        key, "clang", cached, memoize=_memoize
-    )
-    if _cached_result is not None:
-        return cast("dict[str, Any]", _cached_result), resolved_kind, force_cpp
     if not _coordinated and dumper_cache.ast_acquisition_active():
         return dumper_cache.run_ast_acquisition(
             "clang",
@@ -353,6 +345,13 @@ def _clang_header_dump(
                 _expected_acquisition_key=key,
             ),
         )
+    _memoize = dumper_cache.ast_memoize_active() if memoize is None else memoize
+    _memoize &= not dumper_cache.ast_acquisition_active()
+    _cached_result = dumper_cache.load_cached_ast(
+        key, "clang", cached, memoize=_memoize
+    )
+    if _cached_result is not None:
+        return cast("dict[str, Any]", _cached_result), resolved_kind, force_cpp
 
     agg_ext = ".hpp" if force_cpp else ".h"
     with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
@@ -926,15 +925,6 @@ def _castxml_dump(
     if _expected_acquisition_key is not None and key != _expected_acquisition_key:
         raise SnapshotError("header inputs changed before CastXML acquisition started")
     cached = _cache_path(key)
-    if cached.exists():
-        deadline.check()
-        _cached_root = _read_castxml_cache(cached)
-        if _cached_root is not None:
-            deadline.check()
-            if _selected_meta_out is not None:
-                _selected_meta_out.append((resolved_compiler, force_cpp))
-            return _cached_root
-
     if not _coordinated and dumper_cache.ast_acquisition_active():
 
         def _produce() -> tuple[Element, tuple[str, bool]]:
@@ -963,6 +953,15 @@ def _castxml_dump(
         if _selected_meta_out is not None:
             _selected_meta_out.append(selected_meta)
         return root
+
+    if cached.exists():
+        deadline.check()
+        _cached_root = _read_castxml_cache(cached)
+        if _cached_root is not None:
+            deadline.check()
+            if _selected_meta_out is not None:
+                _selected_meta_out.append((resolved_compiler, force_cpp))
+            return _cached_root
 
     with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp:
         out_xml = Path(tmp.name)
