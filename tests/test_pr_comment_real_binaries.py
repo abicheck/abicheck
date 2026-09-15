@@ -133,21 +133,45 @@ def test_real_binary_plus_public_headers_shows_the_enum_value(_libs, tmp_path) -
     assert "→ 3" in body, "the added enumerator's value must reach the comment"
     assert model.change_summary is not None
     rows = {r.entity: r for r in model.change_summary.rows}
-    assert rows["function"].added == 2
-    assert rows["variable"].added == 1
+
+    # The enumerator is the acceptance case, and its row is platform-stable:
+    # an enum is an enum in every container format.
     assert rows["enum"].added == 1
+
+    # The three added *symbols* are asserted as a total, not split into two
+    # and one. Which of them the rollup calls a function and which a
+    # variable is a property of the container the toolchain produced, not of
+    # this renderer: a PE export directory does not distinguish a function
+    # export from a data export the way an ELF `.dynsym` does, so the same
+    # three declarations legitimately read 2+1 on Linux and 3+0 on a Windows
+    # runner (which is exactly how an earlier revision of this assertion
+    # failed CI -- it pinned the Linux split as though it were the claim).
+    # The claim is that every added declaration is accounted for, under some
+    # canonical entity, with none silently dropped.
+    added_symbols = sum(
+        rows[entity].added for entity in ("function", "variable") if entity in rows
+    )
+    assert added_symbols == 3
+
     # Header evidence was available, so nothing claims otherwise.
     assert model.evidence is not None
     assert model.evidence.confidence == report["confidence"]
     assert model.evidence.coverage_warnings == ()
 
 
-def test_real_elf_dwarf_without_headers_keeps_its_limitation_visible(
+def test_real_binary_without_headers_keeps_its_limitation_visible(
     _libs, tmp_path
 ) -> None:
     """Acceptance: the same pair with no headers reports reduced confidence
     and says, in the comment, what that cost -- the exact pair of facts a
-    production run carried in its JSON and no comment ever showed."""
+    production run carried in its JSON and no comment ever showed.
+
+    Named for the *evidence* it withholds, not for a container format: this
+    module's fixture builds with whichever compiler the runner has, so the
+    artifact is ELF on Linux and PE on a Windows runner. The assertions
+    below hold either way because they read the producer's own confidence
+    and warnings rather than a platform-specific expectation.
+    """
     old_lib, _old_h, new_lib, _new_h = _libs
     report = _compare(tmp_path, str(old_lib), str(new_lib))
     model = build_model(report)
