@@ -609,15 +609,18 @@ class TestCastxmlDump:
         monkeypatch.setattr("abicheck.dumper._cache_key", lambda *a, **kw: "testkey")
         monkeypatch.setattr("abicheck.dumper._cache_path", lambda k: cache_xml)
 
-        from abicheck import deadline, dumper
+        from abicheck import deadline, dumper_cache
 
-        real_parse = dumper.DefusedET.parse
+        # The warm-cache parse this exercises lives in `dumper_cache.
+        # read_cached_castxml` (`dumper` re-exports it as
+        # `_read_castxml_cache`), so slow down the parser *that* module holds.
+        real_parse = dumper_cache.DefusedET.parse
 
         def _slow_parse(path):
             time.sleep(0.05)
             return real_parse(path)
 
-        monkeypatch.setattr(dumper.DefusedET, "parse", _slow_parse)
+        monkeypatch.setattr(dumper_cache.DefusedET, "parse", _slow_parse)
         with deadline.deadline_scope(0.03):
             with pytest.raises(deadline.DeadlineExceeded):
                 _castxml_dump([Path("h.h")], [])

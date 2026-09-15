@@ -34,7 +34,6 @@ if TYPE_CHECKING:
     from .dump_manifest import DumpManifest
     from .dwarf_unified import DwarfSession
 
-from defusedxml import ElementTree as DefusedET
 
 from . import deadline, dumper_cache
 from ._compiler_options import (
@@ -53,7 +52,11 @@ from .dumper_ast_config import (
     _resolve_compiler_binary as _resolve_compiler_binary,
 )
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers as _detect_cpp20_headers
-from .dumper_cache import _atomic_write as _atomic_write, _cache_path as _cache_path
+from .dumper_cache import (
+    _atomic_write as _atomic_write,
+    _cache_path as _cache_path,
+    read_cached_castxml as _read_castxml_cache,
+)
 from .dumper_castxml import (
     _CastxmlParser as _CastxmlParser,
     _parse_vtable_index as _parse_vtable_index,
@@ -323,13 +326,10 @@ def _clang_header_dump(
         frontend_context if dpcpp_multi_context or dpcpp_host_context else None
     )
     cached = _cache_path(key, backend="clang")
-    _memoize = dumper_cache.ast_memoize_active() if memoize is None else memoize
-    _cached_result = dumper_cache.load_cached_ast(
-        key, "clang", cached, memoize=_memoize
-    )
-    if _cached_result is not None:
-        return cast("dict[str, Any]", _cached_result), resolved_kind, force_cpp
     if not _coordinated and dumper_cache.ast_acquisition_active():
+        # A warm disk hit is an acquisition too, so it is read on the
+        # `_coordinated=True` re-entry below, never ahead of this call --
+        # `dumper_cache.run_ast_acquisition`'s own docstring has the rule.
         return dumper_cache.run_ast_acquisition(
             "clang",
             key,
@@ -353,6 +353,13 @@ def _clang_header_dump(
                 _expected_acquisition_key=key,
             ),
         )
+
+    _memoize = dumper_cache.resolve_request_memoization(memoize)
+    _cached_result = dumper_cache.load_cached_ast(
+        key, "clang", cached, memoize=_memoize
+    )
+    if _cached_result is not None:
+        return cast("dict[str, Any]", _cached_result), resolved_kind, force_cpp
 
     agg_ext = ".hpp" if force_cpp else ".h"
     with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
@@ -792,23 +799,6 @@ def _resolve_gated_castxml_bin(castxml_bin: str | None) -> str:
     return resolved
 
 
-def _read_castxml_cache(cached: Path) -> Element | None:
-    """Parse a cached castxml XML tree, discarding the entry if it is unusable.
-
-    Returns ``None`` (having unlinked *cached*) when the file cannot be parsed,
-    so the caller falls through to a fresh run rather than failing on a
-    truncated or corrupt cache entry.
-    """
-    try:
-        root = DefusedET.parse(str(cached)).getroot()
-    except Exception:
-        root = None
-    if root is None:
-        cached.unlink(missing_ok=True)
-        return None
-    return cast(Element, root)
-
-
 def _castxml_cpp_retry_allowed(
     primary: SnapshotError, *, force_cpp: bool, headers: list[Path]
 ) -> bool:
@@ -926,16 +916,9 @@ def _castxml_dump(
     if _expected_acquisition_key is not None and key != _expected_acquisition_key:
         raise SnapshotError("header inputs changed before CastXML acquisition started")
     cached = _cache_path(key)
-    if cached.exists():
-        deadline.check()
-        _cached_root = _read_castxml_cache(cached)
-        if _cached_root is not None:
-            deadline.check()
-            if _selected_meta_out is not None:
-                _selected_meta_out.append((resolved_compiler, force_cpp))
-            return _cached_root
-
     if not _coordinated and dumper_cache.ast_acquisition_active():
+        # Same ordering rule (and reason) as the clang backend above; waiters
+        # also get the producer's `(resolved_compiler, force_cpp)` selection.
 
         def _produce() -> tuple[Element, tuple[str, bool]]:
             produced_meta: list[tuple[str, bool]] = []
@@ -963,6 +946,15 @@ def _castxml_dump(
         if _selected_meta_out is not None:
             _selected_meta_out.append(selected_meta)
         return root
+
+    if cached.exists():
+        deadline.check()
+        _cached_root = _read_castxml_cache(cached)
+        if _cached_root is not None:
+            deadline.check()
+            if _selected_meta_out is not None:
+                _selected_meta_out.append((resolved_compiler, force_cpp))
+            return _cached_root
 
     with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp:
         out_xml = Path(tmp.name)
