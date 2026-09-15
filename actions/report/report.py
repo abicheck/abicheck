@@ -40,7 +40,10 @@ def _input(name: str) -> str:
 
 
 def _fail(message: str) -> int:
-    print(f"::error::{message}", file=sys.stderr)
+    # Workflow commands are line-delimited.  Treat rejected artifact text as
+    # data so it cannot inject a second command through an error annotation.
+    escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"::error::{escaped}", file=sys.stderr)
     return _USAGE
 
 

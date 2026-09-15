@@ -80,6 +80,13 @@ def test_refuses_a_symlinked_component_report(tmp_path: Path, monkeypatch) -> No
     assert not (tmp_path / "summary.md").exists()
 
 
+def test_rejection_escapes_workflow_command_newlines(capsys) -> None:
+    module = _load()
+
+    assert module._fail("bad\n::warning::injected") == 64
+    assert "\n::warning::" not in capsys.readouterr().err
+
+
 def test_summary_is_bounded_at_a_utf8_boundary(tmp_path: Path, monkeypatch) -> None:
     module = _load()
     reports = tmp_path / "reports"
