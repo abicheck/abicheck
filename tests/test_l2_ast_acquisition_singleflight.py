@@ -13,7 +13,9 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from pathlib import Path
+from xml.etree import ElementTree
 
 import pytest
 
@@ -849,3 +851,155 @@ def test_directory_l2_compare_acquires_one_ast_per_key(
     )
     # Member binding stays per member: each DSO keeps its own export.
     assert sum(1 for f in cold_findings if "mod0_entry" in f) >= 1
+
+
+# --------------------------------------------------------------------------
+# The small decision functions the reordering above rests on, covered
+# directly rather than only through a full acquisition.
+# --------------------------------------------------------------------------
+
+
+def test_read_cached_castxml_returns_the_parsed_root(tmp_path: Path) -> None:
+    from abicheck.dumper_cache import read_cached_castxml
+
+    cached = tmp_path / "ast.xml"
+    cached.write_text("<GCC_XML><Namespace name='demo'/></GCC_XML>", encoding="utf-8")
+    root = read_cached_castxml(cached)
+    assert root is not None
+    assert root.tag == "GCC_XML"
+    assert cached.exists()
+
+
+def test_read_cached_castxml_evicts_an_unusable_entry(tmp_path: Path) -> None:
+    """A torn/corrupt cache file is discarded, not raised on."""
+    from abicheck.dumper_cache import read_cached_castxml
+
+    cached = tmp_path / "ast.xml"
+    cached.write_text("<GCC_XML><unclosed>", encoding="utf-8")
+    assert read_cached_castxml(cached) is None
+    assert not cached.exists()  # evicted so the caller falls through to a run
+
+
+@pytest.mark.parametrize(
+    ("memoize", "memo_scope", "acquisition", "expected"),
+    [
+        (None, False, False, False),
+        (None, True, False, True),
+        (None, True, True, False),
+        (None, False, True, False),
+        (True, False, False, True),
+        (True, True, True, False),
+        (False, True, False, False),
+        (False, False, True, False),
+    ],
+)
+def test_resolve_request_memoization_matrix(
+    memoize: bool | None, memo_scope: bool, acquisition: bool, expected: bool
+) -> None:
+    """The memo is written only when a same-thread consumer will pop it.
+
+    Oracle stated independently of the implementation: the explicit argument
+    (or the memo scope when it is ``None``) says whether a handoff was wanted,
+    and an active acquisition scope means the request-keyed table is already
+    that handoff -- so the answer is ``wanted and not acquisition``.
+    """
+    from abicheck import dumper_cache
+
+    def check() -> None:
+        assert dumper_cache.resolve_request_memoization(memoize) is expected
+
+    def with_acquisition() -> None:
+        if acquisition:
+            with ast_acquisition_scope():
+                check()
+        else:
+            check()
+
+    if memo_scope:
+        from abicheck.dumper_cache import ast_memoize_scope
+
+        with ast_memoize_scope():
+            with_acquisition()
+    else:
+        with_acquisition()
+
+
+@pytest.mark.parametrize(
+    ("env_on", "scope", "expected"),
+    [
+        (False, None, False),
+        (True, None, True),
+        (True, "acquisition", False),
+        (True, "memoize", False),
+        (True, "suppressed", False),
+        (False, "acquisition", False),
+    ],
+)
+def test_streaming_prune_gate_matrix(
+    env_on: bool, scope: str | None, expected: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pruning runs only when nothing else will reuse this exact root.
+
+    Oracle: ``env_on and no sharing/suppression scope is active`` -- derived
+    from what each scope means, not from the function's own conditions.
+    """
+    from abicheck import dumper_clang_errors
+    from abicheck.dumper_cache import ast_memoize_scope
+    from abicheck.dumper_clang_streaming import suppress_streaming_prune
+
+    monkeypatch.setenv(
+        dumper_clang_errors.STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR,
+        "1" if env_on else "0",
+    )
+    scopes = {
+        None: nullcontext,
+        "acquisition": ast_acquisition_scope,
+        "memoize": ast_memoize_scope,
+        "suppressed": suppress_streaming_prune,
+    }
+    with scopes[scope]():
+        assert dumper_clang_errors._streaming_prune_enabled() is expected
+
+
+def test_cold_castxml_acquisition_shares_the_producer_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The miss branch: one real run, its metadata reaching both consumers."""
+    header = tmp_path / "api.hpp"
+    header.write_text("int api();\n", encoding="utf-8")
+    cache = tmp_path / "ast.xml"  # deliberately absent: this is the cold path
+    monkeypatch.setattr(dumper, "_resolve_gated_castxml_bin", lambda value: "castxml")
+    monkeypatch.setattr(dumper, "_resolve_force_cpp", lambda *a, **k: False)
+    monkeypatch.setattr(dumper, "_detect_cpp20_headers", lambda *a, **k: False)
+    monkeypatch.setattr(
+        dumper, "_resolve_compiler_binary", lambda *a, **k: ("cc", "compiler")
+    )
+    monkeypatch.setattr(dumper.shutil, "which", lambda value: value)
+    monkeypatch.setattr(dumper, "_tool_identity", lambda *a, **k: "stable")
+    monkeypatch.setattr(dumper, "_cache_key", lambda *a, **k: "same")
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setattr(dumper, "_write_castxml_cache", lambda *a, **k: None)
+    produced = ElementTree.Element("GCC_XML")
+    runs = 0
+
+    def one_run(*args: object, **kwargs: object) -> object:
+        nonlocal runs
+        runs += 1
+        return produced
+
+    monkeypatch.setattr(dumper, "_run_castxml_attempt", one_run)
+    first_meta: list[tuple[str, bool]] = []
+    second_meta: list[tuple[str, bool]] = []
+    with ast_acquisition_scope():
+        first = dumper._castxml_dump(
+            [header], [], lang="c", _selected_meta_out=first_meta
+        )
+        second = dumper._castxml_dump(
+            [header], [], lang="c", _selected_meta_out=second_meta
+        )
+
+    assert runs == 1
+    assert first is second is produced
+    # `cc`, not the requested `c++`: the producer's own C-mode compiler
+    # selection is what both consumers are told.
+    assert first_meta == second_meta == [("cc", False)]
