@@ -648,7 +648,7 @@ def test_validate_castxml_output_rechecks_deadline_after_parse(
     again after the parse before handing the root off to the caller."""
     import time
 
-    from abicheck import deadline, dumper
+    from abicheck import deadline, dumper, dumper_castxml_probe
 
     out_xml = tmp_path / "out.xml"
     out_xml.write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
@@ -656,13 +656,16 @@ def test_validate_castxml_output_rechecks_deadline_after_parse(
         args=["castxml"], returncode=0, stdout="", stderr=""
     )
 
-    real_parse = dumper.DefusedET.parse
+    # `_validate_castxml_output` is `dumper_castxml_probe`'s, and parses
+    # through that module's own `DefusedET` -- patch the owner rather than
+    # reaching for an unrelated module's handle on the same library.
+    real_parse = dumper_castxml_probe.DefusedET.parse
 
     def _slow_parse(path):
         time.sleep(0.05)
         return real_parse(path)
 
-    monkeypatch.setattr(dumper.DefusedET, "parse", _slow_parse)
+    monkeypatch.setattr(dumper_castxml_probe.DefusedET, "parse", _slow_parse)
     with deadline.deadline_scope(0.03):
         with pytest.raises(deadline.DeadlineExceeded):
             dumper._validate_castxml_output(result, out_xml, [], False)
