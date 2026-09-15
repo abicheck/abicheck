@@ -15,7 +15,12 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import Future, TimeoutError as FutureTimeoutError
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
+
+if TYPE_CHECKING:
+    from xml.etree.ElementTree import Element
+
+from defusedxml import ElementTree as DefusedET
 
 from . import deadline
 
@@ -152,12 +157,49 @@ def ast_acquisition_scope() -> Iterator[AstAcquisitionScope]:
 
 
 def run_ast_acquisition(backend: str, key: str, producer: Callable[[], _T]) -> _T:
-    """Run *producer* once per request and effective AST cache key."""
+    """Run *producer* once per request and effective AST cache key.
+
+    *producer* must cover **every** source of that AST -- a warm disk-cache
+    decode as much as a real frontend run. A cheap path placed ahead of this
+    call still returns an equal value, so nothing observable breaks, but it
+    returns a *separate object* each time: the decode repeats per member and
+    per worker group, identity-keyed downstream work repeats with it
+    (``extract/header_ast_fields.py`` keys neutral ``SemanticIR``
+    normalization on ``id(root)``), a follow-up consumer of the same artifact
+    (``service._attach_header_graph``) re-reads the cache the primary pass
+    just decoded, and every copy stays resident for the request. Whatever the
+    producer *resolved* travels with the result too -- the post-retry language
+    mode, the DPC++ frontend context, CastXML's selected compiler -- so a
+    waiter never re-derives a stale answer of its own.
+
+    One consequence worth keeping in mind when changing a producer: because
+    its exact parsed object is published to later consumers, a lossy
+    transformation that used to be private to it no longer is (see
+    ``dumper_clang_errors._streaming_prune_enabled``, which is disabled inside
+    an acquisition scope for exactly that reason).
+    """
 
     scope = _ast_acquisition_scope.get()
     if scope is None:
         return producer()
     return scope.run(backend, key, producer)
+
+
+def resolve_request_memoization(memoize: bool | None) -> bool:
+    """Whether a header-AST parse should write this thread's memo slot.
+
+    ``None`` means "decide from context" -- :func:`ast_memoize_scope`'s own
+    answer, the pre-existing default. A request-local acquisition scope then
+    overrides it to ``False``: inside one, the request-keyed table returned by
+    :func:`run_ast_acquisition` is *the* handoff to a later consumer, and the
+    per-thread slot would be a second, never-consumed reference holding a
+    potentially multi-GB tree for the life of the thread. Outside a scope the
+    legacy one-shot handoff is untouched, so a direct ``dumper.dump()`` caller
+    behaves exactly as before.
+    """
+
+    resolved = ast_memoize_active() if memoize is None else memoize
+    return resolved and not ast_acquisition_active()
 
 
 def ast_acquisition_active() -> bool:
@@ -265,6 +307,25 @@ def load_cached_ast(
     if memoize:
         store_cached_ast(key, backend, root)
     return root
+
+
+def read_cached_castxml(cached: Path) -> Element | None:
+    """Parse a cached castxml XML tree, discarding the entry if it is unusable.
+
+    Returns ``None`` (having unlinked *cached*) when the file cannot be parsed,
+    so the caller falls through to a fresh run rather than failing on a
+    truncated or corrupt cache entry. The CastXML counterpart of
+    :func:`load_cached_ast`; lives here, next to it, rather than in
+    ``dumper.py`` (which re-exports it under its historical private name).
+    """
+    try:
+        root = DefusedET.parse(str(cached)).getroot()
+    except Exception:
+        root = None
+    if root is None:
+        cached.unlink(missing_ok=True)
+        return None
+    return cast("Element", root)
 
 
 def _atomic_copy(src: Path, dst: Path) -> None:

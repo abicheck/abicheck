@@ -36,7 +36,12 @@ from pathlib import Path
 from typing import Any
 
 from . import deadline
-from .dumper_cache import _atomic_copy, _atomic_write_json, ast_memoize_active
+from .dumper_cache import (
+    _atomic_copy,
+    _atomic_write_json,
+    ast_acquisition_active,
+    ast_memoize_active,
+)
 from .dumper_clang_streaming import load_pruned_clang_ast, streaming_prune_suppressed
 from .errors import SnapshotError
 from .extract.env_flags import env_flag
@@ -579,6 +584,18 @@ def _streaming_prune_enabled() -> bool:
     # addition to) `streaming_prune_suppressed()` above, which only covers
     # the separate "full/unscoped dump requested" case.
     if ast_memoize_active():
+        return False
+    # `ast_acquisition_active()` is the same hazard reached through the other
+    # sharing mechanism: inside a request-local acquisition scope this parse's
+    # root is published in the request-keyed table, so a later consumer of the
+    # same (backend, key) -- notably `service._attach_header_graph`, which
+    # walks the raw AST dict directly for call-graph edges -- receives THIS
+    # exact tree rather than re-reading the (unpruned) cache file. The memo
+    # check above cannot cover that: the two scopes are opened independently
+    # (`service_compare_pipeline` opens an acquisition scope around a whole
+    # comparison, while `ast_memoize_scope()` is per primary dump), so a parse
+    # can be shared without being memoized.
+    if ast_acquisition_active():
         return False
     return env_flag(STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR)
 

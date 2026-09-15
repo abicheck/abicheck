@@ -5,9 +5,12 @@
 from __future__ import annotations
 
 import contextvars
+import json
 import shutil
+import subprocess
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -16,6 +19,7 @@ import pytest
 from abicheck import dumper
 from abicheck.deadline import DeadlineExceeded, deadline_scope
 from abicheck.dumper_cache import (
+    _ast_memo_slot,
     ast_acquisition_active,
     ast_acquisition_scope,
     retain_ast_context_object,
@@ -313,3 +317,521 @@ def test_castxml_singleflight_binds_producer_to_registered_key(
     with pytest.raises(SnapshotError, match="before CastXML acquisition started"):
         with ast_acquisition_scope():
             dumper._castxml_dump([header], [], compiler="c++", lang="c++")
+
+
+# --------------------------------------------------------------------------
+# Warm-cache coordination: a disk hit is an acquisition too (PR #1305).
+#
+# The invariant under test is not "the second call is fast" but "one request
+# plus one effective acquisition key means exactly one decoded AST object,
+# whatever produced it".  Counting decodes rather than asserting equality is
+# deliberate: two separately-decoded roots compare equal, so an equality
+# assertion passes on the defect these tests exist to catch.
+# --------------------------------------------------------------------------
+
+
+def _stub_clang_resolution(monkeypatch: pytest.MonkeyPatch, cache: Path) -> None:
+    """Pin every input of the clang cache key so the test owns the key."""
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(
+        dumper, "_resolve_dpcpp_acquisition", lambda *a, **k: (False, False)
+    )
+    monkeypatch.setattr(
+        dumper, "_resolve_clang_langmode", lambda *a, **k: (True, False, False, "clang")
+    )
+    monkeypatch.setattr(dumper, "_resolve_clang_system_includes", lambda *a, **k: ())
+    monkeypatch.setattr(dumper, "_tool_identity", lambda *a, **k: "stable")
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+
+
+def _count_json_decodes(monkeypatch: pytest.MonkeyPatch) -> Callable[[], int]:
+    decodes = 0
+    original = dumper.dumper_cache.json.loads
+
+    def counted(value: object, *args: object, **kwargs: object) -> object:
+        nonlocal decodes
+        decodes += 1
+        return original(value, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(dumper.dumper_cache.json, "loads", counted)
+    return lambda: decodes
+
+
+def test_warm_clang_disk_hit_is_decoded_once_per_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    header = tmp_path / "api.hpp"
+    header.write_text("int api();\n", encoding="utf-8")
+    cache = tmp_path / "ast.json"
+    cache.write_text('{"kind": "TranslationUnitDecl"}', encoding="utf-8")
+    _stub_clang_resolution(monkeypatch, cache)
+    monkeypatch.setattr(dumper, "_cache_key", lambda *a, **k: "same")
+    decodes = _count_json_decodes(monkeypatch)
+
+    with ast_acquisition_scope():
+        first = dumper._clang_header_dump([header], [], lang="c++")
+        second = dumper._clang_header_dump([header], [], lang="c++")
+        # A later graph-shaped consumer (``memoize=False``, as
+        # ``service._attach_header_graph`` passes) must not re-read the cache.
+        graph = dumper._clang_header_dump([header], [], lang="c++", memoize=False)
+
+    assert decodes() == 1
+    assert second[0] is first[0] and graph[0] is first[0]
+    # The whole acquisition result travels, not just the root: resolved DPC++
+    # context kind and post-retry language mode alike.
+    assert second == first == graph
+    # No unconsumed legacy handoff is left behind holding the tree.
+    assert _ast_memo_slot.get() is None
+
+
+def test_warm_clang_disk_hit_keeps_legacy_handoff_without_acquisition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Outside an acquisition scope the pre-existing memo behaviour stands."""
+    header = tmp_path / "api.hpp"
+    header.write_text("int api();\n", encoding="utf-8")
+    cache = tmp_path / "ast.json"
+    cache.write_text('{"kind": "TranslationUnitDecl"}', encoding="utf-8")
+    _stub_clang_resolution(monkeypatch, cache)
+    monkeypatch.setattr(dumper, "_cache_key", lambda *a, **k: "same")
+    decodes = _count_json_decodes(monkeypatch)
+
+    assert ast_acquisition_active() is False
+    root, _kind, _force_cpp = dumper._clang_header_dump(
+        [header], [], lang="c++", memoize=True
+    )
+    slot = _ast_memo_slot.get()
+    assert slot is not None and slot[0] == "clang" and slot[2] is root
+    # ... and the pending handoff is what the next same-thread caller gets.
+    again = dumper._clang_header_dump([header], [], lang="c++", memoize=True)
+    assert again[0] is root
+    assert decodes() == 1
+    assert _ast_memo_slot.get() is None
+
+
+def test_warm_clang_distinct_contexts_are_not_merged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control: two effective contexts stay two acquisitions."""
+    header = tmp_path / "api.hpp"
+    header.write_text("int api();\n", encoding="utf-8")
+    host_cache = tmp_path / "host.json"
+    device_cache = tmp_path / "device.json"
+    host_cache.write_text('{"kind": "TranslationUnitDecl", "ctx": "host"}', "utf-8")
+    device_cache.write_text('{"kind": "TranslationUnitDecl", "ctx": "device"}', "utf-8")
+    _stub_clang_resolution(monkeypatch, host_cache)
+    monkeypatch.setattr(
+        dumper,
+        "_cache_key",
+        lambda *a, **k: f"key-{k.get('frontend_context')}",
+    )
+    monkeypatch.setattr(
+        dumper,
+        "_cache_path",
+        lambda key, **k: host_cache if key.endswith("host") else device_cache,
+    )
+    decodes = _count_json_decodes(monkeypatch)
+
+    with ast_acquisition_scope():
+        host = dumper._clang_header_dump([header], [], lang="c++")
+        device = dumper._clang_header_dump(
+            [header], [], lang="c++", frontend_context="device"
+        )
+
+    assert decodes() == 2
+    assert host[0] is not device[0]
+    assert host[0]["ctx"] == "host" and device[0]["ctx"] == "device"
+
+
+def test_warm_clang_edited_header_is_not_served_stale(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control: the cache key still follows header content."""
+    header = tmp_path / "api.hpp"
+    header.write_text("int api();\n", encoding="utf-8")
+    _stub_clang_resolution(monkeypatch, tmp_path / "unused.json")
+    monkeypatch.setattr(
+        dumper,
+        "_cache_key",
+        lambda headers, *a, **k: headers[0].read_text(encoding="utf-8"),
+    )
+    monkeypatch.setattr(
+        dumper,
+        "_cache_path",
+        lambda key, **k: tmp_path / f"{len(key)}.json",
+    )
+    (tmp_path / "11.json").write_text('{"decls": ["api"]}', encoding="utf-8")
+    (tmp_path / "27.json").write_text(
+        '{"decls": ["api", "appeared"]}', encoding="utf-8"
+    )
+
+    with ast_acquisition_scope():
+        before = dumper._clang_header_dump([header], [], lang="c++")
+        header.write_text("int api();\nint appeared();\n", encoding="utf-8")
+        after = dumper._clang_header_dump([header], [], lang="c++")
+
+    assert before[0]["decls"] == ["api"]
+    assert after[0]["decls"] == ["api", "appeared"]
+
+
+def test_warm_clang_failed_acquisition_is_retryable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control: a producer failure does not poison the request."""
+    header = tmp_path / "api.hpp"
+    header.write_text("int api();\n", encoding="utf-8")
+    cache = tmp_path / "ast.json"
+    _stub_clang_resolution(monkeypatch, cache)
+    monkeypatch.setattr(dumper, "_cache_key", lambda *a, **k: "same")
+    attempts = 0
+
+    def flaky(*args: object, **kwargs: object) -> object:
+        nonlocal attempts
+        attempts += 1
+        raise SnapshotError("clang exploded")
+
+    monkeypatch.setattr(dumper, "run_clang_to_ast_file", flaky)
+    with ast_acquisition_scope():
+        with pytest.raises(SnapshotError, match="clang exploded"):
+            dumper._clang_header_dump([header], [], lang="c++")
+        # The failed entry was dropped rather than published, so a later
+        # attempt in the SAME request really re-enters the acquisition (and
+        # now finds the warm cache that meanwhile appeared) instead of
+        # replaying the stored failure forever.
+        cache.write_text('{"kind": "TranslationUnitDecl"}', encoding="utf-8")
+        root, _kind, _force = dumper._clang_header_dump([header], [], lang="c++")
+    assert attempts == 1
+    assert root == {"kind": "TranslationUnitDecl"}
+    assert _ast_memo_slot.get() is None
+
+
+def test_warm_castxml_disk_hit_shares_producer_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    header = tmp_path / "api.hpp"
+    header.write_text("int api();\n", encoding="utf-8")
+    cache = tmp_path / "ast.xml"
+    cache.write_text("<GCC_XML/>", encoding="utf-8")
+    monkeypatch.setattr(dumper, "_resolve_gated_castxml_bin", lambda value: "castxml")
+    monkeypatch.setattr(dumper, "_resolve_force_cpp", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_detect_cpp20_headers", lambda *a, **k: False)
+    monkeypatch.setattr(
+        dumper, "_resolve_compiler_binary", lambda *a, **k: ("c++", "compiler")
+    )
+    monkeypatch.setattr(dumper.shutil, "which", lambda value: value)
+    monkeypatch.setattr(dumper, "_tool_identity", lambda *a, **k: "stable")
+    monkeypatch.setattr(dumper, "_cache_key", lambda *a, **k: "same")
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    decodes = 0
+    original = dumper._read_castxml_cache
+
+    def counted(*args: object, **kwargs: object) -> object:
+        nonlocal decodes
+        decodes += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(dumper, "_read_castxml_cache", counted)
+    first_meta: list[tuple[str, bool]] = []
+    second_meta: list[tuple[str, bool]] = []
+    with ast_acquisition_scope():
+        first = dumper._castxml_dump(
+            [header], [], lang="c++", _selected_meta_out=first_meta
+        )
+        second = dumper._castxml_dump(
+            [header], [], lang="c++", _selected_meta_out=second_meta
+        )
+
+    assert decodes == 1
+    assert second is first
+    # The producer's own (compiler, force_cpp) selection reaches the waiter
+    # rather than each consumer re-deriving it.
+    assert first_meta == second_meta == [("c++", True)]
+
+
+def test_streaming_prune_is_disabled_inside_an_acquisition_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A shared root is walked raw by the graph consumer, so never pruned.
+
+    ``ast_memoize_scope`` already gated this for the thread-local handoff; the
+    request-keyed table is the second way a parse's exact root reaches that
+    consumer, and the two scopes are opened independently.
+    """
+    from abicheck import dumper_clang_errors
+
+    monkeypatch.setenv(dumper_clang_errors.STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR, "1")
+    assert dumper_clang_errors._streaming_prune_enabled() is True
+    with ast_acquisition_scope():
+        assert dumper_clang_errors._streaming_prune_enabled() is False
+
+
+# --------------------------------------------------------------------------
+# Real directory L2 compare: one shared public header, six separately
+# compiled DSOs per side.  Driving the public CLI (rather than calling the
+# dumper helper directly) is the point -- it is the only way to prove the
+# whole-snapshot cache did not simply skip the AST path being measured, and
+# the only shape in which "the next group of release workers" exists at all.
+# --------------------------------------------------------------------------
+
+_FIXTURE_HEADER = """#pragma once
+namespace demo {
+struct Config {
+  int width;
+  int height;
+  double scale;
+};
+class Engine {
+ public:
+  Engine();
+  virtual ~Engine();
+  virtual int run(const Config& cfg);
+  int cached() const;
+ private:
+  int state_;
+};
+int helper_alpha(const Config& cfg);
+int helper_beta(int value);
+long helper_gamma(const Config& cfg, int value);
+}  // namespace demo
+"""
+
+_FIXTURE_SOURCE = """#include "api.hpp"
+namespace demo {{
+Engine::Engine() : state_({n}) {{}}
+Engine::~Engine() {{}}
+int Engine::run(const Config& cfg) {{ return cfg.width + state_; }}
+int Engine::cached() const {{ return state_; }}
+int helper_alpha(const Config& cfg) {{ return cfg.height; }}
+int helper_beta(int value) {{ return value + {n}; }}
+{gamma}
+}}  // namespace demo
+extern "C" int mod{n}_entry(int v) {{ return v + {n}; }}
+"""
+
+_FIXTURE_GAMMA = (
+    "long helper_gamma(const Config& cfg, int value) { return cfg.width + value; }"
+)
+
+#: The member whose ``helper_gamma`` definition the new side drops -- one real
+#: breaking finding that must survive every reuse change below unchanged.
+_BROKEN_MEMBER = 3
+
+
+def _build_release_tree(root: Path, *, drop_gamma_in: int | None) -> Path:
+    include = root / "include"
+    include.mkdir(parents=True)
+    (include / "api.hpp").write_text(_FIXTURE_HEADER, encoding="utf-8")
+    libs = root / "lib"
+    libs.mkdir()
+    for n in range(6):
+        src = root / f"mod{n}.cpp"
+        src.write_text(
+            _FIXTURE_SOURCE.format(
+                n=n, gamma="" if drop_gamma_in == n else _FIXTURE_GAMMA
+            ),
+            encoding="utf-8",
+        )
+        subprocess.run(
+            [
+                "g++",
+                "-shared",
+                "-fPIC",
+                "-g",
+                "-O0",
+                f"-I{include}",
+                str(src),
+                "-o",
+                str(libs / f"libmod{n}.so"),
+            ],
+            check=True,
+            capture_output=True,
+        )
+    return root
+
+
+@pytest.fixture(scope="module")
+def six_dso_release(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """One public header plus six separately compiled DSOs on each side."""
+    if shutil.which("g++") is None:
+        pytest.skip("g++ is required to build the six-DSO L2 fixture")
+    root = tmp_path_factory.mktemp("six_dso_release")
+    _build_release_tree(root / "old", drop_gamma_in=None)
+    _build_release_tree(root / "new", drop_gamma_in=_BROKEN_MEMBER)
+    return root
+
+
+class _AcquisitionCounters:
+    """Real call counts around the real frontends -- never a substitute for
+    them: every compiler, parser and normalizer below is the production one,
+    wrapped only to be counted."""
+
+    def __init__(self) -> None:
+        self.requested_keys: list[tuple[str, str]] = []
+        self.compiler = 0
+        self.raw_decodes: list[str] = []
+        self.normalizations = 0
+
+    @property
+    def raw_ast_keys(self) -> set[str]:
+        return {backend for backend, _ in self.requested_keys}
+
+    def reset(self) -> None:
+        self.requested_keys.clear()
+        self.compiler = 0
+        self.raw_decodes.clear()
+        self.normalizations = 0
+
+
+@pytest.fixture
+def acquisition_counters(monkeypatch: pytest.MonkeyPatch) -> _AcquisitionCounters:
+    from abicheck import dumper_cache
+    from abicheck.extract import header_ast_fields
+
+    counters = _AcquisitionCounters()
+    scope_run = dumper_cache.AstAcquisitionScope.run
+
+    def counted_run(self, backend: str, key: str, producer: object):  # type: ignore[no-untyped-def]
+        counters.requested_keys.append((backend, key))
+        assert callable(producer)
+        return scope_run(self, backend, key, producer)
+
+    monkeypatch.setattr(dumper_cache.AstAcquisitionScope, "run", counted_run)
+
+    def _count(mod: object, name: str, bump: object) -> None:
+        original = getattr(mod, name)
+
+        def wrapper(*args: object, **kwargs: object) -> object:
+            bump()  # type: ignore[operator]
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(mod, name, wrapper)
+
+    def _bump_compiler() -> None:
+        counters.compiler += 1
+
+    def _bump_normalize() -> None:
+        counters.normalizations += 1
+
+    _count(dumper, "run_clang_to_ast_file", _bump_compiler)
+    _count(dumper, "_run_castxml_attempt", _bump_compiler)
+    _count(dumper, "_read_castxml_cache", lambda: counters.raw_decodes.append("xml"))
+    _count(dumper_cache.json, "loads", lambda: counters.raw_decodes.append("json"))
+    _count(header_ast_fields, "_normalize_header_ast_fields", _bump_normalize)
+    return counters
+
+
+def _findings(report: Path) -> list[str]:
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    return sorted(
+        "|".join(
+            str(x)
+            for x in (
+                library.get("library"),
+                change.get("kind"),
+                change.get("symbol"),
+                change.get("name"),
+                change.get("old_value"),
+                change.get("new_value"),
+            )
+        )
+        for library in payload.get("libraries", [])
+        for change in (library.get("findings") or [])
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", ["castxml", "clang"])
+def test_directory_l2_compare_acquires_one_ast_per_key(
+    backend: str,
+    six_dso_release: Path,
+    acquisition_counters: _AcquisitionCounters,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cold start, warm cache, later worker groups and the graph pass all
+    share one acquisition per (backend, key) in one request."""
+    if shutil.which(backend) is None:
+        pytest.skip(f"{backend} backend is not available on this host")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", backend)
+
+    # Six members against two workers, so members 3-6 run in a later group
+    # than the producer's own -- the shape a per-call disk decode escaped
+    # request coordination in.
+    from abicheck.workflows import release_jobs
+
+    monkeypatch.setattr(
+        release_jobs, "resolve_release_worker_count", lambda *a, **k: (2, None, 0.0)
+    )
+
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    def run(tag: str) -> Path:
+        report = tmp_path / f"{tag}.json"
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(six_dso_release / "old" / "lib"),
+                str(six_dso_release / "new" / "lib"),
+                "-H",
+                str(six_dso_release / "old" / "include"),
+                "-o",
+                f"json={report}",
+            ],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 4, result.output
+        return report
+
+    cold = run("cold")
+    cold_keys = list(acquisition_counters.requested_keys)
+    cold_compiler = acquisition_counters.compiler
+    cold_decodes = len(acquisition_counters.raw_decodes)
+    cold_normalizations = acquisition_counters.normalizations
+
+    # Every member really entered the shared table (twelve dumps, six per
+    # side), so the assertions below are about coordination, not about a
+    # path that quietly did not run.
+    assert len(cold_keys) >= 12
+    raw_keys = {(b, k) for b, k in cold_keys if not b.endswith("-normalized")}
+    normalized_keys = {(b, k) for b, k in cold_keys if b.endswith("-normalized")}
+    assert cold_compiler >= 1
+    # One decode/compile per distinct raw key, one neutral normalization per
+    # distinct normalization scope -- not one per member.
+    assert cold_decodes <= len(raw_keys)
+    assert cold_normalizations == len(normalized_keys)
+
+    acquisition_counters.reset()
+    warm = run("warm")
+
+    # The whole-snapshot cache must not have skipped the path under test.
+    assert acquisition_counters.requested_keys, "warm run never reached L2 acquisition"
+    warm_raw_keys = {
+        (b, k)
+        for b, k in acquisition_counters.requested_keys
+        if not b.endswith("-normalized")
+    }
+    warm_normalized_keys = {
+        (b, k)
+        for b, k in acquisition_counters.requested_keys
+        if b.endswith("-normalized")
+    }
+    assert acquisition_counters.compiler == 0
+    assert len(acquisition_counters.raw_decodes) == len(warm_raw_keys)
+    assert acquisition_counters.normalizations == len(warm_normalized_keys)
+    assert warm_raw_keys == raw_keys
+
+    # Correctness is the real gate: the full canonical finding set, not just
+    # the verdict or a count, is identical cold and warm -- and still holds
+    # the member-local break.
+    cold_findings = _findings(cold)
+    assert cold_findings == _findings(warm)
+    assert any(
+        f"libmod{_BROKEN_MEMBER}.so" in finding and "helper_gamma" in finding
+        for finding in cold_findings
+    )
+    # Member binding stays per member: each DSO keeps its own export.
+    assert sum(1 for f in cold_findings if "mod0_entry" in f) >= 1
