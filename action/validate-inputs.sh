@@ -57,6 +57,51 @@ _is_release_style_operand() {
   return 1
 }
 
+# Pre-install counterpart of run.sh's `_is_compare_release_operand`.  This
+# validator cannot import abicheck yet, so package files use the existing
+# suffix/magic classifier.  For directories, a valid ProjectSnapshot manifest
+# with exactly one artifact and one variant is the scalar exception; every
+# other directory is a release operand.  The command-side classifier remains
+# authoritative for malformed/degraded packages once abicheck is installed.
+_is_compare_release_operand() {
+  local path="$1"
+  [[ -n "$path" ]] || return 1
+  if [[ ! -d "$path" ]]; then
+    _is_release_style_operand "$path"
+    return $?
+  fi
+  local manifest="$path/manifest.json"
+  [[ -f "$manifest" ]] || return 0
+  local python_bin=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_bin=python3
+  elif command -v python >/dev/null 2>&1; then
+    python_bin=python
+  else
+    return 0
+  fi
+  "$python_bin" -c '
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as stream:
+        manifest = json.load(stream)
+    artifacts = manifest["artifact_ids"]
+    variants = manifest["variant_ids"]
+    is_scalar = (
+        isinstance(artifacts, list)
+        and isinstance(variants, list)
+        and len(artifacts) == 1
+        and len(variants) == 1
+        and "versions" in manifest
+    )
+except (OSError, ValueError, KeyError, TypeError):
+    is_scalar = False
+raise SystemExit(1 if is_scalar else 0)
+' "$manifest"
+}
+
 # Workflow-command injection defense (bug class
 # `trust_boundary.shell_workflow_injection`; #705 -> #758).
 #
@@ -268,8 +313,8 @@ case "$MODE" in
     # tests/test_action_validate_inputs.py cross-checks these two sets
     # against the live CLI to catch drift.
     if [[ -n "$FORMAT" ]]; then
-      if { [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; } \
-         || { [[ -n "$OLD_LIBRARY" ]] && _is_release_style_operand "$OLD_LIBRARY"; }; then
+      if { [[ -n "$NEW_LIBRARY" ]] && _is_compare_release_operand "$NEW_LIBRARY"; } \
+         || { [[ -n "$OLD_LIBRARY" ]] && _is_compare_release_operand "$OLD_LIBRARY"; }; then
         if [[ "$FORMAT" != "json" && "$FORMAT" != "markdown" && "$FORMAT" != "junit" && "$FORMAT" != "oneline" ]]; then
           _fail "mode: compare does not support format: $FORMAT with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') — only 'json', 'markdown', 'junit', and 'oneline' are available for a directory/package comparison."
         fi
