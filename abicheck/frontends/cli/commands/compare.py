@@ -572,8 +572,8 @@ def _embed_inline_source_side(
 @two_sided_input_options
 # ── Compare options (unchanged) ──────────────────────────────────────────────
 @export_options(
-    ["json", "markdown", "sarif", "html", "junit", "review", "oneline"],
-    default_format="review",
+    ["json", "markdown", "sarif", "html", "junit", "review", "terminal", "oneline"],
+    default_format="terminal",
     supports_directory=True,
     directory_formats=["json"],
     help_extra=" 'review' emits a compact GitHub-facing digest (verdict + "

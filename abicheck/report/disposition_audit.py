@@ -73,6 +73,7 @@ _NOT_EVALUATED_ROW_CAP = 6
 
 #: Rules listed individually in a sticky PR comment before the list collapses.
 _COMMENT_RULE_CAP = 3
+_REVIEW_RULE_CAP = 4
 
 
 @dataclass(frozen=True)
@@ -322,7 +323,7 @@ def fold_disposition_audits(audits: Iterable[DispositionAudit]) -> DispositionAu
         acknowledged_total += audit.acknowledged_total
         for name, count in audit.counts:
             counts[name] = counts.get(name, 0) + count
-        for rule, count in audit.rules:
+        for rule, count in audit.rules[:_REVIEW_RULE_CAP]:
             if rule not in rule_tally:
                 rule_order.append(rule)
                 rule_tally[rule] = 0
@@ -509,13 +510,18 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
     if audit.rules:
         lines.append("**Rules applied:**")
         lines.append("")
-        for rule, count in audit.rules:
+        for rule, count in audit.rules[:_REVIEW_RULE_CAP]:
             detail = rule.reason or rule.label or "no reason given"
             source = f" (`{rule.source_file}`)" if rule.source_file else ""
             expiry = f", expires {rule.expires}" if rule.expires else ""
             lines.append(
                 f"- `{rule.rule_id or 'rule'}`{source} — {detail} "
                 f"[intent: {rule.intent}{expiry}] — {count} finding(s)"
+            )
+        if len(audit.rules) > _REVIEW_RULE_CAP:
+            lines.append(
+                f"- … {len(audit.rules) - _REVIEW_RULE_CAP} more rule(s) omitted; "
+                "export JSON for the complete audit"
             )
         lines.append("")
     if audit.policy_overlays:
@@ -545,8 +551,12 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
             "(keeps its verdict class and gate contribution; ADR-067 D5)"
         )
         lines.append("")
-        for record_id, count in audit.acknowledgments:
+        for record_id, count in audit.acknowledgments[:_REVIEW_RULE_CAP]:
             lines.append(f"- `{record_id}` — {count} finding(s)")
+        if len(audit.acknowledgments) > _REVIEW_RULE_CAP:
+            lines.append(
+                f"- … {len(audit.acknowledgments) - _REVIEW_RULE_CAP} more omitted"
+            )
         lines.append("")
     if audit.unacknowledged_additions_review:
         review = audit.unacknowledged_additions_review
@@ -559,9 +569,11 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
                 "the addition)"
             )
             lines.append("")
-            for entry in unacked:
+            for entry in unacked[:_REVIEW_RULE_CAP]:
                 symbol = entry.get("symbol") or "?"
                 lines.append(f"- `{entry.get('kind')}`: `{symbol}`")
+            if len(unacked) > _REVIEW_RULE_CAP:
+                lines.append(f"- … {len(unacked) - _REVIEW_RULE_CAP} more omitted")
             lines.append("")
     if audit.not_evaluated_detectors:
         # Collapsed to one line on purpose: D3 requires the *state* and its

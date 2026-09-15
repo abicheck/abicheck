@@ -11,9 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Sticky GitHub PR-comment rendering — ``CommentModel`` -> markdown.
-
 Split out of ``pr_comment.py`` (over the file-size soft limit) as its own
 module: that file's own "Parsing — JSON report -> CommentModel" / "Rendering
 -- CommentModel -> markdown" section divider already marked this exact
@@ -490,43 +488,6 @@ def _library_notes(model: CommentModel) -> list[str]:
     return out
 
 
-def _suppression_note(model: CommentModel) -> list[str]:
-    """ "Reporting must survive suppression": a reviewer must see *that*
-    findings were withheld/reclassified, not just the post-suppression
-    buckets above (which, for a fully-suppressed diff, could otherwise read
-    as "no ABI changes at all")."""
-    parts: list[str] = []
-    if model.suppressed_count:
-        n = model.suppressed_count
-        parts.append(
-            f"🔇 {n} finding{'s' if n != 1 else ''} suppressed by `--suppress`"
-        )
-    if model.reclassified_count:
-        n = model.reclassified_count
-        parts.append(
-            f"🔀 {n} finding{'s' if n != 1 else ''} reclassified by `--policy`"
-        )
-    lines: list[str] = []
-    if model.disposition_audit is not None:
-        # ADR-067 D3: the raw-versus-effective counts come first and are not
-        # conditional on anything having been suppressed -- "0 breaking" must
-        # never be the only number a reviewer sees.
-        from .report.disposition_audit import (
-            DispositionAudit,
-            render_disposition_audit_comment_lines,
-        )
-
-        lines += render_disposition_audit_comment_lines(
-            DispositionAudit.from_dict(model.disposition_audit)
-        )
-    if not parts:
-        return lines
-    return lines + [
-        f"> ℹ️ {' · '.join(parts)} — see the full JSON report for details.",
-        "",
-    ]
-
-
 def _scoped_notes(model: CommentModel) -> list[str]:
     """`compare --used-by`/`--required-symbol(s)` consumer summary (workstream
     D-S1, vision-api-abi-evolution.md "D. Optional prebuilt-consumer
@@ -752,7 +713,12 @@ def _render_body(
     lines += _gate_note(model)
     lines += _incomplete_note(model)
     lines += _scoped_notes(model)
-    lines += _suppression_note(model)
+    from .report.pr_comment_group_summary import suppression_note
+
+    lines += suppression_note(model)
+    from .report.pr_comment_group_summary import review_group_note
+
+    lines += review_group_note(model)
     if detail != "summary":
         lines += _body_sections(model, detail)
     lines += _footer_block(ts, run_label, short_sha, report_url)

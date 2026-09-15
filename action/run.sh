@@ -3482,7 +3482,16 @@ elif [[ "$MODE" == "compare" ]]; then
   # sarif/html are rejected by the CLI itself (a clear UsageError, exit 64)
   # when the operands are directories/packages — surfaced as VERDICT=ERROR
   # below via the generic CLI-error detection, no separate fallback needed.
-  FORMAT="${INPUT_FORMAT:-markdown}"
+  FORMAT="${INPUT_FORMAT:-}"
+  if [[ -z "$FORMAT" ]]; then
+    # The scalar compare CLI's bounded human default. Release/package fan-out
+    # has no single review document, so it retains detailed Markdown.
+    if [[ -d "${INPUT_OLD_LIBRARY:-}" || -d "${INPUT_NEW_LIBRARY:-}" ]]; then
+      FORMAT="markdown"
+    else
+      FORMAT="terminal"
+    fi
+  fi
 
   # Computed here, not only after extra-args are appended to CMD below, so
   # the PR_JSON sidecar-injection decision a few lines down (which runs

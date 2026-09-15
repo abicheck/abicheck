@@ -231,7 +231,7 @@ purpose. (The old `--source-method s0…s6`/`--mode` axes and the separate
 
 ## 6. Example reports
 
-The default format is Markdown. A fuller report for the header-aware run from §3
+The default scalar format is the bounded terminal summary. A fuller Markdown report for the header-aware run from §3
 — **illustrative**: the section structure and `ChangeKind`s are real, the values
 are for the hypothetical `libfoo`:
 

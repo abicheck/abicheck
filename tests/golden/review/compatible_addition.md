@@ -1,28 +1,18 @@
 ## ABI review — `libfoo.so` 1.0 → 2.0
 
 **Verdict:** ✅ `COMPATIBLE` — backward-compatible — safe to merge
+**Policy:** `strict_abi` · **Gate:** not configured
 
-> ⚠️ Detector 'elf_layout' disabled: missing ELF metadata on one side
-> ⚠️ Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode
-> ⚠️ Detector 'kabi' disabled: missing Module.symvers (kABI) metadata
-> ⚠️ Detector 'long_double' disabled: missing ELF metadata on one side
-> ⚠️ Detector 'elf' disabled: missing ELF metadata
-> ⚠️ Detector 'pe' disabled: missing PE metadata
-> ⚠️ Detector 'macho' disabled: missing Mach-O metadata
-> ⚠️ Detector 'tls_checks' disabled: missing ELF metadata
-> ⚠️ Detector 'protected_visibility' disabled: missing ELF metadata
-> ⚠️ Detector 'symbol_version_alias' disabled: missing ELF metadata
-> ⚠️ Detector 'vtable_identity' disabled: missing ELF metadata
-> ⚠️ Detector 'abi_surface' disabled: missing ELF metadata
-> ⚠️ Detector 'dwarf' disabled: no DWARF debug info on either side
-> ⚠️ Detector 'elf_deleted_fallback' disabled: missing ELF metadata
-> ⚠️ Detector 'python_ext' disabled: missing CPython extension metadata
-> ⚠️ Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered)
-> ⚠️ Detector 'sycl' disabled: missing SYCL metadata
-> ⚠️ Detector 'unnamed_types' disabled: missing ELF metadata on one side
-> ⚠️ Detector 'vtable_layout' disabled: missing DWARF/header type metadata (inheritance)
-> ⚠️ Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata
 > ⚠️ No binary metadata available; verdict is based on header analysis only
+
+**Evidence:** recorded snapshot facts; no debug-derived layout verification, no source replay.
+
+**Review:** 0 gating finding(s) in 0 gating group(s); 1 retained group(s) total
+
+1. **helper** — added
+   New public function: helper
+   Action: Review the detailed finding and its evidence.
+   Findings: func_added
 
 | Category | Count |
 |---|---|
@@ -31,8 +21,6 @@
 | ⚠️ Risk findings | 0 |
 | ✅ Public additions | 1 |
 | 🔒 Filtered (internal/private) | 0 |
-
-**Release recommendation:** `minor` version bump · SONAME `no_bump_needed`
 
 **Disposition audit:**
 
@@ -48,14 +36,4 @@
 
 **Not evaluated:** 20 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 14 more
 
-**Additions** (1)
-
-- **_Z6helperi** — `helper`
-
-**Removals** (0)
-
-- none
-
-**Modifications** (0)
-
-- none
+**Details:** export the same completed comparison with `-o markdown=abi-report.md -o json=abi-report.json`.

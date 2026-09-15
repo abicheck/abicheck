@@ -182,7 +182,10 @@ def compute_surface_changes(
     for finding in resolved:
         kind = finding.change.kind
         kind_value = kind.value if hasattr(kind, "value") else str(kind)
-        if entity_for_change(finding.change, kind_value) not in _PUBLIC_SURFACE_ENTITIES:
+        if (
+            entity_for_change(finding.change, kind_value)
+            not in _PUBLIC_SURFACE_ENTITIES
+        ):
             continue
         entry = _entry_for(finding)
         operation = operation_for_kind(kind_value)
@@ -258,7 +261,9 @@ def render_surface_changes_lines(
             lines.extend(_declaration_line(e) for e in shown)
             remaining -= len(shown)
             if len(entries) > len(shown):
-                lines.append(f"- … {len(entries) - len(shown)} more {label.lower()} omitted")
+                lines.append(
+                    f"- … {len(entries) - len(shown)} more {label.lower()} omitted"
+                )
         else:
             lines.append("- none" if not entries else f"- … all {len(entries)} omitted")
         lines.append("")

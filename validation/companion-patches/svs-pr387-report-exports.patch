@@ -1,0 +1,57 @@
+diff --git a/.github/scripts/abi-check.sh b/.github/scripts/abi-check.sh
+index e8a17af..c06547f 100755
+--- a/.github/scripts/abi-check.sh
++++ b/.github/scripts/abi-check.sh
+@@ -49,6 +49,8 @@ HEADER_SUBDIR="${HEADER_SUBDIR:-include/svs/runtime}"
+ SUPPRESSIONS="${SUPPRESSIONS:-.github/abi-suppressions.yml}"
+ POLICY="${POLICY:-strict_abi}"
+ REPORT="${REPORT:-abi-report.md}"
++REVIEW_REPORT="${REVIEW_REPORT:-abi-review.md}"
++JSON_REPORT="${JSON_REPORT:-abi-report.json}"
+ WORKDIR="${WORKDIR:-abi-work}"
+ 
+ # Prints the resolved library path on success. Release tarballs and CI artifacts
+@@ -106,7 +108,10 @@ abicheck compare \
+     --version new="$NEW_LABEL" \
+     --policy "$POLICY" \
+     "${suppress_args[@]}" \
+-    --output markdown=- | tee "$REPORT" || rc=$?
++    -o oneline=- \
++    -o review="$REVIEW_REPORT" \
++    -o markdown="$REPORT" \
++    -o json="$JSON_REPORT" || rc=$?
+ 
+ # Only 2 and 4 are findings. Anything else -- a removed flag, an unparseable
+ # header, a crash -- means the comparison did not happen, and reporting that as an
+diff --git a/.github/workflows/build-cpp-runtime-bindings.yml b/.github/workflows/build-cpp-runtime-bindings.yml
+index 8dbe619..aed05e0 100644
+--- a/.github/workflows/build-cpp-runtime-bindings.yml
++++ b/.github/workflows/build-cpp-runtime-bindings.yml
+@@ -218,10 +218,10 @@ jobs:
+             '${{ steps.baseline.outputs.tag }}' baseline/svs-cpp-runtime-bindings.tar.gz \
+             "$label" current/svs-cpp-runtime-bindings.tar.gz || rc=$?
+ 
+-          if [ -s abi-report.md ]; then
++          if [ -s abi-review.md ]; then
+             {
+               echo "## ABI vs ${{ steps.baseline.outputs.tag }}"
+-              cat abi-report.md
++              cat abi-review.md
+             } >> "$GITHUB_STEP_SUMMARY"
+           fi
+ 
+@@ -232,3 +232,14 @@ jobs:
+             exit 1
+           fi
+           exit "$rc"
++
++      - name: Upload ABI reports
++        if: ${{ always() }}
++        uses: actions/upload-artifact@v7
++        with:
++          name: abi-reports
++          path: |
++            abi-review.md
++            abi-report.md
++            abi-report.json
++          if-no-files-found: warn

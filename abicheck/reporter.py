@@ -1502,6 +1502,7 @@ def _change_to_dict(
         "description": getattr(c, "description", ""),
         "old_value": getattr(c, "old_value", None),
         "new_value": getattr(c, "new_value", None),
+        "review_evidence": getattr(c, "review_evidence", None),
         "severity": severity,
     }
     if reclassified_by:

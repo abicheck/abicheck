@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from ..model import AbiSnapshot
     from ..policy.severity import GateDecision
     from ..workflows.gate import SeverityConfig
+    from .finding import ReportFinding
 
 
 def build_report_document(
@@ -72,6 +73,7 @@ def build_report_document(
     contract_evaluation: bool = False,
     gate: GateDecision | None = None,
     today: date | None = None,
+    findings: tuple[ReportFinding, ...] | None = None,
 ) -> ReportDocument:
     """Build the one canonical, format-neutral ``report_mode="full"`` document.
 
@@ -136,11 +138,16 @@ def build_report_document(
         add_contract_context as _add_contract_context,
         build_report_document_with_side_facts,
     )
-    from .disposition_audit import add_disposition_audit as _add_disposition_audit
+    from .disposition_audit import (
+        DispositionAudit,
+        add_disposition_audit as _add_disposition_audit,
+    )
     from .finding_evolution import add_finding_evolution as _add_finding_evolution
     from .pattern_preprocessor_scan import (
         add_pattern_preprocessor_scan as _add_pattern_preprocessor_scan,
     )
+    from .result_counts import compute_result_counts
+    from .review_groups import build_review_groups
     from .surface_changes import add_surface_changes as _add_surface_changes
 
     changes = list(result.changes)
@@ -198,6 +205,31 @@ def build_report_document(
     _add_suppression(d, result)
     _add_disposition_audit(d, result, severity_config, today=today)
     _add_surface_changes(d, result, changes)
+    all_findings = findings or build_report_findings(
+        result.changes,
+        policy=result.policy,
+        kind_sets=eff_sets,
+        policy_file=result.policy_file,
+        today=today,
+    )
+    displayed_ids = {id(change) for change in changes}
+    displayed_findings = tuple(
+        finding for finding in all_findings if id(finding.change) in displayed_ids
+    )
+    review_groups = build_review_groups(displayed_findings)
+    all_review_groups = build_review_groups(all_findings)
+    d["review_groups"] = [group.to_dict() for group in review_groups]
+    audit_value = d["disposition_audit"]
+    assert isinstance(audit_value, dict)
+    d["result_counts"] = compute_result_counts(
+        all_findings,
+        all_review_groups,
+        DispositionAudit.from_dict(audit_value),
+        observed_changes=tuple(result.changes)
+        + tuple(result.suppressed_changes)
+        + tuple(result.out_of_surface_changes)
+        + tuple(result.reconciled_changes),
+    ).to_dict()
     _add_finding_evolution(d, result)
     _add_pattern_preprocessor_scan(d, result)
     _add_surface_scope(d, result)
@@ -528,6 +560,14 @@ def build_report_envelope(
     opts = options if options is not None else RenderOptions()
     today = date.today()
     gate = gate_decision_for_result(result, severity_config, today=today)
+    kind_sets = result._effective_kind_sets()
+    findings = build_report_findings(
+        result.changes,
+        policy=result.policy,
+        kind_sets=kind_sets,
+        policy_file=result.policy_file,
+        today=today,
+    )
     document = build_report_document(
         result,
         show_only=opts.show_only,
@@ -537,14 +577,7 @@ def build_report_envelope(
         contract_evaluation=opts.contract_evaluation,
         gate=gate,
         today=today,
-    )
-    kind_sets = result._effective_kind_sets()
-    findings = build_report_findings(
-        result.changes,
-        policy=result.policy,
-        kind_sets=kind_sets,
-        policy_file=result.policy_file,
-        today=today,
+        findings=findings,
     )
     scoped_only = tuple(getattr(result, "scoped_only_changes", ()) or ())
     scoped_only_findings = (

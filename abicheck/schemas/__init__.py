@@ -969,7 +969,9 @@ _ARTIFACT_NAMES = frozenset(
 #:         exposed the identical finding set in all 93 cases that had
 #:         findings, and ``leaf``'s headline section was empty in 40 of them.
 #:         ``root_causes``/``root_cause_count`` is the supported grouping.
-REPORT_SCHEMA_VERSION = "5.0"  #: 5.0 -- see the comment immediately above.
+#: 5.1 -- additive ``review_groups`` correlation with stable membership ids;
+#:        presentation-only and never a replacement for ``changes``.
+REPORT_SCHEMA_VERSION = "5.1"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

@@ -570,6 +570,11 @@ def _diff_type_vtable(
         old_value=", ".join(old_vtable),
         new_value=", ".join(new_vtable),
         entity_id=t_old.entity_id or t_new.entity_id,
+        review_evidence={
+            "kind": "declared_vtable_sequence",
+            "old_entries": list(old_vtable),
+            "new_entries": list(new_vtable),
+        },
     )
     # Tag (never demote) when this finding rests on the identical evidence
     # gap LAYOUT_UNVERIFIABLE reports for the same (exact, already

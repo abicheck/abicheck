@@ -58,7 +58,12 @@ from .policy.classification import (
 )
 from .policy.contract_finding_relevance import is_evaluated
 from .policy.evidence_status import EvidenceStatus
-from .report import contract_conflicts_markdown as _ccm, render_markdown as _rmd
+from .report import (
+    contract_conflicts_markdown as _ccm,
+    render_markdown as _rmd,
+    render_review as _review,
+    review_compute as _review_compute,
+)
 from .report.cross_source_evolution import (
     cross_source_evolution_md_suffix as _cross_source_evolution_md_suffix,
 )
@@ -1511,7 +1516,10 @@ def compute_review_digest(
     disposition_audit: DispositionAudit | None = None,
     findings: Sequence[ReportFinding] | None = None,
     gate: GateDecision | None = None,
-) -> _rmd.ReviewDigest:
+    review_groups: Sequence[dict[str, object]] | None = None,
+    result_counts: dict[str, int] | None = None,
+    gate_exit_code: int | None = None,
+) -> _review.ReviewDigest:
     """The structured intermediate for :func:`to_review_digest`.
 
     *severity_config*, when given, drives the merge-effect phrase from the
@@ -1566,7 +1574,9 @@ def compute_review_digest(
     # byte-identical-inputs warning -- and this digest is exactly the
     # GitHub-facing summary a reviewer approves a merge from, so it must not
     # read as unconditionally clean when one of these is present.
-    coverage_warnings = tuple(result.coverage_warnings or ())
+    coverage_warnings = _review_compute.compact_coverage_warnings(
+        result.coverage_warnings or ()
+    )
 
     scoped = result.scope_to_public_surface
     additions_label = "Public additions" if scoped else "Additions"
@@ -1595,7 +1605,7 @@ def compute_review_digest(
         if f.verdict in (Verdict.BREAKING, Verdict.API_BREAK)
     ]
 
-    return _rmd.ReviewDigest(
+    return _review.ReviewDigest(
         library=result.library,
         old_version=result.old_version,
         new_version=result.new_version,
@@ -1621,7 +1631,7 @@ def compute_review_digest(
         bump_value=rec.bump.value,
         soname_value=rec.soname.value,
         impacted=tuple(
-            _rmd.ImpactedSymbol(symbol=c.symbol or "?", kind=c.kind.value)
+            _review.ImpactedSymbol(symbol=c.symbol or "?", kind=c.kind.value)
             for c in impacted
         ),
         disposition_audit=(
@@ -1632,6 +1642,17 @@ def compute_review_digest(
         surface_changes=compute_surface_changes(result, findings),
         env_matrix_source_sha256=result.env_matrix_source_sha256,
         pattern_modulations=tuple(getattr(result, "pattern_modulations", ()) or ()),
+        review_groups=tuple(
+            review_groups or _review_compute.review_groups_for(findings)
+        ),
+        result_counts=result_counts or {},
+        policy=result.policy or "strict_abi",
+        gate_exit_code=gate.exit_code if gate is not None else gate_exit_code,
+        evidence_summary=_review_compute.compact_evidence_summary(result),
+        show_release_recommendation=bool(
+            result.policy_file is not None
+            and getattr(result.policy_file, "versioning_stated", False)
+        ),
     )
 
 

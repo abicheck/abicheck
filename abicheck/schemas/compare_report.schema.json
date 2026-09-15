@@ -759,6 +759,55 @@
         }
       }
     },
+    "review_groups": {
+      "type": "array",
+      "description": "Schema 5.1: presentation-only correlation of retained findings. Group membership never changes finding, disposition, compatibility, or gate counts.",
+      "items": {
+        "type": "object",
+        "required": ["group_id", "entity", "operation", "display_name", "transition", "member_finding_ids", "member_kinds", "exact_symbols", "evidence", "gating_findings", "consequence", "action"],
+        "properties": {
+          "group_id": {"type": "string"},
+          "library": {"type": ["string", "null"]},
+          "entity": {"type": "string"},
+          "operation": {"enum": ["added", "removed", "modified"]},
+          "display_name": {"type": "string"},
+          "transition": {"type": "string"},
+          "member_finding_ids": {"type": "array", "items": {"type": "string"}},
+          "member_kinds": {"type": "array", "items": {"type": "string"}},
+          "exact_symbols": {"type": "array", "items": {"type": "string"}},
+          "evidence": {"type": "array", "items": {"type": "string"}},
+          "gating_findings": {"type": "integer", "minimum": 0},
+          "consequence": {"type": "string"},
+          "action": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "result_counts": {
+      "type": "object",
+      "description": "Schema 5.1: explicitly named populations and stages used by concise human projections; group counts are not finding counts.",
+      "required": ["raw_detected", "retained", "gating", "non_gating", "review_groups", "gating_review_groups", "public_additions", "public_removals", "public_modifications", "detected_public_additions", "detected_public_removals", "detected_public_modifications", "runtime_dependency", "hygiene_introduced", "hygiene_resolved", "hygiene_persistent", "hygiene_not_evaluated"],
+      "additionalProperties": false,
+      "properties": {
+        "raw_detected": {"type": "integer", "minimum": 0},
+        "retained": {"type": "integer", "minimum": 0},
+        "gating": {"type": "integer", "minimum": 0},
+        "non_gating": {"type": "integer", "minimum": 0},
+        "review_groups": {"type": "integer", "minimum": 0},
+        "gating_review_groups": {"type": "integer", "minimum": 0},
+        "public_additions": {"type": "integer", "minimum": 0},
+        "public_removals": {"type": "integer", "minimum": 0},
+        "public_modifications": {"type": "integer", "minimum": 0},
+        "detected_public_additions": {"type": "integer", "minimum": 0},
+        "detected_public_removals": {"type": "integer", "minimum": 0},
+        "detected_public_modifications": {"type": "integer", "minimum": 0},
+        "runtime_dependency": {"type": "integer", "minimum": 0},
+        "hygiene_introduced": {"type": "integer", "minimum": 0},
+        "hygiene_resolved": {"type": "integer", "minimum": 0},
+        "hygiene_persistent": {"type": "integer", "minimum": 0},
+        "hygiene_not_evaluated": {"type": "integer", "minimum": 0}
+      }
+    },
     "suppression": {
       "type": "object",
       "required": [
@@ -2643,6 +2692,11 @@
             "string",
             "null"
           ]
+        },
+        "review_evidence": {
+          "type": ["object", "null"],
+          "description": "Schema 5.1 structured transition evidence for human explanations; it does not affect finding identity, compatibility, or gating.",
+          "additionalProperties": true
         },
         "severity": {
           "type": "string",

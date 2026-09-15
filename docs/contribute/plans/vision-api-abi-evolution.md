@@ -749,6 +749,16 @@ deletions" acceptance scenario from the Tests table below. Scope/
 completeness, consumer, versioning, and history/relationship blocks (S2-S4)
 remain open, as scoped above.
 
+**2026-09-14 report redesign.** Schema 5.1 adds canonical presentation-only
+`review_groups` and explicitly staged `result_counts`. The bounded scalar
+terminal consumes those shared facts, distinguishes compatibility from the
+finalized gate/exit, separates public operations, runtime/dependency findings,
+and hygiene lifecycle, and summarizes only material evidence limitations.
+Correlated export/vtable evidence retains every member finding and library/
+entity identity; full human and machine exports remain complete. The Action
+uses the same scalar/package default split. The unapplied SVS PR 387 companion
+patch and application instructions live under `validation/companion-patches/`.
+
 ## Files & surfaces
 
 Owners per ADR-061; new code goes to the target package, never a new root

@@ -41,27 +41,28 @@ format selection works.
 
 ## Decision
 
-### Five output formats
+### Human and machine output formats
 
 | Format | Primary consumer | CLI flag | Default? |
 |--------|-----------------|----------|----------|
-| **Markdown** | Humans (terminal, CI logs) | `--format markdown` | Yes |
+| **Terminal** | Humans (terminal, CI logs) | `-o terminal=-` | Scalar compare |
+| **Review Markdown** | PR/step summaries | `-o review=-` | No |
+| **Detailed Markdown** | Navigable archived report | `-o markdown=-` | No |
 | **JSON** | Automation, AI agents, scripts | `--format json` | No |
 | **SARIF 2.1.0** | GitHub Code Scanning | `--format sarif` | No |
 | **HTML** | Standalone report viewing | `--format html` | No |
 | **JUnit XML** | GitLab CI, Jenkins, Azure DevOps | `--format junit` | No |
 
-### Markdown (default)
+### Terminal and Markdown
 
-- Rendered in monospace terminals and CI log viewers
-- Sections: verdict banner, summary table, changes grouped by severity
-  (breaking → source breaks → risk → compatible)
-- Emoji verdict indicators: ❌ (BREAKING), ⚠️ (API_BREAK/RISK), ✅
-  (COMPATIBLE/NO_CHANGE)
-- Demangled symbol names for readability
-
-Markdown is the default because it works everywhere — terminals, GitHub PR
-comments, CI log viewers, README files — without requiring special rendering.
+- `terminal` is the bounded plain-text scalar default. It puts compatibility,
+  finalized gate/exit, scope, and policy first, then samples canonical review
+  groups and reconciled count populations.
+- `review` is the bounded Markdown projection for PR comments and step summaries.
+- `markdown` is the complete navigable human report; it is intentionally an
+  explicit export rather than pages of default log output.
+- Package/release fan-out retains detailed Markdown as its implicit default
+  because it has no single scalar review document.
 
 ### JSON
 
@@ -131,7 +132,7 @@ CI integration.
 ### Format selection
 
 ```bash
-abicheck compare old.so new.so                         # bounded review (default)
+abicheck compare old.so new.so                         # bounded terminal result (default)
 abicheck compare old.so new.so -o markdown=-           # detailed Markdown
 abicheck compare old.so new.so -o json=report.json     # JSON
 abicheck compare old.so new.so -o sarif=report.sarif   # SARIF
@@ -141,7 +142,7 @@ abicheck compare old.so new.so -o junit=results.xml    # JUnit XML
 
 The format and destination are selected together with repeatable
 `-o FORMAT=DESTINATION` exports; the file extension never infers a format.
-With no export the default is `review=-`. See ADR-036's 2026-09-14 amendment
+With no export the scalar default is `terminal=-`. See ADR-036's 2026-09-14 amendment
 for the bounded-human-output migration.
 
 ### Information preservation
@@ -170,7 +171,7 @@ or reshape some `DiffResult` fields relative to JSON).
 
 ### Negative
 
-- Five formatters to maintain (reporter.py, sarif.py, html_report.py, junit_report.py)
+- Multiple projections to maintain (terminal/review, Markdown, JSON, SARIF, HTML, JUnit)
 - SARIF severity mapping is a compatibility contract with GitHub
 - Self-contained HTML generates larger files than external-CSS approaches
 - JSON schema evolves with the project (see ADR-015 for schema versioning)

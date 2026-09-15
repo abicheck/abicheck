@@ -85,7 +85,7 @@ def render_output(
     """Render comparison result in the requested output format.
 
     Supported formats: ``'json'``, ``'markdown'``, ``'sarif'``, ``'html'``,
-    ``'junit'``, ``'review'``, and :data:`ONELINE_FORMAT` (``'oneline'``),
+    ``'junit'``, ``'review'``, ``'terminal'``, and :data:`ONELINE_FORMAT` (``'oneline'``),
     a public ``--format`` choice on ``compare``.
 
     ``demangle`` only affects human-facing formats (markdown, review, html,
@@ -177,7 +177,7 @@ def render_output(
 #: here: it short-circuits above, being a summary-only document rather than a
 #: projection of the shared one (``report/envelope.py``'s scope note).
 _SUPPORTED_FORMATS = frozenset(
-    {"json", "sarif", "html", "junit", "markdown", "md", "review"}
+    {"json", "sarif", "html", "junit", "markdown", "md", "review", "terminal"}
 )
 
 
@@ -195,7 +195,7 @@ _SUPPORTED_FORMATS = frozenset(
 #: here too; ``tests/test_view_internal_grammar.py`` asserts that every
 #: format aliasing a human projector resolves the same way its target does.
 HUMAN_FORMATS: frozenset[str] = frozenset(
-    {"markdown", "md", "review", "html", "text", ONELINE_FORMAT}
+    {"markdown", "md", "review", "terminal", "html", "text", ONELINE_FORMAT}
 )
 
 
@@ -395,6 +395,21 @@ def _project_review(envelope: ReportEnvelope) -> str:
     )
 
 
+def _project_terminal(envelope: ReportEnvelope) -> str:
+    from .report.review_digest_document import (
+        build_review_digest_document,
+        render_terminal_digest_document,
+    )
+
+    document = build_review_digest_document(
+        envelope.result,
+        severity_config=envelope.severity_config,
+        report_document=envelope.document,
+        envelope=envelope,
+    )
+    return render_terminal_digest_document(document)
+
+
 def _project_markdown(envelope: ReportEnvelope) -> str:
     """The full Markdown report (and its ``md`` alias).
 
@@ -463,6 +478,7 @@ _PROJECTIONS: dict[str, Callable[[ReportEnvelope], str]] = {
     "html": _project_html,
     "junit": _project_junit,
     "review": _project_review,
+    "terminal": _project_terminal,
     "markdown": _project_markdown,
     "md": _project_markdown,
 }

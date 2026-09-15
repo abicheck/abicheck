@@ -43,10 +43,11 @@ import abicheck.reporter_markdown as _reporter_markdown_module
 from .disposition_audit import DispositionAudit
 from .document import ReportDocument
 from .envelope import ReportEnvelope, resolved_document
-from .render_markdown import (
+from .render_review import (
     ImpactedSymbol,
     ReviewDigest,
     render_review_digest,
+    render_terminal_digest,
 )
 from .surface_changes import SurfaceChangeSection
 
@@ -106,12 +107,18 @@ def build_review_digest_document(
         if shared_document is not None
         else None
     )
+    shared_mapping = shared_document.to_mapping() if shared_document is not None else {}
+    exit_value = shared_mapping.get("exit")
+    exit_code = exit_value.get("code") if isinstance(exit_value, dict) else None
     digest = _reporter_markdown().compute_review_digest(
         result,
         severity_config=severity_config,
         disposition_audit=shared_disposition_audit,
         findings=None if envelope is None else envelope.findings,
         gate=None if envelope is None else envelope.gate,
+        review_groups=cast("Any", shared_mapping.get("review_groups")),
+        result_counts=cast("Any", shared_mapping.get("result_counts")),
+        gate_exit_code=cast("Any", exit_code),
     )
     d: dict[str, object] = {
         "library": digest.library,
@@ -148,6 +155,12 @@ def build_review_digest_document(
         # mapping dropped it, so `-o review=...` still showed an accepted
         # result with no rule and no reason (Codex review, PR #1284).
         "pattern_modulations": list(digest.pattern_modulations),
+        "review_groups": list(digest.review_groups),
+        "policy": digest.policy,
+        "gate_exit_code": digest.gate_exit_code,
+        "result_counts": digest.result_counts,
+        "evidence_summary": digest.evidence_summary,
+        "show_release_recommendation": digest.show_release_recommendation,
     }
     return ReportDocument.from_mapping(d)
 
@@ -186,9 +199,19 @@ def _review_digest_from_mapping(d: Mapping[str, Any]) -> ReviewDigest:
         ),
         env_matrix_source_sha256=d.get("env_matrix_source_sha256"),
         pattern_modulations=tuple(d.get("pattern_modulations") or ()),
+        review_groups=tuple(d.get("review_groups") or ()),
+        policy=d.get("policy", "strict_abi"),
+        gate_exit_code=d.get("gate_exit_code"),
+        result_counts=dict(d.get("result_counts") or {}),
+        evidence_summary=d.get("evidence_summary", ""),
+        show_release_recommendation=bool(d.get("show_release_recommendation", False)),
     )
 
 
 def render_review_digest_document(doc: ReportDocument) -> str:
     """Project a review-digest ``ReportDocument`` to its Markdown text."""
     return render_review_digest(_review_digest_from_mapping(doc.to_mapping()))
+
+
+def render_terminal_digest_document(doc: ReportDocument) -> str:
+    return render_terminal_digest(_review_digest_from_mapping(doc.to_mapping()))
