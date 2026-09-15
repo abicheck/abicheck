@@ -100,6 +100,47 @@ def test_compute_surface_changes_groups_by_review_action() -> None:
     assert section.total == 3
 
 
+def test_catalog_operation_not_kind_suffix_or_severity_controls_surface() -> None:
+    """ELF-only public removal is a removal; an import is not public API."""
+    from abicheck.checker_policy import ChangeKind, Verdict
+    from abicheck.checker_types import Change, DiffResult
+
+    changes = [
+        Change(ChangeKind.FUNC_REMOVED_ELF_ONLY, "_Z3foov", "export disappeared"),
+        Change(ChangeKind.IMPORTED_SYMBOL_REMOVED, "write", "import disappeared"),
+    ]
+    # A presentation/policy override must not rewrite the observed operation.
+    changes[0].effective_verdict = Verdict.COMPATIBLE
+    section = compute_surface_changes(
+        DiffResult(old_version="1", new_version="2", library="lib", changes=changes)
+    )
+    assert [entry.symbol for entry in section.removals] == ["_Z3foov"]
+    assert all(
+        entry.symbol != "write"
+        for entry in (*section.additions, *section.removals, *section.modifications)
+    )
+
+
+def test_compact_surface_list_is_bounded_and_discloses_omissions() -> None:
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.checker_types import Change, DiffResult
+
+    result = DiffResult(
+        old_version="1",
+        new_version="2",
+        library="lib",
+        changes=[
+            Change(ChangeKind.FUNC_ADDED, f"function_{i}", "added")
+            for i in range(10_000)
+        ],
+    )
+    section = compute_surface_changes(result)
+    lines = render_surface_changes_lines(section)
+    assert len(lines) < 30
+    assert "9988 more additions omitted" in "\n".join(lines)
+    assert "function_9999" not in "\n".join(lines)
+
+
 def test_removal_entry_carries_its_old_declaration() -> None:
     old, new = _snapshots()
     result = compare(old, new)
@@ -176,15 +217,17 @@ def test_review_digest_and_full_markdown_itemize_every_group() -> None:
 
     digest = to_review_digest(result)
     assert "## Surface changes" not in digest  # digest has no section heading
-    assert "Additions" in digest and "Removals" in digest
-    assert "_ZN3foo9brand_newEv" in digest
-    assert "_ZN3foo4goneEv" in digest
+    assert "**Review:**" in digest
+    assert "brand_new" in digest and "gone" in digest
+    assert "func_added" in digest
+    assert "func_removed" in digest
 
-    for render in (to_markdown, _to_markdown_root_cause):
-        text = render(result)
-        assert "## Surface changes" in text, render.__name__
-        assert "_ZN3foo9brand_newEv" in text, render.__name__
-        assert "_ZN3foo4goneEv" in text, render.__name__
+    text = to_markdown(result)
+    assert "## Related review groups" in text
+    assert "brand_new" in text and "gone" in text
+    root = _to_markdown_root_cause(result)
+    assert "## Surface changes" in root
+    assert "_ZN3foo9brand_newEv" in root
 
 
 def test_surface_changes_honors_show_only_like_every_other_section() -> None:

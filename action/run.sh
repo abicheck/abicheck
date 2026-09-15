@@ -1839,6 +1839,38 @@ raise SystemExit(0 if is_package(Path(sys.argv[1])) else 3)
   return 1
 }
 
+# Whether compare will route an operand through the release/package engine.
+# Unlike `_is_release_style_operand`, this deliberately does not equate every
+# directory with a release: a readable, single-artifact ProjectSnapshot
+# directory is a scalar operand.  Ask the installed CLI's canonical classifier
+# so archives detected by content and stored snapshots follow the same route as
+# the command we are about to invoke.
+_is_compare_release_operand() {
+  local path="$1"
+  [[ -n "$path" ]] || return 1
+  if [[ "${_PY_BIN_HAS_ABICHECK:-false}" == "true" && -n "${_PY_SAFE_DIR:-}" && -n "${_PY_BIN:-}" ]]; then
+    local _probe_path="$path"
+    if ! _is_path_already_qualified "$_probe_path"; then
+      _probe_path="$PWD/$_probe_path"
+    fi
+    local _probe_rc=0
+    (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import sys
+from pathlib import Path
+
+from abicheck.cli_resolve import classify_compare_operand
+
+raise SystemExit(0 if classify_compare_operand(Path(sys.argv[1])) in {"directory", "package"} else 3)
+' "$_probe_path") || _probe_rc=$?
+    [[ "$_probe_rc" -eq 0 ]] && return 0
+    [[ "$_probe_rc" -eq 3 ]] && return 1
+  fi
+  # A failed classifier probe must not make an archive use the unsupported
+  # scalar terminal projection.  This fallback is intentionally conservative;
+  # normal Action execution always has the installed classifier above.
+  _is_release_style_operand "$path"
+}
+
 # ---------------------------------------------------------------------------
 # Value-taking CLI options, derived from the INSTALLED abicheck (ADR-070 D3)
 # ---------------------------------------------------------------------------
@@ -3482,7 +3514,18 @@ elif [[ "$MODE" == "compare" ]]; then
   # sarif/html are rejected by the CLI itself (a clear UsageError, exit 64)
   # when the operands are directories/packages — surfaced as VERDICT=ERROR
   # below via the generic CLI-error detection, no separate fallback needed.
-  FORMAT="${INPUT_FORMAT:-markdown}"
+  FORMAT="${INPUT_FORMAT:-}"
+  if [[ -z "$FORMAT" ]]; then
+    # The scalar compare CLI's bounded human default. Release/package fan-out
+    # has no single review document, so it retains detailed Markdown.
+    if [[ "$_NO_BASELINE" == "true" ]] \
+       || _is_compare_release_operand "${INPUT_OLD_LIBRARY:-}" \
+       || _is_compare_release_operand "${INPUT_NEW_LIBRARY:-}"; then
+      FORMAT="markdown"
+    else
+      FORMAT="terminal"
+    fi
+  fi
 
   # Computed here, not only after extra-args are appended to CMD below, so
   # the PR_JSON sidecar-injection decision a few lines down (which runs

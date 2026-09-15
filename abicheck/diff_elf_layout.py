@@ -372,6 +372,12 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
                 symbol=sym,
                 name=cls,
+                qualified_name=cls,
+                review_evidence={
+                    "kind": "elf_vtable_group_size",
+                    "old_bytes": o_size,
+                    "new_bytes": n_size,
+                },
                 detail=detail,
                 old=str(o_size),
                 new=str(n_size),

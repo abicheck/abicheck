@@ -358,19 +358,19 @@ def detect_coverage_asymmetry(
 #: from a bare binary up through debug symbols, headers, build data, and sources.
 CHECK_CAPABILITIES: tuple[tuple[str, str, str, str], ...] = (
     (
-        "Symbol presence & linkage (added/removed/SONAME)",
+        "Exports, linkage, SONAME, and emitted ELF vtable-group sizes",
         "L0",
         "from the binary's dynamic symbol table",
         "needs the built binary",
     ),
     (
-        "Type layout, members, vtables, signatures",
+        "Debug-derived compiled type layout and member offsets",
         "L1",
         "from DWARF/PDB debug info",
-        "no debug info: checks limited to symbol-level, not struct/member/layout",
+        "no debug info: compiled layout/member offsets are not verified",
     ),
     (
-        "API decls absent from the symbol table; public-surface scoping",
+        "Public declarations, signatures, and declared virtual sequence",
         "L2",
         "from the public header AST",
         "no headers: header-only/inline-API declarations are invisible",
@@ -409,15 +409,29 @@ def capability_lines(
     # Only a PRESENT layer enables its checks: a PARTIAL layer (e.g. L4 when clang
     # was missing or every TU failed, so no entities were extracted) ran but
     # produced nothing, and must read as [off], not [on] (CodeRabbit review).
-    present = {
-        c.layer for c in (*intrinsic, *optional) if c.status == CoverageStatus.PRESENT
-    }
+    coverage = {c.layer: c for c in (*intrinsic, *optional)}
     lines = ["Checks enabled for this scan (and why others are not):"]
     for label, layer, how, why_off in CHECK_CAPABILITIES:
-        if layer in present:
+        row = coverage.get(layer)
+        if row is not None and row.status == CoverageStatus.PRESENT:
             lines.append(f"  [on]  {label} — {how}")
+        elif row is not None and row.status == CoverageStatus.PARTIAL:
+            lines.append(
+                f"  [partial] {label} — evidence covered only part of the selected scope"
+            )
         else:
-            lines.append(f"  [off] {label} — {why_off}")
+            detail = row.detail.lower() if row is not None else ""
+            if "failed" in detail or "error" in detail:
+                status = "failed"
+            elif "unsupported" in detail:
+                status = "unsupported"
+            elif "disabled" in detail:
+                status = "disabled"
+            elif "unavailable" in detail or "missing" in detail:
+                status = "unavailable"
+            else:
+                status = "not requested"
+            lines.append(f"  [{status}] {label} — {why_off}")
     return lines
 
 

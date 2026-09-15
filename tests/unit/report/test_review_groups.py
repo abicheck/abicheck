@@ -1,0 +1,132 @@
+from abicheck.checker_policy import ChangeKind, Verdict
+from abicheck.checker_types import Change
+from abicheck.policy.severity import IssueCategory
+from abicheck.report.finding import ReportFinding
+from abicheck.report.review_groups import build_review_groups
+
+
+def _finding(
+    kind: ChangeKind, symbol: str, *, library: str | None = None
+) -> ReportFinding:
+    change = Change(kind, symbol, kind.value, library=library)
+    return ReportFinding(change, Verdict.BREAKING, IssueCategory.ABI_BREAKING)
+
+
+def test_export_and_visibility_evidence_group_without_dropping_members() -> None:
+    removed = _finding(ChangeKind.FUNC_REMOVED_ELF_ONLY, "_ZN1A3addEv")
+    visibility = _finding(ChangeKind.FUNC_VISIBILITY_CHANGED, "_ZN1A3addEv")
+    visibility.change.surface_facts = {
+        "declared_in_headers": "true",
+        "in_public_contract": "true",
+        "binary_exported": "false",
+    }
+    groups = build_review_groups((removed, visibility))
+    assert len(groups) == 1
+    assert groups[0].member_kinds == (
+        "func_removed_elf_only",
+        "func_visibility_changed",
+    )
+    assert len(groups[0].member_finding_ids) == 2
+
+
+def test_export_relationship_without_declaration_fact_remains_ambiguous() -> None:
+    assert (
+        len(
+            build_review_groups(
+                (
+                    _finding(ChangeKind.FUNC_REMOVED_ELF_ONLY, "_ZN1A3addEv"),
+                    _finding(ChangeKind.FUNC_VISIBILITY_CHANGED, "_ZN1A3addEv"),
+                )
+            )
+        )
+        == 2
+    )
+
+
+def test_vtable_evidence_groups_but_same_name_in_different_dsos_does_not() -> None:
+    groups = build_review_groups(
+        (
+            _finding(ChangeKind.TYPE_VTABLE_CHANGED, "N::V", library="a.so"),
+            _finding(ChangeKind.VTABLE_SLOT_COUNT_CHANGED, "N::V", library="a.so"),
+            _finding(ChangeKind.TYPE_VTABLE_CHANGED, "N::V", library="b.so"),
+        )
+    )
+    assert [len(group.member_kinds) for group in groups] == [2, 1]
+
+
+def test_overloads_and_namespaces_remain_separate() -> None:
+    groups = build_review_groups(
+        (
+            _finding(ChangeKind.FUNC_REMOVED_ELF_ONLY, "_ZN1A3addEi"),
+            _finding(ChangeKind.FUNC_REMOVED_ELF_ONLY, "_ZN1B3addEi"),
+            _finding(ChangeKind.FUNC_REMOVED_ELF_ONLY, "_ZN1A3addEf"),
+        )
+    )
+    assert len(groups) == 3
+
+
+def test_vtable_append_and_size_evidence_is_precise_not_reordering() -> None:
+    header = _finding(ChangeKind.TYPE_VTABLE_CHANGED, "N::V")
+    header.change.old_value = "f(), g()"
+    header.change.new_value = "f(), g(), h(), i()"
+    header.change.review_evidence = {
+        "kind": "declared_vtable_sequence",
+        "old_entries": ["f(int, float)", "g()"],
+        "new_entries": ["f(int, float)", "g()", "h()", "i()"],
+    }
+    size = _finding(ChangeKind.VTABLE_SLOT_COUNT_CHANGED, "_ZTVN1N1VE")
+    size.change.qualified_name = "N::V"
+    size.change.old_value = "88"
+    size.change.new_value = "104"
+    size.change.review_evidence = {
+        "kind": "elf_vtable_group_size",
+        "old_bytes": 88,
+        "new_bytes": 104,
+    }
+    (group,) = build_review_groups((header, size))
+    assert "appended 2 entries" in group.transition
+    assert "2 prior entries retain order" in group.transition
+    assert "88 to 104 bytes" in group.transition
+    assert "cannot identify slots or inheritance" in group.transition
+    assert "reordered" not in group.transition
+
+
+def test_vtable_reorder_removal_replacement_and_unknown_are_distinct() -> None:
+    cases = (
+        (("a, b", "b, a"), "reordered"),
+        (("a, b", "a"), "removed 1 trailing entry"),
+        (("a, b", "a, c"), "replaced"),
+        ((None, None), "incomplete layout evidence"),
+    )
+    for (old, new), phrase in cases:
+        finding = _finding(ChangeKind.TYPE_VTABLE_CHANGED, f"N::{phrase}")
+        finding.change.old_value = old
+        finding.change.new_value = new
+        assert phrase in build_review_groups((finding,))[0].transition
+
+
+def test_contradictory_vtable_directions_are_not_grouped() -> None:
+    header = _finding(ChangeKind.TYPE_VTABLE_CHANGED, "N::V")
+    header.change.review_evidence = {
+        "kind": "declared_vtable_sequence",
+        "old_entries": ["f()"],
+        "new_entries": ["f()", "g()"],
+    }
+    size = _finding(ChangeKind.VTABLE_SLOT_COUNT_CHANGED, "_ZTVN1N1VE")
+    size.change.qualified_name = "N::V"
+    size.change.review_evidence = {
+        "kind": "elf_vtable_group_size",
+        "old_bytes": 104,
+        "new_bytes": 88,
+    }
+    assert len(build_review_groups((header, size))) == 2
+
+
+def test_inheritance_size_evidence_does_not_claim_an_exact_base_change() -> None:
+    finding = _finding(ChangeKind.RTTI_INHERITANCE_CHANGED, "_ZTIN1N1VE")
+    finding.change.qualified_name = "N::V"
+    finding.change.old_value = "16"
+    finding.change.new_value = "24"
+    (group,) = build_review_groups((finding,))
+    assert "RTTI inheritance shape changed" in group.transition
+    assert "not the exact base transition" in group.transition

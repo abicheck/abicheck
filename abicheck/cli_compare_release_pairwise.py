@@ -397,7 +397,7 @@ def _compare_one_library(
         # discards `_diff_result`, so the release-level fold
         # (`cli_compare_receipt.release_disposition_audit_block`) has
         # something to read per library.
-        from .report.disposition_audit import compute_disposition_audit
+        from .report.release_member_summary import add_member_review_summary
 
         entry: dict[str, object] = {
             "library": old_path.name,
@@ -407,9 +407,6 @@ def _compare_one_library(
             "risk_changes": len(result.risk),
             "compatible_additions": _summary.compatible_additions,
             "quality_issues": n_quality,
-            "disposition_audit": compute_disposition_audit(
-                result, severity_config
-            ).to_dict(),
             "_diff_result": result,
             **(
                 {"coverage_warnings": list(result.coverage_warnings)}
@@ -426,6 +423,7 @@ def _compare_one_library(
                 else {}
             ),
         }
+        add_member_review_summary(entry, result, severity_config)
         # ADR-067's structured half; see `reporter.disposition_ledger_blocks`.
         entry.update(disposition_ledger_blocks(result))
         if pattern_modulations_text is not None:
@@ -661,7 +659,6 @@ def _suppress_lockstep_soname_findings(
         # disposition.py` is the established "a frontend legitimately
         # touches the disposition ledger through here" home every other
         # such need in this codebase already uses.
-        from .report.disposition_audit import compute_disposition_audit
         from .workflows.disposition import supersede_as_suppressed
 
         supersede_as_suppressed(
@@ -674,9 +671,9 @@ def _suppress_lockstep_soname_findings(
                 "SONAME bumps across every member are justified"
             ),
         )
-        entry["disposition_audit"] = compute_disposition_audit(
-            result, severity_config
-        ).to_dict()
+        from .report.release_member_summary import add_member_review_summary
+
+        add_member_review_summary(entry, result, severity_config)
         # ...and the ledger blocks, snapshotted before this pass ran and so
         # naming neither this rule nor what it hid (Codex review, PR #1284).
         entry.update(disposition_ledger_blocks(result))

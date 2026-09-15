@@ -16,13 +16,15 @@ abicheck supports multiple output formats for different use cases:
 
 | Format | Flag | Best for |
 |--------|------|----------|
-| Markdown | `-o markdown=-` (default) | Human review, PRs, terminals |
+| Terminal | `-o terminal=-` (default for a scalar comparison) | Bounded plain-text local/CI output |
+| Review | `-o review=-` | Bounded Markdown PR and step-summary review |
+| Markdown | `-o markdown=-` | Complete navigable human report |
 | JSON | `-o json=-` | CI pipelines, machine processing |
 | SARIF | `-o sarif=-` | GitHub Code Scanning, SAST platforms |
 | HTML | `-o html=-` | Standalone reports, ABICC migration |
 | JUnit XML | `-o junit=-` | GitLab CI, Jenkins, Azure DevOps test dashboards |
 
-All five formats support the report filtering options described below.
+All formats support the report filtering options described below.
 The ABICC-compatible XML output (via `abicheck compat check`) includes
 redundancy annotations but does not support the `--view show=...` display filter.
 
@@ -762,7 +764,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "5.0",
+  "report_schema_version": "5.1",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }

@@ -453,6 +453,8 @@ def _from_compare(
         verdict = consumer_scope.get("verdict")
         scoped_verdict = str(verdict) if verdict is not None else None
     verdict_value = report.get("verdict")
+    review_groups_value = report.get("review_groups")
+    result_counts_value = report.get("result_counts")
     return CommentModel(
         mode="compare",
         subject=str(report.get("library", "library")),
@@ -480,6 +482,12 @@ def _from_compare(
         suppressed_count=_suppressed_count(report),
         reclassified_count=_reclassified_count(report),
         disposition_audit=_disposition_audit(report),
+        review_groups=[row for row in review_groups_value if isinstance(row, dict)]
+        if isinstance(review_groups_value, list)
+        else [],
+        result_counts=result_counts_value
+        if isinstance(result_counts_value, dict)
+        else None,
     )
 
 
@@ -942,6 +950,8 @@ def _from_release(
     categories: set[str] = set()
     severities: set[str] = set()
     libraries = report.get("libraries")
+    review_groups: list[dict[str, object]] = []
+    result_counts: dict[str, int] = {}
     if isinstance(libraries, list):
         for lib in libraries:
             if not isinstance(lib, dict):
@@ -949,6 +959,15 @@ def _from_release(
             rows.append(
                 _release_lib_row(lib, gate_api_break, levels, categories, severities)
             )
+            for group in lib.get("review_groups", []):
+                if isinstance(group, dict):
+                    review_groups.append({**group, "library": lib.get("library")})
+            member_counts = lib.get("result_counts")
+            if isinstance(member_counts, dict):
+                for key, value in member_counts.items():
+                    result_counts[str(key)] = result_counts.get(str(key), 0) + _as_int(
+                        value
+                    )
     n_libs = len(rows)
     _append_release_global_row(
         rows,
@@ -1025,6 +1044,8 @@ def _from_release(
         scope_blocking=scope_blocking,
         no_comparison_completed=no_comparison_completed,
         unmatched_states=unmatched_states,
+        review_groups=review_groups,
+        result_counts=result_counts or None,
     )
 
 

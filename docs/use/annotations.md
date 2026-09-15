@@ -289,7 +289,7 @@ and `\r` using GitHub's `%`-encoding. Message bodies escape `%`, `\n`, and
 | **`annotate: true`** (this feature) | Yes | No (per-run) | Add one Action input |
 | **SARIF + Code Scanning** | Yes (Security tab) | Yes (alerts) | `format: sarif` + `upload-sarif: true` + permissions |
 | **Job Summary** | No (separate panel) | No (per-run) | Automatic via `add-job-summary` |
-| **Markdown report** (default) | No (log output) | No | Default behavior |
+| **Bounded terminal result** (scalar default) | No (log output) | No | Default behavior; export detailed Markdown separately |
 
 For most teams, `annotate: true` provides the best signal-to-noise ratio with
 zero configuration beyond the single input.
