@@ -43,8 +43,9 @@ from .report.evidence_summary import tier_label
 # ---------------------------------------------------------------------------
 
 # GitHub rejects issue/PR comment bodies longer than 65,536 characters. Render
-# within a budget below that; if the body overflows, downgrade the detail level
-# (full → standard → summary) and finally hard-truncate so we never exceed it.
+# within a budget below that; if the body overflows, tighten the per-section
+# row budget first, then downgrade the detail level (full → standard →
+# summary), and finally hard-truncate so we never exceed it.
 GITHUB_COMMENT_LIMIT = 65536
 _BODY_BUDGET = 64000
 _DETAIL_DOWNGRADE = {
