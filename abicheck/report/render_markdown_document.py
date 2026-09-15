@@ -107,7 +107,7 @@ from .disposition_audit import (
 )
 from .document import ReportDocument
 from .envelope import ReportEnvelope, resolved_document
-from .finding import report_findings_for
+from .finding import build_report_findings
 from .pattern_modulations_markdown import render_pattern_modulations_from_mapping
 from .render_markdown import (
     ConfidenceSection,
@@ -476,7 +476,6 @@ def build_markdown_document(
             headline_table, breaking=hb, source_breaks=hsb, risk=hr, compatible=hc
         )
 
-    displayed_change_ids = {id(change) for change in changes}
     d: dict[str, object] = {
         "report_mode": "full",
         "demangle": demangle,
@@ -562,10 +561,11 @@ def build_markdown_document(
             else [
                 group.to_dict()
                 for group in build_review_groups(
-                    tuple(
-                        finding
-                        for finding in report_findings_for(result)
-                        if id(finding.change) in displayed_change_ids
+                    build_report_findings(
+                        changes,
+                        policy=result.policy,
+                        kind_sets=result._effective_kind_sets(),
+                        policy_file=result.policy_file,
                     )
                     if envelope is None
                     else envelope.findings_for(changes)

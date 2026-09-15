@@ -121,6 +121,26 @@ class TestFoldMergesDuplicateIdentitiesAcrossMembers:
         # Deduplicated by name, not doubled.
         assert folded.not_evaluated_detectors == (det,)
 
+    def test_machine_fold_retains_more_rules_than_human_sample_cap(self) -> None:
+        rules = tuple(
+            (RuleProvenance(rule_id=f"rule-{index}", reason="reviewed"), index + 1)
+            for index in range(6)
+        )
+        folded = fold_disposition_audits(
+            [_audit(detected_total=21, counts=(("suppressed", 21),), rules=rules)]
+        )
+        assert folded.rules == rules
+        assert [row["matched_count"] for row in folded.to_dict()["rules"]] == [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+        ]
+        rendered = render_disposition_audit_lines(folded)
+        assert any("2 more rule(s) omitted" in line for line in rendered)
+
 
 class TestRenderReclassificationAndScopeReasons:
     def test_note_states_reclassified_count(self) -> None:

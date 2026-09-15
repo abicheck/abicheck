@@ -55,4 +55,5 @@ def compact_evidence_summary(result: DiffResult) -> str:
         limits.append("no debug-derived layout verification")
     if "L4_source_abi" not in present:
         limits.append("no source replay")
-    return f"{', '.join(names)}; {', '.join(limits)}"
+    summary = ", ".join(names)
+    return f"{summary}; {', '.join(limits)}" if limits else summary

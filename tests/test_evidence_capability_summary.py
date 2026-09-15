@@ -23,3 +23,17 @@ def test_partial_and_failed_evidence_are_not_rendered_as_absence() -> None:
     text = "\n".join(capability_lines(coverage, []))
     assert "[failed] Debug-derived compiled type layout" in text
     assert "[partial] Public declarations, signatures" in text
+
+
+def test_compact_evidence_with_all_optional_layers_has_no_empty_suffix() -> None:
+    from abicheck.checker_types import DiffResult
+    from abicheck.report.review_compute import compact_evidence_summary
+
+    result = DiffResult("1", "2", "libx.so")
+    result.layer_coverage = [
+        {"layer": layer, "status": "present"}
+        for layer in ("L0", "L1", "L2", "L4_source_abi")
+    ]
+    assert compact_evidence_summary(result) == (
+        "binary exports, public headers/signatures, debug-derived compiled layout"
+    )

@@ -69,6 +69,7 @@ from ....cli_options import (
 )
 from ....cli_resolve import (
     _normalize_binary_input,
+    classify_compare_operand,
 )
 from ....frontends.cli import help as cli_help
 from ....frontends.cli.operand_diagnostics import (  # noqa: F401  — re-exported: cli_compare_helpers resolves these names here
@@ -862,9 +863,13 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     operands = (kwargs.get("old_input"), kwargs.get("new_input"))
     non_full_view = any(token != "full" for token in kwargs.get("view", ()))
     release_operand = any(
-        value is not None and Path(value).is_dir() for value in operands
+        value is not None
+        and classify_compare_operand(Path(value)) in {"directory", "package"}
+        for value in operands
     )
-    if not exports.explicit and (non_full_view or release_operand):
+    if not exports.explicit and (
+        non_full_view or release_operand or kwargs.get("no_baseline")
+    ):
         kwargs["exports"] = ExportSet(
             targets=(ExportTarget(fmt="markdown", destination=None),), explicit=False
         )

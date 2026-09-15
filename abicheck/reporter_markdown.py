@@ -1478,7 +1478,9 @@ def _merge_effect_from_exit_code(exit_code: int) -> str:
     return "blocked by severity policy — review required before merge"
 
 
-def _severity_merge_effect(result: DiffResult, severity_config: SeverityConfig) -> str:
+def _severity_merge_effect(
+    result: DiffResult, severity_config: SeverityConfig
+) -> tuple[str, int]:
     """Merge-effect phrase reflecting the actual severity-aware gate.
 
     Compatibility (``result.verdict``) and the CI gate are independent
@@ -1506,7 +1508,7 @@ def _severity_merge_effect(result: DiffResult, severity_config: SeverityConfig) 
         kind_sets=eff_sets,
         policy_file=result.policy_file,
     )
-    return _merge_effect_from_exit_code(exit_code)
+    return _merge_effect_from_exit_code(exit_code), exit_code
 
 
 def compute_review_digest(
@@ -1559,7 +1561,7 @@ def compute_review_digest(
     if gate is not None:
         effect = _merge_effect_from_exit_code(gate.exit_code)
     elif severity_config is not None:
-        effect = _severity_merge_effect(result, severity_config)
+        effect, gate_exit_code = _severity_merge_effect(result, severity_config)
     else:
         effect = _VERDICT_MERGE_EFFECT.get(v, "")
 

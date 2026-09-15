@@ -47,6 +47,23 @@ def test_typed_terminal_renderer_uses_the_same_finalized_document() -> None:
     assert "1 gating" in text
 
 
+def test_terminal_human_default_demangles_without_markdown_pipe_escaping() -> None:
+    from abicheck.checker_policy import ChangeKind, Verdict
+    from abicheck.checker_types import Change, DiffResult
+
+    old = AbiSnapshot(library="libx.so", version="1")
+    new = AbiSnapshot(library="libx.so", version="2")
+    result = DiffResult(
+        "1",
+        "2",
+        "libx.so",
+        changes=[Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
+        verdict=Verdict.BREAKING,
+    )
+    text = render_output("terminal", result, old, new)
+    assert "1. foo() [_Z3foov]: removed" in text
+
+
 def test_terminal_distinguishes_breaking_compatibility_from_accepted_gate() -> None:
     from abicheck.checker import compare
     from abicheck.policy.severity import PRESET_INFO_ONLY
@@ -195,3 +212,23 @@ def test_pr_comment_reads_canonical_groups_and_counts() -> None:
     text = render_comment(build_model(report), timestamp=None)
     assert "Review groups:** 1 gating; 1 retained" in text
     assert "N::V" in text and "declared entries reordered" in text
+
+
+def test_pr_comment_derives_gating_groups_when_counts_are_unavailable() -> None:
+    from abicheck.pr_comment import build_model
+    from abicheck.pr_comment_render import render_comment
+
+    report = {
+        "report_schema_version": "5.1",
+        "library": "libx.so",
+        "old_version": "1",
+        "new_version": "2",
+        "policy": "strict_abi",
+        "verdict": "BREAKING",
+        "changes": [],
+        "review_groups": [
+            {"display_name": "N::V", "transition": "changed", "gating_findings": 2}
+        ],
+    }
+    text = render_comment(build_model(report), timestamp=None)
+    assert "**Review groups:** 1 gating; 1 retained total." in text

@@ -407,7 +407,11 @@ def _project_terminal(envelope: ReportEnvelope) -> str:
         report_document=envelope.document,
         envelope=envelope,
     )
-    return render_terminal_digest_document(document)
+    return _demangled(
+        render_terminal_digest_document(document),
+        envelope,
+        escape_table_pipes=False,
+    )
 
 
 def _project_markdown(envelope: ReportEnvelope) -> str:
@@ -447,7 +451,9 @@ def _project_markdown(envelope: ReportEnvelope) -> str:
     return _demangled(md, envelope)
 
 
-def _demangled(text: str, envelope: ReportEnvelope) -> str:
+def _demangled(
+    text: str, envelope: ReportEnvelope, *, escape_table_pipes: bool = True
+) -> str:
     """Apply the human-facing ``demangle`` presentation option to *text*.
 
     ``escape_table_pipes=True`` because both callers render Markdown
@@ -469,7 +475,7 @@ def _demangled(text: str, envelope: ReportEnvelope) -> str:
         return text
     from .demangle import demangle_text
 
-    return demangle_text(text, escape_table_pipes=True)
+    return demangle_text(text, escape_table_pipes=escape_table_pipes)
 
 
 _PROJECTIONS: dict[str, Callable[[ReportEnvelope], str]] = {

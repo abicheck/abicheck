@@ -212,9 +212,16 @@ def build_report_document(
         policy_file=result.policy_file,
         today=today,
     )
-    displayed_ids = {id(change) for change in changes}
-    displayed_findings = tuple(
-        finding for finding in all_findings if id(finding.change) in displayed_ids
+    displayed_findings = (
+        build_report_findings(
+            changes,
+            policy=result.policy,
+            kind_sets=eff_sets,
+            policy_file=result.policy_file,
+            today=today,
+        )
+        if show_only
+        else all_findings
     )
     review_groups = build_review_groups(displayed_findings)
     all_review_groups = build_review_groups(all_findings)

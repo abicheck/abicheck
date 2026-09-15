@@ -3486,7 +3486,7 @@ elif [[ "$MODE" == "compare" ]]; then
   if [[ -z "$FORMAT" ]]; then
     # The scalar compare CLI's bounded human default. Release/package fan-out
     # has no single review document, so it retains detailed Markdown.
-    if [[ -d "${INPUT_OLD_LIBRARY:-}" || -d "${INPUT_NEW_LIBRARY:-}" ]]; then
+    if [[ "$_NO_BASELINE" == "true" || -d "${INPUT_OLD_LIBRARY:-}" || -d "${INPUT_NEW_LIBRARY:-}" ]]; then
       FORMAT="markdown"
     else
       FORMAT="terminal"

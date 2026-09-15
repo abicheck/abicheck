@@ -323,7 +323,7 @@ def fold_disposition_audits(audits: Iterable[DispositionAudit]) -> DispositionAu
         acknowledged_total += audit.acknowledged_total
         for name, count in audit.counts:
             counts[name] = counts.get(name, 0) + count
-        for rule, count in audit.rules[:_REVIEW_RULE_CAP]:
+        for rule, count in audit.rules:
             if rule not in rule_tally:
                 rule_order.append(rule)
                 rule_tally[rule] = 0
