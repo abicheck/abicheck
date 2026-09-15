@@ -72,6 +72,22 @@ from .frontends.cli.runtime import _write_or_echo
     "comment is condensed or truncated to fit GitHub's size limit.",
 )
 @click.option(
+    "--report-artifact-url",
+    default=None,
+    help="Direct URL of the uploaded full-report artifact, linked in the footer "
+    "as 'Download full report' (distinct from --report-url's 'View workflow "
+    "run'). Pass it only for an upload that actually succeeded -- a link "
+    "rendered here is a promise that the artifact exists.",
+)
+@click.option(
+    "--path-prefix",
+    default="",
+    help="Absolute checkout root to strip from rendered source locations "
+    "(e.g. $GITHUB_WORKSPACE), so rows show repo-relative paths instead of "
+    "runner-specific absolute ones. Applied only as a whole leading path "
+    "component; a location outside it is left exactly as the report gave it.",
+)
+@click.option(
     "--gate-api-break",
     is_flag=True,
     default=False,
@@ -102,6 +118,8 @@ def pr_comment_cmd(
     post_on: str,
     run_label: str | None,
     report_url: str | None,
+    report_artifact_url: str | None,
+    path_prefix: str,
     gate_api_break: bool,
     gate_breaking: bool,
     output: Path | None,
@@ -158,7 +176,10 @@ def pr_comment_cmd(
 
     try:
         model = build_model(
-            data, gate_api_break=gate_api_break, gate_breaking=gate_breaking
+            data,
+            gate_api_break=gate_api_break,
+            gate_breaking=gate_breaking,
+            path_prefix=path_prefix,
         )
     except UnsupportedReportShapeError as e:
         raise click.ClickException(str(e)) from e
@@ -169,7 +190,12 @@ def pr_comment_cmd(
         return
 
     body = render_comment(
-        model, sha=sha, detail=detail, run_label=run_label, report_url=report_url
+        model,
+        sha=sha,
+        detail=detail,
+        run_label=run_label,
+        report_url=report_url,
+        report_artifact_url=report_artifact_url,
     )
     _write_or_echo(output, body)
 
