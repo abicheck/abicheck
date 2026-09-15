@@ -16,6 +16,7 @@ import pytest
 from abicheck import dumper
 from abicheck.deadline import DeadlineExceeded, deadline_scope
 from abicheck.dumper_cache import (
+    _ast_memo_slot,
     ast_acquisition_active,
     ast_acquisition_scope,
     retain_ast_context_object,
@@ -313,3 +314,187 @@ def test_castxml_singleflight_binds_producer_to_registered_key(
     with pytest.raises(SnapshotError, match="before CastXML acquisition started"):
         with ast_acquisition_scope():
             dumper._castxml_dump([header], [], compiler="c++", lang="c++")
+
+
+def test_warm_clang_disk_hit_enters_acquisition_before_decode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    header = tmp_path / "api.hpp"
+    header.write_text("int api();\n", encoding="utf-8")
+    cache = tmp_path / "ast.json"
+    cache.write_text('{"kind": "TranslationUnitDecl"}', encoding="utf-8")
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(
+        dumper, "_resolve_dpcpp_acquisition", lambda *a, **k: (False, False)
+    )
+    monkeypatch.setattr(
+        dumper,
+        "_resolve_clang_langmode",
+        lambda *a, **k: (True, False, False, "clang"),
+    )
+    monkeypatch.setattr(dumper, "_resolve_clang_system_includes", lambda *a, **k: ())
+    monkeypatch.setattr(dumper, "_tool_identity", lambda *a, **k: "stable")
+    monkeypatch.setattr(dumper, "_cache_key", lambda *a, **k: "same")
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    decodes = 0
+    original_loads = dumper.dumper_cache.json.loads
+
+    def count_decode(value: object, *args: object, **kwargs: object) -> object:
+        nonlocal decodes
+        decodes += 1
+        return original_loads(value, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(dumper.dumper_cache.json, "loads", count_decode)
+    with ast_acquisition_scope():
+        first = dumper._clang_header_dump([header], [], lang="c++")
+        second = dumper._clang_header_dump([header], [], lang="c++")
+
+    assert second is first
+    assert decodes == 1
+    assert _ast_memo_slot.get() is None
+
+
+def test_warm_castxml_disk_hit_enters_acquisition_with_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    header = tmp_path / "api.hpp"
+    header.write_text("int api();\n", encoding="utf-8")
+    cache = tmp_path / "ast.xml"
+    cache.write_text("<GCC_XML/>", encoding="utf-8")
+    monkeypatch.setattr(dumper, "_resolve_gated_castxml_bin", lambda value: "castxml")
+    monkeypatch.setattr(dumper, "_resolve_force_cpp", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_detect_cpp20_headers", lambda *a, **k: False)
+    monkeypatch.setattr(
+        dumper, "_resolve_compiler_binary", lambda *a, **k: ("c++", "compiler")
+    )
+    monkeypatch.setattr(dumper.shutil, "which", lambda value: value)
+    monkeypatch.setattr(dumper, "_tool_identity", lambda *a, **k: "stable")
+    monkeypatch.setattr(dumper, "_cache_key", lambda *a, **k: "same")
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    decodes = 0
+    original_decode = dumper._read_castxml_cache
+
+    def count_decode(*args: object, **kwargs: object) -> object:
+        nonlocal decodes
+        decodes += 1
+        return original_decode(*args, **kwargs)
+
+    monkeypatch.setattr(dumper, "_read_castxml_cache", count_decode)
+    first_meta: list[tuple[str, bool]] = []
+    second_meta: list[tuple[str, bool]] = []
+    with ast_acquisition_scope():
+        first = dumper._castxml_dump(
+            [header], [], lang="c++", _selected_meta_out=first_meta
+        )
+        second = dumper._castxml_dump(
+            [header], [], lang="c++", _selected_meta_out=second_meta
+        )
+
+    assert second is first
+    assert first_meta == second_meta == [("c++", True)]
+    assert decodes == 1
+
+
+@pytest.mark.integration
+def test_warm_clang_cache_decode_is_request_singleflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Warm sequential, pooled, and graph-shaped consumers share one root."""
+    clang = shutil.which("clang")
+    if clang is None:
+        pytest.skip("clang is required for the warm-cache integration control")
+    header = tmp_path / "api.hpp"
+    header.write_text("int api();\n", encoding="utf-8")
+    monkeypatch.setenv("ABICHECK_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+
+    # Populate the real disk cache outside the measured request.  Suppressing
+    # the legacy handoff is intentional: the new request must prove disk-hit
+    # coordination, not accidentally consume an in-thread root.
+    dumper._clang_header_dump([header], [], compiler=clang, lang="c++", memoize=False)
+    compiler_calls = 0
+    decode_calls = 0
+    original_compile = dumper.run_clang_to_ast_file
+    original_loads = dumper.dumper_cache.json.loads
+
+    def count_compile(*args: object, **kwargs: object) -> object:
+        nonlocal compiler_calls
+        compiler_calls += 1
+        return original_compile(*args, **kwargs)  # type: ignore[arg-type]
+
+    def count_decode(value: object, *args: object, **kwargs: object) -> object:
+        nonlocal decode_calls
+        decode_calls += 1
+        return original_loads(value, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(dumper, "run_clang_to_ast_file", count_compile)
+    monkeypatch.setattr(dumper.dumper_cache.json, "loads", count_decode)
+    call = lambda: dumper._clang_header_dump(  # noqa: E731
+        [header], [], compiler=clang, lang="c++"
+    )
+    with ast_acquisition_scope():
+        first = call()
+        assert call() is first
+        parent = contextvars.copy_context()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            pooled = [pool.submit(parent.copy().run, call) for _ in range(2)]
+            assert all(future.result(timeout=10) is first for future in pooled)
+
+    assert compiler_calls == 0
+    assert decode_calls == 1
+    assert _ast_memo_slot.get() is None
+
+
+@pytest.mark.integration
+def test_warm_castxml_cache_decode_and_metadata_are_request_singleflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    castxml = shutil.which("castxml")
+    if castxml is None:
+        pytest.skip("castxml is required for the warm-cache integration control")
+    header = tmp_path / "api.hpp"
+    header.write_text("int api();\n", encoding="utf-8")
+    monkeypatch.setenv("ABICHECK_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    dumper._castxml_dump([header], [], compiler="c++", lang="c++", castxml_bin=castxml)
+    compiler_calls = 0
+    decode_calls = 0
+    original_compile = dumper._run_castxml_attempt
+    original_decode = dumper._read_castxml_cache
+
+    def count_compile(*args: object, **kwargs: object) -> object:
+        nonlocal compiler_calls
+        compiler_calls += 1
+        return original_compile(*args, **kwargs)  # type: ignore[arg-type]
+
+    def count_decode(*args: object, **kwargs: object) -> object:
+        nonlocal decode_calls
+        decode_calls += 1
+        return original_decode(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(dumper, "_run_castxml_attempt", count_compile)
+    monkeypatch.setattr(dumper, "_read_castxml_cache", count_decode)
+    first_meta: list[tuple[str, bool]] = []
+    second_meta: list[tuple[str, bool]] = []
+    with ast_acquisition_scope():
+        first = dumper._castxml_dump(
+            [header],
+            [],
+            compiler="c++",
+            lang="c++",
+            castxml_bin=castxml,
+            _selected_meta_out=first_meta,
+        )
+        second = dumper._castxml_dump(
+            [header],
+            [],
+            compiler="c++",
+            lang="c++",
+            castxml_bin=castxml,
+            _selected_meta_out=second_meta,
+        )
+
+    assert second is first
+    assert first_meta == second_meta
+    assert compiler_calls == 0
+    assert decode_calls == 1
