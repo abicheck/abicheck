@@ -8,6 +8,7 @@ import contextvars
 import json
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -740,6 +741,19 @@ def _findings(report: Path) -> list[str]:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason=(
+        "ELF release fan-out shape: this asserts that a directory compare's "
+        "per-member L2 header acquisitions coordinate. On the macOS and "
+        "Windows CI runners the fixture's header parse degrades before "
+        "`_clang_header_dump`/`_castxml_dump` reach the acquisition at all "
+        "(zero keys registered, an honest ADR-028 D3 degrade unrelated to "
+        "this coordination), so the invariant has nothing to observe there "
+        "-- the same reason this lane already skips the ELF/DWARF suites. "
+        "The deterministic tests above run on every platform."
+    ),
+)
 @pytest.mark.parametrize("backend", ["castxml", "clang"])
 def test_directory_l2_compare_acquires_one_ast_per_key(
     backend: str,

@@ -184,6 +184,18 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
                 ),
                 reference="docs/contribute/plans/vision-api-abi-evolution.md",
             ),
+            KnownGap(
+                description=(
+                    "The directory-level guard is ELF-only. On the macOS and "
+                    "Windows runners the fixture's header parse degrades "
+                    "before either backend reaches the acquisition, so the "
+                    "counts have nothing to observe and the test is skipped "
+                    "there; the deterministic warm-path tests still run on "
+                    "every platform, and the MSVC/PDB header path has no "
+                    "coverage of this invariant at all."
+                ),
+                reference="tests/test_l2_ast_acquisition_singleflight.py",
+            ),
         ),
     ),
 )
