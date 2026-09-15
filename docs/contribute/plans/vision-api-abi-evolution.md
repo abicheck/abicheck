@@ -756,8 +756,7 @@ finalized gate/exit, separates public operations, runtime/dependency findings,
 and hygiene lifecycle, and summarizes only material evidence limitations.
 Correlated export/vtable evidence retains every member finding and library/
 entity identity; full human and machine exports remain complete. The Action
-uses the same scalar/package default split. The unapplied SVS PR 387 companion
-patch and application instructions live under `validation/companion-patches/`.
+uses the same scalar/package default split.
 
 ## Files & surfaces
 
