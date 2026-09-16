@@ -70,6 +70,80 @@ _RELEASE_JOB_MEM_BUDGET_GIB_BY_DEPTH: dict[str, float] = {
 }
 
 
+#: Fraction of probed-available RAM the fan-out is allowed to commit to
+#: worker working sets, and a flat reserve subtracted on top of it.
+#:
+#: ``release_jobs_mem_cap`` divided *all* of ``available_mem_gib()`` by the
+#: per-worker budget, which commits 100% of what the probe reported to the
+#: workers and leaves nothing for the three things that are resident at the
+#: same time and are not a worker's own two snapshots:
+#:
+#: * the parent's own retained state -- the fan-out is a
+#:   :class:`~concurrent.futures.ThreadPoolExecutor`, so every member's
+#:   result accumulates in the *same* address space the workers allocate in,
+#:   and is held until the bundle is assembled and rendered;
+#: * the shared context a header-depth run builds once (AST/template indexes,
+#:   acquisition and metadata reuse) and every worker reads through;
+#: * the probe's own staleness -- ``MemAvailable`` is sampled once, at pool
+#:   sizing time, before any of the above exists.
+#:
+#: Measured on this repository's own 16 GB reference host: ``headers`` depth
+#: probed 13.17 GiB available and admitted 3 workers at a 4.0 GiB budget, a
+#: 12.0 GiB commitment -- 91% of available, with the parent's share still to
+#: come out of the remaining 1.17 GiB. That is the shape that OOM-kills
+#: rather than clamps, which is the one failure this cap exists to prevent.
+#:
+#: Both are tunable (``ABICHECK_RELEASE_MEM_UTILIZATION``,
+#: ``ABICHECK_RELEASE_MEM_RESERVE_GIB``). The default utilization is the low
+#: end of the 80-85% engineering target so the reserve is not the only thing
+#: standing between a full bundle and the limit.
+_RELEASE_MEM_UTILIZATION = 0.85
+_RELEASE_MEM_RESERVE_GIB = 1.0
+
+
+def _release_mem_utilization() -> float:
+    """Committable fraction of probed-available RAM, clamped to (0, 1].
+
+    An unparsable or out-of-range override falls back to the default rather
+    than inverting the clamp's meaning -- the same rule
+    :func:`abicheck.process_resources.job_mem_budget_gib` applies to its own
+    override, and the same reason :func:`process_resources.mem_cap` treats a
+    non-positive budget as "can't be read".
+    """
+    import os
+
+    try:
+        value = float(
+            os.environ.get("ABICHECK_RELEASE_MEM_UTILIZATION")
+            or _RELEASE_MEM_UTILIZATION
+        )
+    except ValueError:
+        return _RELEASE_MEM_UTILIZATION
+    if not 0.0 < value <= 1.0:
+        return _RELEASE_MEM_UTILIZATION
+    return value
+
+
+def _release_mem_reserve_gib() -> float:
+    """Flat GiB held back for parent-retained and shared-context state.
+
+    Floored at 0.0 (never negative, which would *raise* the admission), and
+    an unparsable override falls back to the default.
+    """
+    import os
+
+    try:
+        return max(
+            0.0,
+            float(
+                os.environ.get("ABICHECK_RELEASE_MEM_RESERVE_GIB")
+                or _RELEASE_MEM_RESERVE_GIB
+            ),
+        )
+    except ValueError:
+        return _RELEASE_MEM_RESERVE_GIB
+
+
 def sizing_depth(depth: str | None, *, header_roots: bool) -> str | None:
     """The evidence depth a fan-out worker will actually reach.
 
@@ -121,15 +195,34 @@ def release_jobs_mem_cap(
     when RAM can't be read (host/cgroup memory probing failed, or a
     non-Linux platform) -- the memory clamp is then skipped entirely,
     matching :mod:`abicheck.process_resources`'s own documented behaviour.
+
+    Workers are admitted against *committable* memory, not against everything
+    the probe reported: a utilization fraction of available RAM, less a flat
+    reserve for the parent-retained and shared-context state that is resident
+    alongside them in this same process. See
+    :data:`_RELEASE_MEM_UTILIZATION` for why both exist and what was measured.
+
+    Deliberately conservative in one direction only. It can only ever admit
+    *fewer* workers than the plain ``available / budget`` it replaces (the
+    utilization is at most 1.0 and the reserve at least 0.0), and it still
+    floors at one worker -- a host too small to hold a single member's budget
+    is not made to run zero of them, it runs one and is allowed to fail on its
+    own terms rather than silently comparing nothing.
+
+    Note this does not make the admission *periodic*: the probe is still read
+    once, at pool-sizing time, and the resulting count is fixed for the run.
+    That is what keeps several workers from each observing the same free
+    memory and simultaneously oversubscribing it -- the commitment is decided
+    once, up front, rather than re-checked per worker.
     """
     from ..process_resources import available_mem_gib
 
     avail = available_mem_gib()
     if avail is None:
         return None
-    return max(
-        1, int(avail / release_job_mem_budget_gib(depth, header_roots=header_roots))
-    )
+    committable = avail * _release_mem_utilization() - _release_mem_reserve_gib()
+    budget = release_job_mem_budget_gib(depth, header_roots=header_roots)
+    return max(1, int(committable / budget))
 
 
 def resolve_release_worker_count(
