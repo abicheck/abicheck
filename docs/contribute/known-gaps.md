@@ -9573,6 +9573,20 @@ closed in the same pass as that one.
 > declared `-H`/`--public-header-dir`/`sources.public_headers` set the
 > caller passes alongside the `-I` list.
 >
+> A root the rule declines is classified `UNKNOWN`, **not**
+> `PRIVATE_HEADER`. That distinction is the whole safety argument and was
+> not in the first version of the fix: `PUBLIC_HEADER` is what creates an
+> export obligation, so a dependency's declarations must not have it; but
+> `PRIVATE_HEADER` is a *confident* signal that public-surface scoping acts
+> on to drop findings, so a root the run merely could not place must not
+> have it either, or a library whose own public headers are split across
+> include roots loses real breaking changes from its verdict. Raised as a
+> P1 by Codex's security review on the PR; four attempted repros were each
+> caught by some other mechanism (the undeclared-export removal exemption,
+> the export-table closure, the conservative-unknown fallback), but the
+> safety of a demotion rule must not rest on unrelated mechanisms
+> happening to cover it.
+>
 > **What it closes:** a *dependency's* include tree. Intel MKL passes an MPI
 > include directory solely so `mkl_cdft.h` can parse `#include <mpi.h>`; no
 > MKL public header lives under it, so it no longer widens anything, and the

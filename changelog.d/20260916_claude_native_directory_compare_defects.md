@@ -40,7 +40,13 @@
   rule that names no vendor, path or symbol prefix, and that the
   transitively-reached-header case this widening exists for already
   satisfied. Types a dependency declares remain available to type closure
-  and leak analysis when an owned public declaration references them. This
+  and leak analysis when an owned public declaration references them. A root
+  the rule declines is classified `UNKNOWN`, never `PRIVATE_HEADER`: "not
+  declared public" is an absence of evidence, and only a *confident* private
+  origin licenses public-surface scoping to drop a finding — so the fix
+  cannot cost a library whose own public headers are split across include
+  roots a real breaking change (raised as a P1 by Codex's security review on
+  this PR). This
   closes the dependency-tree half of `docs/contribute/known-gaps.md`'s
   "An `-I` include root makes another library's public headers this
   component's export obligations"; the sibling-libraries-sharing-one-include-

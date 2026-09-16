@@ -60,7 +60,7 @@ from abicheck.extract.public_root_ownership import (
     roots_a_declared_public_surface,
 )
 from abicheck.model import ScopeOrigin
-from abicheck.provenance import _segments, public_dirs_with_owned_roots
+from abicheck.provenance import _segments, split_include_roots
 
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith("linux"),
@@ -208,11 +208,11 @@ class TestDependencyIncludeRootIsNotAPublicApiRoot:
         handed and nothing else."""
         old_pub = _segments("/old/pub")
         new_pub = _segments("/new/pub")
-        assert public_dirs_with_owned_roots([old_pub], [], ["/old/pub"]) == [
+        assert split_include_roots([old_pub], [], ["/old/pub"])[0] == [
             _segments("/old/pub")
         ]
-        assert public_dirs_with_owned_roots([new_pub], [], ["/old/pub"]) == []
-        assert public_dirs_with_owned_roots([old_pub], [], ["/new/pub"]) == []
+        assert split_include_roots([new_pub], [], ["/old/pub"])[0] == []
+        assert split_include_roots([old_pub], [], ["/new/pub"])[0] == []
 
 
 class TestIncludeRootContainmentPredicate:
@@ -279,7 +279,7 @@ class TestIncludeRootContainmentPredicate:
         guard: a ``-I /usr/include`` alongside a public header living under
         it is still not a project-owned directory."""
         declared = _segments("/usr/include/mylib/api.h")
-        assert public_dirs_with_owned_roots([declared], [], ["/usr/include"]) == []
+        assert split_include_roots([declared], [], ["/usr/include"])[0] == []
 
     def test_omitting_declared_segs_keeps_the_pre_containment_behavior(self) -> None:
         """The leaf's documented default, so a caller with no declared set
@@ -291,7 +291,7 @@ class TestIncludeRootContainmentPredicate:
     def test_an_empty_declared_set_widens_nothing(self) -> None:
         """No declared public set means classification was never opted in,
         so an ``-I`` root cannot turn it on by itself."""
-        assert public_dirs_with_owned_roots([], [], ["/proj/include"]) == []
+        assert split_include_roots([], [], ["/proj/include"])[0] == []
 
 
 class TestEveryOwnershipSourceAndEntryPointAgrees:
@@ -318,13 +318,11 @@ class TestEveryOwnershipSourceAndEntryPointAgrees:
         include = _segments("/proj/include")
         # Declared as a directory: the -I root above it still owns nothing
         # of its own, but the declared directory itself does.
-        assert public_dirs_with_owned_roots([], [include], ["/proj/include"]) == [
+        assert split_include_roots([], [include], ["/proj/include"])[0] == [
             include,
             include,
         ]
-        assert public_dirs_with_owned_roots([], [include], ["/proj/vendor"]) == [
-            include
-        ]
+        assert split_include_roots([], [include], ["/proj/vendor"])[0] == [include]
 
     def test_an_unrelated_include_root_never_widens_a_declared_set(self) -> None:
         """Requirement 3 stated as the property: adding any number of
@@ -332,13 +330,13 @@ class TestEveryOwnershipSourceAndEntryPointAgrees:
         Several independently-chosen roots, so one coincidence cannot
         carry the claim."""
         declared = [_segments("/proj/include/api.h")]
-        base = public_dirs_with_owned_roots(declared, [], [])
+        base = split_include_roots(declared, [], [])[0]
         for unrelated in (
             ["/opt/mpi/include"],
             ["/usr/local/include", "/opt/vendor/sdk/include"],
             ["/proj/vendor", "/proj/build/gen", "/elsewhere"],
         ):
-            assert public_dirs_with_owned_roots(declared, [], unrelated) == base
+            assert split_include_roots(declared, [], unrelated)[0] == base
 
     def test_every_binary_entry_point_classifies_through_the_one_fold(self) -> None:
         """Requirement 6, structurally: ELF, PE and Mach-O all reach
@@ -367,8 +365,169 @@ class TestEveryOwnershipSourceAndEntryPointAgrees:
         graph_src = pathlib.Path(header_graph.__file__).read_text(encoding="utf-8")
         prov_src = pathlib.Path(provenance.__file__).read_text(encoding="utf-8")
         for src in (graph_src, prov_src):
-            assert "public_dirs_with_owned_roots(" in src
+            assert "split_include_roots(" in src
         assert "retain_owning_roots(" not in graph_src, (
             "header_graph must go through the shared fold, not re-apply the "
             "containment rule with its own filtering around it"
         )
+
+
+class TestADeclinedRootIsUnknownNotPrivate:
+    """A root this run cannot place as public must not be called private.
+
+    Reported as a P1 by Codex's security review on the PR that introduced
+    the containment rule, and correct in principle even though four
+    attempted repros were each caught by some other mechanism. The first
+    version of this module returned only the owning half, so every declined
+    root's declarations fell through to ``PRIVATE_HEADER`` -- and
+    ``PRIVATE_HEADER`` is a *confident* signal that public-surface scoping
+    acts on to drop findings. A library whose own public headers are split
+    across include roots would then have real, breaking changes to the
+    declarations in the non-``-H`` root filtered out of its verdict.
+
+    The two states are not interchangeable and that is the whole point:
+
+    * ``PUBLIC_HEADER`` creates an export obligation, so a dependency's
+      declarations must not have it (the 2,211-finding defect).
+    * ``PRIVATE_HEADER`` licenses dropping a finding, so a root the run
+      merely could not place must not have it either.
+
+    ``UNKNOWN`` buys the first without buying the second, and is what the
+    scoping design already means by "cannot place".
+    """
+
+    def test_a_dependency_root_declaration_is_unknown(self, tmp_path: Path) -> None:
+        _require_toolchain()
+        so, pub, extra = _build_dependency_tree(tmp_path)
+        origins = _origins(_dump(so, pub, extra))
+        for name in ("dep_exported", "dep_never_exported"):
+            assert origins[name] == ScopeOrigin.UNKNOWN.value, (
+                f"{name} came from a root this run could not place as public; "
+                "that is an absence of evidence, not evidence of privacy, and "
+                "PRIVATE_HEADER would let scoping drop a real finding about it"
+            )
+
+    def test_a_genuinely_private_header_is_still_private(self, tmp_path: Path) -> None:
+        """The negative control, and why this cannot just return UNKNOWN for
+        everything: a private sibling inside the declared tree, under no
+        separate ``-I`` root at all, keeps its confident ``PRIVATE_HEADER``
+        and stays droppable -- the case184 behaviour
+        ``tests/test_dump_provenance_include_scope.py`` pins."""
+        _require_toolchain()
+        (tmp_path / "internal.h").write_text(
+            "#pragma once\nvoid priv(void);\n", encoding="utf-8"
+        )
+        (tmp_path / "api.h").write_text(
+            '#pragma once\n#include "internal.h"\nvoid pub(void);\n', encoding="utf-8"
+        )
+        (tmp_path / "lib.c").write_text(
+            '#include "api.h"\nvoid pub(void) {}\nvoid priv(void) {}\n',
+            encoding="utf-8",
+        )
+        so = tmp_path / "lib.so"
+        subprocess.run(
+            ["gcc", "-shared", "-fPIC", "-g", "-o", str(so), str(tmp_path / "lib.c")],
+            check=True,
+            capture_output=True,
+        )
+        from abicheck.dumper import dump
+
+        origins = _origins(
+            dump(
+                so,
+                [tmp_path / "api.h"],
+                [tmp_path],
+                public_headers=[tmp_path / "api.h"],
+            )
+        )
+        assert origins["pub"] == ScopeOrigin.PUBLIC_HEADER.value
+        assert origins["priv"] == ScopeOrigin.PRIVATE_HEADER.value
+
+    def test_a_break_under_a_declined_root_is_still_reported(
+        self, tmp_path: Path
+    ) -> None:
+        """The end property, guarded end to end through the real CLI: a
+        library whose public headers are split across include roots must
+        not lose a breaking change to the half that is not the ``-H`` root.
+
+        **This test does not currently discriminate**, and saying so is the
+        point. Reverting the ``UNKNOWN`` tier leaves it passing: with
+        ``PRIVATE_HEADER`` restored, this exact shape is still reported,
+        because the export-table closure keeps ``Payload`` reachable. Four
+        separate shapes were tried while verifying the P1 and each was
+        caught by some other mechanism -- the undeclared-export removal
+        exemption, the export-table closure, the conservative-unknown
+        fallback.
+
+        That is precisely why the fix is not "the repro is unreachable, so
+        leave it": the safety of a demotion rule must not rest on unrelated
+        mechanisms happening to cover it, and any of those could narrow
+        later. ``test_a_dependency_root_declaration_is_unknown`` above is
+        the discriminating regression test (it fails on the reverted
+        implementation); this one pins the property those mechanisms are
+        currently providing, so a future change that removes the last of
+        them fails here instead of shipping."""
+        _require_toolchain()
+        sdk = tmp_path / "sdkinc"
+        pub = tmp_path / "pub"
+        sdk.mkdir()
+        pub.mkdir()
+        (pub / "api.h").write_text(
+            "#pragma once\n#include <types.h>\nvoid plain_api(void);\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "v.c").write_text(
+            '#include "api.h"\n'
+            "void plain_api(void) {}\n"
+            "void use_payload(struct Payload *p) { (void)p; }\n",
+            encoding="utf-8",
+        )
+        built: list[Path] = []
+        for layout in ("int a; int b;", "int a; long b; int c;"):
+            (sdk / "types.h").write_text(
+                "#pragma once\nstruct Payload { " + layout + " };\n"
+                "void use_payload(struct Payload *p);\n",
+                encoding="utf-8",
+            )
+            so = tmp_path / f"lib{len(built)}.so"
+            subprocess.run(
+                [
+                    "gcc",
+                    "-shared",
+                    "-fPIC",
+                    "-g",
+                    f"-I{sdk}",
+                    f"-I{pub}",
+                    "-o",
+                    str(so),
+                    str(tmp_path / "v.c"),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            built.append(so)
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(built[0]),
+                str(built[1]),
+                "-H",
+                str(pub / "api.h"),
+                "-I",
+                str(sdk),
+                "-I",
+                str(pub),
+            ],
+        )
+        assert result.exit_code == 4, (
+            "a breaking layout change to the library's own type, declared in "
+            "an include root that is not the -H root, must not be scoped out "
+            f"of the verdict:\n{result.output}"
+        )
+        assert "BREAKING" in result.output
