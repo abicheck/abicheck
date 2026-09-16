@@ -55,7 +55,6 @@ from .idioms import (
     AntiPattern,
     Idiom,
     IdiomTag,
-    _public_pointer_only,
     detect_antipatterns,
     recognise_idioms,
 )
@@ -63,6 +62,11 @@ from .model import AbiSnapshot
 from .model.change_catalog.kinds import ChangeKind
 from .policy.classification import Verdict
 from .policy.evidence_status import EvidenceTier, ReachabilityState
+from .policy.public_use_index import (
+    PublicUseIndex,
+    build_public_use_index,
+    query_public_use,
+)
 from .surface_graph import SurfaceGraph, build_surface_graph
 
 if TYPE_CHECKING:
@@ -316,9 +320,17 @@ def _emit_lost_invariants(
     # change to a PIMPL wrapper's own layout is caught by the normal layout
     # detectors (and is never demoted — see the PIMPL guard), so it needs no
     # separate transition here.
+    # One index over NEW's public signature sites, shared by every name in this
+    # loop, instead of one per name: ``_public_pointer_only`` is the one-shot
+    # entry point and rebuilds the index on each call, which is pure waste when
+    # a caller asks about many records. Built lazily so a run with no
+    # OPAQUE_POINTER tag never pays for it.
+    public_use: PublicUseIndex | None = None
     for name, tags in old_idioms.items():
         if not any(t.idiom == Idiom.OPAQUE_POINTER for t in tags):
             continue
+        if public_use is None:
+            public_use = build_public_use_index(new_graph.snapshot.functions)
         new_rec = _exact_record(new, name)
         if new_rec is None:
             continue  # removed entirely → handled by TYPE_REMOVED, not this
@@ -329,7 +341,7 @@ def _emit_lost_invariants(
         # at all) keeps its opacity — emitting a break there is a false positive
         # (e.g. removing the last `Ctx*` use while keeping the forward decl).
         definition_now_visible = not getattr(new_rec, "is_opaque", False)
-        referenced, only_pointer = _public_pointer_only(new_graph, name)
+        referenced, only_pointer = query_public_use(public_use, name)
         by_value_use = referenced and not only_pointer
         if not (definition_now_visible or by_value_use):
             continue
@@ -355,7 +367,7 @@ def _emit_lost_invariants(
             # ADR-044 (Codex review): this finding only exists because `name`
             # was tagged OPAQUE_POINTER in `old_idioms`, which itself requires
             # `_public_pointer_only` to have found a genuine `Visibility.PUBLIC`
-            # function referencing it (idioms.py._recognise_opaque) — the same
+            # function referencing it (idioms.py._record_is_opaque_candidate/_opaque_tag) — the same
             # reliable "finding's mere existence already proves the subject is
             # public" signal the other Visibility.PUBLIC-filtered late-detector
             # findings have. apply_pattern_verdicts runs after MarkReachability
