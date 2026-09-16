@@ -45,8 +45,8 @@ from .report_publication import (
     decide,
     read_comments,
     render_report,
-    render_summary,
     request_payload,
+    summary_for_plan,
 )
 from .run_selection import (
     DEFAULT_MAX_ENTRIES,
@@ -215,8 +215,11 @@ def comment_cmd(
     # body to the job summary would publish the superseded result on the
     # one channel the ordering guard does not cover.
     if summary_out is not None and plan.posts:
-        summary, summary_truncated = render_summary(
-            body, max_summary_bytes=max_summary_bytes, report_url=report_url
+        summary, summary_truncated = summary_for_plan(
+            rendered,
+            plan,
+            max_summary_bytes=max_summary_bytes,
+            report_url=report_url,
         )
         summary_out.parent.mkdir(parents=True, exist_ok=True)
         summary_out.write_text(summary, encoding="utf-8")

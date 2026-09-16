@@ -436,7 +436,13 @@ def select_artifact(
     for artifact in matches:
         owner = artifact.get("workflow_run")
         owner_id = str(owner.get("id", "")) if isinstance(owner, Mapping) else ""
-        if owner_id and owner_id != run_id:
+        # An entry that states no owner is refused exactly like one stating
+        # the wrong owner. `if owner_id and owner_id != run_id` accepted the
+        # unstated case, which is the one an attacker controls: this whole
+        # loop exists because the endpoint was chosen by the shell, so
+        # "the entry did not say" cannot be read as "the entry belongs to
+        # the run we asked about". Fail closed.
+        if owner_id != str(run_id):
             continue
         scoped.append(artifact)
     if not scoped:

@@ -34,9 +34,9 @@ subtly wrong and impossible to notice when wrong.
 | `expect-workflow` | *(empty)* | Workflow path (`.github/workflows/abi.yml`) or name the run must be. **Strongly recommended.** |
 | `expect-event` | `pull_request` | Event the run must have been triggered by. |
 | `expect-run-attempt` | *(empty)* | Attempt the run must be. Empty means any. |
-| `allowed-conclusions` | `success` | Comma-separated. Empty allows any — a real choice for a publisher that reports analysis failures. |
+| `allowed-conclusions` | `success` | Comma-separated. Explicitly empty allows any conclusion — a real choice for a publisher that reports analysis failures. |
 | `artifact-name` | *(required)* | Artifact to download from that run. |
-| `tested-sha` | *(empty)* | The commit the producer actually analysed, if it recorded one. Verified against the PR head. Empty means the run's own head SHA. |
+| `tested-sha` | *(empty)* | The commit the producer actually analysed, if it recorded one, as a **full** 40- or 64-character SHA. Verified against the PR head. Empty means the run's own head SHA. An abbreviated SHA is refused: verification is by exact equality against values the API states in full, and prefix-matching a value that decides which commit a trusted comment claims was analysed would be ambiguous by construction. |
 | `claimed-pr-number` | *(empty)* | A PR number the artifact states. Cross-checked only; a disagreement fails the step. |
 | `destination` | `abicheck-source-artifact` | Directory to extract into. |
 | `max-total-bytes` | `67108864` | Total uncompressed bytes the artifact may expand to. |

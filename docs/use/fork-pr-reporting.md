@@ -128,6 +128,7 @@ on:
     types: [completed]
 
 permissions:
+  contents: read           # to read commit documents when verifying the analysed SHA
   actions: read            # to read the producer run and its artifacts
   pull-requests: write     # to post the comment
 
@@ -135,10 +136,8 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5      # this repository's code, not the PR's
-
       - id: verify
-        uses: ./actions/verify-source-run
+        uses: abicheck/abicheck/actions/verify-source-run@v1
         with:
           source-run-id: ${{ github.event.workflow_run.id }}
           expect-repository: ${{ github.repository }}
@@ -149,36 +148,72 @@ jobs:
           destination: incoming
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # The analysed commit, as the producer recorded it. It is passed
-      # through verify-source-run, which checks it really is this pull
-      # request's head or a merge of it -- an unverified value is refused.
-      - id: tested
-        run: echo "sha=$(cat incoming/tested-sha.txt)" >> "$GITHUB_OUTPUT"
-
-      - uses: ./actions/report
+      - uses: abicheck/abicheck/actions/report@v1
         with:
           report: incoming/compare.json
           repository: ${{ github.repository }}
           pr-number: ${{ steps.verify.outputs.pr-number }}
           sha: ${{ steps.verify.outputs.tested-sha }}
+          # The run that PRODUCED the report, not this publisher, so the
+          # sticky comment's ordering guard compares the right thing.
+          source-run-id: ${{ github.event.workflow_run.id }}
+          source-run-attempt: ${{ github.event.workflow_run.run_attempt }}
           profile: linux-gcc
           post-on: changes
-          run-label: run #${{ github.event.workflow_run.run_number }}
+          # Quoted: an unquoted `#` starts a YAML comment, which would
+          # silently truncate this label to "run".
+          run-label: "run #${{ github.event.workflow_run.run_number }}"
           report-url: ${{ github.event.workflow_run.html_url }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-!!! note "Ordering: read the tested SHA before verifying it"
+There is no `actions/checkout` step: the Actions are referenced by their
+published path, so the publisher never needs a copy of this repository — and
+never checks out the contributor's code, which is the whole point.
 
-    The snippet above reads `incoming/tested-sha.txt` *after*
-    `verify-source-run` has extracted the artifact, and then passes
-    `steps.verify.outputs.tested-sha` — not the raw file — to the reporter.
-    To have the SHA verified, feed it back in with the `tested-sha` input on
-    a second `verify-source-run` step, or write it into the artifact under a
-    name your own workflow reads and pass it as `tested-sha` on the first.
-    The reporter displays whatever `sha` it is given; only
-    `verify-source-run` can establish that the value belongs to this pull
-    request.
+### Reporting a merge commit the producer analysed
+
+The example above displays `verify-source-run`'s own `tested-sha`, which
+defaults to the producer run's head commit — the pull request's head, which
+that step has verified. If your analysis job checks out the ephemeral merge
+commit instead (`$GITHUB_SHA` on a `pull_request` run) and you want the
+comment to say so, the producer must record it and the publisher must
+**verify** it:
+
+```yaml
+      # Read the producer's value safely. It comes out of a fork-controlled
+      # artifact, so it is validated as a full SHA before it becomes a step
+      # output -- a raw `echo "sha=$(cat file)" >> "$GITHUB_OUTPUT"` lets a
+      # newline in that file forge any other output of this privileged job.
+      - id: tested
+        run: |
+          sha="$(head -c 100 incoming/tested-sha.txt | tr -d '[:space:]')"
+          case "$sha" in
+            [0-9a-fA-F]*) ;;
+            *) echo "::error::tested-sha.txt is not a commit SHA"; exit 1 ;;
+          esac
+          [ ${#sha} -eq 40 ] || [ ${#sha} -eq 64 ] || {
+            echo "::error::tested-sha.txt must hold a full SHA"; exit 1; }
+          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+
+      # Verify it belongs to this pull request. Passing it to `report`
+      # without this step would display a SHA nothing checked.
+      - id: verify-tested
+        uses: abicheck/abicheck/actions/verify-source-run@v1
+        with:
+          source-run-id: ${{ github.event.workflow_run.id }}
+          expect-repository: ${{ github.repository }}
+          expect-workflow: .github/workflows/abi-analysis.yml
+          artifact-name: abi-reports
+          destination: incoming-verified
+          tested-sha: ${{ steps.tested.outputs.sha }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+Then pass `${{ steps.verify-tested.outputs.tested-sha }}` as the reporter's
+`sha`. The reporter displays whatever `sha` it is given; only
+`verify-source-run` can establish that the value belongs to this pull
+request.
 
 ## What the publisher checks
 

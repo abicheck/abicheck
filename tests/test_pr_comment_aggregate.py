@@ -1055,3 +1055,130 @@ class TestTagPreservesEveryFieldButComponent:
         original = self._populated()
         _tag([original], "new-target")
         assert original.component == "original-target"
+
+
+class TestANonComparisonLegIsNotEvidenceOfAComparison:
+    """Two review findings on the same branch, with the same root: a leg
+    whose comparison never ran was being treated as one that did.
+
+    1. The Per-target row named ``sorted(gate_categories)[0]``, the whole
+       set rather than the non-comparison subset. A leg carrying both
+       ``operational_error`` and ``abi_breaking`` sorted to ``abi_breaking``,
+       so the row reported a *comparison verdict* for a target whose own
+       limitation row said the comparison never ran.
+    2. ``any_analyzed`` was set before the non-comparison check, so an
+       all-``not_comparable`` fan-in claimed "coverage reduced" (some
+       targets compared) instead of "no comparison completed" (none did).
+    """
+
+    @staticmethod
+    def _document_with_categories(
+        tmp_path: Path, categories: list[str]
+    ) -> dict[str, object]:
+        (tmp_path / "linux.json").write_text(
+            json.dumps(_member_report("break")), encoding="utf-8"
+        )
+        return {
+            "aggregate_schema_version": "1.4",
+            "status": "fail",
+            "compatibility": {"verdict": "BREAKING", "analyzed_targets": 1},
+            "coverage": {
+                "status": "complete",
+                "required_targets": 1,
+                "analyzed_required_targets": 1,
+                "missing_required_targets": [],
+                "blocking": False,
+            },
+            "gate": {
+                "passed": False,
+                "exit_code": 1,
+                "blocking_targets": ["linux-x86_64"],
+                "coverage_blocking": False,
+            },
+            "contract_coverage": {"exit_contribution": 0, "incomplete_targets": []},
+            "analysis_assurance": {"exit_contribution": 0, "incomplete_targets": []},
+            "scope_completeness": {"exit_contribution": 0, "incomplete_targets": []},
+            "disposition_audit_missing_targets": [],
+            "effective_policy": {
+                "missing_required": "fail",
+                "unexpected_target": "include",
+                "source": "default",
+            },
+            "targets": [
+                {
+                    "target_id": "linux-x86_64",
+                    "required": True,
+                    "state": "analyzed",
+                    "compatibility_verdict": "BREAKING",
+                    "gate": {
+                        "exit_code": 1,
+                        "blocking": True,
+                        "blocking_categories": categories,
+                        "from_report": True,
+                    },
+                    "contract_coverage_exit": 0,
+                    "analysis_assurance_exit": 0,
+                    "scope_completeness_exit": 0,
+                    "report_path": "linux.json",
+                    "reason": "the comparison never ran",
+                }
+            ],
+            "unexpected_targets": [],
+            "profile_matrix": [],
+            "finding_matrix": [],
+        }
+
+    @pytest.mark.parametrize(
+        "categories",
+        [
+            ["operational_error", "abi_breaking"],
+            ["abi_breaking", "operational_error"],
+            ["not_comparable", "abi_breaking"],
+            ["abi_breaking", "api_break", "not_comparable"],
+            ["operational_error"],
+            ["not_comparable"],
+        ],
+        ids=["oe-first", "abi-first", "nc-mixed", "three", "oe-only", "nc-only"],
+    )
+    def test_the_row_names_the_non_comparison_state(
+        self, tmp_path: Path, categories: list[str]
+    ) -> None:
+        """Whatever else the leg carries, the row must name why no
+        comparison result exists -- never a compatibility category, which
+        would claim a verdict for a run that produced none."""
+        document = self._document_with_categories(tmp_path, categories)
+        path = tmp_path / "aggregate.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        body = render_comment(
+            build_model(document, report_dir=path.parent),
+            sha="0123456789ab",
+            detail="full",
+        )
+        expected = sorted(set(categories) & {"not_comparable", "operational_error"})[
+            0
+        ].upper()
+        row = [
+            line
+            for line in body.splitlines()
+            if "linux-x86_64" in line and line.strip().startswith("|")
+        ]
+        assert row, f"no per-target row rendered:\n{body[:600]}"
+        assert expected in row[0], row[0]
+        assert "ABI_BREAKING" not in row[0], (
+            "the row claims a comparison verdict for a leg that never compared"
+        )
+
+    @pytest.mark.parametrize("categories", [["not_comparable"], ["operational_error"]])
+    def test_an_all_non_comparison_fan_in_reports_no_comparison_completed(
+        self, tmp_path: Path, categories: list[str]
+    ) -> None:
+        document = self._document_with_categories(tmp_path, categories)
+        path = tmp_path / "aggregate.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        body = render_comment(
+            build_model(document, report_dir=path.parent),
+            sha="0123456789ab",
+            detail="full",
+        )
+        assert "No comparison completed" in body, _headline(body)
+        assert not any(clean in body for clean in CLEAN_HEADLINES)

@@ -313,3 +313,43 @@ def test_the_fixture_actually_stamps_what_it_claims() -> None:
     unstamped = hygiene_report(evolution="")["changes"]
     assert isinstance(unstamped, list)
     assert "cross_source_evolution" not in unstamped[0]
+
+
+class TestNotEvaluatedIsNotAnAssertedModification:
+    """A finding the comparison would not classify is in no bucket at all.
+
+    Review finding: ``_introduced_changes`` filtered only the two
+    *background* states, so a ``not_evaluated`` finding was excluded from
+    the compatibility buckets (it goes to analysis-incomplete) while still
+    being counted in the "What changed" rollup. One finding, two mutually
+    exclusive places, and the summary asserting as a modification exactly
+    what the comparison layer declined to assert.
+    """
+
+    @pytest.mark.parametrize("severity", SEVERITIES)
+    def test_it_is_absent_from_the_rollup_and_the_buckets_alike(
+        self, severity: str
+    ) -> None:
+        model = build_model(
+            hygiene_report(evolution="not_evaluated", severity=severity, count=7)
+        )
+        assert model.counts == (0, 0, 0)
+        assert model.has_incomplete
+        assert model.change_summary is None or model.change_summary.counted == 0
+
+    def test_a_real_change_beside_them_is_counted_exactly_once(self) -> None:
+        model = build_model(
+            hygiene_report(evolution="not_evaluated", count=7, with_real_change=True)
+        )
+        assert model.change_summary is not None
+        assert model.change_summary.counted == 1
+        assert model.counts == (1, 0, 0)
+
+    @pytest.mark.parametrize("evolution", EVOLUTIONS)
+    def test_the_rollup_and_the_buckets_never_disagree(self, evolution: str) -> None:
+        """The invariant the two now share, over every state including the
+        unstamped one: whatever reaches a compatibility bucket is exactly
+        what the rollup counts."""
+        model = build_model(hygiene_report(evolution=evolution, count=3))
+        counted = model.change_summary.counted if model.change_summary else 0
+        assert counted == sum(model.counts)

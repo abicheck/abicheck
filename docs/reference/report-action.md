@@ -61,6 +61,8 @@ design record is
 | `repository` | current repo | `owner/repo` to publish into. |
 | `pr-number` | *(empty)* | The pull request. Required unless `dry-run`. Resolve it through the API — see [`verify-source-run`](verify-source-run.md) — never from a contributor-produced artifact. |
 | `github-token` | *(empty)* | Token with `pull-requests: write`. Required unless `dry-run`. |
+| `source-run-id` | this job's run | The run that **produced** the report — `${{ github.event.workflow_run.id }}` in a `workflow_run` publisher. This is what the ordering guard compares; see below. |
+| `source-run-attempt` | this job's attempt | The producing run's attempt, paired with `source-run-id`. |
 | `job-summary` | `true` | Also write the body to this job's summary. |
 | `max-comment-bytes` | `60000` | Byte budget for the comment body. |
 | `max-summary-bytes` | `900000` | Byte budget for the job summary. |
@@ -91,13 +93,27 @@ Because it defaults to `abicheck:<profile>`, a matrix publishing several
 profiles to one PR gets one comment each rather than several fighting over
 one.
 
-`run_id` and `run_attempt` are the ordering guard. Producer runs finish out
-of order — a re-run of an older commit, a slow matrix leg, a retried
-publisher — and without an ordering record the last writer wins, which means
-the *oldest* result can be the one a reviewer is left looking at. When the
-existing comment records a strictly newer run, this Action publishes nothing
-and sets `skipped-reason=stale`, even if it has findings and the newer
-comment is clean.
+`run_id` and `run_attempt` are the ordering guard, and they must be the
+**producing** run's — pass `source-run-id`/`source-run-attempt`. They default
+to this job's own, which is correct only when one run both analyses and
+publishes. In a `workflow_run` publisher they are different runs, and a
+publisher's id orders by when it was *triggered*: a re-run of an older commit
+is triggered later, so its publisher carries the larger id and would be read
+as the newer result — inverting the very guarantee this guard exists to give.
+
+Producer runs finish out of order — a re-run of an older commit, a slow
+matrix leg, a retried publisher — and without an ordering record the last
+writer wins, which means the *oldest* result can be the one a reviewer is
+left looking at. When the existing comment records a strictly newer run,
+this Action publishes nothing and sets `skipped-reason=stale`, even if it
+has findings and the newer comment is clean.
+
+The guard orders *this* Action's own publications. It is not an
+authentication boundary: the marker is a plain HTML comment in a public
+body, so anyone who can comment on the pull request can write one. A
+same-identity comment carrying an implausible run id will make this Action
+stand down — visibly, as `skipped-reason=stale`, never by publishing
+something wrong.
 
 An existing marker that cannot be ordered (a malformed payload, no run id)
 is *not* treated as newer: the Action publishes. A publisher frozen forever
@@ -108,7 +124,10 @@ by one broken marker is worse than one redundant update.
 When the report now shows nothing and a prior comment for this identity
 exists, that comment is **updated** to state the previously reported findings
 are resolved — under `on: changes` too, because "the report no longer shows
-this" is itself the news. It is rewritten rather than deleted so it keeps its
+this" is itself the news. **Not under `on: never`**, which suppresses every
+write: `never` short-circuits before the report is read at all, so a
+"resolved" notice there would assert an all-clear this Action never
+established. It is rewritten rather than deleted so it keeps its
 ordering marker, which a delete would discard along with the ability of a
 slower older run to know it has been superseded.
 
@@ -123,8 +142,10 @@ When there is no prior comment and nothing to say, the Action stays quiet.
 
 Both are measured in UTF-8 bytes, which also bounds characters (a UTF-8
 string never has more characters than bytes), and the two are bounded
-independently — folding them into one budget would either waste the
-summary's room or overrun the comment's.
+independently **from the same full render** — each gets the whole body and
+its own budget. Bounding the summary from the already-cut comment would
+hand it the comment's budget and the comment's truncation notice, making
+its ~15x larger limit buy nothing.
 
 A body over budget is cut on a line boundary (never mid-row, never
 mid-codepoint), any open `<details>` is closed, and the cut is stated in the

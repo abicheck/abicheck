@@ -15,7 +15,7 @@
 
 """A value crossing from Python to a shell keeps exactly its own bytes.
 
-**Bug class:** ``boundary.platform_dependent_record_separator`` -- two
+**Bug class:** ``tooling.platform_dependent_record_separator`` -- two
 languages agreeing on a record separator that one of them silently
 rewrites per platform.
 

@@ -51,6 +51,7 @@ from abicheck.frontends.action.report_publication import (
     render_resolution,
     render_summary,
     request_payload,
+    summary_for_plan,
 )
 
 IDENTITY = PublicationIdentity(
@@ -232,17 +233,41 @@ class TestPublicationDecision:
         assert plan.skipped_reason == "no-changes"
         assert not plan.posts
 
-    def test_on_never_publishes_nothing_but_still_clears(self) -> None:
+    def test_on_never_makes_no_write_of_any_kind(self) -> None:
+        """`never` is the kill switch, and it must actually kill writes.
+
+        This asserted `clear` until review, on the reading that `never`
+        meant "do not report findings" rather than "leave an obsolete
+        report standing". That reading does not survive looking at what the
+        clear would *say*: `render_report` short-circuits on `never`
+        **before** `build_model`, so the resolution body is written without
+        the report having been read at all. Under `on: never` a BREAKING
+        report would have had its comment replaced by "previously reported
+        findings are resolved" -- an affirmative all-clear the Action never
+        established. Not reporting and asserting the opposite of the truth
+        are not the same thing, and only one of them is what `never` asks
+        for.
+        """
         rendered = render_report(BREAK, identity=IDENTITY, on="never")
         assert not rendered.has_content
         assert rendered.reason == "never"
-        assert decide(rendered, identity=IDENTITY, comments=[]).action == "skip"
-        # An existing comment is still cleared: `never` means "do not report
-        # findings", not "leave an obsolete report standing".
-        assert (
-            decide(rendered, identity=IDENTITY, comments=[_comment(IDENTITY)]).action
-            == "clear"
-        )
+        for comments in ([], [_comment(IDENTITY)]):
+            plan = decide(rendered, identity=IDENTITY, comments=comments)
+            assert plan.action == "skip"
+            assert plan.skipped_reason == "never"
+            assert not plan.posts
+            assert not plan.body
+
+    def test_on_never_is_the_only_setting_that_suppresses_a_clear(self) -> None:
+        """The positive control: clearing still happens where it is honest.
+
+        Under `changes`, a report that no longer shows anything *has* been
+        read, so "resolved" is a claim the run can make.
+        """
+        rendered = render_report(CLEAN, identity=IDENTITY, on="changes")
+        plan = decide(rendered, identity=IDENTITY, comments=[_comment(IDENTITY)])
+        assert plan.action == "clear"
+        assert "resolved" in (plan.body or "")
 
     def test_on_always_publishes_a_clean_result(self) -> None:
         rendered = render_report(CLEAN, identity=IDENTITY, on="always")
@@ -562,3 +587,87 @@ class TestActionCommentCommand:
         )
         # Whatever was cut, the sticky identity is never what goes.
         assert PublicationIdentity.parse(body) is not None
+
+
+class TestTheSummaryGetsItsOwnBudget:
+    """The two destinations are bounded from the same *unbounded* render.
+
+    Review finding: the summary was bounded from `rendered.body`, which
+    `render_report` had already cut to the comment budget. The ~15x larger
+    summary limit therefore bought nothing -- the summary could only ever
+    be the comment, and inherited the comment's own truncation notice, so
+    the job summary told a reader content had been dropped for a limit that
+    was not the one it was subject to.
+    """
+
+    @staticmethod
+    def _big_report(rows: int = 4000) -> dict[str, object]:
+        return {
+            "library": "libthing.so",
+            "old_version": "1.0",
+            "new_version": "1.1",
+            "verdict": "BREAKING",
+            "changes": [
+                {
+                    "kind": "func_removed",
+                    "symbol": f"thing_symbol_with_a_long_name_{i:05d}",
+                    "severity": "breaking",
+                    "description": "Function removed from the public surface",
+                }
+                for i in range(rows)
+            ],
+        }
+
+    def test_the_summary_keeps_content_the_comment_had_to_drop(self) -> None:
+        rendered = render_report(
+            self._big_report(),
+            identity=IDENTITY,
+            on="always",
+            detail="full",
+            max_comment_bytes=20_000,
+        )
+        assert rendered.truncated, "the fixture must actually exceed the comment budget"
+        plan = decide(rendered, identity=IDENTITY, comments=[])
+        summary, summary_truncated = summary_for_plan(
+            rendered, plan, max_summary_bytes=900_000
+        )
+        assert not summary_truncated
+        assert len(summary.encode("utf-8")) > len(rendered.body.encode("utf-8")), (
+            "the summary is still bounded by the comment's budget"
+        )
+        # The specific tell: the comment's own truncation notice must not be
+        # carried into a destination that did not truncate.
+        assert "truncated" not in summary.lower()
+
+    def test_both_budgets_are_still_honoured_independently(self) -> None:
+        rendered = render_report(
+            self._big_report(),
+            identity=IDENTITY,
+            on="always",
+            detail="full",
+            max_comment_bytes=20_000,
+        )
+        plan = decide(rendered, identity=IDENTITY, comments=[])
+        summary, summary_truncated = summary_for_plan(
+            rendered, plan, max_summary_bytes=30_000
+        )
+        assert len(rendered.body.encode("utf-8")) <= 20_000
+        assert len(summary.encode("utf-8")) <= 30_000
+        assert summary_truncated, "a summary over its own budget must say so"
+
+    def test_a_clear_summarises_the_resolution_not_the_report(self) -> None:
+        """`plan.body` wins when the plan wrote one: a cleared comment
+        states a resolution, and the summary must agree with the comment
+        rather than re-publishing the findings it just retracted."""
+        rendered = render_report(CLEAN, identity=IDENTITY, on="changes")
+        plan = decide(rendered, identity=IDENTITY, comments=[_comment(IDENTITY)])
+        assert plan.action == "clear"
+        summary, _ = summary_for_plan(rendered, plan)
+        assert "resolved" in summary
+
+    def test_an_unbounded_render_carries_full_body_equal_to_body(self) -> None:
+        """Vacuity guard: when nothing was cut the two are the same text, so
+        the tests above cannot be passing on an accidental difference."""
+        rendered = render_report(BREAK, identity=IDENTITY, on="always")
+        assert not rendered.truncated
+        assert rendered.full_body == rendered.body

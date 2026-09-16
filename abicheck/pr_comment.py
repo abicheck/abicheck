@@ -254,20 +254,29 @@ def _changes_list(changes: object) -> list[dict[str, object]]:
 
 
 def _introduced_changes(changes: object) -> list[dict[str, object]]:
-    """:func:`_changes_list` minus the findings this comparison did not
-    introduce (:data:`_BACKGROUND_EVOLUTIONS`).
+    """:func:`_changes_list` minus every finding this comparison did not
+    establish as its own (:data:`_NOT_THIS_CHANGES_EVOLUTIONS`).
 
     The "What changed" rollup answers *what this comparison's operands
     did*. Counting standing hygiene debt in it reports 336 modifications
     for a byte-identical rebuild -- the same misattribution the background
-    bucket exists to stop, one table over. Exactly the same predicate
-    ``_bucket_changes`` routes on, so the rollup and the sections can never
-    disagree about which findings are this change's own.
+    bucket exists to stop, one table over.
+
+    ``not_evaluated`` is excluded too, for a different reason and with the
+    same necessity: there the comparison layer declined to say whether the
+    finding is new at all, so ``_bucket_changes`` routes it to the
+    analysis-*incomplete* bucket rather than a compatibility one. Counting
+    it here would assert as a modification the very thing the comparison
+    refused to assert, and would put one finding in two mutually exclusive
+    places at once. Filtering on the union keeps this rollup over exactly
+    the set ``_bucket_changes`` admits to the compatibility buckets, so the
+    summary and its own detail sections cannot disagree.
     """
     return [
         c
         for c in _changes_list(changes)
-        if str(c.get("cross_source_evolution", "") or "") not in _BACKGROUND_EVOLUTIONS
+        if str(c.get("cross_source_evolution", "") or "")
+        not in _NOT_THIS_CHANGES_EVOLUTIONS
     ]
 
 
@@ -290,6 +299,15 @@ def _introduced_changes(changes: object) -> list[dict[str, object]]:
 #: ``introduced`` is absent because an introduced finding *is* this
 #: comparison's own, and is bucketed by severity like any other.
 _BACKGROUND_EVOLUTIONS = frozenset({"persistent", "resolved"})
+
+#: Everything :func:`_introduced_changes` keeps out of the "What changed"
+#: rollup: the two background states above, plus ``not_evaluated``. The
+#: three are not one concept -- two mean "present before this change", the
+#: third means "we could not tell" -- but a rollup of asserted
+#: modifications may claim none of them, and ``_bucket_changes`` keeps all
+#: three out of the compatibility buckets. Deriving the union here rather
+#: than spelling a second literal is what stops the two from drifting.
+_NOT_THIS_CHANGES_EVOLUTIONS = _BACKGROUND_EVOLUTIONS | {"not_evaluated"}
 
 
 def _bucket_changes(

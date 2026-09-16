@@ -101,11 +101,18 @@ else
   : > "$EXISTING"
 fi
 
+# The ordering guard compares the run that PRODUCED the report, not the
+# one publishing it. In a `workflow_run` publisher those are different
+# runs, and the publisher's own id orders by trigger time: a re-run of an
+# older commit is triggered later, so its publisher carries the larger id
+# and would be read as the newer result. Falling back to this job's own
+# ids keeps the single-workflow case (analyse and publish in one run)
+# working, where the two are the same run by construction.
 RENDER_ARGS=(
   comment "$REPORT"
   --identity "$IDENTITY"
-  --run-id "${GITHUB_RUN_ID:-}"
-  --run-attempt "${GITHUB_RUN_ATTEMPT:-1}"
+  --run-id "${INPUT_SOURCE_RUN_ID:-${GITHUB_RUN_ID:-}}"
+  --run-attempt "${INPUT_SOURCE_RUN_ATTEMPT:-${GITHUB_RUN_ATTEMPT:-1}}"
   --sha "${INPUT_SHA:-}"
   --detail "$DETAIL"
   --on "$ON"

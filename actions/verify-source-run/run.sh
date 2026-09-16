@@ -48,8 +48,16 @@ ARTIFACT_NAME="${INPUT_ARTIFACT_NAME:-}"
 [[ -n "$ARTIFACT_NAME" ]] || _fail "the 'artifact-name' input is required."
 
 TESTED_SHA="${INPUT_TESTED_SHA:-}"
-if [[ -n "$TESTED_SHA" && ! "$TESTED_SHA" =~ ^[0-9a-fA-F]{7,64}$ ]]; then
-  _fail "'tested-sha' must be a hexadecimal commit SHA (got '$TESTED_SHA')."
+# Full-length only. Verification compares this against the pull request's
+# head and the analysed commit's parents, both of which the API states in
+# full, by exact equality -- an abbreviated SHA matches neither and was
+# refused as `unassociated-tested-sha` every time, which reads as "this
+# commit is not yours" rather than "say it in full". Refusing it here says
+# the true thing, and prefix-matching instead would be a weakening: a short
+# prefix is ambiguous by construction, and this value decides which commit
+# a trusted comment claims was analysed.
+if [[ -n "$TESTED_SHA" && ! "$TESTED_SHA" =~ ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$ ]]; then
+  _fail "'tested-sha' must be a full 40- or 64-character commit SHA (got '$TESTED_SHA'); an abbreviated SHA cannot be verified against the pull request."
 fi
 
 CLAIMED_PR="${INPUT_CLAIMED_PR_NUMBER:-}"
@@ -127,8 +135,16 @@ if [[ -n "$TESTED_SHA" ]]; then
 fi
 
 # `--allow-conclusion ''` means "any conclusion"; the CLI drops empty values.
-IFS=',' read -r -a _CONCLUSIONS <<< "${INPUT_ALLOWED_CONCLUSIONS:-success}"
-if [[ ${#_CONCLUSIONS[@]} -eq 0 ]]; then
+# `${VAR-default}` (no colon), NOT `${VAR:-default}`: the input is documented
+# as "empty allows any", and `:-` substitutes on empty as well as unset, so
+# an explicitly empty value silently became `success` and the any-conclusion
+# branch below was unreachable -- a publisher could never report a producer
+# run that failed, which is one of this input's two stated uses.
+if [[ -z "${INPUT_ALLOWED_CONCLUSIONS+set}" ]]; then
+  INPUT_ALLOWED_CONCLUSIONS=success
+fi
+IFS=',' read -r -a _CONCLUSIONS <<< "$INPUT_ALLOWED_CONCLUSIONS"
+if [[ ${#_CONCLUSIONS[@]} -eq 0 || -z "${_CONCLUSIONS[0]}" ]]; then
   VERIFY_ARGS+=(--allow-conclusion "")
 else
   for _conclusion in "${_CONCLUSIONS[@]}"; do
@@ -136,9 +152,16 @@ else
   done
 fi
 
-gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/artifacts" > "$ARTIFACTS_JSON" \
+# `--paginate`, like the pull-request listing above: this endpoint pages at
+# 30, so a run publishing more artifacts than that refused the named one as
+# `artifact-not-found` purely for being on page two.
+gh api --paginate "repos/$REPOSITORY/actions/runs/$RUN_ID/artifacts" --jq '.artifacts' > "$WORK/artifacts.raw" \
   2>"$WORK/artifacts.err" \
   || _fail "could not list artifacts for run $RUN_ID: $(tr '\n' ' ' < "$WORK/artifacts.err")"
+# `--jq '.artifacts'` emits one array per page, concatenated -- the same
+# shape the pull-request listing produces, so it goes through the same
+# flattener rather than a second opinion about how pages join.
+python -m abicheck.frontends.action.cli flatten-pages "$WORK/artifacts.raw" "$ARTIFACTS_JSON"
 VERIFY_ARGS+=(--artifacts-json "$ARTIFACTS_JSON")
 
 if ! python -m abicheck.frontends.action.cli "${VERIFY_ARGS[@]}"; then

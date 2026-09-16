@@ -63,3 +63,21 @@
   positional, so one would forge a record and shift every later field), and
   always emits one record per requested field so an absent value cannot
   silently shorten the read.
+
+- **Review round fixes on the above.** `on: never` no longer writes to the
+  pull request at all — it short-circuits before the report is read, so the
+  "resolved" notice it used to PATCH over an existing comment was an
+  all-clear the run never established. The sticky comment's ordering guard
+  now records the **producing** run (`source-run-id`/`source-run-attempt`)
+  rather than the publisher's own, which in a `workflow_run` split ordered
+  by trigger time and so let a re-run of an older commit overwrite a newer
+  result. The job summary is bounded from the full render instead of the
+  already-cut comment body, so its larger budget is real. A
+  `not_evaluated` finding no longer appears in the "What changed" rollup
+  while being excluded from every bucket. An aggregate leg whose comparison
+  never ran no longer renders a compatibility category in its row, and no
+  longer counts as evidence that some comparison completed. An artifact
+  entry stating no owning run is refused like one stating the wrong owner.
+  `allowed-conclusions: ''` now reaches its documented "any conclusion"
+  meaning, the run's artifact listing is paginated, and an abbreviated
+  `tested-sha` is refused up front instead of failing verification later.

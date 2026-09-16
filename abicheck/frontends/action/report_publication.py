@@ -289,6 +289,12 @@ class RenderedReport:
     truncated: bool
     #: Why nothing was rendered, when ``has_content`` is false.
     reason: str = ""
+    #: The same body *before* the comment budget was applied. The job
+    #: summary's limit is ~15x the comment's, so bounding the summary from
+    #: the already-cut comment would silently give it the comment's budget
+    #: and hand it the comment's own truncation notice. Empty when nothing
+    #: was rendered; equal to ``body`` whenever no cut was needed.
+    full_body: str = ""
 
     @property
     def body_bytes(self) -> int:
@@ -352,10 +358,13 @@ def render_report(
         report_artifact_url=report_artifact_url,
     )
     body = f"{identity.marker()}\n{body}"
+    full_body = body
     body, truncated = bound_to_bytes(
         body, max_comment_bytes, _comment_truncation_note(report_url)
     )
-    return RenderedReport(body=body, has_content=True, truncated=truncated)
+    return RenderedReport(
+        body=body, has_content=True, truncated=truncated, full_body=full_body
+    )
 
 
 def render_resolution(identity: PublicationIdentity, *, sha: str = "") -> str:
@@ -382,14 +391,50 @@ def render_summary(
     max_summary_bytes: int = DEFAULT_MAX_SUMMARY_BYTES,
     report_url: str | None = None,
 ) -> tuple[str, bool]:
-    """The job-summary rendering of an already-rendered comment body.
+    """The job-summary rendering of a rendered body.
 
     Bounded **independently** of the comment: the two destinations have
     different limits (1 MiB versus 64 KiB), so folding them into one budget
-    would either waste the summary's room or overrun the comment's. Returns
-    ``(text, truncated)``.
+    would either waste the summary's room or overrun the comment's.
+
+    That independence is a property of what the caller passes, not of this
+    function -- and it was not true when this docstring first claimed it.
+    Callers must pass :attr:`RenderedReport.full_body`, the body *before*
+    the comment budget was applied. Handed the bounded ``body`` instead,
+    this returns the comment's own truncation, notice and all, and the
+    larger budget buys exactly nothing. ``summary_for_plan`` is the
+    pairing that gets this right; prefer it to calling this directly.
+    Returns ``(text, truncated)``.
     """
     return bound_to_bytes(body, max_summary_bytes, _summary_truncation_note(report_url))
+
+
+def summary_for_plan(
+    rendered: RenderedReport,
+    plan: PublicationPlan,
+    *,
+    max_summary_bytes: int = DEFAULT_MAX_SUMMARY_BYTES,
+    report_url: str | None = None,
+) -> tuple[str, bool]:
+    """The job summary for what *plan* decided to publish.
+
+    The pairing :func:`render_summary` asks for. It picks the right source
+    body so the summary is bounded once, from full content, against its own
+    budget.
+
+    Note which body that is. ``plan.body`` is *not* the general answer:
+    for ``create``/``update`` it holds the comment body, already cut to the
+    comment budget, so reading it here reproduces the very defect this
+    helper exists to prevent (it did, until the test below caught it). Only
+    a ``clear`` authors text of its own -- a resolution notice, which is
+    what the comment says and so what the summary must say too.
+    """
+    source = plan.body if plan.action == "clear" else ""
+    if not source:
+        source = rendered.full_body or rendered.body
+    return render_summary(
+        source, max_summary_bytes=max_summary_bytes, report_url=report_url
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -494,6 +539,19 @@ def decide(
                 comment_id=existing.comment_id,
                 skipped_reason="stale",
             )
+    if rendered.reason == "never":
+        # `on: never` means this Action does not write to the pull request,
+        # full stop. Falling through to the clear branch below would PATCH
+        # an existing comment into a resolution notice -- a write, on the
+        # one setting whose entire meaning is "do not write". Clearing is
+        # for a report that no longer shows what it used to; `never` is a
+        # statement about the channel, not about the findings, and under it
+        # this Action has no opinion to publish either way.
+        return PublicationPlan(
+            action="skip",
+            comment_id=existing.comment_id if existing is not None else None,
+            skipped_reason="never",
+        )
     if not rendered.has_content:
         if existing is None:
             return PublicationPlan(

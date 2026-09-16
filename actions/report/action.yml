@@ -115,6 +115,25 @@ inputs:
     description: "Token with `pull-requests: write`. Required unless dry-run is true."
     required: false
     default: ''
+  source-run-id:
+    description: >
+      The id of the run that PRODUCED this report, which is what the sticky
+      comment's ordering guard compares. In a `workflow_run` publisher pass
+      `${{ github.event.workflow_run.id }}` (or verify-source-run's own
+      `source-run-id` output). Defaults to this job's own GITHUB_RUN_ID,
+      which is correct only when the same run both analysed and published:
+      a publisher's own id orders by when it was *triggered*, so a late
+      re-run of an older commit would look newer than the current result
+      and overwrite it -- the exact inversion the guard exists to prevent.
+    required: false
+    default: ''
+  source-run-attempt:
+    description: >
+      The attempt of the producing run, paired with source-run-id. In a
+      `workflow_run` publisher, `${{ github.event.workflow_run.run_attempt }}`.
+      Defaults to this job's own GITHUB_RUN_ATTEMPT.
+    required: false
+    default: ''
   job-summary:
     description: "Also write the rendered body to this job's summary."
     required: false

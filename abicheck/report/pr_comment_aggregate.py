@@ -570,13 +570,23 @@ def _fold_target(
         # for this target. A row of zeros would put it in the results table
         # as though it had been checked.
         return
-    fold.any_analyzed = True
-    if gate_categories & NON_COMPARISON_GATE_CATEGORIES:
+    non_comparison = gate_categories & NON_COMPARISON_GATE_CATEGORIES
+    if non_comparison:
         # Analyzed in the document's bookkeeping sense, but its verdict is
         # the synthetic one `aggregate` forces so the leg cannot pass
-        # unnoticed. Show it with the state it actually reached.
-        fold.rows.append((tid, sorted(gate_categories)[0].upper(), 0, 0, 0))
+        # unnoticed. Show it with the state it actually reached -- naming
+        # the *non-comparison* category, not `sorted(gate_categories)[0]`:
+        # a leg carrying {"abi_breaking", "operational_error"} sorts to
+        # `abi_breaking`, so the row claimed a comparison result while its
+        # own limitation row said the comparison never ran.
+        fold.rows.append((tid, sorted(non_comparison)[0].upper(), 0, 0, 0))
+        # Deliberately *not* `any_analyzed`. That flag answers "did any
+        # comparison actually complete", which decides between "coverage
+        # reduced" and "no comparison completed"; a leg that never compared
+        # must not be the evidence that one did. Setting it before this
+        # check made an all-`not_comparable` fan-in read as merely reduced.
         return
+    fold.any_analyzed = True
 
     member, refusal = _load_member(
         target,

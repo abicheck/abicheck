@@ -982,3 +982,74 @@ class TestArchiveEdgeCases:
         with pytest.raises(SourceRunRejected) as excinfo:
             load_json_document(tmp_path / "nowhere.json")
         assert excinfo.value.code == "artifact-unreadable"
+
+
+#: Sentinel for "the entry has no ``workflow_run`` key at all", which is a
+#: different input from one carrying an empty mapping.
+_ABSENT_OWNER = object()
+
+
+class TestArtifactOwnershipFailsClosed:
+    """An entry that states no owner is refused like one stating the wrong
+    owner.
+
+    Review finding: the guard read ``if owner_id and owner_id != run_id``,
+    so an entry carrying no ``workflow_run.id`` at all passed. That is the
+    case an attacker controls, and it defeats the re-establishment this
+    function's own docstring promises: the listing endpoint is chosen by
+    the shell, so "the entry did not say which run it belongs to" can never
+    be read as "the entry belongs to the run we asked about".
+    """
+
+    @staticmethod
+    def _entry(name: str, owner: object) -> dict[str, object]:
+        entry: dict[str, object] = {"id": 7, "name": name, "expired": False}
+        if owner is not _ABSENT_OWNER:
+            entry["workflow_run"] = owner
+        return entry
+
+    @pytest.mark.parametrize(
+        "owner",
+        [
+            _ABSENT_OWNER,
+            {},
+            {"id": ""},
+            {"id": None},
+            {"other": "field"},
+            "not-a-mapping",
+            [],
+        ],
+        ids=[
+            "no-key",
+            "empty-mapping",
+            "empty-id",
+            "null-id",
+            "no-id-field",
+            "scalar",
+            "list",
+        ],
+    )
+    def test_an_unstated_owner_is_refused(self, owner: object) -> None:
+        with pytest.raises(SourceRunRejected) as caught:
+            select_artifact([self._entry("reports", owner)], "reports", run_id="99")
+        assert caught.value.code == "artifact-not-found"
+
+    def test_a_wrong_owner_is_still_refused(self) -> None:
+        with pytest.raises(SourceRunRejected) as caught:
+            select_artifact(
+                [self._entry("reports", {"id": 12345})], "reports", run_id="99"
+            )
+        assert caught.value.code == "artifact-not-found"
+
+    @pytest.mark.parametrize("run_id", ["99", 99])
+    def test_the_matching_owner_is_accepted_whichever_type_it_is(
+        self, run_id: object
+    ) -> None:
+        """Positive control, and the reason the comparison stringifies both
+        sides: the API states the id as an integer, the shell passes it as
+        text, and a guard that fails closed on a type mismatch would refuse
+        every artifact rather than the wrong one."""
+        chosen = select_artifact(
+            [self._entry("reports", {"id": 99})], "reports", run_id=str(run_id)
+        )
+        assert chosen["name"] == "reports"
