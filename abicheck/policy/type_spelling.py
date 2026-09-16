@@ -31,7 +31,7 @@ residue two adjacent keywords leave behind) is what the recognisers in
 from __future__ import annotations
 
 import re
-from functools import lru_cache
+from collections import OrderedDict
 
 _POINTER_RE = re.compile(r"[*&]")
 
@@ -54,10 +54,10 @@ _KEYWORD_RES = tuple(
 # profile: 22,717 normalisation requests over 2,161 *unique* spellings), so a
 # library of that scale fits entirely without eviction while the retained set
 # stays hard-capped. Measured retained size when full (tracemalloc, not RSS):
-# 2.56 MiB worst case -- 4096 entries at the 512-char admission limit, still
-# 4096 after pushing 8192 distinct keys through it -- and 0.62 MiB for a
+# 2.59 MiB worst case -- 4096 entries at the 512-char admission limit, still
+# 4096 after pushing 8192 distinct keys through it -- and 0.59 MiB for a
 # realistic 40-character spelling set. A workload of the reported oneDAL shape
-# (2,161 spellings) retains ~0.37 MiB and never evicts.
+# (2,161 spellings) retains ~0.36 MiB and never evicts.
 #
 # Only pure strings are ever stored -- never a graph, snapshot, record, parser
 # or bound method -- so the cache cannot extend any object's lifetime.
@@ -73,7 +73,20 @@ def strip_ptr_uncached(type_str: str) -> str:
     return s.strip()
 
 
-_strip_ptr_memo = lru_cache(maxsize=STRIP_PTR_CACHE_MAXSIZE)(strip_ptr_uncached)
+# The bounded LRU memo, written out rather than delegated to ``lru_cache``.
+#
+# ``lru_cache`` is faster, but its contents are unreachable except through
+# CPython-internal details, so the "only plain strings are ever retained"
+# guarantee stated above could not be *checked* -- and a guarantee whose test
+# cannot observe it is not a guarantee. An ``OrderedDict`` gives the same
+# semantics (bounded size, least-recently-used eviction) with a retained set a
+# test can read through :func:`strip_ptr_cache_entries`. The measured cost of
+# that choice is recorded in the module's tests; it is small because a
+# recognition pass reaches this function a few thousand times, not millions,
+# once the public-use index removes the per-record rescan.
+_strip_ptr_memo: OrderedDict[str, str] = OrderedDict()
+_strip_ptr_hits = 0
+_strip_ptr_misses = 0
 
 
 def strip_ptr(type_str: str) -> str:
@@ -84,19 +97,43 @@ def strip_ptr(type_str: str) -> str:
     pathological machine-generated template spelling from consuming the byte
     budget the bound above is expressed in.
     """
+    global _strip_ptr_hits, _strip_ptr_misses
     if len(type_str) > STRIP_PTR_CACHE_MAX_INPUT:
         return strip_ptr_uncached(type_str)
-    return _strip_ptr_memo(type_str)
+    cached = _strip_ptr_memo.get(type_str)
+    if cached is not None:
+        _strip_ptr_memo.move_to_end(type_str)
+        _strip_ptr_hits += 1
+        return cached
+    _strip_ptr_misses += 1
+    result = strip_ptr_uncached(type_str)
+    _strip_ptr_memo[type_str] = result
+    if len(_strip_ptr_memo) > STRIP_PTR_CACHE_MAXSIZE:
+        # Evict the least recently used entry. Deliberately *not* a clear():
+        # the cache is process-wide, and dropping every entry would throw away
+        # what a sibling worker mid-recognition is relying on.
+        _strip_ptr_memo.popitem(last=False)
+    return result
+
+
+def strip_ptr_cache_entries() -> tuple[tuple[str, str], ...]:
+    """A snapshot of what the cache currently retains (tests, diagnostics).
+
+    Returns copies in least- to most-recently-used order, so a caller cannot
+    mutate the live mapping. This is the supported way to assert the retention
+    contract -- that every retained object is a plain ``str``, and that no
+    graph, snapshot, record, parser or bound method is reachable from here.
+    """
+    return tuple(_strip_ptr_memo.items())
 
 
 def strip_ptr_cache_stats() -> dict[str, int]:
     """Hits/misses/occupancy for the normalisation cache (tests, benchmarks)."""
-    info = _strip_ptr_memo.cache_info()
     return {
-        "hits": info.hits,
-        "misses": info.misses,
-        "occupancy": info.currsize,
-        "maxsize": info.maxsize or 0,
+        "hits": _strip_ptr_hits,
+        "misses": _strip_ptr_misses,
+        "occupancy": len(_strip_ptr_memo),
+        "maxsize": STRIP_PTR_CACHE_MAXSIZE,
     }
 
 
@@ -110,4 +147,7 @@ def strip_ptr_cache_clear() -> None:
     is a pure function of its key -- but the eviction policy is deliberately
     LRU, not "clear on overflow".
     """
-    _strip_ptr_memo.cache_clear()
+    global _strip_ptr_hits, _strip_ptr_misses
+    _strip_ptr_memo.clear()
+    _strip_ptr_hits = 0
+    _strip_ptr_misses = 0

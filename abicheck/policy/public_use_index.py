@@ -36,6 +36,11 @@ from .type_spelling import strip_ptr
 
 
 def _is_pointer(type_str: str) -> bool:
+    """True when *type_str* spells a pointer.
+
+    The existing spelling-level test, kept as-is: a literal ``*`` anywhere in
+    the type text. It is deliberately not a parse.
+    """
     return "*" in type_str
 
 

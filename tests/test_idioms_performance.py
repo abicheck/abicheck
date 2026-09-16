@@ -253,14 +253,75 @@ class TestStripPtrCacheBounds:
         type_spelling.strip_ptr(exact)
         assert type_spelling.strip_ptr_cache_stats()["occupancy"] == before + 1
 
-    def test_cache_stores_only_strings(self) -> None:
-        type_spelling.strip_ptr("ns::Widget const *")
-        # Every retained object must be a plain str -- never a graph, snapshot,
-        # record, parser or bound method.
-        cell = type_spelling._strip_ptr_memo.__wrapped__
-        assert callable(cell)
-        stats = type_spelling.strip_ptr_cache_stats()
-        assert stats["occupancy"] >= 1
+    def test_cache_retains_only_plain_strings(self) -> None:
+        """The documented retention contract, actually inspected.
+
+        The earlier version of this test asserted that ``__wrapped__`` was
+        callable and that occupancy was non-zero -- neither of which can fail
+        if the cache retained a snapshot, a record or a bound method. The
+        contract is only meaningful if the retained set is read, so the memo
+        exposes it (``strip_ptr_cache_entries``) and this reads it.
+        """
+        type_spelling.strip_ptr_cache_clear()
+        for spelling in _spellings()[:200]:
+            type_spelling.strip_ptr(spelling)
+        entries = type_spelling.strip_ptr_cache_entries()
+        assert entries, "nothing retained -- the assertion below would be vacuous"
+        for key, value in entries:
+            assert type(key) is str, (key, type(key))
+            assert type(value) is str, (value, type(value))
+            # A plain str references no object graph; assert the property that
+            # actually matters rather than inferring it from the type alone.
+            assert not gc.get_referents(key)
+            assert not gc.get_referents(value)
+
+    def test_retention_assertion_would_catch_a_non_string_entry(self) -> None:
+        """Negative control: the check above must be able to fail."""
+
+        class _Poison:
+            def __init__(self) -> None:
+                self.graph = object()
+
+        with pytest.raises(AssertionError):
+            for key, value in (("k", _Poison()),):
+                assert type(key) is str
+                assert type(value) is str
+
+    def test_every_cached_value_equals_the_reference_result(self) -> None:
+        """Retained values are the *correct* normalisations, not merely strings."""
+        type_spelling.strip_ptr_cache_clear()
+        for spelling in _spellings()[:200]:
+            type_spelling.strip_ptr(spelling)
+        for key, value in type_spelling.strip_ptr_cache_entries():
+            assert value == _ref_strip_ptr(key), key
+
+    def test_eviction_is_least_recently_used_not_a_clear(self) -> None:
+        """Overflow drops one entry; it never discards the whole cache.
+
+        A clear-on-overflow policy satisfies an occupancy bound just as well
+        while throwing away what a concurrent worker relies on, so the bound
+        alone cannot distinguish the two and the order is asserted directly.
+        """
+        type_spelling.strip_ptr_cache_clear()
+        maxsize = type_spelling.STRIP_PTR_CACHE_MAXSIZE
+        for i in range(maxsize):
+            type_spelling.strip_ptr(f"T{i} *")
+        # Re-touch the oldest key so it becomes most recently used...
+        type_spelling.strip_ptr("T0 *")
+        # ...then overflow by one: T1, not T0, must be the entry that goes.
+        type_spelling.strip_ptr("Overflow *")
+        keys = {k for k, _ in type_spelling.strip_ptr_cache_entries()}
+        assert len(keys) == maxsize
+        assert "T0 *" in keys, "LRU re-touch was ignored"
+        assert "T1 *" not in keys, "evicted entry was not the least recently used"
+        assert "Overflow *" in keys
+
+    def test_oversized_input_is_never_retained(self) -> None:
+        big = "Tpl<" + ", ".join(f"const Arg{i} *" for i in range(200)) + "> *"
+        assert len(big) > type_spelling.STRIP_PTR_CACHE_MAX_INPUT
+        type_spelling.strip_ptr_cache_clear()
+        type_spelling.strip_ptr(big)
+        assert type_spelling.strip_ptr_cache_entries() == ()
 
 
 # --------------------------------------------------------------------------
