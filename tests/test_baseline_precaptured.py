@@ -125,6 +125,40 @@ def _write_set(
     return root
 
 
+def _real_sectioned_snapshot() -> tuple[dict, dict]:
+    """A genuine `snapshot_to_dict()` document and its sectioned envelope.
+
+    Built through the real codecs, not hand-written: `to_sectioned_document`
+    rejects a partial document (a `declarations` section must carry every one
+    of its keys), and a fixture that resembled no real dump is precisely what
+    `tests/CLAUDE.md` warns against.
+    """
+    flat = _flat_snapshot()
+    return flat, _sectionize(flat)
+
+
+def _flat_snapshot() -> dict:
+    from abicheck.model import AbiSnapshot
+    from abicheck.serialization import snapshot_to_dict
+
+    flat = snapshot_to_dict(AbiSnapshot(library="libthing.so.1", version="1.5.2"))
+    flat["schema_version"] = 9
+    return flat
+
+
+def _sectionize(flat: dict) -> dict:
+    from abicheck.serialization import SCHEMA_VERSION
+    from abicheck.storage.sectioned_document import to_sectioned_document
+
+    return to_sectioned_document(flat, max_known_schema_version=SCHEMA_VERSION)
+
+
+def _flatten(envelope: dict) -> dict:
+    from abicheck.storage.sectioned_document import from_sectioned_document
+
+    return from_sectioned_document(envelope)
+
+
 class TestAValidSetIsAccepted:
     def test_a_self_consistent_set_validates(self, tmp_path: Path) -> None:
         _write_set(tmp_path / "set", libraries=("liba.so.1", "libb.so.2"))
@@ -658,3 +692,222 @@ class TestMemberSchemaIsCheckedPerFile:
         assert not any("could not be read" in e for e in result.errors), (
             "an upgrade-needed set was reported as corrupt"
         )
+
+
+class TestBundleMemberBinariesAreVerified:
+    """A bundle-scoped set stages a real binary beside each snapshot.
+
+    That branch was entirely untested (codecov, PR #1319) even though the
+    validator claims to verify `binary_sha256` -- and the resolver's own
+    `_binary_digest_issue` really does check it, against the raw file bytes
+    rather than the snapshot's stable-content hash. A claim this module makes
+    and never exercises is exactly the "covered but unverified" shape
+    AGENTS.md's mutation lane exists to catch.
+
+    The oracle is a plain `hashlib.sha256` over the bytes written here,
+    deliberately not the module's own `_file_sha256`.
+    """
+
+    @staticmethod
+    def _bundle_set(
+        root: Path, *, binary_bytes: bytes = b"\x7fELF-not-really", **overrides: str
+    ) -> Path:
+        import hashlib
+
+        root.mkdir(parents=True, exist_ok=True)
+        payload = _snapshot_payload("libthing.so.1")
+        (root / "libthing.so.1.abicheck.json").write_text(
+            json.dumps(payload), encoding="utf-8"
+        )
+        (root / "binaries").mkdir(exist_ok=True)
+        (root / "binaries" / "libthing.so.1").write_bytes(binary_bytes)
+        row = {
+            "library": "libthing.so.1",
+            "snapshot": "libthing.so.1.abicheck.json",
+            "sha256": compute_snapshot_content_hash(payload),
+            "binary": "binaries/libthing.so.1",
+            "binary_sha256": hashlib.sha256(binary_bytes).hexdigest(),
+        }
+        row.update(overrides)
+        (root / BASELINE_MANIFEST_FILENAME).write_text(
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": PROJECT_REF,
+                    "profile": PROFILE,
+                    "snapshot_schema": 9,
+                    "artifacts": [row],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return root
+
+    def test_a_consistent_bundle_member_validates(self, tmp_path: Path) -> None:
+        root = self._bundle_set(tmp_path / "set")
+        result = validate_precaptured_baseline_set(
+            root, expected_profile=PROFILE, expected_project_ref=PROJECT_REF
+        )
+        assert result.ok, result.errors
+
+    def test_a_tampered_binary_is_caught(self, tmp_path: Path) -> None:
+        root = self._bundle_set(tmp_path / "set")
+        (root / "binaries" / "libthing.so.1").write_bytes(b"\x7fELF-tampered")
+        result = validate_precaptured_baseline_set(root)
+        assert not result.ok
+        assert any("staged binary hashes to" in e for e in result.errors), result.errors
+
+    def test_the_binary_digest_is_over_raw_bytes_not_snapshot_content(
+        self, tmp_path: Path
+    ) -> None:
+        """The two digests are different functions over different files.
+        Reusing the snapshot's stable-content hash here would report every
+        bundle member as a mismatch."""
+        root = self._bundle_set(tmp_path / "set")
+        manifest = json.loads((root / BASELINE_MANIFEST_FILENAME).read_text())
+        row = manifest["artifacts"][0]
+        row["binary_sha256"] = row["sha256"]
+        (root / BASELINE_MANIFEST_FILENAME).write_text(json.dumps(manifest))
+        assert not validate_precaptured_baseline_set(root).ok
+
+    @pytest.mark.parametrize(
+        "binary", ["../outside-binary", "/abs/binary", "binaries/missing"]
+    )
+    def test_an_unpublishable_binary_path_is_refused(
+        self, tmp_path: Path, binary: str
+    ) -> None:
+        root = self._bundle_set(tmp_path / f"set-{abs(hash(binary))}", binary=binary)
+        result = validate_precaptured_baseline_set(root)
+        assert not result.ok
+
+    def test_a_declared_binary_with_no_digest_is_not_hashed(
+        self, tmp_path: Path
+    ) -> None:
+        """Unlike a snapshot, a manifest that records no `binary_sha256` is the
+        ordinary case -- `build_manifest.py` has no bundle-binary staging step,
+        so every manifest it writes omits it. Refusing that would reject every
+        real set."""
+        root = self._bundle_set(tmp_path / "set", binary_sha256="")
+        assert validate_precaptured_baseline_set(root).ok
+
+
+class TestStructuralEdgesOfTheValidator:
+    """The remaining branches, each a real refusal path rather than a line
+    to colour in: an unnamed row, a member that is a directory, a member that
+    cannot be read at all, and the machine-readable receipt the workflow's
+    step emits."""
+
+    def test_an_artifacts_row_with_no_library_name_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        root = _write_set(tmp_path / "set")
+        manifest = json.loads((root / BASELINE_MANIFEST_FILENAME).read_text())
+        manifest["artifacts"][0]["library"] = ""
+        (root / BASELINE_MANIFEST_FILENAME).write_text(json.dumps(manifest))
+        result = validate_precaptured_baseline_set(root)
+        assert not result.ok
+        assert any("no library name" in e for e in result.errors), result.errors
+        assert result.libraries == [], "an unnamed row must not be published"
+
+    def test_a_member_that_is_a_directory_is_refused(self, tmp_path: Path) -> None:
+        root = _write_set(tmp_path / "set")
+        snapshot = root / "libthing.so.1.abicheck.json"
+        snapshot.unlink()
+        snapshot.mkdir()
+        result = validate_precaptured_baseline_set(root)
+        assert not result.ok
+        assert any("not a regular file" in e for e in result.errors), result.errors
+
+    def test_an_unreadable_snapshot_is_an_error_not_a_traceback(
+        self, tmp_path: Path
+    ) -> None:
+        root = _write_set(tmp_path / "set")
+        (root / "libthing.so.1.abicheck.json").write_bytes(b"\x00\x01 not json")
+        result = validate_precaptured_baseline_set(root)
+        assert not result.ok
+        assert any("could not be read" in e for e in result.errors), result.errors
+
+    def test_to_dict_is_json_serializable_and_states_the_same_verdict(
+        self, tmp_path: Path
+    ) -> None:
+        """The workflow step reads this shape; a field that cannot round-trip
+        through JSON would fail only in CI."""
+        for corrupt in (False, True):
+            root = _write_set(tmp_path / f"set-{corrupt}", corrupt_digest=corrupt)
+            result = validate_precaptured_baseline_set(root)
+            payload = json.loads(json.dumps(result.to_dict()))
+            assert payload["ok"] is result.ok
+            assert payload["errors"] == result.errors
+            assert payload["libraries"] == result.libraries
+            assert payload["root"] == str(result.root)
+            assert payload["profile"] == result.profile
+
+
+class TestASectionedSnapshotValidatesThroughTheUnwrap:
+    """A real dump writes the sectioned envelope by default (ADR-062/063
+    Phase 8), so this is the *ordinary* member shape, not an edge case.
+
+    The stable-content hash is computed over the unwrapped document, which is
+    what the resolver does too -- hashing the envelope instead would make
+    every sectioned member read as a digest mismatch. Uses the real
+    `to_sectioned_document`, not a hand-built envelope, so the test cannot
+    drift from the format the dumper actually writes.
+    """
+
+    def _sectioned_set(self, root: Path) -> Path:
+        root.mkdir(parents=True, exist_ok=True)
+        from abicheck.storage.sectioned_document import from_sectioned_document
+
+        flat, envelope = _real_sectioned_snapshot()
+        rel = "libthing.so.1.abicheck.json"
+        (root / rel).write_text(json.dumps(envelope), encoding="utf-8")
+        # The oracle: the hash of the UNWRAPPED document, derived through the
+        # real round trip rather than assumed equal to the flat payload's.
+        digest = compute_snapshot_content_hash(from_sectioned_document(envelope))
+        (root / BASELINE_MANIFEST_FILENAME).write_text(
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": PROJECT_REF,
+                    "profile": PROFILE,
+                    "snapshot_schema": 9,
+                    "artifacts": [
+                        {
+                            "library": "libthing.so.1",
+                            "snapshot": rel,
+                            "sha256": digest,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return root
+
+    def test_a_sectioned_member_validates(self, tmp_path: Path) -> None:
+        root = self._sectioned_set(tmp_path / "set")
+        result = validate_precaptured_baseline_set(
+            root, expected_profile=PROFILE, expected_project_ref=PROJECT_REF
+        )
+        assert result.ok, result.errors
+
+    def test_the_envelope_is_not_what_gets_hashed(self, tmp_path: Path) -> None:
+        """Vacuity guard: if the module hashed the envelope as-is, the test
+        above could only pass by coincidence. Show the two hashes differ."""
+        flat, envelope = _real_sectioned_snapshot()
+        assert compute_snapshot_content_hash(envelope) != (
+            compute_snapshot_content_hash(flat)
+        )
+
+    def test_tampering_inside_a_section_is_still_caught(self, tmp_path: Path) -> None:
+        root = self._sectioned_set(tmp_path / "set")
+        path = root / "libthing.so.1.abicheck.json"
+        envelope = json.loads(path.read_text())
+        flat = _flatten(envelope)
+        flat["functions"] = list(flat.get("functions") or []) + [
+            {"name": "smuggled", "mangled_name": "smuggled"}
+        ]
+        path.write_text(json.dumps(_sectionize(flat)), encoding="utf-8")
+        result = validate_precaptured_baseline_set(root)
+        assert not result.ok
+        assert any("self-inconsistent" in e for e in result.errors), result.errors
