@@ -262,7 +262,7 @@ def sync_present_facts(obj: object, *field_names: str) -> None:
         setattr(obj, f"{name}_fact", Fact.present(getattr(obj, name)))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Fact(Generic[T]):
     """A value paired with why we do or don't have it.
 

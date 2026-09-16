@@ -57,7 +57,7 @@ _OMITTED_VAR_DEPRECATED: str | None = cast("str | None", _Omitted())
 _OMITTED_VAR_ACCESS: AccessLevel = cast("AccessLevel", _Omitted())
 
 
-@dataclass
+@dataclass(slots=True)
 class Param:
     name: str
     type: str
@@ -103,7 +103,7 @@ class Param:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class Function:
     name: str  # demangled
     mangled: str  # mangled symbol name
@@ -346,7 +346,7 @@ class Function:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class Variable:
     name: str
     mangled: str

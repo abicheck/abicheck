@@ -117,7 +117,7 @@ class TypeField:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class RecordType:
     """struct / class / union."""
 
@@ -391,7 +391,7 @@ class EnumMember:
     value: int
 
 
-@dataclass
+@dataclass(slots=True)
 class EnumType:
     name: str
     members: list[EnumMember] = field(default_factory=list)
