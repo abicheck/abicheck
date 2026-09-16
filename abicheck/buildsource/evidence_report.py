@@ -42,6 +42,7 @@ the invocation was wrong when the data was. Pinned by
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -420,19 +421,68 @@ def capability_lines(
                 f"  [partial] {label} — evidence covered only part of the selected scope"
             )
         else:
-            detail = row.detail.lower() if row is not None else ""
-            if "failed" in detail or "error" in detail:
-                status = "failed"
-            elif "unsupported" in detail:
-                status = "unsupported"
-            elif "disabled" in detail:
-                status = "disabled"
-            elif "unavailable" in detail or "missing" in detail:
-                status = "unavailable"
-            else:
-                status = "not requested"
-            lines.append(f"  [{status}] {label} — {why_off}")
+            lines.append(f"  [{_not_collected_reason(row)}] {label} — {why_off}")
     return lines
+
+
+#: Ordered (pattern, label) vocabulary for reading *why* a layer was not
+#: collected out of its free-text ``detail``. First match wins, so the order
+#: is the precedence.
+#:
+#: ``CoverageStatus`` has exactly three members (PRESENT/PARTIAL/
+#: NOT_COLLECTED), so the reason a layer was not collected genuinely exists
+#: only as prose today -- there is no structured field to read instead. This
+#: is therefore a deliberate, bounded presentational heuristic over a
+#: human-written string, and it is confined to the *label* on a capability
+#: line: it never reaches a finding, a verdict, an assurance level, or an
+#: exit code, and "not requested" is the conservative default for a detail
+#: that matches nothing.
+#:
+#: Matched on word boundaries rather than as substrings. A plain ``"error"
+#: in detail`` test reads a detail like "completed with no errors" as a
+#: failure, and ``"missing"`` fires on "no missing headers" the same way --
+#: a negated mention is the common shape in this field, not an exotic one.
+_NOT_COLLECTED_REASONS: tuple[tuple[str, str], ...] = (
+    (r"fail(?:ed|ure)?s?|errors?", "failed"),
+    (r"unsupported", "unsupported"),
+    (r"disabled", "disabled"),
+    (r"unavailable|missing|not found|absent", "unavailable"),
+)
+
+#: Negations that precede a keyword and invert it. "completed with no errors"
+#: and "no missing headers" are the shapes this field actually takes; without
+#: this guard both read as a problem the run did not have.
+_NEGATIONS = ("no", "without", "zero")
+
+
+def _not_collected_reason(row: LayerCoverage | None) -> str:
+    """Why a non-PRESENT, non-PARTIAL layer produced nothing.
+
+    See :data:`_NOT_COLLECTED_REASONS` for why this reads prose and what
+    that is and is not allowed to affect.
+    """
+    if row is None:
+        return "not requested"
+    detail = (row.detail or "").lower()
+    for pattern, label in _NOT_COLLECTED_REASONS:
+        for match in re.finditer(rf"\b(?:{pattern})\b", detail):
+            preceding = detail[: match.start()].split()
+            if preceding and preceding[-1] in _NEGATIONS:
+                continue  # "no errors", "no missing headers"
+            return label
+    return "not requested"
+    detail = (row.detail or "").lower()
+    negated = "|".join(_NEGATIONS)
+    for pattern, label in _NOT_COLLECTED_REASONS:
+        # Word-boundary match, skipping an occurrence a negation precedes.
+        if re.search(rf"(?<!\w)(?<!\b(?:{negated}) )(?:{pattern})\b", detail):
+            return label
+    return "not requested"
+    detail = (row.detail or "").lower()
+    for pattern, label in _NOT_COLLECTED_REASONS:
+        if re.search(pattern, detail):
+            return label
+    return "not requested"
 
 
 def diff_embedded_build_source(
