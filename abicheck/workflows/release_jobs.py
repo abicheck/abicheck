@@ -128,20 +128,33 @@ def _release_mem_reserve_gib() -> float:
     """Flat GiB held back for parent-retained and shared-context state.
 
     Floored at 0.0 (never negative, which would *raise* the admission), and
-    an unparsable override falls back to the default.
+    an unparsable *or non-finite* override falls back to the default.
+
+    ``float()`` accepts ``"nan"``, ``"inf"`` and ``"-inf"`` without raising,
+    so ``except ValueError`` alone does not catch them, and each fails in its
+    own way: ``max(0.0, nan)`` is ``0.0`` (every comparison with ``nan`` is
+    false), which silently produces the *zero* reserve this whole change
+    exists to prevent, and ``inf`` drives ``committable`` to ``-inf`` and
+    makes ``int()`` raise ``OverflowError`` in
+    :func:`release_jobs_mem_cap` -- a crash in worker sizing from one
+    malformed environment variable. :func:`_release_mem_utilization` escapes
+    both only incidentally, because its ``0.0 < value <= 1.0`` range check
+    rejects ``nan`` and ``inf`` as a side effect; this one needs the check
+    stated outright (CodeRabbit review).
     """
+    import math
     import os
 
     try:
-        return max(
-            0.0,
-            float(
-                os.environ.get("ABICHECK_RELEASE_MEM_RESERVE_GIB")
-                or _RELEASE_MEM_RESERVE_GIB
-            ),
+        value = float(
+            os.environ.get("ABICHECK_RELEASE_MEM_RESERVE_GIB")
+            or _RELEASE_MEM_RESERVE_GIB
         )
     except ValueError:
         return _RELEASE_MEM_RESERVE_GIB
+    if not math.isfinite(value):
+        return _RELEASE_MEM_RESERVE_GIB
+    return max(0.0, value)
 
 
 def sizing_depth(depth: str | None, *, header_roots: bool) -> str | None:

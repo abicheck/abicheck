@@ -326,6 +326,51 @@ class TestReleaseAdmissionReserve:
             # where a dropped reserve would give 4.
             assert release_jobs.release_jobs_mem_cap("headers") == 3
 
+    def test_a_non_finite_reserve_falls_back_instead_of_zeroing_or_crashing(
+        self, monkeypatch
+    ) -> None:
+        """`nan`/`inf`/`-inf` parse fine and then fail in two different ways.
+
+        `float()` raises no `ValueError` for any of them, so the fallback
+        above does not catch them, and each breaks differently:
+
+        * `nan` -- `max(0.0, nan)` is `0.0`, because every comparison with
+          `nan` is false. That is silently the *zero* reserve this whole
+          change exists to prevent, reached through a typo.
+        * `inf` -- drives `committable` to `-inf`, and `int(-inf)` raises
+          `OverflowError`, so one malformed environment variable crashes
+          worker sizing outright rather than degrading to a default.
+
+        Probed at 19.0 GiB for the same reason as the test above: it is a
+        value where a defaulted reserve (3 workers) and a zeroed one (4) give
+        different answers, so a `nan` silently reaching 0.0 is visible rather
+        than hidden by truncation.
+        """
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_UTILIZATION", raising=False)
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 19.0)
+        for bad in ("nan", "NaN", "inf", "-inf", "Infinity"):
+            monkeypatch.setenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", bad)
+            assert release_jobs._release_mem_reserve_gib() == 1.0, bad
+            # No OverflowError, and the default reserve's answer, not 4.
+            assert release_jobs.release_jobs_mem_cap("headers") == 3, bad
+
+    def test_a_non_finite_utilization_also_falls_back(self, monkeypatch) -> None:
+        """The sibling knob, asserted rather than left to a happy accident.
+
+        `_release_mem_utilization` rejects `nan`/`inf` today only as a side
+        effect of its `0.0 < value <= 1.0` range check. That is correct but
+        incidental, so it gets its own assertion: a later refactor that
+        replaces the range check with an `isinstance`/positive test would
+        otherwise reintroduce the same class of bug silently.
+        """
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", raising=False)
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 19.0)
+        for bad in ("nan", "inf", "-inf"):
+            monkeypatch.setenv("ABICHECK_RELEASE_MEM_UTILIZATION", bad)
+            assert release_jobs.release_jobs_mem_cap("headers") == 3, bad
+
     def test_a_negative_reserve_is_floored_rather_than_raising_admission(
         self, monkeypatch
     ) -> None:

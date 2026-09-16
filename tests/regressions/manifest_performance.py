@@ -341,7 +341,11 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # come out of the remaining 1.17 GiB.
         fixed_by=(1320,),
         seed_tests=("tests/test_cli_compare_release_jobs_memory.py",),
-        public_surfaces=("cli",),
+        # Deliberately empty: the seed test drives
+        # `_compare_release_libraries` and the sizing helpers directly and
+        # never builds a `CliRunner`, so it does not meet the schema's bar
+        # for claiming the `cli` surface (CodeRabbit review).
+        public_surfaces=(),
         axes={
             "depth": ("binary", "headers", "build", "source"),
             "probe": ("unreadable", "below-one-budget", "typical", "large"),
