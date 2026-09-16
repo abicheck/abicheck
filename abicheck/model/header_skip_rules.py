@@ -135,16 +135,42 @@ def _compile_pattern(value: str) -> re.Pattern[str]:
     """
     out: list[str] = []
     escaped = False
+    # Inside an unescaped ``[...]`` class, ``*`` and ``?`` are already
+    # literal, so translating them corrupts the class both ways: ``[?]``
+    # became ``[.]`` (matching a dot, missing the ``?`` it names) and
+    # ``[*]`` became ``[.*]`` (matching a dot *or* an asterisk). CodeRabbit
+    # review -- the same "translate everywhere" shortcut that corrupted
+    # escapes, one construct further in.
+    in_class = False
+    # Characters consumed in the current class, ignoring a leading ``^``.
+    # A ``]`` in first position is a literal ``]``, not the close.
+    class_len = 0
     for ch in value:
         if escaped:
             out.append(ch)
             escaped = False
+            if in_class:
+                class_len += 1
             continue
         if ch == "\\":
             out.append(ch)
             escaped = True
             continue
-        if ch == "*":
+        if in_class:
+            if ch == "^" and class_len == 0:
+                out.append(ch)
+                continue
+            if ch == "]" and class_len > 0:
+                in_class = False
+            else:
+                class_len += 1
+            out.append(ch)
+            continue
+        if ch == "[":
+            in_class = True
+            class_len = 0
+            out.append(ch)
+        elif ch == "*":
             out.append(".*")
         elif ch == "?":
             out.append(".")

@@ -238,6 +238,58 @@ class TestPatternRules:
         assert rule.matches("/inc/mkl*.h")
         assert not rule.matches("/inc/mkl_dfti.h")
 
+    @pytest.mark.parametrize(
+        ("pattern", "matches", "does_not_match"),
+        [
+            ("mkl_[?].h", "/inc/mkl_?.h", "/inc/mkl_a.h"),
+            ("mkl_[*].h", "/inc/mkl_*.h", "/inc/mkl_a.h"),
+            ("mkl_[?*].h", "/inc/mkl_*.h", "/inc/mkl_a.h"),
+        ],
+    )
+    def test_wildcards_inside_a_character_class_stay_literal(
+        self, pattern: str, matches: str, does_not_match: str
+    ) -> None:
+        """Inside ``[...]`` a ``*`` or ``?`` is already literal.
+
+        Translating them there corrupted the class in both directions
+        (CodeRabbit review): ``[?]`` became ``[.]``, which matched a dot and
+        missed the ``?`` the rule names, and ``[*]`` became ``[.*]``, which
+        matched a dot *or* an asterisk. Either way the rule excludes a
+        header it was not pointed at and keeps one it was -- a silent,
+        wrong narrowing.
+        """
+        rule = _r(pattern)
+        assert rule.matches(matches)
+        assert not rule.matches(does_not_match)
+
+    def test_a_class_never_matches_the_dot_it_used_to_become(self) -> None:
+        """The specific corruption, pinned: ``[?]`` must not match a dot."""
+        assert not _r("mkl_[?].h").matches("/inc/mkl_..h")
+        assert not _r("mkl_[*].h").matches("/inc/mkl_..h")
+
+    @pytest.mark.parametrize(
+        ("pattern", "header"),
+        [
+            # `]` in first position is a literal `]`, not the class close.
+            ("[]]x.h", "/inc/]x.h"),
+            ("[^]]x.h", "/inc/ax.h"),
+            # An escaped bracket does not open a class, so the `?` after it
+            # is still a wildcard.
+            (r"a\[?.h", "/inc/a[b.h"),
+        ],
+    )
+    def test_class_boundary_edge_cases(self, pattern: str, header: str) -> None:
+        """The negative control on the class tracking itself: getting the
+        boundary wrong would silently change what everything after it
+        means."""
+        assert _r(pattern).matches(header)
+
+    def test_a_wildcard_outside_a_class_still_translates(self) -> None:
+        """The other negative control: the class tracking must not disable
+        wildcard translation everywhere."""
+        assert _r("mkl_*.h").matches("/inc/mkl_dfti.h")
+        assert _r("[abc]?.h").matches("/inc/ax.h")
+
     def test_a_separator_inside_a_pattern_is_written_forward(self) -> None:
         r"""The documented consequence: inside a pattern ``\`` is the escape
         character, so a path separator is spelled ``/``. The operand path is
