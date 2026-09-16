@@ -18,11 +18,12 @@ worse than leaving it listed.
 |---|---|
 | abicheck base (`main` at implementation time) | `dc8c2dd43cf7e9ed4f4b4cda439cd03f87a63205` |
 | abicheck branch | `claude/clever-meitner-2ja05m` |
-| abicheck PR | **Not yet opened at the time of writing — see the note below.** |
+| Implementation commit | `3a16ce8f` (branch head at the time of writing) |
+| abicheck PR | [abicheck/abicheck#1315](https://github.com/abicheck/abicheck/pull/1315) |
 | PVXS consumer reviewed | `napetrov/pvxs` PR #2, head `65d3f8d1416b2a916188500c952628029d631713` (fetched fresh; unchanged from the previous review's anchor) |
 
-**Status: unmerged.** There is no merge SHA and none is predicted here. Pin
-the abicheck Actions to the merge commit once a maintainer merges the PR; the
+**Status: open, unmerged.** There is no merge SHA and none is predicted here.
+Pin the abicheck Actions to the merge commit once a maintainer merges the PR; the
 `@<pinned-sha>` placeholders below are literal placeholders, not a value to
 guess. Do not begin the PVXS deletions in §3 before that.
 
