@@ -142,9 +142,9 @@ routing" states the rule.
 
 `frontends/action/` holds everything `actions/report` and
 `actions/verify-source-run` *decide* (`report_publication.py`,
-`run_selection.py`, `cli.py` — each module's docstring is the detail), so
-their shells keep only argument marshalling and the API call. Two rules,
-both enforced by `tests/test_action_report_contract.py`: **no network I/O
-here**, and **no analysis anywhere in either Action** — the second is what
-makes them safe in a privileged `workflow_run` job. See
-`docs/use/fork-pr-reporting.md`.
+`run_selection.py`, `cli.py`), so their shells keep only argument
+marshalling and the API call. Three rules, all enforced by tests: **no
+network I/O here**, **no analysis anywhere in either Action** (what makes
+them safe in a privileged `workflow_run` job), and **no inline `python -`
+in a shell** — a value crossing that boundary goes through `emit-fields`,
+which owns the record separator (`print` emits `\r\n` on Windows).

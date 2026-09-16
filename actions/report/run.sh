@@ -156,17 +156,7 @@ fi
   read -r PLAN_COMMENT_ID
   read -r PLAN_REASON
   read -r BODY_BYTES
-} < <(python - "$PLAN" <<'PYEOF'
-import json
-import sys
-
-plan = json.load(open(sys.argv[1], encoding="utf-8"))
-print(plan["action"])
-print(plan["comment_id"] if plan["comment_id"] is not None else "")
-print(plan["skipped_reason"])
-print(plan["body_bytes"])
-PYEOF
-)
+} < <(python -m abicheck.frontends.action.cli emit-fields "$PLAN" action comment_id skipped_reason body_bytes)
 
 _out "body-path" "$BODY"
 _out "body-bytes" "$BODY_BYTES"
@@ -211,7 +201,7 @@ else
   fi
 fi
 
-COMMENT_URL="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("html_url",""))' "$RESPONSE" 2>/dev/null || true)"
+COMMENT_URL="$(python -m abicheck.frontends.action.cli emit-fields --tolerant "$RESPONSE" html_url 2>/dev/null || true)"
 echo "abicheck report: ${PLAN_ACTION}d comment on $REPOSITORY#$PR_NUMBER."
 _out "posted" "true"
 _out "comment-url" "$COMMENT_URL"

@@ -49,3 +49,17 @@
   since the comparison layer explicitly declined to say whether it was new.
   The renderer reclassifies nothing — it reads the state the comparison
   established (ADR-072 D1).
+
+- **A value handed from Python to either Action's shell keeps exactly its own
+  bytes.** Both publishers read values out of JSON documents through inline
+  `python - <<PYEOF` heredocs whose `print` goes through a `TextIOWrapper`,
+  which rewrites `\n` to the host's `os.linesep` — so on a Windows runner
+  every record arrived with a trailing `\r` that `read -r` does not strip.
+  `[[ "$PLAN_ACTION" == "skip" ]]` was false for a plan whose action was
+  exactly `skip`, and `artifact_id`/`pr_number`/`comment_id` carried a stray
+  byte into the GitHub API paths they are interpolated into. All five
+  emitters now route through one `emit-fields` command that writes through
+  the binary layer, refuses a value containing a line break (the framing is
+  positional, so one would forge a record and shift every later field), and
+  always emits one record per requested field so an absent value cannot
+  silently shorten the read.

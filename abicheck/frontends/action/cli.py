@@ -31,6 +31,7 @@ comparison, no compiler, no build query.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import click
@@ -403,6 +404,125 @@ def extract_artifact_cmd(
         click.echo(f"abicheck: refused artifact — {exc}", err=True)
         raise SystemExit(EXIT_REFUSED) from exc
     click.echo(f"abicheck: extracted {len(written)} file(s)")
+
+
+# ---------------------------------------------------------------------------
+
+
+#: What a field worth no value emits. The shells read these records with
+#: ``read -r``, which cannot distinguish "empty" from "absent", so both
+#: deliberately arrive as one empty line rather than as a missing record --
+#: a dropped record would shift every field after it onto the wrong variable.
+_ABSENT = ""
+
+
+def _shell_field(value: object) -> str:
+    """Render one JSON value as the single line a shell will read back.
+
+    ``None`` and a missing key are the same answer here (see ``_ABSENT``),
+    and a real boolean becomes the ``true``/``false`` a shell test compares
+    against rather than Python's capitalised ``repr``.
+    """
+    if value is None:
+        return _ABSENT
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+@action_cli.command("emit-fields")
+@click.argument("document", type=click.Path(exists=False, path_type=Path))
+@click.argument("fields", nargs=-1, required=True)
+@click.option(
+    "--tolerant",
+    is_flag=True,
+    help="Emit empty values instead of failing when DOCUMENT cannot be read.",
+)
+def emit_fields_cmd(document: Path, fields: tuple[str, ...], tolerant: bool) -> None:
+    """Print DOCUMENT's FIELDS as newline-delimited records, one per field.
+
+    The one supported way for either Action's shell to read a value out of a
+    JSON document this package wrote. It exists as a command rather than as
+    an inline ``python -`` heredoc in each script because the record
+    separator is a contract between two languages, and an inline copy is a
+    place for that contract to be restated wrongly -- which is exactly what
+    happened: Python's text-mode ``print`` emits ``\r\n`` on Windows, while
+    ``read -r`` strips only the ``\n``. Every value a shell read that way
+    carried a trailing carriage return, so ``[[ "$PLAN_ACTION" == "skip" ]]``
+    was false for a plan that said ``skip``, and an id destined for an API
+    path (``artifact_id``, ``pr_number``) carried a stray byte into the URL.
+
+    So the newline is written explicitly and never translated, and a value
+    holding one is refused rather than emitted: the framing is positional,
+    so a value carrying ``\n`` or ``\r`` would forge an extra record and
+    every later field would land on the wrong shell variable.
+    """
+    try:
+        raw = json.loads(document.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        if not tolerant:
+            raise
+        raw = {}
+    data = raw if isinstance(raw, dict) else {}
+    rendered = []
+    for field in fields:
+        value = _shell_field(data.get(field))
+        if "\n" in value or "\r" in value:
+            raise click.ClickException(
+                f"{document}: field {field!r} contains a line break and cannot be "
+                "passed to the shell as one record."
+            )
+        rendered.append(value)
+    payload = "".join(f"{line}\n" for line in rendered).encode("utf-8")
+    # Write through the *binary* layer. `print`, `click.echo` and even
+    # `sys.stdout.write` all go through a `TextIOWrapper` that rewrites
+    # "\n" to `os.linesep` -- which is the whole bug, so a text write is
+    # not a fix for it, it is the same defect spelled differently.
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        buffer.write(payload)
+        buffer.flush()
+        return
+    # No binary layer at all (a capturing stand-in, not the real process).
+    # Turn the translation off rather than writing through it.
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(newline="")
+    sys.stdout.write(payload.decode("utf-8"))
+
+
+@action_cli.command("flatten-pages")
+@click.argument("raw", type=click.Path(exists=True, path_type=Path))
+@click.argument("out", type=click.Path(path_type=Path))
+def flatten_pages_cmd(raw: Path, out: Path) -> None:
+    """Flatten ``gh api --paginate``'s concatenated arrays in RAW into OUT.
+
+    ``--paginate`` emits one JSON array per page back to back, which is not
+    a JSON document, so this walks them with a raw decoder and concatenates
+    the members. Lives here rather than inline in the shell for the same
+    reason ``emit-fields`` does: the Actions' shells marshal arguments and
+    call the API, and every decision they rest on is importable Python that
+    a test can reach without credentials (ADR-073).
+
+    A page that is not an array is appended as a single member rather than
+    dropped -- the caller decides what an unexpected shape means, and
+    silently discarding it here would look to them like an empty page.
+    """
+    text = raw.read_text(encoding="utf-8")
+    decoder = json.JSONDecoder()
+    pages: list[object] = []
+    index = 0
+    while index < len(text):
+        while index < len(text) and text[index].isspace():
+            index += 1
+        if index >= len(text):
+            break
+        value, index = decoder.raw_decode(text, index)
+        if isinstance(value, list):
+            pages.extend(value)
+        else:
+            pages.append(value)
+    out.write_text(json.dumps(pages), encoding="utf-8")
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised via subprocess

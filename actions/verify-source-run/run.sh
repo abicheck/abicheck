@@ -80,14 +80,7 @@ gh api "repos/$REPOSITORY/actions/runs/$RUN_ID" > "$RUN_JSON" 2>"$WORK/run.err" 
 # The run's own head SHA, read with a JSON parser rather than a grep. Every
 # later request is built from this value, so it is also shape-checked: an
 # API response that somehow carried a non-SHA here must not reach a URL.
-RUN_HEAD_SHA="$(python - "$RUN_JSON" <<'PYEOF'
-import json
-import sys
-
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-print(str(data.get("head_sha") or ""))
-PYEOF
-)"
+RUN_HEAD_SHA="$(python -m abicheck.frontends.action.cli emit-fields "$RUN_JSON" head_sha)"
 [[ "$RUN_HEAD_SHA" =~ ^[0-9a-fA-F]{7,64}$ ]] \
   || _fail "run $RUN_ID reports no usable head SHA."
 
@@ -99,26 +92,7 @@ gh api --paginate "repos/$REPOSITORY/commits/$RUN_HEAD_SHA/pulls" \
   --jq '.' > "$WORK/pulls.raw" 2>"$WORK/pulls.err" \
   || _fail "could not resolve the pull request for $RUN_HEAD_SHA: $(tr '\n' ' ' < "$WORK/pulls.err")"
 # `--paginate` concatenates one array per page; flatten them into one.
-python - "$WORK/pulls.raw" "$PULLS_JSON" <<'PYEOF'
-import json
-import sys
-
-raw = open(sys.argv[1], encoding="utf-8").read()
-decoder = json.JSONDecoder()
-out = []
-index = 0
-while index < len(raw):
-    while index < len(raw) and raw[index].isspace():
-        index += 1
-    if index >= len(raw):
-        break
-    value, index = decoder.raw_decode(raw, index)
-    if isinstance(value, list):
-        out.extend(value)
-    else:
-        out.append(value)
-json.dump(out, open(sys.argv[2], "w", encoding="utf-8"))
-PYEOF
+python -m abicheck.frontends.action.cli flatten-pages "$WORK/pulls.raw" "$PULLS_JSON"
 
 VERIFY_ARGS=(
   verify-run
@@ -168,16 +142,10 @@ gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/artifacts" > "$ARTIFACTS_JSON" \
 VERIFY_ARGS+=(--artifacts-json "$ARTIFACTS_JSON")
 
 if ! python -m abicheck.frontends.action.cli "${VERIFY_ARGS[@]}"; then
-  CODE="$(python - "$RESULT_JSON" <<'PYEOF'
-import json
-import sys
-
-try:
-    print(json.load(open(sys.argv[1], encoding="utf-8")).get("code", ""))
-except Exception:  # noqa: BLE001 - the refusal message is the real signal
-    print("")
-PYEOF
-)"
+  # `|| true`: this runs on the refusal path, where `_fail`'s own message is
+  # the real signal. A result document we cannot read here must not preempt
+  # it under `set -e` and leave the step failing with nothing said.
+  CODE="$(python -m abicheck.frontends.action.cli emit-fields --tolerant "$RESULT_JSON" code || true)"
   _out "refusal-code" "$CODE"
   _fail "refused to publish from run $RUN_ID (${CODE:-unknown})."
 fi
@@ -188,18 +156,7 @@ fi
   read -r VERIFIED_TESTED_SHA
   read -r FROM_FORK
   read -r ARTIFACT_ID
-} < <(python - "$RESULT_JSON" <<'PYEOF'
-import json
-import sys
-
-result = json.load(open(sys.argv[1], encoding="utf-8"))
-print(result.get("pr_number", ""))
-print(result.get("pr_head_sha", ""))
-print(result.get("tested_sha", ""))
-print("true" if result.get("from_fork") else "false")
-print(result.get("artifact_id", ""))
-PYEOF
-)
+} < <(python -m abicheck.frontends.action.cli emit-fields "$RESULT_JSON" pr_number pr_head_sha tested_sha from_fork artifact_id)
 
 [[ "$ARTIFACT_ID" =~ ^[0-9]+$ ]] \
   || _fail "the verified result names no downloadable artifact id."
@@ -226,7 +183,10 @@ _out "verified" "true"
 _out "pr-number" "$PR_NUMBER"
 _out "pr-head-sha" "$PR_HEAD_SHA"
 _out "tested-sha" "$VERIFIED_TESTED_SHA"
-_out "from-fork" "$FROM_FORK"
+# `${:-false}` so a result document that resolved no pull request still
+# publishes a boolean here, which is what this output promised before the
+# field emitter started answering "no value" for an absent key.
+_out "from-fork" "${FROM_FORK:-false}"
 _out "artifact-path" "$DESTINATION"
 _out "refusal-code" ""
 echo "abicheck verify-source-run: run $RUN_ID verified for pull request #$PR_NUMBER."
