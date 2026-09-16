@@ -169,6 +169,7 @@ def build_compare_dry_run_result(
     new_effective = compose_sided_paths(headers, new_headers_only)
 
     def _fmt(paths: list[Path]) -> str:
+        """One side's header list as the receipt renders it."""
         return ", ".join(str(h) for h in paths)
 
     if old_effective == new_effective:

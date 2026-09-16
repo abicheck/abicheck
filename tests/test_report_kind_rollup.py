@@ -285,6 +285,30 @@ class TestPerLibraryBreakdown:
         r = rollups[0]
         assert sum(n for _, n in r.counts_by_library) == r.count
 
+    def test_the_counts_sum_to_the_count_with_mixed_attribution(self) -> None:
+        """The invariant, on the input that broke it.
+
+        Dropping unattributed findings let a headline of 61 sit above a
+        breakdown totalling 60 -- worse than no breakdown, because a reader
+        cannot tell an omission from a bug (CodeRabbit review).
+        """
+        _, rollups = roll_up_large_kinds(
+            self._changes({"liba.so": 30, "libb.so": 30, None: 1})
+        )
+        r = rollups[0]
+        assert r.count == 61
+        assert sum(n for _, n in r.counts_by_library) == r.count
+        assert ("(unattributed)", 1) in r.counts_by_library
+
+    def test_one_library_plus_unattributed_still_shows_both(self) -> None:
+        """Two buckets is a real breakdown even when one is the unattributed
+        one -- it is exactly the case where a reader needs to know some
+        findings could not be placed."""
+        _, rollups = roll_up_large_kinds(self._changes({"liba.so": 30, None: 1}))
+        r = rollups[0]
+        assert r.counts_by_library == (("liba.so", 30), ("(unattributed)", 1))
+        assert sum(n for _, n in r.counts_by_library) == r.count
+
     def test_a_single_library_run_is_unchanged(self) -> None:
         """The negative control and the compatibility claim: one library, or
         no attribution at all, reads exactly as it did before."""

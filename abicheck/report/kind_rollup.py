@@ -136,16 +136,28 @@ def section_is_gating(severity_level: object | None) -> bool:
     return str(value).lower() == "error"
 
 
+#: The bucket an unattributed finding is counted under. A real library name
+#: can never collide with it: this spelling is not a filename.
+UNATTRIBUTED_LIBRARY = "(unattributed)"
+
+
 def _counts_by_library(group: list[Change]) -> tuple[tuple[str, int], ...]:
     """``(library, count)`` for a multi-library group, descending by count.
 
-    Empty when the group carries no library attribution, or when every
-    finding in it came from the same library -- in both cases the breakdown
+    **The counts sum to the rollup's own count.** Findings carrying no
+    library are counted under :data:`UNATTRIBUTED_LIBRARY` rather than
+    dropped (CodeRabbit review): filtering them out let a headline of 61
+    sit above a breakdown totalling 60, which is worse than no breakdown --
+    a reader cannot tell whether the missing one is an omission or a bug,
+    and the whole point of the breakdown is to say where the flood is.
+
+    Empty when the group carries no attribution at all, or when every
+    finding came from the same library -- in both cases the breakdown
     restates what the surrounding report already says, and a single-library
     run must read exactly as it did before this existed.
     """
-    counts: Counter[str] = Counter(c.library for c in group if c.library)
-    if len(counts) < 2:
+    counts: Counter[str] = Counter(c.library or UNATTRIBUTED_LIBRARY for c in group)
+    if counts.keys() == {UNATTRIBUTED_LIBRARY} or len(counts) < 2:
         return ()
     return tuple(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
 

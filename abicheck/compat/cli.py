@@ -92,9 +92,9 @@ from .multi_library_run import (
 from .run_inputs import (
     _emit_compat_info_notes,
     _load_compat_inputs,
-    descriptor_header_universe,
     effective_skip_rules,
     record_descriptor_skips,
+    resolve_and_narrow_headers,
 )
 from .xml_report import write_xml_report
 
@@ -356,11 +356,12 @@ def compat_dump_cmd(
     # same reason: a descriptor is the project's recorded default, not an
     # override of what the user explicitly asked for.
     skip_rules_for_dump = desc.skip_rules()
-    headers_for_dump = _resolve_headers_from_list(
-        None,
-        None,
-        desc.headers,
-        skip_rules=skip_rules_for_dump,
+    # Resolved once and then narrowed, so the recorded universe below is the
+    # list the rules really ran against -- the same invariant as
+    # `_snapshot_from_compat_input`, stated the same way rather than relying
+    # on this path happening to have no `-headers-list`/`-header`.
+    dump_header_universe, headers_for_dump = resolve_and_narrow_headers(
+        desc, skip_rules_for_dump
     )
     combined_gcc_options = " ".join(
         opt for opt in (_descriptor_compile_options(desc), gcc_options) if opt
@@ -387,7 +388,7 @@ def compat_dump_cmd(
     # a complete surface, and is then compared against a full dump as though
     # the missing declarations had been removed.
     snap = record_descriptor_skips(
-        snap, skip_rules_for_dump, quiet, descriptor_header_universe(desc)
+        snap, skip_rules_for_dump, quiet, dump_header_universe
     )
 
     # Override library name to match -lib flag
@@ -1198,11 +1199,8 @@ def _snapshot_from_compat_input(
     # descriptor and `libs[0]` is the only entry.
     so = lib_override if lib_override is not None else desc.libs[0]
     effective_rules = effective_skip_rules(desc, sorted(skip_headers_set))
-    hdrs = _resolve_headers_from_list(
-        headers_list_path,
-        single_header,
-        desc.headers,
-        skip_rules=effective_rules,
+    header_universe, hdrs = resolve_and_narrow_headers(
+        desc, effective_rules, headers_list_path, single_header
     )
     descriptor_options = _descriptor_compile_options(desc)
     # Descriptor flags FIRST, the command line's own `-gcc-options` last.
@@ -1247,9 +1245,7 @@ def _snapshot_from_compat_input(
     # either -- declarations omitted from NEW came back as removals and a
     # breaking verdict (Codex review). Sorted so the record does not depend
     # on set iteration order.
-    snap = record_descriptor_skips(
-        snap, effective_rules, quiet, descriptor_header_universe(desc)
-    )
+    snap = record_descriptor_skips(snap, effective_rules, quiet, header_universe)
     return grant_live_source_licence(snap), desc.version
 
 

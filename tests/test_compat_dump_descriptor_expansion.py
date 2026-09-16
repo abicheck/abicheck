@@ -506,3 +506,82 @@ class TestOnlyTheAchievedNarrowingIsRecorded:
         mismatch = check_contracts_comparable(native, snap, diagnostic=True)
         assert "different rules" in mismatch.reason
         assert "glob" in mismatch.reason and "abicc" in mismatch.reason
+
+
+class TestTheRecordedUniverseIncludesTheCliSuppliedHeaders:
+    """A skip rule matching only a `-header`/`-headers-list` input is still
+    an achieved narrowing.
+
+    The universe the rules are *recorded* against must be the one they were
+    *applied* to. It was the descriptor's `<headers>` alone, so a rule whose
+    only match arrived via the CLI was reported as matching nothing and its
+    narrowing went unrecorded (CodeRabbit review) -- and an unrecorded
+    narrowing is exactly what lets the ADR-050 comparability gate accept an
+    asymmetric pair, the failure `record_descriptor_skips` exists to
+    prevent.
+
+    Driven through `compat check`, because `-header` is only wired there.
+    """
+
+    def _run(self, tree: Path, skip: str, extra_header: Path):
+        from abicheck.model import AbiSnapshot
+
+        desc = tree / "d.xml"
+        desc.write_text(
+            "<version>1.0</version>\n<headers>\n  include\n</headers>\n"
+            f"<libs>\n  libs\n</libs>\n<skip_headers>\n  {skip}\n</skip_headers>\n"
+        )
+        captured: dict = {}
+
+        def _fake_dump(path, **kwargs):
+            captured["headers"] = list(kwargs.get("headers") or [])
+            return AbiSnapshot(library="libfoo.so", version="1.0")
+
+        with mock.patch("abicheck.compat.cli.dump", side_effect=_fake_dump):
+            result = CliRunner().invoke(
+                compat_group,
+                [
+                    "check",
+                    "-lib",
+                    "foo",
+                    "-old",
+                    str(desc),
+                    "-new",
+                    str(desc),
+                    "-header",
+                    str(extra_header),
+                ],
+            )
+        return captured, result.output
+
+    def test_a_rule_matching_only_a_cli_header_is_not_called_unmatched(
+        self, tree: Path
+    ) -> None:
+        extra = tree / "extra.h"
+        extra.write_text("int extra_decl(int);\n")
+        captured, output = self._run(tree, "extra.h", extra)
+        # It really excluded the header ...
+        assert "extra.h" not in [h.name for h in captured["headers"]]
+        # ... so it must not be reported as having matched nothing.
+        assert "matched no header" not in output
+
+    def test_the_descriptors_own_headers_are_still_in_the_universe(
+        self, tree: Path
+    ) -> None:
+        """The negative control: widening the universe must not stop a rule
+        that matches a `<headers>` entry from being recognised."""
+        extra = tree / "extra.h"
+        extra.write_text("int extra_decl(int);\n")
+        captured, output = self._run(tree, "b.h", extra)
+        assert sorted(h.name for h in captured["headers"]) == ["a.h", "extra.h"]
+        assert "matched no header" not in output
+
+    def test_a_rule_matching_nothing_anywhere_is_still_reported(
+        self, tree: Path
+    ) -> None:
+        """And the guard stays live: widening the universe must not silence
+        a genuinely unreachable rule."""
+        extra = tree / "extra.h"
+        extra.write_text("int extra_decl(int);\n")
+        _, output = self._run(tree, "nosuch.h", extra)
+        assert "matched no header" in output

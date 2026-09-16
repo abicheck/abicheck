@@ -105,6 +105,7 @@ def _normalize(text: str) -> str:
 
 
 def _is_pattern(value: str) -> bool:
+    """Whether *value* is a pattern rule rather than a name or path one."""
     return bool(_PATTERN_METACHARACTERS & set(value))
 
 
@@ -117,9 +118,32 @@ def _compile_pattern(value: str) -> re.Pattern[str]:
     character class or alternation work. A bare ``*`` at the start would
     otherwise be an invalid quantifier, so the translation happens before
     compilation rather than after a failed attempt.
+
+    **The pattern source is not separator-normalized** (CodeRabbit review).
+    It used to be, and that silently corrupted every regex escape: ``\\.``
+    became ``/.`` and ``[\\w]`` became ``[/w]``, so ``mkl_.*\\.h``
+    compiled to ``mkl_..*/.h`` and matched nothing at all -- while this
+    docstring claimed the opposite. Inside a pattern ``\\`` is the regex
+    escape character, so a path separator must be written ``/`` here; the
+    operand path is normalized to ``/`` before matching, and the ``name``
+    and ``path`` rule classes (the ones a separator normally appears in)
+    still accept either separator.
+
+    An escaped ``\\*`` or ``\\?`` therefore stays a literal asterisk or
+    question mark rather than becoming a wildcard, which is what a regex
+    author writing the escape means.
     """
     out: list[str] = []
-    for ch in _normalize(value):
+    escaped = False
+    for ch in value:
+        if escaped:
+            out.append(ch)
+            escaped = False
+            continue
+        if ch == "\\":
+            out.append(ch)
+            escaped = True
+            continue
         if ch == "*":
             out.append(".*")
         elif ch == "?":

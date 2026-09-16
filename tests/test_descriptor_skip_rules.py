@@ -209,6 +209,41 @@ class TestPatternRules:
         assert _r("x[0-9].h").matches("/inc/x3.h")
         assert not _r("x[0-9].h").matches("/inc/xa.h")
 
+    @pytest.mark.parametrize(
+        ("pattern", "header"),
+        [
+            (r"mkl_.*\.h", "/inc/mkl_dfti.h"),
+            (r"[\w]+\.h", "/inc/mkl_dfti.h"),
+            (r"mkl_\w+\.h", "/inc/mkl_dfti.h"),
+            (r"(fftw|mkl)_.*\.h", "/inc/mkl_dfti.h"),
+        ],
+    )
+    def test_regex_escapes_survive_compilation(self, pattern: str, header: str) -> None:
+        r"""A backslash escape is a regex escape, not a path separator.
+
+        The pattern source used to be separator-normalized, which turned
+        ``\.`` into ``/.`` and ``[\w]`` into ``[/w]`` -- so ``mkl_.*\.h``
+        compiled to ``mkl_..*/.h`` and matched nothing at all, while the
+        module docstring claimed every regex construct passed through
+        (CodeRabbit review). The pre-existing test here dodged this by
+        spelling its dot as ``[.]``, which is precisely a test written to
+        agree with the implementation rather than the contract.
+        """
+        assert _r(pattern).matches(header)
+
+    def test_an_escaped_wildcard_stays_literal(self) -> None:
+        r"""The other half of honoring escapes: ``\*`` is an asterisk, not a
+        wildcard, which is what a regex author writing the escape means."""
+        rule = _r(r"mkl\*\.h")
+        assert rule.matches("/inc/mkl*.h")
+        assert not rule.matches("/inc/mkl_dfti.h")
+
+    def test_a_separator_inside_a_pattern_is_written_forward(self) -> None:
+        r"""The documented consequence: inside a pattern ``\`` is the escape
+        character, so a path separator is spelled ``/``. The operand path is
+        normalized to ``/`` before matching, so this always works."""
+        assert _r("fftw/.*[.]h").matches("C:\\mkl\\fftw\\fftw.h")
+
     def test_a_pattern_with_a_separator_is_matched_against_the_whole_path(
         self,
     ) -> None:

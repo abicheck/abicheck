@@ -52,6 +52,7 @@ from ..model.header_exclusion_record import (
 from ..model.header_skip_rules import (
     HeaderSkipRule,
     achieved_exclusion_patterns,
+    apply_skip_rules,
     compile_skip_rules,
 )
 from ..serialization import load_snapshot
@@ -285,6 +286,36 @@ def descriptor_header_universe(desc: CompatDescriptor) -> list[Path]:
     the expanded list, not the declared one.
     """
     return expand_descriptor_headers(desc.headers)
+
+
+def resolve_and_narrow_headers(
+    desc: CompatDescriptor,
+    rules: Sequence[HeaderSkipRule],
+    headers_list_path: Path | None = None,
+    single_header: str | None = None,
+) -> tuple[list[Path], list[Path]]:
+    """``(universe, narrowed)`` -- the operand list before and after *rules*.
+
+    Returned as a pair, and resolved once, because the universe the rules
+    are *recorded* against has to be the same one they were *applied* to.
+    Deriving the record from the descriptor's ``<headers>`` alone meant a
+    rule whose only match arrived via ``-headers-list`` or ``-header`` was
+    reported as matching nothing and its achieved narrowing went unrecorded
+    (CodeRabbit review) -- and an unrecorded narrowing is precisely what
+    lets the comparability gate accept an asymmetric pair, the failure
+    :func:`record_descriptor_skips` exists to prevent.
+
+    Lives here rather than in ``compat.cli`` because it is the input half
+    of the same question :func:`record_descriptor_skips` answers, and
+    keeping the two together is what stops a third caller doing one without
+    the other.
+    """
+    from ._helpers import _resolve_headers_from_list
+
+    universe = _resolve_headers_from_list(
+        headers_list_path, single_header, desc.headers
+    )
+    return universe, apply_skip_rules(universe, rules)
 
 
 def warn_unreachable_skip_rules(
