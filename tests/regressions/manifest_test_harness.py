@@ -217,4 +217,57 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="tests.fixture_fabricates_a_state_the_types_forbid",
+        invariant=(
+            "A test fixture may not construct a value in a state the "
+            "production type forbids, because a reader who instruments a run "
+            "through it cannot tell the fabrication from production "
+            "behaviour. `checker_types.Change.symbol` is annotated `str` and "
+            "every producer under `abicheck/` honours it -- the one kind with "
+            'no single symbol to name passes the `"<surface>"` sentinel. '
+            "Three fixtures nonetheless passed `symbol=None`, and `mypy` "
+            "never sees `tests/`, so nothing said so. Instrumenting "
+            "`report/review_groups.py` during one of those tests surfaced a "
+            "`None` symbol, which was read as evidence about the detector: "
+            "the result was a defensive fallback, a test asserting an "
+            "unreachable state, and a `known-gaps.md` entry recording a "
+            "product defect that does not exist. Typechecking the suite is "
+            "not the available remedy (~26,800 errors against an unannotated "
+            "tree); the guard is a narrow structural gate plus an oracle that "
+            "is Python's own argument binding rather than the gate's rule "
+            "restated, so a mis-indexed positional or a forgotten "
+            "keyword-only parameter disagrees with it immediately."
+        ),
+        fixed_by=(1304,),
+        seed_tests=("tests/test_change_symbol_typed_gate.py",),
+        # `()` per the field's own rule: the seed test parses source with
+        # `ast` and invokes no CLI, no `abicheck.service`, no real run.
+        public_surfaces=(),
+        axes={
+            "call_shape": (
+                "positional-symbol",
+                "keyword-symbol",
+                "keyword-only-callable",
+                "starred-args",
+                "python-rejects-the-call",
+            ),
+            "callable": ("Change", "make_change"),
+            "half": ("synthesized-call-sweep", "live-tree-cleanliness"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The gate names two callables and one parameter. It is "
+                    "the one fabricated value that has already misled a "
+                    "reader, not a general rule -- every other `tests/` "
+                    "construction of a type-forbidden state is still "
+                    "unguarded, and the general remedy (typechecking the "
+                    "suite) stays out of reach while the suite is "
+                    "unannotated."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )

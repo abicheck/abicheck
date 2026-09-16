@@ -2627,6 +2627,77 @@ def _assignment_targets_and_value(
     return [node.target], node.value
 
 
+def change_symbol_none_sites(tree: ast.AST) -> list[tuple[str, int]]:
+    """Every `Change(...)`/`make_change(...)` call binding `symbol` to `None`.
+
+    Split out from the check below so the rule can be stated against
+    synthesized sources rather than only against whatever the live tree
+    happens to contain today (`tests/test_change_symbol_typed_gate.py`).
+
+    `symbol` is `Change`'s second positional parameter and a keyword on both
+    callables; a keyword wins over a positional because that is what Python
+    itself would do with the same call text.
+    """
+    sites: list[tuple[str, int]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = getattr(node.func, "id", None)
+        if name not in {"Change", "make_change"}:
+            continue
+        symbol: ast.expr | None = None
+        if name == "Change" and len(node.args) > 1:
+            symbol = node.args[1]
+        for kw in node.keywords:
+            if kw.arg == "symbol":
+                symbol = kw.value
+        if isinstance(symbol, ast.Constant) and symbol.value is None:
+            sites.append((name, node.lineno))
+    return sites
+
+
+def check_test_change_symbol_is_typed(f: Findings) -> None:
+    """No test may construct a `Change`/`make_change` with `symbol=None`.
+
+    `checker_types.Change.symbol` is annotated `str`, and every producer in
+    `abicheck/` honours it -- `diff_helpers.make_change(symbol: str)`, and
+    `mypy abicheck/` is clean across all of them. The kind with no single
+    symbol to name (`public_surface_shrank`) passes the `"<surface>"`
+    sentinel.
+
+    Nothing enforced that in `tests/`, because the typecheck gate runs
+    `mypy abicheck/` only -- typechecking the suite reports ~26,800 errors,
+    so widening that gate is not the answer. Three fixtures had been passing
+    `symbol=None` for some time, and a reader who instrumented a run through
+    them (as one did, PR #1304) sees a `None` symbol and reasonably concludes
+    production emits one. It does not. That reading produced a defensive fix,
+    a test for an unreachable state, and a `known-gaps.md` entry asserting a
+    product bug that does not exist.
+
+    So this is narrow on purpose: it is not a general "typecheck the tests"
+    ambition, it is the one fabricated value that has already misled
+    someone. A test needing a nameless finding uses `""`, which is
+    type-valid and is the reachable case.
+    """
+    for path in sorted((ROOT / "tests").rglob("*.py")):
+        rel = path.relative_to(ROOT).as_posix()
+        try:
+            tree = ast.parse(_read(path), filename=rel)
+        except SyntaxError:
+            continue
+        for name, lineno in change_symbol_none_sites(tree):
+            f.err(
+                "test-change-symbol-typed",
+                f"{rel}:{lineno}: `{name}(..., symbol=None)` — "
+                "`Change.symbol` is typed `str` and no producer in "
+                'abicheck/ emits `None`. Use `""` for a nameless '
+                "finding, or the kind's own sentinel (e.g. "
+                '`"<surface>"` for public_surface_shrank). A fabricated '
+                "`None` here reads as production behaviour to anyone who "
+                "instruments a run through it.",
+            )
+
+
 def check_project_snapshot_dto_no_asdict(f: Findings) -> None:
     """ADR-063 Phase 8's D8 constraint, made mechanical: zero
     `dataclasses.asdict`/`asdict` call sites (including an aliased import,
@@ -3552,6 +3623,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "adr-status-sync": check_adr_status_sync,
     "banned-imports": check_banned_imports,
     "project-snapshot-dto-no-asdict": check_project_snapshot_dto_no_asdict,
+    "test-change-symbol-typed": check_test_change_symbol_is_typed,
     "cli-contract": check_cli_contract,
     "engine-cli-boundary": check_engine_cli_boundary,
     "action-cli-mirror": check_action_cli_mirror,

@@ -9622,47 +9622,43 @@ same way the gate already does (`l4_source_abi_was_attempted`), which touches
 `new_evidence_depth` — an evidence-layer change, not a reporting one, and it
 changes a value stored in existing reports.
 
-## `Change.symbol` is annotated `str` but a real detector emits `None` (2026-09-16)
+## Nothing stopped a test fabricating a `Change` state the types forbid (2026-09-16)
 
-`checker_types.Change.symbol` is declared `symbol: str  # mangled name or
-type name`. It is not always one. A `public_surface_shrank` finding carries
-`symbol=None` — observed directly, not inferred, by instrumenting
-`report/review_groups.py` during
-`tests/test_policy_registry_and_summary.py::
-test_review_digest_additions_count_excludes_quality_issues`:
+An earlier revision of this section claimed, under the heading "`Change.symbol`
+is annotated `str` but a real detector emits `None`", that a real
+`public_surface_shrank` finding carries `symbol=None`. **That claim was
+wrong**, and the way it was reached is the actual gap worth recording.
 
-```
-DISPLAY '_Z3barv'               SYM '_Z3barv'
-DISPLAY 'public_surface_shrank' SYM None
-```
+The `None` was observed by instrumenting `report/review_groups.py` during
+`tests/test_policy_registry_and_summary.py`, and read as evidence about
+production. It was not: it came from three hand-written fixtures in that
+test file (`Change(..., symbol=None)`). The real producer of that kind,
+`diff_surface_metrics.py`, passes the `"<surface>"` sentinel — a `str`, as
+the annotation requires. Verified: `make_change(symbol: str)` in
+`diff_helpers.py`, no `# type: ignore` on any `Change(` construction under
+`abicheck/`, and `mypy abicheck/` clean. So there is no production/annotation
+disagreement, and widening the field to `str | None` (measured: 84 new mypy
+errors across 24 files) would have been a breaking change to a public type in
+service of a defect that does not exist.
 
-That is a surface-level fact about the library as a whole, so it genuinely
-has no single symbol to name; `None` is the honest value and the annotation
-is what is wrong.
+**The real gap.** `mypy` runs over `abicheck/` only, so `tests/` could
+construct a `Change` in a state the types forbid and nothing anywhere would
+say so — and a downstream reader could then be "fixed" against an impossible
+input, or, as here, a false gap recorded from one. Typechecking `tests/`
+outright is not available as a fix (`mypy --explicit-package-bases tests/`
+reports 26,780 errors against an entirely unannotated suite).
 
-**Why this is recorded rather than fixed here.** Widening the field to
-`str | None` is a change to a public type (root `AGENTS.md`: "Public types
-live in `model/`, `checker_types.py`, `checker_policy.py`. Changing their
-public surface is a breaking change to the Python API — coordinate it"), and
-it would make `change.symbol` an optional for every consumer that currently
-treats it as a `str` — a cascade of new `mypy` errors well outside the scope
-of the PR that found it. No CI gate is failing on it today: the typecheck
-step runs `mypy abicheck/` only, so neither the production `None` (which
-flows through untyped call sites) nor a test that constructs one is checked.
+**Closed by** a narrow structural gate instead: `check_ai_readiness.py`'s
+`test-change-symbol-typed` rejects `Change(..., symbol=None)` and
+`make_change(symbol=None)` anywhere under `tests/`. The three fixtures now
+pass `"<surface>"`, matching the producer.
 
-**What was done instead.** `review_groups.build_review_groups` no longer
-assumes a name exists: its `display_name` falls back to the finding's kind,
-which is stable and sorts. Before that it raised
-`TypeError: '<' not supported between instances of 'NoneType' and 'str'` as
-soon as an unnamed group met a named one in the sort — needing *two* groups
-to surface, which is why no single-finding test had caught it.
-`tests/unit/report/test_review_groups.py` states the invariant as an
-order-independence property over every mix of named and unnamed findings;
-its `Change(kind, None, ...)` constructions mirror what production really
-produces, and are deliberate rather than an invented impossible state.
+**What remains true about `review_groups`.** The `display_name` fallback to
+the finding's kind stays, and still earns its place — the *reachable*
+nameless case is the empty string, which is type-valid and which
+`qualified_name or demangled_symbol or symbol` resolves to unchanged, leaving
+a group rendered under an empty heading. `tests/unit/report/test_review_groups.py`
+states that as an order-independence property over every mix of named and
+nameless findings, with a vacuity guard asserting the fixture really is
+nameless, and constructs it with `""` rather than a fabricated `None`.
 
-**What is still open.** The annotation and the runtime disagree. Any
-consumer reading `change.symbol` as a `str` is relying on something the type
-checker cannot verify and that this detector already violates. Closing it
-means widening the field and auditing every reader — worth doing, as its own
-change.
