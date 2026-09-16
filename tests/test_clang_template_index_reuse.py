@@ -47,7 +47,6 @@ generated inputs rather than as one example per remembered bug.
 
 from __future__ import annotations
 
-import contextlib
 import contextvars
 import copy
 import platform
@@ -817,48 +816,122 @@ def _compare_sides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
 def test_a_real_comparison_keeps_its_full_finding_set_under_reuse(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A whole real comparison, not a verdict or a count.
+    """A whole real comparison under reuse off vs. on, not a verdict or a count.
 
-    ``AGENTS.md`` is explicit that a change must be validated through the real
-    workflow and the rendered result. So this compares the *entire* finding
-    set -- every kind, symbol and value -- plus the declarations, types and
-    template spellings each snapshot carries, with reuse off and on. A
-    verdict-only or count-only assertion would pass against an implementation
-    that silently swapped one finding for another.
+    Both arms run **inside** an acquisition scope, and the only thing that
+    varies is whether the index bundle is shared. That is load-bearing, and
+    the first version of this test got it wrong: it compared a scoped run
+    against an *unscoped* one, which also flips something this PR does not
+    touch -- `header_ast_fields._parse_header_ast_fields` derives
+    `semantic_ir` from the NEUTRAL parse inside a scope and from the LEGACY
+    (export-bound) parse outside one. The two happen to agree on the
+    fixture under one clang and not under another, so the test passed
+    locally and failed on CI's 3.12 lane, asserting a difference that was
+    never this change's. Holding the scope constant is what makes the
+    comparison about the reuse.
+
+    `AGENTS.md` asks a change to be proven through the public workflow and
+    the rendered report, so this compares the *entire* serialized snapshot
+    of each side plus the rendered JSON report -- not a verdict or a count,
+    either of which would pass against an implementation that silently
+    swapped one finding for another.
     """
     import json as _json
 
+    from abicheck import dumper_clang
     from abicheck.reporter import to_json
 
-    def _run(scoped: bool) -> tuple[Any, Any, Any]:
-        ctx = ast_acquisition_scope() if scoped else contextlib.nullcontext()
-        with ctx:
-            return _compare_sides(
-                tmp_path / ("scoped" if scoped else "plain"), monkeypatch
-            )
+    builds: dict[bool, int] = {}
 
+    def _run(reuse: bool) -> tuple[Any, Any, Any]:
+        """One comparison with reuse on or forced off, inside a scope."""
+        count = 0
+        real = dumper_clang.build_template_param_indexes
+
+        def counted(root: dict[str, Any]) -> Any:
+            nonlocal count
+            count += 1
+            return real(root)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(dumper_clang, "build_template_param_indexes", counted)
+            if not reuse:
+                # The pre-change behaviour: rebuild per constructed parser.
+                patch.setattr(dumper_clang, "_template_param_indexes_for", counted)
+            with ast_acquisition_scope():
+                result = _compare_sides(
+                    tmp_path / ("arm_one" if reuse else "arm_two"), monkeypatch
+                )
+        builds[reuse] = count
+        return result
+
+    reuse_result, reuse_old, reuse_new = _run(True)
     plain_result, plain_old, plain_new = _run(False)
-    scoped_result, scoped_old, scoped_new = _run(True)
+
+    # Prove both configurations really ran differently, by observing the
+    # mechanism rather than its output -- otherwise an equality that held
+    # because the second arm was served the first's answer would pass
+    # (`AGENTS.md`: "a differential test must prove both of its
+    # configurations actually ran").
+    assert builds[True] == 2, builds
+    assert builds[False] > builds[True], builds
+
+    def _scrub_paths(value: Any) -> Any:
+        """*value* with the two build roots' absolute paths normalized away.
+
+        The arms build under two roots so neither can be served the other's
+        AST cache entry; their paths therefore differ by construction and
+        say nothing about the parse.
+        """
+        # Equal-length names on purpose: the compiled `.so` embeds its own
+        # compile path, so roots of differing length would move `source_size`
+        # for a reason that has nothing to do with the parse, and that field
+        # would have to be excluded instead of checked.
+        roots = (str(tmp_path / "arm_one"), str(tmp_path / "arm_two"))
+        if isinstance(value, str):
+            for root in roots:
+                value = value.replace(root, "<root>")
+            return value
+        if isinstance(value, dict):
+            return {k: _scrub_paths(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [_scrub_paths(v) for v in value]
+        return value
 
     def _findings(result: Any) -> list[tuple[Any, ...]]:
+        # `c.kind.value` (the slug), not `str(c.kind)` (which renders
+        # "ChangeKind.X") -- the kind assertions below read as the vocabulary
+        # the reports and docs use.
         return sorted(
-            (str(c.kind), c.symbol or "", str(c.old_value), str(c.new_value))
+            (c.kind.value, c.symbol or "", str(c.old_value), str(c.new_value))
             for c in result.changes
         )
 
     assert _findings(plain_result), "the fixture must produce real findings"
-    assert _findings(scoped_result) == _findings(plain_result)
-    assert scoped_result.verdict == plain_result.verdict
+    assert _findings(reuse_result) == _findings(plain_result)
+    assert reuse_result.verdict == plain_result.verdict
+
+    # The expected breaks themselves, not only that the two arms agree: an
+    # equality assertion alone would still hold if BOTH arms had silently
+    # stopped detecting them.
+    kinds = {kind for kind, *_ in _findings(reuse_result)}
+    assert "type_vtable_changed" in kinds, kinds
+    removed = {
+        symbol
+        for kind, symbol, *_ in _findings(reuse_result)
+        if "removed" in kind.lower()
+    }
+    assert any("shape_count" in s for s in removed), (
+        f"the export-loss break disappeared; kinds={kinds} removed={removed}"
+    )
 
     def _surface(snap: Any) -> dict[str, Any]:
         """The whole serialized snapshot, minus what a rerun legitimately varies.
 
-        Deliberately the full serialized document rather than a hand-listed set
-        of attributes: the claim is that *nothing* the header AST decides moved,
-        and a hand-listed projection only ever proves it for the fields whoever
-        wrote the list happened to think of. Only the paths and timestamps of
-        two separately-built trees are dropped, since those differ by
-        construction and say nothing about the parse.
+        Deliberately the full document rather than a hand-listed set of
+        attributes -- the claim is that *nothing* the header AST decides
+        moved, and a hand-listed projection only proves it for the fields
+        whoever wrote the list thought of.
         """
         from abicheck.serialization import snapshot_to_dict
 
@@ -874,49 +947,24 @@ def test_a_real_comparison_keeps_its_full_finding_set_under_reuse(
             document.pop(volatile, None)
         return _scrub_paths(document)
 
-    def _scrub_paths(value: Any) -> Any:
-        """*value* with the two build roots' absolute paths normalized away."""
-        roots = (str(tmp_path / "scoped"), str(tmp_path / "plain"))
-        if isinstance(value, str):
-            for root in roots:
-                value = value.replace(root, "<root>")
-            return value
-        if isinstance(value, dict):
-            return {k: _scrub_paths(v) for k, v in value.items()}
-        if isinstance(value, list):
-            return [_scrub_paths(v) for v in value]
-        return value
+    assert _surface(reuse_old) == _surface(plain_old)
+    assert _surface(reuse_new) == _surface(plain_new)
 
-    assert _surface(scoped_old) == _surface(plain_old)
-    assert _surface(scoped_new) == _surface(plain_new)
-    # Vacuity guard on the comparison above: the whole-snapshot equality is
-    # only evidence about template handling if the fixture's parse actually
-    # produced reconstructed specialization spellings. `Outer<int>` is one the
-    # three indexes are jointly responsible for -- the explicit outer
-    # specialization whose nested member template they scope.
-    import json as _json2
-
-    rendered = _json2.dumps(_scrub_paths(_surface(plain_old)))
+    # Vacuity guard on that equality: it is only evidence about template
+    # handling if the parse actually reconstructed specialization spellings.
+    rendered = _json.dumps(_surface(plain_old))
     assert "Outer<int>" in rendered, (
-        "the fixture no longer exercises specialization-spelling reconstruction, "
-        "so the snapshot equality above proves nothing about these indexes"
+        "the fixture no longer exercises specialization-spelling "
+        "reconstruction, so the snapshot equality proves nothing here"
     )
 
-    # The rendered report, not just the in-memory result: `AGENTS.md` asks a
-    # change to be proven through the public workflow's own output.
-    # Same path scrub as above: the two sides are built under two roots, so a
-    # finding's `source_location` differs by construction and nothing else may.
-    plain_report = _scrub_paths(_json.loads(to_json(plain_result)))
-    scoped_report = _scrub_paths(_json.loads(to_json(scoped_result)))
-
     def _stable(section: object) -> object:
-        """*section* without `finding_id`, which is path-derived.
+        """*section* without `finding_id`, which folds in `source_location`.
 
-        `finding_id` folds in the finding's own `source_location`, so two
-        trees built under two roots legitimately disagree on it and on nothing
-        else. `canonical_finding_id` -- the identity that is *supposed* to be
-        stable across spellings and locations -- is deliberately kept in the
-        comparison, and it matches.
+        Two trees built under two roots legitimately disagree on it and on
+        nothing else. `canonical_finding_id` -- the identity that is supposed
+        to be stable across spellings and locations -- stays in the
+        comparison, and matches.
         """
         if isinstance(section, list):
             return [_stable(item) for item in section]
@@ -924,13 +972,13 @@ def test_a_real_comparison_keeps_its_full_finding_set_under_reuse(
             return {k: _stable(v) for k, v in section.items() if k != "finding_id"}
         return section
 
+    plain_report = _scrub_paths(_json.loads(to_json(plain_result)))
+    reuse_report = _scrub_paths(_json.loads(to_json(reuse_result)))
     for section in ("changes", "summary", "analysis_assurance"):
-        assert _stable(scoped_report.get(section)) == _stable(
+        assert _stable(reuse_report.get(section)) == _stable(
             plain_report.get(section)
         ), section
-    # The stable identity really is present, so excluding the path-derived one
-    # above did not hollow the comparison out.
-    assert all(c.get("canonical_finding_id") for c in scoped_report["changes"])
+    assert all(c.get("canonical_finding_id") for c in reuse_report["changes"])
 
 
 @_CLANG_L2
@@ -964,9 +1012,15 @@ Base::~Base() {}
 int Base::kind() const { return 1; }
 }
 """
+    from abicheck import dumper_clang
+
     results = []
-    for scoped in (False, True):
-        root = tmp_path / ("scoped" if scoped else "plain")
+    # Both arms inside a scope, varying only the reuse -- same reasoning as
+    # the template test above: a scoped-vs-unscoped comparison would also
+    # flip which parse `semantic_ir` is derived from, which this PR does not
+    # touch.
+    for reuse in (True, False):
+        root = tmp_path / ("arm_one" if reuse else "arm_two")
         root.mkdir(parents=True, exist_ok=True)
         (root / "plain.hpp").write_text(header_text, encoding="utf-8")
         (root / "plain.cpp").write_text(source_text, encoding="utf-8")
@@ -987,11 +1041,115 @@ int Base::kind() const { return 1; }
             check=True,
             capture_output=True,
         )
-        ctx = ast_acquisition_scope() if scoped else contextlib.nullcontext()
-        with ctx:
-            snap = dump(so, [root / "plain.hpp"], [root])
-            results.append(compare(snap, snap))
-    assert results[0].verdict == results[1].verdict
-    assert [str(c.kind) for c in results[0].changes] == [
-        str(c.kind) for c in results[1].changes
+        with monkeypatch.context() as patch:
+            if not reuse:
+                patch.setattr(
+                    dumper_clang,
+                    "_template_param_indexes_for",
+                    dumper_clang.build_template_param_indexes,
+                )
+            with ast_acquisition_scope():
+                snap = dump(so, [root / "plain.hpp"], [root])
+                results.append((compare(snap, snap), snap))
+    reuse_result, reuse_snap = results[0]
+    plain_result, plain_snap = results[1]
+    assert reuse_result.verdict == plain_result.verdict
+    assert [str(c.kind) for c in reuse_result.changes] == [
+        str(c.kind) for c in plain_result.changes
     ]
+    # A self-comparison of an unchanged library must not be judged a break --
+    # stated outright rather than inherited from the two arms agreeing, which
+    # would also hold if both had started reporting the same spurious break.
+    # Not "no findings at all": a self-compare with a header context legitimately
+    # reports `header_binary_context_mismatch`, which is pre-existing and
+    # nothing to do with this change, so the claim is about the verdict.
+    assert str(reuse_result.verdict) == str(plain_result.verdict)
+    assert not [
+        c.kind.value
+        for c in reuse_result.changes
+        if c.kind.value not in {"header_binary_context_mismatch"}
+    ], [c.kind.value for c in reuse_result.changes]
+    # And the control must actually have parsed a real surface, or "clean"
+    # is vacuous.
+    assert any("distance" in (f.name or "") for f in reuse_snap.functions), [
+        f.name for f in reuse_snap.functions
+    ]
+
+
+_CASTXML_CONTROL = pytest.mark.skipif(
+    not sys.platform.startswith("linux")
+    or shutil.which("castxml") is None
+    or shutil.which("g++") is None,
+    reason="the castxml control needs castxml + g++ on Linux",
+)
+
+
+@_CASTXML_CONTROL
+@pytest.mark.integration
+def test_the_castxml_backend_is_an_unchanged_control(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other L2 header backend must be untouched by this change.
+
+    castxml has its own parser and never constructs a `_ClangAstParser`, so
+    nothing here should reach it -- which is exactly why it is worth asserting
+    rather than assuming. A shared-state change that accidentally leaked
+    across backends (a key namespace collision in the one acquisition table,
+    say) would show up here and nowhere else in this file.
+
+    Two claims, because the weaker one alone would not catch a collision:
+    the castxml comparison is identical with reuse on and off, **and** the
+    clang-side builder never ran during it.
+    """
+    from abicheck import dumper_clang
+    from abicheck.checker import compare
+    from abicheck.dumper import dump
+
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", "castxml")
+    builds: list[int] = []
+    results = []
+    for reuse in (True, False):
+        count = 0
+        real = dumper_clang.build_template_param_indexes
+
+        def counted(root: dict[str, Any], _real: Any = real) -> Any:
+            nonlocal count
+            count += 1
+            return _real(root)
+
+        root = tmp_path / ("arm_one" if reuse else "arm_two")
+        old_so, old_h = _build_side(root / "old", broken=False)
+        new_so, new_h = _build_side(root / "new", broken=True)
+        with monkeypatch.context() as patch:
+            patch.setattr(dumper_clang, "build_template_param_indexes", counted)
+            if not reuse:
+                patch.setattr(dumper_clang, "_template_param_indexes_for", counted)
+            with ast_acquisition_scope():
+                old_snap = dump(old_so, [old_h], [old_h.parent])
+                new_snap = dump(new_so, [new_h], [new_h.parent])
+                results.append(compare(old_snap, new_snap))
+        builds.append(count)
+        # The control is only a control if castxml really parsed the headers.
+        # Without this it would still "pass" after silently degrading to a
+        # symbols-only or DWARF-only dump, which is the failure mode a
+        # backend-scoped assertion exists to catch.
+        assert getattr(old_snap, "ast_producer", None) == "castxml", getattr(
+            old_snap, "ast_producer", None
+        )
+        spellings = {t.name for t in old_snap.types if "<" in (t.name or "")}
+        assert spellings, sorted(t.name for t in old_snap.types)
+
+    # Nothing in this change is reachable from the castxml path at all.
+    assert builds == [0, 0], builds
+
+    reuse_result, plain_result = results
+
+    def _findings(result: Any) -> list[tuple[Any, ...]]:
+        return sorted(
+            (c.kind.value, c.symbol or "", str(c.old_value), str(c.new_value))
+            for c in result.changes
+        )
+
+    assert _findings(reuse_result), "the castxml control must produce findings"
+    assert _findings(reuse_result) == _findings(plain_result)
+    assert str(reuse_result.verdict) == str(plain_result.verdict)
