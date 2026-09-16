@@ -1,0 +1,171 @@
+name: 'abicheck verify-baseline-source'
+description: >-
+  Decide which producer run a baseline may be taken from, and whether a name
+  really is a release tag -- the staging half of baseline resolution that
+  `actions/resolve-baseline` deliberately does not do (it resolves WITHIN an
+  already-staged set).
+
+  This is a trust decision, not a lookup. A baseline is what every later
+  comparison is measured against, so a run that failed, a run of a different
+  workflow, a run triggered on an unrelated branch, or a "tag" that is really
+  a branch must never become one. Exact head SHA alone is not eligibility.
+
+  Makes only read-only GitHub API calls; every rule it applies lives in
+  `abicheck.frontends.action.baseline_source` and is exercised with no
+  credentials at all.
+
+branding:
+  icon: 'git-commit'
+  color: 'blue'
+
+inputs:
+  mode:
+    description: >
+      'producer-run' (default) -- select the newest eligible run that may
+      supply a baseline. 'tag' -- verify that `tag` is really a tag of this
+      repository and, when `built-sha` is given, that it names that commit.
+    required: false
+    default: 'producer-run'
+
+  # ── mode: tag ─────────────────────────────────────────────────────────
+  tag:
+    description: >
+      The tag name to verify. Resolved through `git/ref/tags/<name>`
+      explicitly -- a generic revision endpoint accepts any revision name and
+      will resolve a BRANCH, which is how a branch build publishes itself as
+      a release baseline. An annotated tag is peeled to its commit. The name
+      is never required to look like a version: plenty of projects tag
+      `1.5.2` with no `v`, and a name-shaped guard would exclude every one of
+      their releases.
+    required: false
+    default: ''
+  built-sha:
+    description: >
+      The commit the capture being published was actually taken from. When
+      given, the tag's peeled commit must equal it -- otherwise one commit's
+      ABI would be published as another's for every future comparison against
+      that release.
+    required: false
+    default: ''
+
+  # ── mode: producer-run ────────────────────────────────────────────────
+  workflow:
+    description: "Producer workflow file (e.g. `.github/workflows/ci.yml`) whose runs are searched, and which an eligible run must belong to."
+    required: false
+    default: ''
+  expect-repository:
+    description: 'owner/repo the producer run must belong to. Defaults to this repository.'
+    required: false
+    default: ''
+  expect-event:
+    description: "Event the producer run must have been triggered by (e.g. `push`)."
+    required: false
+    default: ''
+  expect-head-sha:
+    description: >
+      Commit the baseline must describe. For an accepted-main channel this is
+      the pull request's own base SHA: a baseline built from a LATER
+      default-branch commit compares across two histories rather than against
+      this PR's base.
+    required: false
+    default: ''
+  expect-head-branch:
+    description: >
+      Branch the producer run must have been triggered on. A push run at the
+      right SHA can still come from an unrelated branch.
+    required: false
+    default: ''
+  allowed-conclusions:
+    description: "Comma-separated run conclusions that may supply a baseline. Default 'success'. Empty means any."
+    required: false
+    default: 'success'
+  required-jobs:
+    description: >
+      Comma-separated job names that must each have concluded success -- the
+      build/test/capture results a baseline actually depends on. A required
+      job that never ran is reported separately from one that failed: an
+      absent capture job silently treated as passing is how a run with no
+      capture at all becomes a baseline.
+    required: false
+    default: ''
+  allow-unrelated-job-failures:
+    description: >
+      'false' (default) -- a run whose overall conclusion is not allowed is
+      never selected. 'true' -- the explicit policy that unrelated matrix legs
+      may fail: such a run may be selected provided every `required-jobs`
+      entry succeeded. Requires `required-jobs`; without it there is nothing
+      left checking that the baseline's own evidence was produced.
+    required: false
+    default: 'false'
+  github-token:
+    description: 'Token with `actions: read` (and `contents: read` for tag mode).'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  outcome:
+    description: >
+      mode tag: `tag` | `not_a_tag` | `lookup_failed` | `tag-commit-mismatch`.
+      mode producer-run: `resolved` | `not_found` | `lookup_failed`.
+      `not_found` (a real lifecycle state -- nothing published for this
+      revision yet) and `lookup_failed` (an operational error) are
+      deliberately different values: collapsing them is how a transient API
+      failure becomes a silent "no baseline, therefore compatible".
+    value: ${{ steps.verify.outputs.outcome }}
+  eligible:
+    description: "'true' when a baseline may be taken from this source, 'false' otherwise."
+    value: ${{ steps.verify.outputs.eligible }}
+  run-id:
+    description: '(producer-run) The selected run id. Empty when none was eligible.'
+    value: ${{ steps.verify.outputs.run-id }}
+  run-attempt:
+    description: '(producer-run) The selected run attempt.'
+    value: ${{ steps.verify.outputs.run-attempt }}
+  head-sha:
+    description: '(producer-run) The commit the selected run built.'
+    value: ${{ steps.verify.outputs.head-sha }}
+  commit-sha:
+    description: '(tag) The commit the tag names, peeled for an annotated tag.'
+    value: ${{ steps.verify.outputs.commit-sha }}
+  annotated:
+    description: "(tag) 'true' when the tag was annotated and had to be peeled."
+    value: ${{ steps.verify.outputs.annotated }}
+  considered:
+    description: '(producer-run) How many candidate runs were examined.'
+    value: ${{ steps.verify.outputs.considered }}
+  rejected:
+    description: >
+      (producer-run) How many candidates were rejected. Each reason is printed
+      to the log: a caller reporting "no eligible baseline" can then say what
+      it did see, instead of a mis-scoped query looking like an empty history.
+    value: ${{ steps.verify.outputs.rejected }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+
+    - name: Install abicheck
+      shell: bash
+      run: pip install "${{ github.action_path }}/../.."
+
+    - name: Verify the baseline source
+      id: verify
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_TAG: ${{ inputs.tag }}
+        INPUT_BUILT_SHA: ${{ inputs.built-sha }}
+        INPUT_WORKFLOW: ${{ inputs.workflow }}
+        INPUT_EXPECT_REPOSITORY: ${{ inputs.expect-repository || github.repository }}
+        INPUT_EXPECT_EVENT: ${{ inputs.expect-event }}
+        INPUT_EXPECT_HEAD_SHA: ${{ inputs.expect-head-sha }}
+        INPUT_EXPECT_HEAD_BRANCH: ${{ inputs.expect-head-branch }}
+        INPUT_ALLOWED_CONCLUSIONS: ${{ inputs.allowed-conclusions }}
+        INPUT_REQUIRED_JOBS: ${{ inputs.required-jobs }}
+        INPUT_ALLOW_UNRELATED_JOB_FAILURES: ${{ inputs.allow-unrelated-job-failures }}
+      run: bash "${{ github.action_path }}/run.sh"

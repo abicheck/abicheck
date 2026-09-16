@@ -28,7 +28,65 @@ inputs:
       (`abicheck/bundle.py`'s `build_bundle_snapshot()`) reads real ELF
       binaries and skips non-ELF inputs, including this Action's own
       `.abicheck.json` snapshots.
-    required: true
+
+      Optional when `library-spec` is given, which produces this exact array
+      from a declarative spec instead of the caller building it in shell.
+    required: false
+    default: ''
+  library-spec:
+    description: >
+      Path to a JSON file declaring the libraries to dump *by pattern*
+      rather than by resolved path -- the same entry vocabulary as
+      `libraries` (`name`/`artifact`/`header`/`include`/`stage_binary`),
+      except that every path field is a glob resolved against
+      `library-root`, `header`/`include` additionally accept a JSON array,
+      and `header_exclude` is accepted:
+
+        [{"name": "libfoo",
+          "artifact": "lib/libfoo.so*",
+          "header": ["include/foo/*.h"],
+          "header_exclude": ["include/foo/plugin.h"],
+          "include": ["include", "/opt/dep/include"]},
+         {"name": "libfooPlugin",
+          "artifact": "lib/libfooPlugin.so*",
+          "header": ["include/foo/plugin.h"],
+          "include": ["include", "/opt/dep/include"]}]
+
+      This exists so an integrator declaring "this component owns every
+      installed public header except the one its sibling owns" does not have
+      to hand-roll find/grep/readelf in shell. Resolution (see
+      `abicheck.frontends.action.library_selection`) picks the single real
+      shared object out of a directory that also holds its SONAME symlinks
+      (aliases are de-duplicated by resolved identity, not banned -- only a
+      link escaping `library-root`, or two genuinely distinct files, is
+      refused), checks each artifact is an ELF shared object (ET_DYN) and
+      that every component names the same machine, and refuses a header or
+      exclusion pattern matching nothing rather than silently changing what
+      a component owns. `include` roots are parser context only: they never
+      widen the declarations a component is held responsible for, which is
+      what lets two components share one installed header tree.
+
+      Ignored when empty (default). Giving both `library-spec` and
+      `libraries` is a usage error -- two declarations of one set is exactly
+      the drift this input removes.
+    required: false
+    default: ''
+  library-root:
+    description: >
+      Installation tree `library-spec`'s relative patterns resolve against.
+      Defaults to the current working directory. An absolute pattern in the
+      spec (a dependency's installed include prefix) is honoured as written
+      and is not required to be under this root; a *relative* one never
+      escapes it.
+    required: false
+    default: '.'
+  library-spec-require-elf:
+    description: >
+      'true' (default) -- every resolved artifact must be an ELF shared
+      object. Set 'false' to declare a component whose artifact is a PE or
+      Mach-O image, which also disables the same-machine agreement check.
+    required: false
+    default: 'true'
   output-dir:
     description: 'Directory to write the per-library snapshots and manifest.json into.'
     required: false
@@ -158,6 +216,18 @@ outputs:
   library-count:
     description: 'Number of libraries successfully dumped into this baseline-set.'
     value: ${{ steps.run-baseline.outputs.library-count }}
+  resolved-libraries:
+    description: >
+      The concrete `libraries` array this run dumped. Echoes the `libraries`
+      input when one was given; when `library-spec` was used instead, this is
+      the resolved result -- so a caller can record exactly which artifact and
+      headers each component resolved to, without re-globbing.
+    value: ${{ steps.libraries.outputs.libraries || inputs.libraries }}
+  machine:
+    description: >
+      The ELF machine every resolved artifact agreed on (e.g. `EM_X86_64`)
+      when `library-spec` was used and agreement was checked. Empty otherwise.
+    value: ${{ steps.libraries.outputs.machine }}
   content-digest:
     description: 'SHA-256 over the manifest''s artifact list (library names + per-file digests, including each staged bundle-member binary''s own digest when present) -- changes whenever any library''s snapshot content, or a staged binary''s bytes, changes.'
     value: ${{ steps.run-baseline.outputs.content-digest }}
@@ -190,11 +260,38 @@ runs:
       shell: bash
       run: pip install "${{ github.action_path }}/../.."
 
+    - name: Resolve the declarative library spec
+      id: libraries
+      if: inputs.library-spec != ''
+      shell: bash
+      env:
+        INPUT_LIBRARY_SPEC: ${{ inputs.library-spec }}
+        INPUT_LIBRARY_ROOT: ${{ inputs.library-root }}
+        INPUT_LIBRARY_SPEC_REQUIRE_ELF: ${{ inputs.library-spec-require-elf }}
+        INPUT_LIBRARIES: ${{ inputs.libraries }}
+      run: |
+        set -euo pipefail
+        if [[ -n "$INPUT_LIBRARIES" ]]; then
+          echo "::error::give either 'libraries' or 'library-spec', not both -- two declarations of one component set is what library-spec exists to remove."
+          exit 1
+        fi
+        elf_flag=--require-elf
+        machine_flag=--require-same-machine
+        if [[ "$INPUT_LIBRARY_SPEC_REQUIRE_ELF" != "true" ]]; then
+          elf_flag=--no-require-elf
+          machine_flag=--no-require-same-machine
+        fi
+        python -m abicheck.frontends.action.cli resolve-libraries \
+          "$INPUT_LIBRARY_SPEC" \
+          --root "$INPUT_LIBRARY_ROOT" \
+          "$elf_flag" "$machine_flag" \
+          --github-output "$GITHUB_OUTPUT" >/dev/null
+
     - name: Dump baseline-set
       id: run-baseline
       shell: bash
       env:
-        INPUT_LIBRARIES: ${{ inputs.libraries }}
+        INPUT_LIBRARIES: ${{ steps.libraries.outputs.libraries || inputs.libraries }}
         INPUT_OUTPUT_DIR: ${{ inputs.output-dir }}
         INPUT_PROJECT_REF: ${{ inputs.project-ref }}
         INPUT_PROFILE: ${{ inputs.profile }}

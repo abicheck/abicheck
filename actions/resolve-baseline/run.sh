@@ -65,8 +65,8 @@ case "$BASELINE_PATH" in
   *$'\n'*) _fail "baseline-path input must not contain a newline." ;;
 esac
 case "$KIND" in
-  target | bundle) ;;
-  *) _fail "kind '$KIND' is not recognized. Use 'target' or 'bundle'." ;;
+  target | bundle | members) ;;
+  *) _fail "kind '$KIND' is not recognized. Use 'target', 'bundle', or 'members'." ;;
 esac
 case "$REQUIRED" in
   true | false) ;;
@@ -85,6 +85,9 @@ if [[ "$KIND" == "target" && -z "$TARGET" ]]; then
 fi
 if [[ "$KIND" == "bundle" && -z "$BUNDLE" ]]; then
   _fail "bundle input is required when kind is 'bundle'."
+fi
+if [[ "$KIND" == "members" && ( -z "$BUNDLE_MEMBERS" || "$BUNDLE_MEMBERS" == "[]" ) ]]; then
+  _fail "bundle-members input is required when kind is 'members' -- name every member this set must contain, so an absent one is a reported failure rather than a silently shorter set."
 fi
 
 # Resolve BASELINE_PATH to a directory this run can read manifest.json from:
@@ -274,6 +277,11 @@ RESOLVE_ARGS=(
 )
 if [[ "$KIND" == "target" ]]; then
   RESOLVE_ARGS+=(--name "$TARGET")
+elif [[ "$KIND" == "members" ]]; then
+  # A member set has no single target/bundle id of its own -- the set IS the
+  # subject -- so --name carries the channel purely so diagnostics say which
+  # set failed.
+  RESOLVE_ARGS+=(--name "$CHANNEL" --members "$BUNDLE_MEMBERS")
 else
   RESOLVE_ARGS+=(--name "$BUNDLE" --members "$BUNDLE_MEMBERS")
 fi
@@ -286,7 +294,7 @@ fi
 if [[ -n "$EXPECTED_BASELINE_GENERATION" ]]; then
   RESOLVE_ARGS+=(--expected-baseline-generation "$EXPECTED_BASELINE_GENERATION")
 fi
-if [[ "$KIND" == "target" ]]; then
+if [[ "$KIND" == "target" || "$KIND" == "members" ]]; then
   RESOLVE_ARGS+=(--allow-new-target "$ALLOW_NEW_TARGET")
 fi
 # Per-bundle-member baseline header staging. Staged under a directory of

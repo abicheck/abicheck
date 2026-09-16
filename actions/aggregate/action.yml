@@ -1,0 +1,165 @@
+name: 'abicheck aggregate'
+description: >-
+  Collect this run's per-check reports, aggregate them into one canonical
+  outcome document, and validate that document -- from a SINGLE declaration
+  of the checks the run was supposed to produce.
+
+  Exists so an integrator stops writing the three shell steps this replaces:
+  copying reports into a directory under names that preserve check identity,
+  writing a parallel expected-target manifest, and interpreting `abicheck
+  aggregate`'s exit code by hand (usually `|| true` followed by a home-grown
+  JSON key check, which cannot tell an operational report loss from an empty
+  finding set).
+
+  Compatibility and operational success are kept apart: a non-clean
+  compatibility outcome never fails this Action -- it is reported on
+  `compatibility-exit` for the caller's own gate -- while a refused
+  declaration, a usage error, or a document that does not describe a real
+  aggregate outcome always does.
+
+branding:
+  icon: 'layers'
+  color: 'blue'
+
+inputs:
+  checks:
+    description: >
+      JSON array declaring every check this event was supposed to produce --
+      the one source of truth for the expected set:
+
+        [{"id": "libfoo@<profile>#accepted-main@headers",
+          "report": "/path/to/report.json", "required": true},
+         {"id": "libfoo@<profile>#release-contract@headers~release",
+          "report": "", "required": true}]
+
+      `id` is the check's full identity (component, profile, baseline
+      channel, depth, and any explicit id) and is written into the report's
+      filename verbatim -- the `@`/`#`/`~`/`!` separators are never
+      sanitized away, because `aggregate` reads the identity back out of
+      that filename for a report that records none of its own. A report that
+      DOES record its own `target_id` is authoritative: a declaration
+      disagreeing with it is refused rather than silently re-labelled.
+
+      An empty/absent `report` means "expected, produced nothing". That check
+      is still declared, so the aggregate reports it as an unavailable target
+      instead of the run quietly describing a shorter set of checks than it
+      actually had. Declare only the checks the EVENT asked for: naming a
+      PR-base comparison on a tag/push build manufactures a missing check for
+      a question nobody asked.
+    required: true
+  reports-dir:
+    description: >
+      Directory to collect reports into. This Action owns it: reports a
+      previous run of it left are cleared, and any other `.json` already
+      present is refused, because `aggregate` globs `*.json` there and would
+      read a stale `aggregate.json` (or a manifest) as an extra target.
+    required: false
+    default: '.abicheck-reports'
+  manifest-path:
+    description: >
+      Where to write the expected-target manifest. Must be outside
+      `reports-dir` for the reason above; this Action refuses it otherwise
+      rather than producing a run whose own manifest is one of its targets.
+      Written atomically -- a half-written manifest declares a SHORTER
+      expected set than the run had, which is worse than none.
+    required: false
+    default: '.abicheck-expected-checks.json'
+  gate:
+    description: >
+      Optional JSON object folded into the manifest's own `gate` block, e.g.
+      `{"missing_required": "warn", "unexpected_target": "fail"}`. Omit for
+      aggregate's defaults (`fail`/`include`).
+    required: false
+    default: ''
+  outputs:
+    description: >
+      Space-separated `format=filename` pairs written inside `reports-dir`,
+      passed straight through to `abicheck aggregate -o`. Filenames only: the
+      aggregate document's per-target `report_path` entries are resolved
+      relative to its own directory, so aggregating to an absolute path
+      elsewhere silently costs every per-target detail downstream.
+    required: false
+    default: 'json=aggregate.json text=aggregate.txt'
+  install:
+    description: "'true' (default) to pip install abicheck from this Action's own checkout."
+    required: false
+    default: 'true'
+  python-version:
+    description: 'Python version for setup-python.'
+    required: false
+    default: '3.13'
+
+outputs:
+  aggregate-path:
+    description: 'Path to the validated aggregate JSON document.'
+    value: ${{ steps.aggregate.outputs.aggregate-path }}
+  status:
+    description: "The document's own `pass`/`fail` status."
+    value: ${{ steps.validate.outputs.status }}
+  coverage:
+    description: 'complete | partial | empty -- whether every declared check reported.'
+    value: ${{ steps.validate.outputs.coverage }}
+  compatibility-exit:
+    description: >
+      `abicheck aggregate`'s own exit code (0 pass, 1 coverage/quality, 2 API
+      break, 4 ABI break). Reported, never acted on here: this Action's own
+      success means "the analysis result is trustworthy", not "the ABI is
+      compatible". A usage error (64) is an operational failure and fails the
+      Action instead of appearing here.
+    value: ${{ steps.aggregate.outputs.compatibility-exit }}
+  expected:
+    description: 'Number of checks the declaration named.'
+    value: ${{ steps.collect.outputs.expected }}
+  analyzed:
+    description: 'Number of declared checks that produced a usable report.'
+    value: ${{ steps.validate.outputs.analyzed }}
+  unavailable:
+    description: 'Number of declared checks that did not.'
+    value: ${{ steps.validate.outputs.unavailable }}
+  channels:
+    description: >
+      JSON object mapping each declared check's baseline channel to its own
+      `{analyzed, unavailable}` counts, so a caller can tell "the release
+      comparison is missing" from "one component is missing" instead of
+      reading a single total.
+    value: ${{ steps.validate.outputs.channels }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install abicheck
+      if: inputs.install == 'true'
+      shell: bash
+      run: pip install "${{ github.action_path }}/../.."
+
+    - name: Collect the declared checks
+      id: collect
+      shell: bash
+      env:
+        INPUT_CHECKS: ${{ inputs.checks }}
+        INPUT_REPORTS_DIR: ${{ inputs.reports-dir }}
+        INPUT_MANIFEST_PATH: ${{ inputs.manifest-path }}
+        INPUT_GATE: ${{ inputs.gate }}
+      run: bash "${{ github.action_path }}/run.sh" collect
+
+    - name: Aggregate
+      id: aggregate
+      shell: bash
+      env:
+        INPUT_REPORTS_DIR: ${{ inputs.reports-dir }}
+        INPUT_MANIFEST_PATH: ${{ inputs.manifest-path }}
+        INPUT_OUTPUTS: ${{ inputs.outputs }}
+      run: bash "${{ github.action_path }}/run.sh" aggregate
+
+    - name: Validate the aggregate document
+      id: validate
+      shell: bash
+      env:
+        INPUT_AGGREGATE_PATH: ${{ steps.aggregate.outputs.aggregate-path }}
+        INPUT_EXPECTED: ${{ steps.collect.outputs.expected }}
+      run: bash "${{ github.action_path }}/run.sh" validate

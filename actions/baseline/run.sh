@@ -12,7 +12,7 @@ set -uo pipefail
 # script hit during testing: the JSON example below silently corrupted
 # LIBRARIES_JSON). Keep this message brace-free; the JSON shape is
 # documented in action.yml instead.
-LIBRARIES_JSON="${INPUT_LIBRARIES:?libraries input is required -- a JSON array of library entries, see action.yml}"
+LIBRARIES_JSON="${INPUT_LIBRARIES:?give either the libraries input (a JSON array of resolved library entries) or library-spec (a declarative pattern spec resolved against library-root) -- see action.yml}"
 OUTPUT_DIR="${INPUT_OUTPUT_DIR:-.abicheck-baseline}"
 PROJECT_REF="${INPUT_PROJECT_REF:-}"
 PROFILE="${INPUT_PROFILE:-}"
