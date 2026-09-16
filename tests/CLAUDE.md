@@ -1,6 +1,7 @@
 # CLAUDE.md — `tests/`
 
-~5400 unit tests across ~180 files. Most are fast and stdlib-only.
+~50,000 unit tests across ~1,240 files. Most are fast and stdlib-only, but the
+suite as a whole is not quick: budget ~12 minutes at 4-way parallelism.
 
 ## Test markers
 
@@ -14,8 +15,9 @@
 | `slow` | varies | hypothesis / property-based / perf — covered in CI on Linux/3.13 |
 | `golden` | golden files in `tests/golden/` | output-format snapshots |
 
-The default fast command excludes all external-tool markers. Use it. It
-finishes in ~45 seconds.
+The default fast command excludes all external-tool markers. Use it — but note
+it also excludes `golden`, so an output-format regression it skips still fails
+CI's `pr` profile.
 
 ## Test-quality guards (don't just chase coverage)
 

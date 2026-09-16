@@ -207,14 +207,17 @@ def build_review_groups(findings: Sequence[ReportFinding]) -> tuple[ReviewGroup,
         kinds = tuple(m.change.kind.value for m in members)
         operations = tuple(dict.fromkeys(operation_for_kind(k) for k in kinds))
         entity = entity_for_change(members[0].change, kinds[0]) or "unknown"
-        # `ReviewGroup.display_name` is typed `str`, and the sort below keys
-        # on it. A finding with no name at all -- an analysis- or
-        # container-level fact carries no symbol -- made all three sources
-        # `None`, which both violated that type and raised `TypeError:
-        # '<' not supported between instances of 'NoneType' and 'str'` the
-        # moment such a group met a named one. Falling back to the kind is
-        # stable, sorts, and is more use to a reader than a placeholder:
-        # it still says what was observed.
+        # A group a reader cannot identify is not a group. All three name
+        # sources can legitimately be the empty string -- `Change.symbol` is
+        # typed `str` and "" satisfies it -- and `a or b or c` then resolves
+        # to "", so the group renders under an empty heading. Falling back to
+        # the kind is stable, sorts, and still says what was observed.
+        #
+        # It also keeps the sort key below total against a `None` symbol,
+        # which the annotation forbids and no producer in `abicheck/` emits
+        # (`make_change(symbol: str)`, mypy-clean across every call site).
+        # That is belt-and-braces, not the reachable case: the reachable one
+        # is "" (see `docs/contribute/known-gaps.md`).
         display = (
             members[0].change.qualified_name
             or members[0].change.demangled_symbol

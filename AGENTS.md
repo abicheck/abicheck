@@ -157,7 +157,10 @@ contract and temporary no-growth inventory live in `architecture/`; run
 # Install in dev mode (do this first if pytest/ruff/mypy are missing)
 pip install -e ".[dev]"
 
-# Run fast unit tests (THE go-to command — ~43s, ~5400 tests)
+# Run fast unit tests (THE go-to command — ~50,000 tests; ~12 min at 4-way
+# parallelism, far longer serially, so give it a real timeout and don't read a
+# still-running run as a hang). It excludes the `golden` marker, so a snapshot
+# regression it skips can still redden CI — see the `pr` profile below.
 pytest tests/ -m "not integration and not libabigail and not abicc and not slow and not golden" -q
 
 # Lint (must pass, CI enforces)
@@ -1059,6 +1062,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `adr-status-sync` | ERROR on contradiction / bad receipt, WARN on staleness | An ADR's own `**Status:**` line and its row in `adr/index.md` may not *contradict* each other — one claiming nothing is implemented while the other claims something is (how ADR-056's row went stale), or disagreeing on the decision word. Paraphrase is explicitly allowed: the index cell is an abridgement, and a stricter prototype flagged 15 of 56 ADRs, nearly all false positives. Separately validates the optional `**Verified:** <ref>@<sha> on <YYYY-MM-DD>` receipt (see `adr/index.md`'s convention section): exactly one per ADR, well-formed, a real non-future date, and naming a commit reachable from the default branch — a receipt anchored to the branch that adds it vanishes on merge and then fails this required job on `main` permanently. It then WARNs when commits after that sha touched a first-party file the Status paragraph names, which is the only mechanism here that catches *document-vs-code* drift (ADR-049's status claimed its evaluator was unwired for five merged PRs after it wasn't). **A file is watched only when the Status names it by full repo-relative path** (any `FIRST_PARTY_PY_ROOTS` tree, not just `abicheck/`); a bare `x.py` is accepted only when it resolves to `abicheck/x.py`, and family shorthand (`_resolver.py`) is deliberately not guessed at — see `adr/index.md` for why. Lives in `scripts/adr_status_sync.py`, a sibling leaf module, since `check_ai_readiness.py` is already past the 2000-line hard cap |
 | `banned-imports` | ERROR | No `print(...)` outside CLI/reporter modules; no `subprocess(..., shell=True)` |
 | `project-snapshot-dto-no-asdict` | ERROR | No `dataclasses.asdict()`/`asdict()` call in a `ProjectSnapshot` DTO file (`abicheck/storage/dto.py`, `abicheck/storage/import_v1.py`, `abicheck/project_snapshot_store.py`, `abicheck/storage/semantic_ir_codec.py`) — ADR-063 Phase 8's D8 constraint, made mechanical |
+| `test-change-symbol-typed` | ERROR | No `Change(..., symbol=None)` or `make_change(symbol=None)` anywhere under `tests/`. `mypy` runs over `abicheck/` only, so a fixture could construct a `Change` in a state its own annotation (`symbol: str`) forbids and nothing would say so — which is how a `known-gaps.md` entry came to record a production defect that did not exist, from a `None` a test had fabricated. Typechecking the (unannotated) suite is not an available alternative; this is the narrow structural stand-in |
 | `license-header` | WARN | Every `abicheck/**/*.py` carries the Apache-2.0 header / SPDX identifier |
 | `test-assertion-density` | WARN | Every `test_*` function asserts something (directly or via a same-file helper) — flags zero-assertion smoke tests so coverage isn't "filled" without verification |
 

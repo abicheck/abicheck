@@ -140,7 +140,7 @@ def test_build_summary_quality_issues_splits_out_public_surface_shrank() -> None
         changes=[
             Change(
                 ChangeKind.PUBLIC_SURFACE_SHRANK,
-                symbol=None,
+                symbol="<surface>",
                 description="public surface shrank: 439 -> 425 declarations (-14)",
             )
         ],
@@ -169,7 +169,7 @@ def test_build_summary_quality_issues_does_not_shadow_real_additions() -> None:
             Change(ChangeKind.FUNC_ADDED, "_Z3barv", "New function added"),
             Change(
                 ChangeKind.PUBLIC_SURFACE_SHRANK,
-                symbol=None,
+                symbol="<surface>",
                 description="public surface shrank: 439 -> 425 declarations (-14)",
             ),
         ],
@@ -251,7 +251,7 @@ def test_review_digest_additions_count_excludes_quality_issues() -> None:
             Change(ChangeKind.FUNC_ADDED, "_Z3barv", "New function added"),
             Change(
                 ChangeKind.PUBLIC_SURFACE_SHRANK,
-                symbol=None,
+                symbol="<surface>",
                 description="public surface shrank: 439 -> 425 declarations (-14)",
             ),
         ],

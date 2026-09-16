@@ -143,47 +143,46 @@ def test_inheritance_size_evidence_does_not_claim_an_exact_base_change() -> None
 # ---------------------------------------------------------------------------
 
 
-def _unnamed_finding(kind: ChangeKind, *, library: str | None = None) -> ReportFinding:
-    """A finding carrying no symbol, as `public_surface_shrank` really does.
+def _nameless_finding(kind: ChangeKind, *, library: str | None = None) -> ReportFinding:
+    """A finding whose every name source is empty.
 
-    `Change.symbol` is annotated `str`, so this construction is a type
-    violation — but it is what production emits (observed directly; see
-    `docs/contribute/known-gaps.md`, "`Change.symbol` is annotated `str` but
-    a real detector emits `None`"). The annotation is the thing that is
-    wrong, and widening it is a public-type change out of scope here. Not
-    checked by CI either way: the typecheck gate runs `mypy abicheck/`.
+    `Change.symbol` is annotated `str` and production honours that — the one
+    kind with no single symbol to name (`public_surface_shrank`) passes the
+    `"<surface>"` sentinel, not `None`. So the reachable nameless case is the
+    *empty string*, which is type-valid and which `qualified_name or
+    demangled_symbol or symbol` resolves to unchanged.
     """
-    change = Change(kind, None, kind.value, library=library)  # type: ignore[arg-type]
+    change = Change(kind, "", kind.value, library=library)
     return ReportFinding(change, Verdict.BREAKING, IssueCategory.ABI_BREAKING)
 
 
-def test_a_finding_with_no_name_still_groups_and_sorts() -> None:
-    """The reported crash, and the property behind it."""
+def test_a_finding_with_no_name_still_gets_a_usable_display_name() -> None:
+    """A group a reader cannot identify is not a group.
+
+    Without a fallback the three name sources resolve to `""`, so the group
+    renders under an empty heading — it sorts, but it tells the reader
+    nothing about what was observed.
+    """
     groups = build_review_groups(
         [
-            _unnamed_finding(ChangeKind.FUNC_REMOVED),
+            _nameless_finding(ChangeKind.FUNC_REMOVED),
             _finding(ChangeKind.FUNC_REMOVED, "_ZN1A3addEv"),
         ]
     )
-    assert groups, "an unnamed finding must still produce a group"
+    assert groups, "a nameless finding must still produce a group"
     for group in groups:
         assert isinstance(group.display_name, str) and group.display_name, (
             f"display_name is not a non-empty str: {group.display_name!r}"
         )
 
 
-def test_the_sort_is_total_over_every_mix_of_named_and_unnamed() -> None:
-    """Order-independence too: the result must not depend on input order.
-
-    Stated over the combinations rather than the one reported pair — the
-    crash surfaced only when an unnamed group was compared against a named
-    one, so which side of the comparison each lands on is the axis.
-    """
+def test_the_sort_is_total_over_every_mix_of_named_and_nameless() -> None:
+    """Order-independence: the result must not depend on input order."""
     import itertools
 
     population = [
-        _unnamed_finding(ChangeKind.FUNC_REMOVED),
-        _unnamed_finding(ChangeKind.VAR_REMOVED, library="libb.so"),
+        _nameless_finding(ChangeKind.FUNC_REMOVED),
+        _nameless_finding(ChangeKind.VAR_REMOVED, library="libb.so"),
         _finding(ChangeKind.FUNC_REMOVED, "_ZN1A3addEv"),
         _finding(ChangeKind.VAR_REMOVED, "global_x", library="liba.so"),
     ]
@@ -194,9 +193,9 @@ def test_the_sort_is_total_over_every_mix_of_named_and_unnamed() -> None:
         )
 
 
-def test_the_unnamed_case_is_really_unnamed() -> None:
-    """Vacuity guard: the fixture must actually exercise the None path."""
-    change = Change(ChangeKind.FUNC_REMOVED, None, ChangeKind.FUNC_REMOVED.value)  # type: ignore[arg-type]
-    assert change.symbol is None
+def test_the_nameless_case_is_really_nameless() -> None:
+    """Vacuity guard: the fixture must actually exercise the empty path."""
+    change = Change(ChangeKind.FUNC_REMOVED, "", ChangeKind.FUNC_REMOVED.value)
+    assert change.symbol == ""
     assert not getattr(change, "qualified_name", None)
     assert not getattr(change, "demangled_symbol", None)
