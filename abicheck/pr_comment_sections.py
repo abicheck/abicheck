@@ -451,6 +451,39 @@ def _gate_note(model: CommentModel) -> list[str]:
     ]
 
 
+def _background_note(model: CommentModel) -> list[str]:
+    """One line for the hygiene findings this comparison did not introduce.
+
+    ADR-068 D3 stamps every cross-source hygiene finding with its OLD->NEW
+    evolution, and the comparison layer is the only thing that can establish
+    it. This states the two counts that matter to a reviewer -- how much
+    standing debt both sides carry, and how much the candidate cleared --
+    without listing any of it: a library with 336 template-instantiation
+    guard variables has 336 of these on every single run, and itemizing them
+    beside a real finding is how the real finding gets lost.
+
+    Deliberately a *note*, not a section with a row budget: there is nothing
+    here for a reviewer to act on in this pull request, which is the whole
+    reason these findings are not in the compatibility buckets.
+    """
+    persistent, resolved = model.background_counts
+    if not persistent and not resolved:
+        return []
+    parts: list[str] = []
+    if persistent:
+        parts.append(
+            f"{persistent} pre-existing cross-source hygiene finding"
+            f"{'s' if persistent != 1 else ''} present on both sides"
+        )
+    if resolved:
+        parts.append(f"{resolved} resolved since the baseline")
+    return [
+        "> ♻️ " + " · ".join(parts) + " — not introduced by this change; "
+        "see the full report for the itemized list.",
+        "",
+    ]
+
+
 def _incomplete_note(model: CommentModel) -> list[str]:
     """Explain the analysis-incomplete bucket when it did *not* win the
     headline — a genuine breaking finding, or (for a merely-advisory

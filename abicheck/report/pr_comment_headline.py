@@ -70,7 +70,15 @@ _POLICY_ONLY_HEADER: dict[frozenset[str], tuple[str, str]] = {
 }
 
 
-def headline(model: CommentModel) -> tuple[str, str]:
+def _pre_comparison_headline(model: CommentModel) -> tuple[str, str] | None:
+    """The headline for a model whose buckets cannot speak for the run.
+
+    Four cases, in priority order, that all share one property: the
+    breaking/review/safe counts below are empty or unrepresentative *by
+    construction*, so reading them would report "we compared and found
+    nothing" for a run that compared nothing. ``None`` means the ordinary
+    bucket-driven ladder applies.
+    """
     if model.no_baseline_audit:
         # No two-sided comparison ran, so none of the "ABI BREAKING"/"Source
         # API changed; binary ABI unchanged" wording below applies (Codex
@@ -100,7 +108,7 @@ def headline(model: CommentModel) -> tuple[str, str]:
             and not model.review
             and not model.has_incomplete
             and not model.safe
-            and model.suppressed_count == 0
+            and not model.suppressed_count
         ):
             return "✅", "Audit — no baseline to compare"
         return "⚠️", "Audit — candidate-side finding(s), not gated"
@@ -117,51 +125,100 @@ def headline(model: CommentModel) -> tuple[str, str]:
         # as "we compared and found nothing" rather than "there was nothing
         # to compare".
         return "✅", "Scan audit — no baseline to compare"
-    # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
-    # prebuilt-consumer lifecycle"): a supplied --used-by/--required-symbol
-    # consumer's own scoped verdict (`model.scoped_verdict`) no longer
-    # overrides this headline -- it is reported separately, see
-    # `_scoped_notes` below. The headline always follows the full-library
-    # `b`/`r`/`s` bucket counts (and the orthogonal `incomplete_blocking`
-    # check further down, which already folds in a contract-coverage
-    # failure), exactly as it would for a run with no consumer supplied.
-    b, r, s = model.counts
     if model.removed_libraries:
         return "❌", "LIBRARY REMOVED"
     if model.no_comparison_completed:
         # ADR-065 D7: nothing was compared, so no bucket below can speak
         # for the scope -- never "No ABI changes".
         return "🛑", "No comparison completed"
-    if b:
-        # A finding is only accurately reported as "ABI BREAKING" when the
-        # Breaking bucket holds a genuine abi_breaking/potential_breaking
-        # finding — never infer that wording from bucket membership alone.
-        # Severity-config promotion (ADR-042: compatibility and gate
-        # decisions are separate axes) can populate Breaking with a
-        # COMPATIBLE addition/quality finding that policy chose to block;
-        # that is a policy violation, not an ABI/API break.
-        cats = model.breaking_categories
-        if "abi_breaking" in cats:
-            return "❌", "ABI BREAKING"
-        if "potential_breaking" in cats:
-            # "potential_breaking" covers both "api_break" (a real source
-            # break) and "risk" (a risk promoted to blocking) — they share a
-            # severity-config knob but are not the same claim, so resolve
-            # via the raw severities rather than wording every gated risk as
-            # a "source API break" (Codex review, PR #595).
-            sevs = model.breaking_severities
-            if "api_break" in sevs:
-                return "⛔", "Source API break blocks this PR"
-            if "risk" in sevs:
-                return "⛔", "Compatibility risk blocks this PR"
-            return "⛔", "Source API break blocks this PR"
-        policy_header = _POLICY_ONLY_HEADER.get(cats)
-        if policy_header is not None:
-            return policy_header
-        # No per-category tracking for this bucket (shouldn't normally
-        # happen — every mode populates breaking_categories) — fall back to
-        # the conservative default rather than under-stating a red check.
+    return None
+
+
+def _breaking_headline(model: CommentModel) -> tuple[str, str]:
+    """Wording for a non-empty Breaking bucket.
+
+    A finding is only accurately reported as "ABI BREAKING" when the bucket
+    holds a genuine abi_breaking/potential_breaking finding — never infer
+    that wording from bucket membership alone. Severity-config promotion
+    (ADR-042: compatibility and gate decisions are separate axes) can
+    populate Breaking with a COMPATIBLE addition/quality finding that policy
+    chose to block; that is a policy violation, not an ABI/API break.
+    """
+    cats = model.breaking_categories
+    if "abi_breaking" in cats:
         return "❌", "ABI BREAKING"
+    if "potential_breaking" in cats:
+        # "potential_breaking" covers both "api_break" (a real source
+        # break) and "risk" (a risk promoted to blocking) — they share a
+        # severity-config knob but are not the same claim, so resolve
+        # via the raw severities rather than wording every gated risk as
+        # a "source API break" (Codex review, PR #595).
+        if "risk" in model.breaking_severities and (
+            "api_break" not in model.breaking_severities
+        ):
+            return "⛔", "Compatibility risk blocks this PR"
+        return "⛔", "Source API break blocks this PR"
+    policy_header = _POLICY_ONLY_HEADER.get(cats)
+    if policy_header is not None:
+        return policy_header
+    # No per-category tracking for this bucket (shouldn't normally
+    # happen — every mode populates breaking_categories) — fall back to
+    # the conservative default rather than under-stating a red check.
+    return "❌", "ABI BREAKING"
+
+
+def _review_headline(model: CommentModel) -> tuple[str, str]:
+    """Wording for a non-empty Needs-review bucket.
+
+    Names the actual reason instead of the generic "Review recommended"
+    whenever every review-bucket finding agrees on one severity — a
+    source-level API change (binary ABI unaffected) reads very differently
+    from a risk finding, and a reviewer shouldn't have to open the section
+    to tell which one this is.
+    """
+    review_sevs = frozenset(f.severity for f in model.review if f.severity)
+    if review_sevs == {"api_break"}:
+        return "⚠️", "Source API changed; binary ABI unchanged"
+    if review_sevs == {"risk"}:
+        return "⚠️", "Compatibility risk — review recommended"
+    return "⚠️", "Review recommended"
+
+
+def _quiet_headline(model: CommentModel, safe_count: int) -> tuple[str, str]:
+    """Wording once no bucket above claimed the headline.
+
+    Advisory limitations still outrank "nothing to report": a clean set of
+    compared members says nothing about the members that were not compared.
+    """
+    if model.has_incomplete:
+        return "⚠️", "Analysis coverage reduced"
+    if model.scope_notice is not None:
+        # `warn` (the default): the compared members are clean, but the
+        # headline may only say so for them, never for the whole scope.
+        return "⚠️", "Compared members clean; scope incompletely checked"
+    if safe_count:
+        return "✅", "No compatibility impact detected"
+    return "✅", "No ABI changes"
+
+
+def headline(model: CommentModel) -> tuple[str, str]:
+    """The comment's one-line claim, in strict priority order.
+
+    Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
+    prebuilt-consumer lifecycle"): a supplied --used-by/--required-symbol
+    consumer's own scoped verdict (`model.scoped_verdict`) does not override
+    this headline -- it is reported separately (`_scoped_notes`). The
+    headline always follows the full-library bucket counts and the
+    orthogonal `incomplete_blocking` check below, which already folds in a
+    contract-coverage failure, exactly as it would for a run with no
+    consumer supplied.
+    """
+    early = _pre_comparison_headline(model)
+    if early is not None:
+        return early
+    breaking_count, review_count, safe_count = model.counts
+    if breaking_count:
+        return _breaking_headline(model)
     if model.scope_blocking:
         # ADR-065 D6 under `--on-incomplete-scope block`: the scope axis
         # turned the check red on its own, ahead of merely-advisory review
@@ -170,11 +227,11 @@ def headline(model: CommentModel) -> tuple[str, str]:
     if model.has_incomplete and model.incomplete_blocking:
         # A hard evidence-policy failure fails the run the same way a
         # genuine break does (ADR-033 D7 / a gated coverage risk), so it
-        # takes the same headline priority as `b` above — ahead of a
-        # separate, merely-advisory review finding. Say so explicitly rather
-        # than folding it into the generic "Review recommended" wording,
-        # which would read as "this PR changed the API," not "we couldn't
-        # check this PR."
+        # takes the same headline priority as the Breaking bucket above —
+        # ahead of a separate, merely-advisory review finding. Say so
+        # explicitly rather than folding it into the generic "Review
+        # recommended" wording, which would read as "this PR changed the
+        # API," not "we couldn't check this PR."
         if model.mode == "aggregate":
             # "Source analysis" names an evidence layer a *comparison* was
             # short of. An aggregate's blocking limitation is a different
@@ -185,33 +242,14 @@ def headline(model: CommentModel) -> tuple[str, str]:
             # problem.
             return "🛑", "Targets unchecked — this result is incomplete"
         return "🛑", "Source analysis incomplete"
-    if r:
+    if review_count:
         # A real compatibility finding always keeps headline priority over a
         # merely-advisory coverage gap (Codex review) — an ungated
         # `layer_coverage_asymmetric` must not bury a genuine source-API
         # change behind "Analysis coverage reduced". `_incomplete_note`
         # still calls the coverage gap out separately.
-        #
-        # Name the actual reason instead of the generic "Review recommended"
-        # whenever every review-bucket finding agrees on one severity — a
-        # source-level API change (binary ABI unaffected) reads very
-        # differently from a risk finding, and a reviewer shouldn't have to
-        # open the section to tell which one this is.
-        review_sevs = frozenset(f.severity for f in model.review if f.severity)
-        if review_sevs == {"api_break"}:
-            return "⚠️", "Source API changed; binary ABI unchanged"
-        if review_sevs == {"risk"}:
-            return "⚠️", "Compatibility risk — review recommended"
-        return "⚠️", "Review recommended"
-    if model.has_incomplete:
-        return "⚠️", "Analysis coverage reduced"
-    if model.scope_notice is not None:
-        # `warn` (the default): the compared members are clean, but the
-        # headline may only say so for them, never for the whole scope.
-        return "⚠️", "Compared members clean; scope incompletely checked"
-    if s:
-        return "✅", "No compatibility impact detected"
-    return "✅", "No ABI changes"
+        return _review_headline(model)
+    return _quiet_headline(model, safe_count)
 
 
 __all__ = ["headline"]

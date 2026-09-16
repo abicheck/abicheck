@@ -33,7 +33,9 @@ import json
 from dataclasses import replace
 
 import pytest
+from click.testing import CliRunner
 
+from abicheck.frontends.action.cli import action_cli
 from abicheck.frontends.action.report_publication import (
     DEFAULT_MAX_COMMENT_BYTES,
     GITHUB_COMMENT_CHAR_LIMIT,
@@ -452,10 +454,6 @@ class TestActionCommentCommand:
 
     @staticmethod
     def _invoke(tmp_path, report_payload, *extra, existing=None):
-        from click.testing import CliRunner
-
-        from abicheck.frontends.action.cli import action_cli
-
         report = tmp_path / "report.json"
         report.write_text(json.dumps(report_payload), encoding="utf-8")
         args = [

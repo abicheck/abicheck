@@ -110,7 +110,7 @@ class TestMemberReportRefusal:
         "raw",
         [
             "/etc/passwd",
-            "/tmp/elsewhere.json",
+            "/opt/elsewhere.json",
             "C:\\Windows\\win.ini",
             "C:/Windows/win.ini",
             "../outside.json",
@@ -120,7 +120,7 @@ class TestMemberReportRefusal:
         ],
         ids=[
             "absolute-posix",
-            "absolute-posix-tmp",
+            "absolute-posix-other",
             "absolute-windows-backslash",
             "absolute-windows-slash",
             "parent-traversal",

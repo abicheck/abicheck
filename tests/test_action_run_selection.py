@@ -34,7 +34,10 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
+import abicheck.frontends.action.run_selection as run_selection_module
+from abicheck.frontends.action.cli import EXIT_REFUSED, action_cli
 from abicheck.frontends.action.run_selection import (
     ExtractionLimits,
     RunExpectation,
@@ -410,7 +413,7 @@ class TestHostileArchives:
         assert not sentinel.exists(), "the escaping entry was written anyway"
 
     def test_an_absolute_entry_is_refused(self, tmp_path: Path) -> None:
-        archive = _zip(tmp_path, [("/tmp/abicheck-owned.json", b"{}")])
+        archive = _zip(tmp_path, [("/opt/abicheck-owned.json", b"{}")])
         with pytest.raises(SourceRunRejected) as excinfo:
             extract_artifact(archive, tmp_path / "out")
         assert excinfo.value.code in ("artifact-absolute-path", "artifact-traversal")
@@ -587,8 +590,7 @@ class TestTheModuleNeverExecutesArtifactContent:
     """
 
     def test_the_module_imports_nothing_that_can_execute_a_payload(self) -> None:
-        import abicheck.frontends.action.run_selection as module
-
+        module = run_selection_module
         forbidden = {"pickle", "yaml", "marshal", "shelve", "subprocess", "os"}
         module_globals = {
             name
@@ -598,8 +600,7 @@ class TestTheModuleNeverExecutesArtifactContent:
         assert module_globals == set()
 
     def test_no_dynamic_execution_builtin_is_referenced(self) -> None:
-        import abicheck.frontends.action.run_selection as module
-
+        module = run_selection_module
         source = Path(module.__file__).read_text(encoding="utf-8")
         tree = compile(source, module.__file__, "exec", dont_inherit=True)
 
@@ -698,10 +699,6 @@ class TestVerifyRunCommand:
         return path
 
     def _invoke(self, tmp_path: Path, *extra: str, **overrides: object):
-        from click.testing import CliRunner
-
-        from abicheck.frontends.action.cli import EXIT_REFUSED, action_cli
-
         run_json = self._write(tmp_path, "run.json", run_document(**overrides))
         pulls_json = self._write(tmp_path, "pulls.json", [pull_document()])
         artifacts_json = self._write(
@@ -744,12 +741,12 @@ class TestVerifyRunCommand:
                 *extra,
             ],
         )
-        return result, json.loads(out.read_text(encoding="utf-8")), EXIT_REFUSED
+        return result, json.loads(out.read_text(encoding="utf-8"))
 
     def test_a_verified_run_reports_the_api_resolved_pull_request(
         self, tmp_path: Path
     ) -> None:
-        result, document, _ = self._invoke(tmp_path)
+        result, document = self._invoke(tmp_path)
         assert result.exit_code == 0, result.output
         assert document["verified"] is True
         assert document["pr_number"] == 216
@@ -765,7 +762,7 @@ class TestVerifyRunCommand:
             "commit.json",
             {"sha": MERGE_SHA, "parents": [{"sha": "0" * 40}, {"sha": HEAD_SHA}]},
         )
-        result, document, _ = self._invoke(
+        result, document = self._invoke(
             tmp_path,
             "--tested-sha",
             MERGE_SHA,
@@ -802,8 +799,8 @@ class TestVerifyRunCommand:
         extra: tuple[str, ...],
         code: str,
     ) -> None:
-        result, document, exit_refused = self._invoke(tmp_path, *extra, **overrides)
-        assert result.exit_code == exit_refused
+        result, document = self._invoke(tmp_path, *extra, **overrides)
+        assert result.exit_code == EXIT_REFUSED
         assert document == {
             "verified": False,
             "code": code,
@@ -812,17 +809,13 @@ class TestVerifyRunCommand:
         assert document["reason"]
 
     def test_an_allow_any_conclusion_accepts_a_failed_run(self, tmp_path: Path) -> None:
-        result, document, _ = self._invoke(
+        result, document = self._invoke(
             tmp_path, "--allow-conclusion", "", conclusion="failure"
         )
         assert result.exit_code == 0, result.output
         assert document["verified"] is True
 
     def test_a_non_list_association_document_is_refused(self, tmp_path: Path) -> None:
-        from click.testing import CliRunner
-
-        from abicheck.frontends.action.cli import EXIT_REFUSED, action_cli
-
         run_json = self._write(tmp_path, "run.json", run_document())
         pulls_json = self._write(tmp_path, "pulls.json", {"not": "a list"})
         out = tmp_path / "result.json"
@@ -846,10 +839,6 @@ class TestVerifyRunCommand:
 
 class TestExtractArtifactCommand:
     def test_an_ordinary_archive_extracts(self, tmp_path: Path) -> None:
-        from click.testing import CliRunner
-
-        from abicheck.frontends.action.cli import action_cli
-
         archive = _zip(tmp_path, [("compare.json", b'{"verdict": "COMPATIBLE"}')])
         result = CliRunner().invoke(
             action_cli, ["extract-artifact", str(archive), str(tmp_path / "out")]
@@ -858,10 +847,6 @@ class TestExtractArtifactCommand:
         assert (tmp_path / "out" / "compare.json").is_file()
 
     def test_a_hostile_archive_exits_distinctly(self, tmp_path: Path) -> None:
-        from click.testing import CliRunner
-
-        from abicheck.frontends.action.cli import EXIT_REFUSED, action_cli
-
         archive = _zip(tmp_path, [("../escaped.json", b"{}")])
         result = CliRunner().invoke(
             action_cli, ["extract-artifact", str(archive), str(tmp_path / "out")]
@@ -870,10 +855,6 @@ class TestExtractArtifactCommand:
         assert "artifact-traversal" in result.output
 
     def test_limits_are_honoured_from_the_command_line(self, tmp_path: Path) -> None:
-        from click.testing import CliRunner
-
-        from abicheck.frontends.action.cli import EXIT_REFUSED, action_cli
-
         archive = _zip(tmp_path, [(f"f{i}.json", b"{}") for i in range(20)])
         result = CliRunner().invoke(
             action_cli,

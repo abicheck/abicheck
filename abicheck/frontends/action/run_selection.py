@@ -267,6 +267,12 @@ class ResolvedPullRequest:
 
 
 def _pull_request_from_api(data: Mapping[str, Any]) -> ResolvedPullRequest | None:
+    """One association entry, or ``None`` when it carries no usable answer.
+
+    Never coerced into a candidate: an entry with no integer ``number``
+    describes no pull request, and resolving one from it would be inventing
+    the very answer this boundary exists to establish.
+    """
     if not isinstance(data, Mapping):
         return None
     number = data.get("number")
@@ -384,7 +390,7 @@ def verify_tested_sha(
             f"the run's head {run.head_sha} is not the pull request's head "
             f"{pull_request.head_sha}",
         )
-    if tested_sha == pull_request.head_sha or tested_sha == run.head_sha:
+    if tested_sha in (pull_request.head_sha, run.head_sha):
         return tested_sha
     if tested_commit is None:
         raise SourceRunRejected(
@@ -458,6 +464,9 @@ def select_artifact(
 
 @dataclass(frozen=True)
 class ExtractionLimits:
+    """Caps applied to one artifact, declared together so a caller cannot
+    tighten one and silently leave another at its default."""
+
     max_total_bytes: int = DEFAULT_MAX_TOTAL_BYTES
     max_entry_bytes: int = DEFAULT_MAX_ENTRY_BYTES
     max_entries: int = DEFAULT_MAX_ENTRIES

@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from ..pr_comment_base import CommentModel, Finding
@@ -438,21 +439,17 @@ def _fallback_row(tid: str, verdict: str) -> tuple[str, str, int, int, int]:
 
 
 def _tag(findings: Sequence[Finding], component: str) -> list[Finding]:
-    """Copy *findings* with their originating target recorded on each."""
-    return [
-        Finding(
-            kind=f.kind,
-            symbol=f.symbol,
-            detail=f.detail,
-            location=f.location,
-            category=f.category,
-            severity=f.severity,
-            impact=f.impact,
-            mangled=f.mangled,
-            component=component,
-        )
-        for f in findings
-    ]
+    """Copy *findings* with their originating target recorded on each.
+
+    :func:`dataclasses.replace`, not a field-by-field constructor call: the
+    hand-written version silently dropped whichever field was added to
+    :class:`~abicheck.pr_comment_base.Finding` next (it lost
+    ``evolution``, so every folded member's pre-existing hygiene finding
+    came back through the fan-in unstamped, and therefore counted as a
+    change the comparison introduced). A copy that enumerates fields is a
+    copy that goes stale.
+    """
+    return [replace(f, component=component) for f in findings]
 
 
 def _member_evidence_limitation(tid: str, member: CommentModel) -> Finding | None:
@@ -481,6 +478,140 @@ def _member_evidence_limitation(tid: str, member: CommentModel) -> Finding | Non
         "see its full report.",
         tid,
     )
+
+
+@dataclass
+class _Fold:
+    """The accumulator one target at a time contributes to.
+
+    A struct rather than a dozen locals threaded through
+    :func:`build_aggregate_model`: the per-target work is a loop body with
+    ten outputs, and a parameter list that long is how one of them ends up
+    silently not updated on some path.
+    """
+
+    rows: list[tuple[str, str, int, int, int]] = field(default_factory=list)
+    breaking: list[Finding] = field(default_factory=list)
+    review: list[Finding] = field(default_factory=list)
+    safe: list[Finding] = field(default_factory=list)
+    incomplete: list[Finding] = field(default_factory=list)
+    background: list[Finding] = field(default_factory=list)
+    categories: set[str] = field(default_factory=set)
+    severities: set[str] = field(default_factory=set)
+    summaries: list[ChangeSummary] = field(default_factory=list)
+    suppressed: int = 0
+    reclassified: int = 0
+    member_blocking: bool = False
+    any_analyzed: bool = False
+    itemized: int = 0
+
+
+def _load_member(
+    target: Mapping[str, object],
+    tid: str,
+    *,
+    build_member_model: Callable[[dict[str, object]], CommentModel],
+    base_dir: Path | None,
+    max_member_bytes: int,
+) -> tuple[CommentModel | None, Finding | None]:
+    """One member's model, or ``(None, limitation)`` stating why not.
+
+    Every failure becomes a *limitation*, never an omission and never an
+    exception that escapes: one member written in a shape this build cannot
+    model (a newer schema, a retired one) must not cost every other target's
+    result too.
+    """
+    if base_dir is None:
+        return None, _limitation(
+            tid,
+            "Per-target detail is unavailable: the aggregate document's own "
+            "directory is not known to this renderer, so no member report "
+            "was read.",
+            tid,
+        )
+    raw_path = target.get("report_path")
+    try:
+        data = load_member_report(
+            base_dir,
+            str(raw_path) if raw_path is not None else "",
+            max_bytes=max_member_bytes,
+        )
+        return build_member_model(data), None
+    except MemberReportRefused as exc:
+        return None, _limitation(tid, f"Per-target detail is unavailable: {exc}", tid)
+    except Exception as exc:  # noqa: BLE001 - see this function's docstring
+        return None, _limitation(
+            tid,
+            f"Per-target detail is unavailable: its report could not be "
+            f"rendered ({type(exc).__name__}: {exc})",
+            tid,
+        )
+
+
+def _fold_target(
+    fold: _Fold,
+    target: Mapping[str, object],
+    *,
+    build_member_model: Callable[[dict[str, object]], CommentModel],
+    base_dir: Path | None,
+    max_member_bytes: int,
+) -> None:
+    """Add one target's contribution to *fold*, in place."""
+    tid = str(target.get("target_id", "?"))
+    state = str(target.get("state", ""))
+    verdict = target.get("compatibility_verdict")
+    verdict_str = str(verdict) if verdict is not None else ""
+    gate_categories = frozenset(
+        _str_list(_mapping(target.get("gate")).get("blocking_categories"))
+    )
+    fold.incomplete += _target_limitations(target)
+    if state != "analyzed":
+        # No comparison behind it; the limitation above is the whole report
+        # for this target. A row of zeros would put it in the results table
+        # as though it had been checked.
+        return
+    fold.any_analyzed = True
+    if gate_categories & NON_COMPARISON_GATE_CATEGORIES:
+        # Analyzed in the document's bookkeeping sense, but its verdict is
+        # the synthetic one `aggregate` forces so the leg cannot pass
+        # unnoticed. Show it with the state it actually reached.
+        fold.rows.append((tid, sorted(gate_categories)[0].upper(), 0, 0, 0))
+        return
+
+    member, refusal = _load_member(
+        target,
+        tid,
+        build_member_model=build_member_model,
+        base_dir=base_dir,
+        max_member_bytes=max_member_bytes,
+    )
+    if refusal is not None:
+        fold.incomplete.append(refusal)
+    if member is None:
+        fold.rows.append(_fallback_row(tid, verdict_str))
+        return
+
+    fold.itemized += 1
+    nb, nr, ns = member.counts
+    fold.rows.append((tid, verdict_str or "?", nb, nr, ns))
+    fold.breaking += _tag(member.breaking, tid)
+    fold.review += _tag(member.review, tid)
+    fold.safe += _tag(member.safe, tid)
+    fold.incomplete += _tag(member.incomplete, tid)
+    # ADR-068 D3: each member states which of its hygiene findings it
+    # introduced; a fan-in may not decide differently, so the folded
+    # model keeps the same separation the member's own comment does.
+    fold.background += _tag(member.background, tid)
+    fold.categories |= set(member.breaking_categories)
+    fold.severities |= set(member.breaking_severities)
+    fold.suppressed += member.suppressed_count
+    fold.reclassified += member.reclassified_count
+    fold.member_blocking = fold.member_blocking or member.incomplete_blocking
+    evidence_note = _member_evidence_limitation(tid, member)
+    if evidence_note is not None:
+        fold.incomplete.append(evidence_note)
+    if member.change_summary is not None:
+        fold.summaries.append(member.change_summary)
 
 
 def build_aggregate_model(
@@ -514,104 +645,17 @@ def build_aggregate_model(
       folded findings.
     """
     targets = _targets(report)
-    rows: list[tuple[str, str, int, int, int]] = []
-    breaking: list[Finding] = []
-    review: list[Finding] = []
-    safe: list[Finding] = []
-    incomplete: list[Finding] = []
-    categories: set[str] = set()
-    severities: set[str] = set()
-    summaries: list[ChangeSummary] = []
-    suppressed = 0
-    reclassified = 0
-    member_blocking = False
-    any_analyzed = False
-    itemized_targets = 0
-
+    fold = _Fold()
     for target in targets:
-        tid = str(target.get("target_id", "?"))
-        state = str(target.get("state", ""))
-        verdict = target.get("compatibility_verdict")
-        verdict_str = str(verdict) if verdict is not None else ""
-        gate = _mapping(target.get("gate"))
-        gate_categories = frozenset(_str_list(gate.get("blocking_categories")))
-        incomplete += _target_limitations(target)
-        if state == "analyzed":
-            any_analyzed = True
-        if state != "analyzed":
-            # No comparison behind it; the limitation above is the whole
-            # report for this target. Emitting a row of zeros would put it
-            # in the results table as though it had been checked.
-            continue
-        if gate_categories & NON_COMPARISON_GATE_CATEGORIES:
-            # Analyzed in the document's bookkeeping sense, but its verdict
-            # is the synthetic one `aggregate` forces so the leg cannot pass
-            # unnoticed. Show it with the state it actually reached.
-            rows.append((tid, sorted(gate_categories)[0].upper(), 0, 0, 0))
-            continue
-
-        member: CommentModel | None = None
-        raw_path = target.get("report_path")
-        if base_dir is None:
-            incomplete.append(
-                _limitation(
-                    tid,
-                    "Per-target detail is unavailable: the aggregate document's "
-                    "own directory is not known to this renderer, so no member "
-                    "report was read.",
-                    tid,
-                )
-            )
-        else:
-            try:
-                data = load_member_report(
-                    base_dir,
-                    str(raw_path) if raw_path is not None else "",
-                    max_bytes=max_member_bytes,
-                )
-                member = build_member_model(data)
-            except MemberReportRefused as exc:
-                incomplete.append(
-                    _limitation(
-                        tid,
-                        f"Per-target detail is unavailable: {exc}",
-                        tid,
-                    )
-                )
-            except Exception as exc:  # noqa: BLE001 - see below
-                # A member report this build cannot model (a newer schema, a
-                # shape retired from this renderer) is a limitation, not a
-                # crash that loses every other target's result too. The
-                # reason is surfaced verbatim so it stays diagnosable.
-                incomplete.append(
-                    _limitation(
-                        tid,
-                        f"Per-target detail is unavailable: its report could "
-                        f"not be rendered ({type(exc).__name__}: {exc})",
-                        tid,
-                    )
-                )
-        if member is None:
-            rows.append(_fallback_row(tid, verdict_str))
-            continue
-
-        itemized_targets += 1
-        nb, nr, ns = member.counts
-        rows.append((tid, verdict_str or "?", nb, nr, ns))
-        breaking += _tag(member.breaking, tid)
-        review += _tag(member.review, tid)
-        safe += _tag(member.safe, tid)
-        incomplete += _tag(member.incomplete, tid)
-        categories |= set(member.breaking_categories)
-        severities |= set(member.breaking_severities)
-        suppressed += member.suppressed_count
-        reclassified += member.reclassified_count
-        member_blocking = member_blocking or member.incomplete_blocking
-        evidence_note = _member_evidence_limitation(tid, member)
-        if evidence_note is not None:
-            incomplete.append(evidence_note)
-        if member.change_summary is not None:
-            summaries.append(member.change_summary)
+        _fold_target(
+            fold,
+            target,
+            build_member_model=build_member_model,
+            base_dir=base_dir,
+            max_member_bytes=max_member_bytes,
+        )
+    rows = fold.rows
+    incomplete = fold.incomplete
 
     axis_findings, axis_blocking = _axis_limitations(
         report,
@@ -660,13 +704,13 @@ def build_aggregate_model(
 
     n_targets = len(targets)
     summary_inexact_reason = ""
-    if itemized_targets < len(rows):
+    if fold.itemized < len(rows):
         summary_inexact_reason = (
-            f"{len(rows) - itemized_targets} of {len(rows)} target(s) could not "
+            f"{len(rows) - fold.itemized} of {len(rows)} target(s) could not "
             "be itemized, so these are lower bounds"
         )
     folded_summary = fold_change_summaries(
-        summaries, inexact_reason=summary_inexact_reason
+        fold.summaries, inexact_reason=summary_inexact_reason
     )
     if summary_inexact_reason and folded_summary.rows:
         folded_summary = ChangeSummary(
@@ -684,20 +728,23 @@ def build_aggregate_model(
         old_label="each target vs its own baseline",
         new_label=str(report.get("head_sha", "") or "candidate"),
         policy="per-target policy",
-        breaking=breaking,
-        review=review,
-        safe=safe,
+        breaking=fold.breaking,
+        review=fold.review,
+        safe=fold.safe,
         incomplete=incomplete,
-        incomplete_blocking=(axis_blocking or member_blocking or forced_gate_blocking),
+        background=fold.background,
+        incomplete_blocking=(
+            axis_blocking or fold.member_blocking or forced_gate_blocking
+        ),
         contract_coverage_blocking=contract_blocking,
-        breaking_categories=frozenset(categories),
-        breaking_severities=frozenset(severities),
+        breaking_categories=frozenset(fold.categories),
+        breaking_severities=frozenset(fold.severities),
         library_rows=rows,
         # ADR-065 D7's wording, applied one level up: a fan-in where not one
         # target reached a comparison may not render as "no ABI changes".
-        no_comparison_completed=bool(targets) and not any_analyzed,
-        suppressed_count=suppressed,
-        reclassified_count=reclassified,
+        no_comparison_completed=bool(targets) and not fold.any_analyzed,
+        suppressed_count=fold.suppressed,
+        reclassified_count=fold.reclassified,
         # Read verbatim from the document's own already-folded block
         # (`report/aggregate.py`), never re-folded here: a second fold over
         # the member reports would double-count every target whose audit the

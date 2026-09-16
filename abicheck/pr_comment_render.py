@@ -50,6 +50,7 @@ from .pr_comment_base import (
 from .pr_comment_sections import (
     _BODY_BUDGET,
     GITHUB_COMMENT_LIMIT as GITHUB_COMMENT_LIMIT,
+    _background_note,
     _change_summary_block,
     _detail_link,
     _evidence_block,
@@ -625,6 +626,7 @@ def _render_body(
     lines += _library_notes(model)
     lines += _gate_note(model)
     lines += _incomplete_note(model)
+    lines += _background_note(model)
     lines += _scoped_notes(model)
     lines += _suppression_note(model)
     lines += _change_summary_block(model)

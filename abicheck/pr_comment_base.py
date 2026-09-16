@@ -108,6 +108,14 @@ class Finding:
     # of collapsing into one row that lists the name three times and says
     # nothing about which target each came from.
     component: str = ""
+    # ADR-068 D3's `cross_source_evolution` state, carried verbatim from the
+    # report: "introduced" | "resolved" | "persistent" | "not_evaluated",
+    # or "" for a finding the comparison layer did not stamp (every ordinary
+    # two-sided diff finding). Read, never re-derived -- the comparison
+    # layer is the only thing that can establish whether a one-sided hygiene
+    # check's finding is new, and this renderer may not form a second
+    # opinion about it (ADR-072 D1).
+    evolution: str = ""
 
 
 @dataclass
@@ -133,6 +141,21 @@ class CommentModel:
     # into `total_changes` separately so `should_post("changes")` still fires
     # on a report that carries only this.
     incomplete: list[Finding] = field(default_factory=list)
+    # ADR-068 D3: cross-source hygiene findings this comparison established
+    # were **not introduced by it** -- present identically on both sides
+    # (`persistent`) or present only on the baseline (`resolved`). They are
+    # a standing property of the library, not something a pull request did,
+    # so they are kept out of every compatibility bucket and out of
+    # `counts`/`total_changes` entirely: a byte-identical rebuild whose
+    # library carries 336 template-instantiation guard variables must
+    # publish *nothing* under `--on=changes`, and when there is a real
+    # change beside them they must read as background rather than as this
+    # change's own modifications.
+    #
+    # `not_evaluated` deliberately does NOT land here: "one side's evidence
+    # could not confirm or deny this" is an analysis limitation, and it goes
+    # to `incomplete` where limitations belong.
+    background: list[Finding] = field(default_factory=list)
     # Whether the incomplete bucket actually turns the Action's check red —
     # i.e. whether `_incomplete_is_blocking` found a finding whose severity
     # is gated to blocking (see that function's own docstring for exactly
@@ -373,6 +396,21 @@ class CommentModel:
                 else len(self.safe),
             )
         return len(self.breaking), len(self.review), len(self.safe)
+
+    @property
+    def background_counts(self) -> tuple[int, int]:
+        """``(persistent, resolved)`` over the pre-existing-hygiene bucket.
+
+        Reported separately because the two say different things: one is
+        standing debt both sides carry, the other is debt the baseline had
+        and the candidate no longer does. Neither is a change this
+        comparison's operands introduced, which is why neither reaches
+        :attr:`counts`.
+        """
+        return (
+            sum(1 for f in self.background if f.evolution == "persistent"),
+            sum(1 for f in self.background if f.evolution == "resolved"),
+        )
 
     @property
     def total_changes(self) -> int:

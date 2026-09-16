@@ -282,6 +282,13 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             # failure was indistinguishable from a clean result.
             "tests/test_pr_comment_aggregate.py",
             "tests/test_action_report_publication.py",
+            # The same class's mirror image, found on a real PVXS build: a
+            # finding the comparison layer stamped as *pre-existing*
+            # (ADR-068 D3 `persistent`/`resolved`) read as one this pull
+            # request made. Same mechanism -- the renderer asserting what
+            # the comparison did not -- so it seeds the same class rather
+            # than opening a new one.
+            "tests/test_pr_comment_background_hygiene.py",
             # The generalized statement of the class, over a generated
             # cross-product rather than the reported inputs: an admitted
             # document must be answerable

@@ -32,3 +32,20 @@
   out-of-directory member reports, and every contract-coverage,
   analysis-assurance and scope-completeness shortfall now render as explicit
   limitations and post under `--on=changes`.
+
+- **A pre-existing cross-source hygiene finding is no longer reported as a
+  change the pull request made.** ADR-068 D3 already re-runs each one-sided
+  hygiene check against the baseline and stamps every finding
+  ``introduced``/``resolved``/``persistent``/``not_evaluated``, and the JSON
+  report has always carried the value — the PR comment never read it. A
+  self-compare of one PVXS snapshot against itself (byte-identical operands,
+  verdict ``NO_CHANGE``) reported 339 changes, 336 of them
+  ``exported_not_public`` on C++ template-instantiation guard variables that
+  both sides carry identically, and posted all of them on every run under the
+  default ``--on=changes``. ``persistent``/``resolved`` findings now go to a
+  background bucket that is summarised in one line, excluded from the
+  breaking/needs-review/safe counts, from the "What changed" rollup and from
+  ``should_post``; ``not_evaluated`` goes to the analysis-incomplete bucket,
+  since the comparison layer explicitly declined to say whether it was new.
+  The renderer reclassifies nothing — it reads the state the comparison
+  established (ADR-072 D1).

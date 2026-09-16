@@ -119,6 +119,12 @@ from .report.change_summary import ChangeSummary, summarize_changes
 from .report.comparison_scope import comparison_scope_notice
 from .report.evidence_summary import evidence_summary
 
+# A one-directional import: the aggregate adapter reaches only into
+# `pr_comment_base`/`report.change_summary`, never back here (it takes
+# this module's per-shape builder as a parameter instead), so it needs
+# no lazy import to stay cycle-free.
+from .report.pr_comment_aggregate import build_aggregate_model
+
 POST_MODES = ("always", "changes", "never")
 
 
@@ -247,16 +253,63 @@ def _changes_list(changes: object) -> list[dict[str, object]]:
     return [c for c in changes if isinstance(c, dict)]
 
 
+def _introduced_changes(changes: object) -> list[dict[str, object]]:
+    """:func:`_changes_list` minus the findings this comparison did not
+    introduce (:data:`_BACKGROUND_EVOLUTIONS`).
+
+    The "What changed" rollup answers *what this comparison's operands
+    did*. Counting standing hygiene debt in it reports 336 modifications
+    for a byte-identical rebuild -- the same misattribution the background
+    bucket exists to stop, one table over. Exactly the same predicate
+    ``_bucket_changes`` routes on, so the rollup and the sections can never
+    disagree about which findings are this change's own.
+    """
+    return [
+        c
+        for c in _changes_list(changes)
+        if str(c.get("cross_source_evolution", "") or "") not in _BACKGROUND_EVOLUTIONS
+    ]
+
+
+#: ``Change.cross_source_evolution`` states that mean *this comparison did
+#: not introduce the finding* (ADR-068 D3, stamped by
+#: ``workflows/cross_source_evolution.py``). A one-sided hygiene check is
+#: re-run against the baseline and its findings paired, so the comparison
+#: layer already knows which of them are new; this renderer reads that
+#: answer and never re-derives it (ADR-072 D1).
+#:
+#: - ``persistent`` -- flagged identically on both sides. Standing library
+#:   debt (a C++ template-instantiation guard variable, a function-local
+#:   static), not something a pull request did.
+#: - ``resolved`` -- flagged on the baseline only. Good news, and still not
+#:   a change to review in the candidate.
+#:
+#: ``not_evaluated`` is deliberately absent: it means one side's evidence
+#: could not confirm or deny the finding, which is an analysis limitation
+#: and belongs in the analysis-incomplete bucket, not in background.
+#: ``introduced`` is absent because an introduced finding *is* this
+#: comparison's own, and is bucketed by severity like any other.
+_BACKGROUND_EVOLUTIONS = frozenset({"persistent", "resolved"})
+
+
 def _bucket_changes(
     changes: object,
     gate_api_break: bool = False,
     levels: dict[str, str] | None = None,
     path_prefix: str = "",
-) -> tuple[list[Finding], list[Finding], list[Finding], list[Finding]]:
+) -> tuple[list[Finding], list[Finding], list[Finding], list[Finding], list[Finding]]:
+    """Route each serialized finding to its reviewer-facing bucket.
+
+    Returns ``(breaking, review, safe, incomplete, background)``. The last
+    two are not compatibility buckets: *incomplete* is what the comparison
+    could not establish, *background* is what it established was already
+    there (see :data:`_BACKGROUND_EVOLUTIONS`).
+    """
     breaking: list[Finding] = []
     review: list[Finding] = []
     safe: list[Finding] = []
     incomplete: list[Finding] = []
+    background: list[Finding] = []
     target = {"breaking": breaking, "review": review, "safe": safe}
     levels = levels or {}
     changes_list = changes if isinstance(changes, list) else []
@@ -273,11 +326,44 @@ def _bucket_changes(
                 continue
             sev = str(c.get("severity", "unknown"))
             kind = str(c.get("kind", ""))
+            evolution = str(c.get("cross_source_evolution", "") or "")
+            # ADR-068 D3: a cross-source hygiene finding the comparison
+            # layer established was already present (or is being resolved)
+            # is not a change this comparison's operands introduced. Routed
+            # out ahead of every compatibility rule below -- including the
+            # evidence-kind split and the severity gates -- because none of
+            # them is a question about a finding nobody introduced: a
+            # severity promotion cannot make standing debt into this PR's
+            # break, and the gate the producer ran already scored it.
+            if evolution in _BACKGROUND_EVOLUTIONS:
+                loc = c.get("source_location")
+                background.append(
+                    Finding(
+                        kind=kind,
+                        symbol=str(c.get("symbol", "")),
+                        detail=_detail_text(c, str(c.get("symbol", ""))),
+                        location=_normalize_location(str(loc), path_prefix)
+                        if loc
+                        else None,
+                        severity=sev,
+                        impact=str(c.get("impact", "") or ""),
+                        evolution=evolution,
+                    )
+                )
+                continue
             # Evidence-quality findings never enter the compatibility buckets
             # (see `_EVIDENCE_KIND_VALUES`/module docstring) — pulled out
             # ahead of the severity-bucket/gate logic below, which is about
             # compatibility gating and does not apply to them.
-            if kind in _EVIDENCE_KIND_VALUES:
+            #
+            # ADR-068 D3's `not_evaluated` joins them: it means one side's
+            # evidence could not confirm or deny the finding, so the
+            # comparison layer explicitly refused to call it introduced.
+            # Bucketing it by severity would make this renderer assert what
+            # the comparison declined to, and calling it background would
+            # assert the opposite. "We could not establish this" is what the
+            # analysis-incomplete bucket is for.
+            if kind in _EVIDENCE_KIND_VALUES or evolution == "not_evaluated":
                 loc = c.get("source_location")
                 symbol = _evidence_symbol_label(kind, str(c.get("symbol", "")))
                 incomplete.append(
@@ -290,6 +376,7 @@ def _bucket_changes(
                         else None,
                         severity=sev,
                         impact=str(c.get("impact", "") or ""),
+                        evolution=evolution,
                     )
                 )
                 continue
@@ -317,9 +404,10 @@ def _bucket_changes(
                     severity=sev,
                     impact=str(c.get("impact", "") or ""),
                     mangled=mangled_evidence,
+                    evolution=evolution,
                 )
             )
-    return breaking, review, safe, incomplete
+    return breaking, review, safe, incomplete, background
 
 
 def _incomplete_is_blocking(
@@ -506,7 +594,7 @@ def _from_compare(
         message = reason.get("message")
         not_comparable_reason = str(message) if message else "not comparable"
     levels = _severity_levels(report)
-    breaking, review, safe, incomplete = _bucket_changes(
+    breaking, review, safe, incomplete, background = _bucket_changes(
         report.get("changes"), gate_api_break, levels, path_prefix
     )
     # Blocking-ness for the ordinary evidence-kind findings above is
@@ -569,6 +657,7 @@ def _from_compare(
         review=review,
         safe=safe,
         incomplete=incomplete,
+        background=background,
         incomplete_blocking=incomplete_blocking,
         contract_coverage_blocking=contract_coverage_blocking,
         breaking_categories=_breaking_categories(breaking),
@@ -590,7 +679,7 @@ def _from_compare(
         # Summarized from the report's own complete `changes` list, before
         # any grouping or display cap this renderer applies -- AGENTS.md
         # "compute authoritative totals before grouping or display caps".
-        change_summary=summarize_changes(_changes_list(report.get("changes"))),
+        change_summary=summarize_changes(_introduced_changes(report.get("changes"))),
     )
 
 
@@ -666,7 +755,7 @@ def _from_no_baseline(
                 str(item.get("verdict", "")), "unknown"
             )
             changes_shaped.append(item)
-    breaking, review, safe, incomplete = _bucket_changes(
+    breaking, review, safe, incomplete, background = _bucket_changes(
         changes_shaped, gate_api_break, {}, path_prefix
     )
     incomplete_blocking = _incomplete_is_blocking(
@@ -699,6 +788,7 @@ def _from_no_baseline(
         review=review,
         safe=safe,
         incomplete=incomplete,
+        background=background,
         incomplete_blocking=incomplete_blocking,
         contract_coverage_blocking=contract_coverage_blocking,
         breaking_categories=_breaking_categories(breaking),
@@ -753,7 +843,7 @@ def _from_appcompat(
     path_prefix: str = "",
 ) -> CommentModel:
     levels = _severity_levels(report)
-    breaking, review, safe, incomplete = _bucket_changes(
+    breaking, review, safe, incomplete, background = _bucket_changes(
         report.get("relevant_changes"), gate_api_break, levels, path_prefix
     )
     missing = report.get("missing_symbols")
@@ -797,6 +887,7 @@ def _from_appcompat(
         review=review,
         safe=safe,
         incomplete=incomplete,
+        background=background,
         incomplete_blocking=_incomplete_is_blocking(
             incomplete, gate_api_break, gate_breaking, levels
         ),
@@ -804,7 +895,7 @@ def _from_appcompat(
         breaking_severities=_breaking_severities(breaking),
         evidence=evidence_summary(report),
         change_summary=summarize_changes(
-            _changes_list(report.get("relevant_changes"))
+            _introduced_changes(report.get("relevant_changes"))
             + _appcompat_synthetic_changes(report)
         ),
     )
@@ -1289,8 +1380,6 @@ def build_model(
         # presence of a payload array, and because falling through to
         # `_from_compare` is exactly what made it render a false "no
         # changes" comment (this adapter's own module docstring).
-        from .report.pr_comment_aggregate import build_aggregate_model
-
         def _member(data: dict[str, object]) -> CommentModel:
             return build_model(
                 data,

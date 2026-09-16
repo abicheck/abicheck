@@ -39,12 +39,14 @@ crossed with the document's own axes, against an oracle derived from the
 from __future__ import annotations
 
 import json
+import random
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
 
 from abicheck.pr_comment import build_model, render_comment, should_post
+from abicheck.pr_comment_base import Finding
 from abicheck.pr_comment_render import GITHUB_COMMENT_LIMIT
 from abicheck.pr_comment_sections import _truncate_to_budget
 from abicheck.report.change_summary import (
@@ -690,8 +692,6 @@ class TestFoldChangeSummariesProperties:
 
     @staticmethod
     def _rand_summaries(seed: int, n: int) -> list[ChangeSummary]:
-        import random
-
         rng = random.Random(seed)
         entities = ["function", "variable", "type", "enum", "binary"]
         out = []
@@ -719,8 +719,6 @@ class TestFoldChangeSummariesProperties:
 
     @pytest.mark.parametrize("seed", range(25))
     def test_the_result_never_depends_on_input_order(self, seed: int) -> None:
-        import random
-
         parts = self._rand_summaries(seed, 5)
         shuffled = list(parts)
         random.Random(seed + 1000).shuffle(shuffled)
@@ -999,3 +997,61 @@ class TestDocumentFactsAreReadNotRecomputed:
         model = build_model(document, report_dir=tmp_path)
         assert model.counts == expected
         assert model.has_incomplete
+
+
+class TestTagPreservesEveryFieldButComponent:
+    """A copy that enumerates fields is a copy that goes stale.
+
+    ``_tag`` re-stamps a folded member's findings with the target that
+    reported them. Written as a field-by-field constructor call it silently
+    dropped whichever field ``Finding`` gained next -- concretely
+    ``evolution``, so every member's *pre-existing* hygiene finding came
+    back through the fan-in unstamped and was then counted as a change the
+    comparison had introduced. Stated here over ``Finding``'s own field
+    list, so the next field added is covered without anyone remembering to.
+    """
+
+    @staticmethod
+    def _populated() -> Finding:
+        import dataclasses
+
+        # A distinct, non-default value in every field, so a dropped one
+        # shows up as a reverted default rather than coinciding with it.
+        values: dict[str, object] = {
+            "kind": "func_removed",
+            "symbol": "ns::thing",
+            "detail": "Function removed",
+            "location": "include/thing.h:12",
+            "category": "abi_breaking",
+            "severity": "breaking",
+            "impact": "consumers fail to link",
+            "mangled": "_ZN2ns5thingEv",
+            "component": "original-target",
+            "evolution": "persistent",
+        }
+        declared = {f.name for f in dataclasses.fields(Finding)}
+        assert declared == set(values), (
+            f"`Finding` gained or lost a field: {declared ^ set(values)}. Add it "
+            "to this fixture with a distinct value so `_tag` stays covered."
+        )
+        return Finding(**values)  # type: ignore[arg-type]
+
+    def test_every_field_survives_except_the_one_being_set(self) -> None:
+        import dataclasses
+
+        from abicheck.report.pr_comment_aggregate import _tag
+
+        original = self._populated()
+        (tagged,) = _tag([original], "new-target")
+        assert tagged.component == "new-target"
+        for f in dataclasses.fields(Finding):
+            if f.name == "component":
+                continue
+            assert getattr(tagged, f.name) == getattr(original, f.name), f.name
+
+    def test_the_original_is_not_mutated(self) -> None:
+        from abicheck.report.pr_comment_aggregate import _tag
+
+        original = self._populated()
+        _tag([original], "new-target")
+        assert original.component == "original-target"

@@ -292,6 +292,8 @@ class RenderedReport:
 
     @property
     def body_bytes(self) -> int:
+        """The rendered body's size in UTF-8 bytes -- the unit both
+        platform limits are bounded against."""
         return _byte_len(self.body)
 
 
@@ -407,6 +409,7 @@ class ExistingComment:
 
     @property
     def identity(self) -> PublicationIdentity | None:
+        """This comment's recorded identity, or ``None`` if it is not ours."""
         return PublicationIdentity.parse(self.body)
 
 
@@ -421,9 +424,11 @@ class PublicationPlan:
 
     @property
     def posts(self) -> bool:
+        """Whether this plan writes anything to the pull request."""
         return self.action in ("create", "update", "clear")
 
     def to_dict(self) -> dict[str, Any]:
+        """The plan document the Action's shell reads back."""
         return {
             "action": self.action,
             "comment_id": self.comment_id,
