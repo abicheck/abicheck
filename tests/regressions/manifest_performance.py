@@ -339,7 +339,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # and admitted 3 workers at a 4.0 GiB budget -- a 12.0 GiB
         # commitment, 91% of available, with the parent's share still to
         # come out of the remaining 1.17 GiB.
-        fixed_by=(),
+        fixed_by=(1320,),
         seed_tests=("tests/test_cli_compare_release_jobs_memory.py",),
         public_surfaces=("cli",),
         axes={
