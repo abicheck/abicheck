@@ -588,18 +588,17 @@ def is_dependency_header(
     # system prefix (`-H /usr/include/mylib/api.h`, parent
     # `/usr/include/mylib`) is unaffected: that parent is not itself one of
     # the bare system-dir suffixes, only *within* one.
-    resolved = [_absolutize_header_root(h) for h in header_roots]
-    roots = [str(r) for r in resolved if not r.is_dir()]
-    root_dirs = [
-        str(r if r.is_dir() else r.parent)
-        for r in resolved
-        if r.is_dir() or not _is_bare_system_dir(_segments(str(r.parent)))
-    ]
-    header_segs, dir_segs, have_set = build_public_set(roots, root_dirs)
-    origin = classify_origin(
-        source_header, header_segs, dir_segs, have_public_set=have_set
-    )
-    return origin is ScopeOrigin.SYSTEM_HEADER
+    # The root-set preparation this used to inline on every call now lives in
+    # `extract.dependency_header_roots` -- see that module for the cost it
+    # hoists and for `dependency_header_predicate`, which a caller classifying
+    # many headers against one root set should use instead of this function.
+    # Imported inside the function because that module imports this one's own
+    # segmentation/classification helpers; a module-level import here would
+    # close that into a real cycle (`AGENTS.md`: "prefer a function-local
+    # import ... IMPORT_CYCLE_ALLOWLIST is not a routine step").
+    from .extract.dependency_header_roots import prepare_dependency_header_roots
+
+    return prepare_dependency_header_roots(header_roots).is_dependency(source_header)
 
 
 def classify_origin(
