@@ -573,3 +573,104 @@ def test_a_declared_symbol_is_left_to_the_declaration_aware_diff() -> None:
     old = snap([ElfSymbol(name="_Z4gonev")], [declared])
     new = snap([], [declared])
     assert _diff_undeclared_exports(old, new) == []
+
+
+# --------------------------------------------------------------------------
+# 3. Identity: the new kind's must-merge / must-not-merge pair
+# --------------------------------------------------------------------------
+#
+# `var_removed_elf_only` joins two mappings that decide whether two findings
+# are one event: `finding_identity._EQUIVALENT_CHANGE_CATEGORIES` (so a
+# `finding_id:` suppression written when one run had header evidence keeps
+# matching when the next one does not) and `diff_filtering`'s cross-detector
+# dedup category. Both directions are independent claims, and testing only
+# "these collapse" is satisfied by a mapping that collapses everything -- so
+# the distinctness half is asserted over the same mechanism, not assumed.
+
+
+def _removal_change(kind_value: str, symbol: str):
+    from abicheck.checker_types import Change
+    from abicheck.model.change_catalog.kinds import ChangeKind as _CK
+
+    return Change(
+        kind=_CK(kind_value),
+        symbol=symbol,
+        description=f"{kind_value}: {symbol}",
+    )
+
+
+def test_the_two_evidence_tiers_of_one_removal_share_an_identity() -> None:
+    """Must-merge: the same lost data symbol, seen once with header evidence
+    and once without, is one event -- so a suppression written against either
+    spelling keeps matching the other."""
+    from abicheck.finding_identity import resolve_change_identity
+
+    weak = resolve_change_identity(_removal_change("var_removed_elf_only", "_ZTV3Foo"))
+    strong = resolve_change_identity(_removal_change("var_removed", "_ZTV3Foo"))
+    assert weak.primary_id == strong.primary_id
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "why"),
+    [
+        (
+            ("var_removed_elf_only", "_ZTV3Foo"),
+            ("var_removed_elf_only", "_ZTV3Bar"),
+            "two different types' vtables are two losses",
+        ),
+        (
+            ("var_removed_elf_only", "_ZTV3Foo"),
+            ("var_removed_elf_only", "_ZTI3Foo"),
+            "one type's vtable and its typeinfo are distinct objects",
+        ),
+        (
+            ("var_removed_elf_only", "_Z4gonev"),
+            ("func_removed_elf_only", "_Z4gonev"),
+            "a data loss and a function loss are different events even at the "
+            "same name -- the two categories must not be merged",
+        ),
+        (
+            ("var_removed_elf_only", "_ZTV3Foo"),
+            ("var_added_elf_only", "_ZTV3Foo"),
+            "the same symbol going and coming are opposite events",
+        ),
+    ],
+    ids=[
+        "distinct_owners",
+        "distinct_objects",
+        "distinct_symbol_class",
+        "opposite_direction",
+    ],
+)
+def test_genuinely_distinct_losses_keep_distinct_identities(
+    left: tuple[str, str], right: tuple[str, str], why: str
+) -> None:
+    """Must-not-merge, and the vacuity guard for the test above: a mapping
+    that collapsed everything would satisfy the must-merge claim alone.
+
+    The last case is the one the audit warns about directly -- a derived
+    class's own export loss must not be erased because a related object also
+    changed.
+    """
+    from abicheck.finding_identity import resolve_change_identity
+
+    a = resolve_change_identity(_removal_change(*left))
+    b = resolve_change_identity(_removal_change(*right))
+    assert a.primary_id != b.primary_id, why
+
+
+def test_dedup_collapses_the_tier_pair_and_keeps_distinct_losses() -> None:
+    """The same pair through the real cross-detector dedup rather than the
+    identity resolver, since that is the consumer whose behaviour users see:
+    one symbol reported at both tiers collapses to one finding, while two
+    genuinely different lost symbols both survive."""
+    from abicheck.diff_filtering import _deduplicate_cross_detector
+
+    duplicated = [
+        _removal_change("var_removed", "_ZTV3Foo"),
+        _removal_change("var_removed_elf_only", "_ZTV3Foo"),
+        _removal_change("var_removed_elf_only", "_ZTV3Bar"),
+    ]
+    kept = _deduplicate_cross_detector(duplicated)
+    symbols = [c.symbol for c in kept]
+    assert sorted(symbols) == ["_ZTV3Bar", "_ZTV3Foo"], symbols
