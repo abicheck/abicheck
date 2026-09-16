@@ -40,6 +40,7 @@ from .model import ParamKind, RecordType, ScopeOrigin, resolved_fact_value
 from .model.change_catalog.kinds import ChangeKind
 from .model.surface_facts import in_public_surface
 from .policy.evidence_status import Confidence
+from .policy.type_spelling import strip_ptr as _strip_ptr
 from .surface_graph import SurfaceGraph
 
 # Provenance origins that are NOT part of the public ABI surface — a type defined
@@ -82,16 +83,7 @@ class IdiomTag:
     definition_hidden: bool = False
 
 
-_POINTER_RE = re.compile(r"[*&]")
 _FUNC_PTR_RE = re.compile(r"\(\s*\*\s*\)|\(\s*\*[^)]*\)\s*\(")
-
-
-def _strip_ptr(type_str: str) -> str:
-    """Drop pointer/reference/cv tokens, yielding the pointee type name."""
-    s = _POINTER_RE.sub("", type_str)
-    for kw in ("const", "volatile", "struct", "class", "union", "enum"):
-        s = re.sub(rf"\b{kw}\b", "", s)
-    return s.strip()
 
 
 def _is_pointer(type_str: str) -> bool:
@@ -176,22 +168,36 @@ def _public_pointer_only(graph: SurfaceGraph, type_name: str) -> tuple[bool, boo
         for p in fn.params:
             sites.append((getattr(p, "type", "") or "", getattr(p, "pointer_depth", 0)))
         for type_str, depth in sites:
-            names = {type_str.rsplit("::", 1)[-1]} | set(_strip_ptr(type_str).split())
-            if short in names or type_name in (type_str, _strip_ptr(type_str)):
+            # One normalisation per *site*, not one per clause: ``_strip_ptr``
+            # is pure, so the second call could only ever return the same value.
+            stripped = _strip_ptr(type_str)
+            names = {type_str.rsplit("::", 1)[-1]} | set(stripped.split())
+            if short in names or type_name in (type_str, stripped):
                 referenced = True
                 if depth < 1 and not _is_pointer(type_str):
                     only_pointer = False
     return referenced, only_pointer
 
 
-def _recognise_opaque(graph: SurfaceGraph, rec: RecordType) -> IdiomTag | None:
-    referenced, only_pointer = _public_pointer_only(graph, rec.name)
-    if not referenced or not only_pointer:
-        return None
+def _record_is_opaque_candidate(rec: RecordType) -> bool:
+    """The O(1), record-local half of the OPAQUE_POINTER conditions.
+
+    Both are pre-existing, necessary conditions -- a record failing either is
+    rejected outright below, whatever the public signature scan would have
+    said. Evaluating them *first* is therefore outcome-preserving and skips the
+    scan entirely for every complete or public-field record.
+    """
     # Load-bearing: the definition must be hidden in the public include closure.
     if not rec.is_opaque:
+        return False
+    return not any(f.access.name == "PUBLIC" for f in rec.fields)
+
+
+def _recognise_opaque(graph: SurfaceGraph, rec: RecordType) -> IdiomTag | None:
+    if not _record_is_opaque_candidate(rec):
         return None
-    if any(f.access.name == "PUBLIC" for f in rec.fields):
+    referenced, only_pointer = _public_pointer_only(graph, rec.name)
+    if not referenced or not only_pointer:
         return None
     return IdiomTag(
         idiom=Idiom.OPAQUE_POINTER,
