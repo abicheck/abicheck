@@ -230,6 +230,8 @@ runs:
         INPUT_GATE_API_BREAK: ${{ inputs.gate-api-break }}
         INPUT_GATE_BREAKING: ${{ inputs.gate-breaking }}
         INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_SOURCE_RUN_ID: ${{ inputs.source-run-id }}
+        INPUT_SOURCE_RUN_ATTEMPT: ${{ inputs.source-run-attempt }}
         INPUT_COMMENT_IDENTITY: ${{ inputs.comment-identity }}
         INPUT_REPOSITORY: ${{ inputs.repository }}
         INPUT_PR_NUMBER: ${{ inputs.pr-number }}

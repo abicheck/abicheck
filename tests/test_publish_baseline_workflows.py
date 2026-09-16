@@ -224,9 +224,14 @@ class TestPublishBaselineSelfCheckout:
         steps = _steps(data["jobs"]["publish"])
         package_step = next(s for s in steps if s.get("name") == "Package baseline-set")
         assert package_step["uses"] == "./.publish-baseline-src/actions/stage-baseline"
-        assert package_step["with"]["baseline-path"] == (
-            "${{ steps.baseline.outputs.baseline-path }}"
-        )
+        # Names whichever step produced the set. Since the existing-set mode
+        # landed there are two producers and one packaging step, so this
+        # asserts both are named rather than pinning one expression --
+        # `tests/test_publish_baseline_existing_set.py` owns the rule that no
+        # downstream consumer may name only one of them.
+        baseline_path = package_step["with"]["baseline-path"]
+        assert "steps.baseline.outputs.baseline-path" in baseline_path
+        assert "steps.precaptured.outputs.baseline-path" in baseline_path
         assert package_step["with"]["asset-name-template"] == (
             "${{ inputs.asset-name-template }}"
         )
