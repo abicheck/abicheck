@@ -243,7 +243,7 @@ def test_lost_opaqueness_emits_break_not_silent_demotion() -> None:
     broken = next(c for c in changes if c.kind == ChangeKind.OPAQUE_INVARIANT_BROKEN)
     assert broken.effective_verdict is None  # a real BREAKING kind, not demoted
     # ADR-044: OPAQUE_POINTER tagging requires a genuine Visibility.PUBLIC
-    # function reference (idioms._recognise_opaque/_public_pointer_only), so
+    # function reference (idioms._opaque_tag/_public_pointer_only), so
     # this finding's mere existence already proves its subject is public.
     assert broken.public_reachable is True
     assert broken.reachability_kind == "direct_public_symbol"

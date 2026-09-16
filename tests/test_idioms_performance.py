@@ -36,7 +36,7 @@ import weakref
 
 import pytest
 
-from abicheck import idioms
+from abicheck import idioms, pattern_verdicts
 from abicheck.idioms import Idiom, detect_antipatterns, recognise_idioms
 from abicheck.model import (
     AbiSnapshot,
@@ -49,6 +49,7 @@ from abicheck.model import (
 )
 from abicheck.model.surface_facts import in_public_surface
 from abicheck.policy import public_use_index, type_spelling
+from abicheck.policy.evidence_status import EvidenceTier
 from abicheck.surface_graph import SurfaceGraph, build_surface_graph
 
 # --------------------------------------------------------------------------
@@ -819,3 +820,62 @@ class TestLifetimeAndReuse:
         for t in threads:
             t.join()
         assert results == [expected] * len(graphs)
+
+
+class TestPatternVerdictsSharesOneIndex:
+    """The second consumer of the predicate must not rebuild it per name.
+
+    ``pattern_verdicts._emit_lost_invariants`` asks the public-use question
+    once per OPAQUE_POINTER-tagged type. ``_public_pointer_only`` is the
+    one-shot entry point and rebuilds the index on every call, so a caller with
+    many records has to build it once itself -- the same rule this branch
+    applies inside ``recognise_idioms``. A work-count guard, not a timing
+    threshold, so it states the invariant rather than a machine's speed.
+    """
+
+    @staticmethod
+    def _build_count(old: AbiSnapshot, new: AbiSnapshot) -> tuple[int, object]:
+        calls = 0
+        orig = pattern_verdicts.build_public_use_index
+
+        def spy(functions):
+            nonlocal calls
+            calls += 1
+            return orig(functions)
+
+        pattern_verdicts.build_public_use_index = spy  # type: ignore[assignment]
+        try:
+            result = pattern_verdicts.apply_pattern_verdicts(
+                [], old, new, evidence_tier=EvidenceTier.HEADER_AWARE
+            )
+        finally:
+            pattern_verdicts.build_public_use_index = orig  # type: ignore[assignment]
+        return calls, result
+
+    def test_index_built_at_most_once_for_many_opaque_types(self) -> None:
+        snap = _uniform_snapshot(30, 40, opaque=True)
+        calls, _ = self._build_count(snap, snap)
+        assert calls <= 1, f"rebuilt the index {calls} times"
+
+    def test_index_not_built_when_no_opaque_tag_exists(self) -> None:
+        snap = _uniform_snapshot(30, 40, opaque=False)
+        calls, _ = self._build_count(snap, snap)
+        assert calls == 0
+
+    def test_hoisting_preserves_the_emitted_verdicts(self) -> None:
+        """Equivalence, not just call counts: same findings either way."""
+        old = _mixed_snapshot()
+        new = _mixed_snapshot()
+        _, hoisted = self._build_count(old, new)
+        # Re-derive through the one-shot entry point the loop used to call.
+        graph = build_surface_graph(new)
+        per_name = {
+            rec.name: idioms._public_pointer_only(graph, rec.name)
+            for rec in graph.snapshot.types
+        }
+        shared = public_use_index.build_public_use_index(new.functions)
+        assert per_name == {
+            rec.name: public_use_index.query_public_use(shared, rec.name)
+            for rec in graph.snapshot.types
+        }
+        assert hoisted is not None

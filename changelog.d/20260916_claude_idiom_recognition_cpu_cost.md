@@ -30,3 +30,7 @@
   retained" guarantee is actually asserted rather than assumed. The measured
   end-to-end cost of that choice is +0.4 ms on a pass that the rest of this
   change takes from ~5,772 ms to ~6.8 ms.
+- `pattern_verdicts._emit_lost_invariants` shares one public-use index across
+  its whole loop instead of rebuilding it per OPAQUE_POINTER-tagged type. That
+  loop is the predicate's other production consumer, and `_public_pointer_only`
+  is a one-shot entry point that rebuilds on every call.

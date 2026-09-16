@@ -182,13 +182,6 @@ def _record_is_opaque_candidate(rec: RecordType) -> bool:
     return not any(f.access.name == "PUBLIC" for f in rec.fields)
 
 
-def _recognise_opaque(graph: SurfaceGraph, rec: RecordType) -> IdiomTag | None:
-    """Single-record entry point (tests, and any one-off caller)."""
-    if not _record_is_opaque_candidate(rec):
-        return None
-    return _opaque_tag(build_public_use_index(graph.snapshot.functions), rec)
-
-
 def _opaque_tag(index: PublicUseIndex, rec: RecordType) -> IdiomTag | None:
     """The OPAQUE_POINTER tag for an *already eligible* record."""
     referenced, only_pointer = query_public_use(index, rec.name)
