@@ -429,3 +429,126 @@ def test_an_always_covered_guard_would_fail_something_here() -> None:
     out_of_line = [_ctor("api::Ool", inline=False), _dtor("api::Ool", inline=False)]
     assert _reported(["_ZN3api6InlineC1Ev"], inline) == set()
     assert _reported(["_ZN3api3OolC1Ev"], out_of_line) == {"_ZN3api3OolC1Ev"}
+
+
+# ---------------------------------------------------------------------------
+# 6. The "no verdict" paths, one test per way the parse or the join gives up
+# ---------------------------------------------------------------------------
+#
+# The whole design rests on `None`/`unsupported` meaning "this parser reached
+# no verdict", which the detector treats as keep-reporting. A defensive
+# branch that no test reaches is one nobody has checked actually *gives up*
+# rather than silently answering something -- and answering here drops a
+# finding. So each way of giving up gets its own case.
+
+
+@pytest.mark.parametrize(
+    "mangled, why",
+    [
+        # `CI` followed by something that is not a ctor index. Not a real
+        # compiler output; the point is that the CI production must not fire
+        # on a coincidental `CI` prefix in the component stream.
+        ("_ZN3api7DerivedCIxNS_4BaseEEi", "CI not followed by a ctor index"),
+        # A GNU ABI tag whose length prefix does not describe a valid name.
+        ("_ZN1CB9xIiEC1Ev", "malformed B<tag> length prefix"),
+        # A vendor/unmodelled operator code in the leaf position.
+        ("_ZN1CzzEv", "unmodelled operator code"),
+        # The nested name closes with no ctor/dtor component at all.
+        ("_ZN3apiEv", "nested name closes before any special member"),
+        # `St` with nothing after it.
+        ("_ZNStE", "no components after the std abbreviation"),
+        # The component stream simply runs out, with no terminator and no
+        # special member -- a truncated symbol, not a ctor.
+        ("_ZN3api", "components exhausted before any special member"),
+        # A conversion operator: the parser stops at it by design (its
+        # target type is never decoded), and stopping is not an owner.
+        ("_ZN1CcviEv", "conversion operator leaf is not a ctor/dtor"),
+    ],
+)
+def test_every_way_the_parse_gives_up_reaches_no_verdict(
+    mangled: str, why: str
+) -> None:
+    assert itanium_special_member_owner(mangled) is None, why
+
+
+def test_a_truncated_inherited_ctor_still_resolves_its_owner() -> None:
+    """The counterpart to the row above: an inheriting constructor's
+    base-type encoding is deliberately never parsed, so a name truncated
+    *after* the `CI<n>` code still yields the owner. Pinned because it is the
+    visible consequence of stopping early, and a future "validate what
+    follows" change would break it silently."""
+    resolved = itanium_special_member_owner("_ZN3api7DerivedCI1")
+    assert resolved is not None
+    assert resolved.qualified_owner == "api::Derived"
+    assert resolved.inherited
+
+
+@pytest.mark.parametrize(
+    "mangled",
+    ["_ZTVQQQ", "_ZTV", "_ZTX3Foo"],
+    ids=["unparseable-remainder", "empty-remainder", "unknown-special-code"],
+)
+def test_special_name_owner_recovery_gives_up_the_same_way(mangled: str) -> None:
+    """`surface.py` demotes a finding when every resolvable owner candidate is
+    confidently private, so a candidate set invented from an unparseable name
+    would demote a real break. Both entry points must answer None."""
+    from abicheck.model.owner_recovery import (
+        itanium_special_name_owner_identifiers,
+        itanium_special_name_owner_scope_components,
+    )
+
+    assert itanium_special_name_owner_identifiers(mangled) is None
+    assert itanium_special_name_owner_scope_components(mangled) is None
+
+
+def test_the_declaration_index_ignores_ordinary_manglings() -> None:
+    """`function_map` holds mostly ordinary Itanium manglings; only the
+    synthetic ctor/dtor placeholders are owner evidence. An ordinary mangling
+    read as a placeholder would invent an owner from a method name."""
+    snap = _snapshot(
+        exports=[],
+        declarations=[
+            Function(
+                name="v",
+                mangled="_ZN3api4Base1vEv",
+                return_type="void",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            ),
+            _ctor("api::Base", inline=True),
+        ],
+    )
+    assert set(declared_special_members(snap)) == {("{ctor}", "api::Base")}
+
+
+def test_a_placeholder_with_no_owner_is_not_indexed() -> None:
+    """A bare `~` (an owner-less destructor placeholder) must not index an
+    empty-string owner, which every unresolvable name would then match."""
+    snap = _snapshot(
+        exports=[],
+        declarations=[
+            Function(
+                name="~",
+                mangled="~",
+                return_type="",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )
+        ],
+    )
+    assert declared_special_members(snap) == {}
+
+
+def test_a_ctor_placeholder_without_a_parameter_list_still_indexes() -> None:
+    """The parameter-list scan is angle-depth aware and may find no `(` at
+    depth 0 at all; the key is then the whole remainder, not a truncation."""
+    snap = _snapshot(
+        exports=[],
+        declarations=[
+            Function(
+                name="Base",
+                mangled="__abicheck_ctor__api::Base",
+                return_type="",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )
+        ],
+    )
+    assert set(declared_special_members(snap)) == {("{ctor}", "api::Base")}
