@@ -36,6 +36,16 @@ VALUE_TOKEN_CHARS = frozenset("0123456789abcdefghijklmnopqrstuvwxyz_.-+")
 #: itself be part of a value.
 VALUE_STATEMENT_TERMINATORS = ").,;:] \t"
 
+#: Unit words a description may place *after* a transition while still
+#: stating exactly that transition. ``"Size changed: Ctx (64 -> 96 bits)"``
+#: says precisely what a row's own ``64 -> 96`` would, so repeating it is the
+#: duplication this module exists to suppress -- a trailing *unit* is not
+#: more of the value, which is the thing the completion rule below guards
+#: against. Kept to the bit/byte family because ``type_size_changed`` is the
+#: kind that renders one; a unit this set does not know simply falls through
+#: to the safe answer (report the values), never to a wrong suppression.
+VALUE_TRAILING_UNITS = frozenset({"bit", "bits", "byte", "bytes", "b", "kb", "mb"})
+
 
 def states_delta(desc: str, delta: str) -> bool:
     """Whether *desc* already states exactly the transition *delta*.
@@ -54,14 +64,23 @@ def states_delta(desc: str, delta: str) -> bool:
 
     A decoy earlier in the string does not mask a real match later --
     ``"offset 100 → 104 and 0 → 1"`` really does state ``0 → 1``.
+
+    A trailing *unit* is the one thing allowed to follow and still count as
+    a complete statement (:data:`VALUE_TRAILING_UNITS`): ``"(64 → 96 bits)"``
+    states the same transition a bare ``"64 → 96"`` does. Without that,
+    every ``type_size_changed`` row rendered its delta twice -- the
+    description's own ``(64 → 96 bits)`` followed by the row's ``(64 → 96)``
+    (``tests/test_pr_comment_reporting.py::
+    test_a_two_sided_delta_the_description_already_spells_is_not_repeated``).
     """
     start = desc.find(delta)
     while start != -1:
         end = start + len(delta)
         before = desc[start - 1].lower() if start > 0 else ""
         trailing = desc[end:].strip()
-        if before not in VALUE_TOKEN_CHARS and not trailing.strip(
-            VALUE_STATEMENT_TERMINATORS
+        remainder = trailing.strip(VALUE_STATEMENT_TERMINATORS)
+        if before not in VALUE_TOKEN_CHARS and (
+            not remainder or remainder.lower() in VALUE_TRAILING_UNITS
         ):
             return True
         start = desc.find(delta, start + 1)
