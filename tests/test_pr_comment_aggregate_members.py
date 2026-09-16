@@ -40,6 +40,7 @@ from abicheck.report.pr_comment_aggregate import (
     load_member_report,
     resolve_member_path,
 )
+from abicheck.report.pr_comment_members import MAX_FOLDED_TARGETS
 from tests._aggregate_documents import (
     CLEAN_HEADLINES,
     headline_of as _headline,
@@ -249,3 +250,164 @@ class TestMemberPathEdgeCases:
         (tmp_path / "member.json").write_bytes(b"\xff\xfe not utf-8 at all")
         with pytest.raises(MemberReportRefused, match="could not be read"):
             load_member_report(tmp_path, "member.json")
+
+
+class TestTheFanInIsBoundedAgainstAHostileDocument:
+    """Review finding: the per-member *size* cap bounded one read, and
+    nothing bounded how many reads a document could ask for.
+
+    The two are independent. A document repeating one permitted 32 MiB
+    member path ten thousand times stays small itself while asking a
+    privileged publisher for 320 GiB of parsing -- inside every limit the
+    artifact extractor enforces, because the extractor never sees this
+    amplification. Bounded two ways: distinct paths are read once, and the
+    target count is capped.
+    """
+
+    @staticmethod
+    def _member(symbol: str) -> str:
+        return json.dumps(
+            {
+                "library": "libthing.so",
+                "old_version": "1.0",
+                "new_version": "1.1",
+                "verdict": "BREAKING",
+                "changes": [
+                    {
+                        "kind": "func_removed",
+                        "symbol": symbol,
+                        "severity": "breaking",
+                        "description": "Function removed",
+                    }
+                ],
+            }
+        )
+
+    @classmethod
+    def _document(cls, tmp_path: Path, targets: int, *, distinct: bool) -> Path:
+        blocks = []
+        for i in range(targets):
+            name = f"m{i}.json" if distinct else "m.json"
+            # Distinct members carry distinct *content*, so a cache keyed on
+            # anything but the path is detectable. Keyed on the target index
+            # only when the paths differ, so the repeated-path case still
+            # writes one identical file.
+            symbol = f"thing_open_{i}" if distinct else "thing_open"
+            (tmp_path / name).write_text(cls._member(symbol), encoding="utf-8")
+            blocks.append(
+                {
+                    "target_id": f"t{i}",
+                    "required": True,
+                    "state": "analyzed",
+                    "compatibility_verdict": "BREAKING",
+                    "gate": {
+                        "exit_code": 4,
+                        "blocking": True,
+                        "blocking_categories": ["abi_breaking"],
+                        "from_report": True,
+                    },
+                    "contract_coverage_exit": 0,
+                    "analysis_assurance_exit": 0,
+                    "scope_completeness_exit": 0,
+                    "report_path": name,
+                }
+            )
+        document = {
+            "aggregate_schema_version": "1.4",
+            "status": "fail",
+            "compatibility": {"verdict": "BREAKING", "analyzed_targets": targets},
+            "coverage": {
+                "status": "complete",
+                "required_targets": targets,
+                "analyzed_required_targets": targets,
+                "missing_required_targets": [],
+                "blocking": False,
+            },
+            "gate": {
+                "passed": False,
+                "exit_code": 4,
+                "blocking_targets": [f"t{i}" for i in range(targets)],
+                "coverage_blocking": False,
+            },
+            "contract_coverage": {"exit_contribution": 0, "incomplete_targets": []},
+            "analysis_assurance": {"exit_contribution": 0, "incomplete_targets": []},
+            "scope_completeness": {"exit_contribution": 0, "incomplete_targets": []},
+            "disposition_audit_missing_targets": [],
+            "effective_policy": {
+                "missing_required": "fail",
+                "unexpected_target": "include",
+                "source": "default",
+            },
+            "targets": blocks,
+            "unexpected_targets": [],
+            "profile_matrix": [],
+            "finding_matrix": [],
+        }
+        path = tmp_path / "aggregate.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        return path
+
+    def test_a_repeated_member_path_is_read_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Observe the mechanism, not the output: an equal rendering proves
+        nothing about how many times the file was opened."""
+        path = self._document(tmp_path, 200, distinct=False)
+        reads: list[str] = []
+        real = Path.read_text
+
+        def counting(self: Path, *a: object, **k: object) -> str:
+            if self.name == "m.json":
+                reads.append(str(self))
+            return real(self, *a, **k)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "read_text", counting)
+        model = build_model(
+            json.loads(path.read_text(encoding="utf-8")), report_dir=path.parent
+        )
+        assert len(reads) == 1, f"the same member was read {len(reads)} times"
+        # Every target still gets its own row: sharing the read must not
+        # collapse two targets into one result.
+        assert len(model.library_rows) == 200
+
+    def test_distinct_members_are_each_read(self, tmp_path: Path) -> None:
+        """Positive control for the cache key, stated over *content*.
+
+        Counting rows is not enough and a mutation proved it: a cache keyed
+        on a constant -- serving member 0's model for every path -- passed a
+        row-count assertion in full. Each member here names a different
+        symbol, so serving the wrong one is visible.
+        """
+        path = self._document(tmp_path, 5, distinct=True)
+        model = build_model(
+            json.loads(path.read_text(encoding="utf-8")), report_dir=path.parent
+        )
+        assert len(model.library_rows) == 5
+        body = render_comment(model, sha="0123456789ab", detail="full")
+        for i in range(5):
+            assert f"thing_open_{i}" in body, (
+                f"member {i}'s own finding is missing; the cache served "
+                "another member's model for this path"
+            )
+
+    def test_a_document_past_the_target_cap_says_so(self, tmp_path: Path) -> None:
+        path = self._document(tmp_path, MAX_FOLDED_TARGETS + 5, distinct=False)
+        model = build_model(
+            json.loads(path.read_text(encoding="utf-8")), report_dir=path.parent
+        )
+        assert len(model.library_rows) == MAX_FOLDED_TARGETS
+        body = render_comment(model, sha="0123456789ab", detail="full")
+        assert "only the first" in body
+        assert str(MAX_FOLDED_TARGETS + 5) in body
+
+    def test_a_refusal_is_cached_as_itself_but_relabelled(self, tmp_path: Path) -> None:
+        """A bad path named by many targets costs one attempt -- and each
+        target's limitation still names *that* target, not the first one."""
+        path = self._document(tmp_path, 3, distinct=False)
+        (tmp_path / "m.json").unlink()
+        model = build_model(
+            json.loads(path.read_text(encoding="utf-8")), report_dir=path.parent
+        )
+        body = render_comment(model, sha="0123456789ab", detail="full")
+        for i in range(3):
+            assert f"t{i}" in body
