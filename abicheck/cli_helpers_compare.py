@@ -215,22 +215,6 @@ def _merge_gcc_options(
     return f"{merged} {gcc_options}" if gcc_options else merged
 
 
-def _resolve_per_side_options(
-    headers: tuple[Path, ...],
-    includes: tuple[Path, ...],
-    old_headers_only: tuple[Path, ...],
-    new_headers_only: tuple[Path, ...],
-    old_includes_only: tuple[Path, ...],
-    new_includes_only: tuple[Path, ...],
-) -> tuple[list[Path], list[Path], list[Path], list[Path]]:
-    """Resolve per-side headers/includes: --old-header overrides -H, etc."""
-    old_h = list(old_headers_only) if old_headers_only else list(headers)
-    new_h = list(new_headers_only) if new_headers_only else list(headers)
-    old_inc = list(old_includes_only) if old_includes_only else list(includes)
-    new_inc = list(new_includes_only) if new_includes_only else list(includes)
-    return old_h, new_h, old_inc, new_inc
-
-
 def _pair_wide_dialect_override(
     lang: str,
     old_h: list[Path],

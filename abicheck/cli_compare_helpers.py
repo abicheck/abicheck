@@ -55,7 +55,6 @@ from .cli_helpers_compare import (
     _pair_wide_dialect_override,
     _plugin_contract_summary as _plugin_contract_summary,
     _require_used_by_binary_evidence as _require_used_by_binary_evidence,
-    _resolve_per_side_options,
     _scoped_exit_code as _scoped_exit_code,
     _scoped_severity_summary as _scoped_severity_summary,
     _verdict_exit_code as _verdict_exit_code,
@@ -107,6 +106,7 @@ from .frontends.cli.runtime import (
     _setup_verbosity,
     _write_or_echo,
 )
+from .model.sided_inputs import resolve_per_side_inputs
 from .report.report_modes import normalize_report_mode
 from .serialization import run_scoped_digest_cache
 from .service_render import ONELINE_FORMAT, resolve_demangle_for_format
@@ -1720,7 +1720,7 @@ def run_compare(
     header_backend = compile_context.frontend
     side_compile_context = dataclasses.replace(compile_context, frontend="auto")
 
-    old_h, new_h, old_inc, new_inc = _resolve_per_side_options(
+    old_h, new_h, old_inc, new_inc = resolve_per_side_inputs(
         headers,
         includes,
         old_headers_only,

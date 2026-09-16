@@ -105,12 +105,42 @@ abicheck supports:
   pairs) and each pair is compared, with the results merged into one verdict.
   A library present on only one side is reported as a coverage warning, never
   as a removal — a descriptor's `<libs>` list is a selection, not an inventory
-- The narrowing elements `<skip_headers>`, `<skip_including>`,
-  `<skip_namespaces>`, `<skip_symbols>`, `<skip_types>` and `<skip_constants>`
+- The narrowing elements `<skip_namespaces>`, `<skip_symbols>`,
+  `<skip_types>` and `<skip_constants>`
+- The narrowing elements `<skip_headers>` and `<skip_including>`, **partially**
+  — see below
 - The compile elements `<include_paths>`, `<add_include_paths>`, `<defines>`
-  and `<gcc_options>`
+  and `<gcc_options>`, including ABICC's **automatic include-path mode**: a
+  descriptor that states no `<include_paths>` has its own `<headers>` roots
+  added to the search path, so an umbrella header's `#include <sibling.h>`
+  resolves without a hand-added element. `<add_include_paths>` adds to that
+  mode rather than replacing it, exactly as ABICC's own
+  `Internals/Descriptor.pm` does
 - `{RELPATH}` macro substitution
 - XXE-safe parsing (improvement over ABICC)
+
+#### `<skip_headers>` / `<skip_including>`: what is and is not supported
+
+Both elements are matched by ABICC's own three rule classes
+(`Internals/Path.pm`'s `classifyPath`): a bare name matches a header's file
+name; a value containing `/` or `\` matches a tree-relative path, or — with
+a trailing separator — a whole directory and its descendants, at component
+boundaries (so `foo/bar` never takes `myfoo/bar`); a value containing `*`,
+`?` or `[` is matched as a pattern. Absolute values and Windows separators
+work on either side.
+
+The two elements are **not** treated as synonyms. `<skip_headers>` is "do not
+include and do not analyze" and is recorded as this snapshot's achieved
+narrowing (so the comparability gate can refuse an asymmetric pair);
+`<skip_including>` is "do not include *directly*" and is not, because the
+declarations it reaches are still part of the contract.
+
+What is **not** supported: neither element can stop a header being analyzed
+when *another* header reaches it through its own `#include`. Both filter the
+resolved header list before any parse, which is also exactly what abicheck's
+own `--exclude-header` does. A rule that matched no header in the run is
+reported rather than silently doing nothing, and is not recorded as a
+narrowing. See `docs/contribute/known-gaps.md`.
 
 Elements abicheck does **not** act on (`<skip_libs>`, `<search_headers>`,
 `<search_libs>`, `<tools>`, `<cross_prefix>`, `<include_preamble>`,

@@ -69,6 +69,7 @@ import defusedxml.ElementTree as ET
 
 from .._compiler_options import split_gcc_options
 from ..errors import ValidationError
+from ..model.header_skip_rules import HeaderSkipRule, compile_skip_rules
 
 log = logging.getLogger(__name__)
 
@@ -128,10 +129,17 @@ class CompatDescriptor:
     headers: list[Path]
     libs: list[Path]
     path: Path = field(default_factory=lambda: Path("."))
-    #: ``<skip_headers>``/``<skip_including>`` -- header names or paths to
-    #: exclude from the parsed surface. Matched the same way ``-skip-headers
-    #: FILE`` entries are (basename or full path).
+    #: ``<skip_headers>`` -- headers to neither include nor analyze.
+    #: Matched by ABICC's own three rule classes (bare name, tree-relative
+    #: path or directory, regex-like pattern) -- see
+    #: :mod:`abicheck.model.header_skip_rules`. Kept **separate** from
+    #: ``skip_including`` below: the two elements mean different things,
+    #: and merging them made a "do not include directly" rule read as a
+    #: real narrowing of the analyzed contract.
     skip_headers: list[str] = field(default_factory=list)
+    #: ``<skip_including>`` -- headers not to include *directly*, whose
+    #: declarations still count when another header reaches them.
+    skip_including: list[str] = field(default_factory=list)
     #: ``<skip_namespaces>`` -- C++ namespaces whose declarations are
     #: internal.
     skip_namespaces: list[str] = field(default_factory=list)
@@ -140,13 +148,48 @@ class CompatDescriptor:
     #: ``<skip_symbols>`` / ``<skip_types>`` -- exact names to exclude.
     skip_symbols: list[str] = field(default_factory=list)
     skip_types: list[str] = field(default_factory=list)
-    #: ``<include_paths>``/``<add_include_paths>`` -- include search roots,
-    #: and ``<defines>``/``<gcc_options>`` -- extra compile flags. Without
-    #: these a ``<headers>`` directory that relies on the descriptor's own
-    #: include roots cannot parse at all.
+    #: ``<include_paths>`` -- the descriptor's *explicit* include search
+    #: roots, and ``<defines>``/``<gcc_options>`` -- extra compile flags.
+    #: Without these a ``<headers>`` directory that relies on the
+    #: descriptor's own include roots cannot parse at all.
+    #:
+    #: Deliberately **not** merged with ``add_include_paths``: ABICC
+    #: selects its automatic include-path mode precisely by whether
+    #: ``<include_paths>`` is absent (``Internals/Descriptor.pm``), so
+    #: flattening the two destroys the one signal that decides it. A
+    #: descriptor carrying only ``<add_include_paths>`` still wants its
+    #: ``<headers>`` roots inferred; one carrying ``<include_paths>`` has
+    #: stated its search path in full.
     include_paths: list[Path] = field(default_factory=list)
+    #: ``<add_include_paths>`` -- roots *added* to whatever the automatic
+    #: mode would search. Searched after ``include_paths``.
+    add_include_paths: list[Path] = field(default_factory=list)
     defines: list[str] = field(default_factory=list)
     gcc_options: list[str] = field(default_factory=list)
+
+    @property
+    def all_include_paths(self) -> list[Path]:
+        """Every declared include root, explicit ones first."""
+        return [*self.include_paths, *self.add_include_paths]
+
+    @property
+    def auto_include_paths(self) -> bool:
+        """Whether ABICC's automatic include-path mode applies.
+
+        True exactly when ``<include_paths>`` is absent -- the descriptor
+        did not state its search path, so the ``<headers>`` roots
+        themselves have to be inferred into it.
+        """
+        return not self.include_paths
+
+    def skip_rules(self) -> tuple[HeaderSkipRule, ...]:
+        """Both skip elements, compiled and ordered.
+
+        Raises :class:`~abicheck.errors.ValidationError` for a rule that
+        cannot be compiled -- an invalid pattern is a descriptor the user
+        must fix, not a rule to drop silently.
+        """
+        return compile_skip_rules(self.skip_headers, self.skip_including)
 
 
 def parse_descriptor(path: Path, *, relpath: str | None = None) -> CompatDescriptor:
@@ -223,16 +266,17 @@ def parse_descriptor(path: Path, *, relpath: str | None = None) -> CompatDescrip
         # written either way behaves identically -- and a value containing a
         # space (a Windows SDK path) survives. `<gcc_options>` alone takes the
         # shell-like whitespace grammar, via `_get_flag_tokens`.
-        skip_headers=_get_lines(_get_all, "skip_headers")
-        + _get_lines(_get_all, "skip_including"),
+        skip_headers=_get_lines(_get_all, "skip_headers"),
+        skip_including=_get_lines(_get_all, "skip_including"),
         skip_namespaces=_get_lines(_get_all, "skip_namespaces"),
         skip_constants=_get_lines(_get_all, "skip_constants"),
         skip_symbols=_get_lines(_get_all, "skip_symbols"),
         skip_types=_get_lines(_get_all, "skip_types"),
         include_paths=[
-            _resolve(t, resolve_base)
-            for t in _get_lines(_get_all, "include_paths")
-            + _get_lines(_get_all, "add_include_paths")
+            _resolve(t, resolve_base) for t in _get_lines(_get_all, "include_paths")
+        ],
+        add_include_paths=[
+            _resolve(t, resolve_base) for t in _get_lines(_get_all, "add_include_paths")
         ],
         defines=_get_lines(_get_all, "defines"),
         gcc_options=_get_flag_tokens(_get_all, "gcc_options"),

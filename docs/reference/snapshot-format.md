@@ -297,10 +297,14 @@ reading -- never as a confirmed negative, so a headerless snapshot still
 reads "declaration not established" rather than "no declaration". Then
 (v48) `AbiSnapshot.excluded_header_matching` persisted — which rule the
 recorded exclusion patterns were matched by: `"glob"` for the native
-`--exclude-header` (fnmatch, plus a `*/<pattern>` try), `"exact"` for a
-descriptor's `<skip_headers>` basename-or-path membership. The same pattern
-text is not the same scope under both — `include/foo.h` excludes
-`/pkg/include/foo.h` natively and keeps it through a descriptor — so
+`--exclude-header` (fnmatch, plus a `*/<pattern>` try), `"abicc"` for a
+descriptor's `<skip_headers>` under ABICC's own three rule classes
+(basename, component-boundary path/directory, compiled pattern — see
+`abicheck/model/header_skip_rules.py`), and the legacy `"exact"` for a
+descriptor snapshot written before those rule classes existed, when a
+descriptor skip was a plain basename-or-path membership test. The same
+pattern text is not the same scope under any two of them — `fftw/fftw.h`
+excludes nothing under `"exact"` and takes the header under `"abicc"` — so
 recording the text alone let the comparability gate accept two snapshots
 covering different surfaces. Absent on a pre-v48 snapshot, which loads as
 `"unknown"` — **not** as `"glob"`: v47 already recorded a descriptor's

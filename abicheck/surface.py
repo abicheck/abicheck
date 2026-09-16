@@ -102,6 +102,16 @@ _NEVER_FILTER_KIND_NAMES: frozenset[str] = frozenset(
         # reachability gate (header_graph.is_public_dependency_node); this
         # finding must not be re-filtered by a second, incompatible one.
         "public_api_internal_dependency_added",
+        # The hygiene finding that *reports* an undocumented export. Since
+        # ``policy.public_surface_closure._seed_undeclared_exports`` began
+        # placing export-table-only symbols in ``all_symbols``, every other
+        # finding about such a symbol is demoted as ``not-exported`` -- so
+        # without this exemption the one finding explaining why they were
+        # demoted would be demoted with them, leaving the leak reported
+        # nowhere at all. Same shape as the leak kinds above: its subject is
+        # by construction outside the declared public surface, which is the
+        # thing it exists to say.
+        "exported_not_public",
         # Preprocessor / const-constant findings. Their ``symbol`` is a
         # constant name, not an exported symbol or a reachable type, so the
         # normal symbol/type reachability classifier would always demote them.

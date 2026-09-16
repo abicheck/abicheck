@@ -63,7 +63,6 @@ from ...cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli 
     _merge_redundant_changes as _merge_redundant_changes,
     _provenance_timestamp as _provenance_timestamp,
     _resolve_build_context_flags as _resolve_build_context_flags,
-    _resolve_per_side_options as _resolve_per_side_options,
     _resolve_severity as _resolve_severity,
     _version_sort_key as _version_sort_key,
     _warn_ignored_flags as _warn_ignored_flags,

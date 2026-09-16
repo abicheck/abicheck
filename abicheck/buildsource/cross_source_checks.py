@@ -85,6 +85,7 @@ from ..model import (
     Variable,
 )
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.cxx_artifact_symbols import is_cxx_class_artifact_symbol
 from ..model.graph_facts import GraphNode
 from ..model.source_graph import DEPENDENCY_EDGE_KINDS, SourceGraphSummary
 from ..policy.evidence_status import Confidence
@@ -1363,30 +1364,6 @@ def _origin_resolvable(snapshot: AbiSnapshot) -> bool:
 #: display name (notably for constructors/destructors), not a comparable symbol.
 _MANGLE_SIGILS = ("_Z", "?")
 
-#: Itanium constructor (``C1``/``C2``/``C3``) and destructor (``D0``/``D1``/``D2``)
-#: encodings — used to skip structor exports castxml cannot reliably mangle.
-_STRUCTOR_RE = re.compile(r"_ZN.*?[CD][0-4]E")
-
-#: Compiler-generated C++ ABI artifacts that belong to a class, not to a
-#: free function/variable: vtables/typeinfo/VTT/construction-vtables/thunks (Itanium
-#: ``_ZTV``/``_ZTI``/``_ZTS``/``_ZTT``/``_ZTC``/``_ZTh``/``_ZTv``/``_ZTc``) and MSVC
-#: ``??_`` vftable/vbtable/RTTI/deleting-dtor names. castxml records the owning class
-#: as a ``RecordType`` (not a ``Function``/``Variable``), so these would never be in
-#: the documented symbol set and must be exempted from ``exported_not_public`` when
-#: they belong to a *native* class (a leaked *dependency* construction vtable is
-#: caught earlier by the external-dependency origin check — Codex review).
-_CXX_ARTIFACT_PREFIXES = (
-    "_ZTV",
-    "_ZTI",
-    "_ZTS",
-    "_ZTT",
-    "_ZTC",
-    "_ZTh",
-    "_ZTv",
-    "_ZTc",
-    "??_",
-)
-
 
 def _bare_name_exports(decl: Function | Variable) -> bool:
     """Whether *decl* legitimately exports under its bare (un-mangled) name.
@@ -1410,20 +1387,9 @@ def _looks_mangled(decl: Function | Variable) -> bool:
     return decl.mangled.startswith(_MANGLE_SIGILS)
 
 
-def _is_cxx_implementation_symbol(symbol: str) -> bool:
-    """Whether *symbol* is a compiler-generated C++ class artifact, not free surface.
-
-    Covers constructors/destructors (Itanium ``_ZN…C1Ev``/``…D1Ev``, MSVC
-    ``??0…``/``??1…``) — which castxml leaves unmangled on the header side — and
-    vtable/typeinfo/thunk artifacts (``_CXX_ARTIFACT_PREFIXES``), which belong to
-    a ``RecordType`` rather than a function/variable. Both classes of symbol would
-    otherwise false-positive in ``exported_not_public`` (Codex review).
-    """
-    if symbol.startswith(_CXX_ARTIFACT_PREFIXES):
-        return True
-    if symbol.startswith("_ZN") and _STRUCTOR_RE.match(symbol):
-        return True
-    return symbol.startswith(("??0", "??1"))
+#: Shared with public-surface scoping (``model.cxx_artifact_symbols``), which must
+#: make the identical exemption -- see that function's own docstring.
+_is_cxx_implementation_symbol = is_cxx_class_artifact_symbol
 
 
 def _candidate_symbols(decl: Function | Variable) -> tuple[str, ...]:

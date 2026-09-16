@@ -37,6 +37,7 @@ plain values, :func:`render_kind_rollups` only formats them.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -76,6 +77,15 @@ class KindRollup:
     kind: str
     count: int
     sample_symbols: tuple[str, ...]
+    #: ``(library, count)`` pairs, descending by count, for a multi-library
+    #: run. A flood of one kind across a 28-library release collapsed to a
+    #: single count and five sample symbols told a reader nothing about
+    #: *which* library to look at -- and the sample symbols are exactly the
+    #: case where that matters least, since a repeated ``..._alias_stub_``
+    #: name recurs in several libraries at once. Empty for a single-library
+    #: run (and for findings carrying no library attribution at all), so
+    #: those reports read exactly as they did before.
+    counts_by_library: tuple[tuple[str, int], ...] = ()
 
 
 def render_kind_rollups(rollups: tuple[KindRollup, ...]) -> list[str]:
@@ -93,8 +103,15 @@ def render_kind_rollups(rollups: tuple[KindRollup, ...]) -> list[str]:
         shown = ", ".join(f"`{s}`" for s in r.sample_symbols)
         remaining = r.count - len(r.sample_symbols)
         more = f", and {remaining:,} more" if remaining > 0 else ""
+        by_lib = (
+            " By library: "
+            + ", ".join(f"{lib} ({n:,})" for lib, n in r.counts_by_library)
+            + "."
+            if r.counts_by_library
+            else ""
+        )
         lines.append(
-            f"- **{r.kind}**: {r.count:,} findings — e.g. {shown}{more}. "
+            f"- **{r.kind}**: {r.count:,} findings — e.g. {shown}{more}.{by_lib} "
             "Itemised in full in the machine-readable report (`-o json=...`)."
         )
     return lines
@@ -117,6 +134,20 @@ def section_is_gating(severity_level: object | None) -> bool:
         return False
     value = getattr(severity_level, "value", severity_level)
     return str(value).lower() == "error"
+
+
+def _counts_by_library(group: list[Change]) -> tuple[tuple[str, int], ...]:
+    """``(library, count)`` for a multi-library group, descending by count.
+
+    Empty when the group carries no library attribution, or when every
+    finding in it came from the same library -- in both cases the breakdown
+    restates what the surrounding report already says, and a single-library
+    run must read exactly as it did before this existed.
+    """
+    counts: Counter[str] = Counter(c.library for c in group if c.library)
+    if len(counts) < 2:
+        return ()
+    return tuple(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
 
 
 def roll_up_large_kinds(
@@ -162,6 +193,7 @@ def roll_up_large_kinds(
                 sample_symbols=tuple(
                     str(c.symbol) for c in group[:KIND_ROLLUP_SAMPLES] if c.symbol
                 ),
+                counts_by_library=_counts_by_library(group),
             )
         )
     # Stable order: the itemised remainder keeps the caller's order, and the
