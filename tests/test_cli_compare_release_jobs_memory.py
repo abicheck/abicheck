@@ -49,10 +49,20 @@ class TestReleaseJobsMemCap:
         monkeypatch.setattr(process_resources, "available_mem_gib", lambda: None)
         assert release_pairwise._release_jobs_mem_cap() is None
 
-    def test_divides_available_by_budget(self, monkeypatch) -> None:
+    def test_admits_against_committable_memory_not_all_of_it(self, monkeypatch) -> None:
+        """The cap divides *committable* RAM by the budget, not all of it.
+
+        This is the contract that replaced a plain ``available / budget``:
+        at 6.0 GiB available and a 1.0 GiB budget the old answer was 6 --
+        a 100% commitment, with nothing left for the parent-retained and
+        shared-context state resident in this same process.
+        """
         monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_UTILIZATION", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", raising=False)
         monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 6.0)
-        assert release_pairwise._release_jobs_mem_cap() == 6
+        # (6.0 * 0.85 - 1.0) / 1.0 -> 4.1 -> 4
+        assert release_pairwise._release_jobs_mem_cap() == 4
 
     def test_floors_at_one_worker(self, monkeypatch) -> None:
         monkeypatch.setenv("ABICHECK_RELEASE_JOB_MEM_GIB", "10")
@@ -141,3 +151,243 @@ class TestCompareReleaseLibrariesMemoryClamp:
         )
         assert captured_jobs == [8]
         assert "reduced" not in capsys.readouterr().err
+
+
+class TestReleaseAdmissionReserve:
+    """The reserve's own invariants, stated independently of any one host.
+
+    These are deliberately *not* assertions against the shipped constants'
+    arithmetic -- a test that recomputes ``avail * utilization - reserve``
+    and compares it to the implementation compares the module with itself
+    and passes against any utilization, including 1.0 (which is the absent
+    reserve this change exists to remove). Each of these instead states a
+    property the admission must hold for *every* input, and is checked over
+    a swept domain with an explicit non-vacuity guard.
+    """
+
+    _AVAILS = (0.25, 0.5, 1.0, 2.0, 6.0, 13.17, 32.0, 64.0, 256.0, 1024.0)
+    _DEPTHS = (None, "binary", "headers", "build", "source")
+
+    @staticmethod
+    def _plain_cap(avail: float, budget: float) -> int:
+        """The pre-change rule, written out here rather than imported.
+
+        An independent second derivation, per AGENTS.md's matrix-test rule:
+        importing the module's own helper would make every comparison below
+        a tautology.
+        """
+        return max(1, int(avail / budget))
+
+    def test_never_admits_more_than_the_unreserved_rule_did(self, monkeypatch) -> None:
+        """Conservative in one direction only -- this is the safety property.
+
+        A reserve that could *raise* the admission on some input would be a
+        memory regression hiding inside a memory fix.
+        """
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_UTILIZATION", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", raising=False)
+        strictly_lower = 0
+        violations = []
+        for avail in self._AVAILS:
+            monkeypatch.setattr(
+                process_resources, "available_mem_gib", lambda a=avail: a
+            )
+            for depth in self._DEPTHS:
+                budget = release_jobs.release_job_mem_budget_gib(depth)
+                got = release_jobs.release_jobs_mem_cap(depth)
+                plain = self._plain_cap(avail, budget)
+                if got > plain:
+                    violations.append((avail, depth, got, plain))
+                if got < plain:
+                    strictly_lower += 1
+        assert not violations, f"admission rose above the unreserved rule: {violations}"
+        # Non-vacuity: the sweep must actually contain cases the reserve
+        # changed, or the assertion above is true for a no-op.
+        assert strictly_lower > 0
+
+    def test_always_admits_at_least_one_worker(self, monkeypatch) -> None:
+        """A host too small for one budget runs one member, never zero.
+
+        Zero workers would turn an under-provisioned host into a run that
+        silently compares nothing -- which ADR-065 treats as never a clean
+        pass, and which a cap is not allowed to manufacture.
+        """
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_UTILIZATION", raising=False)
+        monkeypatch.setenv("ABICHECK_RELEASE_JOB_MEM_GIB", "64")
+        for avail in (0.0, 0.01, 0.25, 1.0):
+            monkeypatch.setattr(
+                process_resources, "available_mem_gib", lambda a=avail: a
+            )
+            assert release_jobs.release_jobs_mem_cap("headers") == 1
+
+    def test_still_skips_the_clamp_when_ram_is_unreadable(self, monkeypatch) -> None:
+        """Negative control: the reserve must not turn an unprobed host into
+        a clamped one. ``None`` means "skip the clamp", not "assume nothing
+        is available"."""
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: None)
+        for depth in self._DEPTHS:
+            assert release_jobs.release_jobs_mem_cap(depth) is None
+
+    def test_admission_is_monotonic_in_available_memory(self, monkeypatch) -> None:
+        """More memory never admits fewer workers."""
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_UTILIZATION", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", raising=False)
+        for depth in self._DEPTHS:
+            caps = []
+            for avail in self._AVAILS:
+                monkeypatch.setattr(
+                    process_resources, "available_mem_gib", lambda a=avail: a
+                )
+                caps.append(release_jobs.release_jobs_mem_cap(depth))
+            assert caps == sorted(caps), f"{depth}: non-monotonic {caps}"
+            # Non-vacuity: a constant sequence would also be sorted.
+            assert caps[-1] > caps[0]
+
+    def test_scales_up_rather_than_pinning_one_worker(self, monkeypatch) -> None:
+        """A large host is not clamped to a single worker.
+
+        The failure mode this guards against is a reserve large enough to
+        act as a blanket single-worker policy regardless of host size.
+        """
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_UTILIZATION", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", raising=False)
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 32.0)
+        # A six-member bundle at header depth still fans out fully on a
+        # host that can actually hold it.
+        assert release_jobs.release_jobs_mem_cap("headers") >= 6
+
+    def test_binary_depth_admission_is_unchanged_on_a_cpu_bound_host(
+        self, monkeypatch
+    ) -> None:
+        """The common path keeps its worker count.
+
+        At the binary-depth budget the reserve is far below the CPU-derived
+        default on any host that was not already memory-clamped, so an
+        ordinary ``compare OLD_DIR NEW_DIR`` is sized exactly as before.
+        """
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_UTILIZATION", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", raising=False)
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 13.17)
+        import os as _os
+
+        monkeypatch.setattr(_os, "cpu_count", lambda: 4)
+        effective, clamped_from, _ = release_jobs.resolve_release_worker_count(
+            0, depth="binary"
+        )
+        assert (effective, clamped_from) == (4, None)
+
+    def test_explicit_overrides_are_honoured_and_bounded(self, monkeypatch) -> None:
+        """Both knobs move the answer, and a nonsense value falls back."""
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 12.0)
+
+        monkeypatch.setenv("ABICHECK_RELEASE_MEM_UTILIZATION", "1.0")
+        monkeypatch.setenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", "0")
+        # Fully committing with no reserve reproduces the pre-change rule.
+        assert release_jobs.release_jobs_mem_cap("headers") == self._plain_cap(
+            12.0, 4.0
+        )
+
+        monkeypatch.setenv("ABICHECK_RELEASE_MEM_UTILIZATION", "0.5")
+        assert release_jobs.release_jobs_mem_cap("headers") == 1
+
+        # Out-of-range and unparsable both fall back to the default rather
+        # than inverting the clamp.
+        for bad in ("0", "-1", "1.5", "not-a-number"):
+            monkeypatch.setenv("ABICHECK_RELEASE_MEM_UTILIZATION", bad)
+            monkeypatch.setenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", "1.0")
+            assert release_jobs.release_jobs_mem_cap("headers") == 2
+
+    def test_an_unparsable_reserve_falls_back_to_the_default(self, monkeypatch) -> None:
+        """The reserve override has its own fallback, and its own test.
+
+        The utilization case above cannot stand in for this one: they are
+        two independent `try`/`except ValueError` bodies, and a sweep that
+        only ever feeds a bad value to one of them leaves the other's
+        fallback unexecuted. Codecov caught exactly that on the first push
+        of this change -- the branch was written and never run, which is
+        the state in which a fallback is indistinguishable from a crash.
+        """
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_UTILIZATION", raising=False)
+        # 19.0 GiB is chosen, not arbitrary: it is a probe value where the
+        # default reserve and a zero reserve give *different* worker counts
+        # (3 vs 4). At 12.0 GiB both truncate to 2, so a test written there
+        # executes the fallback without checking what it returns -- verified
+        # by mutating the fallback to `return 0.0`, which such a test passes.
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 19.0)
+        for bad in ("not-a-number", "", "   ", "1.0.0"):
+            monkeypatch.setenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", bad)
+            # Falls back to the 1.0 GiB default: (19.0 * 0.85 - 1.0) / 4.0 -> 3,
+            # where a dropped reserve would give 4.
+            assert release_jobs.release_jobs_mem_cap("headers") == 3
+
+    def test_a_non_finite_reserve_falls_back_instead_of_zeroing_or_crashing(
+        self, monkeypatch
+    ) -> None:
+        """`nan`/`inf`/`-inf` parse fine and then fail in two different ways.
+
+        `float()` raises no `ValueError` for any of them, so the fallback
+        above does not catch them, and each breaks differently:
+
+        * `nan` -- `max(0.0, nan)` is `0.0`, because every comparison with
+          `nan` is false. That is silently the *zero* reserve this whole
+          change exists to prevent, reached through a typo.
+        * `inf` -- drives `committable` to `-inf`, and `int(-inf)` raises
+          `OverflowError`, so one malformed environment variable crashes
+          worker sizing outright rather than degrading to a default.
+
+        Probed at 19.0 GiB for the same reason as the test above: it is a
+        value where a defaulted reserve (3 workers) and a zeroed one (4) give
+        different answers, so a `nan` silently reaching 0.0 is visible rather
+        than hidden by truncation.
+        """
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_UTILIZATION", raising=False)
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 19.0)
+        for bad in ("nan", "NaN", "inf", "-inf", "Infinity"):
+            monkeypatch.setenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", bad)
+            assert release_jobs._release_mem_reserve_gib() == 1.0, bad
+            # No OverflowError, and the default reserve's answer, not 4.
+            assert release_jobs.release_jobs_mem_cap("headers") == 3, bad
+
+    def test_a_non_finite_utilization_also_falls_back(self, monkeypatch) -> None:
+        """The sibling knob, asserted rather than left to a happy accident.
+
+        `_release_mem_utilization` rejects `nan`/`inf` today only as a side
+        effect of its `0.0 < value <= 1.0` range check. That is correct but
+        incidental, so it gets its own assertion: a later refactor that
+        replaces the range check with an `isinstance`/positive test would
+        otherwise reintroduce the same class of bug silently.
+        """
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", raising=False)
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 19.0)
+        for bad in ("nan", "inf", "-inf"):
+            monkeypatch.setenv("ABICHECK_RELEASE_MEM_UTILIZATION", bad)
+            assert release_jobs.release_jobs_mem_cap("headers") == 3, bad
+
+    def test_a_negative_reserve_is_floored_rather_than_raising_admission(
+        self, monkeypatch
+    ) -> None:
+        """A negative reserve would *add* committable memory.
+
+        That is the one direction this whole change forbids, and the floor
+        that prevents it needs its own assertion rather than being implied
+        by the `max(0.0, ...)` in the source.
+        """
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_UTILIZATION", raising=False)
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 19.0)
+
+        monkeypatch.setenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", "-100")
+        floored = release_jobs.release_jobs_mem_cap("headers")
+        monkeypatch.setenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", "0")
+        no_reserve = release_jobs.release_jobs_mem_cap("headers")
+        assert floored == no_reserve
+        # And still no more than the rule this replaces, which is the point.
+        assert floored <= self._plain_cap(19.0, 4.0)

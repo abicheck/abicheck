@@ -294,4 +294,98 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="perf.admission_commits_the_whole_probed_budget",
+        invariant=(
+            "An automatic admission control that sizes a worker pool from a "
+            "probed resource must budget for everything resident *beside* "
+            "those workers, not only for the workers themselves. Dividing a "
+            "whole probe by a per-worker budget commits 100% of what was "
+            "probed and silently assumes the co-resident set is empty. It is "
+            "not: a pool whose workers are threads shares one address space "
+            "with the parent's own retained per-task results, with any "
+            "context the tasks read through, and with whatever the process "
+            "already held -- so the true peak is the pool's commitment plus "
+            "that set, and the probe itself is a single sample taken before "
+            "any of it exists. The failure is one-sided and invisible to "
+            "every functional assertion: the run either fits or is "
+            "OOM-killed, and the clamp reports having clamped either way. "
+            "So the guard states the admission's properties over a swept "
+            "domain of probe values rather than recomputing its arithmetic "
+            "-- a test that re-derives `probe * factor - reserve` and "
+            "compares it to the implementation compares the module with "
+            "itself and passes against a factor of 1.0, which is the absent "
+            "reserve the fix exists to add. The properties are directional: "
+            "the new rule may never admit *more* than the rule it replaces "
+            "(a reserve that could raise the count is a memory regression "
+            "hiding inside a memory fix), must still admit at least one "
+            "worker (a run that processes nothing is never a clean pass), "
+            "must still skip the clamp entirely when the resource cannot be "
+            "probed (unreadable is not zero), must stay monotonic in the "
+            "probe, and must still scale up -- a reserve large enough to "
+            "pin every host to a single worker passes every "
+            "'uses less memory' assertion while destroying the "
+            "parallelism the pool exists for. Each needs a non-vacuity "
+            "guard, since 'never more than before' and 'monotonic' are both "
+            "trivially true of a constant."
+        ),
+        # `workflows.release_jobs.release_jobs_mem_cap` clamped the
+        # `compare-release` fan-out with `int(available / budget)`. The
+        # fan-out is a `ThreadPoolExecutor`, so each completed member's
+        # retained result, the shared header-depth context (AST/template
+        # indexes, acquisition and metadata reuse) and the parent all live
+        # in the same heap the workers allocate in, and none was charged.
+        # Measured on a real 16 GB host: `--depth headers` probed 13.17 GiB
+        # and admitted 3 workers at a 4.0 GiB budget -- a 12.0 GiB
+        # commitment, 91% of available, with the parent's share still to
+        # come out of the remaining 1.17 GiB.
+        fixed_by=(1320,),
+        seed_tests=("tests/test_cli_compare_release_jobs_memory.py",),
+        # Deliberately empty: the seed test drives
+        # `_compare_release_libraries` and the sizing helpers directly and
+        # never builds a `CliRunner`, so it does not meet the schema's bar
+        # for claiming the `cli` surface (CodeRabbit review).
+        public_surfaces=(),
+        axes={
+            "depth": ("binary", "headers", "build", "source"),
+            "probe": ("unreadable", "below-one-budget", "typical", "large"),
+            "override": ("default", "utilization", "reserve", "unparsable"),
+            "direction": (
+                "never-admits-more",
+                "floors-at-one",
+                "monotonic",
+                "scales-up",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Admission control bounds only the *concurrent* half of "
+                    "a bundle's peak. The retention half is bounded on the "
+                    "default path (a compact `BundleSignatureEvidence` per "
+                    "member) but not under `need_full_snapshots`, which "
+                    "JUnit output and `--bundle-facts-out` both set and "
+                    "which holds every member's full old *and* new snapshot "
+                    "simultaneously -- twelve full L2 surfaces for a "
+                    "six-member bundle, a quantity no worker-count clamp "
+                    "reduces. Spooling those through the existing storage "
+                    "contracts is the structural fix and is not attempted."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+            KnownGap(
+                description=(
+                    "The utilization fraction and flat reserve are an "
+                    "engineering target, not a measured expansion factor: "
+                    "the co-resident set was established by reading the "
+                    "fan-out's retention structure, not by sampling a real "
+                    "six-member peak, because no oneDAL binary exists in "
+                    "this workspace to sample. The admission is therefore "
+                    "verified correct in its direction and its properties, "
+                    "and unverified in its constant."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )

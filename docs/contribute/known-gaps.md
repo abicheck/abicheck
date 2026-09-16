@@ -120,6 +120,46 @@ looked like the obvious fix and wasn't.
   expansion factor is the same mistake the "conservative fix ... implemented
   twice and reverted twice" paragraph below records.
 
+  A second contributor is now removed, and this one is an *admission*
+  change rather than a per-copy one. `workflows/release_jobs.py` clamped the
+  fan-out with `int(available / budget)` -- it committed 100% of what the
+  memory probe reported to worker working sets and reserved nothing for the
+  state resident beside them. That state is not hypothetical: the fan-out is
+  a `ThreadPoolExecutor`, so every member's result accumulates in the *same*
+  address space its workers allocate in, the shared header-depth context
+  (AST/template indexes, acquisition and metadata reuse) is live throughout,
+  and `MemAvailable` is sampled once, at pool-sizing time, before any of it
+  exists. Measured on this repository's own 16 GB reference host: `headers`
+  depth probed 13.17 GiB available and admitted 3 workers at the 4.0 GiB
+  budget -- a **12.0 GiB commitment, 91% of available**, with the parent's
+  share still to come out of the remaining 1.17 GiB. Workers are now
+  admitted against committable memory (a utilization fraction, less a flat
+  reserve; `ABICHECK_RELEASE_MEM_UTILIZATION` /
+  `ABICHECK_RELEASE_MEM_RESERVE_GIB`), which on that same host admits 2
+  workers for an 8.0 GiB commitment (61%). It can only ever admit *fewer*
+  workers than the rule it replaces, still floors at one, still skips
+  entirely when RAM cannot be probed, and still scales -- a 32 GiB host
+  admits the full six. Binary depth is unchanged on any host that was not
+  already memory-clamped, so an ordinary `compare OLD_DIR NEW_DIR` is sized
+  exactly as before.
+
+  **This is still not the receipt, for a specific and measurable reason.**
+  Admission control bounds the *concurrent* half of the peak only. The
+  other half is retention, and it is bounded on the default path but not on
+  all of them: `cli_compare_release_pairwise` keeps a compact
+  `BundleSignatureEvidence` per member normally, but under
+  `need_full_snapshots` -- which JUnit output and `--bundle-facts-out` both
+  set -- it retains **every** member's full old *and* new snapshot
+  simultaneously, for the life of the fan-out. For a six-member bundle at
+  header depth that is twelve full L2 surfaces held at once, a quantity no
+  worker-count clamp can reduce, and the reported 19.93 GiB peak was taken
+  on a shape that may include it. Closing that means spooling completed
+  members' full results through the existing storage contracts rather than
+  holding them, which is a larger change than this one and is deliberately
+  not attempted here. Until it is done, a bundle run that requests JUnit or
+  bundle-facts output should not be assumed to fit the 16 GB runner on the
+  strength of the admission change alone.
+
   So the routing decision this entry gates still needs a real receipt:
   a full six-member run, unprofiled, under the actual runner's byte limit
   and `timeout-minutes`, with peak RSS sampled externally. Routing a bundle
