@@ -32,7 +32,7 @@ could drift.
 from __future__ import annotations
 
 from abicheck import diff_cxx_rules
-from abicheck.model import mangled_name
+from abicheck.model import mangled_name, owner_recovery
 
 
 def test_itanium_scope_components_basic() -> None:
@@ -65,7 +65,7 @@ def test_itanium_special_name_owner_scope_components() -> None:
     # Codex review, fresh evidence: surface.py's vtable/RTTI/VTT owner-scope
     # resolution must not depend on an external demangler -- this is the
     # in-process structural parser it uses instead.
-    fn = mangled_name.itanium_special_name_owner_scope_components
+    fn = owner_recovery.itanium_special_name_owner_scope_components
     assert fn("_ZTV13InternalCache") == (["InternalCache"], frozenset())
     assert fn("_ZTVN2ns3FooE") == (["ns", "Foo"], frozenset())
     assert fn("_ZTI6Result") == (["Result"], frozenset())
@@ -90,7 +90,7 @@ def test_itanium_special_name_owner_identifiers() -> None:
     # `_type_identifiers` treats an ordinary (non-mangled) qualified type
     # string: a namespace qualifier is only ever part of the fused qualified
     # token or its own trailing "::" segment, never a free-standing token.
-    fn = mangled_name.itanium_special_name_owner_identifiers
+    fn = owner_recovery.itanium_special_name_owner_identifiers
     # No template args: the qualified owner and its own bare tail.
     assert fn("_ZTV13InternalCache") == frozenset({"InternalCache"})
     assert fn("_ZTVN2ns3FooE") == frozenset({"ns::Foo", "Foo"})
@@ -165,7 +165,7 @@ def test_itanium_special_name_owner_identifiers_is_host_independent_property() -
     a fixed example: no namespace-*path* component (every scope component
     before the trailing owner-class one) may ever appear as its own
     standalone candidate."""
-    fn = mangled_name.itanium_special_name_owner_identifiers
+    fn = owner_recovery.itanium_special_name_owner_identifiers
     cases = [
         "_ZTVN4dnnl4pool6vectorIiEE",
         "_ZTVSt6vectorIN2ab3BarEE",
@@ -188,7 +188,7 @@ def test_itanium_special_name_owner_identifiers_is_host_independent_property() -
         second = fn(mangled)
         assert first == second, mangled
         assert first is not None, mangled
-        scope = mangled_name.itanium_special_name_owner_scope_components(mangled)
+        scope = owner_recovery.itanium_special_name_owner_scope_components(mangled)
         assert scope is not None
         components, template_positions = scope
         # Every namespace-*path* component (every component strictly before

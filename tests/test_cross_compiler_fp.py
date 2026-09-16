@@ -78,7 +78,46 @@ Widget* create_widget() { return new Widget(); }
 void destroy_widget(Widget* w) { delete w; }
 """
 
+#: The header for `CPP_SRC`. Its special members and accessors are defined
+#: **in-class**, exactly as `CPP_SRC` defines them -- the header a real
+#: consumer of this library would be given.
+#:
+#: This previously declared them out-of-line (`Widget();`, no body), and that
+#: made `test_o0_vs_o2_cpp_no_break` a mislabelled corpus entry rather than a
+#: false-positive gate. Measured with an independent runtime oracle, not
+#: inferred: a client compiled once against the `-O0` build and run
+#: (eager-binding, never recompiled) against the `-O2` build of
+#: byte-identical source dies with
+#: `symbol lookup error: undefined symbol: _ZN6WidgetC1Ev`, because an
+#: out-of-line-declared constructor is one no consumer TU may emit for
+#: itself and `-O2` stops exporting the library's own copy. The same client
+#: built against *this* header links its own weak copy and runs against both
+#: builds with exit 0. So the "no break" claim is true only for the header
+#: that actually offers the definition, and the fixture now says so instead
+#: of relying on the detector to stay silent about a real loss.
+#: `TestOptimizationLevelFP::test_o0_vs_o2_cpp_out_of_line_ctor_is_a_real_loss`
+#: pins the other half.
 CPP_HDR = """\
+class Widget {
+public:
+    Widget() : x_(0), y_(0) {}
+    virtual ~Widget() {}
+    virtual int area() const { return x_ * y_; }
+    void resize(int x, int y) { x_ = x; y_ = y; }
+    int x() const { return x_; }
+    int y() const { return y_; }
+private:
+    int x_;
+    int y_;
+};
+
+Widget* create_widget();
+void destroy_widget(Widget* w);
+"""
+
+#: The same class with its special members declared out-of-line -- the
+#: original `CPP_HDR`, kept as the negative control described above.
+CPP_HDR_OUT_OF_LINE = """\
 class Widget {
 public:
     Widget();
@@ -317,7 +356,63 @@ class TestOptimizationLevelFP:
             _run_compile_or_skip(cmd)
 
         r = _dump_and_compare(o0_so, o2_so, CPP_HDR, "cpp", tmp_path)
-        assert not r.breaking
+        assert not r.breaking, [(c.kind.value, c.symbol) for c in r.changes]
+
+    @pytest.mark.integration
+    @pytest.mark.skipif(
+        sys.platform != "linux",
+        reason=(
+            "The runtime oracle behind this assertion is an ELF one: a client "
+            "linked against the -O0 build fails to load against the -O2 build "
+            "with `undefined symbol: _ZN6WidgetC1Ev`. On macOS the same two "
+            "sources build Mach-O dylibs whose only observed difference is the "
+            "LC_ID_DYLIB install name, so there is no measured loss to assert "
+            "there and this test would be pinning an unverified claim. The "
+            "sibling `test_o0_vs_o2_cpp_no_break` stays unrestricted: it "
+            "asserts an absence, which holds on every platform."
+        ),
+    )
+    def test_o0_vs_o2_cpp_out_of_line_ctor_is_a_real_loss(self, tmp_path):
+        """The negative control for the test above, and the reason its header
+        changed: with the *same two binaries* and a header that declares the
+        special members out-of-line, `-O2` really does remove a symbol old
+        consumers bound.
+
+        Verified against an independent runtime oracle rather than against
+        this tool's own verdict -- see `CPP_HDR`'s own comment for the
+        `undefined symbol: _ZN6WidgetC1Ev` loader failure a client built once
+        against the `-O0` build suffers against the `-O2` build. A detector
+        that stayed silent here would be hiding a break, so "more evidence
+        never weakens a verdict" is asserted in the direction that is
+        actually true: the *same* contract (this header) must keep reporting
+        the loss.
+        """
+        _require_tool("g++")
+        _require_tool("castxml")
+
+        o0_so = tmp_path / "libwidget_ool_o0.so"
+        o2_so = tmp_path / "libwidget_ool_o2.so"
+        for so, opt in [(o0_so, "-O0"), (o2_so, "-O2")]:
+            src_file = so.with_suffix(".cpp")
+            src_file.write_text(textwrap.dedent(CPP_SRC).strip(), encoding="utf-8")
+            _run_compile_or_skip(
+                [
+                    "g++",
+                    "-shared",
+                    "-fPIC",
+                    "-g",
+                    "-fvisibility=default",
+                    "-std=c++17",
+                    opt,
+                    "-o",
+                    str(so),
+                    str(src_file),
+                ]
+            )
+
+        r = _dump_and_compare(o0_so, o2_so, CPP_HDR_OUT_OF_LINE, "cpp", tmp_path)
+        lost = {c.symbol for c in r.changes if c.symbol and "WidgetC1" in c.symbol}
+        assert lost, [(c.kind.value, c.symbol) for c in r.changes]
 
 
 @pytest.mark.integration

@@ -35,6 +35,81 @@ __all__ = ["CLASSIFICATION_BUG_CLASSES"]
 
 CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
+        id="classification.declaration_existence_as_export_obligation",
+        invariant=(
+            "That an entity's owner is still *declared* never proves that "
+            "losing one of the owner's exported symbols is harmless. Three "
+            "separate facts have to hold before an observed export "
+            "disappearance may be handed to another detector: the owner "
+            "resolves to exactly one declaration (a bare, unqualified name "
+            "match is a collision, not a resolution), the declaration is "
+            "unchanged on both sides, and the header itself offers the "
+            "definition every consumer would otherwise have to bind to. An "
+            "already-linked client cannot emit a definition it was never "
+            "given, so neither 'the class is still there', nor 'it is a "
+            "constructor', nor 'it is a template', nor 'the symbol was "
+            "weak' licenses dropping the finding -- each of those was "
+            "falsified by a loader running a client built once against OLD "
+            "against NEW."
+        ),
+        fixed_by=(1308,),
+        seed_tests=(
+            "tests/test_export_owner_resolution.py",
+            "tests/test_export_reconciliation_and_obligations.py",
+            "tests/test_cross_compiler_fp.py",
+        ),
+        public_surfaces=("compare -H", "compare --depth binary"),
+        axes={
+            "owner": (
+                "namespaced class",
+                "class template specialization",
+                "inheriting constructor (CI1/CI2)",
+                "same bare name in two namespaces",
+                "owner not declared at all",
+            ),
+            "linkage": ("strong/GLOBAL", "weak/COMDAT"),
+            "definition site": (
+                "in-class (inline)",
+                "out-of-line in the library's own source",
+                "explicit/extern instantiation",
+            ),
+            "lost symbol": ("C1/C2", "D0/D1/D2", "vtable/RTTI", "data export"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The inline-definition fact is read from the "
+                    "declaration's `is_inline`, which is a fact about the "
+                    "*declaration's linkage*, not proof that a consumer "
+                    "emitted a copy. A snapshot with no header evidence "
+                    "reports False and the finding is kept, which is the "
+                    "safe direction; but a header that is inline and a "
+                    "consumer that nonetheless bound the library's copy "
+                    "(an `extern template` on a non-template member, or a "
+                    "consumer built against an older, out-of-line header) "
+                    "is not distinguishable from the snapshots alone. "
+                    "Template specializations are excluded outright for "
+                    "exactly this reason; the non-template case rests on "
+                    "the declaration."
+                ),
+                reference="abicheck/compare/export_owner_resolution.py",
+            ),
+            KnownGap(
+                description=(
+                    "`itanium_special_member_owner` recovers the owner path "
+                    "with template-argument text stripped, so it names the "
+                    "primary template and never the specialization. That is "
+                    "sufficient here (specializations are never exempt) but "
+                    "means no consumer can use it to match a specialization "
+                    "against a model type spelled in C++ (`api::Box<int>`); "
+                    "doing so needs an Itanium type decoder this repository "
+                    "deliberately does not have."
+                ),
+                reference="abicheck/model/mangled_name.py",
+            ),
+        ),
+    ),
+    BugClass(
         id="classification.two_agreeing_sources_read_as_unknown",
         invariant=(
             "A subject that two independent evidence sources jointly place "

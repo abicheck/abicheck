@@ -101,6 +101,7 @@ from pathlib import Path
 from typing import Any
 
 from .dumper_clang_streaming import suppress_streaming_prune
+from .extract.dependency_header_roots import dependency_header_predicate
 from .extract.occurrence_dependency_scope import (
     scoped_occurrences_excluding_dependencies,
 )
@@ -108,7 +109,6 @@ from .model import AbiSnapshot, EnumType, Function, RecordType, Variable
 from .model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
 from .model.semantic_ir import SemanticIR, semantic_ir_conflict_key
 from .model.surface_facts import in_public_surface
-from .provenance import is_dependency_header
 from .type_reachability import (
     _NON_PUBLIC_ORIGINS,
     _compile_spelling_pattern,
@@ -1249,9 +1249,9 @@ def scope_snapshot_excluding_dependencies(
     if not snap.from_headers:
         return snap
 
-    def _is_dep(source_header: str | None) -> bool:
-        return is_dependency_header(source_header, header_roots)
-
+    # Prepared once, memoized per distinct header -- this asks per declaration,
+    # twice over. `extract.dependency_header_roots` owns the cost that hoists.
+    _is_dep = dependency_header_predicate(header_roots)
     kept_functions = [f for f in snap.functions if not _is_dep(f.source_header)]
     kept_variables = [v for v in snap.variables if not _is_dep(v.source_header)]
     kept_types = [t for t in snap.types if not _is_dep(t.source_header)]

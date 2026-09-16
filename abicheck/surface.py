@@ -68,7 +68,7 @@ from typing import TYPE_CHECKING
 from .compare.surface_graph import _type_identifiers
 from .demangle import demangle
 from .model import ScopeOrigin
-from .model.mangled_name import (
+from .model.owner_recovery import (
     itanium_special_name_owner_identifiers,
     itanium_special_name_owner_scope_components,
 )

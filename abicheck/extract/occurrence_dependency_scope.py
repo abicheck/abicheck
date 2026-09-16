@@ -62,7 +62,8 @@ from pathlib import Path
 from ..model.identity import EntityId, EntityKind
 from ..model.occurrence import OccurrenceId
 from ..model.semantic_ir import CanonicalEntity
-from ..provenance import header_from_location, is_dependency_header
+from ..provenance import header_from_location
+from .dependency_header_roots import is_dependency_header
 
 _SCOPED_ENTITY_KINDS = (
     EntityKind.TYPE,
