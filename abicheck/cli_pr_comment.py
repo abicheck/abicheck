@@ -180,6 +180,12 @@ def pr_comment_cmd(
             gate_api_break=gate_api_break,
             gate_breaking=gate_breaking,
             path_prefix=path_prefix,
+            # The `aggregate` shape names its per-target member reports
+            # relatively; they are resolved against the document's own
+            # directory (never the process's working directory), so a
+            # comment rendered from a downloaded artifact reads the reports
+            # that came with it and nothing else.
+            report_dir=report.resolve().parent,
         )
     except UnsupportedReportShapeError as e:
         raise click.ClickException(str(e)) from e

@@ -40,10 +40,17 @@ from __future__ import annotations
 from collections import OrderedDict
 from datetime import datetime, timezone
 
-from .pr_comment_base import CommentModel, Finding, _esc
+from .pr_comment_base import (
+    CommentModel,
+    Finding,
+    _component_key,
+    _component_tag,
+    _esc,
+)
 from .pr_comment_sections import (
     _BODY_BUDGET,
     GITHUB_COMMENT_LIMIT as GITHUB_COMMENT_LIMIT,
+    _background_note,
     _change_summary_block,
     _detail_link,
     _evidence_block,
@@ -56,6 +63,24 @@ from .pr_comment_sections import (
     _suppression_note,
     _truncate_to_budget,
 )
+from .report.pr_comment_headline import (
+    # The per-verdict glyph table lives with the headline that owns the
+    # verdict vocabulary; the per-target/per-library results table below
+    # reads it so the two can never disagree about what a verdict looks
+    # like.
+    _VERDICT_EMOJI,
+    # Re-exported under its historical name for `pr_comment.py`'s own
+    # re-export chain and the test modules that import it from there.
+    headline as _header,
+)
+
+__all__ = [
+    "MARKER",
+    "DETAIL_LEVELS",
+    "GITHUB_COMMENT_LIMIT",
+    "render_comment",
+    "_header",
+]
 
 # Hidden marker used to find-and-update the sticky comment across runs.
 MARKER = "<!-- abicheck-sticky-report -->"
@@ -67,167 +92,6 @@ _STANDARD_ROW_CAP = 25
 _SAFE_SYMBOLS_PER_KIND = 12
 # Member symbols listed inline in an aggregated (API-grouped) Breaking/Review row.
 _GROUP_MEMBERS_INLINE = 8
-
-_VERDICT_EMOJI = {
-    "BREAKING": "❌",
-    "API_BREAK": "⚠️",
-    "COMPATIBLE_WITH_RISK": "⚠️",
-    "COMPATIBLE": "✅",
-    "NO_CHANGE": "✅",
-    "ERROR": "🛑",
-    "unsupported": "🚫",
-}
-
-
-#: Reviewer-facing headline for a Breaking bucket whose members are *only*
-#: policy-gated COMPATIBLE findings (a severity-config category promoted to
-#: ``error``) — not a genuine ABI/API incompatibility. Keyed by the exact
-#: frozenset of categories responsible; a bucket that also holds a genuine
-#: ``abi_breaking``/``potential_breaking`` finding never reaches this table
-#: (see ``_header``), since that finding *is* accurately a break.
-_POLICY_ONLY_HEADER: dict[frozenset[str], tuple[str, str]] = {
-    frozenset({"addition"}): ("⛔", "Public API expansion requires approval"),
-    frozenset({"quality_issues"}): ("⛔", "Quality policy violation"),
-    frozenset({"addition", "quality_issues"}): (
-        "⛔",
-        "Policy violation blocks this PR",
-    ),
-}
-
-
-def _header(model: CommentModel) -> tuple[str, str]:
-    if model.no_baseline_audit:
-        # No two-sided comparison ran, so none of the "ABI BREAKING"/"Source
-        # API changed; binary ABI unchanged" wording below applies (Codex
-        # review, PR #1210, rounds 3-5). Blocking-ness comes from the
-        # report's own overall `exit_code` (`no_baseline_audit_blocking`,
-        # every orthogonal axis max-folded into it -- not bucket membership,
-        # and checked even when every bucket is empty: `evidence_contract`
-        # (exit 7) can block with no itemizable finding at all).
-        if model.no_baseline_audit_blocking:
-            if model.no_baseline_audit_gate_fired:
-                return "🛑", "Audit gate: candidate-side finding blocks this step"
-            # A different orthogonal axis blocked (e.g. --contract's
-            # coverage ledger, or evidence_contract); "🛑 Analysis
-            # incomplete" below names which one when there's a finding for it.
-            return "🛑", "Audit: this run blocks the step"
-        # A policy override can reclassify an audit finding as
-        # "compatible" (bucketed into `model.safe`, not `breaking`/
-        # `review`), and a fully-suppressed audit has only
-        # `suppressed_count` -- both left this check believing the run
-        # found nothing at all (Codex review, PR #1210, round 11, fresh
-        # evidence): the Action still publishes AUDIT_RISK/exit-code 0 for
-        # either shape, and the body renders the finding(s), so the
-        # headline must not claim "no baseline to compare" (a green,
-        # nothing-happened headline) alongside a body that shows one.
-        if (
-            not model.breaking
-            and not model.review
-            and not model.has_incomplete
-            and not model.safe
-            and model.suppressed_count == 0
-        ):
-            return "✅", "Audit — no baseline to compare"
-        return "⚠️", "Audit — candidate-side finding(s), not gated"
-    if (
-        model.mode == "scan"
-        and model.scan_audit_only
-        and not model.breaking
-        and not model.review
-        and not model.has_incomplete
-    ):
-        # An audit-only `scan` (no `--against` baseline at all) ran no
-        # comparison, so every compatibility bucket is necessarily empty —
-        # the generic "✅ No ABI changes" wording below would misreport that
-        # as "we compared and found nothing" rather than "there was nothing
-        # to compare".
-        return "✅", "Scan audit — no baseline to compare"
-    # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
-    # prebuilt-consumer lifecycle"): a supplied --used-by/--required-symbol
-    # consumer's own scoped verdict (`model.scoped_verdict`) no longer
-    # overrides this headline -- it is reported separately, see
-    # `_scoped_notes` below. The headline always follows the full-library
-    # `b`/`r`/`s` bucket counts (and the orthogonal `incomplete_blocking`
-    # check further down, which already folds in a contract-coverage
-    # failure), exactly as it would for a run with no consumer supplied.
-    b, r, s = model.counts
-    if model.removed_libraries:
-        return "❌", "LIBRARY REMOVED"
-    if model.no_comparison_completed:
-        # ADR-065 D7: nothing was compared, so no bucket below can speak
-        # for the scope -- never "No ABI changes".
-        return "🛑", "No comparison completed"
-    if b:
-        # A finding is only accurately reported as "ABI BREAKING" when the
-        # Breaking bucket holds a genuine abi_breaking/potential_breaking
-        # finding — never infer that wording from bucket membership alone.
-        # Severity-config promotion (ADR-042: compatibility and gate
-        # decisions are separate axes) can populate Breaking with a
-        # COMPATIBLE addition/quality finding that policy chose to block;
-        # that is a policy violation, not an ABI/API break.
-        cats = model.breaking_categories
-        if "abi_breaking" in cats:
-            return "❌", "ABI BREAKING"
-        if "potential_breaking" in cats:
-            # "potential_breaking" covers both "api_break" (a real source
-            # break) and "risk" (a risk promoted to blocking) — they share a
-            # severity-config knob but are not the same claim, so resolve
-            # via the raw severities rather than wording every gated risk as
-            # a "source API break" (Codex review, PR #595).
-            sevs = model.breaking_severities
-            if "api_break" in sevs:
-                return "⛔", "Source API break blocks this PR"
-            if "risk" in sevs:
-                return "⛔", "Compatibility risk blocks this PR"
-            return "⛔", "Source API break blocks this PR"
-        policy_header = _POLICY_ONLY_HEADER.get(cats)
-        if policy_header is not None:
-            return policy_header
-        # No per-category tracking for this bucket (shouldn't normally
-        # happen — every mode populates breaking_categories) — fall back to
-        # the conservative default rather than under-stating a red check.
-        return "❌", "ABI BREAKING"
-    if model.scope_blocking:
-        # ADR-065 D6 under `--on-incomplete-scope block`: the scope axis
-        # turned the check red on its own, ahead of merely-advisory review
-        # findings, for the same reason the coverage/assurance axes do.
-        return "🛑", "Comparison scope incompletely checked"
-    if model.has_incomplete and model.incomplete_blocking:
-        # A hard evidence-policy failure fails the run the same way a
-        # genuine break does (ADR-033 D7 / a gated coverage risk), so it
-        # takes the same headline priority as `b` above — ahead of a
-        # separate, merely-advisory review finding. Say so explicitly rather
-        # than folding it into the generic "Review recommended" wording,
-        # which would read as "this PR changed the API," not "we couldn't
-        # check this PR."
-        return "🛑", "Source analysis incomplete"
-    if r:
-        # A real compatibility finding always keeps headline priority over a
-        # merely-advisory coverage gap (Codex review) — an ungated
-        # `layer_coverage_asymmetric` must not bury a genuine source-API
-        # change behind "Analysis coverage reduced". `_incomplete_note`
-        # still calls the coverage gap out separately.
-        #
-        # Name the actual reason instead of the generic "Review recommended"
-        # whenever every review-bucket finding agrees on one severity — a
-        # source-level API change (binary ABI unaffected) reads very
-        # differently from a risk finding, and a reviewer shouldn't have to
-        # open the section to tell which one this is.
-        review_sevs = frozenset(f.severity for f in model.review if f.severity)
-        if review_sevs == {"api_break"}:
-            return "⚠️", "Source API changed; binary ABI unchanged"
-        if review_sevs == {"risk"}:
-            return "⚠️", "Compatibility risk — review recommended"
-        return "⚠️", "Review recommended"
-    if model.has_incomplete:
-        return "⚠️", "Analysis coverage reduced"
-    if model.scope_notice is not None:
-        # `warn` (the default): the compared members are clean, but the
-        # headline may only say so for them, never for the whole scope.
-        return "⚠️", "Compared members clean; scope incompletely checked"
-    if s:
-        return "✅", "No compatibility impact detected"
-    return "✅", "No ABI changes"
 
 
 def _strip_templates(s: str) -> str:
@@ -268,7 +132,7 @@ def _group_by_api(findings: list[Finding]) -> OrderedDict[str, list[Finding]]:
     """Group findings by their enclosing API, preserving first-seen order."""
     groups: OrderedDict[str, list[Finding]] = OrderedDict()
     for f in findings:
-        groups.setdefault(_api_group(f.symbol), []).append(f)
+        groups.setdefault(_component_key(f, _api_group(f.symbol)), []).append(f)
     return groups
 
 
@@ -295,7 +159,7 @@ def _flat_row(f: Finding) -> str:
         cell += f"<br>linker: `{_esc(f.mangled)}`"
     if f.impact:
         cell += f"<br>**Impact:** {_esc(f.impact)}"
-    return f"| `{_esc(f.kind)}` | `{_esc(f.symbol)}` | {cell} |"
+    return f"| `{_esc(f.kind)}` | `{_esc(f.symbol)}`{_component_tag(f)} | {cell} |"
 
 
 def _group_row(key: str, members: list[Finding]) -> str:
@@ -484,13 +348,19 @@ def _safe_section(
         # review).
         shown = findings if row_cap is None else findings[:row_cap]
         for f in shown:
-            out.append(f"| `{_esc(f.kind)}` | `{_esc(f.symbol)}` | {_esc(f.detail)} |")
+            out.append(
+                f"| `{_esc(f.kind)}` | `{_esc(f.symbol)}`{_component_tag(f)} | "
+                f"{_esc(f.detail)} |"
+            )
         if len(findings) > len(shown):
             out.append(_omitted_row(len(findings) - len(shown), report_url))
     else:
         groups: OrderedDict[str, list[str]] = OrderedDict()
         for f in findings:
-            groups.setdefault(f.kind, []).append(f.symbol)
+            # Keyed by component too, for the same reason `_group_by_api` is:
+            # one `func_added` line listing the same name once per target is
+            # a count, not an attribution.
+            groups.setdefault(_component_key(f, f.kind), []).append(f.symbol)
         parts: list[str] = []
         for kind, syms in groups.items():
             shown_syms = syms[:_SAFE_SYMBOLS_PER_KIND]
@@ -518,10 +388,18 @@ def _release_table(
     if detail != "full" and row_cap is not None:
         cap = min(_STANDARD_ROW_CAP, row_cap)
     shown = ordered if cap is None else ordered[:cap]
+    # One table, two operands. In release mode a row is a library inside one
+    # comparison; in aggregate mode it is a whole target's own report folded
+    # in (`report/pr_comment_aggregate.py`). The shape -- name, verdict, and
+    # the same three bucket counts -- is identical, so the table is shared
+    # and only its nouns change; a second near-copy is how the two would
+    # drift.
+    unit = "Target" if model.mode == "aggregate" else "Library"
+    title = f"Per-{unit.lower()} results ({len(rows)})"
     out = [
-        f"<details{is_open}><summary>Per-library results ({len(rows)})</summary>",
+        f"<details{is_open}><summary>{title}</summary>",
         "",
-        "| Library | Verdict | Breaking | Review | Safe |",
+        f"| {unit} | Verdict | Breaking | Review | Safe |",
         "|---|---|---|---|---|",
     ]
     for name, verdict, nb, nr, ns in shown:
@@ -548,6 +426,16 @@ def _header_block(model: CommentModel, short_sha: str) -> list[str]:
         # in the report) -- "vs `baseline`" would claim one did (Codex
         # review, PR #1210, round 4).
         context = f"{head_ref} — audit, no baseline · `{_esc(model.policy)}` · `{_esc(model.subject)}`"
+    elif model.mode == "aggregate":
+        # There is no single baseline here: each folded target was compared
+        # against its own, and naming one would claim a shared operand this
+        # document does not have. `old_label` carries the honest phrase (see
+        # `report/pr_comment_aggregate.py`), rendered as prose rather than
+        # in a code span so it cannot read as a path.
+        context = (
+            f"{head_ref} — {_esc(model.old_label)} · `{_esc(model.policy)}` · "
+            f"`{_esc(model.subject)}`"
+        )
     else:
         context = (
             f"{head_ref} vs `{_esc(model.old_label)}` · `{_esc(model.policy)}` · "
@@ -621,13 +509,18 @@ def _body_sections(
             row_cap=row_cap,
             report_url=report_url,
         )
+    # An aggregate model carries both: the per-target rollup (authoritative
+    # counts, including for a member whose own shape reports only in
+    # aggregate) and the folded per-finding sections below it.
+    out: list[str] = (
+        _release_table(model, detail, row_cap) if model.mode == "aggregate" else []
+    )
     cats = model.breaking_categories
     breaking_title = (
         "❌ Breaking"
         if (not cats or "abi_breaking" in cats or "potential_breaking" in cats)
         else "⛔ Blocked by policy (compatible)"
     )
-    out: list[str] = []
     out += _findings_table(
         breaking_title,
         model.breaking,
@@ -733,6 +626,7 @@ def _render_body(
     lines += _library_notes(model)
     lines += _gate_note(model)
     lines += _incomplete_note(model)
+    lines += _background_note(model)
     lines += _scoped_notes(model)
     lines += _suppression_note(model)
     lines += _change_summary_block(model)

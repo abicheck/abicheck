@@ -9518,3 +9518,106 @@ release JSON schema itself — a `cli_compare_release.py` change, not a
 rendering-only one. It is the same shape of gap `pr_comment._from_release`'s
 own docstring already records for the evidence-kind bucket, and it should be
 closed in the same pass as that one.
+
+## An `-I` include root makes another library's public headers this component's export obligations (2026-09-16)
+
+**Reported on a real PVXS build** (abicheck `3737f9f9`, CastXML 0.7.0, EPICS
+Base 7.0, gcc 13, `-std=c++11`), and reproduced by comparing one snapshot
+against *itself* — byte-identical operands, verdict `NO_CHANGE`:
+
+```
+abicheck dump lib/linux-x86_64/libpvxsIoc.so.1.5 \
+  -H include/pvxs/iochooks.h \
+  -I <pvxs>/include -I <epics>/include ... --depth headers
+```
+
+`-H` names exactly one file. `include/pvxs/version.h` is reachable only
+because `iochooks.h` `#include`s it and `-I <pvxs>/include` makes it
+findable; the symbols it declares (`pvxs::version_int()`,
+`version_str()`, `version_abi_int()`) are exported by **libpvxs**, a
+different library. The comparison charged **libpvxsIoc** with three
+`public_not_exported` findings for them.
+
+**Root cause, confirmed by reading both halves.**
+`provenance.apply_provenance` deliberately folds the `-I` roots into the
+public-*directory* set once a real `-H` set has opted classification in
+(`provenance.py`, the `include_search_dirs` parameter and
+`_public_dirs_from_include_roots`). That fold exists for a real defect it
+fixed: without it every transitively-`#include`d header classified
+`PRIVATE_HEADER`, and a genuine breaking layout change reached only through
+an umbrella header silently dropped out of the compared surface. So the
+declaration's `ScopeOrigin` becomes `PUBLIC_HEADER`, and
+`buildsource/cross_source_checks.py`'s `_has_export_obligation` /
+`_var_has_export_obligation` gate on exactly `origin == PUBLIC_HEADER`.
+
+The two questions are being conflated:
+
+1. *Is this declaration in the component's compared public surface?* — the
+   fold's answer (yes) is defensible: an API change to it matters.
+2. *Does **this binary** owe an exported symbol for it?* — the fold's answer
+   is not implied by (1) at all, and for a shared include tree serving
+   several libraries it is wrong.
+
+Note the reported case used a `-H` **file**, so this is not the documented
+"a directory entry tags everything under it public" behaviour; a directory
+`-H` root reaches the same place through the same fold.
+
+**Not fixed here, and why.** The evidence needed to separate (1) from (2) —
+which headers the run's own `-H` set *declared*, as opposed to which the
+`-I` widening admitted — is not recorded anywhere a check can read it after
+serialization. `ScopeOrigin` collapses both to `PUBLIC_HEADER`, and
+`ExtractionContract` keeps fingerprints rather than paths. The three
+candidate fixes each carry real blast radius:
+
+- **A new `ScopeOrigin` member** (`INCLUDE_CONTEXT_HEADER`): 52 existing
+  `ScopeOrigin.PUBLIC_HEADER` sites must each decide whether they mean
+  "in the compared surface" or "owned by this component", and the value is
+  persisted vocabulary.
+- **Tighten `in_public_contract_fact` to the declared set** (already
+  persisted, schema v46): but `compare/export_transition.py` already keys on
+  `is_confirmed_false(in_public_contract(...))` to decide *not* to suppress a
+  removal, so a confirmed-false for widened declarations would add findings
+  elsewhere.
+- **Record the declared `-H` files/dirs on `AbiSnapshot`** and re-classify in
+  the check: the narrowest of the three, and independently useful (a stored
+  baseline records nothing about the contract it was dumped under), but it is
+  a `SCHEMA_VERSION` bump inside ADR-050's comparability contract.
+
+Whichever is taken, the fix must keep the positive control: a symbol declared
+in a header that *is* in `-H` and genuinely absent from the binary must still
+report. A suppression rule or a per-project carve-out is explicitly not the
+answer.
+
+## `effective_depth` reports `source` for a `--depth headers` dump whose only L5 is the header-only graph (2026-09-16)
+
+Same PVXS run as the entry above: `dump --depth headers` produced a snapshot
+whose `compare` reported `L5 source graph summary: present` on both sides and
+`effective_depth: source`, while L3/L4 correctly read `not_collected`.
+
+**The L5 summary itself is expected and is not the bug.**
+`service_header_graph_attach._attach_header_graph` has attached a *header-only
+(L2) semantic graph* to `AbiSnapshot.surface_graph` on every headers-depth
+dump since G29 Phase A (ADR-041 addendum). It is a declaration graph, not
+source-tier evidence.
+
+**The over-claim is the depth label.** `evidence_depth.py` already carries two
+labels and documents this exact trap:
+
+- `depth_label_for` reports `source` whenever L4 **or** L5 carries facts;
+- `gated_source_label` refuses that for the header-only case, discriminating
+  on `l4_source_abi_was_attempted(pack)` — "a non-empty L5 can also come from
+  a header-only (L2) declaration graph that never ran any source-tier replay
+  at all".
+
+`buildsource/check_report.derive_effective_depth` reads
+`old_evidence_depth`/`new_evidence_depth` off the compare report, which come
+from the *honest* label — so the strict gate knows the dump only reached
+`headers` while the reported `effective_depth` says `source`. A consumer
+reading the report (an assurance policy, a CI gate, a reviewer) is told
+source-tier evidence was collected when none was.
+
+**Not fixed here.** The fix is to make the reported label discriminate the
+same way the gate already does (`l4_source_abi_was_attempted`), which touches
+`evidence_depth.py` and every consumer of `old_evidence_depth`/
+`new_evidence_depth` — an evidence-layer change, not a reporting one, and it
+changes a value stored in existing reports.

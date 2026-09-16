@@ -74,6 +74,8 @@ both the header and the footer.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from .demangle import demangle_batch
 from .pr_comment_base import (
     _ADDITION_KIND_VALUES,
@@ -116,6 +118,12 @@ from .pr_comment_render import (
 from .report.change_summary import ChangeSummary, summarize_changes
 from .report.comparison_scope import comparison_scope_notice
 from .report.evidence_summary import evidence_summary
+
+# A one-directional import: the aggregate adapter reaches only into
+# `pr_comment_base`/`report.change_summary`, never back here (it takes
+# this module's per-shape builder as a parameter instead), so it needs
+# no lazy import to stay cycle-free.
+from .report.pr_comment_aggregate import build_aggregate_model
 
 POST_MODES = ("always", "changes", "never")
 
@@ -245,16 +253,81 @@ def _changes_list(changes: object) -> list[dict[str, object]]:
     return [c for c in changes if isinstance(c, dict)]
 
 
+def _introduced_changes(changes: object) -> list[dict[str, object]]:
+    """:func:`_changes_list` minus every finding this comparison did not
+    establish as its own (:data:`_NOT_THIS_CHANGES_EVOLUTIONS`).
+
+    The "What changed" rollup answers *what this comparison's operands
+    did*. Counting standing hygiene debt in it reports 336 modifications
+    for a byte-identical rebuild -- the same misattribution the background
+    bucket exists to stop, one table over.
+
+    ``not_evaluated`` is excluded too, for a different reason and with the
+    same necessity: there the comparison layer declined to say whether the
+    finding is new at all, so ``_bucket_changes`` routes it to the
+    analysis-*incomplete* bucket rather than a compatibility one. Counting
+    it here would assert as a modification the very thing the comparison
+    refused to assert, and would put one finding in two mutually exclusive
+    places at once. Filtering on the union keeps this rollup over exactly
+    the set ``_bucket_changes`` admits to the compatibility buckets, so the
+    summary and its own detail sections cannot disagree.
+    """
+    return [
+        c
+        for c in _changes_list(changes)
+        if str(c.get("cross_source_evolution", "") or "")
+        not in _NOT_THIS_CHANGES_EVOLUTIONS
+    ]
+
+
+#: ``Change.cross_source_evolution`` states that mean *this comparison did
+#: not introduce the finding* (ADR-068 D3, stamped by
+#: ``workflows/cross_source_evolution.py``). A one-sided hygiene check is
+#: re-run against the baseline and its findings paired, so the comparison
+#: layer already knows which of them are new; this renderer reads that
+#: answer and never re-derives it (ADR-072 D1).
+#:
+#: - ``persistent`` -- flagged identically on both sides. Standing library
+#:   debt (a C++ template-instantiation guard variable, a function-local
+#:   static), not something a pull request did.
+#: - ``resolved`` -- flagged on the baseline only. Good news, and still not
+#:   a change to review in the candidate.
+#:
+#: ``not_evaluated`` is deliberately absent: it means one side's evidence
+#: could not confirm or deny the finding, which is an analysis limitation
+#: and belongs in the analysis-incomplete bucket, not in background.
+#: ``introduced`` is absent because an introduced finding *is* this
+#: comparison's own, and is bucketed by severity like any other.
+_BACKGROUND_EVOLUTIONS = frozenset({"persistent", "resolved"})
+
+#: Everything :func:`_introduced_changes` keeps out of the "What changed"
+#: rollup: the two background states above, plus ``not_evaluated``. The
+#: three are not one concept -- two mean "present before this change", the
+#: third means "we could not tell" -- but a rollup of asserted
+#: modifications may claim none of them, and ``_bucket_changes`` keeps all
+#: three out of the compatibility buckets. Deriving the union here rather
+#: than spelling a second literal is what stops the two from drifting.
+_NOT_THIS_CHANGES_EVOLUTIONS = _BACKGROUND_EVOLUTIONS | {"not_evaluated"}
+
+
 def _bucket_changes(
     changes: object,
     gate_api_break: bool = False,
     levels: dict[str, str] | None = None,
     path_prefix: str = "",
-) -> tuple[list[Finding], list[Finding], list[Finding], list[Finding]]:
+) -> tuple[list[Finding], list[Finding], list[Finding], list[Finding], list[Finding]]:
+    """Route each serialized finding to its reviewer-facing bucket.
+
+    Returns ``(breaking, review, safe, incomplete, background)``. The last
+    two are not compatibility buckets: *incomplete* is what the comparison
+    could not establish, *background* is what it established was already
+    there (see :data:`_BACKGROUND_EVOLUTIONS`).
+    """
     breaking: list[Finding] = []
     review: list[Finding] = []
     safe: list[Finding] = []
     incomplete: list[Finding] = []
+    background: list[Finding] = []
     target = {"breaking": breaking, "review": review, "safe": safe}
     levels = levels or {}
     changes_list = changes if isinstance(changes, list) else []
@@ -271,11 +344,44 @@ def _bucket_changes(
                 continue
             sev = str(c.get("severity", "unknown"))
             kind = str(c.get("kind", ""))
+            evolution = str(c.get("cross_source_evolution", "") or "")
+            # ADR-068 D3: a cross-source hygiene finding the comparison
+            # layer established was already present (or is being resolved)
+            # is not a change this comparison's operands introduced. Routed
+            # out ahead of every compatibility rule below -- including the
+            # evidence-kind split and the severity gates -- because none of
+            # them is a question about a finding nobody introduced: a
+            # severity promotion cannot make standing debt into this PR's
+            # break, and the gate the producer ran already scored it.
+            if evolution in _BACKGROUND_EVOLUTIONS:
+                loc = c.get("source_location")
+                background.append(
+                    Finding(
+                        kind=kind,
+                        symbol=str(c.get("symbol", "")),
+                        detail=_detail_text(c, str(c.get("symbol", ""))),
+                        location=_normalize_location(str(loc), path_prefix)
+                        if loc
+                        else None,
+                        severity=sev,
+                        impact=str(c.get("impact", "") or ""),
+                        evolution=evolution,
+                    )
+                )
+                continue
             # Evidence-quality findings never enter the compatibility buckets
             # (see `_EVIDENCE_KIND_VALUES`/module docstring) — pulled out
             # ahead of the severity-bucket/gate logic below, which is about
             # compatibility gating and does not apply to them.
-            if kind in _EVIDENCE_KIND_VALUES:
+            #
+            # ADR-068 D3's `not_evaluated` joins them: it means one side's
+            # evidence could not confirm or deny the finding, so the
+            # comparison layer explicitly refused to call it introduced.
+            # Bucketing it by severity would make this renderer assert what
+            # the comparison declined to, and calling it background would
+            # assert the opposite. "We could not establish this" is what the
+            # analysis-incomplete bucket is for.
+            if kind in _EVIDENCE_KIND_VALUES or evolution == "not_evaluated":
                 loc = c.get("source_location")
                 symbol = _evidence_symbol_label(kind, str(c.get("symbol", "")))
                 incomplete.append(
@@ -288,6 +394,7 @@ def _bucket_changes(
                         else None,
                         severity=sev,
                         impact=str(c.get("impact", "") or ""),
+                        evolution=evolution,
                     )
                 )
                 continue
@@ -315,9 +422,10 @@ def _bucket_changes(
                     severity=sev,
                     impact=str(c.get("impact", "") or ""),
                     mangled=mangled_evidence,
+                    evolution=evolution,
                 )
             )
-    return breaking, review, safe, incomplete
+    return breaking, review, safe, incomplete, background
 
 
 def _incomplete_is_blocking(
@@ -504,7 +612,7 @@ def _from_compare(
         message = reason.get("message")
         not_comparable_reason = str(message) if message else "not comparable"
     levels = _severity_levels(report)
-    breaking, review, safe, incomplete = _bucket_changes(
+    breaking, review, safe, incomplete, background = _bucket_changes(
         report.get("changes"), gate_api_break, levels, path_prefix
     )
     # Blocking-ness for the ordinary evidence-kind findings above is
@@ -567,6 +675,7 @@ def _from_compare(
         review=review,
         safe=safe,
         incomplete=incomplete,
+        background=background,
         incomplete_blocking=incomplete_blocking,
         contract_coverage_blocking=contract_coverage_blocking,
         breaking_categories=_breaking_categories(breaking),
@@ -588,7 +697,7 @@ def _from_compare(
         # Summarized from the report's own complete `changes` list, before
         # any grouping or display cap this renderer applies -- AGENTS.md
         # "compute authoritative totals before grouping or display caps".
-        change_summary=summarize_changes(_changes_list(report.get("changes"))),
+        change_summary=summarize_changes(_introduced_changes(report.get("changes"))),
     )
 
 
@@ -664,7 +773,7 @@ def _from_no_baseline(
                 str(item.get("verdict", "")), "unknown"
             )
             changes_shaped.append(item)
-    breaking, review, safe, incomplete = _bucket_changes(
+    breaking, review, safe, incomplete, background = _bucket_changes(
         changes_shaped, gate_api_break, {}, path_prefix
     )
     incomplete_blocking = _incomplete_is_blocking(
@@ -697,6 +806,7 @@ def _from_no_baseline(
         review=review,
         safe=safe,
         incomplete=incomplete,
+        background=background,
         incomplete_blocking=incomplete_blocking,
         contract_coverage_blocking=contract_coverage_blocking,
         breaking_categories=_breaking_categories(breaking),
@@ -751,7 +861,7 @@ def _from_appcompat(
     path_prefix: str = "",
 ) -> CommentModel:
     levels = _severity_levels(report)
-    breaking, review, safe, incomplete = _bucket_changes(
+    breaking, review, safe, incomplete, background = _bucket_changes(
         report.get("relevant_changes"), gate_api_break, levels, path_prefix
     )
     missing = report.get("missing_symbols")
@@ -795,6 +905,7 @@ def _from_appcompat(
         review=review,
         safe=safe,
         incomplete=incomplete,
+        background=background,
         incomplete_blocking=_incomplete_is_blocking(
             incomplete, gate_api_break, gate_breaking, levels
         ),
@@ -802,7 +913,7 @@ def _from_appcompat(
         breaking_severities=_breaking_severities(breaking),
         evidence=evidence_summary(report),
         change_summary=summarize_changes(
-            _changes_list(report.get("relevant_changes"))
+            _introduced_changes(report.get("relevant_changes"))
             + _appcompat_synthetic_changes(report)
         ),
     )
@@ -1248,6 +1359,8 @@ def build_model(
     gate_api_break: bool = False,
     gate_breaking: bool = True,
     path_prefix: str = "",
+    *,
+    report_dir: Path | None = None,
 ) -> CommentModel:
     """Detect the report shape and normalise it into a :class:`CommentModel`.
 
@@ -1260,6 +1373,13 @@ def build_model(
     classification is a compatibility judgement, not a gate one (ADR-042),
     so it is unaffected by either flag.
 
+    *report_dir* is the directory the report itself was read from. It is
+    used only by the ``aggregate`` shape, whose per-target detail lives in
+    separate member reports the document names relatively; every other shape
+    is self-contained and ignores it. ``None`` (the default) means "no
+    directory is known", and the aggregate adapter then refuses every member
+    rather than resolving one against the process's working directory.
+
     Raises :class:`UnsupportedReportShapeError` for a report carrying
     ``scan_schema_version`` -- the ``scan``-shaped report dict
     (``diff.findings``/``crosscheck.counts_by_check`` rather than
@@ -1271,6 +1391,29 @@ def build_model(
     ``changes`` instead of ``diff.findings``, and would render a false
     "no changes" comment for a report that may carry real findings).
     """
+    if "aggregate_schema_version" in report:
+        # `abicheck aggregate`'s fan-in document (`report/aggregate.py`).
+        # Dispatched ahead of every other shape because it is the *only*
+        # one recognised by a dedicated version key rather than by the
+        # presence of a payload array, and because falling through to
+        # `_from_compare` is exactly what made it render a false "no
+        # changes" comment (this adapter's own module docstring).
+        def _member(data: dict[str, object]) -> CommentModel:
+            return build_model(
+                data,
+                gate_api_break=gate_api_break,
+                gate_breaking=gate_breaking,
+                path_prefix=path_prefix,
+                # A member report is itself read from the same directory, so
+                # an aggregate document naming another aggregate document
+                # keeps working; the loader's own containment rules apply at
+                # every level.
+                report_dir=report_dir,
+            )
+
+        return build_aggregate_model(
+            report, build_member_model=_member, base_dir=report_dir
+        )
     if isinstance(report.get("libraries"), list):
         return _from_release(report, gate_api_break)
     if "application" in report or isinstance(report.get("relevant_changes"), list):

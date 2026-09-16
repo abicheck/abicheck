@@ -183,3 +183,75 @@ def summarize_changes(
         counted=counted,
         fell_back_to_registry=fallbacks,
     )
+
+
+def fold_change_summaries(
+    summaries: Sequence[ChangeSummary],
+    *,
+    inexact_reason: str = "",
+) -> ChangeSummary:
+    """Merge several reports' rollups into one, row by row.
+
+    Used when one comment covers several reports (``aggregate``'s fan-in --
+    see :mod:`abicheck.report.pr_comment_aggregate`). Folding the already-
+    computed :class:`ChangeSummary` objects, rather than re-summarizing a
+    concatenation of finding dicts, is what keeps a member whose own rollup
+    was already inexact honest: there is no finding list to re-count for it,
+    only a floor it already declared.
+
+    Three invariants, stated here because they are the whole contract:
+
+    * **Addition, not recomputation.** Every operation count is the plain
+      sum of its inputs', and :attr:`ChangeSummary.counted` is the sum of
+      the inputs' ``counted`` -- never re-derived from the folded rows,
+      which would let a row-vs-total disagreement pass silently.
+    * **Inexactness is absorbing.** The fold is ``exact`` only when *every*
+      input was. One member counting from a capped list makes the total a
+      floor, and a floor presented as a total is the one thing
+      :attr:`ChangeSummary.exact` exists to prevent. When an input was
+      inexact and the caller states no *inexact_reason*, the first input's
+      own reason is carried.
+    * **Order-independent.** Rows come out in :data:`_ENTITY_ORDER`
+      regardless of input order, so folding the same set of members in a
+      different order produces an equal result.
+
+    An empty *summaries* (or one holding only empty rollups) folds to an
+    empty, exact :class:`ChangeSummary` -- "nothing to summarize", which
+    :attr:`ChangeSummary.is_empty` already means and every renderer already
+    skips.
+    """
+    totals: dict[str, dict[str, int]] = {}
+    counted = 0
+    fallbacks = 0
+    exact = True
+    carried_reason = ""
+    for summary in summaries:
+        counted += summary.counted
+        fallbacks += summary.fell_back_to_registry
+        if not summary.exact:
+            exact = False
+            if not carried_reason:
+                carried_reason = summary.inexact_reason
+        for row in summary.rows:
+            bucket = totals.setdefault(row.entity, {})
+            bucket["removed"] = bucket.get("removed", 0) + row.removed
+            bucket["modified"] = bucket.get("modified", 0) + row.modified
+            bucket["added"] = bucket.get("added", 0) + row.added
+    rows = [
+        EntityRow(
+            entity=key,
+            label=ENTITY_LABELS.get(key, UNCLASSIFIED_LABEL),
+            removed=totals[key].get("removed", 0),
+            modified=totals[key].get("modified", 0),
+            added=totals[key].get("added", 0),
+        )
+        for key in [*_ENTITY_ORDER, UNCLASSIFIED_LABEL]
+        if key in totals
+    ]
+    return ChangeSummary(
+        rows=tuple(rows),
+        exact=exact,
+        inexact_reason="" if exact else (inexact_reason or carried_reason),
+        counted=counted,
+        fell_back_to_registry=fallbacks,
+    )

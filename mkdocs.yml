@@ -72,6 +72,7 @@ nav:
         - More Recipes: use/github-action-recipes.md
         - Source Scans: use/github-action-source-scans.md
         - PR Annotations: use/annotations.md
+        - Fork PR Reporting: use/fork-pr-reporting.md
       - Severity Configuration: use/severity.md
       - Policy Profiles: use/policies.md
       - Suppressions: use/suppressions.md
@@ -151,6 +152,8 @@ nav:
     - Project Targets Schema: reference/project-targets-schema.md
     - resolve-baseline Action: reference/resolve-baseline.md
     - check-target Action: reference/check-target.md
+    - report Action: reference/report-action.md
+    - verify-source-run Action: reference/verify-source-run.md
     - Run Plan Schema: reference/run-plan-schema.md
     - Reusable Workflows: reference/reusable-workflows.md
     - publish-baseline / update-main-baseline: reference/publish-baseline.md

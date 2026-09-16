@@ -862,6 +862,16 @@ Core pipeline (in order of data flow):
    exercising an installed skill. Never hand-edit the generated trees. See
    `skills-src/CLAUDE.md`.
 
+11. **Report-only publication (ADR-073)** — `actions/report` publishes an
+   already-produced canonical JSON report to a pull request; `actions/
+   verify-source-run` selects and unpacks the producer run a trusted
+   `workflow_run` publisher reports on. Neither analyses anything, which is
+   what makes them safe in a privileged job, and everything either one
+   *decides* lives in `abicheck/frontends/action/` (`report_publication.py`,
+   `run_selection.py`, `cli.py`) so it is testable with no credentials. See
+   `abicheck/frontends/AGENTS.md`'s own `action/` section and
+   `docs/use/fork-pr-reporting.md`.
+
 Beyond the core package: `.github/AGENTS.md` (CI/workflow architecture),
 `action/AGENTS.md` (the composite GitHub Action's shell-script layer), and
 `contrib/abicheck-clang-plugin/AGENTS.md` (the optional Clang facts plugin)
