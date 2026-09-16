@@ -1754,3 +1754,51 @@ def test_header_untracked_category_falls_back_to_abi_breaking():
 
 # `pr-comment` CLI command tests live in test_pr_comment_cli.py (this file's
 # own line-count cap; CLAUDE.md's "Files that are large" section).
+
+
+class TestDeltaSuppressionRequiresValueBoundaries:
+    """A row's authoritative old/new values are suppressed only when the
+    description really states *that* transition.
+
+    `delta in desc` is a substring test and a transition is not a
+    substring-safe token: `"0 → 1"` occurs inside `"10 → 11"`. A description
+    mentioning any other numeric transition therefore hid the row's own
+    values (CodeRabbit review). These enumerate the boundary cases rather
+    than pinning the one reported string, and assert both directions --
+    hiding a real delta is as wrong as showing a redundant one.
+    """
+
+    @pytest.mark.parametrize(
+        ("desc", "delta", "expected"),
+        [
+            # The reported defect and its siblings: a different transition
+            # that merely contains this one.
+            ("struct size changed 10 → 11", "0 → 1", False),
+            ("align 20 → 18", "2 → 1", False),
+            ("type uint → longer", "int → long", False),
+            ("offset 100 → 104", "0 → 10", False),
+            # Genuine statements of the same transition, in the shapes a
+            # description actually takes.
+            ("size changed 0 → 1", "0 → 1", True),
+            ("0 → 1", "0 → 1", True),
+            ("changed (0 → 1)", "0 → 1", True),
+            ("return type int → long", "int → long", True),
+            # A decoy before the real one must not mask it.
+            ("offset 100 → 104 and 0 → 1", "0 → 1", True),
+            # Nothing to match.
+            ("no transition here", "0 → 1", False),
+            ("", "0 → 1", False),
+        ],
+    )
+    def test_boundary_cases(self, desc: str, delta: str, expected: bool) -> None:
+        from abicheck.pr_comment import _states_delta
+
+        assert _states_delta(desc, delta) is expected
+
+    def test_the_predicate_is_not_a_constant(self) -> None:
+        """Vacuity guard: a predicate stuck at either constant would pass a
+        one-sided table, so both answers must be reachable."""
+        from abicheck.pr_comment import _states_delta
+
+        assert _states_delta("size 0 → 1", "0 → 1") is True
+        assert _states_delta("size 10 → 11", "0 → 1") is False

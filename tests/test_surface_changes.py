@@ -29,6 +29,7 @@ entry's old/new declaration directly rather than opening the raw JSON
 from __future__ import annotations
 
 import json
+from collections import Counter
 
 import pytest
 
@@ -510,10 +511,14 @@ def test_the_entity_filter_keeps_real_breaks_and_drops_only_non_declarations() -
     result = compare(old, new)
     section = compute_surface_changes(result)
 
-    listed = {
-        e.symbol
+    # Counted by (kind, symbol), not collapsed into a set of symbols: this
+    # section lists one entry per *finding*, and two findings of different
+    # kinds on one symbol are two entries. A set comparison would call a
+    # dropped duplicate correct (CodeRabbit review).
+    listed = Counter(
+        (e.kind, e.symbol)
         for e in (*section.additions, *section.removals, *section.modifications)
-    }
+    )
 
     # Real break preserved: the removal is present, and in the right group.
     assert "_ZN3foo4goneEv" in {e.symbol for e in section.removals}
@@ -524,16 +529,17 @@ def test_the_entity_filter_keeps_real_breaks_and_drops_only_non_declarations() -
 
     # Nothing with a declaration entity was dropped, and nothing without one
     # was kept -- computed from the same findings the section was built from.
-    expected = set()
+    expected: Counter[tuple[str, str]] = Counter()
     for finding in report_findings_for(result):
         kind = finding.change.kind
         kind_value = kind.value if hasattr(kind, "value") else str(kind)
         if entity_for_change(finding.change, kind_value) in _PUBLIC_SURFACE_ENTITIES:
-            expected.add(finding.change.symbol)
+            expected[(kind_value, finding.change.symbol)] += 1
     assert listed == expected, (
         f"filter dropped real declarations {sorted(expected - listed)} "
         f"or kept non-declarations {sorted(listed - expected)}"
     )
-    assert section.total == len(
-        section.additions + section.removals + section.modifications
-    )
+    # Against the independently-derived population, not against the section's
+    # own components -- `SurfaceChangeSection.total` is that same sum, so
+    # comparing the two asserts nothing (CodeRabbit review).
+    assert section.total == sum(expected.values())

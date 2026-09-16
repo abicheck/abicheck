@@ -687,63 +687,118 @@ class TestPyBinResolvedAsAbsolute:
 # ---------------------------------------------------------------------------
 
 
+#: Every shell script in the composite Action that runs an inline Python
+#: script. `run.sh` runs after abicheck is installed and uses `$_PY_SAFE_DIR`;
+#: `validate-inputs.sh` runs *before* the install, from the untrusted
+#: checkout, and so must isolate with `-I` instead. Both are scanned: the
+#: first version of this guard read only `run.sh`, and the one unprotected
+#: invocation in the tree was in the file it did not open.
+ACTION_SHELL_SCRIPTS = (
+    RUN_SH,
+    RUN_SH.parent / "validate-inputs.sh",
+)
+
+
 def _inline_python_invocations(text: str) -> list[tuple[int, str]]:
     """Every line invoking an interpreter with an inline script body.
 
-    Matched on the real invocation shapes run.sh uses (`"$_PY_BIN" -c`,
-    `python3 -c`, ...) rather than on a single hard-coded spelling, so a
-    call site added with a differently-named interpreter variable is still
-    enumerated instead of silently skipped.
+    Matched on the real invocation shapes these scripts use (`"$_PY_BIN" -c`,
+    `"$python_bin" -I -c`, `python3 -c`, ...) rather than on a single
+    hard-coded spelling, so a call site added with a differently-named
+    interpreter variable or an extra flag is still enumerated instead of
+    silently skipped.
     """
     out: list[tuple[int, str]] = []
     for i, line in enumerate(text.splitlines(), start=1):
         stripped = line.strip()
         if stripped.startswith("#"):
             continue
-        if re.search(r'("\$_?\w*PY\w*_?\w*"|\bpython3?\b)\s+-c\b', stripped):
+        if re.search(
+            r'("\$_?\w*[Pp][Yy]\w*_?\w*"|\bpython3?\b)\s+(-[A-Za-z]+\s+)*-c\b',
+            stripped,
+        ):
             out.append((i, line))
     return out
 
 
-def test_every_inline_python_invocation_importing_abicheck_is_isolated() -> None:
-    """The `$_PY_SAFE_DIR` contract, over every call site in the real file.
+def _is_startup_isolated(invocation: str, window: str) -> bool:
+    """Whether this invocation keeps the untrusted checkout off `sys.path`.
 
-    An invocation that imports a real `abicheck` module must run from the
-    empty temp directory with `PYTHONPATH` cleared. Both halves are required:
-    `cd` alone still honours an inherited `PYTHONPATH=.` pointing back at the
-    untrusted checkout, and clearing `PYTHONPATH` alone still leaves the CWD
-    on `sys.path`.
+    Two mechanisms are accepted, because the two scripts run at different
+    points and only one of them can use each:
+
+    * `(cd "$_PY_SAFE_DIR" && PYTHONPATH= ...)` -- run.sh's, for an
+      invocation that must still import the *installed* abicheck.
+    * `-I` -- isolated mode, for a stdlib-only probe. Implies `-E` and `-s`
+      and keeps the CWD off `sys.path`.
+
+    Both halves of the first are required: `cd` alone still honours an
+    inherited `PYTHONPATH=.` pointing back at the checkout, and clearing
+    `PYTHONPATH` alone still leaves the CWD on `sys.path`.
     """
-    text = RUN_SH.read_text(encoding="utf-8")
-    lines = text.splitlines()
+    safe_dir = '_PY_SAFE_DIR" &&' in window and "PYTHONPATH=" in window
+    isolated_flag = re.search(
+        r"\s-[A-Za-z]*I[A-Za-z]*\s+(-[A-Za-z]+\s+)*-c\b", invocation
+    )
+    return bool(safe_dir or isolated_flag)
+
+
+def test_every_inline_python_invocation_in_the_action_is_startup_isolated() -> None:
+    """The real invariant: no inline Python may start with the checkout
+    reachable -- whether or not its body imports anything of ours.
+
+    The first version of this guard required isolation only of invocations
+    whose body imported `abicheck`, on the theory that shadowing a module is
+    the attack. That is half the attack. `site` auto-imports a discoverable
+    `sitecustomize.py` during interpreter **startup**, before the `-c` body
+    runs at all, so a stdlib-only probe in the untrusted checkout executes
+    PR-controlled code just as readily -- which is exactly what
+    `validate-inputs.sh`'s manifest probe did (CodeRabbit review). The
+    module docstring above has always said so; the guard did not.
+    """
     offenders: list[str] = []
-    for lineno, line in _inline_python_invocations(text):
-        # The script body can span lines; look at the invocation line and the
-        # window that opens it, which is where the isolation prefix lives.
-        window = "\n".join(lines[max(0, lineno - 3) : lineno])
-        body = "\n".join(lines[lineno - 1 : min(len(lines), lineno + 25)])
-        if "from abicheck" not in body and "import abicheck" not in body:
-            continue  # not importing the real package; nothing to shadow
-        isolated = '_PY_SAFE_DIR" &&' in window and "PYTHONPATH=" in window
-        if not isolated:
-            offenders.append(f"{RUN_SH.name}:{lineno}: {line.strip()[:120]}")
+    for script in ACTION_SHELL_SCRIPTS:
+        text = script.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        for lineno, line in _inline_python_invocations(text):
+            window = "\n".join(lines[max(0, lineno - 3) : lineno])
+            if not _is_startup_isolated(line, window):
+                offenders.append(f"{script.name}:{lineno}: {line.strip()[:110]}")
     assert not offenders, (
-        "inline Python invocation(s) importing abicheck without "
-        '`(cd "$_PY_SAFE_DIR" && PYTHONPATH= ...)` isolation:\n' + "\n".join(offenders)
+        "inline Python invocation(s) that start with the untrusted checkout "
+        'reachable -- use `(cd "$_PY_SAFE_DIR" && PYTHONPATH= ...)` or `-I`:\n'
+        + "\n".join(offenders)
     )
 
 
 def test_the_isolation_scan_is_not_vacuous() -> None:
-    """Guard the guard: the scan must actually find abicheck-importing
-    invocations in run.sh, or the assertion above is empty-set-true."""
-    text = RUN_SH.read_text(encoding="utf-8")
-    lines = text.splitlines()
-    found = 0
-    for lineno, _ in _inline_python_invocations(text):
-        body = "\n".join(lines[lineno - 1 : min(len(lines), lineno + 25)])
-        if "from abicheck" in body or "import abicheck" in body:
-            found += 1
-    assert found >= 2, f"expected several abicheck-importing probes, found {found}"
+    """Guard the guard: the scan must find invocations in *both* scripts.
+
+    A per-file assertion, not a total: a scan that silently stopped reading
+    one file would still find plenty in the other and look thorough.
+    """
+    for script in ACTION_SHELL_SCRIPTS:
+        found = _inline_python_invocations(script.read_text(encoding="utf-8"))
+        assert found, f"no inline Python invocation found in {script.name}"
+
+
+def test_the_isolation_predicate_rejects_each_half_measure() -> None:
+    """The predicate must not accept a partial defence.
+
+    Stated directly on the predicate rather than only through the tree,
+    which today is clean and so cannot exercise the negative cases.
+    """
+    assert not _is_startup_isolated("\"$_PY_BIN\" -c 'pass'", "")
+    # `cd` without clearing PYTHONPATH, and the reverse.
+    assert not _is_startup_isolated("\"$_PY_BIN\" -c 'pass'", '(cd "$_PY_SAFE_DIR" &&')
+    assert not _is_startup_isolated("\"$_PY_BIN\" -c 'pass'", "PYTHONPATH= ")
+    # A flag that merely contains an "I" in another word is not isolation.
+    assert not _is_startup_isolated("\"$py\" --interactive -c 'pass'", "")
+    # Both accepted mechanisms.
+    assert _is_startup_isolated(
+        "\"$_PY_BIN\" -c 'pass'", '(cd "$_PY_SAFE_DIR" && PYTHONPATH= '
+    )
+    assert _is_startup_isolated("\"$python_bin\" -I -c 'pass'", "")
 
 
 def _run_operand_classifier_via_real_mechanism(

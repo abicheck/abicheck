@@ -80,7 +80,16 @@ _is_compare_release_operand() {
   else
     return 0
   fi
-  "$python_bin" -c '
+  # -I (isolated): this validator runs with the untrusted checkout as its
+  # working directory, and Python's own `site` processing auto-imports a
+  # discoverable `sitecustomize.py` during interpreter *startup*, before the
+  # `-c` body below ever runs. Without -I a PR that adds a top-level
+  # sitecustomize.py to its own checkout executes arbitrary code with this
+  # step's permissions -- the same attack `_PY_SAFE_DIR` defends against in
+  # run.sh, which this validator cannot use because it runs before abicheck
+  # is installed. -I implies -E and -s and keeps the CWD off sys.path, so
+  # the checkout is unreachable at startup; the body needs only the stdlib.
+  "$python_bin" -I -c '
 import json
 import sys
 

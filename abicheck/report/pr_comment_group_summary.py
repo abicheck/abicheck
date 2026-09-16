@@ -22,19 +22,30 @@ def review_group_note(model: CommentModel) -> list[str]:
     gating_groups = sum(
         bool(group.get("gating_findings")) for group in model.review_groups
     )
+    # The authoritative retained total, which is what the headline states.
+    retained_total = counts.get("review_groups", len(model.review_groups))
     lines = [
         f"**Review groups:** {counts.get('gating_review_groups', gating_groups)} gating; "
-        f"{counts.get('review_groups', len(model.review_groups))} retained total.",
+        f"{retained_total} retained total.",
         "",
     ]
-    for group in model.review_groups[:MAX_COMMENT_REVIEW_GROUPS]:
+    shown = model.review_groups[:MAX_COMMENT_REVIEW_GROUPS]
+    for group in shown:
         scope = f"{_esc(group['library'])}: " if group.get("library") else ""
         lines.append(
             f"- {scope}**{_esc(group.get('display_name', '?'))}** — "
             f"{_esc(group.get('transition', 'changed'))}"
         )
-    omitted = len(model.review_groups) - MAX_COMMENT_REVIEW_GROUPS
-    if omitted > 0:
+    # Measured against that same authoritative total, not against the list
+    # this note happens to have been handed. `report/build.py` builds
+    # `review_groups` from the *displayed* findings under `--view show=`,
+    # while `result_counts` is computed over every retained finding -- so a
+    # filtered list can be shorter than the headline with the display cap
+    # never reached, and deriving the omission from the list alone then
+    # reports none. The headline and the list would disagree with nothing
+    # accounting for the difference (CodeRabbit review).
+    omitted = max(0, retained_total - len(shown))
+    if omitted:
         lines.append(f"- … {omitted} more groups omitted")
     lines.append("")
     return lines

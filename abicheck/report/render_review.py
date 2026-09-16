@@ -267,6 +267,17 @@ def render_terminal_digest(digest: ReviewDigest) -> str:
     ]
     if digest.evidence_summary:
         lines.append(f"Evidence: {digest.evidence_summary}.")
+    # The same unconfirmed-result warning the Markdown projection carries
+    # (CodeRabbit review). This projection is what an ordinary `compare`
+    # prints, so omitting it is the one direction that matters: a
+    # public-surface fallback presented without it reads as a clean public
+    # surface, which is precisely what the banner exists to deny.
+    if digest.manual_review_banner:
+        lines.append(
+            "WARNING: Manual review required -- the public surface could not be "
+            "resolved, so analysis fell back to the full export table. Treat "
+            "this result as unconfirmed, not a clean public surface."
+        )
     lines.extend(
         f"WARNING: {compact(warning, 300)}" for warning in digest.coverage_warnings
     )

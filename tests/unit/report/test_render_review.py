@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from abicheck.policy.disposition_ledger import RuleProvenance
 from abicheck.pr_comment_base import CommentModel
 from abicheck.pr_comment_sections import _suppression_note as suppression_note
@@ -290,3 +292,71 @@ def test_review_digest_lists_every_pattern_modulation_when_under_the_cap() -> No
     for i in range(MAX_REVIEW_PATTERN_MODULATIONS):
         assert f"sym{i}" in text
     assert "more omitted; export JSON for details" not in text
+
+
+# ---------------------------------------------------------------------------
+# Both projections render the same decided digest, so a fact that changes how
+# a reviewer should *trust* the result may not be carried by one and dropped
+# by the other. Stated over the warning-class fields together rather than
+# re-tested per field: the terminal projection silently omitted
+# `manual_review_banner` (CodeRabbit review) precisely because each field had
+# its own separate assertion in the Markdown projection and none across both.
+# ---------------------------------------------------------------------------
+
+#: (field, value, substring both projections must surface). Each names a fact
+#: that qualifies the result's trustworthiness.
+_TRUST_QUALIFYING_FIELDS = (
+    ("manual_review_banner", True, "Manual review required"),
+    ("coverage_warnings", ("asymmetric evidence",), "asymmetric evidence"),
+)
+
+
+@pytest.mark.parametrize(("field", "value", "expected"), _TRUST_QUALIFYING_FIELDS)
+def test_both_projections_carry_every_trust_qualifying_fact(
+    field: str, value: object, expected: str
+) -> None:
+    on = _digest(**{field: value})
+    off_value: object = False if isinstance(value, bool) else ()
+    off = _digest(**{field: off_value})
+
+    markdown_on = render_review_digest(on)
+    terminal_on = render_terminal_digest(on)
+    assert expected in markdown_on, f"markdown projection dropped {field}"
+    assert expected in terminal_on, f"terminal projection dropped {field}"
+
+    # And the assertion is not passing on some unrelated constant text: the
+    # substring must genuinely depend on the field being set.
+    assert expected not in render_terminal_digest(off), (
+        f"{expected!r} appears even with {field} unset, so the assertion "
+        "above does not actually test that field"
+    )
+    assert expected not in render_review_digest(off)
+
+
+def test_review_group_note_omission_is_measured_against_the_authoritative_total() -> (
+    None
+):
+    """A filtered list shorter than the headline must still disclose the gap.
+
+    `report/build.py` builds `review_groups` from the *displayed* findings
+    under `--view show=`, while `result_counts` is computed over every
+    retained finding. So the itemized list can be shorter than the headline
+    without the display cap ever being reached -- and an omission derived
+    from the list alone then reports none, leaving the headline and the list
+    disagreeing with nothing accounting for the difference.
+    """
+    model = CommentModel("compare", "libx", "1", "2", "strict_abi")
+    # Well under the cap, so the cap cannot be what produces the disclosure.
+    model.review_groups = [_group(f"g{i}") for i in range(2)]
+    model.result_counts = {"review_groups": 9, "gating_review_groups": 0}
+    text = "\n".join(review_group_note(model))
+    assert "9 retained total" in text
+    assert "- … 7 more groups omitted" in text
+
+
+def test_review_group_note_discloses_nothing_when_the_list_is_complete() -> None:
+    """The complement: no spurious omission line when nothing was cut."""
+    model = CommentModel("compare", "libx", "1", "2", "strict_abi")
+    model.review_groups = [_group(f"g{i}") for i in range(3)]
+    model.result_counts = {"review_groups": 3, "gating_review_groups": 0}
+    assert "omitted" not in "\n".join(review_group_note(model))
