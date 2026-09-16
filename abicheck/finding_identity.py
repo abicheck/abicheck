@@ -1032,6 +1032,11 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
     # symbol gets depends only on whether a public header declared it, not on
     # what the release did.
     "var_added_elf_only": "var_addition",
+    # And the removal side of the same pair: `var_removed` and
+    # `var_removed_elf_only` are one observation at two evidence tiers, so a
+    # `finding_id:` suppression written against either must keep matching
+    # when a later run has header evidence it did not, or vice versa.
+    "var_removed_elf_only": "var_removal",
     "symbol_version_node_removed": "version_def_removal",
     "symbol_version_defined_removed": "version_def_removal",
     "struct_size_changed": "type_size_change",

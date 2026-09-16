@@ -467,6 +467,31 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
+        "var_removed_elf_only",
+        _B,
+        impact="An exported data symbol (STT_OBJECT/STT_TLS/STT_COMMON) that "
+        "the old binary carried is gone from the new binary's export table, "
+        "and no public header declares it on either side. The removal "
+        "counterpart of var_added_elf_only, and it exists for the same "
+        "asymmetry that one does: a header-aware comparison builds its "
+        "variable map from the header AST, so an undeclared export never "
+        "entered that map and _diff_variables could not report VAR_REMOVED "
+        "for it -- the loss disappeared entirely rather than being reported "
+        "weakly. This is the shape a C++ ABI-support object takes: a class's "
+        "vtable/typeinfo (`_ZTV`/`_ZTI`/`_ZTS`/`_ZTT`) is emitted by the "
+        "compiler, declared by no header, and bound by old consumers that "
+        "construct, destroy, dynamic_cast or throw the type -- so losing its "
+        "export breaks them even though the class declaration and its whole "
+        "method list survive unchanged. The evidence is the export table "
+        "alone, so nothing is known about the object's type or size; public-"
+        "surface scoping still decides relevance from the owning type, and an "
+        "owner that cannot be resolved stays reported rather than silently "
+        "clean.",
+        description_template="Exported data symbol not declared in any public header removed: {name}",
+        entity=_ENT.VARIABLE,
+        operation=_OP.REMOVED,
+    ),
+    _E(
         "var_removed",
         _B,
         impact="Old binaries reference a global variable that no longer exists; link or load failure.",

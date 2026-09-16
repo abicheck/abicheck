@@ -1128,7 +1128,6 @@ def test_reconciliation_underscore_strip_is_macho_only():
         lambda f: setattr(f, "is_static", True),
         lambda f: setattr(f, "access", AccessLevel.PRIVATE),
         lambda f: setattr(f, "mangled", ""),
-        lambda f: setattr(f, "name", "vec<int>"),
     ],
 )
 def test_public_not_exported_excludes_non_exporting_decls(mutate):

@@ -38,6 +38,86 @@ __all__ = ["EVIDENCE_BUG_CLASSES"]
 
 EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
+        id="evidence.richer_model_hides_weaker_observation",
+        invariant=(
+            "Adding an evidence provider to a comparison may narrow or "
+            "explain a conclusion; it may never delete a supported "
+            "incompatibility the weaker evidence already established. "
+            "Concretely, for any pair of artifacts, the verdict and exit "
+            "code of the header-aware comparison are no weaker than those "
+            "of the binary-only comparison of the same two artifacts, and "
+            "every symbol the weaker run named is still named. The defect "
+            "was a detector asking the wrong population: a header-aware "
+            "run builds its function/variable maps from the header AST, so "
+            "an export no header declares -- a class's compiler-emitted "
+            "vtable/typeinfo, an undeclared datum, a macro-gated function "
+            "-- is in neither side's map and its disappearance is reported "
+            "by nobody, while the same two binaries compared without "
+            "headers report it. Relevance is a separate question, decided "
+            "downstream by public-surface scoping, contract evaluation and "
+            "policy; an unresolved owner is not a clean result."
+        ),
+        fixed_by=(1308,),
+        seed_tests=(
+            "tests/test_export_reconciliation_and_obligations.py",
+            "tests/test_undeclared_export_additions.py",
+        ),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The invariant is exercised over one fixture family "
+                    "(a single C++ class, its three ABI-support objects and "
+                    "one ordinary datum, localized by a version script) "
+                    "plus unit-level symbol-class sweeps -- not generated "
+                    "across arbitrary libraries, and not across PE/Mach-O, "
+                    "whose own export tables reach the same detector but "
+                    "have no fixture here. The downstream half is also "
+                    "stated rather than tested: no case yet demonstrates a "
+                    "confidently-private owner being *excluded with a "
+                    "recorded reason*, so 'exclusion stays explicit and "
+                    "auditable' rests on the existing scoping machinery's "
+                    "own coverage rather than on a control in this class."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="evidence.spelling_used_as_a_semantic_model",
+        invariant=(
+            "A property of a declaration that the ABI encodes -- linkage, "
+            "template-ness, mangling shape -- is read from the encoding, "
+            "not from how a display name happens to be spelled. A backend "
+            "may report a bare display name for an entity whose mangling "
+            "says otherwise, so any check keyed on the spelling silently "
+            "misses exactly the population it was written to cover: "
+            "`is_specified` spelled bare, mangled "
+            "`_Z12is_specifiedI12OptionalBoolEbT_`, acquired an "
+            "unconditional dynamic-export obligation although a consumer "
+            "taking its address links and runs with no library at all. "
+            "Where the encoding cannot answer (a non-Itanium spelling, an "
+            "unmodelled production), the fallback's answer is 'unknown', "
+            "never a confident negative."
+        ),
+        fixed_by=(1308,),
+        seed_tests=("tests/test_export_reconciliation_and_obligations.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Covers the export-obligation call sites (function and "
+                    "variable) only. Other checks in this repository still "
+                    "read display spellings for semantic questions -- "
+                    "`_looks_templated` survives as the documented "
+                    "fallback, and the MSVC path has no structural parser "
+                    "at all, so for a PE/COFF mangling the spelling "
+                    "heuristic remains the whole answer rather than a "
+                    "fallback."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="evidence.surface_membership_asymmetry",
         invariant=(
             "A declaration may not enter or leave the *compared* public "
