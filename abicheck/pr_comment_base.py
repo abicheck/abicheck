@@ -41,6 +41,8 @@ from .policy.classification import (
     BREAKING_KINDS,
     RISK_KINDS,
 )
+from .report.change_summary import ChangeSummary
+from .report.evidence_summary import EvidenceSummary
 
 # Kind value strings that constitute new public-API surface (the severity
 # "addition" category). Sourced from the authoritative ADDITION_KINDS so kinds
@@ -297,6 +299,20 @@ class CommentModel:
     # a positional caller keeps binding the older tail.
     unmatched_states: dict[str, str] = field(default_factory=dict)
 
+    # The report's own evidence/coverage facts, read (never recomputed) by
+    # `report/evidence_summary.py`. `None` only for a shape that carries
+    # none at all; an *empty* summary is a real answer ("this report stated
+    # no evidence facts") and stays distinguishable from a rich one. Never
+    # defaulted to a reassuring value -- see that module's own docstring.
+    evidence: EvidenceSummary | None = None
+    # The report's entity-by-operation rollup (`report/change_summary.py`),
+    # computed from the *authoritative* finding list before any grouping or
+    # display cap this renderer applies, and carrying its own `exact` flag
+    # for a shape whose list was already truncated upstream (a release
+    # report's capped per-library `findings` sample). `None` when no such
+    # list exists to summarize.
+    change_summary: ChangeSummary | None = None
+
     @property
     def incomplete_total(self) -> int:
         """Exact analysis-incomplete count -- see `scan_incomplete_total`."""
@@ -371,10 +387,12 @@ class CommentModel:
 _CI_WORKDIR_RE = re.compile(r"^/.*?/work/([^/]+)/\1/")
 
 
-def _normalize_location(raw: str) -> str:
+def _normalize_location(raw: str, path_prefix: str = "") -> str:
     """Normalize a ``path[:line]`` location string for display.
 
-    Strips a CI-runner-specific absolute checkout prefix so the comment
+    Strips *path_prefix* (an explicitly supplied checkout root, e.g. the
+    Action's ``$GITHUB_WORKSPACE``) when the location is under it, and
+    otherwise a CI-runner-specific absolute checkout prefix, so the comment
     shows a repo-relative path (``include/foo.h:10``) instead of e.g.
     ``/home/runner/work/abicheck/abicheck/include/foo.h:10`` — noise that
     tells a reviewer nothing they don't already know from the PR itself, and
@@ -385,6 +403,25 @@ def _normalize_location(raw: str) -> str:
     path, sep, rest = raw.rpartition(":")
     if not sep:
         path, rest = raw, ""
+    # An explicitly supplied checkout root wins over the guessed CI shape:
+    # the caller *knows* where the tree is (the Action passes
+    # $GITHUB_WORKSPACE), so there is nothing to infer and no way to
+    # over-strip. Applied only as a whole leading path component, so a
+    # sibling directory sharing the root's name prefix is never cut.
+    #
+    # Both sides are compared with separators normalized, because on a
+    # Windows runner they genuinely differ: `$GITHUB_WORKSPACE` is native
+    # (`D:\a\repo\repo`) while a header-AST backend reports
+    # `source_location` with forward slashes. Comparing them raw made the
+    # prefix never match there, leaving the absolute runner path in the
+    # comment -- the exact thing this strip exists to remove (CodeRabbit
+    # review). The *returned* remainder is sliced out of the original
+    # string, so nothing else about the path's spelling is rewritten.
+    if path_prefix:
+        root = path_prefix.replace("\\", "/").rstrip("/") + "/"
+        if path.replace("\\", "/").startswith(root):
+            trimmed = path[len(root) :]
+            return f"{trimmed}:{rest}" if rest else trimmed
     match = _CI_WORKDIR_RE.match(path)
     if match:
         path = path[match.end() :]

@@ -41,6 +41,21 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 
 from .pr_comment_base import CommentModel, Finding, _esc
+from .pr_comment_sections import (
+    _BODY_BUDGET,
+    GITHUB_COMMENT_LIMIT as GITHUB_COMMENT_LIMIT,
+    _change_summary_block,
+    _detail_link,
+    _evidence_block,
+    _gate_note,
+    _incomplete_note,
+    _library_notes,
+    _md_url,
+    _scoped_notes,
+    _shortening_plan,
+    _suppression_note,
+    _truncate_to_budget,
+)
 
 # Hidden marker used to find-and-update the sticky comment across runs.
 MARKER = "<!-- abicheck-sticky-report -->"
@@ -53,17 +68,6 @@ _SAFE_SYMBOLS_PER_KIND = 12
 # Member symbols listed inline in an aggregated (API-grouped) Breaking/Review row.
 _GROUP_MEMBERS_INLINE = 8
 
-# GitHub rejects issue/PR comment bodies longer than 65,536 characters. Render
-# within a budget below that; if the body overflows, downgrade the detail level
-# (full → standard → summary) and finally hard-truncate so we never exceed it.
-GITHUB_COMMENT_LIMIT = 65536
-_BODY_BUDGET = 64000
-_DETAIL_DOWNGRADE = {
-    "full": ("full", "standard", "summary"),
-    "standard": ("standard", "summary"),
-    "summary": ("summary",),
-}
-
 _VERDICT_EMOJI = {
     "BREAKING": "❌",
     "API_BREAK": "⚠️",
@@ -73,11 +77,6 @@ _VERDICT_EMOJI = {
     "ERROR": "🛑",
     "unsupported": "🚫",
 }
-
-
-def _md_url(url: str) -> str:
-    """Percent-encode characters that would break a markdown ``(url)`` target."""
-    return url.replace("(", "%28").replace(")", "%29").replace(" ", "%20")
 
 
 #: Reviewer-facing headline for a Breaking bucket whose members are *only*
@@ -313,6 +312,77 @@ def _group_row(key: str, members: list[Finding]) -> str:
     return f"| {kinds} | `{_esc(key)}` ({len(members)}) | {members_cell} |"
 
 
+#: Default total member rows in the "All grouped members" block when no
+#: size budget applies. Bounded on purpose: this block is a *route* to the
+#: complete detail, and an unbounded one makes a large report overflow the
+#: comment budget at every row budget, collapsing the whole body to the
+#: summary level -- strictly less information than the grouped rows it was
+#: added to complete (measured: a 1000-finding standard-detail body fell
+#: from ~15 KB of tables to a 440-byte summary).
+_MEMBER_BLOCK_CAP = 200
+
+
+def _group_members_block(
+    groups: OrderedDict[str, list[Finding]],
+    row_cap: int | None = None,
+    report_url: str | None = None,
+) -> list[str]:
+    """Complete member lists for every aggregated row in a standard table.
+
+    Standard detail rolls an API family up to one row listing member
+    *symbols only*; without this block, everything else about those
+    findings -- description, old/new values, location, impact -- was
+    unreachable from the comment at that detail level, and past
+    ``_GROUP_MEMBERS_INLINE`` even the names were ("+22 more"). A grouped
+    row is allowed to be a summary; it is not allowed to be a dead end.
+
+    Every aggregated family is included, not only the ones whose member
+    list was itself cut: a two-member group shows both names inline and
+    still loses both findings' detail, which is the same failure at a
+    smaller size.
+    """
+    aggregated = [
+        (k, m)
+        for k, m in groups.items()
+        if len(m) > 1 and len({f.symbol for f in m}) > 1
+    ]
+    if not aggregated:
+        return []
+    total = sum(len(m) for _, m in aggregated)
+    cap = _MEMBER_BLOCK_CAP if row_cap is None else row_cap
+    out = [
+        f"<details><summary>All grouped members ({total})</summary>",
+        "",
+        "| Change | Symbol | Detail |",
+        "|---|---|---|",
+    ]
+    shown = 0
+    for _key, members in aggregated:
+        for member in members:
+            if shown >= cap:
+                break
+            out.append(_flat_row(member))
+            shown += 1
+        if shown >= cap:
+            break
+    if total > shown:
+        out.append(_omitted_row(total - shown, report_url))
+    out += ["", "</details>", ""]
+    return out
+
+
+def _omitted_row(n: int, report_url: str | None) -> str:
+    """A table row stating exactly how many rows were left out, and where the
+    rest are. The count is of *omitted rows*, computed from the full list
+    before the cap, so it is never an estimate."""
+    where = (
+        f" — see the [full report]({_md_url(report_url)})"
+        if report_url
+        else " — see the full JSON report"
+    )
+    return f"| … | … | _{n} more not shown{where}_ |"
+
+
 def _findings_table(
     title: str,
     findings: list[Finding],
@@ -320,6 +390,8 @@ def _findings_table(
     *,
     open_default: bool,
     count: int | None = None,
+    row_cap: int | None = None,
+    report_url: str | None = None,
 ) -> list[str]:
     # `count` overrides the header's displayed number when it can diverge
     # from `len(findings)` -- currently only the analysis-incomplete bucket,
@@ -338,26 +410,60 @@ def _findings_table(
         "|---|---|---|",
     ]
     if detail == "full":
-        # Full detail keeps every change as its own per-symbol row (no rollup).
-        out += [_flat_row(f) for f in findings]
+        # Full detail keeps every change as its own per-symbol row (no
+        # rollup), capped only by the size budget the caller resolved
+        # (`row_cap`) rather than by a global downgrade to a different
+        # detail level -- see `render_comment`.
+        shown = findings if row_cap is None else findings[:row_cap]
+        out += [_flat_row(f) for f in shown]
+        if len(findings) > len(shown):
+            out.append(_omitted_row(len(findings) - len(shown), report_url))
         out += ["</details>", ""]
         return out
     # Standard: roll up by enclosing API so mass changes stay scannable —
     # singletons render as a normal per-symbol row, families aggregate.
     groups = _group_by_api(findings)
-    keys = list(groups)
-    for key in keys[:_STANDARD_ROW_CAP]:
+    cap = _STANDARD_ROW_CAP if row_cap is None else min(_STANDARD_ROW_CAP, row_cap)
+    # Rows are built for *every* group first and only then capped, because
+    # a group is not a row: a family whose members all name one symbol
+    # expands to one row per member (see below). Capping the group keys
+    # instead let a section emit more rows than `row_cap` allowed and made
+    # the omission notice count *groups* while the section header counts
+    # findings -- two different quantities under one number (CodeRabbit
+    # review). Each row carries the number of findings it represents, so
+    # the notice can state an exact finding count.
+    rendered: list[tuple[str, int, str]] = []
+    for key in groups:
         members = groups[key]
-        out.append(
-            _flat_row(members[0]) if len(members) == 1 else _group_row(key, members)
-        )
-    if len(keys) > _STANDARD_ROW_CAP:
-        out.append(f"| … | … | _{len(keys) - _STANDARD_ROW_CAP} more_ |")
+        # Aggregate only when the rollup actually summarises *several
+        # entities*. A family whose members are all findings about the one
+        # symbol (a changed return type and a changed parameter list on the
+        # same function) has nothing to summarise: the aggregated row would
+        # read "`foo_init`, `foo_init`" and drop both findings' own values,
+        # which is strictly worse than the two flat rows it replaced.
+        if len(members) == 1 or len({m.symbol for m in members}) == 1:
+            rendered += [(_flat_row(m), 1, key) for m in members]
+        else:
+            rendered.append((_group_row(key, members), len(members), key))
+    shown_rows = rendered[:cap]
+    out += [row for row, _, _ in shown_rows]
+    omitted = sum(n for _, n, _ in rendered[len(shown_rows) :])
+    if omitted:
+        out.append(_omitted_row(omitted, report_url))
     out += ["</details>", ""]
+    shown_keys = list(dict.fromkeys(key for _, _, key in shown_rows))
+    out += _group_members_block(
+        OrderedDict((k, groups[k]) for k in shown_keys), row_cap, report_url
+    )
     return out
 
 
-def _safe_section(findings: list[Finding], detail: str) -> list[str]:
+def _safe_section(
+    findings: list[Finding],
+    detail: str,
+    row_cap: int | None = None,
+    report_url: str | None = None,
+) -> list[str]:
     if not findings:
         return []
     is_open = " open" if detail == "full" else ""
@@ -371,34 +477,46 @@ def _safe_section(findings: list[Finding], detail: str) -> list[str]:
     ]
     if detail == "full":
         out += ["| Change | Symbol | Detail |", "|---|---|---|"]
-        for f in findings:
+        # Full detail here obeys the same row budget every other section
+        # does; without it this one section emitted every finding while the
+        # budget was being tightened around it, which is how a body stayed
+        # over the limit at a budget that should have fitted (CodeRabbit
+        # review).
+        shown = findings if row_cap is None else findings[:row_cap]
+        for f in shown:
             out.append(f"| `{_esc(f.kind)}` | `{_esc(f.symbol)}` | {_esc(f.detail)} |")
+        if len(findings) > len(shown):
+            out.append(_omitted_row(len(findings) - len(shown), report_url))
     else:
         groups: OrderedDict[str, list[str]] = OrderedDict()
         for f in findings:
             groups.setdefault(f.kind, []).append(f.symbol)
         parts: list[str] = []
         for kind, syms in groups.items():
-            shown = syms[:_SAFE_SYMBOLS_PER_KIND]
+            shown_syms = syms[:_SAFE_SYMBOLS_PER_KIND]
             more = (
                 f" _(+{len(syms) - _SAFE_SYMBOLS_PER_KIND})_"
                 if len(syms) > _SAFE_SYMBOLS_PER_KIND
                 else ""
             )
-            joined = ", ".join(f"`{_esc(x)}`" for x in shown)
+            joined = ", ".join(f"`{_esc(x)}`" for x in shown_syms)
             parts.append(f"`{_esc(kind)}`: {joined}{more}")
         out.append(" · ".join(parts))
     out += ["", "</details>", ""]
     return out
 
 
-def _release_table(model: CommentModel, detail: str) -> list[str]:
+def _release_table(
+    model: CommentModel, detail: str, row_cap: int | None = None
+) -> list[str]:
     rows = model.library_rows
     if not rows:
         return []
     is_open = " open" if detail == "full" else ""
     ordered = sorted(rows, key=lambda r: (-r[2], -r[3], -r[4], r[0]))
-    cap = None if detail == "full" else _STANDARD_ROW_CAP
+    cap = row_cap if detail == "full" else _STANDARD_ROW_CAP
+    if detail != "full" and row_cap is not None:
+        cap = min(_STANDARD_ROW_CAP, row_cap)
     shown = ordered if cap is None else ordered[:cap]
     out = [
         f"<details{is_open}><summary>Per-library results ({len(rows)})</summary>",
@@ -453,167 +571,6 @@ def _header_block(model: CommentModel, short_sha: str) -> list[str]:
     ]
 
 
-def _library_notes(model: CommentModel) -> list[str]:
-    out: list[str] = []
-    if model.removed_libraries:
-        listed = ", ".join(f"`{_esc(x)}`" for x in model.removed_libraries)
-        out += [f"> ⛔ Libraries removed: {listed}", ""]
-    if model.added_libraries:
-        listed = ", ".join(f"`{_esc(x)}`" for x in model.added_libraries)
-        out += [f"> ➕ New libraries: {listed}", ""]
-    if model.scope_notice is not None:
-        out += [f"> 🧭 {_esc(model.scope_notice)}", ""]
-    unmatched_old = [x for x in model.unmatched_old if x not in model.removed_libraries]
-    unmatched_new = [x for x in model.unmatched_new if x not in model.added_libraries]
-    if unmatched_old or unmatched_new:
-        # Each member carries its own acquisition state (a failed OLD
-        # acquisition is not "the NEW inventory is unproven"; Codex review);
-        # the trailing rule is the one D2 statement true of all of them.
-        def _named(x: str) -> str:
-            state = model.unmatched_states.get(x)
-            return f"`{_esc(x)}`" + (
-                f" ({_esc(state.replace('_', ' '))})" if state else ""
-            )
-
-        parts = []
-        if unmatched_old:
-            parts.append("OLD-only " + ", ".join(_named(x) for x in unmatched_old))
-        if unmatched_new:
-            parts.append("NEW-only " + ", ".join(_named(x) for x in unmatched_new))
-        out += [
-            "> ↔️ Unmatched libraries (present on one side only; a removal or "
-            "addition needs the lacking side's inventory proven complete, and a "
-            "failed acquisition is never one -- see the comparison scope, "
-            "ADR-065 D2): " + "; ".join(parts),
-            "",
-        ]
-    return out
-
-
-def _suppression_note(model: CommentModel) -> list[str]:
-    """ "Reporting must survive suppression": a reviewer must see *that*
-    findings were withheld/reclassified, not just the post-suppression
-    buckets above (which, for a fully-suppressed diff, could otherwise read
-    as "no ABI changes at all")."""
-    parts: list[str] = []
-    if model.suppressed_count:
-        n = model.suppressed_count
-        parts.append(
-            f"🔇 {n} finding{'s' if n != 1 else ''} suppressed by `--suppress`"
-        )
-    if model.reclassified_count:
-        n = model.reclassified_count
-        parts.append(
-            f"🔀 {n} finding{'s' if n != 1 else ''} reclassified by `--policy`"
-        )
-    lines: list[str] = []
-    if model.disposition_audit is not None:
-        # ADR-067 D3: the raw-versus-effective counts come first and are not
-        # conditional on anything having been suppressed -- "0 breaking" must
-        # never be the only number a reviewer sees.
-        from .report.disposition_audit import (
-            DispositionAudit,
-            render_disposition_audit_comment_lines,
-        )
-
-        lines += render_disposition_audit_comment_lines(
-            DispositionAudit.from_dict(model.disposition_audit)
-        )
-    if not parts:
-        return lines
-    return lines + [
-        f"> ℹ️ {' · '.join(parts)} — see the full JSON report for details.",
-        "",
-    ]
-
-
-def _scoped_notes(model: CommentModel) -> list[str]:
-    """`compare --used-by`/`--required-symbol(s)` consumer summary (workstream
-    D-S1, vision-api-abi-evolution.md "D. Optional prebuilt-consumer
-    lifecycle").
-
-    States a supplied consumer's own confirmed/potential/unresolved
-    assessment *beside* the full-library breaking/review/safe buckets
-    rendered below/above, then lists each app's/contract's own scoped result
-    — purely informational: the exit code and headline verdict this comment
-    reports always come from the full-library result, never this consumer's
-    own.
-    """
-    if model.scoped_verdict is None:
-        return []
-    out: list[str] = []
-    if model.full_verdict is not None and model.full_verdict != model.scoped_verdict:
-        out += [
-            f"> ℹ️ **Consumer-scoped verdict: {model.scoped_verdict}** "
-            f"(informational only). The full library verdict (all changes "
-            f"below, and what this run's exit code/headline are based on) is "
-            f"`{model.full_verdict}`.",
-            "",
-        ]
-    for app in model.used_by_summaries:
-        missing_symbols = app.get("missing_symbols")
-        n_missing = len(missing_symbols) if isinstance(missing_symbols, list) else 0
-        out.append(
-            f"- `--used-by {_esc(app.get('app'))}`: **{_esc(app.get('verdict'))}** "
-            f"(missing {n_missing} symbol(s), "
-            f"{app.get('relevant_change_count', 0)} relevant change(s))"
-        )
-    if model.required_symbol_summary is not None:
-        rs = model.required_symbol_summary
-        missing_entrypoints = rs.get("missing_entrypoints")
-        n_missing_ep = (
-            len(missing_entrypoints) if isinstance(missing_entrypoints, list) else 0
-        )
-        out.append(
-            f"- `--required-symbol` contract: **{_esc(rs.get('verdict'))}** "
-            f"(missing {n_missing_ep} "
-            f"entrypoint(s), {rs.get('relevant_change_count', 0)} relevant change(s))"
-        )
-    if out:
-        out.append("")
-    return out
-
-
-#: Human-readable label for a severity-config category, used in policy-block
-#: messaging ("addition"/"quality_issues" are the only categories that can
-#: populate a *policy-only* Breaking bucket — see `_POLICY_ONLY_HEADER`).
-_CATEGORY_LABEL = {"addition": "addition", "quality_issues": "quality"}
-
-
-def _gate_note(model: CommentModel) -> list[str]:
-    """Explain a policy-only block (ADR-042): compatibility and gate
-    decisions are separate axes, so a COMPATIBLE addition/quality finding
-    can still fail the check under a strict severity config. Rendered only
-    when the Breaking bucket holds no genuine incompatibility, so a
-    reviewer isn't left thinking ABI/API compatibility itself is broken.
-    """
-    if model.removed_libraries or model.scoped_verdict is not None:
-        return []
-    b, r, _ = model.counts
-    cats = model.breaking_categories
-    if not b or "abi_breaking" in cats or "potential_breaking" in cats or not cats:
-        return []
-    names = ", ".join(f"`{_CATEGORY_LABEL.get(c, c)}`" for c in sorted(cats))
-    if r:
-        # A separate, ungated api_break/risk finding sits in "Needs review" —
-        # asserting whole-report "Compatibility: COMPATIBLE" here would
-        # overstate it (Codex review, PR #595), so scope the claim to just
-        # the Breaking bucket's own entries and point at the other section.
-        return [
-            f"> ℹ️ **Gate: BLOCKED** by severity policy — {names} is "
-            f"configured as `error`. These entries are themselves COMPATIBLE "
-            f'(not an ABI/API break) — see "Needs review" below for other '
-            f"findings that may affect compatibility.",
-            "",
-        ]
-    return [
-        f"> ℹ️ **Compatibility: COMPATIBLE** — existing binaries/consumers are "
-        f"unaffected; this is not an ABI/API break. **Gate: BLOCKED** by "
-        f"severity policy — {names} is configured as `error`.",
-        "",
-    ]
-
-
 def _incomplete_findings_for_table(model: CommentModel) -> list[Finding]:
     """`model.incomplete`, or -- when the report cap truncated *every*
     analysis-incomplete finding, leaving the itemized list empty even though
@@ -640,29 +597,12 @@ def _incomplete_findings_for_table(model: CommentModel) -> list[Finding]:
     ]
 
 
-def _incomplete_note(model: CommentModel) -> list[str]:
-    """Explain the analysis-incomplete bucket when it did *not* win the
-    headline — a genuine breaking finding, or (for a merely-advisory
-    coverage gap) a real review finding, took priority instead (see
-    `_header`) — so a reviewer looking at an "ABI BREAKING" or "Review
-    recommended" headline still learns the analysis itself was also
-    degraded, rather than discovering it only in the collapsed details
-    section below.
-    """
-    if not model.has_incomplete:
-        return []
-    if not model.breaking and not (model.review and not model.incomplete_blocking):
-        return []
-    n = model.incomplete_total
-    word = "finding" if n == 1 else "findings"
-    return [
-        f"> 🛑 {n} analysis-coverage {word} below — some real changes may not "
-        f"be detectable with the evidence this comparison had available.",
-        "",
-    ]
-
-
-def _body_sections(model: CommentModel, detail: str) -> list[str]:
+def _body_sections(
+    model: CommentModel,
+    detail: str,
+    row_cap: int | None = None,
+    report_url: str | None = None,
+) -> list[str]:
     if model.mode == "release":
         # Codex review (CLI-audit P2 follow-up): the release path's early
         # return used to skip `model.incomplete` entirely — the headline and
@@ -672,12 +612,14 @@ def _body_sections(model: CommentModel, detail: str) -> list[str]:
         # libraries were affected was unreachable in the rendered body, full
         # detail included. Same table compare mode uses for its own
         # incomplete bucket, appended after the per-library results table.
-        return _release_table(model, detail) + _findings_table(
+        return _release_table(model, detail, row_cap) + _findings_table(
             "🛑 Analysis incomplete",
             _incomplete_findings_for_table(model),
             detail,
             open_default=model.has_incomplete,
             count=model.incomplete_total,
+            row_cap=row_cap,
+            report_url=report_url,
         )
     cats = model.breaking_categories
     breaking_title = (
@@ -687,7 +629,12 @@ def _body_sections(model: CommentModel, detail: str) -> list[str]:
     )
     out: list[str] = []
     out += _findings_table(
-        breaking_title, model.breaking, detail, open_default=bool(model.breaking)
+        breaking_title,
+        model.breaking,
+        detail,
+        open_default=bool(model.breaking),
+        row_cap=row_cap,
+        report_url=report_url,
     )
     out += _findings_table(
         "🛑 Analysis incomplete",
@@ -695,12 +642,16 @@ def _body_sections(model: CommentModel, detail: str) -> list[str]:
         detail,
         open_default=(not model.breaking and model.has_incomplete),
         count=model.incomplete_total,
+        row_cap=row_cap,
+        report_url=report_url,
     )
     out += _findings_table(
         "⚠️ Needs review",
         model.review,
         detail,
         open_default=(not model.breaking and bool(model.review)),
+        row_cap=row_cap,
+        report_url=report_url,
     )
     # New public-API surface gets its own section — a per-symbol table with
     # kind/detail/location, the same treatment Breaking/Needs review get —
@@ -710,22 +661,43 @@ def _body_sections(model: CommentModel, detail: str) -> list[str]:
     additions = [f for f in model.safe if f.category == "addition"]
     quality = [f for f in model.safe if f.category != "addition"]
     out += _findings_table(
-        "➕ Public API additions", additions, detail, open_default=False
+        "➕ Public API additions",
+        additions,
+        detail,
+        open_default=False,
+        row_cap=row_cap,
+        report_url=report_url,
     )
-    out += _safe_section(quality, detail)
+    out += _safe_section(quality, detail, row_cap, report_url)
     return out
 
 
 def _footer_block(
-    ts: datetime, run_label: str | None, short_sha: str, report_url: str | None = None
+    ts: datetime,
+    run_label: str | None,
+    short_sha: str,
+    report_url: str | None = None,
+    report_artifact_url: str | None = None,
 ) -> list[str]:
+    """Footer links.
+
+    *report_url* is the workflow run; *report_artifact_url*, when supplied,
+    is a direct link to the uploaded HTML/JSON report artifact. They are
+    labelled distinctly ("View workflow run" vs "Download full report")
+    because they are different destinations doing different jobs, and the
+    artifact link is rendered only when a caller passes one -- the Action
+    passes it only from an upload step that actually succeeded, so a link
+    here always corresponds to an artifact that exists.
+    """
     footer = f"<sub>Updated {ts.strftime('%Y-%m-%d %H:%M UTC')}"
     if run_label:
         footer += f" · {run_label}"
     if short_sha:
         footer += f" · commit {short_sha}"
     if report_url:
-        footer += f" · [full report]({_md_url(report_url)})"
+        footer += f" · [View workflow run]({_md_url(report_url)})"
+    if report_artifact_url:
+        footer += f" · [Download full report]({_md_url(report_artifact_url)})"
     footer += "</sub>"
     return [footer, ""]
 
@@ -739,35 +711,37 @@ def _render_body(
     report_url: str | None,
     *,
     condensed: bool,
+    row_cap: int | None = None,
+    report_artifact_url: str | None = None,
 ) -> str:
-    """Render the comment body at one detail level (optionally condensed)."""
+    """Render the comment body at one detail level and per-section row budget.
+
+    Everything before the detail sections is *unconditional*: the headline
+    and its verdict/gate meaning, head/baseline identity, the exact
+    authoritative counts, the evidence and scope limitations, and the
+    disposition summary. Only the itemized finding tables shrink, and they
+    shrink by row budget rather than by discarding a whole detail level, so
+    a report with a thousand findings still shows individually-detailed rows
+    instead of collapsing to twenty-five grouped ones.
+    """
     lines = _header_block(model, short_sha)
     if condensed:
-        note = "> ℹ️ _Condensed to fit GitHub's comment size limit"
-        note += (
-            f" — see the [full report]({_md_url(report_url)})._" if report_url else "._"
-        )
+        note = "> ℹ️ _Shortened to fit GitHub's comment size limit"
+        note += _detail_link(report_url, report_artifact_url).rstrip(".") + "._"
         lines += [note, ""]
+    lines += _evidence_block(model)
     lines += _library_notes(model)
     lines += _gate_note(model)
     lines += _incomplete_note(model)
     lines += _scoped_notes(model)
     lines += _suppression_note(model)
+    lines += _change_summary_block(model)
     if detail != "summary":
-        lines += _body_sections(model, detail)
-    lines += _footer_block(ts, run_label, short_sha, report_url)
+        lines += _body_sections(
+            model, detail, row_cap, report_artifact_url or report_url
+        )
+    lines += _footer_block(ts, run_label, short_sha, report_url, report_artifact_url)
     return "\n".join(lines)
-
-
-def _truncate_to_budget(body: str, report_url: str | None) -> str:
-    """Hard-cut an over-budget body, appending a truncation note + report link."""
-    suffix = "\n\n<sub>… comment truncated to fit GitHub's size limit"
-    suffix += (
-        f" — see the [full report]({_md_url(report_url)}).</sub>"
-        if report_url
-        else ".</sub>"
-    )
-    return body[: max(_BODY_BUDGET - len(suffix), 0)] + suffix
 
 
 def render_comment(
@@ -778,23 +752,35 @@ def render_comment(
     run_label: str | None = None,
     timestamp: datetime | None = None,
     report_url: str | None = None,
+    report_artifact_url: str | None = None,
 ) -> str:
     """Render the full sticky-comment markdown body (including :data:`MARKER`).
 
-    The body is kept under GitHub's 65,536-character comment limit: if the
-    requested detail overflows, the detail level is downgraded
-    (full → standard → summary) and, as a last resort, the body is truncated —
-    always pointing at the full report when *report_url* is supplied.
+    The body is kept under GitHub's 65,536-character comment limit by
+    *section-aware* shortening: the per-section row budget is tightened
+    first (keeping per-symbol detail), and only once no budget fits is the
+    detail level itself downgraded, with a hard, line-aligned truncation as
+    the last resort. Every attempt preserves the headline, identity, exact
+    counts, evidence and scope limitations, disposition summary and the
+    links to the complete results.
     """
     if detail not in DETAIL_LEVELS:
         detail = "standard"
     ts = timestamp or datetime.now(timezone.utc)
     short_sha = (sha or "")[:7]
     body = ""
-    for i, level in enumerate(_DETAIL_DOWNGRADE[detail]):
+    for i, (level, budget) in enumerate(_shortening_plan(detail)):
         body = _render_body(
-            model, short_sha, ts, level, run_label, report_url, condensed=(i > 0)
+            model,
+            short_sha,
+            ts,
+            level,
+            run_label,
+            report_url,
+            condensed=(i > 0),
+            row_cap=budget,
+            report_artifact_url=report_artifact_url,
         )
         if len(body) <= _BODY_BUDGET:
             return body
-    return _truncate_to_budget(body, report_url)
+    return _truncate_to_budget(body, report_url, report_artifact_url, _BODY_BUDGET)

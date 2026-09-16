@@ -264,9 +264,87 @@ suppression:
 | `add-job-summary` | `true` | Write summary to Job Summary panel (ignored for dump mode) |
 | `pr-comment` | `true` | Post a sticky ABI report comment on the PR (compare mode, including directory/package comparisons and the audit-only shape). No-op outside `pull_request` events. |
 | `pr-comment-mode` | `update` | `update` keeps one comment and edits it in place; `new` posts a fresh comment each run |
-| `pr-comment-on` | `changes` | When to comment: `changes`, `always`, or `never` |
+| `pr-comment-on` | `changes` | When to comment: `changes`, `always`, or `never` — see [What the default comments on](#what-the-default-comments-on) |
 | `pr-comment-detail` | `standard` | Comment detail: `summary`, `standard`, or `full` |
+| `pr-comment-report-artifact-url` | — | Direct URL of an uploaded full-report artifact, shown as **Download full report**; leave unset unless the upload succeeded |
 | `github-token` | `${{ github.token }}` | Token for the PR comment and baseline auto-fetch (needs `pull-requests: write`) |
+
+#### What the default comments on
+
+`pr-comment-on: changes` (the default) posts when the run produced
+something a reviewer must act on:
+
+* at least one ABI/API change;
+* a library added to, or removed from, a package/directory comparison;
+* an incompletely checked comparison scope (ADR-065);
+* a finding a suppression rule disposed of — "100 removals detected, 100
+  suppressed by rule X" is a fact, not silence;
+* **a material limitation the comparison itself recorded** — its
+  `coverage_warnings`, e.g. *"No header/AST data; type-level changes may be
+  missed"*. A clean run whose analysis was narrowed is a result worth
+  reporting, and it is the result a reviewer is least able to infer from the
+  absence of a comment.
+
+It does **not** post for routine detector inapplicability. A Linux ELF
+comparison disables the PE, Mach-O, kABI, SYCL and CPython-extension
+detectors on every run, forever; those are reported in the comment's
+collapsed *Detector applicability* block when a comment is rendered for
+another reason, and they never cause one.
+
+`always` comments on every run; `never` disables the comment
+unconditionally and is always authoritative. **None of these settings
+changes the compatibility verdict, the gate, or the step's exit code** —
+they decide only whether a comment is written.
+
+#### What the comment shows
+
+Beside the verdict headline and the breaking/needs-review/safe counts:
+
+* **Evidence** — the producer's own confidence, analysis depth and the
+  evidence sources it actually had. When the report states no confidence,
+  none is shown; a confidence level is never invented.
+* **Limits on what was checked** — the comparison's own
+  `coverage_warnings`, expanded by default.
+* **Detector applicability** — collapsed; distinguishes "did not run",
+  "not applicable to these artifacts" and "partial coverage".
+* **What changed** — an entity-by-operation table (functions / variables /
+  types / enums / …, removed / changed / added). It counts **findings**, not
+  declarations and not unique symbols, and says so in its own header. The
+  counts come from the complete finding list, before any display cap.
+* **Findings** — per-symbol rows with the change kind, description, old and
+  new values (including one-sided, zero, `false` and empty-string values),
+  source location and the kind's impact text. Standard detail groups related
+  findings by enclosing API and always provides an *All grouped members*
+  block so no member is a dead end; `full` keeps every finding as its own
+  row, subject to the comment size budget.
+
+When the body would exceed GitHub's 65,536-character comment limit, the
+per-section row budget is tightened first — keeping per-symbol detail — and
+only then is the detail level reduced. The headline, identity, exact counts,
+evidence and scope limitations, the disposition summary and the report links
+survive every level of shortening, and the omitted-row counts are exact.
+
+#### Linking the full report
+
+The footer always carries **View workflow run**. It carries a separate
+**Download full report** link only when you pass
+`pr-comment-report-artifact-url`, which this Action cannot derive: it
+uploads nothing itself. Take the value from your own upload step's
+`artifact-url` output so the link can never point at an upload that failed:
+
+```yaml
+- uses: actions/upload-artifact@v7
+  id: report
+  with:
+    name: abicheck-report
+    path: abicheck-report.json
+- uses: abicheck/abicheck@v1
+  with:
+    pr-comment-report-artifact-url: ${{ steps.report.outputs.artifact-url }}
+```
+
+Source locations are rendered relative to `$GITHUB_WORKSPACE`, so rows show
+`include/foo.h:20` rather than a runner-specific absolute path.
 
 ### Package comparison inputs (compare mode, directory/package operands only)
 
