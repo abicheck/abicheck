@@ -78,12 +78,53 @@ looked like the obvious fix and wasn't.
   `release_job_mem_budget_gib(depth)` now defaults to 4.0 GiB at `headers`
   (6.0 at `build`/`source`) instead of the binary-depth 1.0 GiB, so the
   fan-out clamps its worker count instead of overcommitting. What remains
-  is the total: the measured six-member run took ~84 min wall and 20.4 GiB
-  peak RSS, past both the 45-minute job timeout and the 16 GB runner the
-  L2 job budgets for. A correct per-worker budget makes the run *fit in
-  memory by running fewer members at once* -- which costs wall-clock on a
-  job that is already over its timeout. Routing a bundle check at header
-  depth needs a runner/timeout decision, not another budget constant.
+  is the total, and the wall-clock and memory halves of it are now at
+  different stages -- **do not read this gap as closed by either alone.**
+
+  *Wall clock, improved but not on a verified receipt here.* The ~84 min
+  figure this entry has carried is the original six-member observation.
+  A later external oneDAL experiment on the same profiled setup reports the
+  same shape at **2,247 s wall / 2,979 s CPU (37:27)**, against 4,814 s /
+  5,950 s CPU on the older tree. That is a **reported** measurement from
+  outside this repository, taken under a profiler, and it is recorded here
+  as such: it has not been reproduced in-tree, no oneDAL binary is present
+  in this workspace to reproduce it against, and a profiled run's overhead
+  does not subtract cleanly from an unprofiled one. It also measures the
+  *scan*, not the job -- setup, download, dependency resolution and output
+  publication are outside it, so it does not by itself establish that the
+  job fits a 45-minute `timeout-minutes`.
+
+  *Memory, reduced but still short of the target.* The same experiment
+  reports 19.93 GiB peak RSS, essentially unmoved from the original 20.61
+  GiB -- so the speedup did **not** come with the memory fix this gap needs.
+  The 16 GB runner is the binding constraint, and 16 decimal GB is ~14.90
+  GiB, not 16: a ~20 GiB peak is over the real byte limit by a third, not
+  by a rounding error.
+
+  One contributor to that peak is now removed in-tree and measured:
+  `policy/depth_projection.py` answered every `--depth` rung with one
+  unconditional `copy.deepcopy`, so a `--depth headers` projection
+  duplicated an entire L2 surface in order to rebind two fields
+  (`build_mode`, `build_source`), neither of which is read-modified-written
+  at that rung. On a real 327-type/4,802-function header snapshot that cost
+  +34% resident (0.516 -> 0.691 GiB) and +12.5 s per comparison, paid once
+  per fan-out member, concurrently; the copy is now scoped to what each rung
+  actually writes to, and the same projection is 0.000 s and +0.000 GiB with
+  byte-identical findings. **This is a contributor, not the fix:** it was
+  measured on a local C++ fixture, not on oneDAL, and it removes a
+  *duplicate* of the surface rather than shrinking the surface itself, so
+  the resident baseline each worker holds is unchanged. Whether it moves the
+  bundle peak enough to matter is unmeasured, and a re-derived
+  `release_job_mem_budget_gib` `headers` constant deliberately was **not**
+  taken on the strength of it -- lowering that constant on an unvalidated
+  expansion factor is the same mistake the "conservative fix ... implemented
+  twice and reverted twice" paragraph below records.
+
+  So the routing decision this entry gates still needs a real receipt:
+  a full six-member run, unprofiled, under the actual runner's byte limit
+  and `timeout-minutes`, with peak RSS sampled externally. Routing a bundle
+  check at header depth needs that receipt (and, if the peak is still ~20
+  GiB, a runner/timeout decision), not another budget constant.
 
   One further hole in the same budget is **open and deliberately not closed
   here**: the depth a worker reaches is inferred from `--depth` and from

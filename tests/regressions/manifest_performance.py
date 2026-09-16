@@ -210,4 +210,88 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="perf.shared_projection_read_as_an_owned_copy",
+        invariant=(
+            "When a function drops an unconditional deep copy in favour of "
+            "sharing -- because the work it does provably only *rebinds* "
+            "fields rather than read-modify-writing anything beneath them -- "
+            "what it owns must track, per code path, exactly what that path "
+            "writes to. Two failures sit on opposite sides of that line and "
+            "only opposite-direction assertions catch both. Share where the "
+            "path mutates in place, and the 'copy' silently rewrites its "
+            "caller's retained object; deep-copy where nothing mutates, and "
+            "the cost the change existed to remove comes back invisibly, "
+            "since every equality assertion still passes. So the guard "
+            "asserts container and element *identity* per path -- shared "
+            "where sharing is intended, distinct where ownership is required "
+            "-- and never equality of contents, which cannot distinguish the "
+            "two. The guarantee actually owed to callers ('this never "
+            "mutates its argument') is separate from, and weaker than, the "
+            "one a caller might assume ('the result is an independent "
+            "mutable copy'); whichever is claimed must be stated and pinned, "
+            "because a later consumer that starts writing through a shared "
+            "result is the failure mode, and it corrupts a caller that is "
+            "nowhere near the change. The mechanism used to make the shallow "
+            "copy is part of the contract too: for a wide dataclass with a "
+            "`__post_init__`, `copy.copy` carries every field without "
+            "re-running initialisation, while `dataclasses.replace` -- the "
+            "faster-looking substitution -- re-runs `__init__`/"
+            "`__post_init__` and refuses `init=False` fields, so the "
+            "no-re-normalisation property needs its own assertion rather "
+            "than a comment."
+        ),
+        # `policy.depth_projection.project_snapshot_to_depth` answered every
+        # `--depth` rung with one `copy.deepcopy`. At or above `headers` it
+        # rebinds exactly two fields (`build_mode`, `build_source`) and
+        # rewrites nothing, so on a real 327-type/4,802-function header
+        # snapshot the copy cost +34% resident (0.516 -> 0.691 GiB) and
+        # +12.5s per comparison -- paid once per member of a release
+        # fan-out, concurrently. Nothing was wrong in the output, which is
+        # why no existing test noticed: the defect is only visible as
+        # resident bytes and object identity.
+        fixed_by=(1317,),
+        seed_tests=("tests/test_depth_projection_ownership.py",),
+        public_surfaces=("cli", "python-api"),
+        axes={
+            "rung": ("binary", "headers", "build", "source"),
+            "ownership": ("shared-surface", "owned-surface", "owned-pack"),
+            "consumer_shape": (
+                "rebind-on-result",
+                "two-simultaneous-projections",
+                "repeated-under-different-depths",
+                "serialize-the-projection",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The sharing is sound because no consumer currently "
+                    "writes through a projected snapshot -- established by "
+                    "auditing the call sites and by digesting both projected "
+                    "operands across a real full `compare --depth headers` "
+                    "run, not by a structural guarantee. Nothing prevents a "
+                    "future consumer from mutating one; the guard pins the "
+                    "usage patterns that make sharing safe, so such a "
+                    "consumer trips a test here, but a genuinely "
+                    "unwriteable read-only view (over immutable data) is the "
+                    "structural fix and is not attempted."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+            KnownGap(
+                description=(
+                    "Measured on a local compiled C++ fixture, never against "
+                    "the real oneDAL bundle whose peak motivated it. The "
+                    "change removes a *duplicate* of the L2 surface rather "
+                    "than shrinking the surface, so each fan-out worker's "
+                    "resident baseline is unchanged and the six-member peak "
+                    "remains unverified; `release_job_mem_budget_gib`'s "
+                    "`headers` constant was deliberately not re-derived on "
+                    "the strength of it."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )
