@@ -216,10 +216,14 @@ class TestTheInferenceGoesThroughTheSharedResolver:
                 "<version>1</version><libs>l.so</libs><headers>include</headers>",
             )
         )
+        sentinel = Path("/sentinel/root")
         with mock.patch(
             "abicheck.compat.multi_library_run.resolve_inferred_header_roots",
-            return_value=([Path("/sentinel/root")], []),
+            return_value=([sentinel], []),
         ) as spy:
             rendered = _descriptor_compile_options(desc)
         assert spy.called
-        assert "/sentinel/root" in rendered
+        # `str(sentinel)`, not the POSIX literal: the emitter renders a
+        # `Path`, and a `Path` spells itself with the host's own separator
+        # (`\sentinel\root` on Windows -- real Windows CI failure).
+        assert str(sentinel) in rendered

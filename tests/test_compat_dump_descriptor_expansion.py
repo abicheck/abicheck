@@ -249,7 +249,13 @@ class TestTheDescriptorsCompileAndSkipFieldsAreApplied:
         # include-path mode, so its own <headers> root is searched -- which
         # is the whole point of that mode, and what an umbrella header
         # including its sibling by <angle> name needs.
-        assert captured["gcc_options"] == descriptor_include_flag(str(tree / "include"))
+        #
+        # Spelled from the real directory, not through
+        # `descriptor_include_flag`: that helper answers "where does a
+        # descriptor's POSIX *literal* land on this host" and re-adds the
+        # drive on Windows, which double-prefixed an already-host-spelled
+        # `tmp_path` into `-ID:D:\a\...` (real Windows CI failure).
+        assert captured["gcc_options"] == f"-I{tree / 'include'}"
         assert sorted(h.name for h in captured["headers"]) == ["a.h", "b.h"]
 
 
