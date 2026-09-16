@@ -97,11 +97,6 @@ from .dump import dump_cmd
 #: still missing -- see `docs/contribute/known-gaps.md`).
 _RELEASE_FORMATS = frozenset({"json", "markdown", "junit", "oneline"})
 
-#: What an unrequested default falls back to for a release fan-out. Markdown
-#: because the fan-out produces the detailed per-library report; it has no
-#: bounded single-comparison digest to render.
-_RELEASE_DEFAULT_FORMAT = "markdown"
-
 
 def reject_release_incompatible_view_mode(report_mode: str) -> None:
     """Reject a ``--view`` mode/token a directory/package release fan-out
@@ -165,21 +160,6 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     identically to before.
     """
     fmt = kwargs.get("fmt", "markdown")
-    # A release fan-out has no single review document to bound, so it keeps
-    # the detailed Markdown report -- the same carve-out the composite
-    # Action makes for a release-style operand. Applied here too, because a
-    # CLI `compare OLD_DIR NEW_DIR` never goes through the Action: with the
-    # bounded `terminal` default left in place, *every* directory/package
-    # comparison failed the format check below as a usage error (exit 64)
-    # before any comparison ran. An explicitly requested unsupported format
-    # is still that usage error, which is why this falls back only when the
-    # value came from the default.
-    if (
-        ctx.get_parameter_source("fmt") != click.core.ParameterSource.COMMANDLINE
-        and fmt not in _RELEASE_FORMATS
-    ):
-        fmt = _RELEASE_DEFAULT_FORMAT
-        kwargs["fmt"] = fmt
     # --view's derived values: show_only is threaded through the release
     # engine below (cli_compare_release.py). report_mode's "leaf"/
     # "root-cause" restructure a single DiffResult's own root-cause graph --
@@ -886,12 +866,49 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
         and classify_compare_operand(Path(value)) in {"directory", "package"}
         for value in operands
     )
-    if not exports.explicit and (
-        non_full_view or release_operand or kwargs.get("no_baseline")
-    ):
-        kwargs["exports"] = ExportSet(
-            targets=(ExportTarget(fmt="markdown", destination=None),), explicit=False
+    from .compare_bundle_facts_rejections import STORED_BUNDLE_FACTS_FORMATS
+    from .compare_bundle_operand_dispatch import resolve_bundle_compare_dispatch
+
+    _old_operand, _new_operand = operands
+    stored_operand = (
+        _old_operand is not None
+        and _new_operand is not None
+        and resolve_bundle_compare_dispatch(
+            Path(_old_operand), Path(_new_operand)
+        ).old_is_stored
+    )
+    # Which formats the selected dispatch can actually render. A release
+    # fan-out and a stored-bundle-facts comparison each produce a restricted
+    # set and reject anything outside it as a usage error -- so a default
+    # format outside that set does not degrade their output, it stops them
+    # running at all.
+    renderable: frozenset[str] | None = None
+    if stored_operand:
+        renderable = STORED_BUNDLE_FACTS_FORMATS
+    elif release_operand:
+        renderable = _RELEASE_FORMATS
+    if non_full_view or renderable is not None or kwargs.get("no_baseline"):
+        # Rewritten per *target*, not per export set. `exports.explicit` is
+        # true as soon as the user typed any `-o`, but a directory-only
+        # export (`-o json=out/`) still has a document target this command
+        # inserted on its own (`build_export_set`, `spelling=""`) carrying
+        # the command default -- so a set-level test both rewrote formats
+        # the user really did ask for and left that inserted one stranded.
+        # An empty `spelling` is exactly "the user never typed this target".
+        rewritten = tuple(
+            ExportTarget(
+                fmt="markdown",
+                destination=target.destination,
+                is_directory=target.is_directory,
+                spelling=target.spelling,
+            )
+            if not target.spelling
+            and (renderable is None or target.fmt not in renderable)
+            else target
+            for target in exports.targets
         )
+        if rewritten != exports.targets:
+            kwargs["exports"] = ExportSet(targets=rewritten, explicit=exports.explicit)
 
     reject_dry_run_with_exports(bool(kwargs.get("dry_run")), kwargs["exports"])
     expand_export_kwargs(kwargs)
@@ -943,10 +960,6 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
             dispatch as dispatch_bundle_facts,
             resolve_dispatch_compile_context,
         )
-        from .compare_bundle_facts_rejections import (
-            STORED_BUNDLE_FACTS_DEFAULT_FORMAT as _STORED_BUNDLE_FACTS_DEFAULT_FORMAT,
-            STORED_BUNDLE_FACTS_FORMATS as _STORED_BUNDLE_FACTS_FORMATS,
-        )
 
         # Read before resolve_dispatch_compile_context below mutates kwargs["config"] -- see resolve_stored_bundle_lang.
         _cfg_explicit = (
@@ -955,19 +968,6 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
         _compile_context = resolve_dispatch_compile_context(
             ctx, kwargs, new_is_stored=_bundle_operands.new_is_stored
         )
-        # The bounded `terminal` projection this command now defaults to has
-        # no stored-bundle-facts renderer (that path produces json/markdown
-        # only, the same way the release fan-out keeps detailed Markdown --
-        # there is no single review document to bound). Left as the default,
-        # every stored-pair invocation would be rejected by its own format
-        # check before reaching any real validation. An *explicitly*
-        # requested unsupported format is still a usage error, which is why
-        # this falls back only when the value came from the default.
-        if (
-            ctx.get_parameter_source("fmt") != click.core.ParameterSource.COMMANDLINE
-            and kwargs.get("fmt") not in _STORED_BUNDLE_FACTS_FORMATS
-        ):
-            kwargs["fmt"] = _STORED_BUNDLE_FACTS_DEFAULT_FORMAT
         kwargs["lang"], kwargs["lang_explicit"] = resolve_stored_bundle_lang(
             kwargs,
             config_explicit=_cfg_explicit,

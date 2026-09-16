@@ -59,12 +59,6 @@ import click
 #: before it reached any real validation.
 STORED_BUNDLE_FACTS_FORMATS: frozenset[str] = frozenset({"json", "markdown"})
 
-#: What an unrequested default falls back to. Markdown rather than json for
-#: the same reason the release fan-out keeps it: this path produces no single
-#: bounded review document, so the detailed human artifact is the right
-#: default for a human-facing command.
-STORED_BUNDLE_FACTS_DEFAULT_FORMAT = "markdown"
-
 
 def resolve_max_json_object_nodes_cfg(
     configured: int | None, *, config_explicit: bool, default: int
