@@ -145,4 +145,6 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       without them is byte-identical. A pre-1.5 consumer reads nothing
 #:       differently; one that wants either block feature-detects the key or
 #:       requires >= 1.5.
-RELEASE_SCHEMA_VERSION = "1.5"
+#: ``1.6`` adds each member's scalar-parity ``review_groups`` and
+#: ``result_counts`` blocks; both are additive and presentation-only.
+RELEASE_SCHEMA_VERSION = "1.6"

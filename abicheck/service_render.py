@@ -85,7 +85,7 @@ def render_output(
     """Render comparison result in the requested output format.
 
     Supported formats: ``'json'``, ``'markdown'``, ``'sarif'``, ``'html'``,
-    ``'junit'``, ``'review'``, and :data:`ONELINE_FORMAT` (``'oneline'``),
+    ``'junit'``, ``'review'``, ``'terminal'``, and :data:`ONELINE_FORMAT` (``'oneline'``),
     a public ``--format`` choice on ``compare``.
 
     ``demangle`` only affects human-facing formats (markdown, review, html,
@@ -177,7 +177,7 @@ def render_output(
 #: here: it short-circuits above, being a summary-only document rather than a
 #: projection of the shared one (``report/envelope.py``'s scope note).
 _SUPPORTED_FORMATS = frozenset(
-    {"json", "sarif", "html", "junit", "markdown", "md", "review"}
+    {"json", "sarif", "html", "junit", "markdown", "md", "review", "terminal"}
 )
 
 
@@ -195,7 +195,7 @@ _SUPPORTED_FORMATS = frozenset(
 #: here too; ``tests/test_view_internal_grammar.py`` asserts that every
 #: format aliasing a human projector resolves the same way its target does.
 HUMAN_FORMATS: frozenset[str] = frozenset(
-    {"markdown", "md", "review", "html", "text", ONELINE_FORMAT}
+    {"markdown", "md", "review", "terminal", "html", "text", ONELINE_FORMAT}
 )
 
 
@@ -385,14 +385,46 @@ def _project_review(envelope: ReportEnvelope) -> str:
     """The compact review digest (unconditional-recommendation Markdown)."""
     from .reporter import to_review_digest
 
-    return _demangled(
-        to_review_digest(
-            envelope.result,
-            severity_config=envelope.severity_config,
-            envelope=envelope,
-        ),
-        envelope,
+    text = to_review_digest(
+        envelope.result,
+        severity_config=envelope.severity_config,
+        envelope=envelope,
     )
+    # Pre-existing gap, surfaced by the cross-projection test rather than by
+    # this PR: of the three human projections only Markdown appended the
+    # dependency section, so `-o review=... --follow-deps` had always
+    # rendered nothing for the pass it was asked to run. Same condition and
+    # same renderer as the other two.
+    if envelope.options.follow_deps and (
+        envelope.old.dependency_info or (envelope.new and envelope.new.dependency_info)
+    ):
+        text += _render_deps_section_md(envelope.old, envelope.new)
+    return _demangled(text, envelope)
+
+
+def _project_terminal(envelope: ReportEnvelope) -> str:
+    from .report.review_digest_document import (
+        build_review_digest_document,
+        render_terminal_digest_document,
+    )
+
+    document = build_review_digest_document(
+        envelope.result,
+        severity_config=envelope.severity_config,
+        report_document=envelope.document,
+        envelope=envelope,
+    )
+    text = render_terminal_digest_document(document)
+    # `--follow-deps` is an explicitly requested analysis, so producing
+    # nothing for it in the output an ordinary `compare` prints would read
+    # as the flag having done nothing. Appended on the same condition the
+    # Markdown and review projections use, from the same renderer, so the
+    # three cannot disagree about what the dependency pass found.
+    if envelope.options.follow_deps and (
+        envelope.old.dependency_info or (envelope.new and envelope.new.dependency_info)
+    ):
+        text += _render_deps_section(envelope.old, envelope.new, _PLAIN_DEPS_STYLE)
+    return _demangled(text, envelope, escape_table_pipes=False)
 
 
 def _project_markdown(envelope: ReportEnvelope) -> str:
@@ -432,7 +464,9 @@ def _project_markdown(envelope: ReportEnvelope) -> str:
     return _demangled(md, envelope)
 
 
-def _demangled(text: str, envelope: ReportEnvelope) -> str:
+def _demangled(
+    text: str, envelope: ReportEnvelope, *, escape_table_pipes: bool = True
+) -> str:
     """Apply the human-facing ``demangle`` presentation option to *text*.
 
     ``escape_table_pipes=True`` because both callers render Markdown
@@ -454,7 +488,7 @@ def _demangled(text: str, envelope: ReportEnvelope) -> str:
         return text
     from .demangle import demangle_text
 
-    return demangle_text(text, escape_table_pipes=True)
+    return demangle_text(text, escape_table_pipes=escape_table_pipes)
 
 
 _PROJECTIONS: dict[str, Callable[[ReportEnvelope], str]] = {
@@ -463,6 +497,7 @@ _PROJECTIONS: dict[str, Callable[[ReportEnvelope], str]] = {
     "html": _project_html,
     "junit": _project_junit,
     "review": _project_review,
+    "terminal": _project_terminal,
     "markdown": _project_markdown,
     "md": _project_markdown,
 }
@@ -535,48 +570,75 @@ def _render_json_output(
     return base
 
 
-def _render_deps_section_md(old: AbiSnapshot, new: AbiSnapshot | None) -> str:
-    """Append dependency summary section to markdown output."""
-    lines: list[str] = ["", "## Dependency Analysis", ""]
+#: How a dependency section decorates its headings and values. The section's
+#: *content* is identical across projections -- only the markup differs -- so
+#: the walk is written once and takes the style. The Markdown form was being
+#: appended verbatim to the plain-text terminal projection, which emits no
+#: `#`, `**` or backticks anywhere else (CodeRabbit review).
+_MARKDOWN_DEPS_STYLE = ("## ", "### ", "**{}**", "`{}`")
+_PLAIN_DEPS_STYLE = ("", "", "{}", "{}")
+
+
+def _render_deps_section(
+    old: AbiSnapshot,
+    new: AbiSnapshot | None,
+    style: tuple[str, str, str, str] = _MARKDOWN_DEPS_STYLE,
+) -> str:
+    """The dependency summary for *old*/*new*, decorated per *style*."""
+    section, subsection, field, code_fmt = style
+
+    def code(text: object) -> str:
+        return code_fmt.format(text)
+
+    def bold(text: str) -> str:
+        return field.format(text)
+
+    lines: list[str] = ["", f"{section}Dependency Analysis", ""]
 
     for label, snap in [("Old", old), ("New", new)]:
         if snap is None or snap.dependency_info is None:
             continue
         info = snap.dependency_info
-        lines.append(f"### {label} version (`{snap.version}`)")
+        lines.append(f"{subsection}{label} version ({code(snap.version)})")
         lines.append("")
 
         if info.nodes:
-            lines.append(f"**Dependencies**: {len(info.nodes)} resolved DSOs")
+            lines.append(f"{bold('Dependencies')}: {len(info.nodes)} resolved DSOs")
             for node in info.nodes:
                 raw_depth = node.get("depth", 0)
                 depth = raw_depth if isinstance(raw_depth, int) else 0
                 indent = "  " * depth
                 reason = node.get("resolution_reason", "")
-                lines.append(f"  {indent}- `{node.get('soname', '?')}` ({reason})")
+                lines.append(f"  {indent}- {code(node.get('soname', '?'))} ({reason})")
             lines.append("")
 
         if info.bindings_summary:
-            lines.append("**Bindings**:")
+            lines.append(f"{bold('Bindings')}:")
             for status, count in sorted(info.bindings_summary.items()):
-                lines.append(f"  - `{status}`: {count}")
+                lines.append(f"  - {code(status)}: {count}")
             lines.append("")
 
         if info.unresolved:
-            lines.append("**Unresolved libraries**:")
+            lines.append(f"{bold('Unresolved libraries')}:")
             for u in info.unresolved:
                 lines.append(
-                    f"  - `{u.get('soname', '?')}` needed by `{u.get('consumer', '?')}`"
+                    f"  - {code(u.get('soname', '?'))} needed by "
+                    f"{code(u.get('consumer', '?'))}"
                 )
             lines.append("")
 
         if info.missing_symbols:
-            lines.append(f"**Missing symbols**: {len(info.missing_symbols)}")
+            lines.append(f"{bold('Missing symbols')}: {len(info.missing_symbols)}")
             for ms in info.missing_symbols[:10]:
                 ver = f"@{ms['version']}" if ms.get("version") else ""
-                lines.append(f"  - `{ms['symbol']}{ver}`")
+                lines.append(f"  - {code(str(ms['symbol']) + ver)}")
             if len(info.missing_symbols) > 10:
                 lines.append(f"  - ... +{len(info.missing_symbols) - 10} more")
             lines.append("")
 
     return "\n".join(lines)
+
+
+def _render_deps_section_md(old: AbiSnapshot, new: AbiSnapshot | None) -> str:
+    """Append dependency summary section to markdown output."""
+    return _render_deps_section(old, new, _MARKDOWN_DEPS_STYLE)

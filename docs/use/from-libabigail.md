@@ -89,7 +89,7 @@ the severity-aware scheme).
 | `--verbose` | `-v` / `--verbose` | |
 
 Output formats: where `abidiff` emits its text report, `abicheck compare`
-defaults to Markdown and adds `-o json=...|sarif|html|junit` — see
+defaults to a bounded terminal result and supports explicit `-o markdown=...|json=...|sarif=...|html=...|junit=...` exports — see
 [Output Formats](output-formats.md).
 
 ## Snapshot workflow: `abidw` → `abicheck dump`

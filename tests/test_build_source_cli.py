@@ -1829,9 +1829,9 @@ def test_compare_source_abi_findings_and_capabilities(tmp_path):
     from abicheck.checker_policy import BREAKING_KINDS, ChangeKind
 
     assert ChangeKind.DEFAULT_ARGUMENT_CHANGED not in BREAKING_KINDS
-    # The capability report names what is on/off and why.
+    # A disabled check states *why* it is off, not a bare `[off]`.
     assert "Checks enabled for this scan" in result.stderr
-    assert "[off]" in result.stderr
+    assert "[not requested]" in result.stderr
     # Macros/default-args/bodies row references its source/clang requirement.
     assert "inline/template/constexpr" in result.stderr
 

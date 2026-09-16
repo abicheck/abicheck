@@ -465,7 +465,6 @@ class Change:
     #: mechanism at ``make_change``'s ``detail`` *argument* (not stored)
     #: made it a no-op on every production finding.
     entity_discriminator: str | None = field(default=None, kw_only=True)
-
     #: Which library produced this finding, when the run compared more than
     #: one. ``None`` for every single-library comparison, where the enclosing
     #: ``DiffResult.library`` already answers it unambiguously.
@@ -476,6 +475,9 @@ class Change:
     #: reader cannot tell which DSO a removal came from, and the same symbol
     #: removed from two of them is indistinguishable (Codex review).
     library: str | None = field(default=None, kw_only=True)
+    review_evidence: dict[str, object] | None = field(
+        default=None, kw_only=True, compare=False
+    )
 
 
 @dataclass
@@ -968,11 +970,7 @@ class DiffResult(ReportSideFacts):
 
 @dataclass(frozen=True)
 class DetectorSpec:
-    """Specification for a single ABI change detector.
-
-    Renamed from ``_DetectorSpec`` during architecture review Phase 1
-    to serve as the official detector interface.
-    """
+    """Official specification for a single ABI change detector."""
 
     name: str
     run: Callable[[AbiSnapshot, AbiSnapshot], list[Change]]

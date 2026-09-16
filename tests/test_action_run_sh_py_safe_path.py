@@ -55,6 +55,7 @@ that the attack genuinely reproduces without it.
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
 import tempfile
@@ -673,3 +674,239 @@ class TestPyBinResolvedAsAbsolute:
         line = next(ln for ln in result.stdout.splitlines() if ln.startswith("PY_BIN="))
         py_bin = line[len("PY_BIN=") :]
         assert not Path(py_bin).is_absolute()
+
+
+# ---------------------------------------------------------------------------
+# Exhaustiveness: the class, not the two call sites that happened to have
+# tests. Every test above pins one hand-picked invocation. A *new* inline
+# Python invocation that imports a real `abicheck` module -- such as the
+# compare-operand classifier probe -- reopens the whole shadowing hole if it
+# forgets the mechanism, and nothing above would notice: the existing tests
+# reproduce run.sh's snippet rather than reading its real call sites. This
+# enumerates them from the file itself, so the guard grows with run.sh.
+# ---------------------------------------------------------------------------
+
+
+#: Every shell script in the composite Action that runs an inline Python
+#: script. `run.sh` runs after abicheck is installed and uses `$_PY_SAFE_DIR`;
+#: `validate-inputs.sh` runs *before* the install, from the untrusted
+#: checkout, and so must isolate with `-I` instead. Both are scanned: the
+#: first version of this guard read only `run.sh`, and the one unprotected
+#: invocation in the tree was in the file it did not open.
+ACTION_SHELL_SCRIPTS = (
+    RUN_SH,
+    RUN_SH.parent / "validate-inputs.sh",
+)
+
+
+def _inline_python_invocations(text: str) -> list[tuple[int, str]]:
+    """Every line invoking an interpreter with an inline script body.
+
+    Matched on the real invocation shapes these scripts use (`"$_PY_BIN" -c`,
+    `"$python_bin" -I -c`, `python3 -c`, ...) rather than on a single
+    hard-coded spelling, so a call site added with a differently-named
+    interpreter variable or an extra flag is still enumerated instead of
+    silently skipped.
+    """
+    out: list[tuple[int, str]] = []
+    for i, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        if re.search(
+            r'("\$_?\w*[Pp][Yy]\w*_?\w*"|\bpython3?\b)\s+(-[A-Za-z]+\s+)*-c\b',
+            stripped,
+        ):
+            out.append((i, line))
+    return out
+
+
+def _is_startup_isolated(invocation: str, window: str) -> bool:
+    """Whether this invocation keeps the untrusted checkout off `sys.path`.
+
+    Two mechanisms are accepted, because the two scripts run at different
+    points and only one of them can use each:
+
+    * `(cd "$_PY_SAFE_DIR" && PYTHONPATH= ...)` -- run.sh's, for an
+      invocation that must still import the *installed* abicheck.
+    * `-I` -- isolated mode, for a stdlib-only probe. Implies `-E` and `-s`
+      and keeps the CWD off `sys.path`.
+
+    Both halves of the first are required: `cd` alone still honours an
+    inherited `PYTHONPATH=.` pointing back at the checkout, and clearing
+    `PYTHONPATH` alone still leaves the CWD on `sys.path`.
+    """
+    # `PYTHONPATH=` must be an *empty* assignment. A plain substring test
+    # also matches `PYTHONPATH="$GITHUB_WORKSPACE"`, which points straight
+    # back at the untrusted checkout -- the opposite of the guarantee
+    # (CodeRabbit review).
+    cleared = re.search(r"\bPYTHONPATH=(?=\s|$)", window) is not None
+    safe_dir = '_PY_SAFE_DIR" &&' in window and cleared
+    # `-I` must be a standalone token. The previous pattern allowed letters
+    # on either side of the I, so it accepted `-WI` -- warning control,
+    # which enables no isolation at all. A guard that can approve an
+    # unprotected invocation is worse than no guard.
+    isolated_flag = re.search(r"(?<!\S)-I(?=\s)", invocation) is not None
+    return safe_dir or isolated_flag
+
+
+def test_every_inline_python_invocation_in_the_action_is_startup_isolated() -> None:
+    """The real invariant: no inline Python may start with the checkout
+    reachable -- whether or not its body imports anything of ours.
+
+    The first version of this guard required isolation only of invocations
+    whose body imported `abicheck`, on the theory that shadowing a module is
+    the attack. That is half the attack. `site` auto-imports a discoverable
+    `sitecustomize.py` during interpreter **startup**, before the `-c` body
+    runs at all, so a stdlib-only probe in the untrusted checkout executes
+    PR-controlled code just as readily -- which is exactly what
+    `validate-inputs.sh`'s manifest probe did (CodeRabbit review). The
+    module docstring above has always said so; the guard did not.
+    """
+    offenders: list[str] = []
+    for script in ACTION_SHELL_SCRIPTS:
+        text = script.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        for lineno, line in _inline_python_invocations(text):
+            window = "\n".join(lines[max(0, lineno - 3) : lineno])
+            if not _is_startup_isolated(line, window):
+                offenders.append(f"{script.name}:{lineno}: {line.strip()[:110]}")
+    assert not offenders, (
+        "inline Python invocation(s) that start with the untrusted checkout "
+        'reachable -- use `(cd "$_PY_SAFE_DIR" && PYTHONPATH= ...)` or `-I`:\n'
+        + "\n".join(offenders)
+    )
+
+
+def test_the_isolation_scan_is_not_vacuous() -> None:
+    """Guard the guard: the scan must find invocations in *both* scripts.
+
+    A per-file assertion, not a total: a scan that silently stopped reading
+    one file would still find plenty in the other and look thorough.
+    """
+    for script in ACTION_SHELL_SCRIPTS:
+        found = _inline_python_invocations(script.read_text(encoding="utf-8"))
+        assert found, f"no inline Python invocation found in {script.name}"
+
+
+def test_the_isolation_predicate_rejects_each_half_measure() -> None:
+    """The predicate must not accept a partial defence.
+
+    Stated directly on the predicate rather than only through the tree,
+    which today is clean and so cannot exercise the negative cases.
+    """
+    assert not _is_startup_isolated("\"$_PY_BIN\" -c 'pass'", "")
+    # `cd` without clearing PYTHONPATH, and the reverse.
+    assert not _is_startup_isolated("\"$_PY_BIN\" -c 'pass'", '(cd "$_PY_SAFE_DIR" &&')
+    assert not _is_startup_isolated("\"$_PY_BIN\" -c 'pass'", "PYTHONPATH= ")
+    # A flag that merely contains an "I" in another word is not isolation.
+    # Isolation lookalikes. `--interactive` was the original negative case
+    # and never exercised the real hole: the pattern keyed on an uppercase
+    # I, so `-WI` -- a warning-control flag enabling no isolation at all --
+    # was what slipped through (CodeRabbit review).
+    assert not _is_startup_isolated("\"$py\" --interactive -c 'pass'", "")
+    assert not _is_startup_isolated("\"$py\" -WI -c 'pass'", "")
+    assert not _is_startup_isolated("\"$py\" -X importtime -c 'pass'", "")
+    # A *nonempty* PYTHONPATH is not a cleared one; this one points straight
+    # back at the untrusted checkout.
+    assert not _is_startup_isolated(
+        "\"$_PY_BIN\" -c 'pass'",
+        '(cd "$_PY_SAFE_DIR" && PYTHONPATH="$GITHUB_WORKSPACE" ',
+    )
+    # Both accepted mechanisms.
+    assert _is_startup_isolated(
+        "\"$_PY_BIN\" -c 'pass'", '(cd "$_PY_SAFE_DIR" && PYTHONPATH= '
+    )
+    assert _is_startup_isolated("\"$python_bin\" -I -c 'pass'", "")
+
+
+def _run_operand_classifier_via_real_mechanism(
+    cwd: Path, probe_path: Path, *, use_the_fix: bool = True
+) -> subprocess.CompletedProcess[str]:
+    """run.sh's own compare-operand classifier probe, extracted verbatim."""
+    py_snippet = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "\n"
+        "from abicheck.cli_resolve import classify_compare_operand\n"
+        "\n"
+        'raise SystemExit(0 if classify_compare_operand(Path(sys.argv[1])) in {"directory", "package"} else 3)\n'
+    )
+    if use_the_fix:
+        script = (
+            '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+            + _py_safe_dir_source()
+            + '(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c \''
+            + py_snippet
+            + f'\' "{probe_path}")\n'
+            + 'echo "rc=$?"\n'
+        )
+    else:
+        script = (
+            '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+            + '"$_PY_BIN" -c \''
+            + py_snippet
+            + f'\' "{probe_path}"\n'
+            + 'echo "rc=$?"\n'
+        )
+    return _run_bash_script(script, cwd=cwd, env={**os.environ}, timeout=60)
+
+
+def _write_malicious_cli_resolve(root: Path, side_effect: Path) -> None:
+    """A checkout-shadowing `abicheck.cli_resolve` whose import writes a file.
+
+    A side-effect *file* rather than a printed marker: it proves the attacker
+    code never ran at all, rather than only that its output did not reach the
+    captured stream.
+    """
+    pkg = root / "abicheck"
+    pkg.mkdir(exist_ok=True)
+    (pkg / "__init__.py").write_text("")
+    (pkg / "cli_resolve.py").write_text(
+        "from pathlib import Path\n"
+        f"Path(r'{side_effect}').write_text('{_MALICIOUS_MARKER}')\n"
+        "\n"
+        "def classify_compare_operand(path):\n"
+        "    return 'directory'\n"
+    )
+
+
+class TestCompareOperandClassifierProbeIsIsolated:
+    """The probe added for the bounded-output default format decision imports
+    a real `abicheck` module from inside the Action, so it is exactly the
+    shape `$_PY_SAFE_DIR` exists to protect."""
+
+    def test_malicious_cli_resolve_in_the_checkout_never_executes(
+        self, tmp_path: Path
+    ) -> None:
+        side_effect = tmp_path / "pwned.txt"
+        _write_malicious_cli_resolve(tmp_path, side_effect)
+        target = tmp_path / "libfoo.so"
+        target.write_bytes(b"\x7fELF not-really")
+
+        result = _run_operand_classifier_via_real_mechanism(tmp_path, target)
+
+        assert not side_effect.exists(), (
+            "the checkout's abicheck.cli_resolve executed despite isolation"
+        )
+        assert _MALICIOUS_MARKER not in result.stdout + result.stderr
+        # And the real classifier answered: a plain file is not a release
+        # operand, so the probe exits 3.
+        assert "rc=3" in result.stdout, result.stdout + result.stderr
+
+    def test_without_the_fix_the_attack_actually_reproduces(
+        self, tmp_path: Path
+    ) -> None:
+        """Control: the assertion above is not vacuously true."""
+        side_effect = tmp_path / "pwned.txt"
+        _write_malicious_cli_resolve(tmp_path, side_effect)
+        target = tmp_path / "libfoo.so"
+        target.write_bytes(b"\x7fELF not-really")
+
+        _run_operand_classifier_via_real_mechanism(tmp_path, target, use_the_fix=False)
+
+        assert side_effect.exists(), (
+            "the shadowing attack did not reproduce without the mechanism, "
+            "so the isolation test above proves nothing"
+        )
+        assert side_effect.read_text() == _MALICIOUS_MARKER

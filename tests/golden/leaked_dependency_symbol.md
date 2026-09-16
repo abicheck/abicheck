@@ -54,19 +54,16 @@
 **Not evaluated:** 10 detector(s) — `fingerprint_renames`, `kabi`, `pe`, `macho`, `dwarf`, `python_ext`, … and 4 more
 
 
-## Surface changes
+## Related review groups
 
-**Additions** (0)
+### 1. `_ZNSt6thread8_M_startEv`
 
-- none
-
-**Removals** (0)
-
-- none
-
-**Modifications** (1)
-
-- **_ZNSt6thread8_M_startEv** — `libstdc++.so.6`
+- **Observed:** modified
+- **Implication:** Symbol '_ZNSt6thread8_M_startEv' was removed but appears to originate from 'libstdc++.so.6' (a dependency of this library). This is a real ABI change — the library is leaking dependency symbols into its public ABI surface. Consider applying -fvisibility=hidden.
+- **Action:** Review the detailed finding and its evidence.
+- **Gate contribution:** 0 finding(s)
+- **Members:** `4a1f6acac2ede3c4`
+- **Exact symbols:** `_ZNSt6thread8_M_startEv`
 
 ---
 ## Legend

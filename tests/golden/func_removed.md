@@ -62,19 +62,16 @@
 **Not evaluated:** 20 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 14 more
 
 
-## Surface changes
+## Related review groups
 
-**Additions** (0)
+### 1. `helper`
 
-- none
-
-**Removals** (1)
-
-- **_Z6helperi** — `helper`
-
-**Modifications** (0)
-
-- none
+- **Observed:** removed
+- **Implication:** Public function removed: helper
+- **Action:** Review the detailed finding and its evidence.
+- **Gate contribution:** 1 finding(s)
+- **Members:** `ef5c7cd29844b1ae`
+- **Exact symbols:** `_Z6helperi`
 
 ---
 ## Legend

@@ -9621,3 +9621,48 @@ same way the gate already does (`l4_source_abi_was_attempted`), which touches
 `evidence_depth.py` and every consumer of `old_evidence_depth`/
 `new_evidence_depth` — an evidence-layer change, not a reporting one, and it
 changes a value stored in existing reports.
+
+## `Change.symbol` is annotated `str` but a real detector emits `None` (2026-09-16)
+
+`checker_types.Change.symbol` is declared `symbol: str  # mangled name or
+type name`. It is not always one. A `public_surface_shrank` finding carries
+`symbol=None` — observed directly, not inferred, by instrumenting
+`report/review_groups.py` during
+`tests/test_policy_registry_and_summary.py::
+test_review_digest_additions_count_excludes_quality_issues`:
+
+```
+DISPLAY '_Z3barv'               SYM '_Z3barv'
+DISPLAY 'public_surface_shrank' SYM None
+```
+
+That is a surface-level fact about the library as a whole, so it genuinely
+has no single symbol to name; `None` is the honest value and the annotation
+is what is wrong.
+
+**Why this is recorded rather than fixed here.** Widening the field to
+`str | None` is a change to a public type (root `AGENTS.md`: "Public types
+live in `model/`, `checker_types.py`, `checker_policy.py`. Changing their
+public surface is a breaking change to the Python API — coordinate it"), and
+it would make `change.symbol` an optional for every consumer that currently
+treats it as a `str` — a cascade of new `mypy` errors well outside the scope
+of the PR that found it. No CI gate is failing on it today: the typecheck
+step runs `mypy abicheck/` only, so neither the production `None` (which
+flows through untyped call sites) nor a test that constructs one is checked.
+
+**What was done instead.** `review_groups.build_review_groups` no longer
+assumes a name exists: its `display_name` falls back to the finding's kind,
+which is stable and sorts. Before that it raised
+`TypeError: '<' not supported between instances of 'NoneType' and 'str'` as
+soon as an unnamed group met a named one in the sort — needing *two* groups
+to surface, which is why no single-finding test had caught it.
+`tests/unit/report/test_review_groups.py` states the invariant as an
+order-independence property over every mix of named and unnamed findings;
+its `Change(kind, None, ...)` constructions mirror what production really
+produces, and are deliberate rather than an invented impossible state.
+
+**What is still open.** The annotation and the runtime disagree. Any
+consumer reading `change.symbol` as a `str` is relying on something the type
+checker cannot verify and that this detector already violates. Closing it
+means widening the field and auditing every reader — worth doing, as its own
+change.

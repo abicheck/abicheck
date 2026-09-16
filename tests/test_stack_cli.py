@@ -256,6 +256,65 @@ class TestCompareFollowDeps:
         assert "new_dependency_info" in data
         assert data["old_dependency_info"]["bindings_summary"]["resolved_ok"] > 0
 
+    def test_compare_follow_deps_reaches_every_human_projection(self, runner, real_lib):
+        """`--follow-deps` is an explicitly requested analysis, so every
+        human rendering must show what it found.
+
+        The section was appended by the Markdown and review projections but
+        not the terminal one, so when `terminal` became the default the flag
+        produced no dependency output at all for an ordinary invocation --
+        indistinguishable, to the user who typed it, from the pass not
+        running. Asserted across the projections together rather than in the
+        one that happened to be the default when the test was written.
+        """
+        for extra in ([], ["-o", "markdown=-"], ["-o", "review=-"]):
+            result = runner.invoke(
+                main, ["compare", str(real_lib), str(real_lib), "--follow-deps", *extra]
+            )
+            assert result.exit_code == 0, (extra, result.output)
+            assert "Dependency Analysis" in result.output, (
+                f"the dependency section is missing from {extra or 'the default'}"
+            )
+            assert "resolved_ok" in result.output, extra
+
+    def test_the_dependency_section_matches_its_projection_s_markup(
+        self, runner, real_lib
+    ):
+        """Plain text in the terminal projection, Markdown in the Markdown one.
+
+        The section was written once, in Markdown, and appended verbatim
+        wherever it was needed -- so extending it to the terminal projection
+        put `###`, `**bold**` and backticks into an output that emits none of
+        those anywhere else (CodeRabbit review). Both directions are asserted
+        together: rendering the terminal form into the Markdown report would
+        be the same mistake mirrored.
+        """
+        terminal = runner.invoke(
+            main, ["compare", str(real_lib), str(real_lib), "--follow-deps"]
+        )
+        assert terminal.exit_code == 0, terminal.output
+        deps = terminal.output.split("Dependency Analysis", 1)[1]
+        for markup in ("###", "**", "`"):
+            assert markup not in deps, (
+                f"terminal dependency section contains {markup!r} markup:\n{deps}"
+            )
+
+        markdown = runner.invoke(
+            main,
+            [
+                "compare",
+                str(real_lib),
+                str(real_lib),
+                "--follow-deps",
+                "-o",
+                "markdown=-",
+            ],
+        )
+        assert markdown.exit_code == 0, markdown.output
+        md_deps = markdown.output.split("## Dependency Analysis", 1)[1]
+        assert "### Old version" in md_deps
+        assert "**Dependencies**" in md_deps
+
     def test_compare_follow_deps_markdown(self, runner, real_lib):
         result = runner.invoke(
             main,

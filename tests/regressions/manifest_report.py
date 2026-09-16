@@ -449,4 +449,87 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="report.shared_display_budget_starvation",
+        invariant=(
+            "A bounded/compact rendering that caps how many items it shows "
+            "must budget each displayed group independently. A single "
+            "budget consumed in group-declaration order lets an earlier, "
+            "less consequential group spend the whole allowance and render "
+            "a later, more consequential one as entirely omitted — "
+            "`compare`'s bounded review digest rendered a breaking removal "
+            'as "all 1 omitted" whenever 12+ compatible additions '
+            "preceded it. So: for every group and every input, a bounded "
+            "rendering shows at least `min(len(group), cap)` of that "
+            "group's entries, the shown count for one group never depends "
+            "on the size of any other group, and the heading always states "
+            "the group's complete count even when the body is capped."
+        ),
+        fixed_by=(1304,),
+        seed_tests=("tests/test_surface_changes.py",),
+        public_surfaces=("cli", "report"),
+        axes={
+            "group": ("additions", "removals", "modifications"),
+            "cap": ("0", "1", "default", "larger-than-population"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Stated and property-tested for the surface-changes "
+                    "section only. The review digest's other bounded lists "
+                    "(`report/pr_comment_group_summary.review_group_note`'s "
+                    "own group cap, `render_review`'s impacted-symbol "
+                    "lists) each cap a single flat list rather than "
+                    "several groups, so the starvation shape cannot arise "
+                    "there today — but none of them is held to this "
+                    "invariant by a test, so a future grouped list added "
+                    "beside them would not be caught."
+                ),
+                reference="abicheck/report/pr_comment_group_summary.py",
+                canary_test=None,
+            ),
+        ),
+    ),
+    BugClass(
+        id="cli.default_format_unreachable_operand",
+        invariant=(
+            "A command's default output format must remain runnable for "
+            "every operand shape the command accepts. Several `compare` "
+            "operand shapes render a restricted format set and validate the "
+            "*resolved* format, so a default outside that set does not "
+            "degrade their output -- it makes every invocation of that shape "
+            "a usage error before any comparison runs. Two corollaries the "
+            "individual fixes kept getting wrong: the fallback must be "
+            "decided per export *target*, since a directory-only export "
+            "carries an extra document target the command inserted itself "
+            "(set-level 'did the user pass -o' answers the wrong question); "
+            "and it must apply only to a target the user never typed, or an "
+            "explicitly requested format is silently rendered as a different "
+            "one into the destination the user named."
+        ),
+        fixed_by=(1304,),
+        seed_tests=("tests/test_cli_compare_default_format_reaches_every_operand.py",),
+        public_surfaces=("cli",),
+        axes={
+            "operand_shape": (
+                "single_pair",
+                "directory_pair",
+                "stored_bundle_facts_pair",
+            ),
+            "export_request": ("none", "directory_only", "explicit_unsupported"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Covers the three operand shapes `compare` dispatches "
+                    "on. `compare --no-baseline` takes the same fallback "
+                    "branch and has its own unsupported-format set "
+                    "(`report/no_baseline_document.py`), but is not driven "
+                    "by this module's parametrization."
+                ),
+                reference="abicheck/report/no_baseline_document.py",
+                canary_test=None,
+            ),
+        ),
+    ),
 )

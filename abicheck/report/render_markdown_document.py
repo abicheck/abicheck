@@ -107,6 +107,7 @@ from .disposition_audit import (
 )
 from .document import ReportDocument
 from .envelope import ReportEnvelope, resolved_document
+from .finding import build_report_findings
 from .pattern_modulations_markdown import render_pattern_modulations_from_mapping
 from .render_markdown import (
     ConfidenceSection,
@@ -143,6 +144,7 @@ from .review_digest_document import (
     build_review_digest_document as build_review_digest_document,
     render_review_digest_document as render_review_digest_document,
 )
+from .review_groups import build_review_groups
 from .surface_changes import (
     SurfaceChangeSection,
     compute_surface_changes,
@@ -553,6 +555,23 @@ def build_markdown_document(
             None if envelope is None else envelope.findings_for(changes),
             changes=changes,
         ).to_dict(),
+        "review_groups": (
+            shared_document.to_mapping().get("review_groups", [])
+            if shared_document is not None and not show_only
+            else [
+                group.to_dict()
+                for group in build_review_groups(
+                    build_report_findings(
+                        changes,
+                        policy=result.policy,
+                        kind_sets=result._effective_kind_sets(),
+                        policy_file=result.policy_file,
+                    )
+                    if envelope is None
+                    else envelope.findings_for(changes)
+                )
+            ]
+        ),
         "redundancy_note": _opt_asdict(rm.compute_redundancy_note(result)),
         "suppression_note": _opt_asdict(rm.compute_suppression_note(result)),
         "out_of_surface_note": _opt_asdict(rm.compute_out_of_surface_note(result)),
@@ -597,6 +616,27 @@ def _render_surface_changes_from_mapping(d: Any) -> list[str]:
     if not isinstance(d, Mapping):
         return []
     return render_surface_changes_section(SurfaceChangeSection.from_dict(d))
+
+
+def _render_review_groups_from_mapping(value: Any) -> list[str]:
+    if not isinstance(value, list) or not value:
+        return []
+    lines = ["", "## Related review groups", ""]
+    for index, group in enumerate(value, 1):
+        if not isinstance(group, Mapping):
+            continue
+        lines += [
+            f"### {index}. `{group.get('display_name', '?')}`",
+            "",
+            f"- **Observed:** {group.get('transition', 'unknown transition')}",
+            f"- **Implication:** {group.get('consequence', 'see member findings')}",
+            f"- **Action:** {group.get('action', 'review member findings')}",
+            f"- **Gate contribution:** {group.get('gating_findings', 0)} finding(s)",
+            f"- **Members:** {', '.join(f'`{item}`' for item in group.get('member_finding_ids', []))}",
+            f"- **Exact symbols:** {', '.join(f'`{item}`' for item in group.get('exact_symbols', []))}",
+            "",
+        ]
+    return lines
 
 
 def _suppression_note_from_mapping(
@@ -686,7 +726,9 @@ def render_markdown_document(doc: ReportDocument) -> str:
         lines.append(d["empty_message"])
     lines += _render_disposition_audit_from_mapping(d.get("disposition_audit"))
     lines += render_pattern_modulations_from_mapping(d.get("pattern_modulations"))
-    lines += _render_surface_changes_from_mapping(d.get("surface_changes"))
+    lines += _render_review_groups_from_mapping(d.get("review_groups"))
+    if not d.get("review_groups"):
+        lines += _render_surface_changes_from_mapping(d.get("surface_changes"))
     lines += render_redundancy_note(
         None if d["redundancy_note"] is None else RedundancyNote(**d["redundancy_note"])
     )

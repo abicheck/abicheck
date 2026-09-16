@@ -571,8 +571,8 @@ def _embed_inline_source_side(
 @two_sided_input_options
 # ── Compare options (unchanged) ──────────────────────────────────────────────
 @export_options(
-    ["json", "markdown", "sarif", "html", "junit", "review", "oneline"],
-    default_format="markdown",
+    ["json", "markdown", "sarif", "html", "junit", "review", "terminal", "oneline"],
+    default_format="terminal",
     supports_directory=True,
     directory_formats=["json"],
     help_extra=" 'review' emits a compact GitHub-facing digest (verdict + "
@@ -844,7 +844,35 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # downstream consumer (run_compare, the release fan-out, the abort
     # renderers, the exit fold) already threads, so the grammar change stops
     # at this boundary rather than rippling through the whole compare stack.
-    from ..options.export import expand_export_kwargs, reject_dry_run_with_exports
+    from ..options.export import (
+        ExportSet,
+        expand_export_kwargs,
+        reject_dry_run_with_exports,
+    )
+
+    # The compact default describes one completed pair. Release/package
+    # fan-out and explicit alternate views retain the detailed Markdown
+    # projection they already support. This fallback applies only when the
+    # user supplied no export; an explicit `-o review=...` is still validated
+    # normally and never silently rewritten.
+    exports = kwargs["exports"]
+    assert isinstance(exports, ExportSet)
+    from .compare_bundle_facts_rejections import STORED_BUNDLE_FACTS_FORMATS
+    from .compare_default_format import renderable_formats, resolve_export_set
+
+    kwargs["exports"] = resolve_export_set(
+        exports,
+        renderable=renderable_formats(
+            kwargs.get("old_input"),
+            kwargs.get("new_input"),
+            release_formats=_RELEASE_FORMATS,
+            stored_formats=STORED_BUNDLE_FACTS_FORMATS,
+        ),
+        rewrite_all=(
+            any(token != "full" for token in kwargs.get("view", ()))
+            or bool(kwargs.get("no_baseline"))
+        ),
+    )
 
     reject_dry_run_with_exports(bool(kwargs.get("dry_run")), kwargs["exports"])
     expand_export_kwargs(kwargs)

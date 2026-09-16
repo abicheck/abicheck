@@ -229,6 +229,8 @@ class CommentModel:
     # rather than a parsed struct for the same reason every other field here
     # is: this model is built from an already-serialized report.
     disposition_audit: dict[str, object] | None = None
+    review_groups: list[dict[str, object]] = field(default_factory=list)
+    result_counts: dict[str, int] | None = None
     # scan mode only (see `pr_comment_scan.from_scan`): the raw
     # `scan_engine.ScanOutcome` verdict string
     # ("COMPATIBLE"/"API_BREAK"/"BREAKING"/"NOT_COMPARABLE"/…), the

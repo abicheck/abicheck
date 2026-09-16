@@ -42,6 +42,7 @@ the invocation was wrong when the data was. Pinned by
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -358,19 +359,19 @@ def detect_coverage_asymmetry(
 #: from a bare binary up through debug symbols, headers, build data, and sources.
 CHECK_CAPABILITIES: tuple[tuple[str, str, str, str], ...] = (
     (
-        "Symbol presence & linkage (added/removed/SONAME)",
+        "Exports, linkage, SONAME, and emitted ELF vtable-group sizes",
         "L0",
         "from the binary's dynamic symbol table",
         "needs the built binary",
     ),
     (
-        "Type layout, members, vtables, signatures",
+        "Debug-derived compiled type layout and member offsets",
         "L1",
         "from DWARF/PDB debug info",
-        "no debug info: checks limited to symbol-level, not struct/member/layout",
+        "no debug info: compiled layout/member offsets are not verified",
     ),
     (
-        "API decls absent from the symbol table; public-surface scoping",
+        "Public declarations, signatures, and declared virtual sequence",
         "L2",
         "from the public header AST",
         "no headers: header-only/inline-API declarations are invisible",
@@ -409,16 +410,79 @@ def capability_lines(
     # Only a PRESENT layer enables its checks: a PARTIAL layer (e.g. L4 when clang
     # was missing or every TU failed, so no entities were extracted) ran but
     # produced nothing, and must read as [off], not [on] (CodeRabbit review).
-    present = {
-        c.layer for c in (*intrinsic, *optional) if c.status == CoverageStatus.PRESENT
-    }
+    coverage = {c.layer: c for c in (*intrinsic, *optional)}
     lines = ["Checks enabled for this scan (and why others are not):"]
     for label, layer, how, why_off in CHECK_CAPABILITIES:
-        if layer in present:
+        row = coverage.get(layer)
+        if row is not None and row.status == CoverageStatus.PRESENT:
             lines.append(f"  [on]  {label} — {how}")
+        elif row is not None and row.status == CoverageStatus.PARTIAL:
+            lines.append(
+                f"  [partial] {label} — evidence covered only part of the selected scope"
+            )
         else:
-            lines.append(f"  [off] {label} — {why_off}")
+            lines.append(f"  [{_not_collected_reason(row)}] {label} — {why_off}")
     return lines
+
+
+#: Ordered (pattern, label) vocabulary for reading *why* a layer was not
+#: collected out of its free-text ``detail``. First match wins, so the order
+#: is the precedence.
+#:
+#: ``CoverageStatus`` has exactly three members (PRESENT/PARTIAL/
+#: NOT_COLLECTED), so the reason a layer was not collected genuinely exists
+#: only as prose today -- there is no structured field to read instead. This
+#: is therefore a deliberate, bounded presentational heuristic over a
+#: human-written string, and it is confined to the *label* on a capability
+#: line: it never reaches a finding, a verdict, an assurance level, or an
+#: exit code, and "not requested" is the conservative default for a detail
+#: that matches nothing.
+#:
+#: Matched on word boundaries rather than as substrings. A plain ``"error"
+#: in detail`` test reads a detail like "completed with no errors" as a
+#: failure, and ``"missing"`` fires on "no missing headers" the same way --
+#: a negated mention is the common shape in this field, not an exotic one.
+_NOT_COLLECTED_REASONS: tuple[tuple[str, str], ...] = (
+    (r"fail(?:ed|ure)?s?|errors?", "failed"),
+    (r"unsupported", "unsupported"),
+    (r"disabled", "disabled"),
+    (r"unavailable|missing|not found|absent", "unavailable"),
+)
+
+#: Negations that precede a keyword and invert it. "completed with no errors"
+#: and "no missing headers" are the shapes this field actually takes; without
+#: this guard both read as a problem the run did not have.
+_NEGATIONS = ("no", "without", "zero")
+
+
+def _not_collected_reason(row: LayerCoverage | None) -> str:
+    """Why a non-PRESENT, non-PARTIAL layer produced nothing.
+
+    See :data:`_NOT_COLLECTED_REASONS` for why this reads prose and what
+    that is and is not allowed to affect.
+    """
+    if row is None:
+        return "not requested"
+    detail = (row.detail or "").lower()
+    for pattern, label in _NOT_COLLECTED_REASONS:
+        for match in re.finditer(rf"\b(?:{pattern})\b", detail):
+            preceding = detail[: match.start()].split()
+            if preceding and preceding[-1] in _NEGATIONS:
+                continue  # "no errors", "no missing headers"
+            return label
+    return "not requested"
+    detail = (row.detail or "").lower()
+    negated = "|".join(_NEGATIONS)
+    for pattern, label in _NOT_COLLECTED_REASONS:
+        # Word-boundary match, skipping an occurrence a negation precedes.
+        if re.search(rf"(?<!\w)(?<!\b(?:{negated}) )(?:{pattern})\b", detail):
+            return label
+    return "not requested"
+    detail = (row.detail or "").lower()
+    for pattern, label in _NOT_COLLECTED_REASONS:
+        if re.search(pattern, detail):
+            return label
+    return "not requested"
 
 
 def diff_embedded_build_source(

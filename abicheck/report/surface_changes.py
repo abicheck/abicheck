@@ -32,17 +32,12 @@ struct of plain values; :func:`render_surface_changes_lines`/
 :func:`add_surface_changes` is this section's JSON attachment point, the
 counterpart of ``disposition_audit.add_disposition_audit``.
 
-**Grouping, not a new policy decision.** "Addition" is
-``policy.severity.IssueCategory.ADDITION`` -- the same category
-``ReportFinding.category`` already resolves for every other view, so this
-section cannot disagree with the severity-grouped one about which finding is
-an addition. "Removal" is any change whose kind spells the ``model``-layer's
-own ``*_removed`` naming convention (enforced by the "Adding a new
-ChangeKind" procedure in the root ``AGENTS.md`` -- a kind that removes a
-declaration is named ``<noun>_removed``); everything else is a
-"modification". This is a display grouping, not a severity/gate
-classification, so it does not need (and must not read) a fourth kind-set
-membership test the way ``ADDITION_KINDS``/``BREAKING_KINDS`` do.
+**Grouping, not a new policy decision.** Operation and entity are read from
+the change catalog through :mod:`abicheck.report.change_operation`.  They are
+facts about what was observed, and therefore do not change when policy
+reclassifies a finding.  Only public-surface entities belong here: imported
+symbols, runtime requirements, and build/environment findings remain in their
+own report dimensions rather than masquerading as API declarations.
 """
 
 from __future__ import annotations
@@ -51,6 +46,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ..change_registry import ChangeEntity
+from .change_operation import entity_for_change, operation_for_kind
 from .finding import ReportFinding, build_report_findings, report_findings_for
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -132,10 +129,39 @@ class SurfaceChangeSection:
         )
 
 
-def _is_removal(finding: ReportFinding) -> bool:
-    kind = finding.change.kind
-    value = kind.value if hasattr(kind, "value") else str(kind)
-    return value.endswith("_removed")
+#: The :class:`ChangeEntity` members this section itemizes: the *declaration*
+#: surface a consumer compiles and links against.
+#:
+#: Derived from the enum rather than spelled as bare strings, so a typo is an
+#: ``AttributeError`` at import instead of a filter that silently matches
+#: nothing. Its complement is stated explicitly below rather than left
+#: implicit: ``tests/test_surface_changes.py`` asserts the two partition
+#: :class:`ChangeEntity` exhaustively, so a member added later must be
+#: classified into one of them instead of being silently dropped from this
+#: section -- the `registry.kind_completeness` failure shape
+#: (`tests/regressions/manifest.py`), where a missing classification produced
+#: no failure anywhere.
+_PUBLIC_SURFACE_ENTITIES = frozenset(
+    {
+        ChangeEntity.FUNCTION.value,
+        ChangeEntity.VARIABLE.value,
+        ChangeEntity.TYPE.value,
+        ChangeEntity.ENUM.value,
+    }
+)
+
+#: Entities that are real findings but are *not* declarations, and so belong
+#: to their own report dimensions rather than this one: container/symbol-table
+#: facts, build and environment evidence, source-graph facts, and the
+#: analysis-quality axis.
+_NON_SURFACE_ENTITIES = frozenset(
+    {
+        ChangeEntity.BINARY.value,
+        ChangeEntity.BUILD.value,
+        ChangeEntity.SOURCE.value,
+        ChangeEntity.ANALYSIS.value,
+    }
+)
 
 
 def _entry_for(finding: ReportFinding) -> SurfaceChangeEntry:
@@ -172,8 +198,6 @@ def compute_surface_changes(
     out (workstream G's "rendering never changes a gate" invariant is about
     verdicts/exit codes, not about which findings a filtered view lists).
     """
-    from ..policy.severity import IssueCategory
-
     if findings is not None:
         resolved = findings
     elif changes is not None:
@@ -189,10 +213,18 @@ def compute_surface_changes(
     removals: list[SurfaceChangeEntry] = []
     modifications: list[SurfaceChangeEntry] = []
     for finding in resolved:
+        kind = finding.change.kind
+        kind_value = kind.value if hasattr(kind, "value") else str(kind)
+        if (
+            entity_for_change(finding.change, kind_value)
+            not in _PUBLIC_SURFACE_ENTITIES
+        ):
+            continue
         entry = _entry_for(finding)
-        if finding.category is IssueCategory.ADDITION:
+        operation = operation_for_kind(kind_value)
+        if operation == "added":
             additions.append(entry)
-        elif _is_removal(finding):
+        elif operation == "removed":
             removals.append(entry)
         else:
             modifications.append(entry)
@@ -237,9 +269,32 @@ def _declaration_line(entry: SurfaceChangeEntry) -> str:
     return f"- **{entry.symbol}** — {decl}{loc}"
 
 
-def render_surface_changes_lines(section: SurfaceChangeSection) -> list[str]:
+#: Per-group cap on the compact/bounded rendering of this section.
+#:
+#: The budget is **per group, not shared across groups**. A shared budget
+#: consumed in declaration order lets the least consequential group starve
+#: the most consequential one: 20 compatible additions would spend the whole
+#: allowance and render a single breaking removal as "all 1 omitted". That
+#: inverts this section's own reason to exist -- workstream G's invariant is
+#: that a reviewer can see *what changed*, and a removal they cannot see is
+#: strictly worse than an addition they cannot see. Per-group budgets also
+#: make the output independent of the order the groups happen to be listed
+#: in, which a shared budget silently is not.
+MAX_COMPACT_SURFACE_ITEMS = 12
+
+
+def render_surface_changes_lines(
+    section: SurfaceChangeSection, *, limit: int = MAX_COMPACT_SURFACE_ITEMS
+) -> list[str]:
     """The Markdown form: one sub-heading per group, each entry itemized
-    with its old/new declaration so a reviewer can act on it directly."""
+    with its old/new declaration so a reviewer can act on it directly.
+
+    Each group is independently capped at *limit* entries and discloses its
+    own omitted count, so a bounded rendering never reports fewer than
+    ``min(len(group), limit)`` entries for any group -- see
+    :data:`MAX_COMPACT_SURFACE_ITEMS`. The group headings always carry the
+    *complete* count, capped or not.
+    """
     if section.total == 0:
         return []
     lines: list[str] = []
@@ -248,13 +303,19 @@ def render_surface_changes_lines(section: SurfaceChangeSection) -> list[str]:
         ("Removals", section.removals),
         ("Modifications", section.modifications),
     )
+    cap = max(0, limit)
     for label, entries in groups:
         lines.append(f"**{label}** ({len(entries)})")
         lines.append("")
-        if entries:
-            lines.extend(_declaration_line(e) for e in entries)
-        else:
+        if not entries:
             lines.append("- none")
+        else:
+            shown = entries[:cap]
+            lines.extend(_declaration_line(e) for e in shown)
+            omitted = len(entries) - len(shown)
+            if omitted:
+                quantifier = f"{omitted} more" if shown else f"all {omitted}"
+                lines.append(f"- … {quantifier} {label.lower()} omitted")
         lines.append("")
     return lines
 

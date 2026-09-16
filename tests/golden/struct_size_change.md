@@ -66,19 +66,25 @@
 **Not evaluated:** 19 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 13 more
 
 
-## Surface changes
+## Related review groups
 
-**Additions** (1)
+### 1. `Point`
 
-- **Point** — Field added: Point::z
+- **Observed:** modified
+- **Implication:** Size changed: Point (64 → 96 bits)
+- **Action:** Review the detailed finding and its evidence.
+- **Gate contribution:** 1 finding(s)
+- **Members:** `46636e6c63222ced`
+- **Exact symbols:** `Point`
 
-**Removals** (0)
+### 2. `Point`
 
-- none
-
-**Modifications** (1)
-
-- **Point** — `64` → `96`
+- **Observed:** added
+- **Implication:** Field added: Point::z
+- **Action:** Review the detailed finding and its evidence.
+- **Gate contribution:** 0 finding(s)
+- **Members:** `840d765d1b4b9352`
+- **Exact symbols:** `Point`
 
 ---
 ## Legend

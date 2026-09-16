@@ -49,7 +49,7 @@ The run below compares two builds where version 2 only grows the ABI surface: tw
 
 <p align="center"><img src="docs/assets/readme/report-html.png" alt="abicheck HTML report: verdict COMPATIBLE, analysis confidence table, change summary, four added symbols" width="900"></p>
 
-The same content ships as Markdown (the default, and what the [GitHub Action](#github-action) posts as a PR comment), JSON, SARIF, and JUnit. Before the report, a CLI run prints which checks were on and which were off for the evidence you supplied:
+The default scalar comparison is a bounded terminal summary; request the complete Markdown, JSON, SARIF, or JUnit document with repeatable `-o FORMAT=DESTINATION` exports. The summary states material evidence limits without listing irrelevant platform detectors:
 
 ```text
 $ abicheck compare v1/libfoo.so.1 v2/libfoo.so.2 --header old=v1/foo.h --header new=v2/foo.h
