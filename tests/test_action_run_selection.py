@@ -1053,3 +1053,63 @@ class TestArtifactOwnershipFailsClosed:
             [self._entry("reports", {"id": 99})], "reports", run_id=str(run_id)
         )
         assert chosen["name"] == "reports"
+
+
+class TestAMergeIsNotJustAnyChildCommit:
+    """Review finding: "the PR head is one of its parents" accepted an
+    ordinary single-parent child.
+
+    Such a commit is not the pull request's tree. A contributor can create
+    one, name it in the artifact, and have the trusted comment claim
+    analysis of a commit CI never built. A real `pull_request` merge has
+    two parents -- the head and the base it was merged into -- so requiring
+    that is what makes this branch mean what its own docstring says. The
+    existing two-parent test above was already compatible; only the
+    single-parent case changes.
+    """
+
+    def _pull(self):
+        return resolve_pull_request(
+            SourceRun.from_api(run_document()), [pull_document()], repository=REPO
+        )
+
+    def test_a_single_parent_child_of_the_head_is_refused(self) -> None:
+        child = {"sha": MERGE_SHA, "parents": [{"sha": HEAD_SHA}]}
+        with pytest.raises(SourceRunRejected) as caught:
+            verify_tested_sha(
+                SourceRun.from_api(run_document()),
+                self._pull(),
+                tested_sha=MERGE_SHA,
+                tested_commit=child,
+            )
+        assert caught.value.code == "unassociated-tested-sha"
+        assert "only parent" in str(caught.value)
+
+    def test_a_commit_with_no_parents_at_all_is_refused(self) -> None:
+        orphan = {"sha": MERGE_SHA, "parents": []}
+        with pytest.raises(SourceRunRejected) as caught:
+            verify_tested_sha(
+                SourceRun.from_api(run_document()),
+                self._pull(),
+                tested_sha=MERGE_SHA,
+                tested_commit=orphan,
+            )
+        assert caught.value.code == "unassociated-tested-sha"
+
+    def test_an_octopus_merge_carrying_the_head_is_accepted(self) -> None:
+        """Two is a floor, not an exact count: the rule is "a merge that
+        includes the head", and refusing a three-parent merge would reject
+        a legitimate tree for being more merged than expected."""
+        octopus = {
+            "sha": MERGE_SHA,
+            "parents": [{"sha": "0" * 40}, {"sha": HEAD_SHA}, {"sha": "5" * 40}],
+        }
+        assert (
+            verify_tested_sha(
+                SourceRun.from_api(run_document()),
+                self._pull(),
+                tested_sha=MERGE_SHA,
+                tested_commit=octopus,
+            )
+            == MERGE_SHA
+        )

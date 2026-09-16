@@ -406,6 +406,24 @@ def verify_tested_sha(
         if isinstance(p, Mapping)
     }
     if pull_request.head_sha and pull_request.head_sha in parent_shas:
+        # A real `pull_request` merge commit has two parents: the PR head
+        # and the base it was merged into. Requiring that is what makes
+        # this branch mean "a merge of the head" rather than "any commit
+        # whose parent is the head" -- the latter accepts an ordinary
+        # single-parent child carrying an unrelated tree, which a
+        # contributor can produce and name in the artifact, making the
+        # trusted comment claim analysis of a commit that is not what CI
+        # built. A commit built *on top of* the head is not the pull
+        # request's tree, so refusing it is the correct answer and not
+        # merely the cautious one.
+        if len(parent_shas) < 2:
+            raise SourceRunRejected(
+                "unassociated-tested-sha",
+                f"the analysed commit {tested_sha} has the pull request head "
+                f"{pull_request.head_sha} as its only parent, so it is a "
+                "commit built on top of the pull request rather than a merge "
+                "of it; report the head itself, or the merge commit CI built",
+            )
         return tested_sha
     raise SourceRunRejected(
         "unassociated-tested-sha",

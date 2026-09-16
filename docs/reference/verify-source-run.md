@@ -88,7 +88,10 @@ these routinely differ, and conflating them is a real reporting error in both
 directions: reporting the merge SHA as the head makes the comment unmatchable
 against the commit list, and reporting the head when a merge was analysed
 claims coverage of a tree nothing looked at. The association is verified —
-the analysed commit must be the PR head, or have it as a parent.
+the analysed commit must be the PR head, or a **merge** that includes it:
+two or more parents, one of them the head. "Has the head as a parent" alone
+is not enough, because an ordinary single-parent commit built on top of the
+pull request satisfies it while carrying a tree CI never built.
 
 ### Is the archive safe to unpack?
 
