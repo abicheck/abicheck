@@ -262,7 +262,7 @@ suppression:
 | `severity-addition` | — | Severity for additions: `error`, `warning`, or `info` (compare mode only) |
 | `extra-args` | `''` | Additional CLI arguments passed to abicheck |
 | `add-job-summary` | `true` | Write summary to Job Summary panel (ignored for dump mode) |
-| `pr-comment` | `true` | Post a sticky ABI report comment on the PR (compare mode, including directory/package comparisons and the audit-only shape). No-op outside `pull_request` events. |
+| `pr-comment` | `true` | Post a sticky ABI report comment on the PR (compare mode, including directory/package comparisons and the audit-only shape). No-op outside `pull_request` / `pull_request_target` events. |
 | `pr-comment-mode` | `update` | `update` keeps one comment and edits it in place; `new` posts a fresh comment each run |
 | `pr-comment-on` | `changes` | When to comment: `changes`, `always`, or `never` — see [What the default comments on](#what-the-default-comments-on) |
 | `pr-comment-detail` | `standard` | Comment detail: `summary`, `standard`, or `full` |
@@ -271,9 +271,9 @@ suppression:
 
 !!! note "Pull requests from forks"
 
-    `pr-comment` is a no-op outside a `pull_request` event and needs
-    `pull-requests: write`, which a fork's pull request deliberately does not
-    get. Publishing a fork PR's result needs a separate, trusted
+    `pr-comment` is a no-op outside a `pull_request` or `pull_request_target`
+    event (`action/run.sh` accepts both) and needs `pull-requests: write`,
+    which a fork's `pull_request` deliberately does not get. Publishing a fork PR's result needs a separate, trusted
     `workflow_run` job — see
     [Reporting on fork pull requests](fork-pr-reporting.md) for the supported
     two-workflow split and the
@@ -345,13 +345,24 @@ uploads nothing itself. Take the value from your own upload step's
 `artifact-url` output so the link can never point at an upload that failed:
 
 ```yaml
+# 1. Produce the report. `-o json=` writes the file the upload below names.
+- uses: abicheck/abicheck@v1
+  with:
+    old-library: baseline/libfoo.so
+    new-library: build/libfoo.so
+    extra-args: -o json=abicheck-report.json
+    pr-comment: 'false'
+# 2. Upload it, so the comment can link to something that exists.
 - uses: actions/upload-artifact@v7
   id: report
   with:
     name: abicheck-report
     path: abicheck-report.json
+# 3. Post the comment, pointing at the upload's own URL.
 - uses: abicheck/abicheck@v1
   with:
+    old-library: baseline/libfoo.so
+    new-library: build/libfoo.so
     pr-comment-report-artifact-url: ${{ steps.report.outputs.artifact-url }}
 ```
 

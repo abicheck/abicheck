@@ -362,8 +362,18 @@ def _safe_section(
             # one `func_added` line listing the same name once per target is
             # a count, not an attribution.
             groups.setdefault(_component_key(f, f.kind), []).append(f.symbol)
+        # The same row budget the `full` branch above obeys. This branch
+        # capped symbols *within* each group but emitted every group, so a
+        # report with many distinct (component, kind) groups grew unbounded
+        # while the budget was being tightened around it -- the identical
+        # defect, in the identical section, that the full branch was already
+        # fixed for (CodeRabbit review).
+        group_cap = (
+            _STANDARD_ROW_CAP if row_cap is None else min(_STANDARD_ROW_CAP, row_cap)
+        )
+        shown_groups = list(groups.items())[:group_cap]
         parts: list[str] = []
-        for kind, syms in groups.items():
+        for kind, syms in shown_groups:
             shown_syms = syms[:_SAFE_SYMBOLS_PER_KIND]
             more = (
                 f" _(+{len(syms) - _SAFE_SYMBOLS_PER_KIND})_"
@@ -373,6 +383,16 @@ def _safe_section(
             joined = ", ".join(f"`{_esc(x)}`" for x in shown_syms)
             parts.append(f"`{_esc(kind)}`: {joined}{more}")
         out.append(" · ".join(parts))
+        # Disclosed in *findings*, not groups: a reader counting what is
+        # accounted for is counting findings, and the section heading above
+        # states a finding total.
+        dropped = sum(len(syms) for _, syms in list(groups.items())[group_cap:])
+        if dropped:
+            out += [
+                "",
+                f"… {dropped} more informational finding"
+                f"{'s' if dropped != 1 else ''} omitted.",
+            ]
     out += ["", "</details>", ""]
     return out
 

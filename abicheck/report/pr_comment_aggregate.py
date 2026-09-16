@@ -348,6 +348,17 @@ class _Fold:
     categories: set[str] = field(default_factory=set)
     severities: set[str] = field(default_factory=set)
     summaries: list[ChangeSummary] = field(default_factory=list)
+    #: Every folded member's review groups, each attributed to its target.
+    #: A fan-in that drops them renders no review-group section at all even
+    #: though every member carries one, and the per-target rows state counts
+    #: rather than the group names and transitions the section exists for
+    #: (CodeRabbit review).
+    review_groups: list[dict[str, object]] = field(default_factory=list)
+    #: Summed member `result_counts`. Each member's counts are authoritative
+    #: for that member, so the fan-in adds them rather than recomputing a
+    #: second opinion from the folded findings (which are capped per member
+    #: and would undercount).
+    result_counts: dict[str, int] = field(default_factory=dict)
     suppressed: int = 0
     reclassified: int = 0
     member_blocking: bool = False
@@ -451,6 +462,19 @@ def _fold_target(
         fold.incomplete.append(evidence_note)
     if member.change_summary is not None:
         fold.summaries.append(member.change_summary)
+    for group in member.review_groups:
+        if not isinstance(group, dict):
+            continue
+        attributed = dict(group)
+        # Scope every group to its target, the same attribution `_tag` gives
+        # a folded finding: one `Widget::resize` group from three targets is
+        # three groups, not one repeated name.
+        library = attributed.get("library")
+        attributed["library"] = f"{tid}: {library}" if library else tid
+        fold.review_groups.append(attributed)
+    for key, value in (member.result_counts or {}).items():
+        if isinstance(value, int) and not isinstance(value, bool):
+            fold.result_counts[key] = fold.result_counts.get(key, 0) + value
 
 
 def build_aggregate_model(
@@ -594,6 +618,8 @@ def build_aggregate_model(
         no_comparison_completed=bool(targets) and not fold.any_analyzed,
         suppressed_count=fold.suppressed,
         reclassified_count=fold.reclassified,
+        review_groups=fold.review_groups,
+        result_counts=fold.result_counts or None,
         # Read verbatim from the document's own already-folded block
         # (`report/aggregate.py`), never re-folded here: a second fold over
         # the member reports would double-count every target whose audit the

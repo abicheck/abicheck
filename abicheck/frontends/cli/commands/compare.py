@@ -68,7 +68,6 @@ from ....cli_options import (
 )
 from ....cli_resolve import (
     _normalize_binary_input,
-    classify_compare_operand,
 )
 from ....frontends.cli import help as cli_help
 from ....frontends.cli.operand_diagnostics import (  # noqa: F401  — re-exported: cli_compare_helpers resolves these names here
@@ -847,7 +846,6 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # at this boundary rather than rippling through the whole compare stack.
     from ..options.export import (
         ExportSet,
-        ExportTarget,
         expand_export_kwargs,
         reject_dry_run_with_exports,
     )
@@ -859,56 +857,22 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # normally and never silently rewritten.
     exports = kwargs["exports"]
     assert isinstance(exports, ExportSet)
-    operands = (kwargs.get("old_input"), kwargs.get("new_input"))
-    non_full_view = any(token != "full" for token in kwargs.get("view", ()))
-    release_operand = any(
-        value is not None
-        and classify_compare_operand(Path(value)) in {"directory", "package"}
-        for value in operands
-    )
     from .compare_bundle_facts_rejections import STORED_BUNDLE_FACTS_FORMATS
-    from .compare_bundle_operand_dispatch import resolve_bundle_compare_dispatch
+    from .compare_default_format import renderable_formats, resolve_export_set
 
-    _old_operand, _new_operand = operands
-    stored_operand = (
-        _old_operand is not None
-        and _new_operand is not None
-        and resolve_bundle_compare_dispatch(
-            Path(_old_operand), Path(_new_operand)
-        ).old_is_stored
+    kwargs["exports"] = resolve_export_set(
+        exports,
+        renderable=renderable_formats(
+            kwargs.get("old_input"),
+            kwargs.get("new_input"),
+            release_formats=_RELEASE_FORMATS,
+            stored_formats=STORED_BUNDLE_FACTS_FORMATS,
+        ),
+        rewrite_all=(
+            any(token != "full" for token in kwargs.get("view", ()))
+            or bool(kwargs.get("no_baseline"))
+        ),
     )
-    # Which formats the selected dispatch can actually render. A release
-    # fan-out and a stored-bundle-facts comparison each produce a restricted
-    # set and reject anything outside it as a usage error -- so a default
-    # format outside that set does not degrade their output, it stops them
-    # running at all.
-    renderable: frozenset[str] | None = None
-    if stored_operand:
-        renderable = STORED_BUNDLE_FACTS_FORMATS
-    elif release_operand:
-        renderable = _RELEASE_FORMATS
-    if non_full_view or renderable is not None or kwargs.get("no_baseline"):
-        # Rewritten per *target*, not per export set. `exports.explicit` is
-        # true as soon as the user typed any `-o`, but a directory-only
-        # export (`-o json=out/`) still has a document target this command
-        # inserted on its own (`build_export_set`, `spelling=""`) carrying
-        # the command default -- so a set-level test both rewrote formats
-        # the user really did ask for and left that inserted one stranded.
-        # An empty `spelling` is exactly "the user never typed this target".
-        rewritten = tuple(
-            ExportTarget(
-                fmt="markdown",
-                destination=target.destination,
-                is_directory=target.is_directory,
-                spelling=target.spelling,
-            )
-            if not target.spelling
-            and (renderable is None or target.fmt not in renderable)
-            else target
-            for target in exports.targets
-        )
-        if rewritten != exports.targets:
-            kwargs["exports"] = ExportSet(targets=rewritten, explicit=exports.explicit)
 
     reject_dry_run_with_exports(bool(kwargs.get("dry_run")), kwargs["exports"])
     expand_export_kwargs(kwargs)
