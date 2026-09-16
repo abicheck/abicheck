@@ -33,10 +33,12 @@ import gc
 import re
 import threading
 import weakref
+from collections import OrderedDict
 
 import pytest
 
 from abicheck import idioms, pattern_verdicts
+from abicheck.checker_policy import ChangeKind
 from abicheck.idioms import Idiom, detect_antipatterns, recognise_idioms
 from abicheck.model import (
     AbiSnapshot,
@@ -316,6 +318,118 @@ class TestStripPtrCacheBounds:
         assert "T0 *" in keys, "LRU re-touch was ignored"
         assert "T1 *" not in keys, "evicted entry was not the least recently used"
         assert "Overflow *" in keys
+
+    def test_every_cache_operation_holds_the_lock(self) -> None:
+        """No cache operation may happen outside ``_CACHE_LOCK``.
+
+        The defect this rules out: the individual ``OrderedDict`` operations
+        are atomic under the GIL, but the *sequence* is not. A hit that looks
+        up a key and then marks it most-recently-used can have that key
+        evicted by another thread in between -- ``get`` does not update
+        recency, so a just-read key can still be the least-recently-used one
+        -- and ``move_to_end`` then raises ``KeyError``.
+
+        This is asserted **structurally** rather than by racing threads, and
+        that choice is deliberate. Reproducing the interleaving needs the
+        evicted key to be exactly the LRU entry inside a one-bytecode window;
+        measured here, a 6-thread / 2,400-call run under eviction pressure and
+        a 8-thread / 160,000-call run at a 1-microsecond switch interval both
+        passed against deliberately unsynchronised code. A test that catches
+        the bug one run in ten thousand is not a guard, it is a flake. The
+        structural invariant is deterministic, and it also covers any
+        operation added to the sequence later.
+        """
+        original = type_spelling._strip_ptr_memo
+        unlocked: list[str] = []
+
+        class _LockAssertingDict(OrderedDict):
+            def _check(self, op: str) -> None:
+                if not type_spelling._CACHE_LOCK.locked():
+                    unlocked.append(op)
+
+            def get(self, *a, **k):  # type: ignore[override]
+                self._check("get")
+                return super().get(*a, **k)
+
+            def move_to_end(self, *a, **k):  # type: ignore[override]
+                self._check("move_to_end")
+                return super().move_to_end(*a, **k)
+
+            def __setitem__(self, *a, **k):  # type: ignore[override]
+                self._check("__setitem__")
+                return super().__setitem__(*a, **k)
+
+            def popitem(self, *a, **k):  # type: ignore[override]
+                self._check("popitem")
+                return super().popitem(*a, **k)
+
+            def __len__(self) -> int:
+                self._check("__len__")
+                return super().__len__()
+
+        type_spelling._strip_ptr_memo = _LockAssertingDict()
+        maxsize = type_spelling.STRIP_PTR_CACHE_MAXSIZE
+        type_spelling.STRIP_PTR_CACHE_MAXSIZE = 4
+        try:
+            type_spelling.strip_ptr("ns::A *")  # miss + insert
+            type_spelling.strip_ptr("ns::A *")  # hit + move_to_end
+            for i in range(8):  # overflow -> popitem
+                type_spelling.strip_ptr(f"ns::B{i} *")
+            type_spelling.strip_ptr_cache_entries()  # read path
+            type_spelling.strip_ptr_cache_stats()  # read path
+        finally:
+            type_spelling.STRIP_PTR_CACHE_MAXSIZE = maxsize
+            type_spelling._strip_ptr_memo = original
+
+        assert unlocked == [], (
+            f"cache touched without the lock: {sorted(set(unlocked))}"
+        )
+
+    def test_the_lock_assertion_can_fail(self) -> None:
+        """Vacuity guard: the probe above must report an unlocked access."""
+        unlocked: list[str] = []
+        if not type_spelling._CACHE_LOCK.locked():
+            unlocked.append("get")
+        assert unlocked == ["get"], "the probe cannot observe an unlocked call"
+
+    def test_concurrent_calls_under_eviction_return_correct_results(self) -> None:
+        """Smoke test: threads hammering an evicting cache still get right answers.
+
+        Deliberately *not* claimed as the race guard -- it passes against
+        unsynchronised code, which is exactly why the structural test above
+        exists. It is kept because it exercises the real threaded path end to
+        end and would catch a coarser breakage.
+        """
+        type_spelling.strip_ptr_cache_clear()
+        original = type_spelling.STRIP_PTR_CACHE_MAXSIZE
+        type_spelling.STRIP_PTR_CACHE_MAXSIZE = 8
+        errors: list[BaseException] = []
+        wrong: list[tuple[str, str, str]] = []
+        barrier = threading.Barrier(6)
+
+        def worker(seed: int) -> None:
+            try:
+                barrier.wait()
+                for i in range(400):
+                    spelling = f"ns{(seed + i) % 40}::T{i % 40} const *"
+                    got = type_spelling.strip_ptr(spelling)
+                    if got != _ref_strip_ptr(spelling):
+                        wrong.append((spelling, _ref_strip_ptr(spelling), got))
+            except BaseException as exc:  # noqa: BLE001 - reported below
+                errors.append(exc)
+
+        try:
+            threads = [threading.Thread(target=worker, args=(n,)) for n in range(6)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        finally:
+            type_spelling.STRIP_PTR_CACHE_MAXSIZE = original
+            type_spelling.strip_ptr_cache_clear()
+
+        assert errors == [], f"concurrent access raised: {errors[:3]}"
+        assert wrong == [], f"concurrent access returned wrong results: {wrong[:3]}"
 
     def test_oversized_input_is_never_retained(self) -> None:
         big = "Tpl<" + ", ".join(f"const Arg{i} *" for i in range(200)) + "> *"
@@ -862,20 +976,105 @@ class TestPatternVerdictsSharesOneIndex:
         calls, _ = self._build_count(snap, snap)
         assert calls == 0
 
-    def test_hoisting_preserves_the_emitted_verdicts(self) -> None:
-        """Equivalence, not just call counts: same findings either way."""
-        old = _mixed_snapshot()
-        new = _mixed_snapshot()
-        _, hoisted = self._build_count(old, new)
-        # Re-derive through the one-shot entry point the loop used to call.
+    @staticmethod
+    def _opaque_lost_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
+        """OLD has an opaque, pointer-only type; NEW crosses it by value.
+
+        That is the exact transition `_emit_lost_invariants` exists to catch,
+        so the ledger it produces is non-empty and the comparison below is
+        about real findings rather than two empty lists.
+        """
+        old = AbiSnapshot(
+            library="l",
+            version="1",
+            from_headers=True,
+            functions=[
+                _fn("ctx_open", "Ctx*", [], ret_depth=1),
+                _fn("ctx_use", "void", [Param(name="c", type="Ctx*", pointer_depth=1)]),
+            ],
+            types=[RecordType(name="Ctx", kind="struct", is_opaque=True)],
+            typedefs={},
+        )
+        new = AbiSnapshot(
+            library="l",
+            version="1",
+            from_headers=True,
+            functions=[
+                _fn("ctx_open", "Ctx*", [], ret_depth=1),
+                # now crossed BY VALUE -- opacity is lost
+                _fn("ctx_use", "void", [Param(name="c", type="Ctx")]),
+            ],
+            types=[RecordType(name="Ctx", kind="struct", is_opaque=True)],
+            typedefs={},
+        )
+        return old, new
+
+    def test_the_lost_invariant_path_actually_emits(self) -> None:
+        """Vacuity guard: the fixture must produce a real transition.
+
+        Without this, the equivalence test below would compare two empty
+        ledgers and pass against any implementation -- including one that
+        emits nothing at all.
+        """
+        old, new = self._opaque_lost_pair()
+        changes: list = []
+        ledger = pattern_verdicts.apply_pattern_verdicts(
+            changes, old, new, evidence_tier=EvidenceTier.HEADER_AWARE
+        )
+        assert [r["rule_id"] for r in ledger] == ["lost-opaque-invariant"]
+        assert [(c.kind.value, c.symbol) for c in changes] == [
+            (ChangeKind.OPAQUE_INVARIANT_BROKEN.value, "Ctx")
+        ]
+
+    def test_hoisting_preserves_findings_and_ledger(self) -> None:
+        """The shared index emits exactly what the per-name path emits.
+
+        Runs the real `apply_pattern_verdicts` twice over the same
+        opacity-losing pair -- once as it now runs (one shared index) and once
+        with `build_public_use_index` forced to rebuild on every call, which is
+        the pre-hoist shape -- and compares the emitted findings *and* the
+        whole ledger, not a count and not `is not None`.
+        """
+        old, new = self._opaque_lost_pair()
+
+        shared_changes: list = []
+        shared_ledger = pattern_verdicts.apply_pattern_verdicts(
+            shared_changes, old, new, evidence_tier=EvidenceTier.HEADER_AWARE
+        )
+
+        orig = pattern_verdicts.build_public_use_index
+        rebuilds = 0
+
+        def rebuild_every_time(functions):
+            nonlocal rebuilds
+            rebuilds += 1
+            return orig(list(functions))
+
+        pattern_verdicts.build_public_use_index = rebuild_every_time  # type: ignore[assignment]
+        per_call_changes: list = []
+        try:
+            per_call_ledger = pattern_verdicts.apply_pattern_verdicts(
+                per_call_changes, old, new, evidence_tier=EvidenceTier.HEADER_AWARE
+            )
+        finally:
+            pattern_verdicts.build_public_use_index = orig  # type: ignore[assignment]
+
+        assert rebuilds >= 1, "the per-call arm never built an index"
+        assert shared_ledger, "both arms emitted nothing -- comparison is vacuous"
+        assert shared_ledger == per_call_ledger
+        assert [
+            (c.kind.value, c.symbol, c.effective_verdict) for c in shared_changes
+        ] == [(c.kind.value, c.symbol, c.effective_verdict) for c in per_call_changes]
+
+    def test_index_sharing_does_not_change_the_predicate(self) -> None:
+        """One shared index answers identically to per-name one-shot calls."""
+        _, new = self._opaque_lost_pair()
         graph = build_surface_graph(new)
-        per_name = {
+        shared = public_use_index.build_public_use_index(new.functions)
+        assert {
             rec.name: idioms._public_pointer_only(graph, rec.name)
             for rec in graph.snapshot.types
-        }
-        shared = public_use_index.build_public_use_index(new.functions)
-        assert per_name == {
+        } == {
             rec.name: public_use_index.query_public_use(shared, rec.name)
             for rec in graph.snapshot.types
         }
-        assert hoisted is not None

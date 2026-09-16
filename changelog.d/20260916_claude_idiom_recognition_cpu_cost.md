@@ -34,3 +34,10 @@
   its whole loop instead of rebuilding it per OPAQUE_POINTER-tagged type. That
   loop is the predicate's other production consumer, and `_public_pointer_only`
   is a one-shot entry point that rebuilds on every call.
+- The normalisation cache serialises every read and write under one lock. The
+  individual `OrderedDict` operations are atomic under the GIL but the
+  *sequence* is not: a hit that looks up a key and then marks it
+  most-recently-used can have that key evicted by another thread in between,
+  and `move_to_end` then raises `KeyError`. That race did not exist under
+  `functools.lru_cache`; it was introduced by taking the cache into Python to
+  make its contents inspectable.

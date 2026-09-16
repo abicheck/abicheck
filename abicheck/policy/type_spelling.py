@@ -31,6 +31,7 @@ residue two adjacent keywords leave behind) is what the recognisers in
 from __future__ import annotations
 
 import re
+import threading
 from collections import OrderedDict
 
 _POINTER_RE = re.compile(r"[*&]")
@@ -84,7 +85,19 @@ def strip_ptr_uncached(type_str: str) -> str:
 # that choice is recorded in the module's tests; it is small because a
 # recognition pass reaches this function a few thousand times, not millions,
 # once the public-use index removes the per-record rescan.
+#
+# Every read and write goes through ``_CACHE_LOCK``. The individual dict
+# operations are each atomic under the GIL, but the *sequence* is not: a hit
+# that looks up a key, then marks it most-recently-used, can have that key
+# evicted by another thread in between, and ``move_to_end`` then raises
+# ``KeyError``. Independent comparisons do run concurrently (threads, not just
+# processes), so this is reachable rather than theoretical -- and it is a race
+# ``lru_cache`` did not have, introduced by taking the cache into Python to
+# make its contents inspectable. The lock is held across the normalisation
+# too: it keeps the hit/miss counters exact, and the critical section is a few
+# microseconds of pure regex work with no I/O.
 _strip_ptr_memo: OrderedDict[str, str] = OrderedDict()
+_CACHE_LOCK = threading.Lock()
 _strip_ptr_hits = 0
 _strip_ptr_misses = 0
 
@@ -100,20 +113,21 @@ def strip_ptr(type_str: str) -> str:
     global _strip_ptr_hits, _strip_ptr_misses
     if len(type_str) > STRIP_PTR_CACHE_MAX_INPUT:
         return strip_ptr_uncached(type_str)
-    cached = _strip_ptr_memo.get(type_str)
-    if cached is not None:
-        _strip_ptr_memo.move_to_end(type_str)
-        _strip_ptr_hits += 1
-        return cached
-    _strip_ptr_misses += 1
-    result = strip_ptr_uncached(type_str)
-    _strip_ptr_memo[type_str] = result
-    if len(_strip_ptr_memo) > STRIP_PTR_CACHE_MAXSIZE:
-        # Evict the least recently used entry. Deliberately *not* a clear():
-        # the cache is process-wide, and dropping every entry would throw away
-        # what a sibling worker mid-recognition is relying on.
-        _strip_ptr_memo.popitem(last=False)
-    return result
+    with _CACHE_LOCK:
+        cached = _strip_ptr_memo.get(type_str)
+        if cached is not None:
+            _strip_ptr_memo.move_to_end(type_str)
+            _strip_ptr_hits += 1
+            return cached
+        _strip_ptr_misses += 1
+        result = strip_ptr_uncached(type_str)
+        _strip_ptr_memo[type_str] = result
+        if len(_strip_ptr_memo) > STRIP_PTR_CACHE_MAXSIZE:
+            # Evict the least recently used entry. Deliberately *not* a
+            # clear(): the cache is process-wide, and dropping every entry
+            # would throw away what a sibling worker mid-recognition relies on.
+            _strip_ptr_memo.popitem(last=False)
+        return result
 
 
 def strip_ptr_cache_entries() -> tuple[tuple[str, str], ...]:
@@ -124,17 +138,19 @@ def strip_ptr_cache_entries() -> tuple[tuple[str, str], ...]:
     contract -- that every retained object is a plain ``str``, and that no
     graph, snapshot, record, parser or bound method is reachable from here.
     """
-    return tuple(_strip_ptr_memo.items())
+    with _CACHE_LOCK:
+        return tuple(_strip_ptr_memo.items())
 
 
 def strip_ptr_cache_stats() -> dict[str, int]:
     """Hits/misses/occupancy for the normalisation cache (tests, benchmarks)."""
-    return {
-        "hits": _strip_ptr_hits,
-        "misses": _strip_ptr_misses,
-        "occupancy": len(_strip_ptr_memo),
-        "maxsize": STRIP_PTR_CACHE_MAXSIZE,
-    }
+    with _CACHE_LOCK:
+        return {
+            "hits": _strip_ptr_hits,
+            "misses": _strip_ptr_misses,
+            "occupancy": len(_strip_ptr_memo),
+            "maxsize": STRIP_PTR_CACHE_MAXSIZE,
+        }
 
 
 def strip_ptr_cache_clear() -> None:
@@ -148,6 +164,7 @@ def strip_ptr_cache_clear() -> None:
     LRU, not "clear on overflow".
     """
     global _strip_ptr_hits, _strip_ptr_misses
-    _strip_ptr_memo.clear()
-    _strip_ptr_hits = 0
-    _strip_ptr_misses = 0
+    with _CACHE_LOCK:
+        _strip_ptr_memo.clear()
+        _strip_ptr_hits = 0
+        _strip_ptr_misses = 0
