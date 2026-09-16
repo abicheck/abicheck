@@ -385,14 +385,21 @@ def _project_review(envelope: ReportEnvelope) -> str:
     """The compact review digest (unconditional-recommendation Markdown)."""
     from .reporter import to_review_digest
 
-    return _demangled(
-        to_review_digest(
-            envelope.result,
-            severity_config=envelope.severity_config,
-            envelope=envelope,
-        ),
-        envelope,
+    text = to_review_digest(
+        envelope.result,
+        severity_config=envelope.severity_config,
+        envelope=envelope,
     )
+    # Pre-existing gap, surfaced by the cross-projection test rather than by
+    # this PR: of the three human projections only Markdown appended the
+    # dependency section, so `-o review=... --follow-deps` had always
+    # rendered nothing for the pass it was asked to run. Same condition and
+    # same renderer as the other two.
+    if envelope.options.follow_deps and (
+        envelope.old.dependency_info or (envelope.new and envelope.new.dependency_info)
+    ):
+        text += _render_deps_section_md(envelope.old, envelope.new)
+    return _demangled(text, envelope)
 
 
 def _project_terminal(envelope: ReportEnvelope) -> str:
@@ -407,11 +414,17 @@ def _project_terminal(envelope: ReportEnvelope) -> str:
         report_document=envelope.document,
         envelope=envelope,
     )
-    return _demangled(
-        render_terminal_digest_document(document),
-        envelope,
-        escape_table_pipes=False,
-    )
+    text = render_terminal_digest_document(document)
+    # `--follow-deps` is an explicitly requested analysis, so producing
+    # nothing for it in the output an ordinary `compare` prints would read
+    # as the flag having done nothing. Appended on the same condition the
+    # Markdown and review projections use, from the same renderer, so the
+    # three cannot disagree about what the dependency pass found.
+    if envelope.options.follow_deps and (
+        envelope.old.dependency_info or (envelope.new and envelope.new.dependency_info)
+    ):
+        text += _render_deps_section_md(envelope.old, envelope.new)
+    return _demangled(text, envelope, escape_table_pipes=False)
 
 
 def _project_markdown(envelope: ReportEnvelope) -> str:

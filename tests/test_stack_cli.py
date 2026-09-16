@@ -256,6 +256,27 @@ class TestCompareFollowDeps:
         assert "new_dependency_info" in data
         assert data["old_dependency_info"]["bindings_summary"]["resolved_ok"] > 0
 
+    def test_compare_follow_deps_reaches_every_human_projection(self, runner, real_lib):
+        """`--follow-deps` is an explicitly requested analysis, so every
+        human rendering must show what it found.
+
+        The section was appended by the Markdown and review projections but
+        not the terminal one, so when `terminal` became the default the flag
+        produced no dependency output at all for an ordinary invocation --
+        indistinguishable, to the user who typed it, from the pass not
+        running. Asserted across the projections together rather than in the
+        one that happened to be the default when the test was written.
+        """
+        for extra in ([], ["-o", "markdown=-"], ["-o", "review=-"]):
+            result = runner.invoke(
+                main, ["compare", str(real_lib), str(real_lib), "--follow-deps", *extra]
+            )
+            assert result.exit_code == 0, (extra, result.output)
+            assert "Dependency Analysis" in result.output, (
+                f"the dependency section is missing from {extra or 'the default'}"
+            )
+            assert "resolved_ok" in result.output, extra
+
     def test_compare_follow_deps_markdown(self, runner, real_lib):
         result = runner.invoke(
             main,
