@@ -81,3 +81,13 @@
   `allowed-conclusions: ''` now reaches its documented "any conclusion"
   meaning, the run's artifact listing is paginated, and an abbreviated
   `tested-sha` is refused up front instead of failing verification later.
+
+- **A refused artifact leaves the destination empty.** `inspect_archive`
+  validated sizes, entry counts and entry types up front, but each entry's
+  *path* was resolved only inside the write loop — so an archive whose
+  second entry escaped had its first entry written before the refusal,
+  leaving a partial, attacker-chosen tree and making the documented "the
+  whole central directory is validated before a byte is written" guarantee
+  false for exactly the refusals that matter most. Nothing ever escaped the
+  destination; what changed is that a failed extraction no longer leaves
+  content behind for whatever reads that directory next.

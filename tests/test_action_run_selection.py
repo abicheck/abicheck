@@ -52,6 +52,7 @@ from abicheck.frontends.action.run_selection import (
     verify_source_run,
     verify_tested_sha,
 )
+from tests._action_archives import UNIX_HOST, build_zip
 
 REPO = "example-org/example-lib"
 HEAD_SHA = "1" * 40
@@ -333,28 +334,6 @@ class TestArtifactSelection:
 # 3. Is the archive safe to unpack?
 # ---------------------------------------------------------------------------
 
-_UNIX_HOST = 3
-
-
-def _zip(
-    tmp_path: Path,
-    entries: list[tuple[str, bytes]],
-    *,
-    symlinks: tuple[str, ...] = (),
-    modes: dict[str, int] | None = None,
-    compress: int = zipfile.ZIP_DEFLATED,
-) -> Path:
-    path = tmp_path / "artifact.zip"
-    with zipfile.ZipFile(path, "w", compression=compress) as zf:
-        for name, payload in entries:
-            info = zipfile.ZipInfo(name)
-            info.compress_type = compress
-            info.create_system = _UNIX_HOST
-            mode = 0o120000 if name in symlinks else (modes or {}).get(name, 0o100644)
-            info.external_attr = mode << 16
-            zf.writestr(info, payload)
-    return path
-
 
 class TestArchivePathRules:
     @pytest.mark.parametrize(
@@ -393,7 +372,7 @@ class TestHostileArchives:
     def test_positive_control_an_ordinary_artifact_extracts(
         self, tmp_path: Path
     ) -> None:
-        archive = _zip(
+        archive = build_zip(
             tmp_path,
             [("aggregate.json", b'{"ok": true}'), ("reports/linux.json", b"{}")],
         )
@@ -405,7 +384,7 @@ class TestHostileArchives:
         self, tmp_path: Path
     ) -> None:
         sentinel = tmp_path / "sentinel.json"
-        archive = _zip(tmp_path, [("../sentinel.json", b'{"owned": true}')])
+        archive = build_zip(tmp_path, [("../sentinel.json", b'{"owned": true}')])
         out = tmp_path / "out"
         with pytest.raises(SourceRunRejected) as excinfo:
             extract_artifact(archive, out)
@@ -413,7 +392,7 @@ class TestHostileArchives:
         assert not sentinel.exists(), "the escaping entry was written anyway"
 
     def test_an_absolute_entry_is_refused(self, tmp_path: Path) -> None:
-        archive = _zip(tmp_path, [("/opt/abicheck-owned.json", b"{}")])
+        archive = build_zip(tmp_path, [("/opt/abicheck-owned.json", b"{}")])
         with pytest.raises(SourceRunRejected) as excinfo:
             extract_artifact(archive, tmp_path / "out")
         assert excinfo.value.code in ("artifact-absolute-path", "artifact-traversal")
@@ -422,7 +401,7 @@ class TestHostileArchives:
         """``zipfile`` has no notion of symlinks: it writes the target path
         into a plain file, which is only harmless until something follows
         it. The entry type is read from the recorded Unix mode."""
-        archive = _zip(
+        archive = build_zip(
             tmp_path, [("link.json", b"/etc/passwd")], symlinks=("link.json",)
         )
         with pytest.raises(SourceRunRejected) as excinfo:
@@ -437,7 +416,7 @@ class TestHostileArchives:
     def test_every_non_regular_entry_type_is_refused(
         self, tmp_path: Path, mode: int
     ) -> None:
-        archive = _zip(tmp_path, [("odd", b"x")], modes={"odd": mode})
+        archive = build_zip(tmp_path, [("odd", b"x")], modes={"odd": mode})
         with pytest.raises(SourceRunRejected) as excinfo:
             inspect_archive(archive)
         assert excinfo.value.code == "artifact-non-regular"
@@ -447,7 +426,7 @@ class TestHostileArchives:
     ) -> None:
         """Nothing from an artifact is run, so an executable bit on it has no
         legitimate purpose and is not preserved."""
-        archive = _zip(
+        archive = build_zip(
             tmp_path,
             [("payload.sh", b"#!/bin/sh\nid\n")],
             modes={"payload.sh": 0o100755},
@@ -456,19 +435,21 @@ class TestHostileArchives:
         assert written[0].stat().st_mode & 0o111 == 0
 
     def test_too_many_entries_are_refused(self, tmp_path: Path) -> None:
-        archive = _zip(tmp_path, [(f"f{i}.json", b"{}") for i in range(50)])
+        archive = build_zip(tmp_path, [(f"f{i}.json", b"{}") for i in range(50)])
         with pytest.raises(SourceRunRejected) as excinfo:
             inspect_archive(archive, ExtractionLimits(max_entries=10))
         assert excinfo.value.code == "artifact-too-many-entries"
 
     def test_an_oversized_entry_is_refused(self, tmp_path: Path) -> None:
-        archive = _zip(tmp_path, [("big.json", b"x" * 100_000)])
+        archive = build_zip(tmp_path, [("big.json", b"x" * 100_000)])
         with pytest.raises(SourceRunRejected) as excinfo:
             inspect_archive(archive, ExtractionLimits(max_entry_bytes=1000))
         assert excinfo.value.code == "artifact-entry-too-large"
 
     def test_an_oversized_archive_is_refused(self, tmp_path: Path) -> None:
-        archive = _zip(tmp_path, [(f"f{i}.json", b"y" * 20_000) for i in range(10)])
+        archive = build_zip(
+            tmp_path, [(f"f{i}.json", b"y" * 20_000) for i in range(10)]
+        )
         with pytest.raises(SourceRunRejected) as excinfo:
             inspect_archive(
                 archive,
@@ -480,7 +461,7 @@ class TestHostileArchives:
         """A 10 MiB run of one byte compresses roughly 1000x. The ratio check
         is what catches it while the absolute caps are still satisfied by the
         *declared* compressed size."""
-        archive = _zip(tmp_path, [("bomb.json", b"\0" * (10 * 1024 * 1024))])
+        archive = build_zip(tmp_path, [("bomb.json", b"\0" * (10 * 1024 * 1024))])
         with pytest.raises(SourceRunRejected) as excinfo:
             inspect_archive(archive, ExtractionLimits(max_entry_bytes=64 * 1024 * 1024))
         assert excinfo.value.code == "artifact-compression-bomb"
@@ -500,7 +481,7 @@ class TestHostileArchives:
             )
             + b"]}"
         )
-        archive = _zip(tmp_path, [("report.json", payload)])
+        archive = build_zip(tmp_path, [("report.json", payload)])
         infos = inspect_archive(archive, ExtractionLimits())
         assert infos[0].file_size == len(payload)
 
@@ -516,7 +497,7 @@ class TestHostileArchives:
         tightening only the streaming budget, which is the same position a
         lying header would put the extractor in.
         """
-        archive = _zip(tmp_path, [("big.json", b"z" * 200_000)])
+        archive = build_zip(tmp_path, [("big.json", b"z" * 200_000)])
         inspect_archive(archive, ExtractionLimits())  # the declaration is fine
         with pytest.raises(SourceRunRejected) as excinfo:
             extract_artifact(
@@ -537,7 +518,7 @@ class TestHostileArchives:
         path = tmp_path / "artifact.zip"
         with zipfile.ZipFile(path, "w") as zf:
             info = zipfile.ZipInfo("reports/")
-            info.create_system = _UNIX_HOST
+            info.create_system = UNIX_HOST
             info.external_attr = (0o040755 << 16) | 0x10
             zf.writestr(info, b"")
             zf.writestr("reports/x.json", b"{}")
@@ -644,7 +625,7 @@ class TestEndToEndSelection:
             "abi-reports",
             run_id=run.run_id,
         )
-        archive = _zip(tmp_path, [("compare.json", b'{"verdict": "BREAKING"}')])
+        archive = build_zip(tmp_path, [("compare.json", b'{"verdict": "BREAKING"}')])
         written = extract_artifact(archive, tmp_path / "out")
         assert pull.number == 216
         assert pull.from_fork
@@ -661,17 +642,17 @@ def test_zip_helper_actually_records_the_modes_it_claims(tmp_path: Path) -> None
     would make those tests pass against an implementation with no type check
     at all.
     """
-    archive = _zip(tmp_path, [("link", b"target")], symlinks=("link",))
+    archive = build_zip(tmp_path, [("link", b"target")], symlinks=("link",))
     with zipfile.ZipFile(archive) as zf:
         info = zf.infolist()[0]
-    assert info.create_system == _UNIX_HOST
+    assert info.create_system == UNIX_HOST
     assert (info.external_attr >> 16) & 0o170000 == 0o120000
 
 
 def test_deflate_is_actually_used_by_the_fixture_builder(tmp_path: Path) -> None:
     """Companion vacuity guard: a stored (uncompressed) fixture would make
     the compression-bomb test unable to exercise a ratio at all."""
-    archive = _zip(tmp_path, [("f.json", b"a" * 10_000)])
+    archive = build_zip(tmp_path, [("f.json", b"a" * 10_000)])
     with zipfile.ZipFile(archive) as zf:
         info = zf.infolist()[0]
     assert info.compress_type == zipfile.ZIP_DEFLATED
@@ -839,7 +820,7 @@ class TestVerifyRunCommand:
 
 class TestExtractArtifactCommand:
     def test_an_ordinary_archive_extracts(self, tmp_path: Path) -> None:
-        archive = _zip(tmp_path, [("compare.json", b'{"verdict": "COMPATIBLE"}')])
+        archive = build_zip(tmp_path, [("compare.json", b'{"verdict": "COMPATIBLE"}')])
         result = CliRunner().invoke(
             action_cli, ["extract-artifact", str(archive), str(tmp_path / "out")]
         )
@@ -847,7 +828,7 @@ class TestExtractArtifactCommand:
         assert (tmp_path / "out" / "compare.json").is_file()
 
     def test_a_hostile_archive_exits_distinctly(self, tmp_path: Path) -> None:
-        archive = _zip(tmp_path, [("../escaped.json", b"{}")])
+        archive = build_zip(tmp_path, [("../escaped.json", b"{}")])
         result = CliRunner().invoke(
             action_cli, ["extract-artifact", str(archive), str(tmp_path / "out")]
         )
@@ -855,7 +836,7 @@ class TestExtractArtifactCommand:
         assert "artifact-traversal" in result.output
 
     def test_limits_are_honoured_from_the_command_line(self, tmp_path: Path) -> None:
-        archive = _zip(tmp_path, [(f"f{i}.json", b"{}") for i in range(20)])
+        archive = build_zip(tmp_path, [(f"f{i}.json", b"{}") for i in range(20)])
         result = CliRunner().invoke(
             action_cli,
             [
@@ -954,7 +935,7 @@ class TestArchiveEdgeCases:
         rather than a configuration invented to make the assertion pass.
         """
         entries = [(f"f{i}.json", b"\0" * 200_000) for i in range(200)]
-        archive = _zip(tmp_path, entries)
+        archive = build_zip(tmp_path, entries)
         # The premise: every entry is individually exempt or within ratio.
         with zipfile.ZipFile(archive) as zf:
             assert all(i.compress_size < 1024 for i in zf.infolist())
@@ -966,7 +947,7 @@ class TestArchiveEdgeCases:
     def test_the_total_budget_is_enforced_while_reading_too(
         self, tmp_path: Path
     ) -> None:
-        archive = _zip(tmp_path, [(f"f{i}.json", b"z" * 50_000) for i in range(5)])
+        archive = build_zip(tmp_path, [(f"f{i}.json", b"z" * 50_000) for i in range(5)])
         inspect_archive(archive, ExtractionLimits())
         with pytest.raises(SourceRunRejected) as excinfo:
             extract_artifact(

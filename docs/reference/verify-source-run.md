@@ -95,9 +95,11 @@ pull request satisfies it while carrying a tree CI never built.
 
 ### Is the archive safe to unpack?
 
-The whole central directory is validated before a byte is written, so a bomb
-is refused without any of it reaching the filesystem, and the caps are
-re-enforced against the bytes actually read so a lying header buys nothing.
+The whole central directory is validated before a byte is written — sizes,
+entry count, entry types **and every entry's resolved destination** — so a
+refusal leaves the destination empty rather than a partial tree, and the caps
+are re-enforced against the bytes actually read so a lying header buys
+nothing.
 
 Refused: absolute paths, `..` traversal, symlinks and every other
 non-regular entry — checked by the entry's recorded Unix type, so the rule

@@ -682,6 +682,18 @@ def extract_artifact(
     for it.
     """
     infos = inspect_archive(archive, limits)
+    # Resolve every entry's destination *before* creating the destination or
+    # writing anything. `inspect_archive` checks sizes, counts and entry
+    # types up front, but path safety used to be checked only here in the
+    # write loop -- so an archive whose second entry escaped had its first
+    # entry written before the refusal, leaving a partial, attacker-chosen
+    # tree behind and making this function's own "before a single byte is
+    # written" guarantee false for exactly the refusals that matter most.
+    # Nothing escaped, but a failed step that leaves content behind is a
+    # hazard for whatever reads the directory next.
+    for info in infos:
+        if not _entry_is_directory(info):
+            safe_entry_path(destination, info.filename)
     destination.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     total = 0
