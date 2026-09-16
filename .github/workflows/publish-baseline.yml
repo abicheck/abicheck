@@ -33,6 +33,26 @@ on:
         description: 'Each contract profile''s build-output.json is downloaded from an artifact named <this><profile-id>.'
         type: string
         default: 'abicheck-build-'
+      baseline-set-artifact-prefix:
+        description: >-
+          Publish an ALREADY-CAPTURED baseline-set instead of capturing one.
+          When set, each contract profile's finished baseline-set is
+          downloaded from an artifact named <this><profile-id> -- the
+          directory actions/baseline would have produced, manifest.json
+          included -- and this workflow performs no dump, no build query and
+          no comparison: it validates the set, packages it and publishes it.
+          Mutually exclusive with capture mode; leave empty (the default) to
+          keep capturing from build-output artifacts as before.
+
+          An artifact, not a path: the set has to cross a real job boundary,
+          and a producer-local directory does not exist in this workflow's
+          own job. The set is validated against the profile, release tag and
+          generation it is being published AS
+          (abicheck.buildsource.baseline_precaptured) before anything is
+          written, because an already-captured set is an input whose every
+          manifest claim is a claim until the files on disk agree.
+        type: string
+        default: ''
       release-tag:
         description: 'Release tag this run publishes assets to, and records as each baseline-set''s project-ref. Defaults to github.ref_name (the tag that triggered the calling release workflow).'
         type: string
@@ -122,12 +142,44 @@ jobs:
     outputs:
       matrix: ${{ steps.discover.outputs.matrix }}
       has-profiles: ${{ steps.discover.outputs.has-profiles }}
+      mode: ${{ steps.mode.outputs.mode }}
     steps:
+      # Exactly one of the two modes may be configured. Checked before
+      # anything is downloaded: a run that captured AND was handed a set
+      # would publish one of them by step order, which is not a decision a
+      # workflow gets to make silently.
+      - name: Resolve publication mode
+        id: mode
+        shell: bash
+        env:
+          BUILD_PREFIX: ${{ inputs.build-output-artifact-prefix }}
+          SET_PREFIX: ${{ inputs.baseline-set-artifact-prefix }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$SET_PREFIX" ]]; then
+            if [[ -n "$BUILD_PREFIX" && "$BUILD_PREFIX" != "abicheck-build-" ]]; then
+              echo "::error::baseline-set-artifact-prefix and a customized build-output-artifact-prefix were both set -- this run would either capture or publish a pre-captured set depending on step order. Configure exactly one." >&2
+              exit 1
+            fi
+            echo "mode=existing-set" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=capture" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download build-output artifacts
+        if: steps.mode.outputs.mode == 'capture'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           path: build-outputs
           pattern: '${{ inputs.build-output-artifact-prefix }}*'
+          merge-multiple: false
+
+      - name: Download pre-captured baseline-sets
+        if: steps.mode.outputs.mode == 'existing-set'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          path: baseline-sets
+          pattern: '${{ inputs.baseline-set-artifact-prefix }}*'
           merge-multiple: false
 
       # Reads each build-output.json's OWN profile.id field (ADR-047 section
@@ -138,11 +190,50 @@ jobs:
       # (a single-contract-profile project) extracts flat into path instead,
       # making a name-derived profile id ambiguous by construction (the same
       # gap check-project.yml's own plan job already works around).
-      - name: Discover profile ids
-        id: discover
+      # In existing-set mode the profile id comes from each set's OWN
+      # manifest.json, for the same reason the capture path reads
+      # build-output.json's own profile.id: download-artifact nests only
+      # when its pattern matched two or more artifacts, so a name-derived
+      # id is ambiguous by construction.
+      - name: Discover profile ids (pre-captured sets)
+        id: discover-sets
+        if: steps.mode.outputs.mode == 'existing-set'
         shell: bash
         run: |
           set -euo pipefail
+          python3 -c "
+          import glob, json, sys
+
+          profiles = []
+          for manifest in sorted(glob.glob('baseline-sets/**/manifest.json', recursive=True)):
+              profile_id = json.load(open(manifest)).get('profile', '')
+              if not profile_id:
+                  print(f'::error::{manifest} declares no profile -- cannot determine which contract profile this baseline-set belongs to', file=sys.stderr)
+                  sys.exit(1)
+              profiles.append(profile_id)
+          if len(set(profiles)) != len(profiles):
+              print('::error::two downloaded baseline-sets declare the same profile -- each contract profile publishes exactly one asset', file=sys.stderr)
+              sys.exit(1)
+          print('matrix=' + json.dumps({'include': [{'profile_id': p} for p in profiles]}))
+          print('has-profiles=' + ('true' if profiles else 'false'))
+          " >> "$GITHUB_OUTPUT"
+
+      - name: Discover profile ids
+        id: discover
+        shell: bash
+        env:
+          MODE: ${{ steps.mode.outputs.mode }}
+          SETS_MATRIX: ${{ steps.discover-sets.outputs.matrix }}
+          SETS_HAS_PROFILES: ${{ steps.discover-sets.outputs.has-profiles }}
+        run: |
+          set -euo pipefail
+          if [[ "$MODE" == "existing-set" ]]; then
+            {
+              echo "matrix=$SETS_MATRIX"
+              echo "has-profiles=$SETS_HAS_PROFILES"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           python3 -c "
           import glob, json, sys
 
@@ -225,10 +316,96 @@ jobs:
         run: pip install ./.publish-baseline-src
 
       - name: Download build-output artifact
+        if: needs.discover.outputs.mode == 'capture'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: '${{ inputs.build-output-artifact-prefix }}${{ matrix.profile_id }}'
           path: 'build-output/${{ matrix.profile_id }}'
+
+      # ── existing-set mode ────────────────────────────────────────────────
+      # Downloaded, validated, and then handed to the SAME staging and
+      # immutability chain the capture path uses. Nothing below this step
+      # branches on mode again: an already-captured set that reaches
+      # packaging is a set this workflow has checked as thoroughly as one it
+      # built itself, so it earns the identical treatment from there on.
+      - name: Download pre-captured baseline-set
+        if: needs.discover.outputs.mode == 'existing-set'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          name: '${{ inputs.baseline-set-artifact-prefix }}${{ matrix.profile_id }}'
+          path: 'baseline-set/${{ matrix.profile_id }}'
+
+      # The whole existing-set gate, in one importable, credential-free
+      # function (abicheck/buildsource/baseline_precaptured.py) rather than
+      # in shell: manifest and snapshot schema this build understands, the
+      # profile/release-tag/generation this run is publishing the set AS,
+      # portable in-tree member paths, and every declared digest recomputed
+      # from the bytes actually present. A set this refuses is one a
+      # consumer's own resolver would refuse after publication -- which, on
+      # an immutable channel, is too late to be useful.
+      - name: Validate pre-captured baseline-set
+        id: precaptured
+        if: needs.discover.outputs.mode == 'existing-set'
+        shell: bash
+        env:
+          PROFILE_ID: ${{ matrix.profile_id }}
+          EXPECTED_PROJECT_REF: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
+          EXPECTED_GENERATION: ${{ inputs.baseline-generation }}
+        run: |
+          set -euo pipefail
+          python3 -I -c "
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          from abicheck.buildsource.baseline_precaptured import (
+              validate_precaptured_baseline_set,
+          )
+
+          profile = os.environ['PROFILE_ID']
+          raw_generation = os.environ.get('EXPECTED_GENERATION', '').strip()
+          try:
+              generation = int(raw_generation) if raw_generation else None
+          except ValueError:
+              print(f'::error::baseline-generation {raw_generation!r} is not an integer', file=sys.stderr)
+              sys.exit(1)
+          result = validate_precaptured_baseline_set(
+              Path('baseline-set') / profile,
+              expected_profile=profile,
+              expected_project_ref=os.environ['EXPECTED_PROJECT_REF'],
+              expected_generation=generation,
+          )
+          for error in result.errors:
+              print(f'::error::pre-captured baseline-set for {profile}: {error}', file=sys.stderr)
+          if not result.ok:
+              sys.exit(1)
+          # The same normalized content digest actions/baseline publishes,
+          # from the same function -- and recomputed from the bytes on disk,
+          # not read off the manifest, so the immutability comparison below
+          # weighs this set's real content against an already-published
+          # asset's real content. A digest taken from a declared field would
+          # let a set with honest-looking claims and different bytes read as
+          # an identical republication.
+          import importlib.util
+
+          spec = importlib.util.spec_from_file_location(
+              'baseline_build_manifest',
+              Path('.publish-baseline-src/actions/baseline/build_manifest.py'),
+          )
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          manifest_path = result.root / 'manifest.json'
+          manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+          digest = module.recompute_content_digest_from_disk(manifest, result.root)
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
+              fh.write(f'baseline-path={result.root}\n')
+              fh.write(f'manifest-path={manifest_path}\n')
+              fh.write(f'content-digest={digest}\n')
+              fh.write('libraries=' + json.dumps(result.libraries) + '\n')
+          print(f'validated pre-captured baseline-set for {profile}: ' + ', '.join(result.libraries))
+          "
 
       # Derives actions/baseline's `libraries` JSON input straight from this
       # profile's build-output.json (abicheck/buildsource/baseline_publish.py)
@@ -238,6 +415,7 @@ jobs:
       # correction), is already recorded in build-output.json itself.
       - name: Derive baseline libraries from build-output.json
         id: libraries
+        if: needs.discover.outputs.mode == 'capture'
         shell: bash
         env:
           PROFILE_ID: ${{ matrix.profile_id }}
@@ -297,6 +475,7 @@ jobs:
 
       - name: Dump baseline-set
         id: baseline
+        if: needs.discover.outputs.mode == 'capture'
         uses: ./.publish-baseline-src/actions/baseline
         with:
           libraries: ${{ steps.libraries.outputs.libraries }}
@@ -330,7 +509,7 @@ jobs:
         id: package
         uses: ./.publish-baseline-src/actions/stage-baseline
         with:
-          baseline-path: ${{ steps.baseline.outputs.baseline-path }}
+          baseline-path: ${{ needs.discover.outputs.mode == 'existing-set' && steps.precaptured.outputs.baseline-path || steps.baseline.outputs.baseline-path }}
           asset-name-template: ${{ inputs.asset-name-template }}
           profile: ${{ matrix.profile_id }}
           generation: ${{ inputs.baseline-generation }}
@@ -385,9 +564,9 @@ jobs:
           RELEASE_TAG: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
           ASSET_NAME: ${{ steps.package.outputs.asset-name }}
           REPO: ${{ github.repository }}
-          NEW_CONTENT_DIGEST: ${{ steps.baseline.outputs.content-digest }}
+          NEW_CONTENT_DIGEST: ${{ needs.discover.outputs.mode == 'existing-set' && steps.precaptured.outputs.content-digest || steps.baseline.outputs.content-digest }}
           NEW_PROFILE: ${{ matrix.profile_id }}
-          NEW_MANIFEST_PATH: ${{ steps.baseline.outputs.manifest-path }}
+          NEW_MANIFEST_PATH: ${{ needs.discover.outputs.mode == 'existing-set' && steps.precaptured.outputs.manifest-path || steps.baseline.outputs.manifest-path }}
         run: |
           set -euo pipefail
 
