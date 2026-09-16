@@ -663,6 +663,32 @@ def six_dso_release(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return root
 
 
+def _is_raw_ast_acquisition(backend: str) -> bool:
+    """Whether an acquisition-table entry is a real raw-AST acquisition.
+
+    The partition here used to be implicit -- "anything whose backend does not
+    end in ``-normalized`` is a raw AST key" -- which held only while the
+    shared table carried exactly two kinds of entry. It is a catch-all, so the
+    moment a third kind joined it was silently counted as an AST acquisition:
+    ``dumper_clang``'s template-parameter index bundle (one per raw AST, its
+    own key namespace) is neither an AST nor a normalization, and counting it
+    as a raw key broke "one decode per distinct raw key" below with no decode
+    to match it.
+
+    Stated as an explicit exclusion list rather than an allow-list of AST
+    backends, so a frontend this file does not know about still counts as raw
+    (the conservative direction), and imported from the owning module rather
+    than spelled again here, so renaming the namespace cannot leave this
+    stale.
+    """
+
+    from abicheck.dumper_clang import _TEMPLATE_PARAM_INDEX_NAMESPACE
+
+    if backend.endswith("-normalized"):
+        return False
+    return backend != _TEMPLATE_PARAM_INDEX_NAMESPACE
+
+
 class _AcquisitionCounters:
     """Real call counts around the real frontends -- never a substitute for
     them: every compiler, parser and normalizer below is the production one,
@@ -812,7 +838,7 @@ def test_directory_l2_compare_acquires_one_ast_per_key(
     # side), so the assertions below are about coordination, not about a
     # path that quietly did not run.
     assert len(cold_keys) >= 12
-    raw_keys = {(b, k) for b, k in cold_keys if not b.endswith("-normalized")}
+    raw_keys = {(b, k) for b, k in cold_keys if _is_raw_ast_acquisition(b)}
     normalized_keys = {(b, k) for b, k in cold_keys if b.endswith("-normalized")}
     assert cold_compiler >= 1
     # One decode/compile per distinct raw key, one neutral normalization per
@@ -828,7 +854,7 @@ def test_directory_l2_compare_acquires_one_ast_per_key(
     warm_raw_keys = {
         (b, k)
         for b, k in acquisition_counters.requested_keys
-        if not b.endswith("-normalized")
+        if _is_raw_ast_acquisition(b)
     }
     warm_normalized_keys = {
         (b, k)

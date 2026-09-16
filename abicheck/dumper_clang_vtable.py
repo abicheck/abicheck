@@ -624,6 +624,9 @@ def build_vtable(
 # module (``from abicheck.dumper_clang_vtable import
 # _index_template_param_defaults``, used directly by several tests) keeps
 # resolving unchanged.
+from .extract.headers.clang.template_param_indexes import (  # noqa: E402
+    TemplateParamIndex as _TemplateParamIndex,
+)
 from .extract.headers.clang.templates import (  # noqa: E402,F401
     _SAFE_NONTYPE_INT_TYPES,
     _index_template_param_defaults,
@@ -640,9 +643,9 @@ from .extract.headers.clang.templates import (  # noqa: E402,F401
 
 def build_specialization_index(
     root: dict[str, Any],
-    param_kinds_by_qualname: dict[str, list[str | None]] | None = None,
-    param_defaults_by_qualname: dict[str, list[str | None]] | None = None,
-    param_names_by_qualname: dict[str, list[str | None]] | None = None,
+    param_kinds_by_qualname: _TemplateParamIndex | None = None,
+    param_defaults_by_qualname: _TemplateParamIndex | None = None,
+    param_names_by_qualname: _TemplateParamIndex | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Back-compat wrapper -- see
     :func:`abicheck.extract.headers.clang.templates.build_specialization_index`

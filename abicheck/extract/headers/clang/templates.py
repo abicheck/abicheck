@@ -97,7 +97,7 @@ comments already required.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 #: Decl contexts we descend into, tracking the enclosing scope name so a
@@ -506,9 +506,9 @@ def _index_template_param_names(root: dict[str, Any]) -> dict[str, list[str | No
 def _specialization_spelling(
     node: dict[str, Any],
     name: str,
-    param_kinds: list[str | None] | None,
-    param_defaults: list[str | None] | None = None,
-    param_names: list[str | None] | None = None,
+    param_kinds: Sequence[str | None] | None,
+    param_defaults: Sequence[str | None] | None = None,
+    param_names: Sequence[str | None] | None = None,
 ) -> str | None:
     """A ``ClassTemplateSpecializationDecl``'s own ``Name<Arg1, Arg2>``
     spelling, reconstructed from its direct ``TemplateArgument`` children --
@@ -625,9 +625,9 @@ def _specialization_spelling(
 
 def build_specialization_index(
     root: dict[str, Any],
-    param_kinds_by_qualname: dict[str, list[str | None]] | None = None,
-    param_defaults_by_qualname: dict[str, list[str | None]] | None = None,
-    param_names_by_qualname: dict[str, list[str | None]] | None = None,
+    param_kinds_by_qualname: Mapping[str, Sequence[str | None]] | None = None,
+    param_defaults_by_qualname: Mapping[str, Sequence[str | None]] | None = None,
+    param_names_by_qualname: Mapping[str, Sequence[str | None]] | None = None,
     *,
     is_record_definition: Callable[[dict[str, Any]], bool],
 ) -> dict[str, dict[str, Any]]:

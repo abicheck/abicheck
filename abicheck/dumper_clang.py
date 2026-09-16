@@ -89,6 +89,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from . import dumper_cache
 from ._compiler_options import split_gcc_options
 
 # Re-exported (not just referenced) so the historical
@@ -135,12 +136,11 @@ from .extract.headers.clang import (
     scope as _clang_scope,
 )
 from .extract.headers.clang.return_type import return_type as _clang_return_type
-from .extract.headers.clang.templates import (
-    _index_template_param_defaults,
-    _index_template_param_kinds,
-    _index_template_param_names,
-    _specialization_spelling,
+from .extract.headers.clang.template_param_indexes import (
+    TemplateParamIndexes,
+    build_template_param_indexes,
 )
+from .extract.headers.clang.templates import _specialization_spelling
 from .extract.headers.scope_segments import record_segment as _record_scope_segment
 from .extract.surface_fact_producers import header_ast_surface_facts
 from .model import (
@@ -675,6 +675,56 @@ def _function_qualifiers(qualtype: str) -> str:
     return _clang_functions._function_qualifiers(qualtype)
 
 
+#: Acquisition-scope backend namespace for the template-parameter index
+#: bundle. Deliberately its OWN namespace rather than a suffix on ``"clang"``:
+#: the keys here are AST object identities, not header cache keys, and the two
+#: must not be able to collide in the one shared table.
+_TEMPLATE_PARAM_INDEX_NAMESPACE = "clang-template-param-indexes"
+
+
+def _template_param_indexes_for(root: dict[str, Any]) -> TemplateParamIndexes:
+    """*root*'s three template-parameter indexes, built once per raw AST.
+
+    Every parser constructed over one raw AST used to rebuild all three (four
+    whole-AST walks, since ``_index_template_param_defaults`` runs the names
+    builder internally too), and a request routinely constructs several over
+    the SAME tree: the legacy export-bound parse and the neutral parse of each
+    side, plus one per member of a directory/package release fan-out that
+    shares a header context -- the fan-out's workers run on copies of the same
+    ``contextvars`` context, so they see the same acquisition scope. A measured
+    six-DSO shared-header comparison built 14 parsers over 2 distinct roots,
+    i.e. ran each builder 14 times for 2 distinct answers.
+
+    Safe to share because the builders read *only* *root* (see
+    ``TemplateParamIndexes``'s own docstring for the audit), and safe to hand
+    out because what they are bundled into is read-only to its depth.
+
+    Keyed on ``id(root)``, which is sound here for the same reason it already
+    is in ``extract/header_ast_fields.py``'s neutral-normalization key, and
+    only for that reason: ``retain_ast_context_object`` pins *root* alive for
+    the rest of the request, so its address cannot be recycled onto a
+    different tree while an entry under it is still reachable. Two distinct
+    ASTs therefore never collide, and a *later* request gets a fresh scope
+    (and so an empty table) rather than inheriting this one's answers. The key
+    is never written to disk and never derived from a header path -- two ASTs
+    parsed from the same header at different times are two different objects
+    and get two different entries, which is the conservative direction.
+
+    Without an acquisition scope the build stays strictly local: no table, no
+    retained root, and therefore no change to a direct ``dumper.dump()``
+    caller's memory behaviour.
+    """
+
+    if not dumper_cache.ast_acquisition_active():
+        return build_template_param_indexes(root)
+    dumper_cache.retain_ast_context_object(root)
+    return dumper_cache.run_ast_acquisition(
+        _TEMPLATE_PARAM_INDEX_NAMESPACE,
+        repr(id(root)),
+        lambda: build_template_param_indexes(root),
+    )
+
+
 class _ClangAstParser:
     """Parse a ``clang -ast-dump=json`` tree into ABI model objects.
 
@@ -754,11 +804,16 @@ class _ClangAstParser:
         # __init__ -- needs these to correctly scope a specialization's own
         # members (see the `ClassTemplateSpecializationDecl` branch below);
         # a per-call lazy build wouldn't help since the first call IS during
-        # this walk. Cheap: one extra whole-AST pass each, the same shape
-        # `_id_index()` already pays lazily for a different purpose.
-        self._template_param_kinds_by_qualname = _index_template_param_kinds(root)
-        self._template_param_defaults_by_qualname = _index_template_param_defaults(root)
-        self._template_param_names_by_qualname = _index_template_param_names(root)
+        # this walk.
+        #
+        # Shared per raw AST rather than rebuilt per parser: see
+        # `_template_param_indexes_for` below. The three bundled indexes are
+        # read-only (`TemplateParamIndexes`), so nothing downstream may write
+        # through them into another member's view.
+        indexes = _template_param_indexes_for(root)
+        self._template_param_kinds_by_qualname = indexes.kinds
+        self._template_param_defaults_by_qualname = indexes.defaults
+        self._template_param_names_by_qualname = indexes.names
         # Lazily-built, memoized record/specialization/vtable indices shared
         # between record-entity parsing (_build_record's base-lookup, still
         # in this module) and function-entity parsing

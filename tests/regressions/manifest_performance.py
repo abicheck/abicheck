@@ -52,7 +52,19 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # added without anyone noticing the third, and nothing anywhere
         # measured the count.
         fixed_by=(1245,),
-        seed_tests=("tests/test_snapshot_digest_recomputation.py",),
+        seed_tests=(
+            "tests/test_snapshot_digest_recomputation.py",
+            # The same class in the clang header backend: three pure,
+            # AST-derived template-parameter indexes rebuilt once per
+            # constructed parser rather than once per distinct AST, so a
+            # six-member shared-header fan-out ran each builder 14 times for
+            # 2 distinct answers. Same guard shape, per this class's own
+            # invariant -- a count of the builds a real run performs, bounded
+            # by the number of distinct inputs, not an assertion that one
+            # named call site consults the cache.
+            "tests/test_clang_template_index_reuse.py",
+            "tests/test_clang_template_index_reuse_e2e.py",
+        ),
         public_surfaces=("cli", "python-api"),
         axes={
             "front_end": ("cli", "typed_api"),

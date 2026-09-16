@@ -56,6 +56,7 @@ from ....model.mangled_name import strip_macho_itanium_decoration
 from ....name_classification import strip_anonymous_type_location
 from ....provenance import classify_origin, header_from_location
 from ...surface_fact_producers import header_ast_surface_facts
+from .template_param_indexes import TemplateParamIndex
 from .templates import build_specialization_index
 
 #: Pseudo-files clang attributes builtin / command-line declarations to.
@@ -646,9 +647,15 @@ class RecordVtableIndex:
         self,
         root: dict[str, Any],
         records: list[_Decl],
-        template_param_kinds_by_qualname: dict[str, list[str | None]],
-        template_param_defaults_by_qualname: dict[str, list[str | None]],
-        template_param_names_by_qualname: dict[str, list[str | None]],
+        # Widened from `dict[str, list[str | None]]` to the read-only
+        # `Mapping`/`Sequence` pair (`templates.TemplateParamIndex`) so a shared,
+        # immutable `TemplateParamIndexes` bundle is accepted alongside the plain
+        # dicts existing callers still pass. Strictly a widening -- every previous
+        # argument type still satisfies it -- and honest about what this code does
+        # with the value: it only ever `.get()`s a row and indexes into it.
+        template_param_kinds_by_qualname: TemplateParamIndex,
+        template_param_defaults_by_qualname: TemplateParamIndex,
+        template_param_names_by_qualname: TemplateParamIndex,
     ) -> None:
         self._root = root
         # Same list object `dumper_clang.py`'s `_walk` populates in place —
