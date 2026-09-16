@@ -562,6 +562,42 @@ def project_snapshot_to_depth(
     snapshot (a ``dump`` artifact meant for a later, deeper comparison) is
     unaffected.
 
+    **How much of *snap* the returned copy owns, and why it is not always
+    everything.** The returned object is always a distinct ``AbiSnapshot``,
+    so every field this function *rebinds* (``build_mode``, ``build_source``)
+    is rebound on the copy and never on *snap* — and so is a field a caller
+    rebinds afterwards, which the native ``compare`` CLI relies on
+    (``cli_compare_helpers.run_compare`` assigns ``old.build_source`` on the
+    projected snapshot). What it owns *beneath* those fields is scoped to
+    what each rung actually writes to:
+
+    * **Below ``headers``** — :func:`_strip_header_and_above_evidence`
+      rewrites declarations, identity sidecars and fact bridges **in place**,
+      so this rung deep-copies the whole snapshot exactly as it always has.
+      That contract is unchanged.
+    * **At or above ``headers``** — nothing beneath the two rebound fields is
+      read-modified-written at all, so the copy is shallow and the L2 surface
+      (``functions``/``types``/``enums``/``semantic_ir``/``surface_graph``/…)
+      is **shared with *snap***, not duplicated. A surviving
+      ``build_source`` pack is still deep-copied, because
+      :func:`_project_build_source_pack` degrades one in place; below
+      ``build`` the pack is dropped wholesale and needs no copy.
+
+    So the guarantee is "projecting never mutates *snap*", which is what
+    every in-tree caller depends on — **not** "the result is an independent
+    mutable copy you may write through". A future caller that wants to
+    mutate a projected snapshot's declarations in place must copy them
+    itself; ``tests/test_depth_projection_ownership.py`` pins both halves
+    (the sharing at/above ``headers``, the full ownership below it) so the
+    distinction cannot quietly regress in either direction.
+
+    This is a memory decision with a measured cause, not a micro-optimization:
+    at ``--depth headers`` the old unconditional ``copy.deepcopy`` duplicated
+    an entire L2 surface in order to rebind two fields — measured on a real
+    327-type/4,802-function header snapshot at +34% resident (0.516 → 0.691
+    GiB) and +12.5 s per comparison, paid once per member of a release
+    fan-out, concurrently.
+
     *dwarf_sourced*, when given, overrides :func:`_structural_facts_are_dwarf_
     confirmed`'s own per-snapshot answer for *snap* alone — see
     :func:`project_pair_to_depth`'s docstring for why a comparison needs a
@@ -585,8 +621,14 @@ def project_snapshot_to_depth(
     build_rank = DEPTH_RANK["build"]
     source_rank = DEPTH_RANK["source"]
 
-    out = copy.deepcopy(snap)
-    if rank < headers_rank:
+    # Copy exactly what this rung actually writes to, not the whole object
+    # graph unconditionally -- see :func:`_projected_copy`'s own docstring
+    # for the per-rung ownership argument and the measurement that motivated
+    # it (a `--depth headers` projection of a real L2 snapshot deep-copied
+    # ~100 MB of surface in order to rebind two fields).
+    deep = rank < headers_rank
+    out = copy.deepcopy(snap) if deep else copy.copy(snap)
+    if deep:
         _strip_header_and_above_evidence(
             out,
             dwarf_sourced=dwarf_sourced,
@@ -595,9 +637,17 @@ def project_snapshot_to_depth(
         )
     if rank < build_rank:
         out.build_mode = None
-    if out.build_source is not None:
+    pack = out.build_source
+    if pack is not None:
+        # `_project_build_source_pack` degrades a surviving pack IN PLACE, so
+        # a pack that survives this rung must be owned. Below `build` it is
+        # dropped wholesale (returned `None`, nothing mutated), which is the
+        # one case needing no copy at all -- and the case `--depth headers`
+        # takes.
+        if not deep and rank >= build_rank:
+            pack = copy.deepcopy(pack)
         out.build_source = _project_build_source_pack(
-            out.build_source, rank, build_rank, source_rank
+            pack, rank, build_rank, source_rank
         )
     return out
 
