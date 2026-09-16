@@ -446,6 +446,7 @@ Compare two ABI inputs and return the classified diff result.
 | `collapse_versioned_symbols` | `bool` | `False` |
 | `project_policy_overrides` | `dict[Any, Any] \| None` | `None` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
+| `exclude_headers` | `tuple[str, ...]` | `()` |
 
 **Returns:** `CompareResult`
 

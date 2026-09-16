@@ -43,7 +43,7 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
             "effective-configuration identity either way, so two runs "
             "configured differently cannot fingerprint identically."
         ),
-        fixed_by=(),
+        fixed_by=(1321,),
         seed_tests=("tests/test_release_header_exclusions.py",),
         known_gaps=(
             KnownGap(
@@ -81,7 +81,7 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
             "structurally -- by what the caller separately declared -- not "
             "by the fact that one input happened to be consulted."
         ),
-        fixed_by=(),
+        fixed_by=(1321,),
         seed_tests=("tests/test_dependency_include_root_ownership.py",),
         known_gaps=(
             KnownGap(

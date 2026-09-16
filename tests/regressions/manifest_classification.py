@@ -168,7 +168,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "of both, which for an addition asks nothing at all. A reason "
             "code must also not contradict the evidence it rests on."
         ),
-        fixed_by=(),
+        fixed_by=(1321,),
         seed_tests=("tests/test_undocumented_export_surface_scope.py",),
         public_surfaces=("compare --scope-public-headers",),
         axes={

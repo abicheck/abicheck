@@ -299,6 +299,11 @@ _FIELD_POLICY: dict[str, str] = {
     "suppression_file_provided": "any",
     "suppression_source_sha256": "first",
     "explicit_scope_source_sha256": "first",
+    # The run's `--exclude-header` identity: one invocation narrows every
+    # library's header tree by the same rules, so every side carries the
+    # identical string -- run-wide in exactly the sense the two digests
+    # around it are.
+    "excluded_header_patterns": "first",
     "env_matrix_source_sha256": "first",
     "pattern_verdicts_enabled": "first",
     "collapse_versioned_symbols_enabled": "first",

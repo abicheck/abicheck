@@ -69,8 +69,21 @@ pytestmark = pytest.mark.skipif(
 
 
 def _require_toolchain() -> None:
+    """Skip unless this host can build *and parse* the fixture.
+
+    Both halves matter. ``gcc`` builds the ``.so``; a header-AST backend
+    (castxml, or clang) is what turns the ``-H`` operand into the
+    declarations these tests are about. The unit-test CI lane installs
+    neither backend, which is what the ``integration`` marker on the
+    compiling classes below is for (AGENTS.md: "if a test needs castxml,
+    mark it ``@pytest.mark.integration``"); without it these failed there
+    on a bare ``castxml not found in PATH``. This guard is the local
+    belt-and-braces for a run outside that lane.
+    """
     if shutil.which("gcc") is None:
         pytest.skip("gcc required")
+    if shutil.which("castxml") is None and shutil.which("clang") is None:
+        pytest.skip("a header-AST backend (castxml or clang) is required")
 
 
 def _build_dependency_tree(tmp_path: Path) -> tuple[Path, Path, Path]:
@@ -145,6 +158,7 @@ def _dump(so: Path, pub: Path, extra: Path, **kw: object) -> object:
     )
 
 
+@pytest.mark.integration
 class TestDependencyIncludeRootIsNotAPublicApiRoot:
     def test_a_declaration_found_only_under_a_dependency_root_is_not_public(
         self, tmp_path: Path
@@ -372,6 +386,7 @@ class TestEveryOwnershipSourceAndEntryPointAgrees:
         )
 
 
+@pytest.mark.integration
 class TestADeclinedRootIsUnknownNotPrivate:
     """A root this run cannot place as public must not be called private.
 

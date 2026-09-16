@@ -58,8 +58,21 @@ _CONFLICTING_HEADER = "conflict2.h"
 
 
 def _require_toolchain() -> None:
+    """Skip unless this host can build *and parse* the fixture.
+
+    Both halves matter. ``gcc`` builds the ``.so``; a header-AST backend
+    (castxml, or clang) is what turns the ``-H`` operand into the
+    declarations these tests are about. The unit-test CI lane installs
+    neither backend, which is what the ``integration`` marker on the
+    compiling classes below is for (AGENTS.md: "if a test needs castxml,
+    mark it ``@pytest.mark.integration``"); without it these failed there
+    on a bare ``castxml not found in PATH``. This guard is the local
+    belt-and-braces for a run outside that lane.
+    """
     if shutil.which("gcc") is None:
         pytest.skip("gcc required")
+    if shutil.which("castxml") is None and shutil.which("clang") is None:
+        pytest.skip("a header-AST backend (castxml or clang) is required")
 
 
 def _build_conflicting_tree(root: Path, *, libname: str = "libfoo.so") -> Path:
@@ -96,6 +109,7 @@ def _invoke(args: list[str]) -> Any:
     return CliRunner().invoke(main, args)
 
 
+@pytest.mark.integration
 class TestFilePairAndOneLibraryDirectoryPairAgree:
     """Claims 1-3: the same arguments, the same rules, the same outcome."""
 
@@ -320,6 +334,7 @@ class TestExclusionRulesChangeConfigurationIdentity:
         ) != canonical_exclusion_identity(["include/foo.h"], DESCRIPTOR_MATCHING)
 
 
+@pytest.mark.integration
 class TestAnUnmatchedRuleWarnsOnceForTheWholeRun:
     """Claim 5. The rules are release-wide, so an unmatched one is a
     release-wide fact. Reporting it per library would repeat one line 28
@@ -412,6 +427,7 @@ class TestHeaderExclusionConfigKeyIsDistinctFromSourceCollection:
         assert BuildConfig.from_dict(cfg.to_dict()).exclude_headers == ["a.h", "b.h"]
 
 
+@pytest.mark.integration
 class TestTheConfigKeyReachesDumpAndCompareAlike:
     """A config-only rule must reach both commands, or a project cannot
     compare its own baseline.
