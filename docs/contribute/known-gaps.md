@@ -9725,6 +9725,29 @@ candidate rests on both commands *resolving* the same rules, which is why
 that wiring is load-bearing, not a convenience on top of a gate that would
 otherwise have caught the divergence.
 
+## An `--exclude-header` pattern spelled as a path matches nothing on Windows (2026-09-16)
+
+`extract/header_exclusions.apply_header_exclusions` tries each pattern against
+three spellings of a header: the bare name (`fftw3.h`), the full path
+(`str(path)`), and `*/<pattern>`. Only the first is platform-independent.
+`str(path)` is backslash-separated on Windows, and `fnmatch` treats `/` and
+`\` as ordinary characters, so a forward-slash pattern (`include/fftw3.h`,
+`**/fftw/*`) matches no header there while matching on POSIX. A Windows user
+must either spell the pattern with backslashes or fall back to the bare name.
+
+**Not fixed here**, and deliberately not papered over in the test that found
+it (`tests/test_header_exclusion_primitives.py` states the bare-name spelling
+as an unconditional contract and marks the path-shaped spellings
+`skipif(win32)` pointing at this entry, rather than asserting a POSIX-only
+claim as if it were universal). The fix is a real decision with its own blast
+radius: normalizing both sides to POSIX separators would change which headers
+an existing Windows invocation excludes, and the patterns are hashed into
+`excluded_header_patterns`, the comparability gate
+(`exclusion_asymmetry_reason`) and the effective-configuration digest -- so a
+normalization that alters matching also alters run identity, and a baseline
+dumped before it would stop being comparable against a candidate dumped
+after. That is a migration, not a one-line `as_posix()`.
+
 ## `effective_depth` reports `source` for a `--depth headers` dump whose only L5 is the header-only graph (2026-09-16)
 
 Same PVXS run as the entry above: `dump --depth headers` produced a snapshot
