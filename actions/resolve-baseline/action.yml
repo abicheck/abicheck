@@ -33,7 +33,16 @@ inputs:
       between channels.
     required: true
   kind:
-    description: "'target' (default) or 'bundle' -- which resolution shape to use."
+    description: >
+      'target' (default), 'bundle', or 'members' -- which resolution shape to
+      use. 'members' resolves SEVERAL targets out of one already-staged set in
+      a single call, through the identical per-target resolver 'target' uses,
+      and reports them through the snapshot-paths/members outputs. Use it to
+      name a multi-component project's *candidate* snapshots (the set
+      `actions/baseline` just wrote, downloaded into another job) as well as a
+      baseline's -- the portable `snapshot` entry inside the set, never the
+      manifest's `artifact` field, which is the producing runner's own
+      absolute binary path and means nothing after the set has moved."
     required: false
     default: 'target'
   target:
@@ -46,7 +55,12 @@ inputs:
     default: ''
   bundle-members:
     description: >
-      JSON array of the bundle's member target ids, e.g.
+      JSON array of the member target ids to resolve -- required for both
+      kind: bundle and kind: members. Each id must appear exactly once: a
+      repeated member would resolve twice and report one path, which is
+      indistinguishable from resolving it once.
+
+      For kind: bundle, e.g.
       '["libpvxs", "libpvxsIoc"]'. Required when kind is bundle -- every
       member must have a staged binary in the baseline-set's binaries/
       directory for the bundle to resolve (ADR-047 §6/§8 S14: bundle
@@ -153,7 +167,13 @@ inputs:
 
 outputs:
   outcome:
-    description: 'resolved | not_found | ambiguous | wrong_profile | stale_schema | incompatible_evidence | wrong_project_ref | stale_generation | new_target.'
+    description: >
+      resolved | not_found | ambiguous | wrong_profile | stale_schema |
+      incompatible_evidence | wrong_project_ref | stale_generation |
+      new_target. For kind: members this is `resolved` only when every
+      declared member resolved; otherwise it is the first non-resolved
+      member's own outcome, in declared order -- a real taxonomy value a
+      caller can act on, never a synthetic "partial" tenth outcome.
     value: ${{ steps.resolve.outputs.outcome }}
   bootstrap:
     description: "'true' when outcome is not_found and required was 'false' (advisory, non-fatal). 'false' otherwise."
@@ -179,6 +199,21 @@ outputs:
   member-header-evidence:
     description: '''complete'' when every staged member''s baseline snapshot carries header-derived evidence, ''partial'' when only some do, ''none'' when none do or no staging ran. Only ''complete'' means an old side genuinely distinct from the current checkout for every member.'
     value: ${{ steps.resolve.outputs.member-header-evidence }}
+  snapshot-paths:
+    description: >
+      (kind: members only) JSON object mapping each resolved member target id
+      to its snapshot file inside the set, e.g.
+      `{"libfoo":"/.../libfoo.abicheck.json"}`. Only members that actually
+      resolved appear -- read `members` to tell "absent because it did not
+      resolve" from "absent because it was never asked for". `{}` otherwise.
+    value: ${{ steps.resolve.outputs.snapshot-paths }}
+  members:
+    description: >
+      (kind: members only) JSON array of one row per requested member --
+      `{"target","outcome","snapshot","message"}` -- in the order they were
+      declared, so a caller can report each member's own outcome rather than
+      collapsing the set to one. `[]` otherwise.
+    value: ${{ steps.resolve.outputs.members }}
   message:
     description: 'Human-readable explanation of the outcome.'
     value: ${{ steps.resolve.outputs.message }}

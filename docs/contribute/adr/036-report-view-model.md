@@ -9,6 +9,46 @@ and route the Markdown/text/JSON/SARIF/JUnit reporters). Increment 3 (routing
 remaining local bucketing, e.g. `pr_comment._bucket_changes`) is still open —
 see "Rollout" below.
 
+## 2026-09-14 presentation amendment
+
+The ordinary `compare` human output now defaults to the bounded `terminal`
+projection rather than the exhaustive Markdown document.  This is an
+intentional presentation default change only: comparison, classification,
+suppression, gating, and exit-code computation are unchanged.  Users and
+automation that require the detailed prose report must request it explicitly
+with `-o markdown=-` (or write it beside a compact summary with repeated
+exports). JSON, SARIF, JUnit, HTML, `oneline`, and explicit Markdown requests
+retain their existing contracts.
+
+The review projection is bounded across public-surface entries and always
+discloses omitted counts. Public-surface operation/entity classification comes
+from `ChangeKindMeta`, not kind-name suffixes or effective severity; dependency
+imports and environment requirements are consequently not presented as public
+API operations.
+
+The completed redesign adds report-schema 5.1's `review_groups` and
+`result_counts` blocks. A review group is a presentation relationship, never a
+semantic deduplication: it retains every member finding ID and finalized gate
+contribution. Its key includes library scope and canonical entity identity;
+only explicitly supported corroborating families are joined. Count populations
+are named by stage (`raw_detected`, `retained`, `gating`, `non_gating`) and by
+independent review dimension (groups, public operations, runtime/dependency
+observations, and hygiene lifecycle).
+
+The compact view has deterministic caps for groups, symbols, warnings,
+suppression rules, acknowledgments, and modulation rows. Omitted counts and a
+valid detailed-export command are always printed. Full Markdown/HTML and
+machine exports remain complete. Release/SONAME advice is shown only when the
+project explicitly stated a versioning policy; `strict_abi` alone does not
+imply SemVer.
+
+Evidence metrics such as `artifact_backed_findings` deliberately remain a
+provenance subset, not another retained-total spelling: policy overlays and
+findings backed only by source/build context are retained but not
+artifact-backed. Compact output therefore uses `result_counts.retained` for
+the retained population and never tries to reconcile it to a provenance
+subset as if an equality were expected.
+
 ## Context
 
 abicheck renders a comparison result in many formats (JSON, Markdown, text,

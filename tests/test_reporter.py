@@ -20,13 +20,13 @@ def _first_finding(doc: dict) -> dict:
 
 
 class TestReviewDigest:
-    def test_breaking_digest_has_verdict_and_recommendation(self):
+    def test_breaking_digest_has_verdict_without_invented_version_policy(self):
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo")
         out = to_review_digest(_result(Verdict.BREAKING, changes=[c]))
         assert "ABI review" in out
         assert "`BREAKING`" in out
-        assert "Release recommendation:" in out
-        assert "_Z3foov" in out  # top impacted symbol
+        assert "Release recommendation:" not in out
+        assert "_Z3foov" in out
 
     def test_manual_review_banner_on_scope_fallback(self):
         r = _result(
@@ -67,10 +67,10 @@ class TestReviewDigest:
             for i in range(13)
         ]
         out = to_review_digest(_result(Verdict.BREAKING, changes=changes))
-        # Only the first 10 are listed, with a "… and N more" line.
-        assert "and 3 more" in out
-        assert "`sym0`" in out
-        assert "`sym12`" not in out
+        # Review groups are capped at eight, with an explicit omitted count.
+        assert "5 more group(s) omitted" in out
+        assert "**sym0**" in out
+        assert "**sym9**" not in out
 
 
 class TestReviewDigestSeverityAware:

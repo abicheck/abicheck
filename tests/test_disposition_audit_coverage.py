@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change, DiffResult
 from abicheck.policy.disposition_close import (
@@ -36,6 +38,7 @@ from abicheck.policy.disposition_close import (
 from abicheck.policy.disposition_ledger import Disposition, RuleProvenance
 from abicheck.policy.disposition_types import DispositionRecord
 from abicheck.report.disposition_audit import (
+    _REVIEW_RULE_CAP,
     DispositionAudit,
     NotEvaluatedDetector,
     fold_disposition_audits,
@@ -120,6 +123,26 @@ class TestFoldMergesDuplicateIdentitiesAcrossMembers:
         assert folded.scope_reasons == (("proven_out_of_contract", 4),)
         # Deduplicated by name, not doubled.
         assert folded.not_evaluated_detectors == (det,)
+
+    def test_machine_fold_retains_more_rules_than_human_sample_cap(self) -> None:
+        rules = tuple(
+            (RuleProvenance(rule_id=f"rule-{index}", reason="reviewed"), index + 1)
+            for index in range(6)
+        )
+        folded = fold_disposition_audits(
+            [_audit(detected_total=21, counts=(("suppressed", 21),), rules=rules)]
+        )
+        assert folded.rules == rules
+        assert [row["matched_count"] for row in folded.to_dict()["rules"]] == [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+        ]
+        rendered = render_disposition_audit_lines(folded)
+        assert any("2 more rule(s) omitted" in line for line in rendered)
 
 
 class TestRenderReclassificationAndScopeReasons:
@@ -353,3 +376,74 @@ class TestReleaseSummarySidecarCarriesDispositionAudit:
         data = json.loads((tmp_path / "summary.json").read_text())
         assert data["disposition_audit"]["detected_total"] == 1
         assert data["disposition_audit"]["effective_total"] == 1
+
+
+class TestReviewRenderingBoundsDiscloseWhatTheyCut:
+    """The review projection caps three of the audit's lists.
+
+    ADR-067's rule is that a disposition keeps its rule and reason, so a cap
+    on that rendering is only acceptable while it says what it cut. Each
+    branch is asserted across the cap boundary rather than at one size, and
+    the complete-list case is asserted too — an omission line that appeared
+    when nothing was omitted would misreport the audit just as badly.
+    """
+
+    @staticmethod
+    def _rules(n: int):
+        return tuple(
+            (RuleProvenance(rule_id=f"rule-{i}", reason="waived"), i + 1)
+            for i in range(n)
+        )
+
+    @pytest.mark.parametrize("n", [0, 1, _REVIEW_RULE_CAP, _REVIEW_RULE_CAP + 3])
+    def test_rules_list_is_capped_with_an_exact_remainder(self, n: int) -> None:
+        text = "\n".join(render_disposition_audit_lines(_audit(rules=self._rules(n))))
+        shown = sum(f"`rule-{i}`" in text for i in range(n))
+        assert shown == min(n, _REVIEW_RULE_CAP)
+        omitted = n - min(n, _REVIEW_RULE_CAP)
+        if omitted:
+            assert f"… {omitted} more rule(s) omitted" in text
+            assert "export JSON for the complete audit" in text
+        else:
+            assert "more rule(s) omitted" not in text
+
+    @pytest.mark.parametrize("n", [0, 1, _REVIEW_RULE_CAP, _REVIEW_RULE_CAP + 2])
+    def test_acknowledgments_list_is_capped_with_an_exact_remainder(
+        self, n: int
+    ) -> None:
+        acks = tuple((f"ack-{i}", i + 1) for i in range(n))
+        text = "\n".join(render_disposition_audit_lines(_audit(acknowledgments=acks)))
+        shown = sum(f"`ack-{i}`" in text for i in range(n))
+        assert shown == min(n, _REVIEW_RULE_CAP)
+        omitted = n - min(n, _REVIEW_RULE_CAP)
+        assert (f"… {omitted} more omitted" in text) is bool(omitted)
+
+    @pytest.mark.parametrize("n", [1, _REVIEW_RULE_CAP, _REVIEW_RULE_CAP + 5])
+    def test_unacknowledged_additions_list_is_capped_with_an_exact_remainder(
+        self, n: int
+    ) -> None:
+        review = {
+            "unacknowledged": [
+                {"kind": "func_added", "symbol": f"added_{i}"} for i in range(n)
+            ]
+        }
+        text = "\n".join(
+            render_disposition_audit_lines(
+                _audit(unacknowledged_additions_review=review)
+            )
+        )
+        shown = sum(f"`added_{i}`" in text for i in range(n))
+        assert shown == min(n, _REVIEW_RULE_CAP)
+        omitted = n - min(n, _REVIEW_RULE_CAP)
+        assert (f"… {omitted} more omitted" in text) is bool(omitted)
+
+    def test_the_caps_are_actually_exercised(self) -> None:
+        """Vacuity guard: a cap raised above every parametrized size would
+        make all three tests above pass while asserting no bound at all."""
+        assert _REVIEW_RULE_CAP < _REVIEW_RULE_CAP + 2
+        text = "\n".join(
+            render_disposition_audit_lines(
+                _audit(rules=self._rules(_REVIEW_RULE_CAP + 3))
+            )
+        )
+        assert "omitted" in text

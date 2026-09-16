@@ -67,6 +67,7 @@ nav:
       - CI Gating Pipeline: use/ci-gating.md
       - Contract Evaluation: use/contract-evaluation.md
       - Aggregate Reports: use/aggregate-reports.md
+      - Multi-Component CI: use/multi-component-ci.md
       - GitHub Action:
         - Overview & Setup: use/github-action.md
         - More Recipes: use/github-action-recipes.md

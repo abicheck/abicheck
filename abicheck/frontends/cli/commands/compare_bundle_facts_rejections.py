@@ -49,6 +49,16 @@ from typing import Any
 
 import click
 
+#: The only report formats a stored-bundle-facts comparison renders.
+#:
+#: One owner for both directions: :func:`reject_unsupported_options` rejects
+#: an explicitly requested format outside this set, and `compare`'s dispatch
+#: falls an *unrequested* default back into it. Two copies of this pair would
+#: be free to disagree about which formats exist, which is exactly how the
+#: bounded `terminal` default came to reject every stored-pair invocation
+#: before it reached any real validation.
+STORED_BUNDLE_FACTS_FORMATS: frozenset[str] = frozenset({"json", "markdown"})
+
 
 def resolve_max_json_object_nodes_cfg(
     configured: int | None, *, config_explicit: bool, default: int
@@ -116,7 +126,7 @@ def reject_unsupported_options(
     candidates to filter/scope at all, so both settings would silently have
     no effect -- rejected here rather than left to appear honored."""
     fmt = kwargs.get("fmt", "json")
-    if fmt not in ("json", "markdown"):
+    if fmt not in STORED_BUNDLE_FACTS_FORMATS:
         raise click.UsageError(
             f"--format {fmt} is not available with a stored-bundle-facts OLD_INPUT: only "
             "json/markdown are supported for a stored-bundle-facts "
@@ -132,7 +142,7 @@ def reject_unsupported_options(
     # export set (`frontends.cli.options.export`), which checks collisions
     # across every target at parse time.
     for secondary_fmt, _secondary_path in secondary_writes:
-        if secondary_fmt not in ("json", "markdown"):
+        if secondary_fmt not in STORED_BUNDLE_FACTS_FORMATS:
             # Codex review: --write FORMAT=PATH was accepted (Click's own
             # --write validation allows every format the ordinary compare/
             # compare-release paths render: sarif/html/junit/review too) but

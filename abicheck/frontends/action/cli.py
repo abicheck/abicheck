@@ -36,6 +36,7 @@ from pathlib import Path
 
 import click
 
+from .cli_base import EXIT_REFUSED, _read_json, _write_json, action_cli
 from .report_publication import (
     DEFAULT_MAX_COMMENT_BYTES,
     DEFAULT_MAX_SUMMARY_BYTES,
@@ -63,35 +64,6 @@ from .run_selection import (
     verify_source_run,
     verify_tested_sha,
 )
-
-#: Exit code for a refusal that is about the *publication boundary* -- a
-#: wrong run, an unresolvable PR, a hostile artifact, a failed post. It is
-#: deliberately distinct from Click's own usage exit (2) and from every
-#: compatibility exit abicheck uses, because the one thing this tooling must
-#: never do is let a publication failure be read as a compatibility result.
-EXIT_REFUSED = 3
-
-
-def _read_json(path: Path) -> object:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise click.ClickException(f"Cannot read {path}: {exc}") from exc
-
-
-def _write_json(path: Path, payload: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-
-
-@click.group("abicheck-action")
-def action_cli() -> None:
-    """Internal helpers for abicheck's report-publication Actions."""
-
-
-# ---------------------------------------------------------------------------
-# `comment` — render, bound, and decide
-# ---------------------------------------------------------------------------
 
 
 @action_cli.command("comment")
@@ -528,5 +500,16 @@ def flatten_pages_cmd(raw: Path, out: Path) -> None:
     out.write_text(json.dumps(pages), encoding="utf-8")
 
 
+# Sibling command module, imported for its registration side effect -- it
+# decorates `action_cli` at import time. Kept at the foot of the file, after
+# the group and the shared helpers it uses are defined, the same way
+# `abicheck/cli.py` registers its own `cli_*` siblings.
+from . import cli_integration as _cli_integration  # noqa: E402,F401
+
 if __name__ == "__main__":  # pragma: no cover - exercised via subprocess
+    # Safe to call the group directly: it is `cli_base`'s single object, so
+    # this file's own decorations (running as `__main__`) and the sibling's
+    # (running as the canonical module) both land on it. Defining the group
+    # here instead would give the two module objects two different groups,
+    # and every sibling command would fail with Click's "No such command".
     action_cli()

@@ -83,6 +83,25 @@ if TYPE_CHECKING:
     from .model import AbiSnapshot
 
 
+#: The rendered formats these folds append their sections to: the
+#: text-shaped human reports.
+#:
+#: One named set rather than three inline tuples. Each fold below grew its
+#: own copy, and when `terminal` became `compare`'s default human format all
+#: three silently stopped applying to the output an ordinary run prints --
+#: consumer scope, the suppression audit, and the comparability-refusal
+#: document each vanished from the default, one missed tuple at a time. A
+#: format added later joins them all at once, or none, rather than
+#: whichever copies its author happened to find.
+#:
+#: Deliberately excludes the machine formats (json/sarif/junit/html), which
+#: build these facts natively and must not have text appended, and
+#: ONELINE_FORMAT, whose one-line contract has no room for a section.
+TEXT_REPORT_FORMATS: frozenset[str] = frozenset(
+    {"markdown", "text", "review", "terminal"}
+)
+
+
 def _fold_scoped_compat_into_text(
     text: str,
     fmt: str,
@@ -165,7 +184,15 @@ def _fold_scoped_compat_into_text(
         required_symbols=required_symbols,
         demangle=demangle,
     )
-    if fmt in ("markdown", "text", "review"):
+    # `terminal` joined this set when it became `compare`'s default human
+    # format. Without it the consumer-scope sections -- which name the
+    # consumer and the specific symbol/entrypoint that broke it -- were
+    # dropped from the output an ordinary `compare --used-by` now prints,
+    # leaving a reviewer a verdict with no way to tell *what* broke it
+    # short of re-running. That is the same gap this fold was added to
+    # close for the detailed report (PR #1284); a change of default format
+    # is not a reason to reopen it.
+    if fmt in TEXT_REPORT_FORMATS:
         return fold.into_text(text, fmt)
     # ONELINE_FORMAT (`-o oneline=...`) falls through unchanged (workstream
     # D-S1): the incoming `text` already states the full-library
@@ -411,7 +438,11 @@ class _ScopedFold:
 #: :func:`_fold_use_case_impact_into_text` below. sarif/junit/html render
 #: from the same attributed result and carry none of it. ``text`` is here
 #: because the fold accepts it, not because ``compare -o`` offers it.
-_USE_CASE_IMPACT_BEARING_FORMATS = frozenset({"json", "markdown", "text", "review"})
+#: ``terminal`` joined when it became `compare`'s default human format:
+#: the fold below is gated on ``TEXT_REPORT_FORMATS``, which includes it,
+#: so leaving it out here rejected ``--use-cases`` on a default-format run
+#: whose output would in fact have carried the attribution.
+_USE_CASE_IMPACT_BEARING_FORMATS = frozenset({"json"}) | TEXT_REPORT_FORMATS
 
 
 def format_carries_use_case_impact(fmt: str | None) -> bool:
@@ -453,7 +484,8 @@ def _fold_use_case_impact_into_text(
 ) -> str:
     """Fold ``compare --use-cases``'s attribution into the rendered report.
 
-    Markdown/text/review only. The JSON paths already carry the block --
+    The text-shaped human formats only (:data:`TEXT_REPORT_FORMATS`, which
+    `terminal` joined when it became `compare`'s default). The JSON paths already carry the block --
     ``reporter._add_use_case_impact`` emits it straight off
     ``DiffResult.use_case_impact`` -- so folding it again here would write
     the key twice; the structured formats (sarif, junit, html) are left
@@ -477,11 +509,7 @@ def _fold_use_case_impact_into_text(
     from .impact.use_case_impact import UseCaseImpact, render_use_case_impact_lines
 
     impact = getattr(result, "use_case_impact", None)
-    if not isinstance(impact, UseCaseImpact) or fmt not in (
-        "markdown",
-        "text",
-        "review",
-    ):
+    if not isinstance(impact, UseCaseImpact) or fmt not in TEXT_REPORT_FORMATS:
         return text
     if show_only:
         from .reporter import apply_show_only
@@ -554,7 +582,7 @@ def _fold_suppression_audit_into_text(
 
         return demangle_text(s)
 
-    if fmt in ("markdown", "text", "review"):
+    if fmt in TEXT_REPORT_FORMATS:
         lines = ["", "## Suppression Audit", "", _maybe_demangle(audit.summary())]
         # audit.summary() only reports the stale-rule count (Codex review,
         # fresh evidence: its own per-rule detail lines named a rule by only
@@ -783,7 +811,7 @@ def _report_run_aborted(
                 library, old_version, new_version, kind, message
             )
             _write_or_echo(target_output, xml)
-        elif target_fmt in ("markdown", "text", "review"):
+        elif target_fmt in TEXT_REPORT_FORMATS:
             # Codex review, PR #1180, fresh evidence ("Render aborts for
             # every accepted output format"): a `-o out.md`/`--write
             # markdown=out.md` target must not stay silently absent (or,

@@ -411,3 +411,137 @@ class TestTheFanInIsBoundedAgainstAHostileDocument:
         body = render_comment(model, sha="0123456789ab", detail="full")
         for i in range(3):
             assert f"t{i}" in body
+
+
+class TestAggregatePreservesMemberReviewGroups:
+    """A fan-in keeps what its members carry.
+
+    `_Fold` accumulated ten member outputs and silently dropped two of them
+    — `review_groups` and `result_counts` — so an aggregate comment rendered
+    no review-group section at all although every member had one, and the
+    per-target rows state counts rather than the group names and transitions
+    the section exists to show (CodeRabbit review).
+    """
+
+    @staticmethod
+    def _member_with_groups(target: str) -> dict[str, object]:
+        report = dict(_member_report("break"))
+        report["review_groups"] = [
+            {
+                "display_name": "Widget::resize",
+                "transition": "signature changed",
+                "gating_findings": ["func_removed"],
+                "member_finding_ids": [f"{target}-1"],
+            }
+        ]
+        report["result_counts"] = {
+            "review_groups": 1,
+            "gating_review_groups": 1,
+            "raw_detected": 1,
+            "retained": 1,
+        }
+        return report
+
+    def _document(self, tmp_path: Path, targets: list[str]) -> dict[str, object]:
+        for target in targets:
+            (tmp_path / f"{target}.json").write_text(
+                json.dumps(self._member_with_groups(target)), encoding="utf-8"
+            )
+        return {
+            "aggregate_schema_version": "1.4",
+            "head_sha": "0123456789ab",
+            "targets": [
+                {
+                    "target_id": target,
+                    "state": "analyzed",
+                    "compatibility_verdict": "BREAKING",
+                    "report_path": f"{target}.json",
+                }
+                for target in targets
+            ],
+        }
+
+    def test_every_member_group_survives_the_fold_attributed_to_its_target(
+        self, tmp_path: Path
+    ) -> None:
+        """Three targets reporting one symbol are three groups, not one.
+
+        The same attribution rule folded findings already follow — which is
+        the cross-platform matrix case `aggregate` exists for.
+        """
+        targets = ["alpha", "beta", "gamma"]
+        document = self._document(tmp_path, targets)
+        path = tmp_path / "aggregate.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+
+        model = build_model(document, report_dir=path.parent)
+
+        assert len(model.review_groups) == len(targets), (
+            f"expected one group per target, got {model.review_groups}"
+        )
+        scopes = {str(g.get("library", "")) for g in model.review_groups}
+        assert scopes == set(targets), (
+            f"groups are not attributed to their targets: {scopes}"
+        )
+
+    def test_member_result_counts_are_summed_not_recomputed(
+        self, tmp_path: Path
+    ) -> None:
+        """Each member's counts are authoritative for that member.
+
+        Recomputing from the folded findings would undercount, since those
+        are capped per member.
+        """
+        targets = ["alpha", "beta", "gamma"]
+        document = self._document(tmp_path, targets)
+        path = tmp_path / "aggregate.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+
+        model = build_model(document, report_dir=path.parent)
+
+        assert model.result_counts is not None
+        assert model.result_counts["review_groups"] == len(targets)
+        assert model.result_counts["gating_review_groups"] == len(targets)
+        assert model.result_counts["raw_detected"] == len(targets)
+
+    def test_the_rendered_aggregate_comment_shows_the_groups(
+        self, tmp_path: Path
+    ) -> None:
+        """The property a reviewer actually sees, not just the model field."""
+        targets = ["alpha", "beta"]
+        document = self._document(tmp_path, targets)
+        path = tmp_path / "aggregate.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+
+        model = build_model(document, report_dir=path.parent)
+        body = render_comment(model, sha="0123456789ab", detail="full")
+
+        assert "Review groups:" in body
+        assert "Widget::resize" in body
+        for target in targets:
+            assert f"{target}: **Widget::resize**" in body
+
+    def test_a_member_without_groups_contributes_none(self, tmp_path: Path) -> None:
+        """Negative control: the section must not appear from nowhere."""
+        (tmp_path / "alpha.json").write_text(
+            json.dumps(_member_report("break")), encoding="utf-8"
+        )
+        document = {
+            "aggregate_schema_version": "1.4",
+            "head_sha": "0123456789ab",
+            "targets": [
+                {
+                    "target_id": "alpha",
+                    "state": "analyzed",
+                    "compatibility_verdict": "BREAKING",
+                    "report_path": "alpha.json",
+                }
+            ],
+        }
+        path = tmp_path / "aggregate.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        model = build_model(document, report_dir=path.parent)
+        assert model.review_groups == []
+        assert "Review groups:" not in render_comment(
+            model, sha="0123456789ab", detail="full"
+        )

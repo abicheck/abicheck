@@ -9,6 +9,7 @@ CHOICE compare -o sarif
 CHOICE compare -o html
 CHOICE compare -o junit
 CHOICE compare -o review
+CHOICE compare -o terminal
 CHOICE compare -o oneline
 CHOICE deps-tree -o json
 CHOICE deps-tree -o markdown

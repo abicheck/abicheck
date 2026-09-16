@@ -463,6 +463,21 @@ def emit_export_set(exports: ExportSet, render: Callable[[str], str]) -> None:
         _write_or_echo(target.destination, text)
 
 
+#: The human-readable renderings the exit-code-scheme banner is written
+#: alongside. It goes to stderr, so a machine format whose whole captured
+#: stream is data must not receive it.
+#:
+#: ``terminal`` is here because it is what an ordinary `compare` now prints:
+#: without it the banner explaining which exit-code scheme produced the
+#: status vanished from the default output, which is the one place a reader
+#: most needs it. Deliberately not `cli_compare_fold.TEXT_REPORT_FORMATS` --
+#: these are different questions with different answers (``html`` takes the
+#: banner and is not text-shaped; ``text`` is not a format `compare -o`
+#: offers), so they are named separately rather than shared into a set that
+#: would be wrong for one of them.
+_EXIT_SCHEME_BANNER_FORMATS = frozenset({"markdown", "html", "review", "terminal"})
+
+
 def _announce_exit_scheme(
     scheme: str,
     *,
@@ -482,7 +497,7 @@ def _announce_exit_scheme(
     the ``fmt not in {...}`` check below already covers it without a separate
     boolean, since it isn't one of the three human-readable format names.
     """
-    if fmt not in {"markdown", "html", "review"}:
+    if fmt not in _EXIT_SCHEME_BANNER_FORMATS:
         return
     if scheme == "severity":
         click.echo(

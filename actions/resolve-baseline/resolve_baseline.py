@@ -52,7 +52,9 @@ _EXIT_USAGE_ERROR = 64
 
 
 def _print_outputs(
-    result: ResolveResult, staged: StagedBundleBaseline | None = None
+    result: ResolveResult,
+    staged: StagedBundleBaseline | None = None,
+    members: list[dict[str, str]] | None = None,
 ) -> int:
     """Print ``key=value`` lines ``run.sh`` forwards to ``GITHUB_OUTPUT``.
 
@@ -86,6 +88,14 @@ def _print_outputs(
         "binary-paths": json.dumps(result.binary_paths),
         "member-snapshots-dir": str(staged.snapshots_dir) if staged else "",
         "member-header-evidence": (staged.header_evidence_state if staged else "none"),
+        # kind: members only. Always printed (``{}``/``[]`` otherwise) for the
+        # same reason ``binaries-dir`` is printed for a target: one key set for
+        # every branch, so a caller's expression never reads a key that some
+        # paths simply never define.
+        "snapshot-paths": json.dumps(
+            {row["target"]: row["snapshot"] for row in (members or []) if row["snapshot"]}
+        ),
+        "members": json.dumps(members or []),
         "message": result.message,
     }
     for key, value in fields.items():
@@ -105,12 +115,12 @@ def _print_outputs(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline-dir", required=True, type=Path)
-    parser.add_argument("--kind", required=True, choices=["target", "bundle"])
+    parser.add_argument("--kind", required=True, choices=["target", "bundle", "members"])
     parser.add_argument("--name", required=True, help="target id or bundle id")
     parser.add_argument(
         "--members",
         default="[]",
-        help="JSON array of member target ids (kind: bundle only)",
+        help="JSON array of member target ids (kind: bundle and kind: members)",
     )
     parser.add_argument("--profile", required=True)
     parser.add_argument("--required", required=True, choices=["true", "false"])
@@ -205,7 +215,83 @@ def main(argv: list[str] | None = None) -> int:
 
     required = args.required == "true"
 
-    if args.kind == "target":
+    member_rows: list[dict[str, str]] | None = None
+
+    if args.kind == "members":
+        # Resolve SEVERAL targets out of one already-staged set, through the
+        # very same per-target resolver ``kind: target`` uses -- every digest,
+        # profile, project_ref, generation, schema and path-escape check
+        # applies identically to each member. This exists because a
+        # multi-component project needs its *candidate* set's members named
+        # before it can compare any of them, and the alternative every
+        # integrator reached for was re-parsing manifest.json in shell: which
+        # reliably picks up the manifest's ``artifact`` field (the producing
+        # runner's absolute binary path, meaningless once the set has moved
+        # between jobs) instead of ``snapshot`` (the portable name inside the
+        # set), and skips content identity entirely.
+        #
+        # The set-level outcome is the first member's non-resolved outcome in
+        # declared order, never an aggregate of its own: a caller branching on
+        # ``outcome`` must see a real taxonomy value it can act on, and a
+        # synthetic "partially_resolved" would be a tenth outcome that no
+        # existing consumer understands.
+        try:
+            members_raw = json.loads(args.members)
+        except json.JSONDecodeError as exc:
+            print(f"::error::--members is not valid JSON: {exc}", file=sys.stderr)
+            return _EXIT_USAGE_ERROR
+        if not isinstance(members_raw, list) or not members_raw:
+            print(
+                "::error::--members must be a non-empty JSON array for --kind members",
+                file=sys.stderr,
+            )
+            return _EXIT_USAGE_ERROR
+        wanted = [str(m) for m in members_raw]
+        duplicates = sorted({m for m in wanted if wanted.count(m) > 1})
+        if duplicates:
+            # Last-one-wins would silently hand back one path for a member the
+            # caller named twice, which is indistinguishable from resolving it
+            # once -- and hides that the caller's own declaration disagrees
+            # with itself.
+            print(
+                "::error::--members names "
+                f"{', '.join(repr(d) for d in duplicates)} more than once; each "
+                "member must be declared exactly once.",
+                file=sys.stderr,
+            )
+            return _EXIT_USAGE_ERROR
+
+        member_rows = []
+        result = ResolveResult(
+            outcome=ResolveOutcome.RESOLVED,
+            message=f"resolved {len(wanted)} member(s)",
+        )
+        for member in wanted:
+            one = resolve_target(
+                args.baseline_dir,
+                target=member,
+                profile=args.profile,
+                required=required,
+                candidate_evidence_producer=candidate_evidence_producer,
+                expected_project_ref=args.expected_project_ref,
+                expected_baseline_generation=expected_baseline_generation,
+                allow_new_target=args.allow_new_target == "true",
+            )
+            member_rows.append(
+                {
+                    "target": member,
+                    "outcome": one.outcome,
+                    "snapshot": one.snapshot_path or "",
+                    "message": one.message,
+                }
+            )
+            if one.manifest_path and not result.manifest_path:
+                result.manifest_path = one.manifest_path
+            if not one.ok and result.ok:
+                result.outcome = one.outcome
+                result.bootstrap = one.bootstrap
+                result.message = f"{member}: {one.message}"
+    elif args.kind == "target":
         result = resolve_target(
             args.baseline_dir,
             target=args.name,
@@ -298,7 +384,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
 
-    output_status = _print_outputs(result, staged)
+    output_status = _print_outputs(result, staged, member_rows)
     if output_status != 0:
         return output_status
 

@@ -124,6 +124,7 @@ from .report.evidence_summary import evidence_summary
 # this module's per-shape builder as a parameter instead), so it needs
 # no lazy import to stay cycle-free.
 from .report.pr_comment_aggregate import build_aggregate_model
+from .report.value_delta import states_delta
 
 POST_MODES = ("always", "changes", "never")
 
@@ -229,7 +230,7 @@ def _detail_text(change: dict[str, object], symbol: str = "") -> str:
         new = _ABSENT
     if old is not _ABSENT and new is not _ABSENT:
         delta = f"{_value_repr(old)} → {_value_repr(new)}"
-        if desc and delta in desc:
+        if desc and states_delta(desc, delta):
             return desc
     elif new is not _ABSENT:
         delta = f"→ {_value_repr(new)}"
@@ -665,6 +666,8 @@ def _from_compare(
         verdict = consumer_scope.get("verdict")
         scoped_verdict = str(verdict) if verdict is not None else None
     verdict_value = report.get("verdict")
+    review_groups_value = report.get("review_groups")
+    result_counts_value = report.get("result_counts")
     return CommentModel(
         mode="compare",
         subject=str(report.get("library", "library")),
@@ -693,6 +696,12 @@ def _from_compare(
         suppressed_count=_suppressed_count(report),
         reclassified_count=_reclassified_count(report),
         disposition_audit=_disposition_audit(report),
+        review_groups=[row for row in review_groups_value if isinstance(row, dict)]
+        if isinstance(review_groups_value, list)
+        else [],
+        result_counts=result_counts_value
+        if isinstance(result_counts_value, dict)
+        else None,
         evidence=evidence_summary(report),
         # Summarized from the report's own complete `changes` list, before
         # any grouping or display cap this renderer applies -- AGENTS.md
@@ -1242,6 +1251,8 @@ def _from_release(
     categories: set[str] = set()
     severities: set[str] = set()
     libraries = report.get("libraries")
+    review_groups: list[dict[str, object]] = []
+    result_counts: dict[str, int] = {}
     if isinstance(libraries, list):
         for lib in libraries:
             if not isinstance(lib, dict):
@@ -1249,6 +1260,15 @@ def _from_release(
             rows.append(
                 _release_lib_row(lib, gate_api_break, levels, categories, severities)
             )
+            for group in lib.get("review_groups", []):
+                if isinstance(group, dict):
+                    review_groups.append({**group, "library": lib.get("library")})
+            member_counts = lib.get("result_counts")
+            if isinstance(member_counts, dict):
+                for key, value in member_counts.items():
+                    result_counts[str(key)] = result_counts.get(str(key), 0) + _as_int(
+                        value
+                    )
     n_libs = len(rows)
     _append_release_global_row(
         rows,
@@ -1325,6 +1345,8 @@ def _from_release(
         scope_blocking=scope_blocking,
         no_comparison_completed=no_comparison_completed,
         unmatched_states=unmatched_states,
+        review_groups=review_groups,
+        result_counts=result_counts or None,
         evidence=evidence_summary(report),
         # ADR-065/AGENTS.md: a release report's per-library `findings` list
         # is a cap of at most 10 per library (`cli_compare_release.py`), so
