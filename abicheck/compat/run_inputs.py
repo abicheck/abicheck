@@ -278,16 +278,6 @@ def effective_skip_rules(
     return compile_skip_rules(sorted(cli_skips), ()) + desc.skip_rules()
 
 
-def descriptor_header_universe(desc: CompatDescriptor) -> list[Path]:
-    """The headers a descriptor's rules are matched against.
-
-    A directory operand has to be walked before a rule naming a file beneath
-    it can match, so "which headers did this rule take" is answered against
-    the expanded list, not the declared one.
-    """
-    return expand_descriptor_headers(desc.headers)
-
-
 def resolve_and_narrow_headers(
     desc: CompatDescriptor,
     rules: Sequence[HeaderSkipRule],
