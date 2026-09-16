@@ -49,6 +49,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import click
 import pytest
 
 from abicheck.frontends.action.cli import action_cli
@@ -375,3 +376,107 @@ class TestFlattenPages:
     def test_an_empty_document_is_an_empty_array(self, tmp_path: Path) -> None:
         assert self.flatten(tmp_path, "") == []
         assert self.flatten(tmp_path, "   \n  ") == []
+
+
+class TestInProcessBranchesASubprocessCannotReach:
+    """The same commands driven in-process, through the real Click entry.
+
+    Not a convenience duplicate of the subprocess tests above: those prove
+    what a real process writes to a real pipe, which is the claim that
+    matters to bash, but a real process *always* has a `sys.stdout.buffer`,
+    so the no-binary-layer fallback is unreachable from one. These reach it,
+    and the refusal/tolerant branches, by driving `action_cli.main` directly.
+    """
+
+    @staticmethod
+    def _run(argv: list[str], stdout: object | None = None) -> None:
+        previous = sys.stdout
+        if stdout is not None:
+            sys.stdout = stdout  # type: ignore[assignment]
+        try:
+            action_cli.main(argv, standalone_mode=False)
+        finally:
+            sys.stdout = previous
+
+    def test_the_fallback_writes_when_stdout_has_no_binary_layer(
+        self, tmp_path: Path
+    ) -> None:
+        """A capturing stand-in with no `.buffer`: the records must still
+        come out untranslated, via the reconfigure path."""
+
+        class NoBufferStdout(io.StringIO):
+            """`io.StringIO` has no `.buffer`; it does have `reconfigure`."""
+
+            reconfigured_newline: object = "unset"
+
+            def reconfigure(self, **kwargs: object) -> None:
+                type(self).reconfigured_newline = kwargs.get("newline")
+
+        stdout = NoBufferStdout()
+        self._run(["emit-fields", str(write(tmp_path, {"a": "x"})), "a"], stdout)
+        assert stdout.getvalue() == "x\n"
+        assert NoBufferStdout.reconfigured_newline == "", (
+            "the fallback must turn translation off rather than write through it"
+        )
+
+    def test_the_fallback_still_writes_when_reconfigure_is_absent(
+        self, tmp_path: Path
+    ) -> None:
+        """Neither a binary layer nor `reconfigure` — the records still go
+        out rather than the command raising `AttributeError`."""
+
+        class Minimal:
+            def __init__(self) -> None:
+                self.written: list[str] = []
+
+            def write(self, text: str) -> int:
+                self.written.append(text)
+                return len(text)
+
+            def flush(self) -> None:
+                return None
+
+        stdout = Minimal()
+        self._run(["emit-fields", str(write(tmp_path, {"a": 1})), "a"], stdout)
+        assert "".join(stdout.written) == "1\n"
+
+    def test_a_line_break_refusal_names_the_offending_field(
+        self, tmp_path: Path
+    ) -> None:
+        document = write(tmp_path, {"safe": "ok", "hostile": "a\nb"})
+        with pytest.raises(click.ClickException) as caught:
+            self._run(["emit-fields", str(document), "safe", "hostile"])
+        assert "'hostile'" in str(caught.value)
+        assert "line break" in str(caught.value)
+
+    def test_an_unreadable_document_propagates_without_tolerant(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(OSError):
+            self._run(["emit-fields", str(tmp_path / "absent.json"), "a"])
+
+    def test_malformed_json_propagates_without_tolerant(self, tmp_path: Path) -> None:
+        document = tmp_path / "bad.json"
+        document.write_text("{not json", encoding="utf-8")
+        with pytest.raises(ValueError):
+            self._run(["emit-fields", str(document), "a"])
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ('[{"n": 1}][{"n": 2}]', [{"n": 1}, {"n": 2}]),
+            ("[]", []),
+            ("", []),
+            ('{"message": "x"}', [{"message": "x"}]),
+            ("[1,2]\n[3]\n", [1, 2, 3]),
+        ],
+        ids=["two-pages", "empty-page", "empty-doc", "non-array", "newline-split"],
+    )
+    def test_flatten_pages_in_process(
+        self, tmp_path: Path, raw: str, expected: list[object]
+    ) -> None:
+        source = tmp_path / "raw.json"
+        source.write_text(raw, encoding="utf-8")
+        out = tmp_path / "out.json"
+        self._run(["flatten-pages", str(source), str(out)])
+        assert json.loads(out.read_text(encoding="utf-8")) == expected
