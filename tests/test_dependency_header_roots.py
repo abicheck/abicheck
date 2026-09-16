@@ -53,9 +53,10 @@ import pytest
 
 from abicheck.extract.dependency_header_roots import (
     dependency_header_predicate,
+    is_dependency_header,
     prepare_dependency_header_roots,
 )
-from abicheck.provenance import is_dependency_header, is_system_header
+from abicheck.provenance import is_system_header
 
 
 @pytest.fixture

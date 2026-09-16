@@ -212,7 +212,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from .provenance import is_dependency_header
+from .extract.dependency_header_roots import dependency_header_predicate
 
 #: Ambient, per-thread override forcing the pruner off regardless of
 #: ``ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS`` -- mirrors ``dumper_cache.py``'s
@@ -352,24 +352,17 @@ def _subtree_reaches_a_kept_file(value: Any, is_dep: Any) -> bool:
 def make_dependency_header_predicate(header_roots: tuple[str, ...]) -> Any:
     """Build a memoized ``is_dep(path) -> bool`` closure for *header_roots*.
 
-    :func:`abicheck.provenance.is_dependency_header` re-resolves (and, for a
-    relative root, calls ``Path.resolve()``/``is_dir()`` on) the *entire*
-    header-root set on every single call -- fine for its normal per-snapshot
-    call volume, but this module may ask it thousands of times per header
-    dump (once per candidate function/variable node), so per-unique-path
-    memoization here is what keeps pruning itself cheap. Mirrors
-    ``provenance.apply_provenance``'s own ``origin_cache`` idiom.
+    Thin alias for :func:`abicheck.extract.dependency_header_roots.
+    dependency_header_predicate`, which owns this pattern now: the prepared
+    root set plus the per-unique-path memo this module used to hand-roll. The
+    reason it exists is unchanged -- ``is_dependency_header`` prepares the
+    entire root set per call, and this module asks it once per candidate
+    function/variable node while a header dump's JSON is still being parsed
+    -- but the implementation is shared with the other batch callers rather
+    than duplicated here. Kept as a named function because this module's
+    tests and call sites refer to it by this name.
     """
-    cache: dict[str, bool] = {}
-
-    def is_dep(source_header: str) -> bool:
-        cached = cache.get(source_header)
-        if cached is None:
-            cached = is_dependency_header(source_header, header_roots)
-            cache[source_header] = cached
-        return cached
-
-    return is_dep
+    return dependency_header_predicate(header_roots)
 
 
 class DependencyDeclPruningHook:

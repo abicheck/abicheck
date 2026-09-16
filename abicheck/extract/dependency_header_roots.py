@@ -69,8 +69,9 @@ properly-owned module, which is what this is.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from ..model import ScopeOrigin
 from ..provenance import (
@@ -89,6 +90,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 __all__ = [
     "DependencyHeaderRoots",
     "dependency_header_predicate",
+    "is_dependency_header",
     "prepare_dependency_header_roots",
 ]
 
@@ -185,3 +187,69 @@ def dependency_header_predicate(
         return cached
 
     return is_dep
+
+
+def is_dependency_header(
+    source_header: str | None,
+    header_roots: Sequence[Path | str] | None,
+) -> bool:
+    """Whether *source_header* is confidently a toolchain/dependency header,
+    given the actual ``-H``/``--header`` root set a dump was invoked with.
+
+    Unlike a bare :func:`is_system_header` path check, this treats any header
+    that *is* one of the given roots, or lives under a root's own directory
+    (even recursively, e.g. a private header the root ``#include``s), as
+    never a dependency -- regardless of whether that directory happens to
+    sit under a system prefix. This matters for an installed library
+    analyzed via its real install path (``-H /usr/include/mylib/api.h`` or
+    ``/usr/local/include/mylib/api.h``): without this check,
+    ``is_system_header`` alone would misclassify the library's *own* headers
+    as toolchain headers and silently drop the whole snapshot (Codex
+    review). Reuses :func:`classify_origin`'s existing public-header-set
+    precedence (an explicit match is checked before the system-header
+    heuristic ever runs) by treating *header_roots* as that set -- the roots
+    themselves as the "public headers" and their parent directories as the
+    "public dirs", so both an exact-root match and anything living in the
+    same directory tree win over the system-header classification.
+
+    Falls back to a bare :func:`is_system_header` check when no
+    *header_roots* were given at all (e.g. a dump built from an already
+    in-memory snapshot with no recorded root set).
+    """
+    if not source_header:
+        return False
+    if not header_roots:
+        return is_system_header(source_header)
+    # Resolve relative roots (e.g. `-H include/api.h`) to absolute paths
+    # before segmenting. Without this, a short relative parent directory
+    # like `include` becomes a single-segment public dir, and
+    # `_matches_public`'s contiguous-subsequence containment check then
+    # matches that same generic segment inside *any* path containing an
+    # "include" component -- including real system paths like
+    # `/usr/include/...` -- defeating the exclusion entirely (Codex
+    # review). Resolving first makes the root's own segments as specific
+    # as the real filesystem location, so only paths actually under it
+    # can match.
+    #
+    # `-H`/`--header` accepts a directory as well as a file (Click help:
+    # "Public header file or directory"). Widening *every* root to its
+    # parent unconditionally over-widens a directory root -- `-H
+    # /usr/include/mylib` would turn into the public dir `/usr/include`,
+    # making every unrelated header under that prefix (including real
+    # dependency headers) match as project-owned (Codex review). Only a
+    # *file* root widens to its parent; a directory root is used as-is.
+    #
+    # A file root installed flat in a system prefix (e.g. `-H
+    # /usr/include/zlib.h`) is a further special case: its parent
+    # (`/usr/include`) is not a *project* directory at all -- it's the bare
+    # system prefix itself, with nothing appended -- so widening to it
+    # would make every unrelated system header underneath match as
+    # project-owned too, same failure shape as the directory-root case
+    # above (Codex review). A root under a project *subdirectory* of a
+    # system prefix (`-H /usr/include/mylib/api.h`, parent
+    # `/usr/include/mylib`) is unaffected: that parent is not itself one of
+    # the bare system-dir suffixes, only *within* one.
+    # A caller asking about many headers against one root set should use
+    # `dependency_header_predicate` instead: this prepares the whole root set
+    # for a single question, which is exactly the cost this module hoists.
+    return prepare_dependency_header_roots(header_roots).is_dependency(source_header)

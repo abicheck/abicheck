@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.extract.dependency_header_roots import is_dependency_header
 from abicheck.model import (
     AbiSnapshot,
     EnumMember,
@@ -39,7 +40,6 @@ from abicheck.provenance import (
     build_public_set,
     classify_origin,
     header_from_location,
-    is_dependency_header,
     tag_provenance,
 )
 from abicheck.serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
