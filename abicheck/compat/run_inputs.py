@@ -46,9 +46,14 @@ from typing import TYPE_CHECKING
 
 from ..errors import SnapshotError
 from ..model.header_exclusion_record import (
-    EXACT_MATCHING,
-    patterns_achievable_under,
+    DESCRIPTOR_MATCHING,
     record_header_exclusions,
+)
+from ..model.header_skip_rules import (
+    HeaderSkipRule,
+    achieved_exclusion_patterns,
+    apply_skip_rules,
+    compile_skip_rules,
 )
 from ..serialization import load_snapshot
 from ._errors import _compat_fail
@@ -62,6 +67,8 @@ from .descriptor import CompatDescriptor, parse_descriptor
 from .descriptor_expansion import expand_descriptor_headers, expand_descriptor_libs
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..model.snapshot import AbiSnapshot
 
 
@@ -253,65 +260,109 @@ def _parse_compat_descriptors(
         _compat_fail("parsing descriptor", exc)
 
 
-#: fnmatch's own metacharacters -- the ones that make a native
-#: `--exclude-header` pattern a glob, and that a descriptor's exact
-#: membership can never match.
-_GLOB_METACHARACTERS = frozenset("*?[")
+def effective_skip_rules(
+    desc: CompatDescriptor, cli_skips: Sequence[str] = ()
+) -> tuple[HeaderSkipRule, ...]:
+    """The descriptor's own skip elements, plus ``-skip-headers FILE``'s.
 
+    The two union rather than replace: both are exclusions and ABICC applies
+    both. The descriptor's are per-side by construction (each side names its
+    own), which is why they are merged here rather than once in
+    :func:`_load_compat_inputs`.
 
-def warn_glob_skips_do_nothing(skips: list[str], quiet: bool) -> None:
-    """Say so when a descriptor skip could only have matched as a glob.
-
-    `<skip_headers>`/`<skip_including>` are matched as exact basenames or
-    paths (`_resolve_headers_from_list`), so `*.h` excludes nothing at all.
-    It is also not recorded as an achieved exclusion, since it achieved none
-    -- but silently doing nothing with a rule the user wrote is its own
-    failure, and it is what made this look like working configuration.
-
-    Whether real ABICC globs here is a parity question with its own evidence
-    requirement, recorded in `docs/contribute/known-gaps.md`; this only
-    reports what *this* implementation did.
+    ``-skip-headers`` entries are ``<skip_headers>``-equivalent (exclude, not
+    "do not include directly") and go through the same compiler, so one rule
+    language governs both spellings -- a second, private membership test for
+    the CLI file is exactly how the descriptor path came to have one.
     """
-    ignored = [s for s in skips if _GLOB_METACHARACTERS & set(s)]
-    if not ignored:
+    return compile_skip_rules(sorted(cli_skips), ()) + desc.skip_rules()
+
+
+def resolve_and_narrow_headers(
+    desc: CompatDescriptor,
+    rules: Sequence[HeaderSkipRule],
+    headers_list_path: Path | None = None,
+    single_header: str | None = None,
+) -> tuple[list[Path], list[Path]]:
+    """``(universe, narrowed)`` -- the operand list before and after *rules*.
+
+    Returned as a pair, and resolved once, because the universe the rules
+    are *recorded* against has to be the same one they were *applied* to.
+    Deriving the record from the descriptor's ``<headers>`` alone meant a
+    rule whose only match arrived via ``-headers-list`` or ``-header`` was
+    reported as matching nothing and its achieved narrowing went unrecorded
+    (CodeRabbit review) -- and an unrecorded narrowing is precisely what
+    lets the comparability gate accept an asymmetric pair, the failure
+    :func:`record_descriptor_skips` exists to prevent.
+
+    Lives here rather than in ``compat.cli`` because it is the input half
+    of the same question :func:`record_descriptor_skips` answers, and
+    keeping the two together is what stops a third caller doing one without
+    the other.
+    """
+    from ._helpers import _resolve_headers_from_list
+
+    universe = _resolve_headers_from_list(
+        headers_list_path, single_header, desc.headers
+    )
+    return universe, apply_skip_rules(universe, rules)
+
+
+def warn_unreachable_skip_rules(
+    rules: Sequence[HeaderSkipRule], headers: Sequence[Path], quiet: bool
+) -> None:
+    """Say so when a compiled skip rule took no header in this run.
+
+    The three ABICC rule classes are all really matched now
+    (:mod:`abicheck.model.header_skip_rules`), so the old
+    "a wildcard excluded nothing" warning no longer describes anything --
+    a pattern rule works. What remains worth reporting is the more general
+    case it was a special instance of: a rule the user wrote that matched
+    nothing at all, which usually means a typo or a rule written against a
+    tree this descriptor does not point at. Silently doing nothing with a
+    rule is what made the previous behavior look like working
+    configuration.
+    """
+    unmatched = [r.value for r in rules if not any(r.matches(h) for h in headers)]
+    if not unmatched:
         return
     _do_echo(
         "Warning: descriptor skip rule(s) "
-        + ", ".join(repr(s) for s in ignored)
-        + " contain a wildcard, but <skip_headers>/<skip_including> are "
-        "matched as exact header names or paths -- they excluded nothing. "
-        "Name the headers explicitly.",
+        + ", ".join(repr(s) for s in sorted(set(unmatched)))
+        + " matched no header in this run -- check the spelling against the "
+        "<headers> tree (a bare name matches a file name, a value containing "
+        "'/' matches a tree-relative path or directory, and one containing "
+        "'*'/'?'/'[' is matched as a pattern).",
         quiet,
     )
 
 
 def record_descriptor_skips(
-    snapshot: AbiSnapshot, skips: list[str], quiet: bool
+    snapshot: AbiSnapshot,
+    rules: Sequence[HeaderSkipRule],
+    quiet: bool,
+    headers: Sequence[Path] = (),
 ) -> AbiSnapshot:
     """Record a descriptor's achieved header narrowing, and report what it
     could not achieve.
 
     One function because the two steps always belong together: what gets
-    *recorded* is the exact-matchable subset, and what is left over is
-    precisely what has to be *reported*. Splitting them is how a third caller
-    ends up doing one and not the other -- the bug shape this whole area
-    keeps producing.
+    *recorded* is the subset that really narrowed the analyzed surface, and
+    what is left over is precisely what has to be *reported*. Splitting them
+    is how a third caller ends up doing one and not the other -- the bug
+    shape this whole area keeps producing.
+
+    Only ``<skip_headers>`` rules are recorded
+    (:func:`~abicheck.model.header_skip_rules.achieved_exclusion_patterns`).
+    A ``<skip_including>`` rule changes how a declaration is reached, not
+    whether it belongs to the contract, so recording it would make the
+    snapshot claim a narrowing it did not perform -- the coverage warning
+    would then report headers omitted, and the comparability gate would
+    refuse an otherwise identical unexcluded operand.
     """
-    warn_glob_skips_do_nothing(skips, quiet)
-    # The patterns *and* the rule they were matched by. Recording the text
-    # alone -- or trying to decide from the text which patterns mean the same
-    # thing under both rules -- was falsified twice; see
-    # `exclusions_are_symmetric`.
-    # Only what the exact-membership rule could actually have excluded. A
-    # wildcard skip matches nothing under it -- `warn_glob_skips_do_nothing`
-    # has just said so -- and recording it anyway would make this snapshot
-    # claim a narrowing that did not happen, which the coverage warning then
-    # reports and the comparability gate then refuses against an identical
-    # unexcluded snapshot (Codex review). The recorded *rule* and this filter
-    # answer different questions: the rule decides whether two sides are
-    # comparable, this keeps each side's own record honest.
+    warn_unreachable_skip_rules(rules, headers, quiet)
     return record_header_exclusions(
         snapshot,
-        patterns_achievable_under(skips, EXACT_MATCHING),
-        matching=EXACT_MATCHING,
+        achieved_exclusion_patterns(rules, headers),
+        matching=DESCRIPTOR_MATCHING,
     )

@@ -41,14 +41,12 @@ from abicheck.cli_compare_release import (
     _format_release_markdown,
     _release_md_bundle_findings,
     _release_md_matrix_findings,
-    _resolve_release_headers,
     _resolve_release_severity_config,
 )
 from abicheck.cli_helpers_compare import (
     _collect_additions,
     _collect_release_inputs,
     _merge_gcc_options,
-    _resolve_per_side_options,
     _warn_ignored_flags,
 )
 from abicheck.cli_resolve import (
@@ -264,7 +262,7 @@ class TestSafeWriteOutput:
         assert "to-stdout" in capsys.readouterr().out
 
 
-# ── _merge_gcc_options / _resolve_per_side_options (cli.py helpers) ────────────
+# ── _merge_gcc_options (cli.py helpers) ───────────────────────────────────────
 
 
 class TestSmallHelpers:
@@ -528,20 +526,6 @@ class TestSmallHelpers:
         # full/symbols/graph are rejected outright -- no alias, no --max shorthand.
         rejected = runner.invoke(main, ["dump", "--depth", "full"])
         assert rejected.exit_code != 0
-
-    def test_resolve_per_side_options_overrides(self, tmp_path: Path) -> None:
-        h = (tmp_path / "h.h",)
-        oh = (tmp_path / "old.h",)
-        old_h, new_h, old_inc, new_inc = _resolve_per_side_options(
-            h,
-            (),
-            oh,
-            (),
-            (),
-            (),
-        )
-        assert old_h == list(oh)  # per-side override wins
-        assert new_h == list(h)  # falls back to shared
 
     def test_collect_additions(self) -> None:
         result = DiffResult(
@@ -1000,32 +984,6 @@ class TestCompareReleaseFormatHelpers:
         lines = _release_md_matrix_findings(mr, mr.changes)
         assert any("Matrix" in ln for ln in lines)
         assert any("foo" in ln for ln in lines)
-
-
-class TestResolveReleaseHeaders:
-    def test_header_dir_used_when_no_per_side(self, tmp_path: Path) -> None:
-        hd_old = tmp_path / "old-hdr"
-        hd_new = tmp_path / "new-hdr"
-        old_h, new_h = _resolve_release_headers(
-            (),
-            (),
-            (),
-            hd_old,
-            hd_new,
-        )
-        assert old_h == [hd_old]
-        assert new_h == [hd_new]
-
-    def test_per_side_overrides_header_dir(self, tmp_path: Path) -> None:
-        oh = (tmp_path / "old.h",)
-        old_h, new_h = _resolve_release_headers(
-            (),
-            oh,
-            (),
-            tmp_path / "old-hdr",
-            None,
-        )
-        assert old_h == list(oh)
 
 
 class TestResolveReleaseSeverityConfig:

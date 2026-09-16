@@ -6818,36 +6818,44 @@ recorded patterns keep meaning "what this extraction actually did". Not
 attempted here, since it is a manifest-schema change with its own migration
 rather than a review-round fix.
 
-### Whether ABICC's `<skip_headers>` accepts a glob is unverified
+### `<skip_headers>` cannot stop a transitively-reached header being analyzed
 
-A descriptor's `<skip_headers>`/`<skip_including>` are matched here as exact
-header basenames or paths (`compat/_helpers._resolve_headers_from_list`),
-while the native `--exclude-header` is `fnmatch`. So the same text names two
-different scopes: `*.h` excludes every header natively and nothing at all
-through a descriptor.
+**The glob question this entry used to record is closed.** It asked whether
+real ABICC globs in `<skip_headers>`, and left descriptor skips matched as
+exact basenames or paths in the meantime -- under which every tree-relative
+rule (Intel MKL's own `fftw/fftw.h`, `fftw/offload/`) matched nothing at all
+while the run still produced a confident verdict. The evidence the entry
+asked for is in ABICC's own source: `Internals/Path.pm`'s `classifyPath` and
+`Internals/Filter.pm`'s `skipHeader_I` classify each rule into one of three
+classes -- a bare name matched against the basename, a value containing a
+separator matched against the path at component boundaries (including a
+directory's descendants), and a metacharacter-bearing value compiled as a
+regex-like pattern. `abicheck/model/header_skip_rules.py` is that
+classification, and the descriptor's snapshot now records
+`excluded_header_matching = "abicc"` rather than `"exact"`, since the same
+text genuinely names a different set of headers under the two rules.
 
-That divergence was reported through the snapshot's recorded scope, where it
-was worse than a usability wart: both paths wrote the raw text into
-`excluded_header_patterns`, so a descriptor-narrowed snapshot and a
-natively-narrowed one recorded `("*.h",)` for two entirely different achieved
-surfaces, and the ADR-050 comparability gate accepted the pair -- able to
-report fabricated additions or removals (Codex review on PR #1286). Fixed by
-recording only what the matching rule could actually achieve
-(`model.header_exclusion_record.exact_match_patterns_only`): a pattern with
-no metacharacter means the same thing under both rules and is recorded
-unchanged, one with a metacharacter narrowed nothing under exact matching and
-is not recorded. `compat check`/`compat dump` now say so out loud
-(`compat.run_inputs.record_descriptor_skips`) rather than ignoring the rule
-silently.
+Rewriting every rule to a bare basename was considered and rejected: it fixes
+MKL and over-excludes an unrelated `version.h` under a different subtree, and
+no example test drawn from the reported case can tell the two apart.
 
-**What is still open is the parity question underneath it.** The other
-candidate fix -- make descriptor skips use `fnmatch` too -- would have made
-both paths agree, and may well be what real `abi-compliance-checker` does.
-It was not taken, because taking it would change ABICC drop-in behaviour on a
-*guess* about ABICC's own semantics, which is a parity claim needing evidence
-from the real tool (an `abicc`-marked comparison), not a comparability fix
-smuggled into a review round. Until someone checks it against real ABICC, a
-glob in `<skip_headers>` is reported as ineffective rather than honoured.
+**What is still open** is the other half of `<skip_headers>`'s meaning. ABICC
+distinguishes two elements -- `<skip_headers>` is "do not include *and do not
+analyze*", `<skip_including>` is "do not include directly, but still analyze
+when reached" -- and the two are now modelled separately, with only
+`<skip_headers>` recorded as an achieved narrowing of the surface. Both
+correctly drop a header from the *direct* `-H` operand list. Neither can stop
+a header being parsed when another header reaches it through its own
+`#include`, because filtering happens on the resolved header list after the
+directory walk and before any parse. The native `--exclude-header` path
+shares that limitation exactly (`extract/header_exclusions.py`), which is why
+closing it is a post-parse filter by defining header rather than a change to
+either rule language -- and why it is recorded here rather than patched on
+the descriptor side alone.
+
+Until then, `docs/reference/abicc-format-compliance.md` states partial
+support for `<skip_headers>`, and the two elements' remaining difference is
+in what a run *records*, not in what it parses.
 
 ### The composite Action's single `--write` slot can leave its unconditional coverage/assurance/severity floors without a structured report
 

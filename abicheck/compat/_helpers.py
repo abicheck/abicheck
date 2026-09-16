@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 import click
 
 from ..checker import ChangeKind
+from ..model.header_skip_rules import HeaderSkipRule, apply_skip_rules
 from ..policy.classification import (
     API_BREAK_KINDS as _POLICY_API_BREAK_KINDS,
     compute_verdict as _compute_verdict,
@@ -38,6 +39,8 @@ from ..policy.classification import (
 from ._errors import _compat_fail
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..checker import DiffResult
     from ..suppression import SuppressionList
 
@@ -578,7 +581,14 @@ def _setup_logging(
 
 
 def _load_skip_headers(skip_headers_path: Path | None) -> set[str]:
-    """Load a set of header names/paths to exclude from analysis."""
+    """Load the rule spellings from a ``-skip-headers FILE``.
+
+    Returns the raw text of each rule; compiling them into
+    :class:`~abicheck.model.header_skip_rules.HeaderSkipRule` objects is the
+    caller's job, because ``-skip-headers`` and a descriptor's own
+    ``<skip_headers>`` are the same rule language and must be compiled by
+    the same code.
+    """
     if skip_headers_path is None:
         return set()
     lines = [
@@ -594,9 +604,15 @@ def _resolve_headers_from_list(
     single_header: str | None,
     base_headers: list[Path],
     *,
-    skip_headers: set[str] | None = None,
+    skip_rules: Sequence[HeaderSkipRule] = (),
 ) -> list[Path]:
-    """Merge headers from -headers-list file and -header flag with descriptor headers."""
+    """Merge headers from -headers-list file and -header flag with descriptor headers.
+
+    *skip_rules* are compiled ABICC skip rules (see
+    :mod:`abicheck.model.header_skip_rules`) -- three real rule classes, not
+    the ``h.name in skip or str(h) in skip`` membership test this used to
+    apply, under which every tree-relative rule matched nothing.
+    """
     result = list(base_headers)
 
     if headers_list_path is not None:
@@ -625,13 +641,11 @@ def _resolve_headers_from_list(
 
     result = expand_descriptor_headers(result)
 
-    # Apply -skip-headers filtering: exclude headers whose name or path matches
-    if skip_headers:
-        result = [
-            h
-            for h in result
-            if h.name not in skip_headers and str(h) not in skip_headers
-        ]
+    # Apply the skip rules: a bare name matches a basename, a rule with a
+    # separator matches at component boundaries (including descendants of a
+    # directory rule), and a metacharacter-bearing rule matches as a pattern.
+    if skip_rules:
+        result = apply_skip_rules(result, skip_rules)
 
     return result
 

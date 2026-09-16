@@ -157,11 +157,32 @@ def build_compare_dry_run_result(
             new_build_info=new_build_info,
         ),
     )
-    all_headers = list(headers) + list(old_headers_only) + list(new_headers_only)
+    # Each side's *effective* header list, composed by the one shared rule
+    # the run itself applies (`model.sided_inputs`): a side-specific
+    # `--header old=` adds to the both-sides value rather than replacing it,
+    # and the receipt has to show what will actually be parsed. Rendered as
+    # one line while the two sides agree, so the common case reads exactly
+    # as it did before this became side-aware.
+    from ...model.sided_inputs import compose_sided_paths
+
+    old_effective = compose_sided_paths(headers, old_headers_only)
+    new_effective = compose_sided_paths(headers, new_headers_only)
+
+    def _fmt(paths: list[Path]) -> str:
+        """One side's header list as the receipt renders it."""
+        return ", ".join(str(h) for h in paths)
+
+    if old_effective == new_effective:
+        header_lines = [f"headers: {_fmt(old_effective)}"] if old_effective else []
+    else:
+        header_lines = [
+            f"headers (old): {_fmt(old_effective) or '(none)'}",
+            f"headers (new): {_fmt(new_effective) or '(none)'}",
+        ]
     result.add(
         "Headers and compile context",
         f"ast-frontend: {header_backend}",
-        f"headers: {', '.join(str(h) for h in all_headers)}" if all_headers else None,
+        *header_lines,
     )
     result.add(
         "Build/source inputs",

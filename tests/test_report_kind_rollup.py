@@ -237,3 +237,91 @@ class TestAGatingSectionIsNeverRolledUp:
         # Whatever the default resolves to, the accessor must agree with the
         # config rather than re-deriving it from a rendered label.
         assert level == getattr(config, "quality_issues", None)
+
+
+class TestPerLibraryBreakdown:
+    """A rolled-up flood in a multi-library release names its libraries.
+
+    Bug class: a summary that discards the one attribute a reader needs to
+    act on. The count and five sample symbols answer "how many" and "of
+    what"; across a 28-library release they do not answer "where", and the
+    sample symbols are the *worst* proxy for it -- an alias-stub name
+    recurs in several libraries at once, so five of them can all come from
+    one library while the flood spans twenty.
+    """
+
+    @staticmethod
+    def _changes(spec: dict[str | None, int]) -> list[Change]:
+        out: list[Change] = []
+        n = 0
+        for lib, count in spec.items():
+            for _ in range(count):
+                n += 1
+                out.append(
+                    Change(
+                        kind=ChangeKind.FUNC_ADDED,
+                        symbol=f"s{n}",
+                        description="added",
+                        library=lib,
+                    )
+                )
+        return out
+
+    def test_counts_are_per_library_and_descending(self) -> None:
+        _, rollups = roll_up_large_kinds(
+            self._changes({"libb.so": 30, "liba.so": 5, "libc.so": 30})
+        )
+        assert rollups[0].counts_by_library == (
+            ("libb.so", 30),
+            ("libc.so", 30),
+            ("liba.so", 5),
+        )
+
+    def test_the_counts_sum_to_the_rollup_count(self) -> None:
+        """The invariant that makes the breakdown trustworthy."""
+        _, rollups = roll_up_large_kinds(
+            self._changes({"liba.so": 30, "libb.so": 7, "libc.so": 1})
+        )
+        r = rollups[0]
+        assert sum(n for _, n in r.counts_by_library) == r.count
+
+    def test_the_counts_sum_to_the_count_with_mixed_attribution(self) -> None:
+        """The invariant, on the input that broke it.
+
+        Dropping unattributed findings let a headline of 61 sit above a
+        breakdown totalling 60 -- worse than no breakdown, because a reader
+        cannot tell an omission from a bug (CodeRabbit review).
+        """
+        _, rollups = roll_up_large_kinds(
+            self._changes({"liba.so": 30, "libb.so": 30, None: 1})
+        )
+        r = rollups[0]
+        assert r.count == 61
+        assert sum(n for _, n in r.counts_by_library) == r.count
+        assert ("(unattributed)", 1) in r.counts_by_library
+
+    def test_one_library_plus_unattributed_still_shows_both(self) -> None:
+        """Two buckets is a real breakdown even when one is the unattributed
+        one -- it is exactly the case where a reader needs to know some
+        findings could not be placed."""
+        _, rollups = roll_up_large_kinds(self._changes({"liba.so": 30, None: 1}))
+        r = rollups[0]
+        assert r.counts_by_library == (("liba.so", 30), ("(unattributed)", 1))
+        assert sum(n for _, n in r.counts_by_library) == r.count
+
+    def test_a_single_library_run_is_unchanged(self) -> None:
+        """The negative control and the compatibility claim: one library, or
+        no attribution at all, reads exactly as it did before."""
+        _, one = roll_up_large_kinds(self._changes({"liba.so": 40}))
+        _, none = roll_up_large_kinds(self._changes({None: 40}))
+        assert one[0].counts_by_library == ()
+        assert none[0].counts_by_library == ()
+
+    def test_the_breakdown_is_rendered(self) -> None:
+        _, rollups = roll_up_large_kinds(self._changes({"liba.so": 30, "libb.so": 30}))
+        line = render_kind_rollups(rollups)[0]
+        assert "By library: liba.so (30), libb.so (30)." in line
+
+    def test_a_single_library_renders_as_before(self) -> None:
+        _, rollups = roll_up_large_kinds(self._changes({"liba.so": 40}))
+        assert "By library" not in render_kind_rollups(rollups)[0]

@@ -33,13 +33,29 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-#: The two rules a run may have matched its exclusion patterns by. ``glob``
-#: is native ``--exclude-header`` (fnmatch, plus a ``*/<pattern>`` try);
-#: ``exact`` is a descriptor's ``<skip_headers>`` basename-or-path
-#: membership. Recorded rather than inferred -- see
-#: :func:`exclusions_are_symmetric`.
+#: The rules a run may have matched its exclusion patterns by. ``glob`` is
+#: native ``--exclude-header`` (fnmatch, plus a ``*/<pattern>`` try).
+#: Recorded rather than inferred -- see :func:`exclusions_are_symmetric`.
 GLOB_MATCHING = "glob"
+#: A descriptor's ``<skip_headers>`` before it gained ABICC's real rule
+#: classes, when it was a plain basename-or-path membership test. **No run
+#: produces this any more**; it stays recognised only so a baseline dumped
+#: by such a build loads as the narrowing it really performed, rather than
+#: as :data:`UNKNOWN_MATCHING`, and is correctly refused against a snapshot
+#: narrowed under :data:`DESCRIPTOR_MATCHING` -- the two really do name
+#: different sets of headers for the same text.
 EXACT_MATCHING = "exact"
+#: A descriptor's ``<skip_headers>`` under real ABICC rule classes --
+#: basename, component-boundary path/directory, or compiled pattern (see
+#: :mod:`abicheck.model.header_skip_rules`). Its own rule rather than a
+#: variant of :data:`EXACT_MATCHING`, for the same reason ``exact`` is not
+#: a variant of ``glob``: the same text names a different set of headers
+#: under each, so two sides narrowed under different rules are not
+#: comparable. A snapshot written by a build that only had
+#: ``exact`` therefore no longer compares equal to one written now -- which
+#: is the honest answer, because the two runs really did exclude different
+#: sets (``fftw/fftw.h`` excluded nothing under ``exact``).
+DESCRIPTOR_MATCHING = "abicc"
 #: A snapshot that recorded exclusion patterns *before* the rule was
 #: persisted (schema v47). Not a third rule -- the absence of the answer.
 #: Defaulting such a snapshot to ``glob`` was wrong: descriptor exclusions
@@ -56,7 +72,7 @@ UNKNOWN_MATCHING = "unknown"
 #: be approved, though this reader cannot establish what either excluded
 #: (Codex review). Recognising a name is not the same as implementing it.
 KNOWN_MATCHING_RULES: frozenset[str] = frozenset(
-    {GLOB_MATCHING, EXACT_MATCHING, UNKNOWN_MATCHING}
+    {GLOB_MATCHING, EXACT_MATCHING, DESCRIPTOR_MATCHING, UNKNOWN_MATCHING}
 )
 
 
@@ -160,39 +176,3 @@ def exclusions_are_symmetric(
     if UNKNOWN_MATCHING in (old_matching, new_matching):
         return False
     return old_matching == new_matching
-
-
-#: fnmatch's own metacharacters -- the ones that make a native
-#: ``--exclude-header`` pattern a glob, and that an exact basename-or-path
-#: membership test can never match.
-_GLOB_METACHARACTERS = frozenset("*?[")
-
-
-def patterns_achievable_under(
-    patterns: Sequence[str], matching: str
-) -> tuple[str, ...]:
-    """*patterns* minus any that cannot have excluded anything under *matching*.
-
-    Under :data:`EXACT_MATCHING` a pattern containing a glob metacharacter
-    matches no header at all, so it narrowed nothing and is not part of the
-    achieved scope. Recording it anyway makes the snapshot claim a narrowing
-    that did not happen: the coverage warning then reports headers omitted,
-    and the comparability gate refuses an otherwise identical unexcluded
-    snapshot -- ineffective configuration persisted as achieved reduced
-    evidence (Codex review).
-
-    This filter and the recorded *rule* are complements, not alternatives,
-    and conflating them is how it came to be dropped: an earlier round used
-    the metacharacter test to decide *comparability*, which was wrong (a
-    plain ``include/foo.h`` still means different things under the two
-    rules), so it was removed when the rule began to be recorded. But it was
-    never wrong as a *what did this run actually achieve* test, which is a
-    different question. The rule makes two sides comparable or not; this
-    keeps each side's own record honest.
-
-    Under :data:`GLOB_MATCHING` every pattern is achievable by construction,
-    so the native path passes through untouched.
-    """
-    if matching != EXACT_MATCHING:
-        return tuple(patterns)
-    return tuple(p for p in patterns if not (_GLOB_METACHARACTERS & set(p)))

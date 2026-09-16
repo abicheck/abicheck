@@ -102,6 +102,16 @@ _NEVER_FILTER_KIND_NAMES: frozenset[str] = frozenset(
         # reachability gate (header_graph.is_public_dependency_node); this
         # finding must not be re-filtered by a second, incompatible one.
         "public_api_internal_dependency_added",
+        # The hygiene finding that *reports* an undocumented export. Since
+        # ``policy.public_surface_closure._seed_undeclared_exports`` began
+        # placing export-table-only symbols in ``all_symbols``, every other
+        # finding about such a symbol is demoted as ``not-exported`` -- so
+        # without this exemption the one finding explaining why they were
+        # demoted would be demoted with them, leaving the leak reported
+        # nowhere at all. Same shape as the leak kinds above: its subject is
+        # by construction outside the declared public surface, which is the
+        # thing it exists to say.
+        "exported_not_public",
         # Preprocessor / const-constant findings. Their ``symbol`` is a
         # constant name, not an exported symbol or a reachable type, so the
         # normal symbol/type reachability classifier would always demote them.
@@ -518,6 +528,46 @@ def surface_unions(surf_old: PublicSurface, surf_new: PublicSurface) -> SurfaceU
     )
 
 
+#: Kinds that an *undeclared export* seeding must never demote.
+#:
+#: `policy.public_surface_closure._seed_undeclared_exports` places an
+#: export-table-only symbol in `all_symbols` so binary-level *property*
+#: churn on it (alignment, size, binding) is recognised as provably outside
+#: the declared contract. The symbol's **disappearance** is a different
+#: fact: the catalog's own ground truth
+#: (`catalog/cases/case182_accidental_export_removed_still_breaking`) states
+#: it exactly -- "the absence of a header declaration proves it wasn't part
+#: of the documented contract; it does not prove nobody depends on it. A
+#: consumer that obtained the symbol via dlsym(), a leaked internal header,
+#: or a hand-written prototype fails at lookup time once v2 removes it."
+#:
+#: Without this, seeding turned that case from BREAKING (exit 4) into a
+#: clean exit 0 -- a real break hidden by a noise filter, which is the one
+#: failure "suppressing the noise and hiding a real break look the same
+#: from the noisy side" names. Scoped to the seeded set, so a *declared*
+#: private symbol's removal keeps its long-standing demotion.
+_UNDECLARED_EXPORT_KEEP_KINDS: frozenset[str] = frozenset(
+    {
+        "func_removed",
+        "func_removed_elf_only",
+        "var_removed",
+        "var_removed_elf_only",
+    }
+)
+
+
+def _is_undeclared_export_existence_change(
+    change: Change, surf_old: PublicSurface, surf_new: PublicSurface
+) -> bool:
+    """Whether *change* is a removal of a symbol only the export table knew."""
+    if change.kind.value not in _UNDECLARED_EXPORT_KEEP_KINDS:
+        return False
+    sym = change.symbol or ""
+    return sym in (
+        surf_old.undeclared_export_symbols | surf_new.undeclared_export_symbols
+    )
+
+
 def classify_change_surface(
     change: Change,
     surf_old: PublicSurface,
@@ -561,6 +611,8 @@ def classify_change_surface(
         # ELF-only baseline) offers nothing to cross-check against —
         # exactly the mixed-evidence case this guard exists to protect
         # every other kind of finding from.
+        return True, None
+    if _is_undeclared_export_existence_change(change, surf_old, surf_new):
         return True, None
     if change.kind.value in _HIDDEN_FRIEND_KIND_NAMES:
         return _classify_hidden_friend_surface(change, surf_old, surf_new)

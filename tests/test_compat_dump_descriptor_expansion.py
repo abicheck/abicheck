@@ -245,7 +245,17 @@ class TestTheDescriptorsCompileAndSkipFieldsAreApplied:
             captured,
         )
         assert result.exit_code == 0, result.output
-        assert captured["gcc_options"] is None
+        # A descriptor stating no <include_paths> is in ABICC's *automatic*
+        # include-path mode, so its own <headers> root is searched -- which
+        # is the whole point of that mode, and what an umbrella header
+        # including its sibling by <angle> name needs.
+        #
+        # Spelled from the real directory, not through
+        # `descriptor_include_flag`: that helper answers "where does a
+        # descriptor's POSIX *literal* land on this host" and re-adds the
+        # drive on Windows, which double-prefixed an already-host-spelled
+        # `tmp_path` into `-ID:D:\a\...` (real Windows CI failure).
+        assert captured["gcc_options"] == f"-I{tree / 'include'}"
         assert sorted(h.name for h in captured["headers"]) == ["a.h", "b.h"]
 
 
@@ -291,19 +301,27 @@ class TestDescriptorSkipsAreRecordedOnTheSnapshot:
         snap = self._dump_with_skip(tree, "<skip_headers>\n  b.h\n</skip_headers>\n")
         assert snap.excluded_header_patterns == ("b.h",)
 
-    def test_skip_including_is_recorded_too(self, tree):
+    def test_skip_including_is_not_recorded_as_a_narrowing(self, tree):
+        """The two elements are different rules (ABICC's own semantics).
+
+        ``<skip_including>`` says "do not include this directly"; the
+        declarations it reaches are still part of the contract. Recording it
+        as an exclusion made the snapshot claim a reduced surface, which the
+        coverage warning then reported and the comparability gate then
+        refused an identical unexcluded operand against.
+        """
         snap = self._dump_with_skip(
             tree, "<skip_including>\n  b.h\n</skip_including>\n"
         )
-        assert snap.excluded_header_patterns == ("b.h",)
+        assert snap.excluded_header_patterns == ()
 
     def test_the_record_is_order_stable(self, tree):
         """Built from a set, so it is sorted -- otherwise two identical runs
         could record different tuples and compare as asymmetric."""
         snap = self._dump_with_skip(
-            tree, "<skip_headers>\n  z.h\n  a.h\n  m.h\n</skip_headers>\n"
+            tree, "<skip_headers>\n  b.h\n  a.h\n</skip_headers>\n"
         )
-        assert snap.excluded_header_patterns == ("a.h", "m.h", "z.h")
+        assert snap.excluded_header_patterns == ("a.h", "b.h")
 
     def test_a_descriptor_with_no_skips_records_nothing(self, tree):
         """The negative control and the compatibility claim: every ordinary
@@ -330,13 +348,16 @@ class TestOnlyTheAchievedNarrowingIsRecorded:
     """A descriptor skip and a native `--exclude-header` are matched by
     different rules, so the same text is not the same scope.
 
-    `_resolve_headers_from_list` matches a descriptor skip as an exact
-    basename or path; `extract.header_exclusions` matches
-    `--exclude-header` with `fnmatch`. So `*.h` excludes *nothing* through a
-    descriptor and *every header* natively. Recording the raw text for both
-    made the comparability gate treat those two snapshots as covering the
-    same declared surface, and it could then report fabricated additions or
-    removals (Codex review).
+    A descriptor skip is matched by ABICC's three rule classes
+    (`model.header_skip_rules`: basename, component-boundary path, compiled
+    pattern); `extract.header_exclusions` matches `--exclude-header` with
+    `fnmatch` plus a `*/<pattern>` try. The two agree on some inputs and not
+    others -- `include/foo.h` excludes `/pkg/include/foo.h` natively and,
+    under the descriptor rule, matches at a component boundary anywhere,
+    including trees the native try would miss. Recording the raw text for
+    both made the comparability gate treat those two snapshots as covering
+    the same declared surface, and it could then report fabricated additions
+    or removals (Codex review).
 
     Bug class: one field recording two producers' values under two different
     meanings -- the "request recorded as achieved" failure this field exists
@@ -366,7 +387,7 @@ class TestOnlyTheAchievedNarrowingIsRecorded:
         assert result.exit_code == 0, result.output
         return load_snapshot(out), result.output
 
-    @pytest.mark.parametrize("skip", ["b.h", "include/foo.h"])
+    @pytest.mark.parametrize("skip", ["b.h", "include/b.h"])
     def test_the_matching_rule_is_recorded_with_the_patterns(self, skip, tree):
         """The fact, not a guess from the text.
 
@@ -378,38 +399,44 @@ class TestOnlyTheAchievedNarrowingIsRecorded:
         while exact membership keeps it (Codex review).
         """
         snap, _ = self._dump(tree, skip)
-        assert snap.excluded_header_matching == "exact"
+        assert snap.excluded_header_matching == "abicc"
         assert snap.excluded_header_patterns == (skip,)
 
-    @pytest.mark.parametrize("skip", ["*.h", "a?.h", "x[0].h"])
-    def test_a_wildcard_skip_records_no_narrowing_at_all(self, skip, tree):
-        """It matched nothing under exact membership, so there is no achieved
-        narrowing to record -- and recording one would make this snapshot
-        claim a reduced surface it does not have (Codex review, a round after
-        the matching rule was added: the rule and this filter answer different
-        questions, and the filter was wrongly dropped when the rule landed).
+    @pytest.mark.parametrize("skip", ["*.h", "?.h", "[ab].h"])
+    def test_a_pattern_skip_now_really_narrows_and_is_recorded(self, skip, tree):
+        """A metacharacter-bearing rule is a *pattern*, and patterns match.
+
+        This asserted the opposite until descriptor skips gained ABICC's own
+        three rule classes: under the previous exact-membership test a
+        pattern could match nothing at all, so there was no achieved
+        narrowing to record. It now matches real headers in the fixture
+        tree, so it is a real narrowing and recording it is the honest
+        answer.
         """
         snap, output = self._dump(tree, skip)
-        assert snap.excluded_header_patterns == ()
-        assert "wildcard" in output
+        assert snap.excluded_header_patterns == (skip,)
+        assert snap.excluded_header_matching == "abicc"
+        assert "matched no header" not in output
 
-    def test_a_wildcard_skip_still_compares_with_an_unexcluded_snapshot(self, tree):
-        """The consequence: a run whose skip rule did nothing must not be
-        refused against a snapshot that never had one."""
+    def test_a_rule_matching_nothing_records_no_narrowing_and_is_reported(self, tree):
+        """The surviving half of the old wildcard case, generalized.
+
+        A rule can still match nothing -- it just takes a typo now rather
+        than a metacharacter. Such a rule narrowed nothing, so recording it
+        would make the snapshot claim a reduced surface it does not have,
+        and it must still be reported rather than silently doing nothing.
+        """
         from abicheck.comparability import check_contracts_comparable
         from abicheck.model import AbiSnapshot
 
-        snap, _ = self._dump(tree, "*.h")
+        snap, output = self._dump(tree, "nosuch/typo.h")
+        assert snap.excluded_header_patterns == ()
+        assert "matched no header" in output
+        assert "nosuch/typo.h" in output
+        # And the consequence: it must not be refused against a snapshot
+        # that never had a skip rule at all.
         plain = AbiSnapshot(library="libfoo.so", version="0.9")
         assert check_contracts_comparable(plain, snap) is None
-
-    @pytest.mark.parametrize("skip", ["*.h", "a?.h", "x[0].h"])
-    def test_a_glob_skip_is_reported_rather_than_silently_ignored(self, skip, tree):
-        """Doing nothing with a rule the user wrote is its own failure, and
-        is what made this look like working configuration."""
-        _, output = self._dump(tree, skip)
-        assert "wildcard" in output
-        assert skip in output
 
     def test_a_plain_skip_is_still_recorded(self, tree):
         """The negative control: dropping every pattern would satisfy the
@@ -417,7 +444,7 @@ class TestOnlyTheAchievedNarrowingIsRecorded:
         predecessor added."""
         snap, output = self._dump(tree, "b.h")
         assert snap.excluded_header_patterns == ("b.h",)
-        assert "wildcard" not in output
+        assert "matched no header" not in output
 
     def test_a_descriptor_and_a_native_run_are_refused_across_rules(self, tree):
         """Including for a bare name, which is the cost this accepts.
@@ -478,4 +505,83 @@ class TestOnlyTheAchievedNarrowingIsRecorded:
         )
         mismatch = check_contracts_comparable(native, snap, diagnostic=True)
         assert "different rules" in mismatch.reason
-        assert "glob" in mismatch.reason and "exact" in mismatch.reason
+        assert "glob" in mismatch.reason and "abicc" in mismatch.reason
+
+
+class TestTheRecordedUniverseIncludesTheCliSuppliedHeaders:
+    """A skip rule matching only a `-header`/`-headers-list` input is still
+    an achieved narrowing.
+
+    The universe the rules are *recorded* against must be the one they were
+    *applied* to. It was the descriptor's `<headers>` alone, so a rule whose
+    only match arrived via the CLI was reported as matching nothing and its
+    narrowing went unrecorded (CodeRabbit review) -- and an unrecorded
+    narrowing is exactly what lets the ADR-050 comparability gate accept an
+    asymmetric pair, the failure `record_descriptor_skips` exists to
+    prevent.
+
+    Driven through `compat check`, because `-header` is only wired there.
+    """
+
+    def _run(self, tree: Path, skip: str, extra_header: Path):
+        from abicheck.model import AbiSnapshot
+
+        desc = tree / "d.xml"
+        desc.write_text(
+            "<version>1.0</version>\n<headers>\n  include\n</headers>\n"
+            f"<libs>\n  libs\n</libs>\n<skip_headers>\n  {skip}\n</skip_headers>\n"
+        )
+        captured: dict = {}
+
+        def _fake_dump(path, **kwargs):
+            captured["headers"] = list(kwargs.get("headers") or [])
+            return AbiSnapshot(library="libfoo.so", version="1.0")
+
+        with mock.patch("abicheck.compat.cli.dump", side_effect=_fake_dump):
+            result = CliRunner().invoke(
+                compat_group,
+                [
+                    "check",
+                    "-lib",
+                    "foo",
+                    "-old",
+                    str(desc),
+                    "-new",
+                    str(desc),
+                    "-header",
+                    str(extra_header),
+                ],
+            )
+        return captured, result.output
+
+    def test_a_rule_matching_only_a_cli_header_is_not_called_unmatched(
+        self, tree: Path
+    ) -> None:
+        extra = tree / "extra.h"
+        extra.write_text("int extra_decl(int);\n")
+        captured, output = self._run(tree, "extra.h", extra)
+        # It really excluded the header ...
+        assert "extra.h" not in [h.name for h in captured["headers"]]
+        # ... so it must not be reported as having matched nothing.
+        assert "matched no header" not in output
+
+    def test_the_descriptors_own_headers_are_still_in_the_universe(
+        self, tree: Path
+    ) -> None:
+        """The negative control: widening the universe must not stop a rule
+        that matches a `<headers>` entry from being recognised."""
+        extra = tree / "extra.h"
+        extra.write_text("int extra_decl(int);\n")
+        captured, output = self._run(tree, "b.h", extra)
+        assert sorted(h.name for h in captured["headers"]) == ["a.h", "extra.h"]
+        assert "matched no header" not in output
+
+    def test_a_rule_matching_nothing_anywhere_is_still_reported(
+        self, tree: Path
+    ) -> None:
+        """And the guard stays live: widening the universe must not silence
+        a genuinely unreachable rule."""
+        extra = tree / "extra.h"
+        extra.write_text("int extra_decl(int);\n")
+        _, output = self._run(tree, "nosuch.h", extra)
+        assert "matched no header" in output

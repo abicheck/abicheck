@@ -188,6 +188,15 @@ class PublicSurface:
     # different, colliding spelling (during the *other*, ambiguity-tolerant
     # walk -- this set itself never records an ambiguous route at all).
     exact_type_identities: set[str] = field(default_factory=set)
+    # Export-table names with no modeled declaration at all -- the subset
+    # `_seed_undeclared_exports` really added, not every export it saw.
+    # Kept as its own set because "provably undocumented" licenses demoting
+    # *property* churn on the symbol and must NOT license demoting its
+    # disappearance: absence of a declaration proves the symbol was not part
+    # of the documented contract, never that nobody depends on it (a
+    # consumer can bind it via `dlsym`, a leaked internal header, or a
+    # hand-written prototype). See `surface._UNDECLARED_EXPORT_KEEP_KINDS`.
+    undeclared_export_symbols: set[str] = field(default_factory=set)
     # True when *any* declaration carried a non-UNKNOWN origin — i.e. the
     # snapshot was dumped with a public-header set so provenance is available.
     # Lets the classifier distinguish a confident reachability demotion from one

@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, cast
 from .._compiler_options import join_gcc_options
 from ..analysis_assurance import AnalysisAssurance
 from ..errors import ScopeMismatchError
+from ..header_utils import resolve_inferred_header_roots
 from ..policy.evidence_status import Confidence
 from ._helpers import _do_echo
 from .descriptor import CompatDescriptor
@@ -66,9 +67,37 @@ def _descriptor_compile_options(desc: CompatDescriptor) -> str:
     concatenated the other way round, so the descriptor silently won
     (Codex review).
     """
-    parts = [f"-I{p}" for p in desc.include_paths]
+    parts = [f"-I{p}" for p in desc.all_include_paths]
+    # ABICC's automatic include-path mode (`Internals/Descriptor.pm`): when a
+    # descriptor states no `<include_paths>`, its `<headers>` roots are the
+    # search path. Without this an umbrella header doing `#include
+    # <mkl_dfti.h>` fails to resolve its own sibling, and the error names
+    # neither the descriptor nor the missing root -- which is why the
+    # original MKL descriptor could not be compiled without hand-adding an
+    # `<include_paths>` element it should never have needed.
+    #
+    # Inferred from the descriptor's **declared** roots, not from every
+    # directory the header walk produced: adding each walked subdirectory
+    # would build a search path of hundreds of entries and silently change
+    # which header an ambiguous `#include` resolves to. `<add_include_paths>`
+    # does not disable the mode -- it *adds* to whatever it searches -- so
+    # only `<include_paths>` is consulted (`CompatDescriptor.
+    # auto_include_paths`).
+    if desc.auto_include_paths:
+        extra, deferred = resolve_inferred_header_roots(
+            list(desc.headers),
+            list(desc.all_include_paths),
+            gcc_option_tokens=tuple(desc.gcc_options),
+        )
+        parts += [f"-I{p}" for p in extra]
+    else:
+        deferred = []
     parts += [d if d.startswith("-D") else f"-D{d}" for d in desc.defines]
     parts += list(desc.gcc_options)
+    # A deferred root is emitted *after* the descriptor's own flags, in the
+    # bucket `resolve_inferred_header_roots` chose, so it can never shadow a
+    # search path the descriptor stated explicitly.
+    parts += deferred
     # Quoted, not `" ".join(...)`: every consumer of a `gcc_options` *string*
     # splits it again with the shlex-derived rule, so an `<include_paths>`
     # value containing a space -- a Windows SDK under `C:\Program Files` --
