@@ -149,3 +149,38 @@ verdict-affecting. No default was changed to preserve a prior verdict.
 - **PR #1308's review history was not read** — GitHub was not consulted for
   this note. Everything above about that PR comes from its code and its tests
   as they stand in the tree.
+
+## Reading the classification per record
+
+The per-record table the task asks for is produced by the resolver itself
+rather than by a one-off script, so it stays available for the next corpus:
+
+```python
+from abicheck.compare.export_owner_resolution import special_member_export_coverage
+
+for change in result.changes:
+    if change.kind.value.endswith("_removed_elf_only") and change.symbol:
+        c = special_member_export_coverage(change.symbol, old_snapshot, new_snapshot)
+        print(change.symbol, c.join.value, c.reason, c.owner, c.templated, c.inherited)
+```
+
+Every removal reported carries a row: `join` gives owner resolution
+(`unique`/`ambiguous`/`unresolved`/`unsupported`), `reason` gives the
+disposition (`template_specialization`, `out_of_line_definition`,
+`owner_declared_on_one_side_only`, `bare_name_collision_only`,
+`owner_not_declared`, `not_a_parsed_special_member`,
+`inline_declaration_unchanged_on_both_sides`), and `owner` names the scope
+the join resolved to. Rows are per member library and per raw symbol; nothing
+here deduplicates a spelling across members, so a symbol lost from two
+libraries is two rows.
+
+The reported oneDAL cohorts map onto these rows as follows — **inference from
+the mechanisms, not a reconciliation against the records**, which cannot be
+done without the artifacts:
+
+| cohort | expected row |
+|---|---|
+| template-owner matching (~400) | `unique` / `template_specialization` |
+| inherited constructor matching (~299) | `unique` or `unresolved`, owner = the derived class (previously `not_a_parsed_special_member`, since `CI<n>` did not parse) |
+| ordinary members of template classes | `unsupported` / `not_a_parsed_special_member` — the exemption never covered non-special members, so these were, and remain, reported |
+| internal/runtime instantiations | whatever the row says; relevance for them is public-surface scoping's and `--contract`'s question, not this join's |
