@@ -424,3 +424,109 @@ class TestStructuralManifestProblems:
             expected_generation=4,
         )
         assert len(result.errors) >= 4, result.errors
+
+
+class TestAHostileSetIsRefusedWithoutSideEffects:
+    """The validator's inputs are contributor-shaped, so attack them.
+
+    A pre-captured set is an artifact someone else produced, and the
+    workflow that validates it holds `contents: write` on a release. Two
+    properties matter and neither is provable by reading the code: the
+    validator must **refuse**, and it must refuse without reading, writing
+    or following anything outside the set directory. Every case below plants
+    a real file outside the set and asserts it is untouched.
+    """
+
+    @staticmethod
+    def _outside(tmp_path: Path) -> Path:
+        secret = tmp_path / "outside" / "secret.json"
+        secret.parent.mkdir(parents=True, exist_ok=True)
+        secret.write_text(json.dumps({"schema_version": 9}), encoding="utf-8")
+        return secret
+
+    def _hostile_set(self, tmp_path: Path, snapshot: str) -> Path:
+        root = tmp_path / "set"
+        root.mkdir(parents=True, exist_ok=True)
+        (root / BASELINE_MANIFEST_FILENAME).write_text(
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": PROJECT_REF,
+                    "profile": PROFILE,
+                    "snapshot_schema": 9,
+                    "artifacts": [
+                        {
+                            "library": "libthing.so.1",
+                            "snapshot": snapshot,
+                            "sha256": "0" * 64,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return root
+
+    @pytest.mark.parametrize(
+        "snapshot",
+        [
+            "../outside/secret.json",
+            "nested/../../outside/secret.json",
+            "./../outside/secret.json",
+        ],
+        ids=["parent", "nested", "dot-parent"],
+    )
+    def test_a_traversing_member_is_refused_and_the_outside_file_untouched(
+        self, tmp_path: Path, snapshot: str
+    ) -> None:
+        secret = self._outside(tmp_path)
+        before = (secret.read_bytes(), secret.stat().st_mtime_ns)
+        root = self._hostile_set(tmp_path, snapshot)
+        result = validate_precaptured_baseline_set(
+            root, expected_profile=PROFILE, expected_project_ref=PROJECT_REF
+        )
+        assert not result.ok
+        assert (secret.read_bytes(), secret.stat().st_mtime_ns) == before
+        assert sorted(p.name for p in root.iterdir()) == [BASELINE_MANIFEST_FILENAME], (
+            "the validator wrote something into the set it was only reading"
+        )
+
+    @pytest.mark.skipif(
+        os.name == "nt", reason="symlink creation needs privilege on Windows"
+    )
+    def test_a_symlink_out_of_the_set_is_neither_followed_nor_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        """The traversal check works on the declared string; a symlink is how
+        a set escapes without any declared path ever saying `..`."""
+        secret = self._outside(tmp_path)
+        before = (secret.read_bytes(), secret.stat().st_mtime_ns)
+        root = self._hostile_set(tmp_path, "escape.json")
+        (root / "escape.json").symlink_to(secret)
+        result = validate_precaptured_baseline_set(root)
+        assert not result.ok
+        assert any("symlink" in e for e in result.errors), result.errors
+        assert (secret.read_bytes(), secret.stat().st_mtime_ns) == before
+
+    def test_the_fixtures_would_really_resolve_outside_the_set(
+        self, tmp_path: Path
+    ) -> None:
+        """Vacuity guard: an absence-of-side-effect assertion proves nothing
+        if the payload could never have reached outside in the first place.
+        These paths really do resolve to the planted file."""
+        secret = self._outside(tmp_path)
+        root = tmp_path / "set"
+        root.mkdir(exist_ok=True)
+        for rel in ("../outside/secret.json", "nested/../../outside/secret.json"):
+            assert (root / rel).resolve() == secret.resolve(), rel
+
+    def test_a_refused_set_reports_no_usable_publication_values(
+        self, tmp_path: Path
+    ) -> None:
+        """The workflow gates on `ok`, but a caller that read the fields
+        anyway must not find a plausible-looking baseline path to publish."""
+        root = self._hostile_set(tmp_path, "../outside/secret.json")
+        result = validate_precaptured_baseline_set(root)
+        assert not result.ok
+        assert result.libraries == ["libthing.so.1"]
+        assert result.errors, "a refusal with no stated reason is unactionable"

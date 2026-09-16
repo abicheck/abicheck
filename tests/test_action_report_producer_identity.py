@@ -150,7 +150,11 @@ def _publish(
         cwd=work,
     )
     assert result.returncode == 0, result.stderr
-    parsed: dict[str, str] = {}
+    # Reserved keys, never a real Action output: the runner parses workflow
+    # commands off the step's *stdout*, so a side-effect test about command
+    # forgery has to assert on that stream rather than on the rendered body
+    # (where `::error::` is inert markdown inside an HTML comment).
+    parsed: dict[str, str] = {"__stdout__": result.stdout, "__stderr__": result.stderr}
     for line in outputs.read_text(encoding="utf-8").splitlines():
         if "=" in line:
             key, value = line.split("=", 1)
@@ -374,3 +378,95 @@ class TestNoDeclaredInputIsUnforwarded:
         )
         assert env["INPUT_SOURCE_RUN_ID"] == "9000001"
         assert "INPUT_REPORT" in env and env["INPUT_REPORT"] == "r.json"
+
+
+class TestAHostileProducerIdentityIsInert:
+    """The new wire crosses a trust boundary, so attack it rather than read it.
+
+    ``source-run-id``/``source-run-attempt`` now reach a privileged
+    publisher's shell from a caller's ``with:``. In the intended
+    ``workflow_run`` setup both come from the event payload, but a
+    publisher's whole job is to be correct when its inputs are not -- and
+    asserting the *text* of ``action.yml`` would prove nothing about what
+    the shell does with the value (#705 -> #758 is this repository's own
+    record of that). So each fixture below is executed through the real
+    metadata -> environment -> shell path, and the assertions are on
+    side-effect *absence*: no file created, no workflow command emitted, no
+    forged marker.
+    """
+
+    @staticmethod
+    def _hostile_ids() -> list[tuple[str, str]]:
+        marker = "$(touch pwned)"
+        return [
+            ("command-substitution", marker),
+            ("backtick", "`touch pwned`"),
+            ("semicolon", "1; touch pwned"),
+            ("workflow-command", "1\n::error::forged\n::set-output name=posted::true"),
+            ("marker-forgery", '1", "identity": "abicheck:other'),
+            ("path-traversal", "../../etc/passwd"),
+            ("glob", "*"),
+        ]
+
+    @pytest.mark.parametrize(
+        ("label", "value"),
+        _hostile_ids.__func__(),
+        ids=[i for i, _ in _hostile_ids.__func__()],
+    )
+    def test_a_hostile_run_id_neither_executes_nor_forges(
+        self, tmp_path: Path, label: str, value: str
+    ) -> None:
+        outputs = _publish(
+            tmp_path,
+            with_inputs={
+                "report": str(_report(tmp_path)),
+                "profile": f"hostile-{label}",
+                "source-run-id": value,
+            },
+        )
+        work = tmp_path / f"hostile-{label}"
+        assert not (work / "pwned").exists(), "the value was executed as shell"
+        assert not (tmp_path / "pwned").exists()
+
+        # The sticky identity is ours, never the attacker's: a value that
+        # could rename the identity would let one report overwrite an
+        # unrelated profile's comment.
+        recorded = _marker_identity(outputs).identity
+        assert recorded is not None
+        assert recorded.identity == f"abicheck:hostile-{label}"
+        # The rendered body may quote the value verbatim inside its JSON
+        # marker -- that is inert markdown. What must never happen is a
+        # workflow command reaching the stream the runner parses.
+        assert "::error::forged" not in outputs["__stdout__"]
+        assert "::set-output" not in outputs["__stdout__"]
+        assert "::error::forged" not in outputs["__stderr__"]
+        # `posted` is decided by the plan, never by an injected output line.
+        assert outputs["posted"] == "false"
+
+    def test_the_attack_fixtures_would_really_fire_if_the_value_were_executed(
+        self, tmp_path: Path
+    ) -> None:
+        """Vacuity guard for the class above. Absence-of-side-effect tests
+        pass trivially when the payload was never capable of anything, so
+        run the same fixtures through a shell that *does* evaluate them and
+        show the sentinel appears."""
+        import subprocess
+
+        require_bash()
+        work = tmp_path / "control"
+        work.mkdir()
+        fired = 0
+        for _label, value in self._hostile_ids():
+            subprocess.run(
+                [bash_executable(), "-c", f'eval "echo {value}" || true'],
+                cwd=work,
+                capture_output=True,
+                text=True,
+            )
+            if (work / "pwned").exists():
+                fired += 1
+                (work / "pwned").unlink()
+        assert fired >= 3, (
+            "none of the shell-injection fixtures were capable of creating the "
+            "sentinel, so the absence assertions above prove nothing"
+        )
