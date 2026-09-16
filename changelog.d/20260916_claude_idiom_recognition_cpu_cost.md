@@ -14,3 +14,13 @@
   substitutions are preserved exactly -- they are deliberately not folded into
   one combined alternation, which would change the result for valid spellings
   such as `Foo*const`.
+- `OPAQUE_POINTER`'s public-signature search is now answered from one inverted
+  index over public signature sites (`abicheck/policy/public_use_index.py`)
+  instead of re-walking every public function for each eligible record. The
+  index is a mechanical inversion of the existing predicate -- same
+  public-surface admission test, same short-name and qualified matching clauses
+  kept separate, same by-value test, and any one by-value use still defeats
+  "only pointer" -- so it introduces no type resolver and no ambiguity policy.
+  It is built at most once per recognition, never when no record is eligible,
+  holds only strings and bools, and is local to the call rather than cached
+  against a graph or attached to a snapshot.

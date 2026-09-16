@@ -40,6 +40,11 @@ from .model import ParamKind, RecordType, ScopeOrigin, resolved_fact_value
 from .model.change_catalog.kinds import ChangeKind
 from .model.surface_facts import in_public_surface
 from .policy.evidence_status import Confidence
+from .policy.public_use_index import (
+    PublicUseIndex,
+    build_public_use_index,
+    query_public_use,
+)
 from .policy.type_spelling import strip_ptr as _strip_ptr
 from .surface_graph import SurfaceGraph
 
@@ -152,40 +157,24 @@ def _layout_signature(rec: RecordType) -> str:
 def _public_pointer_only(graph: SurfaceGraph, type_name: str) -> tuple[bool, bool]:
     """Return (referenced_by_public, only_ever_by_pointer) for *type_name*.
 
-    Walks every public function: if it names *type_name* by value in a
-    parameter or return position, the type is observable by value.
+    If a public function names *type_name* by value in a parameter or return
+    position, the type is observable by value.
+
+    One-shot entry point: it builds an index for a single query, so the rule has
+    exactly one implementation rather than a per-record scan kept alongside an
+    index. A caller asking about several records builds the index once itself
+    and calls :func:`_query_public_use`.
     """
-    referenced = False
-    only_pointer = True
-    short = type_name.rsplit("::", 1)[-1]
-    for fn in graph.snapshot.functions:
-        # Use the function's own visibility, not demangled-name membership in
-        # public_roots(): a *hidden* C++ overload sharing a public overload's
-        # name must not contribute its by-value parameter as "public" evidence.
-        if not in_public_surface(fn):
-            continue
-        sites: list[tuple[str, int]] = [(fn.return_type, fn.return_pointer_depth)]
-        for p in fn.params:
-            sites.append((getattr(p, "type", "") or "", getattr(p, "pointer_depth", 0)))
-        for type_str, depth in sites:
-            # One normalisation per *site*, not one per clause: ``_strip_ptr``
-            # is pure, so the second call could only ever return the same value.
-            stripped = _strip_ptr(type_str)
-            names = {type_str.rsplit("::", 1)[-1]} | set(stripped.split())
-            if short in names or type_name in (type_str, stripped):
-                referenced = True
-                if depth < 1 and not _is_pointer(type_str):
-                    only_pointer = False
-    return referenced, only_pointer
+    return query_public_use(build_public_use_index(graph.snapshot.functions), type_name)
 
 
 def _record_is_opaque_candidate(rec: RecordType) -> bool:
     """The O(1), record-local half of the OPAQUE_POINTER conditions.
 
-    Both are pre-existing, necessary conditions -- a record failing either is
-    rejected outright below, whatever the public signature scan would have
-    said. Evaluating them *first* is therefore outcome-preserving and skips the
-    scan entirely for every complete or public-field record.
+    Both are pre-existing necessary conditions -- a record failing either is
+    rejected whatever the signature search would have said -- so evaluating
+    them first is outcome-preserving and skips that search for every complete
+    or public-field record.
     """
     # Load-bearing: the definition must be hidden in the public include closure.
     if not rec.is_opaque:
@@ -194,9 +183,15 @@ def _record_is_opaque_candidate(rec: RecordType) -> bool:
 
 
 def _recognise_opaque(graph: SurfaceGraph, rec: RecordType) -> IdiomTag | None:
+    """Single-record entry point (tests, and any one-off caller)."""
     if not _record_is_opaque_candidate(rec):
         return None
-    referenced, only_pointer = _public_pointer_only(graph, rec.name)
+    return _opaque_tag(build_public_use_index(graph.snapshot.functions), rec)
+
+
+def _opaque_tag(index: PublicUseIndex, rec: RecordType) -> IdiomTag | None:
+    """The OPAQUE_POINTER tag for an *already eligible* record."""
+    referenced, only_pointer = query_public_use(index, rec.name)
     if not referenced or not only_pointer:
         return None
     return IdiomTag(
@@ -757,8 +752,15 @@ def recognise_idioms(graph: SurfaceGraph) -> dict[str, list[IdiomTag]]:
         if tag is not None:
             tags.setdefault(name, []).append(tag)
 
+    # Built at most once, and only when some record is actually eligible -- a
+    # snapshot with no opaque record never pays for it. Local to this call, so
+    # it is released with the frame.
+    index: PublicUseIndex | None = None
     for rec in graph.snapshot.types:
-        add(rec.name, _recognise_opaque(graph, rec))
+        if _record_is_opaque_candidate(rec):
+            if index is None:
+                index = build_public_use_index(graph.snapshot.functions)
+            add(rec.name, _opaque_tag(index, rec))
         add(rec.name, _recognise_pimpl(graph, rec))
 
     for collector in (

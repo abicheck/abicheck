@@ -37,7 +37,7 @@ import weakref
 import pytest
 
 from abicheck import idioms
-from abicheck.policy import type_spelling
+from abicheck.policy import public_use_index, type_spelling
 from abicheck.idioms import Idiom, detect_antipatterns, recognise_idioms
 from abicheck.model import (
     AbiSnapshot,
@@ -486,59 +486,195 @@ class TestRecogniseOpaqueReordering:
         assert idioms._public_pointer_only(graph, "Unreferenced") == (False, True)
         assert "Unreferenced" not in recognise_idioms(graph)
 
-    def test_ineligible_records_never_reach_the_signature_scan(self) -> None:
+    def test_ineligible_records_never_reach_the_signature_query(self) -> None:
         """Deterministic work-count guard (not a millisecond threshold)."""
         graph = build_surface_graph(_mixed_snapshot())
-        calls: list[str] = []
-        orig = idioms._public_pointer_only
+        asked: list[str] = []
+        orig = idioms.query_public_use
 
-        def spy(g: SurfaceGraph, name: str):
-            calls.append(name)
-            return orig(g, name)
+        def spy(index, name: str):
+            asked.append(name)
+            return orig(index, name)
 
-        idioms._public_pointer_only = spy  # type: ignore[assignment]
+        idioms.query_public_use = spy  # type: ignore[assignment]
         try:
             recognise_idioms(graph)
         finally:
-            idioms._public_pointer_only = orig  # type: ignore[assignment]
+            idioms.query_public_use = orig  # type: ignore[assignment]
         # Complete records and records with a PUBLIC field are rejected first.
-        assert "Wrapper" not in calls
-        assert "Thing" not in calls
-        assert "PublicFields" not in calls
+        assert "Wrapper" not in asked
+        assert "Thing" not in asked
+        assert "PublicFields" not in asked
         # ...while every genuinely opaque, private-field record is still asked.
-        assert "Ctx" in calls
+        assert "Ctx" in asked
+
+    def test_index_is_built_at_most_once_per_recognition(self) -> None:
+        graph = build_surface_graph(_mixed_snapshot())
+        builds = self._count_index_builds(graph)
+        assert builds == 1
+
+    def test_index_is_not_built_when_no_record_is_eligible(self) -> None:
+        graph = build_surface_graph(_SNAPSHOT_CASES["none_eligible"])
+        assert self._count_index_builds(graph) == 0
+        graph_empty = build_surface_graph(_SNAPSHOT_CASES["empty"])
+        assert self._count_index_builds(graph_empty) == 0
+
+    @staticmethod
+    def _count_index_builds(graph: SurfaceGraph) -> int:
+        calls = 0
+        orig = idioms.build_public_use_index
+
+        def spy(functions):
+            nonlocal calls
+            calls += 1
+            return orig(functions)
+
+        idioms.build_public_use_index = spy  # type: ignore[assignment]
+        try:
+            recognise_idioms(graph)
+        finally:
+            idioms.build_public_use_index = orig  # type: ignore[assignment]
+        return calls
+
+    def test_index_holds_only_strings_and_bools(self) -> None:
+        graph = build_surface_graph(_mixed_snapshot())
+        index = public_use_index.build_public_use_index(graph.snapshot.functions)
+        for mapping in (index.by_short, index.by_exact):
+            assert mapping
+            assert all(isinstance(k, str) for k in mapping)
+            assert all(isinstance(v, bool) for v in mapping.values())
+
+    def test_index_size_scales_with_sites_not_records(self) -> None:
+        """A per-record copy of the site list would scale with record count.
+
+        The index is built from the declarations alone, so its size is bounded
+        by the number of signature *sites* -- at most one short-name key per
+        word plus two exact keys per site -- however many records will later be
+        queried against it.
+        """
+        snap = _uniform_snapshot(400, 40, opaque=True)
+        sites = sum(1 + len(fn.params) for fn in snap.functions)
+        index = public_use_index.build_public_use_index(snap.functions)
+        assert len(index.by_exact) <= 2 * sites
+        assert len(index.by_short) <= 2 * sites
+        # 400 records, 40 functions: far fewer entries than records x sites.
+        assert len(index.by_short) + len(index.by_exact) < 400 * sites
 
     def test_negative_control_dropping_by_value_evidence_is_caught(self) -> None:
         """An 'optimisation' that loses by-value uses must fail these tests."""
         graph = build_surface_graph(_mixed_snapshot())
+        orig = idioms.query_public_use
 
-        def broken(g: SurfaceGraph, name: str) -> tuple[bool, bool]:
-            referenced, _ = orig(g, name)
+        def broken(index, name: str) -> tuple[bool, bool]:
+            referenced, _ = orig(index, name)
             return referenced, True  # pretends everything is pointer-only
 
-        orig = idioms._public_pointer_only
-        idioms._public_pointer_only = broken  # type: ignore[assignment]
+        idioms.query_public_use = broken  # type: ignore[assignment]
         try:
             tags = recognise_idioms(graph)
         finally:
-            idioms._public_pointer_only = orig  # type: ignore[assignment]
+            idioms.query_public_use = orig  # type: ignore[assignment]
         assert any(t.idiom is Idiom.OPAQUE_POINTER for t in tags.get("ByVal", []))
 
     def test_negative_control_excluding_all_public_functions_is_caught(self) -> None:
         graph = build_surface_graph(_mixed_snapshot())
-
-        def broken(g: SurfaceGraph, name: str) -> tuple[bool, bool]:
-            return False, True
-
-        orig = idioms._public_pointer_only
-        idioms._public_pointer_only = broken  # type: ignore[assignment]
-        try:
-            tags = recognise_idioms(graph)
-        finally:
-            idioms._public_pointer_only = orig  # type: ignore[assignment]
-        assert not any(
-            t.idiom is Idiom.OPAQUE_POINTER for tl in tags.values() for t in tl
+        empty = public_use_index.PublicUseIndex({}, {})
+        got = [idioms.query_public_use(empty, rec.name) for rec in graph.snapshot.types]
+        assert got == [(False, True)] * len(got)
+        # ...and an index built with the public-surface test inverted would
+        # admit the hidden overload's by-value Ctx use, which the real one does
+        # not -- so the admission test is load-bearing, not incidental.
+        hidden_only = public_use_index.build_public_use_index(
+            [fn for fn in graph.snapshot.functions if fn.name == "ctx_hidden"]
         )
+        assert idioms.query_public_use(hidden_only, "Ctx") == (False, True)
+
+
+class TestPublicUseIndexInvertsThePredicateExactly:
+    """Property-style contract for the reusable index primitive itself.
+
+    Stated against the transcribed original scan over generated snapshots, not
+    through one caller's domain logic -- an inversion that is only checked via
+    ``recognise_idioms`` would not search the input space of the mapping.
+    """
+
+    @pytest.mark.parametrize("case", sorted(_SNAPSHOT_CASES))
+    def test_agrees_with_the_original_scan_for_every_queried_name(
+        self, case: str
+    ) -> None:
+        graph = build_surface_graph(_SNAPSHOT_CASES[case])
+        index = public_use_index.build_public_use_index(graph.snapshot.functions)
+        names = {rec.name for rec in graph.snapshot.types}
+        names |= {rec.name.rsplit("::", 1)[-1] for rec in graph.snapshot.types}
+        names |= {"Absent", "ns::Absent", "int", "void", ""}
+        for name in sorted(names):
+            assert public_use_index.query_public_use(
+                index, name
+            ) == _ref_public_pointer_only(graph, name), name
+
+    def test_order_independence(self) -> None:
+        snap = _mixed_snapshot()
+        forward = public_use_index.build_public_use_index(snap.functions)
+        reverse = public_use_index.build_public_use_index(
+            list(reversed(snap.functions))
+        )
+        assert forward.by_short == reverse.by_short
+        assert forward.by_exact == reverse.by_exact
+
+    def test_any_by_value_site_defeats_only_pointer(self) -> None:
+        """Combining sites is an OR, whichever order they arrive in."""
+        ptr = _fn("p", "void", [Param(name="a", type="T*", pointer_depth=1)])
+        val = _fn("v", "void", [Param(name="a", type="T")])
+        for order in ([ptr, val], [val, ptr]):
+            index = public_use_index.build_public_use_index(order)
+            assert public_use_index.query_public_use(index, "T") == (True, False)
+
+    def test_short_and_exact_clauses_stay_separate(self) -> None:
+        """Each clause keys off a different thing; neither is widened.
+
+        An *unqualified* site spelling is what the short-name clause binds, so
+        a differently-qualified query reaches it -- the pre-existing,
+        deliberately loose behaviour. A *qualified* site spelling does not:
+        its short name never enters the short-name key set. Both readings are
+        asserted against the transcribed original, so this pins the existing
+        matching rule rather than a new resolver.
+        """
+        unqualified = _fn("f", "void", [Param(name="a", type="Ctx*", pointer_depth=1)])
+        qualified = _fn(
+            "g", "void", [Param(name="a", type="ns1::Ctx*", pointer_depth=1)]
+        )
+        for fn, expected_referenced in ((unqualified, True), (qualified, False)):
+            index = public_use_index.build_public_use_index([fn])
+            graph = build_surface_graph(
+                AbiSnapshot(
+                    library="l",
+                    version="1",
+                    from_headers=True,
+                    functions=[fn],
+                    types=[],
+                    typedefs={},
+                )
+            )
+            got = public_use_index.query_public_use(index, "ns2::Ctx")
+            assert got[0] is expected_referenced
+            assert got == _ref_public_pointer_only(graph, "ns2::Ctx")
+
+    def test_reference_parameter_treatment_unchanged(self) -> None:
+        fn = _fn("r", "void", [Param(name="a", type="T&")])
+        index = public_use_index.build_public_use_index([fn])
+        graph = build_surface_graph(
+            AbiSnapshot(
+                library="l",
+                version="1",
+                from_headers=True,
+                functions=[fn],
+                types=[],
+                typedefs={},
+            )
+        )
+        assert public_use_index.query_public_use(
+            index, "T"
+        ) == _ref_public_pointer_only(graph, "T")
 
 
 class TestOtherRecognisersUnchanged:
