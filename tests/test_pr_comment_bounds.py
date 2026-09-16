@@ -93,6 +93,52 @@ class TestDeltaSuppressionRequiresValueBoundaries:
 
         assert _states_delta(desc, delta) is expected
 
+    @pytest.mark.parametrize(
+        "unit", ["bit", "bits", "byte", "bytes", "B", "KB", "Bits", "BYTES"]
+    )
+    @pytest.mark.parametrize(
+        ("delta", "prefix"),
+        [
+            ("64 → 96", "Size changed: Ctx ("),
+            ("8 → 16", "align ("),
+            ("0 → 1", "grew from ("),
+        ],
+    )
+    def test_a_trailing_unit_still_completes_the_statement(
+        self, unit: str, delta: str, prefix: str
+    ) -> None:
+        """The class of defect, not the one reported input.
+
+        A description that spells the transition and then names its *unit*
+        states exactly that transition -- the unit is not more of the value.
+        Requiring bare closing punctuation made every `type_size_changed`
+        row render its delta twice, because the description's own
+        `(64 → 96 bits)` left `"bits"` after the match. Enumerated across
+        the unit vocabulary, three independently-chosen deltas and both
+        letter cases rather than pinned to `64 → 96 bits`, since the
+        mechanism is the trailing-token rule and not that one string.
+        """
+        from abicheck.report.value_delta import states_delta as _states_delta
+
+        assert _states_delta(f"{prefix}{delta} {unit})", delta) is True
+
+    @pytest.mark.parametrize(
+        "trailing",
+        ["bitmask", "bytes wide and 3 → 4 deep", "blocks", "and more", "units"],
+    )
+    def test_a_trailing_word_that_is_not_a_unit_does_not_complete_it(
+        self, trailing: str
+    ) -> None:
+        """The negative control, and the reason the allowance is a closed
+        vocabulary rather than "any trailing word": text continuing past the
+        delta may state more than this transition, and suppressing then
+        hides the row's authoritative values. `"bitmask"` is the sharp case
+        -- it starts with a real unit and must not be read as one.
+        """
+        from abicheck.report.value_delta import states_delta as _states_delta
+
+        assert _states_delta(f"size (64 → 96 {trailing})", "64 → 96") is False
+
     def test_the_predicate_is_not_a_constant(self) -> None:
         """Vacuity guard: a predicate stuck at either constant would pass a
         one-sided table, so both answers must be reachable."""
