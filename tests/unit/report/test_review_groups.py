@@ -143,8 +143,17 @@ def test_inheritance_size_evidence_does_not_claim_an_exact_base_change() -> None
 # ---------------------------------------------------------------------------
 
 
-def _unnamed_finding(kind: ChangeKind, *, library: str | None = None):
-    change = Change(kind, None, kind.value, library=library)
+def _unnamed_finding(kind: ChangeKind, *, library: str | None = None) -> ReportFinding:
+    """A finding carrying no symbol, as `public_surface_shrank` really does.
+
+    `Change.symbol` is annotated `str`, so this construction is a type
+    violation — but it is what production emits (observed directly; see
+    `docs/contribute/known-gaps.md`, "`Change.symbol` is annotated `str` but
+    a real detector emits `None`"). The annotation is the thing that is
+    wrong, and widening it is a public-type change out of scope here. Not
+    checked by CI either way: the typecheck gate runs `mypy abicheck/`.
+    """
+    change = Change(kind, None, kind.value, library=library)  # type: ignore[arg-type]
     return ReportFinding(change, Verdict.BREAKING, IssueCategory.ABI_BREAKING)
 
 
@@ -187,7 +196,7 @@ def test_the_sort_is_total_over_every_mix_of_named_and_unnamed() -> None:
 
 def test_the_unnamed_case_is_really_unnamed() -> None:
     """Vacuity guard: the fixture must actually exercise the None path."""
-    change = Change(ChangeKind.FUNC_REMOVED, None, ChangeKind.FUNC_REMOVED.value)
+    change = Change(ChangeKind.FUNC_REMOVED, None, ChangeKind.FUNC_REMOVED.value)  # type: ignore[arg-type]
     assert change.symbol is None
     assert not getattr(change, "qualified_name", None)
     assert not getattr(change, "demangled_symbol", None)

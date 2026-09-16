@@ -124,6 +124,7 @@ from .report.evidence_summary import evidence_summary
 # this module's per-shape builder as a parameter instead), so it needs
 # no lazy import to stay cycle-free.
 from .report.pr_comment_aggregate import build_aggregate_model
+from .report.value_delta import states_delta
 
 POST_MODES = ("always", "changes", "never")
 
@@ -229,7 +230,7 @@ def _detail_text(change: dict[str, object], symbol: str = "") -> str:
         new = _ABSENT
     if old is not _ABSENT and new is not _ABSENT:
         delta = f"{_value_repr(old)} → {_value_repr(new)}"
-        if desc and _states_delta(desc, delta):
+        if desc and states_delta(desc, delta):
             return desc
     elif new is not _ABSENT:
         delta = f"→ {_value_repr(new)}"
@@ -238,34 +239,6 @@ def _detail_text(change: dict[str, object], symbol: str = "") -> str:
     else:
         return desc
     return f"{desc} ({delta})" if desc else delta
-
-
-#: Characters that continue a value token. A delta match flanked by one of
-#: these is part of a larger value, not the transition this row states.
-_VALUE_TOKEN_CHARS = set("0123456789abcdefghijklmnopqrstuvwxyz_.-+")
-
-
-def _states_delta(desc: str, delta: str) -> bool:
-    """Whether *desc* already states exactly the transition *delta*.
-
-    A plain ``delta in desc`` is a substring test, and a transition is not a
-    substring-safe token: ``"0 → 1"`` occurs inside ``"10 → 11"``. A
-    description mentioning some *other* numeric transition therefore
-    suppressed the row's own authoritative old/new values, which is the one
-    thing this suppression must never do (CodeRabbit review).
-
-    So a match counts only at value boundaries: neither side of it may
-    continue a value token.
-    """
-    start = desc.find(delta)
-    while start != -1:
-        end = start + len(delta)
-        before = desc[start - 1].lower() if start > 0 else ""
-        after = desc[end].lower() if end < len(desc) else ""
-        if before not in _VALUE_TOKEN_CHARS and after not in _VALUE_TOKEN_CHARS:
-            return True
-        start = desc.find(delta, start + 1)
-    return False
 
 
 def _changes_list(changes: object) -> list[dict[str, object]]:

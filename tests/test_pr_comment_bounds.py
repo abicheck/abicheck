@@ -54,6 +54,26 @@ class TestDeltaSuppressionRequiresValueBoundaries:
             ("struct size changed 10 → 11", "0 → 1", False),
             ("align 20 → 18", "2 → 1", False),
             ("type uint → longer", "int → long", False),
+            # Qualified types: spaces are boundaries, so a boundary test
+            # alone matched `unsigned int → long long` inside a transition
+            # whose values are genuinely different, hiding the row's own
+            # authoritative ones (CodeRabbit review).
+            (
+                "const unsigned int → long long volatile",
+                "unsigned int → long long",
+                False,
+            ),
+            (
+                "returns std::string → std::wstring &",
+                "std::string → std::wstring",
+                False,
+            ),
+            # The same values, stated completely, still suppress.
+            (
+                "const unsigned int → long long",
+                "const unsigned int → long long",
+                True,
+            ),
             ("offset 100 → 104", "0 → 10", False),
             # Genuine statements of the same transition, in the shapes a
             # description actually takes.
@@ -69,14 +89,14 @@ class TestDeltaSuppressionRequiresValueBoundaries:
         ],
     )
     def test_boundary_cases(self, desc: str, delta: str, expected: bool) -> None:
-        from abicheck.pr_comment import _states_delta
+        from abicheck.report.value_delta import states_delta as _states_delta
 
         assert _states_delta(desc, delta) is expected
 
     def test_the_predicate_is_not_a_constant(self) -> None:
         """Vacuity guard: a predicate stuck at either constant would pass a
         one-sided table, so both answers must be reachable."""
-        from abicheck.pr_comment import _states_delta
+        from abicheck.report.value_delta import states_delta as _states_delta
 
         assert _states_delta("size 0 → 1", "0 → 1") is True
         assert _states_delta("size 10 → 11", "0 → 1") is False

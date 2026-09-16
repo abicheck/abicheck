@@ -277,6 +277,44 @@ class TestCompareFollowDeps:
             )
             assert "resolved_ok" in result.output, extra
 
+    def test_the_dependency_section_matches_its_projection_s_markup(
+        self, runner, real_lib
+    ):
+        """Plain text in the terminal projection, Markdown in the Markdown one.
+
+        The section was written once, in Markdown, and appended verbatim
+        wherever it was needed -- so extending it to the terminal projection
+        put `###`, `**bold**` and backticks into an output that emits none of
+        those anywhere else (CodeRabbit review). Both directions are asserted
+        together: rendering the terminal form into the Markdown report would
+        be the same mistake mirrored.
+        """
+        terminal = runner.invoke(
+            main, ["compare", str(real_lib), str(real_lib), "--follow-deps"]
+        )
+        assert terminal.exit_code == 0, terminal.output
+        deps = terminal.output.split("Dependency Analysis", 1)[1]
+        for markup in ("###", "**", "`"):
+            assert markup not in deps, (
+                f"terminal dependency section contains {markup!r} markup:\n{deps}"
+            )
+
+        markdown = runner.invoke(
+            main,
+            [
+                "compare",
+                str(real_lib),
+                str(real_lib),
+                "--follow-deps",
+                "-o",
+                "markdown=-",
+            ],
+        )
+        assert markdown.exit_code == 0, markdown.output
+        md_deps = markdown.output.split("## Dependency Analysis", 1)[1]
+        assert "### Old version" in md_deps
+        assert "**Dependencies**" in md_deps
+
     def test_compare_follow_deps_markdown(self, runner, real_lib):
         result = runner.invoke(
             main,

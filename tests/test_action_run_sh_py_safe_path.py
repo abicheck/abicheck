@@ -736,11 +736,18 @@ def _is_startup_isolated(invocation: str, window: str) -> bool:
     inherited `PYTHONPATH=.` pointing back at the checkout, and clearing
     `PYTHONPATH` alone still leaves the CWD on `sys.path`.
     """
-    safe_dir = '_PY_SAFE_DIR" &&' in window and "PYTHONPATH=" in window
-    isolated_flag = re.search(
-        r"\s-[A-Za-z]*I[A-Za-z]*\s+(-[A-Za-z]+\s+)*-c\b", invocation
-    )
-    return bool(safe_dir or isolated_flag)
+    # `PYTHONPATH=` must be an *empty* assignment. A plain substring test
+    # also matches `PYTHONPATH="$GITHUB_WORKSPACE"`, which points straight
+    # back at the untrusted checkout -- the opposite of the guarantee
+    # (CodeRabbit review).
+    cleared = re.search(r"\bPYTHONPATH=(?=\s|$)", window) is not None
+    safe_dir = '_PY_SAFE_DIR" &&' in window and cleared
+    # `-I` must be a standalone token. The previous pattern allowed letters
+    # on either side of the I, so it accepted `-WI` -- warning control,
+    # which enables no isolation at all. A guard that can approve an
+    # unprotected invocation is worse than no guard.
+    isolated_flag = re.search(r"(?<!\S)-I(?=\s)", invocation) is not None
+    return safe_dir or isolated_flag
 
 
 def test_every_inline_python_invocation_in_the_action_is_startup_isolated() -> None:
@@ -793,7 +800,19 @@ def test_the_isolation_predicate_rejects_each_half_measure() -> None:
     assert not _is_startup_isolated("\"$_PY_BIN\" -c 'pass'", '(cd "$_PY_SAFE_DIR" &&')
     assert not _is_startup_isolated("\"$_PY_BIN\" -c 'pass'", "PYTHONPATH= ")
     # A flag that merely contains an "I" in another word is not isolation.
+    # Isolation lookalikes. `--interactive` was the original negative case
+    # and never exercised the real hole: the pattern keyed on an uppercase
+    # I, so `-WI` -- a warning-control flag enabling no isolation at all --
+    # was what slipped through (CodeRabbit review).
     assert not _is_startup_isolated("\"$py\" --interactive -c 'pass'", "")
+    assert not _is_startup_isolated("\"$py\" -WI -c 'pass'", "")
+    assert not _is_startup_isolated("\"$py\" -X importtime -c 'pass'", "")
+    # A *nonempty* PYTHONPATH is not a cleared one; this one points straight
+    # back at the untrusted checkout.
+    assert not _is_startup_isolated(
+        "\"$_PY_BIN\" -c 'pass'",
+        '(cd "$_PY_SAFE_DIR" && PYTHONPATH="$GITHUB_WORKSPACE" ',
+    )
     # Both accepted mechanisms.
     assert _is_startup_isolated(
         "\"$_PY_BIN\" -c 'pass'", '(cd "$_PY_SAFE_DIR" && PYTHONPATH= '

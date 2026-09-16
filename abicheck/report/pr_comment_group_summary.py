@@ -16,9 +16,16 @@ MAX_COMMENT_REVIEW_GROUPS = 8
 
 
 def review_group_note(model: CommentModel) -> list[str]:
-    if not model.review_groups:
-        return []
     counts = model.result_counts or {}
+    # Bail only when there is nothing to report *at all*. `--view show=` can
+    # filter every displayed group while `result_counts["review_groups"]`
+    # stays positive, and returning early on the displayed list alone then
+    # hid both the authoritative retained total and the omission disclosure
+    # -- the same "read the authoritative count, not the list you were
+    # handed" rule the omission arithmetic below already follows
+    # (CodeRabbit review).
+    if not model.review_groups and not counts.get("review_groups"):
+        return []
     gating_groups = sum(
         bool(group.get("gating_findings")) for group in model.review_groups
     )

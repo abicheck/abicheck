@@ -360,3 +360,27 @@ def test_review_group_note_discloses_nothing_when_the_list_is_complete() -> None
     model.review_groups = [_group(f"g{i}") for i in range(3)]
     model.result_counts = {"review_groups": 3, "gating_review_groups": 0}
     assert "omitted" not in "\n".join(review_group_note(model))
+
+
+def test_review_group_note_survives_a_filter_that_empties_the_displayed_list() -> None:
+    """`--view show=` can filter every displayed group while the
+    authoritative retained total stays positive.
+
+    Returning early on the displayed list alone hid both that total and the
+    omission disclosure, so a reviewer saw no review-group section at all
+    for a run that retained nine of them (CodeRabbit review).
+    """
+    model = CommentModel("compare", "libx", "1", "2", "strict_abi")
+    model.review_groups = []
+    model.result_counts = {"review_groups": 9, "gating_review_groups": 4}
+    text = "\n".join(review_group_note(model))
+    assert "4 gating; 9 retained total" in text
+    assert "- … 9 more groups omitted" in text
+
+
+def test_review_group_note_is_still_silent_when_nothing_was_retained() -> None:
+    """The complement: a run with no review groups renders no section."""
+    model = CommentModel("compare", "libx", "1", "2", "strict_abi")
+    assert review_group_note(model) == []
+    model.result_counts = {"review_groups": 0, "gating_review_groups": 0}
+    assert review_group_note(model) == []
