@@ -458,7 +458,7 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             "less consequential group spend the whole allowance and render "
             "a later, more consequential one as entirely omitted — "
             "`compare`'s bounded review digest rendered a breaking removal "
-            "as \"all 1 omitted\" whenever 12+ compatible additions "
+            'as "all 1 omitted" whenever 12+ compatible additions '
             "preceded it. So: for every group and every input, a bounded "
             "rendering shows at least `min(len(group), cap)` of that "
             "group's entries, the shown count for one group never depends "

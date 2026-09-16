@@ -489,3 +489,51 @@ def test_every_change_entity_is_classified_as_surface_or_non_surface() -> None:
         f"{sorted(declared - classified)}; unknown members classified: "
         f"{sorted(classified - declared)}"
     )
+
+
+def test_the_entity_filter_keeps_real_breaks_and_drops_only_non_declarations() -> None:
+    """Suppressing noise and hiding a real break look identical from the
+    noisy side, so both directions are asserted on one real comparison.
+
+    The filter's purpose is to keep non-declaration dimensions (binary/build/
+    source/analysis facts) out of the *declaration* surface listing. It must
+    not cost a single real declaration change: every finding whose entity is
+    a declaration entity has to survive into one of the three groups, and the
+    groups together must account for exactly those findings — no more, no
+    fewer.
+    """
+    from abicheck.report.change_operation import entity_for_change
+    from abicheck.report.finding import report_findings_for
+    from abicheck.report.surface_changes import _PUBLIC_SURFACE_ENTITIES
+
+    old, new = _snapshots()
+    result = compare(old, new)
+    section = compute_surface_changes(result)
+
+    listed = {
+        e.symbol
+        for e in (*section.additions, *section.removals, *section.modifications)
+    }
+
+    # Real break preserved: the removal is present, and in the right group.
+    assert "_ZN3foo4goneEv" in {e.symbol for e in section.removals}
+
+    # And the grouping is the catalog's answer, not a name-suffix guess.
+    assert "_ZN3foo9brand_newEv" in {e.symbol for e in section.additions}
+    assert "_ZN3foo7changedEv" in {e.symbol for e in section.modifications}
+
+    # Nothing with a declaration entity was dropped, and nothing without one
+    # was kept -- computed from the same findings the section was built from.
+    expected = set()
+    for finding in report_findings_for(result):
+        kind = finding.change.kind
+        kind_value = kind.value if hasattr(kind, "value") else str(kind)
+        if entity_for_change(finding.change, kind_value) in _PUBLIC_SURFACE_ENTITIES:
+            expected.add(finding.change.symbol)
+    assert listed == expected, (
+        f"filter dropped real declarations {sorted(expected - listed)} "
+        f"or kept non-declarations {sorted(listed - expected)}"
+    )
+    assert section.total == len(
+        section.additions + section.removals + section.modifications
+    )
