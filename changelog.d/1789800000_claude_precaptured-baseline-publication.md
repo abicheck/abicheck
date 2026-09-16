@@ -19,10 +19,13 @@
   revision and generation the set is being published *as*, portable
   in-tree member paths (no traversal, no symlink, no unextractable
   character), and every declared digest recomputed from the bytes on disk
-  rather than read off the manifest. A set this refuses is one that would
-  be rejected at resolution time — which, on an immutable channel, is too
-  late to be useful. Importable and credential-free, so the whole gate is
-  unit-tested with no runner.
+  rather than read off the manifest. A set this **accepts** is one the
+  consumer's resolver would also accept — the implication runs that way, and
+  the gate is deliberately stricter in places (an undeclared member digest is
+  refused here and merely unverifiable there), because tolerating
+  unverifiable evidence while reading someone's published asset is reasonable
+  and minting one is not. Importable and credential-free, so the whole gate
+  is unit-tested with no runner.
 
 ### Fixed
 

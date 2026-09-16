@@ -182,6 +182,10 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+class _SnapshotSchemaTooNew(ValueError):
+    """A member snapshot declares a schema this build cannot read."""
+
+
 def _snapshot_content_sha256(path: Path) -> str:
     """The *stable content* hash a resolver will later verify.
 
@@ -190,16 +194,43 @@ def _snapshot_content_sha256(path: Path) -> str:
     and so must this. Imported lazily for the same reason
     ``build_manifest.py`` does -- this module's own import surface stays
     what its docstring says it is.
+
+    Raises :class:`_SnapshotSchemaTooNew` when the snapshot's **own**
+    ``schema_version`` is newer than this build understands. The manifest's
+    aggregate ``snapshot_schema`` is a separate field and a separate check
+    (:func:`_schema_errors`): a set can declare a manifest schema this build
+    reads while a member file declares one it does not, and the resolver
+    checks both (``baseline_set._snapshot_digest_issue`` reads the file's own
+    value, ``_schema_and_profile_check`` the manifest's). Publishing on the
+    manifest's word alone would put a set on an immutable channel that the
+    resolver then rejects as ``stale_schema`` -- the exact direction this
+    module exists to rule out.
+
+    The envelope's version is checked *before* the unwrap, mirroring the
+    resolver: a genuinely newer envelope is expected to carry section shapes
+    this build cannot decode, so attempting the unwrap first would surface
+    "upgrade abicheck" as "this set is corrupt".
     """
+    from .. import serialization
     from ..snapshot_io import read_snapshot_bytes
     from ..storage.sectioned_document import (
         from_sectioned_document,
         is_sectioned_document,
     )
 
+    def _reject_if_too_new(document: dict[str, object]) -> None:
+        stated = document.get("schema_version")
+        if isinstance(stated, int) and stated > serialization.SCHEMA_VERSION:
+            raise _SnapshotSchemaTooNew(
+                f"declares schema_version {stated}, newer than this build "
+                f"understands (up to {serialization.SCHEMA_VERSION})"
+            )
+
     raw = json.loads(read_snapshot_bytes(path).decode("utf-8"))
     if is_sectioned_document(raw):
+        _reject_if_too_new(raw)
         raw = from_sectioned_document(raw)
+    _reject_if_too_new(raw)
     return compute_snapshot_content_hash(raw)
 
 
@@ -306,6 +337,12 @@ def validate_precaptured_baseline_set(
         elif artifact.sha256:
             try:
                 actual = _snapshot_content_sha256(root / artifact.snapshot)
+            except _SnapshotSchemaTooNew as exc:
+                errors.append(
+                    f"library {library!r}'s snapshot {artifact.snapshot!r} "
+                    f"{exc} -- a consumer would reject this set as "
+                    "stale_schema."
+                )
             except (OSError, ValueError) as exc:
                 errors.append(
                     f"library {library!r}'s snapshot {artifact.snapshot!r} "

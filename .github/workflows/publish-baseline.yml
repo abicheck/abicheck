@@ -248,8 +248,12 @@ jobs:
           print('has-profiles=' + ('true' if profiles else 'false'))
           " >> "$GITHUB_OUTPUT"
 
+  # The message names the artifact the run was actually looking for. Under
+  # existing-set mode that is a baseline-set, and telling such a caller to
+  # check its *build-output* artifacts sends them to debug a job this run
+  # never ran (CodeRabbit review).
   no-profiles:
-    name: 'Fail: no contract-profile build-output artifacts found'
+    name: 'Fail: no contract-profile artifacts found'
     needs: discover
     if: needs.discover.outputs.has-profiles != 'true'
     runs-on: ubuntu-latest
@@ -257,9 +261,15 @@ jobs:
     steps:
       - name: Fail
         env:
+          MODE: ${{ needs.discover.outputs.mode }}
           BUILD_OUTPUT_ARTIFACT_PREFIX: ${{ inputs.build-output-artifact-prefix }}
+          BASELINE_SET_ARTIFACT_PREFIX: ${{ inputs.baseline-set-artifact-prefix }}
         run: |
-          echo "::error::no '${BUILD_OUTPUT_ARTIFACT_PREFIX}*' build-output artifacts were found -- this run would otherwise report success having published nothing. Make sure the calling workflow's build job(s) upload one such artifact per contract profile before calling this reusable workflow." >&2
+          if [[ "$MODE" == "existing-set" ]]; then
+            echo "::error::no '${BASELINE_SET_ARTIFACT_PREFIX}*' baseline-set artifacts were found -- this run would otherwise report success having published nothing. Make sure one already-captured baseline-set (the directory actions/baseline produces, manifest.json included) is uploaded under that name per contract profile before calling this reusable workflow." >&2
+          else
+            echo "::error::no '${BUILD_OUTPUT_ARTIFACT_PREFIX}*' build-output artifacts were found -- this run would otherwise report success having published nothing. Make sure the calling workflow's build job(s) upload one such artifact per contract profile before calling this reusable workflow." >&2
+          fi
           exit 1
 
   # ── Job 2: dump + stage + publish one baseline-set per contract profile ──
@@ -340,9 +350,11 @@ jobs:
       # in shell: manifest and snapshot schema this build understands, the
       # profile/release-tag/generation this run is publishing the set AS,
       # portable in-tree member paths, and every declared digest recomputed
-      # from the bytes actually present. A set this refuses is one a
-      # consumer's own resolver would refuse after publication -- which, on
-      # an immutable channel, is too late to be useful.
+      # from the bytes actually present. A set this ACCEPTS is one a
+      # consumer's own resolver would also accept; it is deliberately
+      # stricter in places, because minting unverifiable evidence onto an
+      # immutable channel is not the same as tolerating it when reading
+      # someone else's published asset.
       - name: Validate pre-captured baseline-set
         id: precaptured
         if: needs.discover.outputs.mode == 'existing-set'

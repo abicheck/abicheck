@@ -530,3 +530,131 @@ class TestAHostileSetIsRefusedWithoutSideEffects:
         assert not result.ok
         assert result.libraries == ["libthing.so.1"]
         assert result.errors, "a refusal with no stated reason is unactionable"
+
+
+class TestMemberSchemaIsCheckedPerFile:
+    """A manifest's aggregate `snapshot_schema` is not the members' own.
+
+    Review finding (CodeRabbit, PR #1319): `_schema_errors` read only the
+    manifest field, so a set could declare a manifest schema this build reads
+    while a member file declared one it does not. The validator hashed it
+    happily and the resolver -- which reads the *file's* own `schema_version`
+    in `_snapshot_digest_issue`, a check its docstring calls out as distinct
+    from the manifest's -- would reject the published asset as
+    `stale_schema`. That is the direction this module exists to rule out.
+
+    The oracle is `serialization.SCHEMA_VERSION` itself, not a constant
+    restated here, so the boundary moves when the real one does.
+    """
+
+    @staticmethod
+    def _too_new() -> int:
+        from abicheck import serialization
+
+        return serialization.SCHEMA_VERSION + 1
+
+    @staticmethod
+    def _supported() -> int:
+        from abicheck import serialization
+
+        return serialization.SCHEMA_VERSION
+
+    def _set_with_member_schema(self, root: Path, schema: int) -> Path:
+        """A set whose *manifest* is fine and whose *member* declares `schema`."""
+        root.mkdir(parents=True, exist_ok=True)
+        payload = _snapshot_payload("libthing.so.1")
+        payload["schema_version"] = schema
+        rel = "libthing.so.1.abicheck.json"
+        (root / rel).write_text(json.dumps(payload), encoding="utf-8")
+        (root / BASELINE_MANIFEST_FILENAME).write_text(
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": PROJECT_REF,
+                    "profile": PROFILE,
+                    # Deliberately supported: the manifest is not the problem.
+                    "snapshot_schema": self._supported(),
+                    "artifacts": [
+                        {
+                            "library": "libthing.so.1",
+                            "snapshot": rel,
+                            "sha256": compute_snapshot_content_hash(payload),
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return root
+
+    def test_a_member_declaring_a_newer_schema_is_refused(self, tmp_path: Path) -> None:
+        root = self._set_with_member_schema(tmp_path / "set", self._too_new())
+        result = validate_precaptured_baseline_set(
+            root, expected_profile=PROFILE, expected_project_ref=PROJECT_REF
+        )
+        assert not result.ok
+        assert any("stale_schema" in e for e in result.errors), result.errors
+
+    @pytest.mark.parametrize("offset", [0, -1, -5])
+    def test_a_member_at_or_below_the_supported_schema_still_validates(
+        self, tmp_path: Path, offset: int
+    ) -> None:
+        """The counterpart guard: a version check that refused every set would
+        pass the test above while breaking every honest capture."""
+        schema = self._supported() + offset
+        root = self._set_with_member_schema(tmp_path / f"set{offset}", schema)
+        result = validate_precaptured_baseline_set(root)
+        assert result.ok, result.errors
+
+    @pytest.mark.parametrize("offset", [1, 2, 1000])
+    def test_every_version_beyond_the_boundary_is_refused(
+        self, tmp_path: Path, offset: int
+    ) -> None:
+        root = self._set_with_member_schema(
+            tmp_path / f"set{offset}", self._supported() + offset
+        )
+        assert not validate_precaptured_baseline_set(root).ok
+
+    def test_a_sectioned_envelope_is_judged_before_it_is_unwrapped(
+        self, tmp_path: Path
+    ) -> None:
+        """A newer envelope is expected to carry section shapes this build
+        cannot decode, so unwrapping first would report "upgrade abicheck" as
+        "this set is corrupt" -- the resolver checks the envelope's own
+        version first for that reason, and so must this."""
+        root = tmp_path / "set"
+        root.mkdir()
+        rel = "libthing.so.1.abicheck.json"
+        (root / rel).write_text(
+            json.dumps(
+                {
+                    "schema_version": self._too_new(),
+                    "sections": {"unknown_future_section": {"shape": "unreadable"}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (root / BASELINE_MANIFEST_FILENAME).write_text(
+            json.dumps(
+                {
+                    "manifest_version": 1,
+                    "project_ref": PROJECT_REF,
+                    "profile": PROFILE,
+                    "snapshot_schema": self._supported(),
+                    "artifacts": [
+                        {
+                            "library": "libthing.so.1",
+                            "snapshot": rel,
+                            "sha256": "0" * 64,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        result = validate_precaptured_baseline_set(root)
+        assert not result.ok
+        assert any("stale_schema" in e for e in result.errors), result.errors
+        assert not any("could not be read" in e for e in result.errors), (
+            "an upgrade-needed set was reported as corrupt"
+        )

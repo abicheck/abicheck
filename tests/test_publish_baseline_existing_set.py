@@ -259,3 +259,60 @@ class TestExistingSetModeNeverBuilds:
     def test_the_scan_can_actually_fire(self) -> None:
         planted = "run: castxml --version"
         assert [t for t in self.FORBIDDEN if t in planted] == ["castxml"]
+
+
+class TestTheEmptyRunFailureNamesTheRightArtifact:
+    """Review finding (CodeRabbit, PR #1319): the no-profiles guard was
+    hard-wired to build-output.
+
+    Telling an existing-set caller to check its *build-output* artifacts sends
+    them to debug a job this run never ran. The guard itself (fail rather than
+    report success having published nothing) was already right; only what it
+    names was not.
+    """
+
+    @pytest.fixture
+    def fail_step(self, workflow: dict[str, Any]) -> dict[str, Any]:
+        steps = workflow["jobs"]["no-profiles"]["steps"]
+        return next(s for s in steps if s.get("name") == "Fail")
+
+    def test_it_still_fails_the_run(self, workflow: dict[str, Any]) -> None:
+        """The property that matters most, pinned before the wording: a run
+        that published nothing must never report success."""
+        job = workflow["jobs"]["no-profiles"]
+        assert job["if"] == "needs.discover.outputs.has-profiles != 'true'"
+        assert (
+            "exit 1" in next(s for s in job["steps"] if s.get("name") == "Fail")["run"]
+        )
+
+    def test_both_modes_are_named(self, fail_step: dict[str, Any]) -> None:
+        run = fail_step["run"]
+        assert "baseline-set artifacts were found" in run
+        assert "build-output artifacts were found" in run
+
+    def test_each_mode_reports_its_own_prefix(self, fail_step: dict[str, Any]) -> None:
+        env = fail_step["env"]
+        assert env["MODE"] == "${{ needs.discover.outputs.mode }}"
+        assert env["BASELINE_SET_ARTIFACT_PREFIX"] == (
+            "${{ inputs.baseline-set-artifact-prefix }}"
+        )
+        assert env["BUILD_OUTPUT_ARTIFACT_PREFIX"] == (
+            "${{ inputs.build-output-artifact-prefix }}"
+        )
+        # The two messages must not be able to print the other mode's prefix.
+        run = fail_step["run"]
+        baseline_line = next(
+            line for line in run.splitlines() if "baseline-set artifacts" in line
+        )
+        build_line = next(
+            line for line in run.splitlines() if "build-output artifacts" in line
+        )
+        assert "BASELINE_SET_ARTIFACT_PREFIX" in baseline_line
+        assert "BUILD_OUTPUT_ARTIFACT_PREFIX" not in baseline_line
+        assert "BUILD_OUTPUT_ARTIFACT_PREFIX" in build_line
+        assert "BASELINE_SET_ARTIFACT_PREFIX" not in build_line
+
+    def test_the_job_name_does_not_claim_one_mode(
+        self, workflow: dict[str, Any]
+    ) -> None:
+        assert "build-output" not in workflow["jobs"]["no-profiles"]["name"]

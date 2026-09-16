@@ -79,9 +79,11 @@ RENDER_STEP = "Render and publish"
 PUBLISHER_RUN_ID = "7777777"
 PUBLISHER_RUN_ATTEMPT = "5"
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt", reason="runs the Action's POSIX shell script directly"
-)
+# Deliberately no module-level platform mark. The shell-executing tests call
+# `require_bash()` (which skips), and `TestNoDeclaredInputIsUnforwarded` only
+# reads metadata and computed environment values -- skipping the whole module on
+# Windows would drop that coverage for no reason, which is the loss
+# `require_bash`'s own docstring warns about.
 
 
 def _report(tmp_path: Path) -> Path:
@@ -470,3 +472,60 @@ class TestAHostileProducerIdentityIsInert:
             "none of the shell-injection fixtures were capable of creating the "
             "sentinel, so the absence assertions above prove nothing"
         )
+
+
+class TestTheForwardingScanMatchesWholeInputNames:
+    """Review finding (CodeRabbit, PR #1319): the scan matched substrings.
+
+    `inputs.report-url` contains `inputs.report`, so with the real
+    `INPUT_REPORT` mapping deleted an unrelated sibling reference kept
+    `test_every_declared_input_is_referenced_by_some_step` green. A guard that
+    a neighbouring name can satisfy is not a guard -- and this one's whole job
+    is to notice a deleted mapping.
+    """
+
+    @pytest.mark.parametrize(
+        ("removed", "expected"),
+        [
+            ("report", {"report"}),
+            ("profile", {"profile"}),
+            ("source-run-id", {"source-run-id"}),
+            ("sha", {"sha"}),
+        ],
+    )
+    def test_deleting_one_mapping_is_noticed_despite_prefix_siblings(
+        self, removed: str, expected: set[str]
+    ) -> None:
+        """Each name here is a strict prefix of another declared input
+        (`report`/`report-url`, `profile`/... , `sha`/...), which is exactly
+        the shape the substring rule could not see."""
+        action = load_action(REPORT_ACTION)
+        env_key = "INPUT_" + removed.upper().replace("-", "_")
+        step = _step(action, RENDER_STEP)
+        assert env_key in step["env"], env_key
+        step["env"].pop(env_key)
+        assert set(declared_inputs(action)) - forwarded_input_names(action) == expected
+
+    def test_a_prefix_sibling_alone_does_not_count_as_a_reference(self) -> None:
+        """Stated directly on the helper, independent of any Action's shape."""
+        synthetic = {
+            "inputs": {"report": {"default": ""}, "report-url": {"default": ""}},
+            "runs": {
+                "steps": [{"env": {"INPUT_REPORT_URL": "${{ inputs.report-url }}"}}]
+            },
+        }
+        assert forwarded_input_names(synthetic) == {"report-url"}
+
+    def test_a_bracket_reference_still_counts(self) -> None:
+        synthetic = {
+            "inputs": {"report": {"default": ""}},
+            "runs": {"steps": [{"run": "echo ${{ inputs['report'] }}"}]},
+        }
+        assert forwarded_input_names(synthetic) == {"report"}
+
+
+def _step(action: dict, name: str) -> dict:
+    for step in action["runs"]["steps"]:
+        if step.get("name") == name:
+            return step
+    raise AssertionError(f"no step named {name!r}")

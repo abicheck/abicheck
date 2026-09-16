@@ -37,6 +37,7 @@ convention for ``_workflow_exec.py`` and ``_action_run_sh_harness.py``.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -136,7 +137,14 @@ def forwarded_input_names(action: dict[str, Any]) -> set[str]:
         elif node is not None:
             text = str(node)
             for name in declared:
-                if f"inputs.{name}" in text or f"inputs['{name}']" in text:
+                # A whole-name boundary, not a substring: `inputs.report-url`
+                # contains `inputs.report`, so a substring rule would let an
+                # unrelated sibling keep the "is it forwarded?" invariant green
+                # after the real mapping was deleted -- the exact silence this
+                # helper exists to break.
+                if re.search(rf"inputs\.{re.escape(name)}(?![\w-])", text) or (
+                    f"inputs['{name}']" in text
+                ):
                     seen.add(name)
 
     visit(action["runs"]["steps"])
