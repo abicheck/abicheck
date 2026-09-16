@@ -42,6 +42,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -68,6 +69,22 @@ int Foo::value() const { return 42; }
 int Foo::plain() const { return 1; }
 int foo_counter = 0;
 """
+
+
+#: The export-reconciliation fixtures below are ELF-specific by construction,
+#: not merely ELF-flavoured: they build the single-variable experiment with a
+#: GNU-ld version script (`-Wl,--version-script`) and a SONAME
+#: (`-Wl,-soname`), neither of which Mach-O's ld64 accepts, and the behaviour
+#: under test is a symbol's presence in `.dynsym` -- which is what the
+#: detector itself reads (`snapshot.elf`). On macOS the compile fails
+#: outright rather than the assertion being interesting, so this is a real
+#: platform restriction on the fixture, not a tolerated failure. The
+#: obligation tests further down carry no such restriction: vague linkage is
+#: a language property, and they run everywhere a compiler does.
+elf_fixture_only = pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="the fixture needs GNU-ld version scripts and an ELF .dynsym",
+)
 
 
 def _require_gpp() -> None:
@@ -154,6 +171,7 @@ _LOSS_CASES = {
 }
 
 
+@elf_fixture_only
 @pytest.mark.integration
 @pytest.mark.parametrize("case", sorted(_LOSS_CASES), ids=sorted(_LOSS_CASES))
 def test_public_object_loss_survives_adding_headers(tmp_path: Path, case: str) -> None:
@@ -188,6 +206,7 @@ def test_public_object_loss_survives_adding_headers(tmp_path: Path, case: str) -
     assert set(localized) <= reported
 
 
+@elf_fixture_only
 @pytest.mark.integration
 def test_unchanged_inputs_stay_unchanged_with_headers(tmp_path: Path) -> None:
     """The vacuity guard for the sweep above: the same machinery must report
@@ -201,6 +220,7 @@ def test_unchanged_inputs_stay_unchanged_with_headers(tmp_path: Path) -> None:
     assert not report.get("changes")
 
 
+@elf_fixture_only
 @pytest.mark.integration
 def test_loss_survives_dump_and_serialized_compare(tmp_path: Path) -> None:
     """The fix must live in the model, not in one direct-binary CLI path.
@@ -347,7 +367,11 @@ def test_header_defined_template_needs_no_library_export(
     by_address = {}
     for line in raw.stdout.splitlines():
         parts = line.split()
-        if len(parts) == 3 and parts[2].startswith("_Z"):
+        # `_Z` on ELF, `__Z` on Mach-O: Darwin's linker prepends one
+        # underscore to every global symbol. Missing that was not a silent
+        # wrong answer -- `assert instantiations` below caught the empty
+        # gather on macOS, which is exactly what that guard is for.
+        if len(parts) == 3 and parts[2].startswith(("_Z", "__Z")):
             by_address[parts[0]] = parts[2]
     instantiations = []
     for line in nm.stdout.splitlines():
@@ -473,8 +497,22 @@ def test_end_to_end_public_not_exported_ignores_a_header_defined_template() -> N
         ("is_specified", "_Z12is_specifiedI12OptionalBoolEbT_"),
         # Template-ness on an inner component (member of a class template).
         ("Box::ok", "_ZNK3BoxIiE2okEi"),
+        # The same manglings as Darwin's linker decorates them, with one
+        # leading underscore prepended. Pinned here rather than left to the
+        # macOS CI lane so the spelling is covered on every platform: a
+        # Mach-O-sourced `Function.mangled` that kept the decoration and was
+        # read as "not a template" would reintroduce the false obligation for
+        # exactly the entities this fix exists for.
+        ("is_specified", "__Z12is_specifiedI12OptionalBoolEbT_"),
+        ("Box::ok", "__ZNK3BoxIiE2okEi"),
     ],
-    ids=["coherent_spelling", "bare_display_name", "inner_component"],
+    ids=[
+        "coherent_spelling",
+        "bare_display_name",
+        "inner_component",
+        "macho_decorated_bare_name",
+        "macho_decorated_inner_component",
+    ],
 )
 def test_template_declaration_never_acquires_an_export_obligation(
     name: str, mangled: str
