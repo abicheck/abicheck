@@ -40,10 +40,17 @@ binary-level finding about such a symbol is classified, not just the one
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
+from click.testing import CliRunner
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
+from abicheck.cli import main
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.macho_metadata import MachoMetadata
 from abicheck.model import AbiSnapshot, Function
@@ -154,6 +161,68 @@ class TestUndocumentedExportIsProvablyOutOfSurface:
                 old,
                 new,
             ) == (True, None)
+
+
+class TestRemovalOfAnUndocumentedExportIsNeverDemoted:
+    """Undocumented licenses demoting *churn*, never *disappearance*.
+
+    The catalog states the ground truth directly
+    (`catalog/cases/case182_accidental_export_removed_still_breaking`):
+    "the absence of a header declaration proves it wasn't part of the
+    documented contract -- it does not prove nobody depends on it. A
+    consumer that obtained the symbol via `dlsym()`, a leaked internal
+    header, or a hand-written prototype fails at lookup time once v2
+    removes it."
+
+    Seeding without this exemption turned that case from BREAKING (exit 4)
+    into a clean exit 0: a real break hidden by a noise filter. It was
+    caught by the example matrix, not by this file, because the original
+    kind list here covered alignment/size/binding and never removal --
+    which is the whole point of stating the axis rather than enumerating
+    the kinds that happened to come to mind.
+    """
+
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            ChangeKind.FUNC_REMOVED_ELF_ONLY,
+            ChangeKind.VAR_REMOVED_ELF_ONLY,
+            ChangeKind.FUNC_REMOVED,
+            ChangeKind.VAR_REMOVED,
+        ],
+    )
+    def test_removal_survives(self, kind: ChangeKind) -> None:
+        snap = _elf_snapshot(declared=[_public_fn()], exports=["api", "internal_table"])
+        assert _classify(kind, "internal_table", snap, snap) == (True, None)
+
+    @pytest.mark.parametrize("kind", _BINARY_CHURN_KINDS)
+    def test_property_churn_on_the_same_symbol_is_still_demoted(
+        self, kind: ChangeKind
+    ) -> None:
+        """The negative control: exempting the whole symbol would undo the
+        noise reduction this seeding exists for."""
+        snap = _elf_snapshot(declared=[_public_fn()], exports=["api", "internal_table"])
+        assert _classify(kind, "internal_table", snap, snap) == (
+            False,
+            "not-exported",
+        )
+
+    def test_only_export_table_only_symbols_get_the_exemption(self) -> None:
+        """A symbol a header *does* declare (privately) keeps its
+        long-standing demotion -- the exemption is scoped to the set this
+        seeding actually added, not to every export."""
+        private = Function(
+            name="priv",
+            mangled="priv",
+            return_type="int",
+            params=[],
+            origin=ScopeOrigin.PRIVATE_HEADER,
+            source_header="/src/priv.h",
+        )
+        snap = _elf_snapshot(declared=[_public_fn(), private], exports=["api", "priv"])
+        assert "priv" not in compute_public_surface(snap).undeclared_export_symbols
+        in_surface, _ = _classify(ChangeKind.FUNC_REMOVED_ELF_ONLY, "priv", snap, snap)
+        assert in_surface is False
 
 
 class TestCompilerEmittedClassArtifactsAreNotUndocumented:
@@ -359,3 +428,62 @@ class TestThroughTheRealPipeline:
         ctx = self._pipeline(force_public={"internal_table"})
         assert ctx.out_of_surface == []
         assert len(ctx.kept) == 2
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="builds an ELF .so pair, linux/macos only"
+)
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="gcc required")
+class TestCase182EndToEnd:
+    """The catalog case this regressed, run directly.
+
+    `catalog/cases/case182_accidental_export_removed_still_breaking` already
+    encodes this, but only the `Full example matrix` CI job runs it -- which
+    is why the regression reached CI instead of a local `pytest` run. Built
+    from the catalog's own sources so the two cannot drift apart.
+    """
+
+    def test_removing_an_accidental_export_is_still_breaking(
+        self, tmp_path: Path
+    ) -> None:
+        case = (
+            Path(__file__).resolve().parent.parent
+            / "catalog"
+            / "cases"
+            / "case182_accidental_export_removed_still_breaking"
+        )
+        if not case.is_dir():  # pragma: no cover - catalog always present
+            pytest.skip("catalog case not available")
+        for name in ("v1.c", "v2.c", "v1.h", "v2.h"):
+            shutil.copy(case / name, tmp_path / name)
+        for ver in ("v1", "v2"):
+            subprocess.run(
+                [
+                    "gcc",
+                    "-shared",
+                    "-fPIC",
+                    "-g",
+                    str(tmp_path / f"{ver}.c"),
+                    "-o",
+                    str(tmp_path / f"libfoo_{ver}.so"),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(tmp_path / "libfoo_v1.so"),
+                str(tmp_path / "libfoo_v2.so"),
+                "-H",
+                str(tmp_path / "v1.h"),
+            ],
+        )
+        # Exit 4 = BREAKING. Public-header scoping is on by default here, so
+        # this is precisely the configuration under which the undeclared
+        # export's removal must survive.
+        assert result.exit_code == 4, result.output
+        assert "internal_helper" in result.output

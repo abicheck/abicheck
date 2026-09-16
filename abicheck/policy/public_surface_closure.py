@@ -364,11 +364,16 @@ def _seed_undeclared_exports(snap: AbiSnapshot, surface: PublicSurface) -> None:
     # the artifact is absent from the declaration list for a reason that
     # says nothing about the contract. Demoting one made an identical binary
     # pair report BREAKING without ``-H`` and clean with it.
-    surface.all_symbols |= {
+    seeded = {
         name
         for name in default_versioned_names(index)
         if not is_cxx_class_artifact_symbol(name)
     }
+    # Exactly the names no declaration provided, captured before the union
+    # so a symbol that *is* declared (privately) keeps its existing,
+    # pre-existing treatment rather than acquiring this one.
+    surface.undeclared_export_symbols |= seeded - surface.all_symbols
+    surface.all_symbols |= seeded
 
 
 def _walk_type_closure(
