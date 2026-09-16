@@ -251,15 +251,13 @@ def collect_reports(
             "unexpected target. Put it anywhere else."
         )
 
-    # Own the directory: clear reports a previous run of this same collection
-    # left, and refuse anything else -- a stale aggregate.json or a foreign
-    # document is a target this run never declared.
-    foreign: list[str] = []
-    for existing in sorted(resolved_dir.glob("*.json")):
-        if existing.name.startswith(prefix):
-            existing.unlink()
-        else:
-            foreign.append(existing.name)
+    # A foreign document is refused before anything is touched -- a stale
+    # aggregate.json is a target this run never declared.
+    foreign = [
+        existing.name
+        for existing in sorted(resolved_dir.glob("*.json"))
+        if not existing.name.startswith(prefix)
+    ]
     if foreign:
         raise CollectionError(
             f"the reports directory {reports_dir} already holds "
@@ -270,31 +268,55 @@ def collect_reports(
     result = CollectionResult(reports_dir=reports_dir, manifest_path=manifest_path)
     placed: dict[str, str] = {}
 
-    for check in checks:
-        if check.report is None or not check.report.is_file():
-            result.missing.append(check.id)
-            continue
-        recorded, problem = _authoritative_id(check.report)
-        if problem is not None:
-            result.unusable[check.id] = f"{check.report} {problem}"
-            continue
-        if recorded is not None and recorded != check.id:
-            raise CollectionError(
-                f"check {check.id!r} was declared for {check.report}, but that "
-                f"report records its own target_id {recorded!r}. The report's "
-                "recorded identity is authoritative; collecting it under a "
-                "different id would report one check's result as another's. Fix "
-                "the declaration to match."
-            )
-        identity = recorded or check.id
-        if identity in placed:
-            raise CollectionError(
-                f"checks {placed[identity]!r} and {check.id!r} both resolve to the "
-                f"identity {identity!r}."
-            )
-        placed[identity] = check.id
-        shutil.copyfile(check.report, resolved_dir / f"{prefix}{identity}.json")
-        result.present.append(check.id)
+    # Stage first, clear second, move third. Clearing the destination up front
+    # is the obvious order and is wrong: a caller may legitimately declare a
+    # report that already lives in the reports directory under this prefix --
+    # a re-run of collection over its own output, or a producer that wrote
+    # straight into it -- and deleting it before the copy loop destroys the
+    # input, after which `is_file()` is False and the check records as
+    # *missing*. A real result would then aggregate as an unavailable target
+    # with no error raised anywhere, which is the exact failure this module
+    # exists to prevent. Staging also means a report the copy loop rejects
+    # never leaves a half-cleared directory behind.
+    staging = Path(
+        tempfile.mkdtemp(dir=resolved_dir.parent, prefix=".abicheck-collect-")
+    )
+    try:
+        for check in checks:
+            if check.report is None or not check.report.is_file():
+                result.missing.append(check.id)
+                continue
+            recorded, problem = _authoritative_id(check.report)
+            if problem is not None:
+                result.unusable[check.id] = f"{check.report} {problem}"
+                continue
+            if recorded is not None and recorded != check.id:
+                raise CollectionError(
+                    f"check {check.id!r} was declared for {check.report}, but that "
+                    f"report records its own target_id {recorded!r}. The report's "
+                    "recorded identity is authoritative; collecting it under a "
+                    "different id would report one check's result as another's. Fix "
+                    "the declaration to match."
+                )
+            identity = recorded or check.id
+            if identity in placed:
+                raise CollectionError(
+                    f"checks {placed[identity]!r} and {check.id!r} both resolve to the "
+                    f"identity {identity!r}."
+                )
+            placed[identity] = check.id
+            shutil.copyfile(check.report, staging / f"{prefix}{identity}.json")
+            result.present.append(check.id)
+
+        # Only now: drop reports a previous run of this same collection left,
+        # so a target that is no longer declared does not linger as an extra.
+        for existing in sorted(resolved_dir.glob("*.json")):
+            if existing.name.startswith(prefix):
+                existing.unlink()
+        for staged in sorted(staging.iterdir()):
+            os.replace(staged, resolved_dir / staged.name)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
     manifest: dict[str, Any] = {
         "targets": [

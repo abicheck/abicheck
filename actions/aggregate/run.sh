@@ -34,10 +34,16 @@ case "$PHASE" in
     fi
 
     rc=0
+    # ${arr[@]+"${arr[@]}"}, not a bare "${arr[@]}": under macOS's stock
+    # (GPLv2-frozen) bash 3.2's set -u, expanding an *empty* array as
+    # "${arr[@]}" is itself treated as an unbound-variable reference (bash
+    # 4.4+ special-cased this away). Every array below is legitimately empty
+    # on a normal path, so a bare expansion aborts the step outright -- the
+    # same trap action/run.sh already guards against throughout.
     python -m abicheck.frontends.action.cli collect-checks "$DECL" \
       --reports-dir "$REPORTS_DIR" \
       --manifest "$MANIFEST_PATH" \
-      "${GATE_ARGS[@]}" \
+      ${GATE_ARGS[@]+"${GATE_ARGS[@]}"} \
       --github-output "$GITHUB_OUTPUT" || rc=$?
     if [[ "$rc" == "$_REFUSED" ]]; then
       _fail "the check declaration could not be honoured (see above). This is a configuration error, not a compatibility result."
@@ -75,7 +81,7 @@ case "$PHASE" in
     # It is captured and reported, never swallowed with `|| true` and never
     # allowed to fail this step. 64 is a usage error -- ours, and fatal.
     rc=0
-    ( cd "$REPORTS_DIR" && abicheck aggregate . --manifest "$(cd "$(dirname "$MANIFEST_PATH")" && pwd)/$(basename "$MANIFEST_PATH")" "${OUT_ARGS[@]}" ) || rc=$?
+    ( cd "$REPORTS_DIR" && abicheck aggregate . --manifest "$(cd "$(dirname "$MANIFEST_PATH")" && pwd)/$(basename "$MANIFEST_PATH")" ${OUT_ARGS[@]+"${OUT_ARGS[@]}"} ) || rc=$?
     if [[ "$rc" == 64 ]]; then
       _fail "abicheck aggregate rejected its inputs (usage error)."
     fi

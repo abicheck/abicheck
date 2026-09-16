@@ -258,14 +258,30 @@ class ProducerSelection:
 
 def required_job_failures(
     jobs_document: Any, required: Sequence[str]
-) -> tuple[list[str], list[str]]:
-    """``(failed, absent)`` among *required* job names in *jobs_document*.
+) -> tuple[list[str], list[str], list[str]]:
+    """``(failed, absent, unfinished)`` among *required* job names.
 
-    *jobs_document* is a ``GET .../runs/{id}/jobs`` response (or its
-    ``jobs`` array). A required job that is **absent** is reported separately
-    from one that failed: "the capture job did not run" and "the capture job
-    ran and failed" are different facts, and an absent job silently treated as
-    passing is how a run with no capture at all becomes a baseline.
+    *jobs_document* is a ``GET .../runs/{id}/jobs`` response (or its ``jobs``
+    array). Only a conclusion of exactly ``success`` satisfies a requirement;
+    the three ways it can fail to are reported apart because they are three
+    different facts a caller reports differently:
+
+    * **failed** -- the job ran and did not succeed (including ``cancelled``
+      and ``skipped``: a skipped capture produced no capture).
+    * **absent** -- no row for it at all. "The capture job did not run" and
+      "the capture job ran and failed" are different, and an absent job
+      silently treated as passing is how a run with no capture becomes a
+      baseline.
+    * **unfinished** -- a row exists but records no conclusion yet (``null``).
+      This is its own category because it used to be neither: the membership
+      test excluded ``""``, which was meant to cover the *absent* default of
+      the lookup, and absence is computed separately -- so a required job
+      present with a null conclusion was reported neither failed nor absent
+      and silently satisfied the requirement. Combined with
+      :attr:`BaselineProducerExpectation.allow_unrelated_job_failures`, which
+      drops the run-level conclusion check, that let a run whose capture job
+      never concluded be selected as an eligible producer. An unchecked
+      requirement is not a satisfied one.
     """
     if isinstance(jobs_document, Mapping):
         rows = jobs_document.get("jobs")
@@ -278,9 +294,14 @@ def required_job_failures(
                 name = str(row.get("name", "") or "")
                 if name:
                     by_name[name] = str(row.get("conclusion", "") or "")
-    failed = [name for name in required if by_name.get(name, "") not in ("", "success")]
     absent = [name for name in required if name not in by_name]
-    return failed, absent
+    unfinished = [name for name in required if by_name.get(name, "x") == ""]
+    failed = [
+        name
+        for name in required
+        if name in by_name and by_name[name] not in ("", "success")
+    ]
+    return failed, absent, unfinished
 
 
 def select_producer_run(
@@ -310,7 +331,7 @@ def select_producer_run(
         )
 
     rejected: list[str] = []
-    eligible: list[tuple[int, SourceRun]] = []
+    eligible: list[tuple[tuple[int, int, int], SourceRun]] = []
     for index, raw in enumerate(candidates):
         try:
             run = SourceRun.from_api(raw)
@@ -359,18 +380,21 @@ def select_producer_run(
                     "checked. An unchecked requirement is not a satisfied one."
                 )
                 continue
-            failed, absent = required_job_failures(jobs, expected.required_jobs)
-            if failed or absent:
+            failed, absent, unfinished = required_job_failures(
+                jobs, expected.required_jobs
+            )
+            if failed or absent or unfinished:
                 detail = []
                 if failed:
                     detail.append(f"failed: {', '.join(failed)}")
                 if absent:
                     detail.append(f"never ran: {', '.join(absent)}")
+                if unfinished:
+                    detail.append(f"no conclusion yet: {', '.join(unfinished)}")
                 rejected.append(f"{label}: required-job: {'; '.join(detail)}")
                 continue
 
-        number = raw.get("run_number") if isinstance(raw, Mapping) else None
-        eligible.append((number if isinstance(number, int) else 0, run))
+        eligible.append((_recency_key(raw, run), run))
 
     if not eligible:
         return ProducerSelection(
@@ -393,6 +417,30 @@ def select_producer_run(
         ),
         rejected=tuple(rejected),
     )
+
+
+def _recency_key(raw: Any, run: SourceRun) -> tuple[int, int, int]:
+    """How "newest" is ordered, deterministically and independent of input order.
+
+    Keying a candidate with no usable ``run_number`` as ``0`` and relying on a
+    stable sort makes the winner among such rows whichever came last in the
+    API's own ordering -- and the runs endpoint returns newest first, so
+    ``[-1]`` picked the *oldest* of the tied group, the opposite of the stated
+    invariant. So: a row carrying a real run number outranks one that does not,
+    higher numbers win, and any remaining tie breaks on the run id, which
+    GitHub assigns monotonically.
+    """
+    raw_number = raw.get("run_number") if isinstance(raw, Mapping) else None
+    number = (
+        raw_number
+        if isinstance(raw_number, int) and not isinstance(raw_number, bool)
+        else None
+    )
+    try:
+        run_id = int(run.run_id)
+    except (TypeError, ValueError):
+        run_id = 0
+    return (0 if number is None else 1, 0 if number is None else number, run_id)
 
 
 def _run_expectation(

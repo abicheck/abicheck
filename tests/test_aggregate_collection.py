@@ -205,6 +205,82 @@ class TestCollection:
             "abi-report-a@p#c@headers.json"
         ]
 
+    def test_a_declared_report_already_inside_the_reports_directory_survives(
+        self, tmp_path: Path
+    ) -> None:
+        """Clearing the destination before reading the inputs destroys them.
+
+        A caller may legitimately declare a report that already lives in the
+        reports directory under this prefix -- a re-run of collection over its
+        own output, or a producer that wrote straight into it. Deleting it
+        first makes ``is_file()`` False, so the check records as *missing* and
+        a real result aggregates as an unavailable target, with no error raised
+        anywhere. That is the exact failure this module exists to prevent.
+        """
+        reports_dir, manifest = _declare(tmp_path)
+        reports_dir.mkdir()
+        check_id = f"libfoo@{_PROFILE}#accepted-main@headers"
+        in_place = _report(reports_dir / f"abi-report-{check_id}.json")
+        result = collect_reports(
+            [DeclaredCheck(id=check_id, report=in_place)],
+            reports_dir=reports_dir,
+            manifest_path=manifest,
+        )
+        assert result.present == [check_id]
+        assert result.missing == []
+        collected = reports_dir / f"abi-report-{check_id}.json"
+        assert collected.is_file()
+        assert (
+            json.loads(collected.read_text(encoding="utf-8"))["verdict"] == "COMPATIBLE"
+        )
+
+    def test_an_in_place_report_leaves_no_stale_twin(self, tmp_path: Path) -> None:
+        """The sibling hazard: keeping the input must not keep it under its
+        *old* name as an extra, undeclared target."""
+        reports_dir, manifest = _declare(tmp_path)
+        reports_dir.mkdir()
+        recorded = f"libfoo@{_PROFILE}#accepted-main@headers"
+        source = _report(reports_dir / "abi-report-stale-name.json", target_id=recorded)
+        assert source.is_file()
+        collect_reports(
+            [DeclaredCheck(id=recorded, report=source)],
+            reports_dir=reports_dir,
+            manifest_path=manifest,
+        )
+        assert sorted(path.name for path in reports_dir.glob("*.json")) == [
+            f"abi-report-{recorded}.json"
+        ]
+
+    def test_a_refused_declaration_leaves_the_destination_untouched(
+        self, tmp_path: Path
+    ) -> None:
+        """Staging means a rejected run does not half-clear the directory."""
+        reports_dir, manifest = _declare(tmp_path)
+        reports_dir.mkdir()
+        survivor = _report(reports_dir / "abi-report-previous@p#c@headers.json")
+        conflicting = _report(tmp_path / "r.json", target_id="other@p#c@headers")
+        with pytest.raises(CollectionError, match="records its own target_id"):
+            collect_reports(
+                [DeclaredCheck(id="declared@p#c@headers", report=conflicting)],
+                reports_dir=reports_dir,
+                manifest_path=manifest,
+            )
+        assert survivor.is_file()
+
+    def test_staging_leaves_no_temporary_directory_behind(self, tmp_path: Path) -> None:
+        reports_dir, manifest = _declare(tmp_path)
+        collect_reports(
+            [DeclaredCheck(id="a@p#c@headers", report=_report(tmp_path / "r.json"))],
+            reports_dir=reports_dir,
+            manifest_path=manifest,
+        )
+        leftovers = [
+            child.name
+            for child in reports_dir.parent.iterdir()
+            if child.name.startswith(".abicheck-collect-")
+        ]
+        assert leftovers == []
+
     def test_a_reports_own_target_id_outranks_the_filename(
         self, tmp_path: Path
     ) -> None:

@@ -77,10 +77,16 @@ print(obj.get("type", ""), obj.get("sha", ""))
     fi
 
     rc=0
+    # ${arr[@]+"${arr[@]}"}, not a bare "${arr[@]}": under macOS's stock
+    # (GPLv2-frozen) bash 3.2's set -u, expanding an *empty* array as
+    # "${arr[@]}" is itself treated as an unbound-variable reference (bash
+    # 4.4+ special-cased this away). Every array below is legitimately empty
+    # on a normal path, so a bare expansion aborts the step outright -- the
+    # same trap action/run.sh already guards against throughout.
     python -m abicheck.frontends.action.cli verify-tag "$TAG" \
       --ref-json "$WORK/ref.json" \
-      "${TAGOBJ_ARGS[@]}" \
-      "${LOOKUP_FLAG[@]}" \
+      ${TAGOBJ_ARGS[@]+"${TAGOBJ_ARGS[@]}"} \
+      ${LOOKUP_FLAG[@]+"${LOOKUP_FLAG[@]}"} \
       --built-sha "${INPUT_BUILT_SHA:-}" \
       --github-output "$GITHUB_OUTPUT" || rc=$?
     if [[ "$rc" == "$_REFUSED" ]]; then
@@ -100,7 +106,7 @@ print(obj.get("type", ""), obj.get("sha", ""))
 
     LOOKUP_FLAG=()
     if ! gh api -X GET "repos/$REPO/actions/workflows/$(basename "$WORKFLOW")/runs" \
-         "${QUERY[@]}" --paginate --jq '.workflow_runs' > "$WORK/raw.json" 2>"$WORK/err"; then
+         ${QUERY[@]+"${QUERY[@]}"} --paginate --jq '.workflow_runs' > "$WORK/raw.json" 2>"$WORK/err"; then
       cat "$WORK/err" >&2
       echo '[]' > "$WORK/raw.json"
       LOOKUP_FLAG=(--lookup-failed)
@@ -110,7 +116,7 @@ print(obj.get("type", ""), obj.get("sha", ""))
     python -m abicheck.frontends.action.cli flatten-pages "$WORK/raw.json" "$WORK/runs.json"
 
     JOBS_ARGS=()
-    if [[ -n "${INPUT_REQUIRED_JOBS:-}" && -z "${LOOKUP_FLAG[*]:-}" ]]; then
+    if [[ -n "${INPUT_REQUIRED_JOBS:-}" && ${#LOOKUP_FLAG[@]} -eq 0 ]]; then
       # One jobs document per candidate. A run whose jobs cannot be fetched is
       # left out of the map, which the decision layer reports as
       # jobs-unavailable -- an unchecked requirement is not a satisfied one.
@@ -168,7 +174,9 @@ json.dump(out, open(sys.argv[2], "w", encoding="utf-8"))
       --expect-head-branch "${INPUT_EXPECT_HEAD_BRANCH:-}" \
       --allowed-conclusions "${INPUT_ALLOWED_CONCLUSIONS:-success}" \
       --required-jobs "${INPUT_REQUIRED_JOBS:-}" \
-      "${ALLOW_FLAG[@]}" "${JOBS_ARGS[@]}" "${LOOKUP_FLAG[@]}" \
+      ${ALLOW_FLAG[@]+"${ALLOW_FLAG[@]}"} \
+      ${JOBS_ARGS[@]+"${JOBS_ARGS[@]}"} \
+      ${LOOKUP_FLAG[@]+"${LOOKUP_FLAG[@]}"} \
       --github-output "$GITHUB_OUTPUT" || rc=$?
     if [[ "$rc" == "$_REFUSED" ]]; then
       # Not a step failure: "no eligible baseline" and "the lookup failed" are

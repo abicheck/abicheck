@@ -307,14 +307,123 @@ class TestRequiredJobs:
         ],
     )
     def test_either_jobs_document_shape_is_read(self, document: Any) -> None:
-        assert required_job_failures(document, ["build"]) == ([], [])
+        assert required_job_failures(document, ["build"]) == ([], [], [])
+
+    def test_a_required_job_with_no_conclusion_yet_is_not_satisfied(self) -> None:
+        """A row exists but records ``null`` -- neither failed nor absent.
+
+        The membership test used to exclude ``""``, which was meant to cover
+        the *absent* default of the lookup while absence was computed
+        separately -- so this case was silently satisfied. With
+        ``allow_unrelated_job_failures`` dropping the run-level conclusion
+        check too, a run whose capture job never concluded became an eligible
+        baseline producer. An unchecked requirement is not a satisfied one.
+        """
+        document = {
+            "jobs": [
+                {"name": "build", "conclusion": "success"},
+                {"name": "capture", "conclusion": None},
+            ]
+        }
+        failed, absent, unfinished = required_job_failures(
+            document, ["build", "capture"]
+        )
+        assert failed == []
+        assert absent == []
+        assert unfinished == ["capture"]
+
+    @pytest.mark.parametrize(
+        "conclusion", ["failure", "cancelled", "skipped", "timed_out"]
+    )
+    def test_only_success_satisfies_a_requirement(self, conclusion: str) -> None:
+        """``skipped`` included deliberately: a skipped capture produced none."""
+        document = {"jobs": [{"name": "capture", "conclusion": conclusion}]}
+        failed, absent, unfinished = required_job_failures(document, ["capture"])
+        assert failed == ["capture"]
+        assert (absent, unfinished) == ([], [])
+
+    def test_an_unconcluded_required_job_blocks_selection(self) -> None:
+        """The end-to-end consequence, through the real selector."""
+        expectation = BaselineProducerExpectation(
+            repository="o/r",
+            workflow=_WORKFLOW,
+            event="push",
+            head_sha="BASE",
+            head_branch="main",
+            required_jobs=("build", "capture"),
+            allow_unrelated_job_failures=True,
+        )
+        jobs = {
+            "1": {
+                "jobs": [
+                    {"name": "build", "conclusion": "success"},
+                    {"name": "capture", "conclusion": None},
+                ]
+            }
+        }
+        selection = select_producer_run(
+            [_run(1, conclusion="failure")], expectation, jobs_by_run=jobs
+        )
+        assert selection.outcome == "not_found"
+        assert any("no conclusion yet: capture" in line for line in selection.rejected)
+
+
+class TestRecencyOrdering:
+    """ "Newest" must not depend on the order the API happened to return.
+
+    The runs endpoint returns newest first, so a stable sort over candidates
+    all keyed the same made ``[-1]`` pick the *oldest* of that group.
+    """
+
+    def test_a_row_without_a_run_number_never_outranks_one_with_it(self) -> None:
+        numbered = _run(1, number=5)
+        unnumbered = _run(2)
+        del unnumbered["run_number"]
+        for candidates in ([numbered, unnumbered], [unnumbered, numbered]):
+            selection = select_producer_run(candidates, _EXPECT)
+            assert selection.run is not None
+            assert selection.run.run_id == "1", candidates
+
+    def test_ties_break_on_the_monotonic_run_id(self) -> None:
+        older = _run(100)
+        newer = _run(200)
+        for candidate in (older, newer):
+            del candidate["run_number"]
+        for candidates in ([older, newer], [newer, older]):
+            selection = select_producer_run(candidates, _EXPECT)
+            assert selection.run is not None
+            assert selection.run.run_id == "200", candidates
+
+    def test_selection_is_independent_of_input_order(self) -> None:
+        """Stated as a property over every permutation, not one arrangement."""
+        import itertools
+
+        candidates = [_run(1, number=3), _run(2, number=9), _run(3, number=7)]
+        winners = {
+            (selection.run.run_id if selection.run else None)
+            for permutation in itertools.permutations(candidates)
+            for selection in [select_producer_run(list(permutation), _EXPECT)]
+        }
+        assert winners == {"2"}
+
+    def test_a_non_integer_run_number_is_not_treated_as_one(self) -> None:
+        bogus = _run(1)
+        bogus["run_number"] = "12"
+        real = _run(2, number=4)
+        selection = select_producer_run([bogus, real], _EXPECT)
+        assert selection.run is not None and selection.run.run_id == "2"
+
+
+class TestMalformedJobs:
+    """A jobs document that cannot be read satisfies nothing."""
 
     @pytest.mark.parametrize("document", [None, "text", {"jobs": "text"}, 7])
     def test_a_malformed_jobs_document_fails_every_requirement(
         self, document: Any
     ) -> None:
-        failed, absent = required_job_failures(document, ["build"])
+        failed, absent, unfinished = required_job_failures(document, ["build"])
         assert absent == ["build"]
+        assert unfinished == []
 
 
 class TestVerifyBaselineSourceShell:
