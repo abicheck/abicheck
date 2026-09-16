@@ -564,6 +564,31 @@ class TestIntroductionOfAnUndocumentedExportIsNeverDemoted:
         old, new = self._sides()
         assert _classify(kind, "brand_new_export", old, new) == (False, "not-exported")
 
+    @pytest.mark.parametrize("kind", _ADDITION_KINDS + _REMOVAL_KINDS)
+    def test_a_finding_with_no_symbol_is_not_an_existence_change(
+        self, kind: ChangeKind
+    ) -> None:
+        """The guard at the top of the rule, exercised rather than assumed.
+
+        An existence change is answered by looking a name up in a side's
+        undeclared-export set. With no name there is nothing to look up, and
+        ``"" in some_set`` is a question about the empty string rather than
+        about this finding -- so the rule declines instead of consulting
+        either side. Checked for every kind in the family, since a guard
+        that held for only some of them would be worse than none.
+        """
+        old, new = self._sides()
+        from abicheck.surface import _is_undeclared_export_existence_change
+
+        assert (
+            _is_undeclared_export_existence_change(
+                Change(kind=kind, symbol="", description="x"),
+                compute_public_surface(old),
+                compute_public_surface(new),
+            )
+            is False
+        )
+
     def test_the_existence_axis_holds_for_every_kind_in_both_directions(
         self,
     ) -> None:

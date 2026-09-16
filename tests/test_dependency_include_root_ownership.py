@@ -56,6 +56,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.extract.public_root_ownership import (
+    compile_only_roots,
     retain_owning_roots,
     roots_a_declared_public_surface,
 )
@@ -279,6 +280,36 @@ class TestIncludeRootContainmentPredicate:
         for rotation in range(len(roots)):
             rotated = roots[rotation:] + roots[:rotation]
             assert roots_a_declared_public_surface(probe, rotated)
+
+    def test_compile_only_roots_is_the_exact_complement(self) -> None:
+        """The two halves partition the input: every root is in exactly one.
+        Stated as a property over several shapes, because a root that fell
+        into *neither* would silently lose both its ownership and its
+        "UNKNOWN, do not demote" protection -- the failure this pair exists
+        to prevent, in its worst form."""
+        declared = [self._seg("/proj/include/api.h")]
+        roots = [
+            self._seg("/proj/include"),
+            self._seg("/proj"),
+            self._seg("/opt/mpi/include"),
+            self._seg("/elsewhere"),
+        ]
+        owning = retain_owning_roots(roots, declared)
+        compile_only = compile_only_roots(roots, declared)
+        assert sorted(owning + compile_only) == sorted(roots)
+        assert not set(owning) & set(compile_only)
+        # And it is not a degenerate partition either way round.
+        assert owning and compile_only
+
+    def test_compile_only_roots_with_no_declared_set(self) -> None:
+        """``None`` is the documented "no declared set to test against"
+        default, and it is not symmetric with its sibling: with nothing
+        declared, `retain_owning_roots` keeps every root (pre-containment
+        behaviour) while `compile_only_roots` claims none -- so the two do
+        not both answer "everything", which would double-count."""
+        roots = [self._seg("/opt/mpi/include")]
+        assert retain_owning_roots(roots, None) == roots
+        assert compile_only_roots(roots, None) == []
 
     def test_no_declared_roots_means_no_owner(self) -> None:
         """The vacuity guard: with nothing declared, nothing is owned --
