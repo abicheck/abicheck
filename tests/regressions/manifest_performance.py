@@ -63,6 +63,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             # by the number of distinct inputs, not an assertion that one
             # named call site consults the cache.
             "tests/test_clang_template_index_reuse.py",
+            "tests/test_clang_template_index_reuse_e2e.py",
         ),
         public_surfaces=("cli", "python-api"),
         axes={
