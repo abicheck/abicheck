@@ -494,3 +494,109 @@ def test_the_castxml_backend_is_an_unchanged_control(
     assert _findings(reuse_result), "the castxml control must produce findings"
     assert _findings(reuse_result) == _findings(plain_result)
     assert str(reuse_result.verdict) == str(plain_result.verdict)
+
+
+@_CLANG_L2
+def test_the_header_graph_pass_is_unchanged_under_reuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The header-graph attach is another parser over the same AST -- cover it.
+
+    ``service_dump_native`` builds the L2 semantic header graph by calling
+    ``dumper._clang_header_dump`` a second time, which constructs one more
+    ``_ClangAstParser`` over the tree the main pass already parsed. That is
+    precisely a consumer this change shares indexes with, and the sibling
+    tests miss it entirely: they call ``dumper.dump`` directly, and the graph
+    attach only happens on the ``service.run_dump`` path (``_HEADER_GRAPH_
+    ENABLED``), so their snapshots legitimately carry no graph at all.
+
+    So this one goes through the service entry point and compares the whole
+    serialized snapshot -- graph included -- with the reuse off and on, and
+    asserts the graph is actually populated so the comparison cannot pass
+    vacuously against two equally empty graphs.
+    """
+    from abicheck import dumper_clang
+    from abicheck.serialization import snapshot_to_dict
+    from abicheck.service import run_dump
+
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
+
+    builds: dict[bool, int] = {}
+
+    def _run(reuse: bool) -> dict[str, Any]:
+        root = tmp_path / ("arm_one" if reuse else "arm_two")
+        so, header = _build_side(root, broken=False)
+        count = 0
+        real = dumper_clang.build_template_param_indexes
+
+        def counted(node: dict[str, Any]) -> Any:
+            nonlocal count
+            count += 1
+            return real(node)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(dumper_clang, "build_template_param_indexes", counted)
+            if not reuse:
+                patch.setattr(dumper_clang, "_template_param_indexes_for", counted)
+            with ast_acquisition_scope():
+                snap = run_dump(so, "elf", headers=[header], includes=[header.parent])
+        builds[reuse] = count
+        document = snapshot_to_dict(snap)
+        for volatile in (
+            "library",
+            "path",
+            "timestamp",
+            "created_at",
+            "provenance",
+            "source_mtime",
+        ):
+            document.pop(volatile, None)
+        roots = (str(tmp_path / "arm_one"), str(tmp_path / "arm_two"))
+
+        def scrub(value: Any) -> Any:
+            if isinstance(value, str):
+                for r in roots:
+                    value = value.replace(r, "<root>")
+                return value
+            if isinstance(value, dict):
+                return {k: scrub(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [scrub(v) for v in value]
+            return value
+
+        return scrub(document)
+
+    reuse_doc = _run(True)
+    plain_doc = _run(False)
+
+    # Prove the two arms really ran differently before comparing them. Without
+    # this the test is vacuous under any change that disables reuse globally:
+    # both arms then rebuild per parser and agree trivially. Found by mutating
+    # `_ClangAstParser.__init__` to call the builder directly -- that mutation
+    # was caught by a sibling test and silently passed here.
+    assert builds[True] == 1, builds
+    assert builds[False] > builds[True], builds
+
+    # Vacuity guard first: if no graph was built, the equality below says
+    # nothing about the graph pass, which is the whole point of this test.
+    graph = reuse_doc.get("surface_graph")
+    assert graph, sorted(reuse_doc)
+    assert graph.get("nodes"), graph.keys()
+    assert graph.get("edges"), graph.keys()
+
+    # `graph_id` is a digest over the graph's own pre-scrub content, which
+    # embeds each arm's absolute header paths -- so the two arms differ there
+    # by construction, exactly like the path-derived `finding_id` the sibling
+    # test excludes. Everything the digest summarises IS compared below, after
+    # scrubbing: nodes, edges, indexes, coverage and the pass lists. Dropping
+    # the digest therefore removes no claim, it only removes the paths.
+    reuse_graph = dict(reuse_doc["surface_graph"])
+    plain_graph = dict(plain_doc["surface_graph"])
+    assert reuse_graph.pop("graph_id") != plain_graph.pop("graph_id"), (
+        "the two arms unexpectedly share a graph digest, so this exclusion is "
+        "hiding something rather than accounting for differing paths"
+    )
+    reuse_doc = {**reuse_doc, "surface_graph": reuse_graph}
+    plain_doc = {**plain_doc, "surface_graph": plain_graph}
+
+    assert reuse_doc == plain_doc
