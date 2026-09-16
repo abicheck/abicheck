@@ -486,6 +486,7 @@ PROVENANCE_UNVERIFIED = frozenset(
         "var_deprecated_removed",
         "var_lost_const",
         "var_removed",
+        "var_removed_elf_only",
         "var_type_changed",
         "var_value_changed",
         "vector_abi_changed",
