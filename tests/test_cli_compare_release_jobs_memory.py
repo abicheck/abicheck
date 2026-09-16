@@ -301,3 +301,48 @@ class TestReleaseAdmissionReserve:
             monkeypatch.setenv("ABICHECK_RELEASE_MEM_UTILIZATION", bad)
             monkeypatch.setenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", "1.0")
             assert release_jobs.release_jobs_mem_cap("headers") == 2
+
+    def test_an_unparsable_reserve_falls_back_to_the_default(self, monkeypatch) -> None:
+        """The reserve override has its own fallback, and its own test.
+
+        The utilization case above cannot stand in for this one: they are
+        two independent `try`/`except ValueError` bodies, and a sweep that
+        only ever feeds a bad value to one of them leaves the other's
+        fallback unexecuted. Codecov caught exactly that on the first push
+        of this change -- the branch was written and never run, which is
+        the state in which a fallback is indistinguishable from a crash.
+        """
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_UTILIZATION", raising=False)
+        # 19.0 GiB is chosen, not arbitrary: it is a probe value where the
+        # default reserve and a zero reserve give *different* worker counts
+        # (3 vs 4). At 12.0 GiB both truncate to 2, so a test written there
+        # executes the fallback without checking what it returns -- verified
+        # by mutating the fallback to `return 0.0`, which such a test passes.
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 19.0)
+        for bad in ("not-a-number", "", "   ", "1.0.0"):
+            monkeypatch.setenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", bad)
+            # Falls back to the 1.0 GiB default: (19.0 * 0.85 - 1.0) / 4.0 -> 3,
+            # where a dropped reserve would give 4.
+            assert release_jobs.release_jobs_mem_cap("headers") == 3
+
+    def test_a_negative_reserve_is_floored_rather_than_raising_admission(
+        self, monkeypatch
+    ) -> None:
+        """A negative reserve would *add* committable memory.
+
+        That is the one direction this whole change forbids, and the floor
+        that prevents it needs its own assertion rather than being implied
+        by the `max(0.0, ...)` in the source.
+        """
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        monkeypatch.delenv("ABICHECK_RELEASE_MEM_UTILIZATION", raising=False)
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 19.0)
+
+        monkeypatch.setenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", "-100")
+        floored = release_jobs.release_jobs_mem_cap("headers")
+        monkeypatch.setenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", "0")
+        no_reserve = release_jobs.release_jobs_mem_cap("headers")
+        assert floored == no_reserve
+        # And still no more than the rule this replaces, which is the point.
+        assert floored <= self._plain_cap(19.0, 4.0)
