@@ -457,6 +457,60 @@ class TestMemberIndependence:
             == baseline
         )
 
+    def test_member_order_does_not_change_the_shared_answer(self) -> None:
+        """Reordering the members, and which one asks first, changes nothing.
+
+        The first member through the scope is the one that actually builds
+        the bundle, and every later member is served that build. So "which
+        member went first" is a real input to the shared value even though it
+        is not part of the key -- and it would matter if any builder read
+        member state. Stated over several genuinely different orders and
+        export sets rather than one swap, since a single reordering only
+        forecloses the pair it names.
+        """
+        from abicheck.dumper_clang import _ClangAstParser
+
+        root = _rich_tree()
+        expected = _independent(root)
+        members = [
+            {"exported_dynamic": {"a"}, "no_binary_evidence": False},
+            {"exported_dynamic": set(), "no_binary_evidence": True},
+            {"exported_dynamic": {"b", "c"}, "public_header_paths": []},
+            {"exported_dynamic": {"_ZN2ns5InnerE"}, "is_cxx": False},
+            {"exported_dynamic": {"d"}, "target_triple": "aarch64-unknown-linux-gnu"},
+            {"exported_dynamic": set(), "exported_static_extra": True},
+        ]
+        orders = [
+            list(range(len(members))),
+            list(reversed(range(len(members)))),
+            [3, 0, 5, 1, 4, 2],
+            [5, 4, 0, 2, 1, 3],
+        ]
+        for order in orders:
+            with ast_acquisition_scope():
+                for index in order:
+                    spec = dict(members[index])
+                    dynamic = set(spec.pop("exported_dynamic"))
+                    static = (
+                        {"s"} if spec.pop("exported_static_extra", False) else set()
+                    )
+                    parser = _ClangAstParser(root, dynamic, static, **spec)
+                    actual = {
+                        "kinds": {
+                            k: list(v)
+                            for k, v in parser._template_param_kinds_by_qualname.items()
+                        },
+                        "defaults": {
+                            k: list(v)
+                            for k, v in parser._template_param_defaults_by_qualname.items()
+                        },
+                        "names": {
+                            k: list(v)
+                            for k, v in parser._template_param_names_by_qualname.items()
+                        },
+                    }
+                    assert actual == expected, (order, index)
+
     def test_member_local_state_stays_distinct_across_shared_parsers(self) -> None:
         """Sharing the indexes must not share anything else.
 
