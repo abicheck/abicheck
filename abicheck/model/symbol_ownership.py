@@ -70,10 +70,8 @@ def owning_scope_components(symbol: str) -> list[str] | None:
     (constructors, operators, unmangled C names, ...) so callers can fall
     back to :func:`_nested_name_region`.
     """
-    from .mangled_name import (
-        itanium_scope_components,
-        itanium_special_name_owner_scope_components,
-    )
+    from .mangled_name import itanium_scope_components
+    from .owner_recovery import itanium_special_name_owner_scope_components
 
     special = itanium_special_name_owner_scope_components(symbol)
     comps = special[0] if special is not None else itanium_scope_components(symbol)

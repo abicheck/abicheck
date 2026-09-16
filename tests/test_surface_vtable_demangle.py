@@ -45,7 +45,7 @@ from abicheck.model import (
     ScopeOrigin,
     Visibility,
 )
-from abicheck.model.mangled_name import (
+from abicheck.model.owner_recovery import (
     itanium_special_name_owner_identifiers,
     itanium_special_name_owner_scope_components,
 )

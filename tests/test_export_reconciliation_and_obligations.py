@@ -736,7 +736,7 @@ def test_dedup_collapses_the_tier_pair_and_keeps_distinct_losses() -> None:
 # --------------------------------------------------------------------------
 
 
-def _ctor_snapshot(symbols: list[str], *, declare_widget: bool):
+def _ctor_snapshot(symbols: list[str], *, declare_widget: bool, inline: bool = True):
     """A header-aware snapshot exporting *symbols*, optionally declaring the
     class ``Widget`` the way a real header parse does.
 
@@ -762,7 +762,28 @@ def _ctor_snapshot(symbols: list[str], *, declare_widget: bool):
                 mangled="__abicheck_ctor__Widget()",
                 return_type="",
                 origin=ScopeOrigin.PUBLIC_HEADER,
-            )
+                # In-class-defined, which is what makes the -O0/-O2 shape this
+                # fixture reproduces harmless: the header offers a definition
+                # every consumer TU emits for itself, so losing the library's
+                # own out-of-line copy leaves no obligation. Verified by
+                # runtime oracle -- see `CPP_HDR` in
+                # `tests/test_cross_compiler_fp.py`. Out-of-line is the
+                # opposite case and has its own test in
+                # `tests/test_export_owner_resolution.py`.
+                is_inline=inline,
+            ),
+            # The destructor's own placeholder key, which a real header parse
+            # always emits alongside (`~Widget`, measured on a real castxml
+            # dump). Omitting it left `_ZN6WidgetD1Ev` resolving to
+            # "owner_not_declared" -- an honest unresolved state, but not the
+            # shape this fixture claims to reproduce.
+            Function(
+                name="~Widget",
+                mangled="~Widget",
+                return_type="",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+                is_inline=inline,
+            ),
         ]
     return snap
 
