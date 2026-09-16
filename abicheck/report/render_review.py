@@ -56,6 +56,17 @@ class ReviewDigest:
     show_release_recommendation: bool = False
 
 
+#: Per-list caps for the bounded review digest. Named rather than inline so
+#: each bound sits next to the disclosure that reports it. Each caps a single
+#: flat list, so none can exhibit the cross-group starvation documented at
+#: ``surface_changes.MAX_COMPACT_SURFACE_ITEMS``; the counts rendered above
+#: these lists come from the digest's own totals, so they stay complete
+#: however far a list is cut.
+MAX_REVIEW_PATTERN_MODULATIONS = 4
+MAX_REVIEW_IMPACTED_SYMBOLS = 10
+MAX_REVIEW_DISPOSITION_RULES = 4
+
+
 def render_review_digest(digest: ReviewDigest) -> str:
     def compact(value: object, limit: int = 180) -> str:
         text = str(value).replace("\n", " ")
@@ -200,11 +211,12 @@ def render_review_digest(digest: ReviewDigest) -> str:
 
         lines += ["**Pattern-modulated findings:**"]
         lines += render_pattern_modulations_from_mapping(
-            digest.pattern_modulations[:4], include_heading=False
+            digest.pattern_modulations[:MAX_REVIEW_PATTERN_MODULATIONS],
+            include_heading=False,
         )
-        if len(digest.pattern_modulations) > 4:
+        if len(digest.pattern_modulations) > MAX_REVIEW_PATTERN_MODULATIONS:
             lines.append(
-                f"- … {len(digest.pattern_modulations) - 4} more omitted; export JSON for details"
+                f"- … {len(digest.pattern_modulations) - MAX_REVIEW_PATTERN_MODULATIONS} more omitted; export JSON for details"
             )
         lines.append("")
     if (
@@ -216,10 +228,12 @@ def render_review_digest(digest: ReviewDigest) -> str:
 
     if digest.impacted and not digest.review_groups:
         lines += ["**Top impacted symbols:**", ""]
-        for sym in digest.impacted[:10]:
+        for sym in digest.impacted[:MAX_REVIEW_IMPACTED_SYMBOLS]:
             lines.append(f"- `{sym.symbol}` — {sym.kind}")
-        if len(digest.impacted) > 10:
-            lines.append(f"- … and {len(digest.impacted) - 10} more")
+        if len(digest.impacted) > MAX_REVIEW_IMPACTED_SYMBOLS:
+            lines.append(
+                f"- … and {len(digest.impacted) - MAX_REVIEW_IMPACTED_SYMBOLS} more"
+            )
         lines.append("")
 
     lines += [
@@ -307,14 +321,14 @@ def render_terminal_digest(digest: ReviewDigest) -> str:
             f"{counts.get('suppressed', 0)} suppressed by {len(audit.rules)} rules; "
             f"{counts.get('out_of_contract', 0) + counts.get('unresolved_relevance', 0)} scope-excluded.",
         ]
-        for rule, matched in audit.rules[:4]:
+        for rule, matched in audit.rules[:MAX_REVIEW_DISPOSITION_RULES]:
             lines.append(
                 f"  Suppression {rule.rule_id or 'rule'}: {matched} finding(s) — "
                 f"{compact(rule.reason or rule.label or 'no reason given', 180)}"
             )
-        if len(audit.rules) > 4:
+        if len(audit.rules) > MAX_REVIEW_DISPOSITION_RULES:
             lines.append(
-                f"  ... {len(audit.rules) - 4} more suppression rules omitted."
+                f"  ... {len(audit.rules) - MAX_REVIEW_DISPOSITION_RULES} more suppression rules omitted."
             )
     lines.append(
         "Details: add -o markdown=abi-report.md -o json=abi-report.json to this invocation."

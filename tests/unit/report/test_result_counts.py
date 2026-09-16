@@ -5,6 +5,7 @@ from abicheck.policy.severity import IssueCategory
 from abicheck.report.disposition_audit import DispositionAudit
 from abicheck.report.finding import ReportFinding
 from abicheck.report.result_counts import compute_result_counts
+from abicheck.report.review_compute import compact_evidence_summary
 from abicheck.report.review_groups import build_review_groups
 
 
@@ -68,3 +69,74 @@ def test_hygiene_lifecycle_populations_do_not_become_new_runtime_risk() -> None:
     assert counts.hygiene_resolved == 3
     assert counts.hygiene_persistent == 33
     assert counts.runtime_dependency == 0
+
+
+class _FakeResult:
+    """Minimal stand-in carrying only the attribute the function reads."""
+
+    def __init__(self, layers: tuple[str, ...]) -> None:
+        self.layer_coverage = [
+            {"layer": layer, "status": "present"} for layer in layers
+        ]
+
+
+#: Every layer `compact_evidence_summary` branches on, so the enumeration
+#: below is exhaustive over its real input domain rather than sampling it.
+_SUMMARY_LAYERS = ("L0", "L1", "L2", "L4_source_abi")
+
+
+def test_evidence_summary_names_every_present_layer_and_every_absent_limit() -> None:
+    """Exhaustive over all 16 present/absent combinations of the four layers.
+
+    The oracle is written from the documented contract -- a layer that is
+    present is named, a layer whose absence bounds the conclusion is listed
+    as a limit -- not from the function's own if-chain.
+    """
+    expected_names = {
+        "L0": "binary exports",
+        "L2": "public headers/signatures",
+        "L1": "debug-derived compiled layout",
+    }
+    failures: list[str] = []
+    for mask in range(1 << len(_SUMMARY_LAYERS)):
+        present = tuple(
+            layer for i, layer in enumerate(_SUMMARY_LAYERS) if mask & (1 << i)
+        )
+        text = compact_evidence_summary(_FakeResult(present))
+        for layer, name in expected_names.items():
+            if (layer in present) != (name in text):
+                failures.append(f"{present}: {name!r} presence wrong in {text!r}")
+        # A run naming no present layer must still say what it rests on,
+        # never render an empty claim.
+        if not any(layer in present for layer in expected_names):
+            if "recorded snapshot facts" not in text:
+                failures.append(f"{present}: no fallback basis in {text!r}")
+        if ("L1" not in present) != ("no debug-derived layout verification" in text):
+            failures.append(f"{present}: L1 limit wrong in {text!r}")
+        if ("L4_source_abi" not in present) != ("no source replay" in text):
+            failures.append(f"{present}: L4 limit wrong in {text!r}")
+        if not text.strip():
+            failures.append(f"{present}: empty summary")
+    assert not failures, "evidence summary contract violated:\n" + "\n".join(failures)
+
+
+def test_evidence_summary_ignores_layers_that_are_not_present() -> None:
+    """A recorded-but-failed layer must not be claimed as evidence."""
+    result = _FakeResult(())
+    result.layer_coverage = [
+        {"layer": "L1", "status": "failed"},
+        {"layer": "L0", "status": "present"},
+        "not-a-dict",
+    ]
+    text = compact_evidence_summary(result)
+    assert "binary exports" in text
+    assert "debug-derived compiled layout" not in text
+    assert "no debug-derived layout verification" in text
+
+
+def test_evidence_summary_handles_a_result_with_no_layer_coverage() -> None:
+    class _Bare:
+        pass
+
+    text = compact_evidence_summary(_Bare())
+    assert "recorded snapshot facts" in text

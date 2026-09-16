@@ -46,6 +46,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ..change_registry import ChangeEntity
 from .change_operation import entity_for_change, operation_for_kind
 from .finding import ReportFinding, build_report_findings, report_findings_for
 
@@ -128,7 +129,39 @@ class SurfaceChangeSection:
         )
 
 
-_PUBLIC_SURFACE_ENTITIES = frozenset({"function", "variable", "type", "enum"})
+#: The :class:`ChangeEntity` members this section itemizes: the *declaration*
+#: surface a consumer compiles and links against.
+#:
+#: Derived from the enum rather than spelled as bare strings, so a typo is an
+#: ``AttributeError`` at import instead of a filter that silently matches
+#: nothing. Its complement is stated explicitly below rather than left
+#: implicit: ``tests/test_surface_changes.py`` asserts the two partition
+#: :class:`ChangeEntity` exhaustively, so a member added later must be
+#: classified into one of them instead of being silently dropped from this
+#: section -- the `registry.kind_completeness` failure shape
+#: (`tests/regressions/manifest.py`), where a missing classification produced
+#: no failure anywhere.
+_PUBLIC_SURFACE_ENTITIES = frozenset(
+    {
+        ChangeEntity.FUNCTION.value,
+        ChangeEntity.VARIABLE.value,
+        ChangeEntity.TYPE.value,
+        ChangeEntity.ENUM.value,
+    }
+)
+
+#: Entities that are real findings but are *not* declarations, and so belong
+#: to their own report dimensions rather than this one: container/symbol-table
+#: facts, build and environment evidence, source-graph facts, and the
+#: analysis-quality axis.
+_NON_SURFACE_ENTITIES = frozenset(
+    {
+        ChangeEntity.BINARY.value,
+        ChangeEntity.BUILD.value,
+        ChangeEntity.SOURCE.value,
+        ChangeEntity.ANALYSIS.value,
+    }
+)
 
 
 def _entry_for(finding: ReportFinding) -> SurfaceChangeEntry:
@@ -236,6 +269,17 @@ def _declaration_line(entry: SurfaceChangeEntry) -> str:
     return f"- **{entry.symbol}** — {decl}{loc}"
 
 
+#: Per-group cap on the compact/bounded rendering of this section.
+#:
+#: The budget is **per group, not shared across groups**. A shared budget
+#: consumed in declaration order lets the least consequential group starve
+#: the most consequential one: 20 compatible additions would spend the whole
+#: allowance and render a single breaking removal as "all 1 omitted". That
+#: inverts this section's own reason to exist -- workstream G's invariant is
+#: that a reviewer can see *what changed*, and a removal they cannot see is
+#: strictly worse than an addition they cannot see. Per-group budgets also
+#: make the output independent of the order the groups happen to be listed
+#: in, which a shared budget silently is not.
 MAX_COMPACT_SURFACE_ITEMS = 12
 
 
@@ -243,7 +287,14 @@ def render_surface_changes_lines(
     section: SurfaceChangeSection, *, limit: int = MAX_COMPACT_SURFACE_ITEMS
 ) -> list[str]:
     """The Markdown form: one sub-heading per group, each entry itemized
-    with its old/new declaration so a reviewer can act on it directly."""
+    with its old/new declaration so a reviewer can act on it directly.
+
+    Each group is independently capped at *limit* entries and discloses its
+    own omitted count, so a bounded rendering never reports fewer than
+    ``min(len(group), limit)`` entries for any group -- see
+    :data:`MAX_COMPACT_SURFACE_ITEMS`. The group headings always carry the
+    *complete* count, capped or not.
+    """
     if section.total == 0:
         return []
     lines: list[str] = []
@@ -252,20 +303,19 @@ def render_surface_changes_lines(
         ("Removals", section.removals),
         ("Modifications", section.modifications),
     )
-    remaining = max(0, limit)
+    cap = max(0, limit)
     for label, entries in groups:
         lines.append(f"**{label}** ({len(entries)})")
         lines.append("")
-        shown = entries[:remaining]
-        if shown:
-            lines.extend(_declaration_line(e) for e in shown)
-            remaining -= len(shown)
-            if len(entries) > len(shown):
-                lines.append(
-                    f"- … {len(entries) - len(shown)} more {label.lower()} omitted"
-                )
+        if not entries:
+            lines.append("- none")
         else:
-            lines.append("- none" if not entries else f"- … all {len(entries)} omitted")
+            shown = entries[:cap]
+            lines.extend(_declaration_line(e) for e in shown)
+            omitted = len(entries) - len(shown)
+            if omitted:
+                quantifier = f"{omitted} more" if shown else f"all {omitted}"
+                lines.append(f"- … {quantifier} {label.lower()} omitted")
         lines.append("")
     return lines
 

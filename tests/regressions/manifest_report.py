@@ -449,4 +449,45 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="report.shared_display_budget_starvation",
+        invariant=(
+            "A bounded/compact rendering that caps how many items it shows "
+            "must budget each displayed group independently. A single "
+            "budget consumed in group-declaration order lets an earlier, "
+            "less consequential group spend the whole allowance and render "
+            "a later, more consequential one as entirely omitted — "
+            "`compare`'s bounded review digest rendered a breaking removal "
+            "as \"all 1 omitted\" whenever 12+ compatible additions "
+            "preceded it. So: for every group and every input, a bounded "
+            "rendering shows at least `min(len(group), cap)` of that "
+            "group's entries, the shown count for one group never depends "
+            "on the size of any other group, and the heading always states "
+            "the group's complete count even when the body is capped."
+        ),
+        fixed_by=(1304,),
+        seed_tests=("tests/test_surface_changes.py",),
+        public_surfaces=("cli", "report"),
+        axes={
+            "group": ("additions", "removals", "modifications"),
+            "cap": ("0", "1", "default", "larger-than-population"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Stated and property-tested for the surface-changes "
+                    "section only. The review digest's other bounded lists "
+                    "(`report/pr_comment_group_summary.review_group_note`'s "
+                    "own group cap, `render_review`'s impacted-symbol "
+                    "lists) each cap a single flat list rather than "
+                    "several groups, so the starvation shape cannot arise "
+                    "there today — but none of them is held to this "
+                    "invariant by a test, so a future grouped list added "
+                    "beside them would not be caught."
+                ),
+                reference="abicheck/report/pr_comment_group_summary.py",
+                canary_test=None,
+            ),
+        ),
+    ),
 )

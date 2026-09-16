@@ -30,9 +30,13 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from abicheck.checker import compare
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.report.surface_changes import (
+    MAX_COMPACT_SURFACE_ITEMS,
+    SurfaceChangeEntry,
     SurfaceChangeSection,
     compute_surface_changes,
     render_surface_changes_lines,
@@ -322,3 +326,166 @@ def test_a_run_with_no_changes_renders_no_surface_changes_section() -> None:
     from abicheck.reporter_markdown import to_markdown
 
     assert "## Surface changes" not in to_markdown(result)
+
+
+# ---------------------------------------------------------------------------
+# Bounded rendering: `report.shared_display_budget_starvation`
+# (`tests/regressions/manifest_report.py`). These state the *contract* of the
+# per-group cap rather than pinning the one reported input: the original
+# defect was a single budget consumed in group-declaration order, under which
+# 12+ additions rendered a breaking removal as "all 1 omitted". A fixed-input
+# regression test for "20 additions plus 1 removal" would have re-passed
+# against any per-group cap *and* against several still-wrong shared-budget
+# variants, so the properties below are checked over a generated population
+# instead, against an oracle (`min(len(group), cap)`) that is deliberately not
+# the renderer's own slicing expression.
+# ---------------------------------------------------------------------------
+
+
+def _surface_entry(symbol: str) -> SurfaceChangeEntry:
+    return SurfaceChangeEntry(
+        kind="func_removed",
+        symbol=symbol,
+        description="d",
+        verdict="BREAKING",
+        category="c",
+        old_declaration="old",
+        new_declaration="new",
+        source_location=None,
+    )
+
+
+def _section(n_add: int, n_rem: int, n_mod: int) -> SurfaceChangeSection:
+    return SurfaceChangeSection(
+        additions=tuple(_surface_entry(f"add{i}") for i in range(n_add)),
+        removals=tuple(_surface_entry(f"rem{i}") for i in range(n_rem)),
+        modifications=tuple(_surface_entry(f"mod{i}") for i in range(n_mod)),
+    )
+
+
+def _shown_symbols(lines: list[str], prefix: str) -> list[str]:
+    """The symbols actually itemized, read back out of the rendered Markdown."""
+    return [
+        line.split("**")[1]
+        for line in lines
+        if line.startswith("- **") and line.split("**")[1].startswith(prefix)
+    ]
+
+
+#: Deliberately spans the boundaries the cap can be wrong at: empty, below,
+#: exactly at, and above `MAX_COMPACT_SURFACE_ITEMS`, in every combination.
+_POPULATION_SIZES = (
+    0,
+    1,
+    MAX_COMPACT_SURFACE_ITEMS - 1,
+    MAX_COMPACT_SURFACE_ITEMS,
+    MAX_COMPACT_SURFACE_ITEMS + 8,
+)
+
+
+@pytest.mark.parametrize("cap", [1, 3, MAX_COMPACT_SURFACE_ITEMS, 1000])
+def test_every_group_gets_its_own_budget_regardless_of_the_other_groups(
+    cap: int,
+) -> None:
+    """No group's shown count may depend on any other group's size.
+
+    This is the property the shared budget violated. The oracle is
+    ``min(len(group), cap)`` -- derived from the documented contract, not
+    from the renderer's slicing.
+    """
+    failures: list[str] = []
+    for n_add in _POPULATION_SIZES:
+        for n_rem in _POPULATION_SIZES:
+            for n_mod in _POPULATION_SIZES:
+                lines = render_surface_changes_lines(
+                    _section(n_add, n_rem, n_mod), limit=cap
+                )
+                for prefix, size in (("add", n_add), ("rem", n_rem), ("mod", n_mod)):
+                    expected = min(size, cap)
+                    actual = len(_shown_symbols(lines, prefix))
+                    if actual != expected:
+                        failures.append(
+                            f"cap={cap} sizes=({n_add},{n_rem},{n_mod}) "
+                            f"group={prefix!r}: showed {actual}, expected {expected}"
+                        )
+    assert not failures, "per-group budget violated:\n" + "\n".join(failures)
+
+
+def test_a_starved_group_is_not_possible_for_any_addition_count() -> None:
+    """The reported shape, generalized over the starving group's size.
+
+    A single removal must stay visible no matter how many additions precede
+    it -- the additions are what consumed the shared budget originally.
+    """
+    for n_add in range(0, MAX_COMPACT_SURFACE_ITEMS * 3):
+        lines = render_surface_changes_lines(_section(n_add, 1, 1))
+        assert _shown_symbols(lines, "rem") == ["rem0"], (
+            f"a removal was starved by {n_add} additions"
+        )
+        assert _shown_symbols(lines, "mod") == ["mod0"]
+
+
+def test_group_headings_always_state_the_complete_count_even_when_capped() -> None:
+    """A capped body must never make the heading under-report the total."""
+    for n_add in _POPULATION_SIZES:
+        for n_rem in _POPULATION_SIZES:
+            text = "\n".join(render_surface_changes_lines(_section(n_add, n_rem, 0)))
+            if n_add or n_rem:
+                assert f"**Additions** ({n_add})" in text
+                assert f"**Removals** ({n_rem})" in text
+
+
+def test_omissions_are_always_disclosed_and_the_disclosed_count_is_exact() -> None:
+    """Whatever is not shown must be reported, with the right number."""
+    for size in _POPULATION_SIZES:
+        for cap in (0, 1, MAX_COMPACT_SURFACE_ITEMS):
+            lines = render_surface_changes_lines(_section(0, size, 0), limit=cap)
+            text = "\n".join(lines)
+            omitted = size - min(size, cap)
+            if omitted and min(size, cap):
+                assert f"… {omitted} more removals omitted" in text
+            elif omitted:
+                assert f"… all {omitted} removals omitted" in text
+            else:
+                assert "omitted" not in text
+
+
+def test_the_oracle_is_not_vacuous() -> None:
+    """Guard the guard: the population must actually exercise capping.
+
+    An oracle accidentally reduced to "never caps" would make every property
+    above pass while asserting nothing.
+    """
+    assert any(size > MAX_COMPACT_SURFACE_ITEMS for size in _POPULATION_SIZES), (
+        "no population size exceeds the cap, so capping is never exercised"
+    )
+    capped = render_surface_changes_lines(_section(0, MAX_COMPACT_SURFACE_ITEMS + 8, 0))
+    assert "omitted" in "\n".join(capped)
+
+
+def test_every_change_entity_is_classified_as_surface_or_non_surface() -> None:
+    """Exhaustiveness, not just correctness of today's membership.
+
+    The filter drops any finding whose entity is not in
+    ``_PUBLIC_SURFACE_ENTITIES``. A `ChangeEntity` member added later would
+    therefore vanish from this section silently -- no test, gate, or runtime
+    error anywhere -- which is the `registry.kind_completeness` failure shape
+    (`tests/regressions/manifest.py`): a missing classification that fails
+    nothing. Adding a member must force a decision here.
+    """
+    from abicheck.change_registry import ChangeEntity
+    from abicheck.report.surface_changes import (
+        _NON_SURFACE_ENTITIES,
+        _PUBLIC_SURFACE_ENTITIES,
+    )
+
+    declared = {e.value for e in ChangeEntity}
+    classified = _PUBLIC_SURFACE_ENTITIES | _NON_SURFACE_ENTITIES
+    assert _PUBLIC_SURFACE_ENTITIES.isdisjoint(_NON_SURFACE_ENTITIES), (
+        "an entity is classified as both surface and non-surface"
+    )
+    assert classified == declared, (
+        "ChangeEntity members missing a surface/non-surface classification: "
+        f"{sorted(declared - classified)}; unknown members classified: "
+        f"{sorted(classified - declared)}"
+    )
