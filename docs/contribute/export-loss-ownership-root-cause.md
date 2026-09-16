@@ -91,9 +91,10 @@ the *base* first here; the owner is the derived class.
 
 ## What changed
 
-- `model/mangled_name.py` parses `CI<n>` (owner = derived class) and gains
-  `itanium_special_member_owner`, which reports the owner path, whether it
-  carries template arguments, and whether the ctor is inheriting.
+- `model/mangled_name.py` parses `CI1`/`CI2` (owner = derived class).
+  `model/owner_recovery.py` provides `itanium_special_member_owner`, which
+  reports the owner path, whether it carries template arguments, and whether
+  the ctor is inheriting.
   `diff_cxx_rules.itanium_ctor_dtor_marker_span` deliberately still declines
   the form: its callers rewrite a 2-character marker in place, and `CI1` is
   three characters with a base-type encoding attached.

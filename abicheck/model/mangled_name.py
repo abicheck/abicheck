@@ -290,9 +290,20 @@ def _parse_inherited_ctor_component(s: str, i: int) -> tuple[str | None, int]:
     """Parse an *inherited* constructor (``CI1``/``CI2``/...) at ``s[i]``.
 
     C++11 inheriting constructors (``using Base::Base;``) mangle as
-    ``CI<n><base-type>`` (Itanium ABI 5.1.4.3) -- confirmed against a real
-    GCC 13 build of ``struct Derived : Base { using Base::Base; };``, which
-    emits ``_ZN3api7DerivedCI1NS_4BaseEEi`` and ``...CI2...``. The owner of
+    ``CI1 <base-type>`` (complete object) or ``CI2 <base-type>`` (base
+    object) -- Itanium ABI 5.1.4.3, and **only** those two: unlike the
+    ordinary ``C1``/``C2``/``C3`` family there is no ``CI3``, and no vendor
+    has claimed ``CI4``/``CI5``. Confirmed against a real GCC 13 build of
+    ``struct Derived : Base { using Base::Base; };``, which emits
+    ``_ZN3api7DerivedCI1NS_4BaseEEi`` and ``...CI2...``.
+
+    Accepting a wider index range would be worse than useless here
+    (CodeRabbit review): an unspecified ``CI3``-``CI5`` is a malformed or
+    vendor-private name this parser cannot claim to understand, yet it would
+    be classified as a terminal ``{ctor}`` and could then be *suppressed* by
+    ``special_member_export_coverage`` as covered emission churn. Declining
+    to parse leaves it reported, which is the safe direction for a name
+    whose meaning is unknown. The owner of
     such a symbol is the **derived** class (``api::Derived``), the enclosing
     nested-name scope -- not the base class named by the ``<base-type>``
     production that follows the code, and not whatever a demangler prints
@@ -318,7 +329,7 @@ def _parse_inherited_ctor_component(s: str, i: int) -> tuple[str | None, int]:
     """
     if s[i : i + 2] != "CI":
         return None, i
-    if s[i + 2 : i + 3] not in tuple("12345"):
+    if s[i + 2 : i + 3] not in ("1", "2"):
         return None, i
     return "{ctor}", i + 3
 

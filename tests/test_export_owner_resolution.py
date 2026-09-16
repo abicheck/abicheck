@@ -449,6 +449,16 @@ def test_an_always_covered_guard_would_fail_something_here() -> None:
         # compiler output; the point is that the CI production must not fire
         # on a coincidental `CI` prefix in the component stream.
         ("_ZN3api7DerivedCIxNS_4BaseEEi", "CI not followed by a ctor index"),
+        # The ABI defines CI1 and CI2 and nothing else -- no CI3 (unlike the
+        # ordinary C1/C2/C3 family), and no vendor has claimed CI4/CI5. A
+        # wider index range would classify an unspecified name as a terminal
+        # ctor, and the coverage join could then suppress a real export loss
+        # under a name this parser cannot claim to understand (CodeRabbit
+        # review). Declining leaves it reported, the safe direction.
+        ("_ZN3api7DerivedCI3NS_4BaseEEi", "CI3 is not an ABI encoding"),
+        ("_ZN3api7DerivedCI4NS_4BaseEEi", "CI4 is not an ABI encoding"),
+        ("_ZN3api7DerivedCI5NS_4BaseEEi", "CI5 is not an ABI encoding"),
+        ("_ZN3api7DerivedCI0NS_4BaseEEi", "CI0 is not an ABI encoding"),
         # A GNU ABI tag whose length prefix does not describe a valid name.
         ("_ZN1CB9xIiEC1Ev", "malformed B<tag> length prefix"),
         # A vendor/unmodelled operator code in the leaf position.
@@ -469,6 +479,32 @@ def test_every_way_the_parse_gives_up_reaches_no_verdict(
     mangled: str, why: str
 ) -> None:
     assert itanium_special_member_owner(mangled) is None, why
+
+
+@pytest.mark.parametrize("index", ["3", "4", "5", "0"])
+def test_an_unspecified_ci_index_is_never_suppressed_as_covered(index: str) -> None:
+    """The consequence the parser restriction exists to prevent, asserted at
+    the detector rather than at the parser.
+
+    An unspecified `CI<n>` reaching the coverage join under the *strongest*
+    conditions -- owner declared inline and unchanged on both sides, which is
+    exactly what covers a real inheriting constructor -- must still report.
+    Pinning it here means a future widening of the accepted index range fails
+    a test about export losses, not only one about name parsing.
+    """
+    decls = [
+        _ctor("api::Derived", params="int", inline=True),
+        _dtor("api::Derived", inline=True),
+    ]
+    lost = f"_ZN3api7DerivedCI{index}NS_4BaseEEi"
+    coverage = special_member_export_coverage(
+        lost,
+        _snapshot(exports=[lost], declarations=decls),
+        _snapshot(exports=[], declarations=decls),
+    )
+    assert coverage.join is OwnerJoin.UNSUPPORTED
+    assert not coverage.covered
+    assert _reported([lost], decls) == {lost}
 
 
 def test_a_truncated_inherited_ctor_still_resolves_its_owner() -> None:

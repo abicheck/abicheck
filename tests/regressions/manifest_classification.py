@@ -58,7 +58,14 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_export_reconciliation_and_obligations.py",
             "tests/test_cross_compiler_fp.py",
         ),
-        public_surfaces=("compare -H", "compare --depth binary"),
+        # Deliberately empty. The seed tests call `_diff_undeclared_exports`,
+        # `abicheck.checker.compare` and `abicheck.dumper.dump` directly, and
+        # `BugClass.public_surfaces` admits a surface only when a seed test
+        # really invokes it (a Click/`CliRunner` run for "cli", and so on) --
+        # a claimed surface no seed test reaches conceals exactly the
+        # cross-surface gap this registry exists to surface (CodeRabbit
+        # review). The gap itself is recorded below rather than dropped.
+        public_surfaces=(),
         axes={
             "owner": (
                 "namespaced class",
@@ -76,6 +83,20 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "lost symbol": ("C1/C2", "D0/D1/D2", "vtable/RTTI", "data export"),
         },
         known_gaps=(
+            KnownGap(
+                description=(
+                    "No seed test drives this class through a public entry "
+                    "point. The behaviour was verified by hand against the "
+                    "real `compare -H` CLI on compiled fixtures during the "
+                    "fix, but every automated test calls an internal module "
+                    "directly, so a regression reachable only through CLI "
+                    "wiring -- option plumbing, exit-code folding, report "
+                    "rendering of these findings -- would not be caught "
+                    "here. Closing it needs a `CliRunner` seed test over "
+                    "compiled fixtures, which is integration-marked work."
+                ),
+                reference="tests/test_export_owner_resolution.py",
+            ),
             KnownGap(
                 description=(
                     "The inline-definition fact is read from the "
