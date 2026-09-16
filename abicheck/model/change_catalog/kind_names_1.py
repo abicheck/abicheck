@@ -508,4 +508,9 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "declaration_identity_reconciled_unresolved",
         "graph-reconciled with SOME identity evidence differing that the classifier cannot attribute to a rename or a move → COMPATIBLE_WITH_RISK",
     ),
+    (
+        "VAR_REMOVED_ELF_ONLY",
+        "var_removed_elf_only",
+        "exported ELF-only data symbol removed -> binary break",
+    ),
 )

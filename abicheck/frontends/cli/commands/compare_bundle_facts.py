@@ -65,6 +65,7 @@ from typing import Any
 
 import click
 
+from ....model.sided_inputs import compose_sided_paths
 from ....report.comparison_scope import ComparisonScopeTerms
 
 # Via `report`, which re-exports it: `frontends -> policy` is forbidden
@@ -81,14 +82,13 @@ from .compare_bundle_facts_scope import (
 def _resolve_new_side_headers_includes(
     kwargs: dict[str, Any],
 ) -> tuple[list[Path], list[Path]]:
-    """NEW-side headers/includes: the side-scoped override, else the uniform
-    value. The OLD side has none of its own here (already a resolved,
-    stored snapshot)."""
-    headers = list(kwargs.get("new_headers_only") or ()) or list(
-        kwargs.get("headers") or ()
+    """NEW-side headers/includes (`model.sided_inputs`). The OLD side has
+    none of its own here (already a resolved, stored snapshot)."""
+    headers = compose_sided_paths(
+        kwargs.get("headers") or (), kwargs.get("new_headers_only") or ()
     )
-    includes = list(kwargs.get("new_includes_only") or ()) or list(
-        kwargs.get("includes") or ()
+    includes = compose_sided_paths(
+        kwargs.get("includes") or (), kwargs.get("new_includes_only") or ()
     )
     return headers, includes
 

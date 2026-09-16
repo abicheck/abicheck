@@ -37,6 +37,7 @@ REMOVED_KINDS: frozenset[str] = frozenset(
         # "changed" symbol and counting zero removals for it.
         "func_removed_elf_only",
         "var_removed",
+        "var_removed_elf_only",
         "type_removed",
         "typedef_removed",
         "union_field_removed",
@@ -219,6 +220,7 @@ HIGH_SEVERITY_KINDS: frozenset[str] = frozenset(
         # "changed" symbol and counting zero removals for it.
         "func_removed_elf_only",
         "var_removed",
+        "var_removed_elf_only",
         "type_removed",
         "typedef_removed",
         "type_size_changed",

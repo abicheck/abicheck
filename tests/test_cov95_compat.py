@@ -486,15 +486,16 @@ class TestResolveHeadersFromList:
         assert hdr in result
 
     def test_skip_headers_filtering_removes_match(self, tmp_path: Path) -> None:
-        """skip_headers set removes matching headers by name (line 578)."""
+        """A compiled name rule removes matching headers by basename."""
         from abicheck.compat.cli import _resolve_headers_from_list
+        from abicheck.model.header_skip_rules import compile_skip_rules
 
         keep = tmp_path / "keep.h"
         drop = tmp_path / "drop.h"
         keep.write_text("x", encoding="utf-8")
         drop.write_text("x", encoding="utf-8")
         result = _resolve_headers_from_list(
-            None, None, [keep, drop], skip_headers={"drop.h"}
+            None, None, [keep, drop], skip_rules=compile_skip_rules(["drop.h"])
         )
         assert keep in result
         assert drop not in result

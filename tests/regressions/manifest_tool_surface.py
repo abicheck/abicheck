@@ -592,6 +592,67 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="tooling.platform_dependent_record_separator",
+        invariant=(
+            "When a value crosses from Python into a shell that reads it "
+            "back positionally, the record separator is a contract between "
+            "two languages and must be written explicitly, through the "
+            "binary layer. `print`, `click.echo` and `sys.stdout.write` all "
+            'go through a `TextIOWrapper` that rewrites "\\n" to the '
+            "*host's* `os.linesep`, so on Windows every record arrives with "
+            'a trailing "\\r" that bash\'s `read -r` does not strip -- '
+            '`[[ "$X" == "skip" ]]` is then false for a value that is '
+            "exactly `skip`, and an id bound for an API path carries a "
+            "stray byte into the URL. The sibling of "
+            "`tooling.platform_dependent_path_key`: both are a value "
+            "*rendered* with a host-dependent byte where a fixed one was "
+            "promised, and both fail deterministically on Windows only. "
+            "Structurally, the separator needs one owner: N inline copies "
+            "of the contract are N places to restate it wrongly, and a "
+            "per-call-site fix leaves the class open for the next one."
+        ),
+        # CI evidence: `unit-tests (windows-latest, 3.13)` on PR #1311 failed
+        # `test_a_clean_report_under_on_changes_publishes_nothing` with
+        # `assert 'dry-run' == 'no-changes'` -- the publisher's skip branch
+        # not taken for a plan that said `skip`. That was the least costly of
+        # five inline emitters sharing the cut: the same trailing byte landed
+        # on `artifact_id` and `pr_number` (both interpolated into a GitHub
+        # API path) and on `comment_id` (which selects the comment a PATCH
+        # rewrites), none of which had a test that would have failed anywhere.
+        fixed_by=(1311,),
+        seed_tests=("tests/test_action_shell_field_records.py",),
+        public_surfaces=("action",),
+        axes={
+            "value_shape": ("string", "integer", "boolean", "null", "absent"),
+            "call_site": (
+                "report_plan",
+                "report_comment_url",
+                "verify_run_head_sha",
+                "verify_refusal_code",
+                "verify_result_fields",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The seed test simulates Windows' translation by "
+                    "wrapping stdout, because the Linux lanes cannot "
+                    "reproduce it natively -- `os.linesep` is already "
+                    '"\\n" there, which is why 35 of this module\'s own '
+                    "assertions pass against the broken code. The real "
+                    "Windows path is covered only by the existing "
+                    "`windows-latest` unit lane running the Action's shell "
+                    "end to end, which needs a POSIX shell and so skips on "
+                    "that very platform: no lane executes `run.sh` on "
+                    "Windows, so the shell half of this contract is "
+                    "asserted through the emitter, not through bash."
+                ),
+                reference="tests/test_action_report_contract.py",
+                canary_test=None,
+            ),
+        ),
+    ),
+    BugClass(
         id="cli_surface.retired_spelling_in_remediation",
         invariant=(
             "Remediation a tool prints must actually work when run: every "

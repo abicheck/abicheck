@@ -131,7 +131,7 @@ from ..compat.abicc_dump_import import (
 )
 from ..debug_resolver import DebugArtifact, resolve_debug_info
 from ..dump_manifest import DumpManifest, load_manifest
-from ..dumper_cache import ast_memoize_scope
+from ..dumper_cache import ast_acquisition_scope, ast_memoize_scope
 from ..dumper_clang import resolve_source_frontend_clang_bin
 from ..dumper_clang_streaming import suppress_streaming_prune
 from ..dumper_contract import _manifest_declared_includes
@@ -193,6 +193,7 @@ __all__ = [
     "_version_sort_key",
     "apply_provenance",
     "ast_memoize_scope",
+    "ast_acquisition_scope",
     "attach_build_context_for_parsed_headers",
     "attach_clang_layout",
     "build_inline_coverage",

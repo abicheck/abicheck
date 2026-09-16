@@ -69,6 +69,7 @@ from .dumper_toolchain import (
     _parser_ast_unsupported_reasons,
     _parser_frontend_context_kind,
 )
+from .extract.header_ast_fields import parse_header_ast_fields
 from .extract.manifest_semantic_ir import manifest_semantic_ir
 from .extract.semantic_normalizer import normalize_header_ast
 from .model import EnumType, Function, RecordType, Variable
@@ -206,8 +207,6 @@ def run_tu_fragment(
     (``dumper._header_ast_parser``, injected -- see this module's own
     docstring) and normalize its output into a :class:`TuFragment`.
 
-    *tu*'s own ``forced_includes`` become the parser's ``headers`` and its
-    own ``includes`` (just the resolved paths) become ``extra_includes``.
     *public_header_paths*/*public_dir_paths* are the manifest's own
     base-profile provenance inputs (``roots`` +
     ``public_header_paths``/``public_header_dirs``), passed identically to
@@ -264,18 +263,20 @@ def run_tu_fragment(
         pruning_header_roots=pruning_header_roots,
         no_binary_evidence=no_binary_evidence,
     )
+    producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
+    fields = parse_header_ast_fields(parser, producer=producer)
     return TuFragment(
         tu_name=tu.name,
-        functions=tuple(parser.parse_functions()),
-        variables=tuple(parser.parse_variables()),
-        types=tuple(parser.parse_types()),
-        enums=tuple(parser.parse_enums()),
-        typedefs=parser.parse_typedefs(),
-        typedefs_qualified=parser.parse_typedefs_qualified(),
-        constants=parser.parse_constants(),
-        typedef_entity_ids=parser.parse_typedef_entity_ids(),
-        constant_entity_ids=parser.parse_constant_entity_ids(),
-        ast_producer="clang" if isinstance(parser, _ClangAstParser) else "castxml",
+        functions=fields.functions,
+        variables=fields.variables,
+        types=fields.types,
+        enums=fields.enums,
+        typedefs=fields.typedefs,
+        typedefs_qualified=fields.typedefs_qualified,
+        constants=fields.constants,
+        typedef_entity_ids=fields.typedef_entity_ids,
+        constant_entity_ids=fields.constant_entity_ids,
+        ast_producer=producer,
         ast_toolchain=_parser_ast_toolchain(parser),
         ast_fallback_reason=_parser_ast_fallback_reason(parser),
         ast_toolchain_supported=_parser_ast_supported(parser),
@@ -283,6 +284,7 @@ def run_tu_fragment(
             _parser_ast_unsupported_reasons(parser)
         ),
         frontend_context_kind=_parser_frontend_context_kind(parser),
+        semantic_ir=fields.semantic_ir,
     )
 
 
@@ -757,6 +759,7 @@ def resolve_header_ast_result(
             ast_toolchain_supported=fragment.ast_toolchain_supported,
             ast_toolchain_unsupported_reasons=fragment.ast_toolchain_unsupported_reasons,
             frontend_context_kind=fragment.frontend_context_kind,
+            semantic_ir=fragment.semantic_ir,
         )
         provenance_headers = tuple(headers)
 
@@ -778,9 +781,7 @@ def resolve_header_ast_result(
         frontend_context_kind=merged.frontend_context_kind,
         is_clang=merged.ast_producer == "clang",
         provenance_headers=provenance_headers,
-        # `run_tu_loop` already populates a richer semantic_ir for the
-        # manifest branch (see `_manifest_semantic_ir`); the legacy
-        # branch's manually-built MergedTuFragments never sets it.
+        # A real manifest carries its occurrence-preserving merged IR.
         semantic_ir=(
             merged.semantic_ir
             if merged.semantic_ir is not None

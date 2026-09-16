@@ -56,6 +56,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from ..errors import ReleaseOperandContentError, ReleaseOperandUsageError
+from ..model.sided_inputs import compose_sided_paths
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -275,13 +276,25 @@ def resolve_release_headers(
     old_header_dir: Path | None,
     new_header_dir: Path | None,
 ) -> tuple[list[Path], list[Path]]:
-    """Resolve each side's headers for a release comparison."""
-    old_h: list[Path] = list(old_headers_only) if old_headers_only else list(headers)
-    new_h: list[Path] = list(new_headers_only) if new_headers_only else list(headers)
-    if old_header_dir and not old_headers_only:
-        old_h = [old_header_dir]
-    if new_header_dir and not new_headers_only:
-        new_h = [new_header_dir]
+    """Resolve each side's headers for a release comparison.
+
+    ``--header old=`` *adds to* the both-sides ``--header`` rather than
+    replacing it (:mod:`abicheck.model.sided_inputs`), so a shared header
+    root survives a per-side one.
+
+    An extracted devel-package header directory is still a *replacement*
+    for the uniform value on that side, and deliberately so: it is not
+    another root the caller asked to search, it is the side's whole header
+    tree, discovered from the package this run unpacked. It composes with
+    that side's own explicit ``--header old=`` entries the same additive
+    way everything else does.
+    """
+    old_h = compose_sided_paths(headers, old_headers_only)
+    new_h = compose_sided_paths(headers, new_headers_only)
+    if old_header_dir:
+        old_h = compose_sided_paths([old_header_dir], old_headers_only)
+    if new_header_dir:
+        new_h = compose_sided_paths([new_header_dir], new_headers_only)
     return old_h, new_h
 
 
@@ -514,21 +527,17 @@ def prepare_release_inputs(
         old_header_dir,
         new_header_dir,
     )
-    # config_includes (the project .abicheck.yml compile.include_dirs
-    # suffix, already folded into `includes` by the caller) must survive a
-    # per-library-pair --old-include/--new-include override, which
-    # otherwise fully replaces `includes` for that side -- so it is
-    # re-appended explicitly here rather than relied on via `includes`
-    # (Codex review, fresh evidence).
-    old_inc = (
-        list(old_includes_only) + list(config_includes)
-        if old_includes_only
-        else list(includes)
+    # `--include old=` adds to the both-sides `--include` rather than
+    # replacing it (`model.sided_inputs`), so config_includes -- the project
+    # .abicheck.yml compile.include_dirs suffix, already folded into
+    # `includes` by the caller -- now survives a per-side value through
+    # `includes` itself. It is still composed in explicitly because a caller
+    # may pass it without having folded it in.
+    old_inc = compose_sided_paths(
+        list(includes) + list(config_includes), old_includes_only
     )
-    new_inc = (
-        list(new_includes_only) + list(config_includes)
-        if new_includes_only
-        else list(includes)
+    new_inc = compose_sided_paths(
+        list(includes) + list(config_includes), new_includes_only
     )
     old_inc.extend(discover_include_roots(old_header_dir))
     new_inc.extend(discover_include_roots(new_header_dir))

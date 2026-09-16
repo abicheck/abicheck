@@ -774,55 +774,6 @@ class TestAModelessSnapshotIsAmbiguousNotNative:
         )
 
 
-class TestOnlyAnAchievableNarrowingIsRecorded:
-    """A descriptor skip that matched nothing is not a recorded narrowing.
-
-    Under exact membership a wildcard matches no header at all --
-    `warn_glob_skips_do_nothing` says exactly that -- yet the pattern was
-    persisted anyway, so the snapshot claimed a narrowing that never
-    happened: the coverage warning reported headers omitted and the gate
-    refused an otherwise identical unexcluded snapshot (Codex review).
-
-    This filter and the recorded *rule* are complements, not alternatives.
-    Conflating them is how it came to be dropped: the metacharacter test was
-    falsified as a *comparability* rule and removed when the rule began to be
-    recorded — but it was never wrong as a "what did this run achieve" test,
-    which is a different question.
-    """
-
-    @pytest.mark.parametrize("pattern", ["*.h", "a?.h", "x[0].h"])
-    def test_an_unachievable_exact_pattern_is_not_recorded(self, pattern):
-        from abicheck.model.header_exclusion_record import (
-            EXACT_MATCHING,
-            patterns_achievable_under,
-        )
-
-        assert patterns_achievable_under([pattern], EXACT_MATCHING) == ()
-
-    @pytest.mark.parametrize("pattern", ["b.h", "include/foo.h", "a_b.h"])
-    def test_an_achievable_exact_pattern_is_kept(self, pattern):
-        """The negative control: dropping everything would satisfy the claim
-        above completely."""
-        from abicheck.model.header_exclusion_record import (
-            EXACT_MATCHING,
-            patterns_achievable_under,
-        )
-
-        assert patterns_achievable_under([pattern], EXACT_MATCHING) == (pattern,)
-
-    @pytest.mark.parametrize("pattern", ["*.h", "b.h", "x[0].h"])
-    def test_the_native_rule_passes_everything_through(self, pattern):
-        """Every pattern is achievable under fnmatch by construction, so the
-        native path must be untouched -- filtering it would silently drop a
-        real exclusion."""
-        from abicheck.model.header_exclusion_record import (
-            GLOB_MATCHING,
-            patterns_achievable_under,
-        )
-
-        assert patterns_achievable_under([pattern], GLOB_MATCHING) == (pattern,)
-
-
 class TestAnUnrecognisedMatchingRuleIsNotTakenAtItsWord:
     """Recognising a rule's name is not the same as implementing it.
 

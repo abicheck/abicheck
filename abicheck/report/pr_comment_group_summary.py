@@ -30,33 +30,3 @@ def review_group_note(model: CommentModel) -> list[str]:
     lines.append("")
     return lines
 
-
-def suppression_note(model: CommentModel) -> list[str]:
-    """Disclose raw dispositions even when every finding was suppressed."""
-    parts: list[str] = []
-    if model.suppressed_count:
-        n = model.suppressed_count
-        parts.append(
-            f"🔇 {n} finding{'s' if n != 1 else ''} suppressed by `--suppress`"
-        )
-    if model.reclassified_count:
-        n = model.reclassified_count
-        parts.append(
-            f"🔀 {n} finding{'s' if n != 1 else ''} reclassified by `--policy`"
-        )
-    lines: list[str] = []
-    if model.disposition_audit is not None:
-        from .disposition_audit import (
-            DispositionAudit,
-            render_disposition_audit_comment_lines,
-        )
-
-        lines += render_disposition_audit_comment_lines(
-            DispositionAudit.from_dict(model.disposition_audit)
-        )
-    if not parts:
-        return lines
-    return lines + [
-        f"> ℹ️ {' · '.join(parts)} — see the full JSON report for details.",
-        "",
-    ]

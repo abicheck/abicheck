@@ -129,8 +129,18 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
         # reason and source file. And the JUnit projection published only
         # the total exit code where JSON/Markdown/oneline/SARIF all named
         # the orthogonal axis that fired.
-        fixed_by=(1176, 1185),
+        fixed_by=(1176, 1185, 1304),
         seed_tests=(
+            # ADR-072: the PR comment was a third instance of this exact
+            # shape, and the largest -- `confidence`, `evidence_tier(s)`,
+            # `coverage_warnings` and every per-finding *one-sided*
+            # `old_value`/`new_value` were published by the JSON projection
+            # and dropped by the comment adapter at every detail level,
+            # `full` included. The seed test states the class as an
+            # invariant over the whole old/new x present/absent/zero/false/
+            # empty-string product plus a JSON-vs-comment agreement check,
+            # rather than one assertion per dropped field.
+            "tests/test_pr_comment_reporting.py",
             "tests/test_disposition_reclassification.py",
             # The audit's own suppression-provenance suite moved here when
             # `test_no_baseline_report_formats.py` crossed its module-size
@@ -150,8 +160,16 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             # contributor to write a test that already exists, the mirror of
             # the overstating case the known gap below describes (Codex
             # review, P2).
-            "renderer": ("json", "markdown", "sarif", "junit"),
-            "record": ("suppression-provenance", "exit-axis"),
+            "renderer": ("json", "markdown", "sarif", "junit", "pr-comment"),
+            "record": (
+                "suppression-provenance",
+                "exit-axis",
+                # ADR-072's three, each a fact the JSON published and the
+                # comment adapter dropped.
+                "evidence-and-coverage",
+                "finding-value",
+                "entity-operation-rollup",
+            ),
         },
         known_gaps=(
             KnownGap(
@@ -252,6 +270,25 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_action_report_query.py",
             "tests/test_action_unreadable_report_verdict.py",
+            # ADR-073. Two more members of the same class, both found by
+            # review rather than in production, and both in a *renderer*
+            # rather than the Action's verdict query -- which is what makes
+            # them this class and not a new one. `build_model` dispatched on
+            # payload keys, so the `aggregate` fan-in document (which carries
+            # none of them, and no `changes` array) fell through to the
+            # `compare` adapter and rendered "No ABI changes" for a run
+            # failing on every target in it; and a publisher that could not
+            # post had no channel of its own to say so, so a publication
+            # failure was indistinguishable from a clean result.
+            "tests/test_pr_comment_aggregate.py",
+            "tests/test_action_report_publication.py",
+            # The same class's mirror image, found on a real PVXS build: a
+            # finding the comparison layer stamped as *pre-existing*
+            # (ADR-068 D3 `persistent`/`resolved`) read as one this pull
+            # request made. Same mechanism -- the renderer asserting what
+            # the comparison did not -- so it seeds the same class rather
+            # than opening a new one.
+            "tests/test_pr_comment_background_hygiene.py",
             # The generalized statement of the class, over a generated
             # cross-product rather than the reported inputs: an admitted
             # document must be answerable
@@ -273,7 +310,15 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                 "undecodable_bytes",
             ),
             "report_schema_version": ("absent", "pre_2_40", "2_40", "post_2_40"),
-            "report_shape": ("compare_root", "nested_diff", "audit_exit_axes"),
+            "report_shape": (
+                "compare_root",
+                "nested_diff",
+                "audit_exit_axes",
+                # ADR-073: the fan-in document, whose absence from the
+                # dispatch table is what made this axis worth enumerating in
+                # the first place.
+                "aggregate_document",
+            ),
             # Where a report was asked for, and whether *this* run produced it.
             # A reader that resolves one destination for the whole request is
             # the same defect wearing a different hat: one artifact arriving

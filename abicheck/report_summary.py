@@ -114,6 +114,42 @@ class ReportSummary:
 
 @dataclass(frozen=True)
 class CompatibilityMetrics:
+    """ABICC-style compatibility counters. **Read the units before using one.**
+
+    Both percentages mix two different counting units, which is a real
+    limitation of the metric rather than an implementation detail a consumer
+    may round away:
+
+    * :attr:`breaking_count` counts **findings** whose effective verdict is
+      ``BREAKING`` -- not unique affected symbols. Two breaking findings
+      about one function count twice.
+    * :attr:`binary_compatibility_pct` is
+      ``(old_symbol_count - breaking_count) / old_symbol_count * 100`` --
+      so its numerator is a *finding* count and its denominator is the old
+      side's **exported symbol** count. A library with ten exports and two
+      breaking findings about one symbol reports 80%, though only one of
+      its ten symbols is actually broken. It is an ABICC-compatible
+      heuristic, not "the percentage of symbols that stayed compatible".
+    * When ``old_symbol_count`` is unknown it falls back to a ratio over
+      ``len(changes)``, a third unit again, and :attr:`affected_pct`
+      degrades to ``0.0`` -- which is *missing denominator information*, not
+      a claim that nothing is affected. A consumer must not reconstruct a
+      symbol count from these percentages: they are lossy in both the
+      rounding and the unit.
+
+    Consequences for reporting, recorded here because they have already been
+    got wrong: a renderer must not present either percentage as a confidence
+    score, as an assurance level, or as "N% of symbols are compatible", and
+    must not put one in a headline where a reviewer will read it as one of
+    those. Explicit counts (the breaking/review/safe totals, and the
+    entity-by-operation rollup in ``report/change_summary.py``) say what
+    actually happened without the unit mismatch. Redesigning the metric
+    belongs here, in its shared semantic owner, with consistent behaviour
+    across JSON/HTML/Markdown -- never as a second, comment-only formula.
+    See ``docs/contribute/known-gaps.md``'s "compatibility percentage"
+    entry.
+    """
+
     breaking_count: int
     binary_compatibility_pct: float
     affected_pct: float

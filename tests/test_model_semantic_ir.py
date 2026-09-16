@@ -24,7 +24,9 @@ caller happens to exist first.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
+import pickle
 
 import pytest
 from hypothesis import given, strategies as st
@@ -40,6 +42,24 @@ from abicheck.model.semantic_ir import (
     renumber_conflict_keys,
     semantic_ir_conflict_key,
 )
+
+
+def test_occurrences_are_deeply_immutable_and_shareable() -> None:
+    entity_id = entity_id_for_type((), "Shared")
+    occurrence = OccurrenceId(entity_id)
+    source = {occurrence: CanonicalEntity(canonical_spelling=Fact.present("Shared"))}
+    semantic_ir = SemanticIR(source)
+    source.clear()
+
+    assert tuple(semantic_ir.occurrences) == (occurrence,)
+    assert copy.deepcopy(semantic_ir).occurrences is semantic_ir.occurrences
+    with pytest.raises(TypeError):
+        semantic_ir.occurrences[occurrence] = CanonicalEntity(  # type: ignore[index]
+            canonical_spelling=Fact.present("mutated")
+        )
+    assert pickle.loads(pickle.dumps(semantic_ir)) == semantic_ir  # nosec B301
+    assert "FrozenMapping" in repr(semantic_ir.occurrences)
+
 
 _names = st.text(
     min_size=1, max_size=10, alphabet=st.characters(min_codepoint=97, max_codepoint=122)

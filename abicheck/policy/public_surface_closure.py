@@ -109,6 +109,8 @@ from ..compare.surface_graph import (
     referenced_identifiers_by_node,
 )
 from ..diff_cxx_rules import owner_class_of
+from ..model.cxx_artifact_symbols import is_cxx_class_artifact_symbol
+from ..model.export_index import build_raw_export_index, default_versioned_names
 from ..model.surface_facts import in_public_surface
 from ..model.vocabulary import ScopeOrigin
 from .public_surface import (
@@ -303,6 +305,75 @@ def _seed_public_roots(
                 refs, node_id_for_declaration(var.entity_id, var.name), var
             )
     return seed_types, has_public
+
+
+def _seed_undeclared_exports(snap: AbiSnapshot, surface: PublicSurface) -> None:
+    """Add export-table-only symbols to ``all_symbols`` -- not ``public_symbols``.
+
+    ``all_symbols`` was built purely from *modeled declarations*, so a
+    symbol present only in the binary's export table fell outside the
+    surface's universe entirely. ``surface._classify_symbol_level`` then
+    returned ``None`` for it (fall through to type reachability), and the
+    conservative-unknown rule kept every finding about it.
+
+    But it is not unknown, and calling it unknown is what produced the
+    reported noise: twenty-one ``exported_object_alignment_reduced`` rows
+    against Intel MKL internals nobody ever declared. Two independent
+    pieces of evidence are in hand and they agree --
+
+    * the **export table** proves the symbol exists, and
+    * the **resolved header surface** proves no public header declares it.
+
+    "Present, and provably not in the declared contract" is exactly what
+    the demotion ledger's ``not-exported`` reason is for. Adding the name
+    to ``all_symbols`` (never to ``public_symbols``) is all it takes: the
+    existing symbol-level classifier then reaches its own
+    already-correct answer instead of falling through.
+
+    Gated on ``has_provenance``, and that gate is the whole safety
+    argument: without a public-header set there is no resolved header
+    surface, so "no public header declares it" is an absence of evidence
+    rather than evidence of absence, and every finding must be kept. The
+    ``resolvable`` check both sides of a comparison go through
+    (``classify_change_surface``) is the second gate.
+
+    ``exported_not_public`` itself is deliberately exempt from the whole
+    classifier (``surface._NEVER_FILTER_KIND_NAMES``): its entire purpose
+    is to report this leak, so the evidence explaining *why* the other
+    findings were demoted stays visible in the active report rather than
+    being demoted alongside them.
+    """
+    if not surface.has_provenance:
+        return
+    index = build_raw_export_index(snap)
+    if index is None:
+        return
+    # The same projection ``buildsource.cross_source_checks_base.
+    # _exported_symbol_names`` uses -- default/unversioned ELF exports only,
+    # Mach-O names normalized the way the dumper normalizes
+    # ``Function.mangled``. Sharing the projection is what keeps this set
+    # and the ``exported_not_public`` obligation set talking about the same
+    # spellings; a private re-read would let one demote a symbol the other
+    # never reported.
+    #
+    # Minus the compiler-emitted class artifacts, and for exactly the reason
+    # ``exported_not_public`` exempts them too: a ``_ZTV``/``_ZTI``/structor
+    # symbol is not an *undocumented* export, it is the ABI artifact of a
+    # class its header does declare -- a header backend simply records that
+    # class as a ``RecordType`` rather than a ``Function``/``Variable``, so
+    # the artifact is absent from the declaration list for a reason that
+    # says nothing about the contract. Demoting one made an identical binary
+    # pair report BREAKING without ``-H`` and clean with it.
+    seeded = {
+        name
+        for name in default_versioned_names(index)
+        if not is_cxx_class_artifact_symbol(name)
+    }
+    # Exactly the names no declaration provided, captured before the union
+    # so a symbol that *is* declared (privately) keeps its existing,
+    # pre-existing treatment rather than acquiring this one.
+    surface.undeclared_export_symbols |= seeded - surface.all_symbols
+    surface.all_symbols |= seeded
 
 
 def _walk_type_closure(
@@ -621,6 +692,8 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
     surface.has_provenance = any(
         o != ScopeOrigin.UNKNOWN for o in surface.origin_by_key.values()
     )
+
+    _seed_undeclared_exports(snap, surface)
 
     # Scoping only makes sense when we actually have header-derived public
     # visibility -- see ``surface.py``'s original docstring (preserved in

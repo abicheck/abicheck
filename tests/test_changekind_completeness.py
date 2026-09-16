@@ -245,6 +245,12 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.VAR_BECAME_CONST,
     ChangeKind.VAR_LOST_CONST,
     ChangeKind.VAR_REMOVED,
+    # tests/test_checker.py::TestElfOnlyRemovals::test_var_removed_elf_only
+    # and tests/test_export_reconciliation_and_obligations.py assert this
+    # kind's finding and its verdict (`by_symbol["_ZTV3Foo"].kind.value ==
+    # "var_removed_elf_only"`); #1308 added the kind and those tests but
+    # not this entry or the evidence-provenance bucket.
+    ChangeKind.VAR_REMOVED_ELF_ONLY,
     ChangeKind.VAR_TYPE_CHANGED,
     ChangeKind.VAR_VALUE_CHANGED,
     ChangeKind.VALUE_ABI_TRAIT_CHANGED,

@@ -35,6 +35,49 @@ __all__ = ["CLASSIFICATION_BUG_CLASSES"]
 
 CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
+        id="classification.two_agreeing_sources_read_as_unknown",
+        invariant=(
+            "A subject that two independent evidence sources jointly place "
+            "-- one proving it exists, the other proving it is not in the "
+            "declared contract -- is classified, not treated as unknown. "
+            "The conservative-unknown rule protects cases where evidence is "
+            "*missing*; applying it where both sources answered turns a "
+            "provable disposition into permanent noise."
+        ),
+        fixed_by=(1314,),
+        seed_tests=("tests/test_undocumented_export_surface_scope.py",),
+        public_surfaces=("compare --scope-public-headers",),
+        axes={
+            "platform": ("elf", "elf-versioned", "macho", "pe"),
+            "evidence": (
+                "no header provenance",
+                "no export table",
+                "one side unresolvable",
+            ),
+            "overlay": ("--no-scope-public-headers", "--public-symbol"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Reported as twenty-one `exported_object_alignment_"
+                    "reduced` rows against Intel MKL internals no header "
+                    "declares. `PublicSurface.all_symbols` held only modeled "
+                    "declarations, so an export-table-only symbol fell "
+                    "outside the surface universe and the conservative-"
+                    "unknown fallback kept every finding about it. The fix "
+                    "seeds the universe rather than special-casing one "
+                    "ChangeKind, so every binary-level kind on such a symbol "
+                    "is classified. What is *not* closed: the same "
+                    "two-sources-agree shape may exist elsewhere in the "
+                    "classifier (type-level reachability has its own "
+                    "unknown fallback), and nothing mechanically enumerates "
+                    "where a fallback is reached with evidence in hand."
+                ),
+                reference="abicheck/policy/public_surface_closure.py",
+            ),
+        ),
+    ),
+    BugClass(
         id="classification.name_shape_as_contract_membership",
         invariant=(
             "A symbol's spelling answers how it is *represented* and what "

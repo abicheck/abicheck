@@ -863,11 +863,32 @@ inputs:
     default: 'update'
   pr-comment-on:
     description: >
-      When to comment: 'changes' (default) only comments when there is at least
-      one ABI/API change, 'always' comments every run (including a clean
-      "no changes" result), 'never' disables the comment.
+      When to comment: 'changes' (default) comments when the run produced
+      anything a reviewer must act on -- at least one ABI/API change, a
+      removed/added library, an incompletely checked comparison scope, a
+      finding disposed of by a suppression rule, or a material analysis
+      limitation the comparison itself recorded (its 'coverage_warnings',
+      e.g. "No header/AST data; type-level changes may be missed"). A clean
+      run whose only evidence note is a permanently-inapplicable detector
+      (the PE and Mach-O detectors on an ELF comparison) is not such an
+      outcome and still posts nothing. 'always' comments every run
+      (including a clean "no changes" result), 'never' disables the comment
+      unconditionally. Changing this input never changes the compatibility
+      verdict, the gate, or the step's exit code -- it only decides whether
+      a comment is written.
     required: false
     default: 'changes'
+  pr-comment-report-artifact-url:
+    description: >
+      Optional direct URL of an uploaded full-report artifact (JSON/HTML),
+      linked in the comment footer as 'Download full report' -- distinct from
+      the always-present 'View workflow run' link. Leave unset unless an
+      upload step actually succeeded: set it from that step's own
+      'artifact-url' output, so a link in the comment always corresponds to
+      an artifact that exists. This Action does not upload artifacts itself,
+      so it cannot derive this value.
+    required: false
+    default: ''
   pr-comment-detail:
     description: >
       Detail level of the comment body: 'summary' (verdict + counts only),
@@ -1389,6 +1410,7 @@ runs:
         INPUT_PR_COMMENT_MODE: ${{ inputs.pr-comment-mode }}
         INPUT_PR_COMMENT_ON: ${{ inputs.pr-comment-on }}
         INPUT_PR_COMMENT_DETAIL: ${{ inputs.pr-comment-detail }}
+        INPUT_PR_COMMENT_REPORT_ARTIFACT_URL: ${{ inputs.pr-comment-report-artifact-url }}
         INPUT_SOURCES: ${{ inputs.sources }}
         INPUT_BUILD_INFO: ${{ inputs.build-info }}
         INPUT_COMPILE_DB: ${{ inputs.compile-db }}

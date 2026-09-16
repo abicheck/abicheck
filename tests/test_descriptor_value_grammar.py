@@ -182,7 +182,12 @@ class TestGccOptionsUsesTheSharedSplitter:
             )
         )
         emitted = _descriptor_compile_options(desc)
-        assert split_gcc_options(emitted) == [
+        # The descriptor's own tokens, in order and intact. The emitter also
+        # appends the automatic include-path mode's inferred `<headers>`
+        # root (this descriptor states no `<include_paths>`), which is a
+        # separate, deferred token pair -- asserted as a prefix so the
+        # grammar claim this test is about stays about the grammar.
+        assert split_gcc_options(emitted)[:3] == [
             "-I/opt/Program Files/inc",
             "-DNAME=a b",
             "-O2",

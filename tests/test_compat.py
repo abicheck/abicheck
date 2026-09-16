@@ -367,12 +367,24 @@ class TestDescriptorSkipAndCompileElements:
             ]
         )
 
-    def test_skip_including_folds_into_skip_headers(self, tmp_path: Path) -> None:
+    def test_the_two_skip_elements_stay_separate(self, tmp_path: Path) -> None:
+        """They are different rules, not two spellings of one.
+
+        ``<skip_headers>`` removes a header from the analyzed contract;
+        ``<skip_including>`` only stops it being included *directly*. Folding
+        them made the second one read as a real narrowing of the surface,
+        which the snapshot then recorded and the comparability gate then
+        refused an unexcluded operand against.
+        """
         d = self._write(
             tmp_path,
             "<skip_headers>a.h</skip_headers><skip_including>b.h</skip_including>",
         )
-        assert parse_descriptor(d).skip_headers == ["a.h", "b.h"]
+        desc = parse_descriptor(d)
+        assert desc.skip_headers == ["a.h"]
+        assert desc.skip_including == ["b.h"]
+        actions = {r.value: r.action for r in desc.skip_rules()}
+        assert actions == {"a.h": "exclude", "b.h": "do_not_directly_include"}
 
     def test_compile_elements_are_parsed(self, tmp_path: Path) -> None:
         d = self._write(
@@ -383,10 +395,20 @@ class TestDescriptorSkipAndCompileElements:
             "<gcc_options>-std=c++17</gcc_options>",
         )
         desc = parse_descriptor(d)
+        # The two elements stay distinct: ABICC selects its automatic
+        # include-path mode by whether `<include_paths>` is absent, so
+        # flattening them destroys the signal that decides it.
         assert [str(p) for p in desc.include_paths] == [
+            str(descriptor_absolute("/opt/inc")),
+        ]
+        assert [str(p) for p in desc.add_include_paths] == [
+            str(descriptor_absolute("/opt/inc2")),
+        ]
+        assert [str(p) for p in desc.all_include_paths] == [
             str(descriptor_absolute("/opt/inc")),
             str(descriptor_absolute("/opt/inc2")),
         ]
+        assert desc.auto_include_paths is False
         assert desc.defines == ["MKL_ILP64"]
         assert desc.gcc_options == ["-std=c++17"]
 

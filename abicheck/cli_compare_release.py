@@ -582,9 +582,10 @@ def compare_release_cmd(
     # matrix-result path all load it independently, so without this a
     # single risky override would log its validate_overrides() warning
     # once per load instead of once for the whole run (Codex review).
+    from .workflows.extraction import ast_acquisition_scope
     from .workflows.policy_file import dedup_validate_overrides_warnings
 
-    with dedup_validate_overrides_warnings():
+    with dedup_validate_overrides_warnings(), ast_acquisition_scope():
         # Validate suppression file early (before per-library loop)
         _validate_suppression_early(
             suppress,

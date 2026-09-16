@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (409 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (410 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -393,6 +393,7 @@ One row per `ChangeKind` (409 total). Columns fuse the verdict partition (`check
 | `var_export_added` | addition | `COMPATIBLE` | `warning` | L0 | `var_export_added` | — |
 | `var_lost_const` | breaking | `BREAKING` | `error` | unspecified | `var_lost_const` | — |
 | `var_removed` | breaking | `BREAKING` | `error` | L0 | `var_removed` | [case58](examples/case58_var_removed.md) |
+| `var_removed_elf_only` | breaking | `BREAKING` | `error` | L0 | `var_removed_elf_only` | — |
 | `var_type_changed` | breaking | `BREAKING` | `error` | L1 | `var_type_changed` | [case11](examples/case11_global_var_type.md) |
 | `var_value_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `var_value_changed` | — |
 | `var_visibility_changed` | breaking | `BREAKING` | `error` | L0 | `var_visibility_changed` | — |

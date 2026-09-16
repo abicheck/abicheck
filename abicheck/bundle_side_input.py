@@ -441,7 +441,7 @@ def compare_release_against_bundle_facts(
         validate_matched_library_overrides,
     )
     from .workflows.compare_policy import compare_snapshots
-    from .workflows.extraction import build_match_map
+    from .workflows.extraction import ast_acquisition_scope, build_match_map
     from .workflows.input_resolution import resolve_input
     from .workflows.release_scope import mismatch_kind
 
@@ -507,88 +507,101 @@ def compare_release_against_bundle_facts(
     # sibling's completed comparison (Codex review).
     failed: dict[str, str] = {}
     not_comparable: dict[str, tuple[str, str]] = {}
-    for key, old_snapshot in old_facts.per_library_snapshots.items():
-        new_path = new_map.get(key)
-        if new_path is None or key in degraded:
-            continue
-        # Per-library overrides win over the uniform fallback -- a library
-        # absent from a given override map still falls back to that map's
-        # own uniform sibling (headers/includes/compile respectively), so a
-        # caller only needs to name the libraries that actually differ. See
-        # the docstring above for why a uniform-only invocation is a cost
-        # proof, not a correctness proof, for a mixed-toolchain bundle.
-        lib_headers = (per_library_headers or {}).get(key, headers)
-        lib_includes = (per_library_includes or {}).get(key, includes)
-        lib_compile = (per_library_compile or {}).get(key, compile)
-        try:
-            new_snapshot = resolve_input(
-                new_path,
-                headers=lib_headers,
-                includes=lib_includes,
-                version=new_version,
-                lang=lang,
-                lang_explicit=lang_explicit,
-                header_backend=header_backend,
-                compile=lib_compile,
-                include_dependencies=include_dependencies,
+    # One request-local AST acquisition table for the whole BundleFacts ->
+    # live fan-out, opened here in the workflow rather than in a CLI
+    # adapter so a typed/Python-API caller gets the identical reuse (the
+    # same placement `service_compare_pipeline.resolve_compare_request`
+    # already uses for scalar `compare`). Members of one release routinely
+    # share a public header set and compile context, so without this each
+    # member re-acquires -- and re-decodes, and re-normalizes -- the exact
+    # same header AST once per library. One scope for the whole loop, never
+    # one per member: a per-member table would key nothing across members
+    # and defeat the point. Nested inside an outer scope (the release
+    # fan-out's own), `ast_acquisition_scope` yields the existing table by
+    # contract, so this never shadows a caller's.
+    with ast_acquisition_scope():
+        for key, old_snapshot in old_facts.per_library_snapshots.items():
+            new_path = new_map.get(key)
+            if new_path is None or key in degraded:
+                continue
+            # Per-library overrides win over the uniform fallback -- a library
+            # absent from a given override map still falls back to that map's
+            # own uniform sibling (headers/includes/compile respectively), so a
+            # caller only needs to name the libraries that actually differ. See
+            # the docstring above for why a uniform-only invocation is a cost
+            # proof, not a correctness proof, for a mixed-toolchain bundle.
+            lib_headers = (per_library_headers or {}).get(key, headers)
+            lib_includes = (per_library_includes or {}).get(key, includes)
+            lib_compile = (per_library_compile or {}).get(key, compile)
+            try:
+                new_snapshot = resolve_input(
+                    new_path,
+                    headers=lib_headers,
+                    includes=lib_includes,
+                    version=new_version,
+                    lang=lang,
+                    lang_explicit=lang_explicit,
+                    header_backend=header_backend,
+                    compile=lib_compile,
+                    include_dependencies=include_dependencies,
+                )
+            except (IncompatibleSnapshotSchemaError, UnsupportedArtifactError) as exc:
+                unsupported[key] = str(exc)
+                continue
+            except (SnapshotError, OSError, ValueError) as exc:
+                failed[key] = str(exc)
+                continue
+            # ADR-050 D2 per member (Codex review, thirtieth round): a pair
+            # whose extraction contracts disagree is `not_comparable` on the
+            # record, and the key counts as compared only once the diff ran --
+            # the fan-out's own per-library rule, never an escape that discards
+            # every sibling's completed comparison.
+            try:
+                # CodeRabbit/Codex review on PR #1154: surface_metrics is
+                # unconditional on every other path that reaches this Tier-2
+                # chokepoint (the native `compare` CLI and, since this same
+                # fix, the release fan-out) -- omitting it here silently dropped
+                # public_surface_grew/public_surface_shrank findings for a
+                # stored-OLD-facts-vs-live-NEW comparison that an identical
+                # library pair would get from `compare` directly. Codex review,
+                # fresh evidence (follow-up: "Make automatic analysis
+                # unconditional at Tier 2"): pattern-verdict modulation
+                # (ADR-068 D4) is the identical class of AUTO analysis and was
+                # missing the same way here -- forced True for the same reason.
+                diff = compare_snapshots(
+                    old_snapshot,
+                    new_snapshot,
+                    suppress,
+                    policy=policy,
+                    policy_file=policy_file,
+                    env_matrix=env_matrix,
+                    # pattern_verdicts is deliberately NOT forced True here:
+                    # ADR-027 (accepted) defers flipping --pattern-verdicts to
+                    # default-on pending FP-rate/parity validation; ADR-068,
+                    # which an earlier fix cited for forcing it, is only
+                    # "Proposed -- not implemented" (Codex review, PR #1154
+                    # follow-up: "Obtain ADR approval before forcing verdict
+                    # modulation"). surface_metrics is no longer a parameter of
+                    # this Tier-2 verb at all (one-comparison-product.md Phase 5:
+                    # `compare_snapshots` forces it on for every caller), so the
+                    # explicit `surface_metrics=True` that used to sit here is
+                    # gone rather than re-stated.
+                )
+            except (ProfileMismatchError, ScopeMismatchError) as exc:
+                not_comparable[key] = (mismatch_kind(exc), str(exc))
+                continue
+            compared.append(key)
+            per_library_results.append(diff)
+            new_signature_evidence[key] = BundleSignatureEvidence.from_snapshot(
+                new_snapshot
             )
-        except (IncompatibleSnapshotSchemaError, UnsupportedArtifactError) as exc:
-            unsupported[key] = str(exc)
-            continue
-        except (SnapshotError, OSError, ValueError) as exc:
-            failed[key] = str(exc)
-            continue
-        # ADR-050 D2 per member (Codex review, thirtieth round): a pair
-        # whose extraction contracts disagree is `not_comparable` on the
-        # record, and the key counts as compared only once the diff ran --
-        # the fan-out's own per-library rule, never an escape that discards
-        # every sibling's completed comparison.
-        try:
-            # CodeRabbit/Codex review on PR #1154: surface_metrics is
-            # unconditional on every other path that reaches this Tier-2
-            # chokepoint (the native `compare` CLI and, since this same
-            # fix, the release fan-out) -- omitting it here silently dropped
-            # public_surface_grew/public_surface_shrank findings for a
-            # stored-OLD-facts-vs-live-NEW comparison that an identical
-            # library pair would get from `compare` directly. Codex review,
-            # fresh evidence (follow-up: "Make automatic analysis
-            # unconditional at Tier 2"): pattern-verdict modulation
-            # (ADR-068 D4) is the identical class of AUTO analysis and was
-            # missing the same way here -- forced True for the same reason.
-            diff = compare_snapshots(
-                old_snapshot,
-                new_snapshot,
-                suppress,
-                policy=policy,
-                policy_file=policy_file,
-                env_matrix=env_matrix,
-                # pattern_verdicts is deliberately NOT forced True here:
-                # ADR-027 (accepted) defers flipping --pattern-verdicts to
-                # default-on pending FP-rate/parity validation; ADR-068,
-                # which an earlier fix cited for forcing it, is only
-                # "Proposed -- not implemented" (Codex review, PR #1154
-                # follow-up: "Obtain ADR approval before forcing verdict
-                # modulation"). surface_metrics is no longer a parameter of
-                # this Tier-2 verb at all (one-comparison-product.md Phase 5:
-                # `compare_snapshots` forces it on for every caller), so the
-                # explicit `surface_metrics=True` that used to sit here is
-                # gone rather than re-stated.
-            )
-        except (ProfileMismatchError, ScopeMismatchError) as exc:
-            not_comparable[key] = (mismatch_kind(exc), str(exc))
-            continue
-        compared.append(key)
-        per_library_results.append(diff)
-        new_signature_evidence[key] = BundleSignatureEvidence.from_snapshot(
-            new_snapshot
-        )
 
     # *old_facts* is already loaded in memory (needed above for the
     # per-library matching loop) -- routed straight to
     # compare_bundle_from_facts() rather than through
     # StoredBundleFactsInput/resolve_bundle_side, which would reload and
     # re-parse the identical file from disk a second time for no benefit.
-    from .bundle import build_bundle_snapshot
+    from .bundle import build_bundle_snapshot_mixed
     from .workflows.release_scope import (
         build_stored_baseline_scope_record,
         bundle_analysis_members,
@@ -628,8 +641,24 @@ def compare_release_against_bundle_facts(
         else old_facts.manifest,
         scope_record,
     )
-    new_bundle_snapshot = build_bundle_snapshot(
-        {k: v for k, v in new_map.items() if k in bundle_members}
+    # Reuse the per-member evidence the loop above already resolved
+    # (`BundleSignatureEvidence.from_snapshot`, which carries the member's
+    # own `ElfMetadata` and real library filename) instead of re-parsing
+    # every successfully-resolved member's ELF from disk a second time just
+    # to assemble the bundle graph. `build_bundle_snapshot_mixed` is the
+    # existing builder for exactly this -- the same call the live release
+    # fan-out makes (`cli_compare_release_helpers._bundle_analysis`) -- and
+    # it keeps the documented fallback: a member with no resolved evidence
+    # (skipped, degraded, unsupported, failed, or a proven removal/addition
+    # that never reached the loop) is still parsed live by
+    # `_collect_live_bundle_metadata`, never substituted with an empty
+    # success. Evidence is narrowed to *bundle_members* so an out-of-scope
+    # member cannot re-enter the graph through the evidence map (ADR-065 D2).
+    new_bundle_snapshot = build_bundle_snapshot_mixed(
+        {k: v for k, v in new_map.items() if k in bundle_members},
+        resolved_evidence={
+            k: v for k, v in new_signature_evidence.items() if k in bundle_members
+        },
     )
     result = compare_bundle_from_facts(
         # `manifest=` is the resolved, scoped manifest even when it is None

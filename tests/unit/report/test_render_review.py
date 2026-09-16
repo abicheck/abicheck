@@ -5,7 +5,7 @@ from dataclasses import replace
 from abicheck.policy.disposition_ledger import RuleProvenance
 from abicheck.pr_comment_base import CommentModel
 from abicheck.report.disposition_audit import DispositionAudit
-from abicheck.report.pr_comment_group_summary import suppression_note
+from abicheck.pr_comment_sections import _suppression_note as suppression_note
 from abicheck.report.render_review import (
     ImpactedSymbol,
     ReviewDigest,

@@ -6818,36 +6818,44 @@ recorded patterns keep meaning "what this extraction actually did". Not
 attempted here, since it is a manifest-schema change with its own migration
 rather than a review-round fix.
 
-### Whether ABICC's `<skip_headers>` accepts a glob is unverified
+### `<skip_headers>` cannot stop a transitively-reached header being analyzed
 
-A descriptor's `<skip_headers>`/`<skip_including>` are matched here as exact
-header basenames or paths (`compat/_helpers._resolve_headers_from_list`),
-while the native `--exclude-header` is `fnmatch`. So the same text names two
-different scopes: `*.h` excludes every header natively and nothing at all
-through a descriptor.
+**The glob question this entry used to record is closed.** It asked whether
+real ABICC globs in `<skip_headers>`, and left descriptor skips matched as
+exact basenames or paths in the meantime -- under which every tree-relative
+rule (Intel MKL's own `fftw/fftw.h`, `fftw/offload/`) matched nothing at all
+while the run still produced a confident verdict. The evidence the entry
+asked for is in ABICC's own source: `Internals/Path.pm`'s `classifyPath` and
+`Internals/Filter.pm`'s `skipHeader_I` classify each rule into one of three
+classes -- a bare name matched against the basename, a value containing a
+separator matched against the path at component boundaries (including a
+directory's descendants), and a metacharacter-bearing value compiled as a
+regex-like pattern. `abicheck/model/header_skip_rules.py` is that
+classification, and the descriptor's snapshot now records
+`excluded_header_matching = "abicc"` rather than `"exact"`, since the same
+text genuinely names a different set of headers under the two rules.
 
-That divergence was reported through the snapshot's recorded scope, where it
-was worse than a usability wart: both paths wrote the raw text into
-`excluded_header_patterns`, so a descriptor-narrowed snapshot and a
-natively-narrowed one recorded `("*.h",)` for two entirely different achieved
-surfaces, and the ADR-050 comparability gate accepted the pair -- able to
-report fabricated additions or removals (Codex review on PR #1286). Fixed by
-recording only what the matching rule could actually achieve
-(`model.header_exclusion_record.exact_match_patterns_only`): a pattern with
-no metacharacter means the same thing under both rules and is recorded
-unchanged, one with a metacharacter narrowed nothing under exact matching and
-is not recorded. `compat check`/`compat dump` now say so out loud
-(`compat.run_inputs.record_descriptor_skips`) rather than ignoring the rule
-silently.
+Rewriting every rule to a bare basename was considered and rejected: it fixes
+MKL and over-excludes an unrelated `version.h` under a different subtree, and
+no example test drawn from the reported case can tell the two apart.
 
-**What is still open is the parity question underneath it.** The other
-candidate fix -- make descriptor skips use `fnmatch` too -- would have made
-both paths agree, and may well be what real `abi-compliance-checker` does.
-It was not taken, because taking it would change ABICC drop-in behaviour on a
-*guess* about ABICC's own semantics, which is a parity claim needing evidence
-from the real tool (an `abicc`-marked comparison), not a comparability fix
-smuggled into a review round. Until someone checks it against real ABICC, a
-glob in `<skip_headers>` is reported as ineffective rather than honoured.
+**What is still open** is the other half of `<skip_headers>`'s meaning. ABICC
+distinguishes two elements -- `<skip_headers>` is "do not include *and do not
+analyze*", `<skip_including>` is "do not include directly, but still analyze
+when reached" -- and the two are now modelled separately, with only
+`<skip_headers>` recorded as an achieved narrowing of the surface. Both
+correctly drop a header from the *direct* `-H` operand list. Neither can stop
+a header being parsed when another header reaches it through its own
+`#include`, because filtering happens on the resolved header list after the
+directory walk and before any parse. The native `--exclude-header` path
+shares that limitation exactly (`extract/header_exclusions.py`), which is why
+closing it is a post-parse filter by defining header rather than a change to
+either rule language -- and why it is recorded here rather than patched on
+the descriptor side alone.
+
+Until then, `docs/reference/abicc-format-compliance.md` states partial
+support for `<skip_headers>`, and the two elements' remaining difference is
+in what a run *records*, not in what it parses.
 
 ### The composite Action's single `--write` slot can leave its unconditional coverage/assurance/severity floors without a structured report
 
@@ -9464,3 +9472,152 @@ carrying a per-header TU cost, and it was deliberately not attempted
 alongside either disposition fix. `--diagnostic-comparison` is explicitly
 **not** the answer to any of this: it downgrades assurance wholesale
 instead of resolving the extraction question.
+
+## The compatibility percentage counts findings against symbols
+
+`report_summary.compatibility_metrics` computes
+`binary_compatibility_pct = (old_symbol_count - breaking_count) / old_symbol_count * 100`,
+where `breaking_count` is a count of **findings** whose effective verdict is
+`BREAKING` and `old_symbol_count` is a count of the old side's **exported
+symbols**. The two quantities are not the same unit, so the percentage is
+not what it reads as. A library with ten exports and two breaking findings
+about one symbol reports 80% binary compatibility while nine of its ten
+symbols are untouched and one is broken — verified with a synthetic probe.
+
+When `old_symbol_count` is unknown the numerator is divided by
+`len(changes)` instead — a third unit — and `affected_pct` degrades to
+`0.0`, which is *missing denominator information* rather than a claim that
+nothing is affected. A consumer must not reconstruct a symbol count from
+either percentage: they are lossy in both the rounding and the unit.
+
+**Not fixed, deliberately.** It is an ABICC-compatible heuristic, it is part
+of the JSON report's public data contract, and redesigning it is a change to
+the shared semantic owner (`report_summary.py`) with consistent behaviour
+required across JSON, HTML and Markdown — not something a reporting-surface
+change may do for one format. What the PR-comment work *did* do is refuse to
+propagate it: the comment states explicit counts (breaking / needs review /
+safe, plus the entity-by-operation rollup in `report/change_summary.py`) and
+carries no percentage at all, so it cannot be read as a confidence score or
+as "N% of symbols are compatible". The semantics, the limitation and this
+prohibition are recorded in `CompatibilityMetrics`' own docstring, next to
+the formula.
+
+## A release/bundle report carries no authoritative entity-by-operation counts
+
+`report/change_summary.py` can summarise a single comparison exactly,
+because `compare`'s JSON carries the complete `changes` list. A release
+(directory/package fan-out) report does not: the only itemized, kind-level
+view of a library's findings is `cli_compare_release.py`'s `findings` list,
+capped at ten per library. `pr_comment._release_change_summary` therefore
+builds the rollup from that sample and marks it `exact=False` with a stated
+reason, and the renderer prints "Not exact totals — …" rather than
+presenting a floor as a total.
+
+Closing it needs an authoritative per-entity/per-operation count in the
+release JSON schema itself — a `cli_compare_release.py` change, not a
+rendering-only one. It is the same shape of gap `pr_comment._from_release`'s
+own docstring already records for the evidence-kind bucket, and it should be
+closed in the same pass as that one.
+
+## An `-I` include root makes another library's public headers this component's export obligations (2026-09-16)
+
+**Reported on a real PVXS build** (abicheck `3737f9f9`, CastXML 0.7.0, EPICS
+Base 7.0, gcc 13, `-std=c++11`), and reproduced by comparing one snapshot
+against *itself* — byte-identical operands, verdict `NO_CHANGE`:
+
+```
+abicheck dump lib/linux-x86_64/libpvxsIoc.so.1.5 \
+  -H include/pvxs/iochooks.h \
+  -I <pvxs>/include -I <epics>/include ... --depth headers
+```
+
+`-H` names exactly one file. `include/pvxs/version.h` is reachable only
+because `iochooks.h` `#include`s it and `-I <pvxs>/include` makes it
+findable; the symbols it declares (`pvxs::version_int()`,
+`version_str()`, `version_abi_int()`) are exported by **libpvxs**, a
+different library. The comparison charged **libpvxsIoc** with three
+`public_not_exported` findings for them.
+
+**Root cause, confirmed by reading both halves.**
+`provenance.apply_provenance` deliberately folds the `-I` roots into the
+public-*directory* set once a real `-H` set has opted classification in
+(`provenance.py`, the `include_search_dirs` parameter and
+`_public_dirs_from_include_roots`). That fold exists for a real defect it
+fixed: without it every transitively-`#include`d header classified
+`PRIVATE_HEADER`, and a genuine breaking layout change reached only through
+an umbrella header silently dropped out of the compared surface. So the
+declaration's `ScopeOrigin` becomes `PUBLIC_HEADER`, and
+`buildsource/cross_source_checks.py`'s `_has_export_obligation` /
+`_var_has_export_obligation` gate on exactly `origin == PUBLIC_HEADER`.
+
+The two questions are being conflated:
+
+1. *Is this declaration in the component's compared public surface?* — the
+   fold's answer (yes) is defensible: an API change to it matters.
+2. *Does **this binary** owe an exported symbol for it?* — the fold's answer
+   is not implied by (1) at all, and for a shared include tree serving
+   several libraries it is wrong.
+
+Note the reported case used a `-H` **file**, so this is not the documented
+"a directory entry tags everything under it public" behaviour; a directory
+`-H` root reaches the same place through the same fold.
+
+**Not fixed here, and why.** The evidence needed to separate (1) from (2) —
+which headers the run's own `-H` set *declared*, as opposed to which the
+`-I` widening admitted — is not recorded anywhere a check can read it after
+serialization. `ScopeOrigin` collapses both to `PUBLIC_HEADER`, and
+`ExtractionContract` keeps fingerprints rather than paths. The three
+candidate fixes each carry real blast radius:
+
+- **A new `ScopeOrigin` member** (`INCLUDE_CONTEXT_HEADER`): 52 existing
+  `ScopeOrigin.PUBLIC_HEADER` sites must each decide whether they mean
+  "in the compared surface" or "owned by this component", and the value is
+  persisted vocabulary.
+- **Tighten `in_public_contract_fact` to the declared set** (already
+  persisted, schema v46): but `compare/export_transition.py` already keys on
+  `is_confirmed_false(in_public_contract(...))` to decide *not* to suppress a
+  removal, so a confirmed-false for widened declarations would add findings
+  elsewhere.
+- **Record the declared `-H` files/dirs on `AbiSnapshot`** and re-classify in
+  the check: the narrowest of the three, and independently useful (a stored
+  baseline records nothing about the contract it was dumped under), but it is
+  a `SCHEMA_VERSION` bump inside ADR-050's comparability contract.
+
+Whichever is taken, the fix must keep the positive control: a symbol declared
+in a header that *is* in `-H` and genuinely absent from the binary must still
+report. A suppression rule or a per-project carve-out is explicitly not the
+answer.
+
+## `effective_depth` reports `source` for a `--depth headers` dump whose only L5 is the header-only graph (2026-09-16)
+
+Same PVXS run as the entry above: `dump --depth headers` produced a snapshot
+whose `compare` reported `L5 source graph summary: present` on both sides and
+`effective_depth: source`, while L3/L4 correctly read `not_collected`.
+
+**The L5 summary itself is expected and is not the bug.**
+`service_header_graph_attach._attach_header_graph` has attached a *header-only
+(L2) semantic graph* to `AbiSnapshot.surface_graph` on every headers-depth
+dump since G29 Phase A (ADR-041 addendum). It is a declaration graph, not
+source-tier evidence.
+
+**The over-claim is the depth label.** `evidence_depth.py` already carries two
+labels and documents this exact trap:
+
+- `depth_label_for` reports `source` whenever L4 **or** L5 carries facts;
+- `gated_source_label` refuses that for the header-only case, discriminating
+  on `l4_source_abi_was_attempted(pack)` — "a non-empty L5 can also come from
+  a header-only (L2) declaration graph that never ran any source-tier replay
+  at all".
+
+`buildsource/check_report.derive_effective_depth` reads
+`old_evidence_depth`/`new_evidence_depth` off the compare report, which come
+from the *honest* label — so the strict gate knows the dump only reached
+`headers` while the reported `effective_depth` says `source`. A consumer
+reading the report (an assurance policy, a CI gate, a reviewer) is told
+source-tier evidence was collected when none was.
+
+**Not fixed here.** The fix is to make the reported label discriminate the
+same way the gate already does (`l4_source_abi_was_attempted`), which touches
+`evidence_depth.py` and every consumer of `old_evidence_depth`/
+`new_evidence_depth` — an evidence-layer change, not a reporting one, and it
+changes a value stored in existing reports.

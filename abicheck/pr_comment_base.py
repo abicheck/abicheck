@@ -41,6 +41,8 @@ from .policy.classification import (
     BREAKING_KINDS,
     RISK_KINDS,
 )
+from .report.change_summary import ChangeSummary
+from .report.evidence_summary import EvidenceSummary
 
 # Kind value strings that constitute new public-API surface (the severity
 # "addition" category). Sourced from the authoritative ADDITION_KINDS so kinds
@@ -95,6 +97,25 @@ class Finding:
     # unavailable, in which case `symbol` is already the raw mangled/plain
     # name and there is nothing distinct left to show here.
     mangled: str = ""
+    # Which component/target this finding came from, for a model folded out
+    # of several reports (`mode="aggregate"`, see
+    # `report/pr_comment_aggregate.py`). Empty for every single-report mode,
+    # where the whole comment already names one subject.
+    #
+    # Load-bearing for grouping, not only for display: the renderer keys its
+    # API rollup on (component, api) rather than api alone, so the *same*
+    # symbol reported by three targets stays three attributable rows instead
+    # of collapsing into one row that lists the name three times and says
+    # nothing about which target each came from.
+    component: str = ""
+    # ADR-068 D3's `cross_source_evolution` state, carried verbatim from the
+    # report: "introduced" | "resolved" | "persistent" | "not_evaluated",
+    # or "" for a finding the comparison layer did not stamp (every ordinary
+    # two-sided diff finding). Read, never re-derived -- the comparison
+    # layer is the only thing that can establish whether a one-sided hygiene
+    # check's finding is new, and this renderer may not form a second
+    # opinion about it (ADR-072 D1).
+    evolution: str = ""
 
 
 @dataclass
@@ -105,7 +126,7 @@ class CommentModel:
     reviewer buckets, and the release-mode rollup.
     """
 
-    mode: str  # "compare" | "release" | "appcompat"
+    mode: str  # "compare" | "release" | "appcompat" | "aggregate"
     subject: str
     old_label: str
     new_label: str
@@ -120,6 +141,21 @@ class CommentModel:
     # into `total_changes` separately so `should_post("changes")` still fires
     # on a report that carries only this.
     incomplete: list[Finding] = field(default_factory=list)
+    # ADR-068 D3: cross-source hygiene findings this comparison established
+    # were **not introduced by it** -- present identically on both sides
+    # (`persistent`) or present only on the baseline (`resolved`). They are
+    # a standing property of the library, not something a pull request did,
+    # so they are kept out of every compatibility bucket and out of
+    # `counts`/`total_changes` entirely: a byte-identical rebuild whose
+    # library carries 336 template-instantiation guard variables must
+    # publish *nothing* under `--on=changes`, and when there is a real
+    # change beside them they must read as background rather than as this
+    # change's own modifications.
+    #
+    # `not_evaluated` deliberately does NOT land here: "one side's evidence
+    # could not confirm or deny this" is an analysis limitation, and it goes
+    # to `incomplete` where limitations belong.
+    background: list[Finding] = field(default_factory=list)
     # Whether the incomplete bucket actually turns the Action's check red —
     # i.e. whether `_incomplete_is_blocking` found a finding whose severity
     # is gated to blocking (see that function's own docstring for exactly
@@ -299,6 +335,20 @@ class CommentModel:
     # a positional caller keeps binding the older tail.
     unmatched_states: dict[str, str] = field(default_factory=dict)
 
+    # The report's own evidence/coverage facts, read (never recomputed) by
+    # `report/evidence_summary.py`. `None` only for a shape that carries
+    # none at all; an *empty* summary is a real answer ("this report stated
+    # no evidence facts") and stays distinguishable from a rich one. Never
+    # defaulted to a reassuring value -- see that module's own docstring.
+    evidence: EvidenceSummary | None = None
+    # The report's entity-by-operation rollup (`report/change_summary.py`),
+    # computed from the *authoritative* finding list before any grouping or
+    # display cap this renderer applies, and carrying its own `exact` flag
+    # for a shape whose list was already truncated upstream (a release
+    # report's capped per-library `findings` sample). `None` when no such
+    # list exists to summarize.
+    change_summary: ChangeSummary | None = None
+
     @property
     def incomplete_total(self) -> int:
         """Exact analysis-incomplete count -- see `scan_incomplete_total`."""
@@ -327,7 +377,13 @@ class CommentModel:
     @property
     def counts(self) -> tuple[int, int, int]:
         """(breaking, needs-review, safe) totals across the report."""
-        if self.mode == "release":
+        if self.mode in ("release", "aggregate"):
+            # `aggregate` shares release mode's rollup source deliberately:
+            # its per-target rows are built from each member model's own
+            # `counts`, and a member that is itself a *release* report has
+            # populated rows but empty `breaking`/`review`/`safe` lists --
+            # so summing the folded lists would report zero for exactly the
+            # member shape that already reports only in aggregate.
             return (
                 sum(r[2] for r in self.library_rows),
                 sum(r[3] for r in self.library_rows),
@@ -342,6 +398,21 @@ class CommentModel:
                 else len(self.safe),
             )
         return len(self.breaking), len(self.review), len(self.safe)
+
+    @property
+    def background_counts(self) -> tuple[int, int]:
+        """``(persistent, resolved)`` over the pre-existing-hygiene bucket.
+
+        Reported separately because the two say different things: one is
+        standing debt both sides carry, the other is debt the baseline had
+        and the candidate no longer does. Neither is a change this
+        comparison's operands introduced, which is why neither reaches
+        :attr:`counts`.
+        """
+        return (
+            sum(1 for f in self.background if f.evolution == "persistent"),
+            sum(1 for f in self.background if f.evolution == "resolved"),
+        )
 
     @property
     def total_changes(self) -> int:
@@ -373,10 +444,12 @@ class CommentModel:
 _CI_WORKDIR_RE = re.compile(r"^/.*?/work/([^/]+)/\1/")
 
 
-def _normalize_location(raw: str) -> str:
+def _normalize_location(raw: str, path_prefix: str = "") -> str:
     """Normalize a ``path[:line]`` location string for display.
 
-    Strips a CI-runner-specific absolute checkout prefix so the comment
+    Strips *path_prefix* (an explicitly supplied checkout root, e.g. the
+    Action's ``$GITHUB_WORKSPACE``) when the location is under it, and
+    otherwise a CI-runner-specific absolute checkout prefix, so the comment
     shows a repo-relative path (``include/foo.h:10``) instead of e.g.
     ``/home/runner/work/abicheck/abicheck/include/foo.h:10`` — noise that
     tells a reviewer nothing they don't already know from the PR itself, and
@@ -387,10 +460,55 @@ def _normalize_location(raw: str) -> str:
     path, sep, rest = raw.rpartition(":")
     if not sep:
         path, rest = raw, ""
+    # An explicitly supplied checkout root wins over the guessed CI shape:
+    # the caller *knows* where the tree is (the Action passes
+    # $GITHUB_WORKSPACE), so there is nothing to infer and no way to
+    # over-strip. Applied only as a whole leading path component, so a
+    # sibling directory sharing the root's name prefix is never cut.
+    #
+    # Both sides are compared with separators normalized, because on a
+    # Windows runner they genuinely differ: `$GITHUB_WORKSPACE` is native
+    # (`D:\a\repo\repo`) while a header-AST backend reports
+    # `source_location` with forward slashes. Comparing them raw made the
+    # prefix never match there, leaving the absolute runner path in the
+    # comment -- the exact thing this strip exists to remove (CodeRabbit
+    # review). The *returned* remainder is sliced out of the original
+    # string, so nothing else about the path's spelling is rewritten.
+    if path_prefix:
+        root = path_prefix.replace("\\", "/").rstrip("/") + "/"
+        if path.replace("\\", "/").startswith(root):
+            trimmed = path[len(root) :]
+            return f"{trimmed}:{rest}" if rest else trimmed
     match = _CI_WORKDIR_RE.match(path)
     if match:
         path = path[match.end() :]
     return f"{path}:{rest}" if rest else path
+
+
+def _component_key(f: Finding, key: str) -> str:
+    """*key* qualified by the finding's component, when it has one.
+
+    A folded (``mode="aggregate"``) model carries findings from several
+    targets in one bucket, and the same symbol legitimately appears once per
+    target. Grouping on the bare key would collapse those into one row whose
+    member list reads ```foo`, `foo`, `foo``` -- three identical names and no
+    way to tell which target each came from -- so the component is part of
+    the grouping key, not merely a decoration on the rendered row. Unchanged
+    (``key`` itself) for every single-report mode, where ``component`` is
+    always empty.
+    """
+    return f"{f.component} · {key}" if f.component else key
+
+
+def _component_tag(f: Finding) -> str:
+    """Per-target attribution for one rendered row, or ``""``.
+
+    Rendered in the Symbol column rather than appended to the detail text:
+    the detail cell is the first thing a row budget shortens, and *which
+    target reported this* is identity, not detail -- a row that loses it
+    stops being attributable at all.
+    """
+    return f"<br><sub>{_esc(f.component)}</sub>" if f.component else ""
 
 
 def _severity_levels(report: dict[str, object]) -> dict[str, str]:

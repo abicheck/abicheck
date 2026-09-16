@@ -74,6 +74,8 @@ both the header and the footer.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from .demangle import demangle_batch
 from .pr_comment_base import (
     _ADDITION_KIND_VALUES,
@@ -113,7 +115,15 @@ from .pr_comment_render import (
     _header as _header,
     render_comment as render_comment,
 )
+from .report.change_summary import ChangeSummary, summarize_changes
 from .report.comparison_scope import comparison_scope_notice
+from .report.evidence_summary import evidence_summary
+
+# A one-directional import: the aggregate adapter reaches only into
+# `pr_comment_base`/`report.change_summary`, never back here (it takes
+# this module's per-shape builder as a parameter instead), so it needs
+# no lazy import to stay cycle-free.
+from .report.pr_comment_aggregate import build_aggregate_model
 
 POST_MODES = ("always", "changes", "never")
 
@@ -138,24 +148,186 @@ def _basename(path: object) -> str:
     return s.rsplit("/", 1)[-1] or str(path or "")
 
 
-def _detail_text(change: dict[str, object]) -> str:
+#: Sentinel distinguishing "the report carried no value for this side" from
+#: every value it *could* carry -- ``None``, ``""``, ``0`` and ``False`` are
+#: all real, reportable values, and the superseded implementation collapsed
+#: the last three onto "absent" by testing ``not in (None, "")``.
+_ABSENT = object()
+
+
+def _value_or_absent(change: dict[str, object], key: str) -> object:
+    """One side's value, or :data:`_ABSENT` when the report states none.
+
+    Absent means *the key is missing or explicitly null*. Everything else --
+    including ``0``, ``False`` and ``""`` -- is a value the comparison
+    observed and a reviewer must be able to see, which is exactly the
+    distinction ``enum_member_added``'s new value ``0`` needs.
+    """
+    if key not in change:
+        return _ABSENT
+    value = change[key]
+    return _ABSENT if value is None else value
+
+
+def _value_repr(value: object) -> str:
+    """Display form for one side's value, never an empty rendering.
+
+    ``""`` renders as a visible empty-string literal and ``False``/``True``
+    in their C-facing spelling, so "the value is empty" can never be read as
+    "there is no value".
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str) and value == "":
+        return '""'
+    return str(value)
+
+
+def _detail_text(change: dict[str, object], symbol: str = "") -> str:
+    """Description plus the finding's old/new values, for one table cell.
+
+    Both sides are rendered whenever the report states them, and a *one-
+    sided* value is rendered as a directional arrow (``→ 3`` for a value
+    only the new side has, ``3 →`` for one only the old side had) rather
+    than dropped. The superseded implementation required *both* sides to be
+    non-empty before rendering either, so an added enum member's value, a
+    removed default's value, and every zero/false/empty-string value on
+    either side disappeared from the comment at every detail level --
+    including ``full`` -- while remaining present in the JSON the comment
+    was built from.
+
+    Two narrow de-duplication rules apply, and both are *whole-value* or
+    *whole-phrase* matches rather than substring tests. A substring test is
+    how this very function would reacquire the defect it exists to fix: a
+    one-sided ``new_value`` of ``0`` is a substring of a description reading
+    "10 fields", so a loose rule silently drops the authoritative value and
+    leaves the row claiming nothing about it (CodeRabbit review).
+
+    * A value *exactly equal* to *symbol* is dropped: ``func_added``-shaped
+      kinds carry the function name as ``new_value``, which adds a full
+      signature's width to the row and no information, since the Symbol
+      column already shows it.
+    * A two-sided delta whose *rendered phrase* the description already
+      contains verbatim is dropped as a pair: ``type_size_changed``'s
+      description reads "Size changed: Ctx (64 → 96 bits)", so appending
+      "(64 → 96)" repeats it. The phrase is matched whole; no individual
+      value is tested against the description at all.
+
+    Neither rule can hide a value the reviewer cannot already read
+    elsewhere in the same row.
+    """
     desc = str(change.get("description", "") or "").strip()
-    old, new = change.get("old_value"), change.get("new_value")
-    if old not in (None, "") and new not in (None, ""):
-        delta = f"{old} → {new}"
-        return f"{desc} ({delta})" if desc else delta
-    return desc
+    old = _value_or_absent(change, "old_value")
+    new = _value_or_absent(change, "new_value")
+
+    def _repeats_symbol(value: object) -> bool:
+        return isinstance(value, str) and bool(value) and value == symbol
+
+    if _repeats_symbol(old):
+        old = _ABSENT
+    if _repeats_symbol(new):
+        new = _ABSENT
+    if old is not _ABSENT and new is not _ABSENT:
+        delta = f"{_value_repr(old)} → {_value_repr(new)}"
+        if desc and delta in desc:
+            return desc
+    elif new is not _ABSENT:
+        delta = f"→ {_value_repr(new)}"
+    elif old is not _ABSENT:
+        delta = f"{_value_repr(old)} →"
+    else:
+        return desc
+    return f"{desc} ({delta})" if desc else delta
+
+
+def _changes_list(changes: object) -> list[dict[str, object]]:
+    """The serialized finding dicts in *changes*, or ``[]``.
+
+    Shared by the bucketing walk and the entity-by-operation rollup so both
+    see exactly the same finding set -- a rollup computed over a different
+    list than the one that produced the buckets is how a summary and its own
+    detail sections drift apart.
+    """
+    if not isinstance(changes, list):
+        return []
+    return [c for c in changes if isinstance(c, dict)]
+
+
+def _introduced_changes(changes: object) -> list[dict[str, object]]:
+    """:func:`_changes_list` minus every finding this comparison did not
+    establish as its own (:data:`_NOT_THIS_CHANGES_EVOLUTIONS`).
+
+    The "What changed" rollup answers *what this comparison's operands
+    did*. Counting standing hygiene debt in it reports 336 modifications
+    for a byte-identical rebuild -- the same misattribution the background
+    bucket exists to stop, one table over.
+
+    ``not_evaluated`` is excluded too, for a different reason and with the
+    same necessity: there the comparison layer declined to say whether the
+    finding is new at all, so ``_bucket_changes`` routes it to the
+    analysis-*incomplete* bucket rather than a compatibility one. Counting
+    it here would assert as a modification the very thing the comparison
+    refused to assert, and would put one finding in two mutually exclusive
+    places at once. Filtering on the union keeps this rollup over exactly
+    the set ``_bucket_changes`` admits to the compatibility buckets, so the
+    summary and its own detail sections cannot disagree.
+    """
+    return [
+        c
+        for c in _changes_list(changes)
+        if str(c.get("cross_source_evolution", "") or "")
+        not in _NOT_THIS_CHANGES_EVOLUTIONS
+    ]
+
+
+#: ``Change.cross_source_evolution`` states that mean *this comparison did
+#: not introduce the finding* (ADR-068 D3, stamped by
+#: ``workflows/cross_source_evolution.py``). A one-sided hygiene check is
+#: re-run against the baseline and its findings paired, so the comparison
+#: layer already knows which of them are new; this renderer reads that
+#: answer and never re-derives it (ADR-072 D1).
+#:
+#: - ``persistent`` -- flagged identically on both sides. Standing library
+#:   debt (a C++ template-instantiation guard variable, a function-local
+#:   static), not something a pull request did.
+#: - ``resolved`` -- flagged on the baseline only. Good news, and still not
+#:   a change to review in the candidate.
+#:
+#: ``not_evaluated`` is deliberately absent: it means one side's evidence
+#: could not confirm or deny the finding, which is an analysis limitation
+#: and belongs in the analysis-incomplete bucket, not in background.
+#: ``introduced`` is absent because an introduced finding *is* this
+#: comparison's own, and is bucketed by severity like any other.
+_BACKGROUND_EVOLUTIONS = frozenset({"persistent", "resolved"})
+
+#: Everything :func:`_introduced_changes` keeps out of the "What changed"
+#: rollup: the two background states above, plus ``not_evaluated``. The
+#: three are not one concept -- two mean "present before this change", the
+#: third means "we could not tell" -- but a rollup of asserted
+#: modifications may claim none of them, and ``_bucket_changes`` keeps all
+#: three out of the compatibility buckets. Deriving the union here rather
+#: than spelling a second literal is what stops the two from drifting.
+_NOT_THIS_CHANGES_EVOLUTIONS = _BACKGROUND_EVOLUTIONS | {"not_evaluated"}
 
 
 def _bucket_changes(
     changes: object,
     gate_api_break: bool = False,
     levels: dict[str, str] | None = None,
-) -> tuple[list[Finding], list[Finding], list[Finding], list[Finding]]:
+    path_prefix: str = "",
+) -> tuple[list[Finding], list[Finding], list[Finding], list[Finding], list[Finding]]:
+    """Route each serialized finding to its reviewer-facing bucket.
+
+    Returns ``(breaking, review, safe, incomplete, background)``. The last
+    two are not compatibility buckets: *incomplete* is what the comparison
+    could not establish, *background* is what it established was already
+    there (see :data:`_BACKGROUND_EVOLUTIONS`).
+    """
     breaking: list[Finding] = []
     review: list[Finding] = []
     safe: list[Finding] = []
     incomplete: list[Finding] = []
+    background: list[Finding] = []
     target = {"breaking": breaking, "review": review, "safe": safe}
     levels = levels or {}
     changes_list = changes if isinstance(changes, list) else []
@@ -172,21 +344,57 @@ def _bucket_changes(
                 continue
             sev = str(c.get("severity", "unknown"))
             kind = str(c.get("kind", ""))
+            evolution = str(c.get("cross_source_evolution", "") or "")
+            # ADR-068 D3: a cross-source hygiene finding the comparison
+            # layer established was already present (or is being resolved)
+            # is not a change this comparison's operands introduced. Routed
+            # out ahead of every compatibility rule below -- including the
+            # evidence-kind split and the severity gates -- because none of
+            # them is a question about a finding nobody introduced: a
+            # severity promotion cannot make standing debt into this PR's
+            # break, and the gate the producer ran already scored it.
+            if evolution in _BACKGROUND_EVOLUTIONS:
+                loc = c.get("source_location")
+                background.append(
+                    Finding(
+                        kind=kind,
+                        symbol=str(c.get("symbol", "")),
+                        detail=_detail_text(c, str(c.get("symbol", ""))),
+                        location=_normalize_location(str(loc), path_prefix)
+                        if loc
+                        else None,
+                        severity=sev,
+                        impact=str(c.get("impact", "") or ""),
+                        evolution=evolution,
+                    )
+                )
+                continue
             # Evidence-quality findings never enter the compatibility buckets
             # (see `_EVIDENCE_KIND_VALUES`/module docstring) — pulled out
             # ahead of the severity-bucket/gate logic below, which is about
             # compatibility gating and does not apply to them.
-            if kind in _EVIDENCE_KIND_VALUES:
+            #
+            # ADR-068 D3's `not_evaluated` joins them: it means one side's
+            # evidence could not confirm or deny the finding, so the
+            # comparison layer explicitly refused to call it introduced.
+            # Bucketing it by severity would make this renderer assert what
+            # the comparison declined to, and calling it background would
+            # assert the opposite. "We could not establish this" is what the
+            # analysis-incomplete bucket is for.
+            if kind in _EVIDENCE_KIND_VALUES or evolution == "not_evaluated":
                 loc = c.get("source_location")
                 symbol = _evidence_symbol_label(kind, str(c.get("symbol", "")))
                 incomplete.append(
                     Finding(
                         kind=kind,
                         symbol=symbol,
-                        detail=_detail_text(c),
-                        location=_normalize_location(str(loc)) if loc else None,
+                        detail=_detail_text(c, symbol),
+                        location=_normalize_location(str(loc), path_prefix)
+                        if loc
+                        else None,
                         severity=sev,
                         impact=str(c.get("impact", "") or ""),
+                        evolution=evolution,
                     )
                 )
                 continue
@@ -206,15 +414,18 @@ def _bucket_changes(
                 Finding(
                     kind=kind,
                     symbol=display_symbol,
-                    detail=_detail_text(c),
-                    location=_normalize_location(str(loc)) if loc else None,
+                    detail=_detail_text(c, display_symbol),
+                    location=_normalize_location(str(loc), path_prefix)
+                    if loc
+                    else None,
                     category=category,
                     severity=sev,
                     impact=str(c.get("impact", "") or ""),
                     mangled=mangled_evidence,
+                    evolution=evolution,
                 )
             )
-    return breaking, review, safe, incomplete
+    return breaking, review, safe, incomplete, background
 
 
 def _incomplete_is_blocking(
@@ -381,6 +592,7 @@ def _from_compare(
     report: dict[str, object],
     gate_api_break: bool = False,
     gate_breaking: bool = True,
+    path_prefix: str = "",
 ) -> CommentModel:
     # ADR-050 D2 comparability-gate refusal (`_report_not_comparable()` /
     # `report.not_comparable.not_comparable_document()`) -- `checker.compare`
@@ -400,8 +612,8 @@ def _from_compare(
         message = reason.get("message")
         not_comparable_reason = str(message) if message else "not comparable"
     levels = _severity_levels(report)
-    breaking, review, safe, incomplete = _bucket_changes(
-        report.get("changes"), gate_api_break, levels
+    breaking, review, safe, incomplete, background = _bucket_changes(
+        report.get("changes"), gate_api_break, levels, path_prefix
     )
     # Blocking-ness for the ordinary evidence-kind findings above is
     # computed BEFORE folding in the contract-coverage ledger below — a
@@ -465,6 +677,7 @@ def _from_compare(
         review=review,
         safe=safe,
         incomplete=incomplete,
+        background=background,
         incomplete_blocking=incomplete_blocking,
         contract_coverage_blocking=contract_coverage_blocking,
         breaking_categories=_breaking_categories(breaking),
@@ -488,6 +701,11 @@ def _from_compare(
         result_counts=result_counts_value
         if isinstance(result_counts_value, dict)
         else None,
+        evidence=evidence_summary(report),
+        # Summarized from the report's own complete `changes` list, before
+        # any grouping or display cap this renderer applies -- AGENTS.md
+        # "compute authoritative totals before grouping or display caps".
+        change_summary=summarize_changes(_introduced_changes(report.get("changes"))),
     )
 
 
@@ -508,6 +726,7 @@ def _from_no_baseline(
     report: dict[str, object],
     gate_api_break: bool = False,
     gate_breaking: bool = True,
+    path_prefix: str = "",
 ) -> CommentModel:
     """Build a :class:`CommentModel` from ``compare --no-baseline``'s audit
     report shape (``audit_report_schema_version``/top-level ``findings``) --
@@ -562,8 +781,8 @@ def _from_no_baseline(
                 str(item.get("verdict", "")), "unknown"
             )
             changes_shaped.append(item)
-    breaking, review, safe, incomplete = _bucket_changes(
-        changes_shaped, gate_api_break, {}
+    breaking, review, safe, incomplete, background = _bucket_changes(
+        changes_shaped, gate_api_break, {}, path_prefix
     )
     incomplete_blocking = _incomplete_is_blocking(
         incomplete, gate_api_break, gate_breaking, {}
@@ -595,6 +814,7 @@ def _from_no_baseline(
         review=review,
         safe=safe,
         incomplete=incomplete,
+        background=background,
         incomplete_blocking=incomplete_blocking,
         contract_coverage_blocking=contract_coverage_blocking,
         breaking_categories=_breaking_categories(breaking),
@@ -603,17 +823,54 @@ def _from_no_baseline(
         no_baseline_audit_blocking=audit_blocking,
         no_baseline_audit_gate_fired=audit_gate_fired,
         suppressed_count=suppressed_count if isinstance(suppressed_count, int) else 0,
+        evidence=evidence_summary(report),
+        # `changes_shaped`, not `report["changes"]`: an audit report's
+        # findings live under the top-level `findings` key and its
+        # `changes` is always empty, so summarizing the latter produced an
+        # empty rollup beside populated buckets -- the summary and its own
+        # detail sections disagreeing, which is the one thing this rollup
+        # may not do (CodeRabbit review).
+        change_summary=summarize_changes(changes_shaped),
     )
+
+
+def _appcompat_synthetic_changes(report: dict[str, object]) -> list[dict[str, object]]:
+    """Summary-shaped entries for the findings `_from_appcompat` *invents*.
+
+    A missing required symbol or version tag is not a ``Change`` in the
+    report at all -- appcompat reports them as bare name lists, and this
+    module turns each into a Breaking finding. The entity-by-operation
+    rollup must see them too, or it undercounts exactly the findings the
+    Breaking section renders (CodeRabbit review).
+
+    ``operation`` is stated as ``removed``, which is what "not provided by
+    the new library" means and is more than the registry could say (neither
+    synthetic kind is registered, so a lookup answers the neutral
+    "modified"). ``entity`` is deliberately *not* stated: a missing export
+    may be a function or a variable and this layer cannot tell, so the row
+    lands under ``Unclassified`` -- which that label exists to mean, rather
+    than being folded into a real entity row on a guess.
+    """
+    synthetic: list[dict[str, object]] = []
+    for key, kind in (
+        ("missing_symbols", "symbol_missing"),
+        ("missing_versions", "version_missing"),
+    ):
+        raw = report.get(key)
+        if isinstance(raw, list):
+            synthetic += [{"kind": kind, "operation": "removed"} for _ in raw]
+    return synthetic
 
 
 def _from_appcompat(
     report: dict[str, object],
     gate_api_break: bool = False,
     gate_breaking: bool = True,
+    path_prefix: str = "",
 ) -> CommentModel:
     levels = _severity_levels(report)
-    breaking, review, safe, incomplete = _bucket_changes(
-        report.get("relevant_changes"), gate_api_break, levels
+    breaking, review, safe, incomplete, background = _bucket_changes(
+        report.get("relevant_changes"), gate_api_break, levels, path_prefix
     )
     missing = report.get("missing_symbols")
     if isinstance(missing, list):
@@ -656,11 +913,17 @@ def _from_appcompat(
         review=review,
         safe=safe,
         incomplete=incomplete,
+        background=background,
         incomplete_blocking=_incomplete_is_blocking(
             incomplete, gate_api_break, gate_breaking, levels
         ),
         breaking_categories=_breaking_categories(breaking),
         breaking_severities=_breaking_severities(breaking),
+        evidence=evidence_summary(report),
+        change_summary=summarize_changes(
+            _introduced_changes(report.get("relevant_changes"))
+            + _appcompat_synthetic_changes(report)
+        ),
     )
 
 
@@ -904,6 +1167,43 @@ def _release_contract_coverage_findings(
     ], blocking
 
 
+def _release_change_summary(report: dict[str, object]) -> ChangeSummary | None:
+    """Entity-by-operation rollup over a release report's *sampled* findings.
+
+    Always ``exact=False``: the only itemized, kind-level view a release
+    report carries is each library's ``findings`` list, which
+    ``cli_compare_release.py`` caps (at most 10 per library, and the
+    bundle/matrix sections have their own). The authoritative per-library
+    integer counts next to it are compatibility-bucket counts, not
+    entity/operation ones, so they cannot reconstruct this table -- and
+    reconstructing one from the capped list while calling it a total is the
+    exact failure AGENTS.md names ("never reconstruct exact totals from an
+    already-truncated finding list"). Closing this needs an authoritative
+    per-entity/operation count in the release JSON schema itself, a
+    `cli_compare_release.py` change rather than a rendering-only one -- the
+    same shape of gap `_from_release`'s own docstring already records for
+    the evidence-kind bucket.
+    """
+    sampled: list[dict[str, object]] = []
+    libraries = report.get("libraries")
+    if isinstance(libraries, list):
+        for lib in libraries:
+            if isinstance(lib, dict):
+                sampled.extend(_changes_list(lib.get("findings")))
+    for key in ("bundle_findings", "matrix_findings"):
+        sampled.extend(_changes_list(report.get(key)))
+    if not sampled:
+        return None
+    return summarize_changes(
+        sampled,
+        exact=False,
+        inexact_reason=(
+            "counted from each library's capped findings sample, so these "
+            "are lower bounds"
+        ),
+    )
+
+
 def _from_release(
     report: dict[str, object], gate_api_break: bool = False
 ) -> CommentModel:
@@ -1046,6 +1346,14 @@ def _from_release(
         unmatched_states=unmatched_states,
         review_groups=review_groups,
         result_counts=result_counts or None,
+        evidence=evidence_summary(report),
+        # ADR-065/AGENTS.md: a release report's per-library `findings` list
+        # is a cap of at most 10 per library (`cli_compare_release.py`), so
+        # a total reconstructed from it is a floor, never the truth. It is
+        # summarized anyway -- a floor with its limitation stated is more
+        # useful to a reviewer than no breakdown at all -- but `exact=False`
+        # makes it impossible for a renderer to present it as complete.
+        change_summary=_release_change_summary(report),
     )
 
 
@@ -1071,6 +1379,9 @@ def build_model(
     report: dict[str, object],
     gate_api_break: bool = False,
     gate_breaking: bool = True,
+    path_prefix: str = "",
+    *,
+    report_dir: Path | None = None,
 ) -> CommentModel:
     """Detect the report shape and normalise it into a :class:`CommentModel`.
 
@@ -1083,6 +1394,13 @@ def build_model(
     classification is a compatibility judgement, not a gate one (ADR-042),
     so it is unaffected by either flag.
 
+    *report_dir* is the directory the report itself was read from. It is
+    used only by the ``aggregate`` shape, whose per-target detail lives in
+    separate member reports the document names relatively; every other shape
+    is self-contained and ignores it. ``None`` (the default) means "no
+    directory is known", and the aggregate adapter then refuses every member
+    rather than resolving one against the process's working directory.
+
     Raises :class:`UnsupportedReportShapeError` for a report carrying
     ``scan_schema_version`` -- the ``scan``-shaped report dict
     (``diff.findings``/``crosscheck.counts_by_check`` rather than
@@ -1094,10 +1412,33 @@ def build_model(
     ``changes`` instead of ``diff.findings``, and would render a false
     "no changes" comment for a report that may carry real findings).
     """
+    if "aggregate_schema_version" in report:
+        # `abicheck aggregate`'s fan-in document (`report/aggregate.py`).
+        # Dispatched ahead of every other shape because it is the *only*
+        # one recognised by a dedicated version key rather than by the
+        # presence of a payload array, and because falling through to
+        # `_from_compare` is exactly what made it render a false "no
+        # changes" comment (this adapter's own module docstring).
+        def _member(data: dict[str, object]) -> CommentModel:
+            return build_model(
+                data,
+                gate_api_break=gate_api_break,
+                gate_breaking=gate_breaking,
+                path_prefix=path_prefix,
+                # A member report is itself read from the same directory, so
+                # an aggregate document naming another aggregate document
+                # keeps working; the loader's own containment rules apply at
+                # every level.
+                report_dir=report_dir,
+            )
+
+        return build_aggregate_model(
+            report, build_member_model=_member, base_dir=report_dir
+        )
     if isinstance(report.get("libraries"), list):
         return _from_release(report, gate_api_break)
     if "application" in report or isinstance(report.get("relevant_changes"), list):
-        return _from_appcompat(report, gate_api_break, gate_breaking)
+        return _from_appcompat(report, gate_api_break, gate_breaking, path_prefix)
     if "scan_schema_version" in report:
         raise UnsupportedReportShapeError(
             "This report was produced by the retired `scan` command "
@@ -1108,8 +1449,8 @@ def build_model(
             "and feed this tool the resulting report instead."
         )
     if "audit_report_schema_version" in report:
-        return _from_no_baseline(report, gate_api_break, gate_breaking)
-    return _from_compare(report, gate_api_break, gate_breaking)
+        return _from_no_baseline(report, gate_api_break, gate_breaking, path_prefix)
+    return _from_compare(report, gate_api_break, gate_breaking, path_prefix)
 
 
 def should_post(model: CommentModel, on: str) -> bool:
@@ -1149,4 +1490,18 @@ def should_post(model: CommentModel, on: str) -> bool:
         # `--on=changes` can't produce no comment (or delete a previous
         # sticky one) for a run the headline itself calls blocking.
         or model.no_baseline_audit_blocking
+        # A material analysis limitation is a reportable outcome in its own
+        # right, not a silent one. A run that found zero API/ABI changes but
+        # recorded `coverage_warnings` ("No header/AST data; type-level
+        # changes may be missed") previously produced *no comment at all*
+        # under the default `--on=changes` -- and, in sticky mode, deleted
+        # the previous one -- so the single fact a reviewer most needed
+        # ("nothing was found, and here is what could not be looked at") was
+        # the one the default never delivered. `EvidenceSummary.
+        # has_limitations` is deliberately narrower than "there is evidence
+        # information to show": an ELF run's permanently-inapplicable PE and
+        # Mach-O detectors are not limitations, so this cannot post routine
+        # inapplicable-detector noise on every clean run. See that
+        # property's own docstring.
+        or (model.evidence is not None and model.evidence.has_limitations)
     )

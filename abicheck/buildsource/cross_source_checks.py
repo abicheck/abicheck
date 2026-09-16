@@ -85,13 +85,10 @@ from ..model import (
     Variable,
 )
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.cxx_artifact_symbols import is_cxx_class_artifact_symbol
 from ..model.graph_facts import GraphNode
 from ..model.source_graph import DEPENDENCY_EDGE_KINDS, SourceGraphSummary
 from ..policy.evidence_status import Confidence
-
-# Export accounting (ADR-035 D4) lives in a sibling module (crosscheck hit the
-# 2000-line file cap). Re-exported so ``_check_exported_not_public`` and the tests
-# keep importing these names from ``crosscheck``.
 from .export_accounting import (
     _ALLOCATOR_INTERPOSER_MARKER,
     _ALLOCATOR_INTERPOSER_SYMBOLS,
@@ -107,6 +104,11 @@ from .export_accounting import (
     _library_self_names,
     _linked_library_names,
 )
+
+# Export accounting (ADR-035 D4) lives in a sibling module (crosscheck hit the
+# 2000-line file cap). Re-exported so ``_check_exported_not_public`` and the tests
+# keep importing these names from ``crosscheck``.
+from .template_linkage import names_a_template_specialization
 
 #: Cross-check fact-schema version. Independent of every other buildsource
 #: schema version (see ``buildsource/CLAUDE.md`` "Versioning").
@@ -1362,30 +1364,6 @@ def _origin_resolvable(snapshot: AbiSnapshot) -> bool:
 #: display name (notably for constructors/destructors), not a comparable symbol.
 _MANGLE_SIGILS = ("_Z", "?")
 
-#: Itanium constructor (``C1``/``C2``/``C3``) and destructor (``D0``/``D1``/``D2``)
-#: encodings — used to skip structor exports castxml cannot reliably mangle.
-_STRUCTOR_RE = re.compile(r"_ZN.*?[CD][0-4]E")
-
-#: Compiler-generated C++ ABI artifacts that belong to a class, not to a
-#: free function/variable: vtables/typeinfo/VTT/construction-vtables/thunks (Itanium
-#: ``_ZTV``/``_ZTI``/``_ZTS``/``_ZTT``/``_ZTC``/``_ZTh``/``_ZTv``/``_ZTc``) and MSVC
-#: ``??_`` vftable/vbtable/RTTI/deleting-dtor names. castxml records the owning class
-#: as a ``RecordType`` (not a ``Function``/``Variable``), so these would never be in
-#: the documented symbol set and must be exempted from ``exported_not_public`` when
-#: they belong to a *native* class (a leaked *dependency* construction vtable is
-#: caught earlier by the external-dependency origin check — Codex review).
-_CXX_ARTIFACT_PREFIXES = (
-    "_ZTV",
-    "_ZTI",
-    "_ZTS",
-    "_ZTT",
-    "_ZTC",
-    "_ZTh",
-    "_ZTv",
-    "_ZTc",
-    "??_",
-)
-
 
 def _bare_name_exports(decl: Function | Variable) -> bool:
     """Whether *decl* legitimately exports under its bare (un-mangled) name.
@@ -1409,20 +1387,9 @@ def _looks_mangled(decl: Function | Variable) -> bool:
     return decl.mangled.startswith(_MANGLE_SIGILS)
 
 
-def _is_cxx_implementation_symbol(symbol: str) -> bool:
-    """Whether *symbol* is a compiler-generated C++ class artifact, not free surface.
-
-    Covers constructors/destructors (Itanium ``_ZN…C1Ev``/``…D1Ev``, MSVC
-    ``??0…``/``??1…``) — which castxml leaves unmangled on the header side — and
-    vtable/typeinfo/thunk artifacts (``_CXX_ARTIFACT_PREFIXES``), which belong to
-    a ``RecordType`` rather than a function/variable. Both classes of symbol would
-    otherwise false-positive in ``exported_not_public`` (Codex review).
-    """
-    if symbol.startswith(_CXX_ARTIFACT_PREFIXES):
-        return True
-    if symbol.startswith("_ZN") and _STRUCTOR_RE.match(symbol):
-        return True
-    return symbol.startswith(("??0", "??1"))
+#: Shared with public-surface scoping (``model.cxx_artifact_symbols``), which must
+#: make the identical exemption -- see that function's own docstring.
+_is_cxx_implementation_symbol = is_cxx_class_artifact_symbol
 
 
 def _candidate_symbols(decl: Function | Variable) -> tuple[str, ...]:
@@ -1521,9 +1488,13 @@ def _has_export_obligation(fn: Function) -> bool:
     # binary's real ``_ZN…`` symbols would false-positive (Codex review).
     if not _looks_mangled(fn):
         return False
-    # Template instantiations are spelled with angle brackets; an uninstantiated
-    # template emits no symbol, so skip anything template-shaped to stay low-FP.
-    if _looks_templated(fn.name):
+    # A template specialization/instantiation has vague linkage: its
+    # definition is in the public header, so a consumer's own translation
+    # unit emits it and no dynamic export is owed. Decided from the *mangled*
+    # name's own template-argument production, not from the display spelling
+    # -- see `_names_a_template_specialization` for the false
+    # `public_not_exported` the spelling check produced.
+    if names_a_template_specialization(fn.name, fn.mangled):
         return False
     return True
 
@@ -1550,25 +1521,12 @@ def _var_has_export_obligation(var: Variable) -> bool:
         return False
     if var.is_const:
         return False
-    if _looks_templated(var.name):
+    # Same structural template test as the function path, and for the same
+    # reason: a variable-template specialization's definition is in the
+    # header and the consumer emits its own copy.
+    if names_a_template_specialization(var.name, var.mangled):
         return False
     return True
-
-
-def _looks_templated(name: str) -> bool:
-    """Whether *name* is a template instantiation spelling (``Foo<int>``), not an operator.
-
-    A bare ``<`` is not enough: ``operator<``, ``operator<<``, and ``operator<=>``
-    legitimately contain one but are ordinary (non-template) functions with a real
-    exported symbol, so testing ``"<" in name`` would wrongly skip a genuinely
-    missing exported operator (Codex review). A template's ``<`` opens an argument
-    list immediately after the template name, so the token right before the first
-    ``<`` is the template's name — never ``operator``.
-    """
-    idx = name.find("<")
-    if idx == -1:
-        return False
-    return not name[:idx].rstrip().endswith("operator")
 
 
 def _abi_relevant_build_flags(snapshot: AbiSnapshot) -> list[str] | None:

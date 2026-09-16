@@ -10,10 +10,17 @@ import os
 import shutil
 import sys
 import tempfile
-from collections.abc import Iterator
+import threading
+from collections.abc import Callable, Iterator
+from concurrent.futures import Future, TimeoutError as FutureTimeoutError
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeVar, cast
+
+if TYPE_CHECKING:
+    from xml.etree.ElementTree import Element
+
+from defusedxml import ElementTree as DefusedET
 
 from . import deadline
 
@@ -57,6 +64,156 @@ _ast_memoize_scope: contextvars.ContextVar[bool] = contextvars.ContextVar(
 _ast_memo_slot: contextvars.ContextVar[tuple[str, str, Any] | None] = (
     contextvars.ContextVar("_ast_memo_slot", default=None)
 )
+
+_T = TypeVar("_T")
+
+
+class AstAcquisitionScope:
+    """Request-owned, per-key coordination for expensive header acquisition.
+
+    Values are retained only for the lifetime of the owning dump/compare
+    request.  The lock protects the small future table; producers run after
+    releasing it, so unrelated compiler contexts proceed independently.
+    ``Future`` gives waiters the producer's exact completion/failure while a
+    cancelled waiter cannot cancel work another member still needs.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._entries: dict[tuple[str, str], Future[Any]] = {}
+        self._retained_context_objects: list[Any] = []
+
+    def retain(self, value: Any) -> None:
+        """Keep an identity-keyed context object alive for this request."""
+
+        with self._lock:
+            self._retained_context_objects.append(value)
+
+    def run(self, backend: str, key: str, producer: Callable[[], _T]) -> _T:
+        lookup = (backend, key)
+        with self._lock:
+            future = self._entries.get(lookup)
+            if future is None:
+                future = Future()
+                self._entries[lookup] = future
+                owns_production = True
+            else:
+                owns_production = False
+        if not owns_production:
+            deadline.check()
+            left = deadline.remaining()
+            try:
+                result = future.result(timeout=left)
+            except FutureTimeoutError:
+                if future.done():
+                    return cast("_T", future.result())
+                # Do not cancel the shared producer: another member may still
+                # need it.  The waiter's own request deadline is nevertheless
+                # authoritative and must bound queue time as well as compiler
+                # time.
+                left_after = deadline.remaining()
+                raise deadline.DeadlineExceeded(
+                    left_after if left_after is not None else 0.0
+                )
+            deadline.check()
+            return cast("_T", result)
+        try:
+            result = producer()
+        except BaseException as exc:
+            future.set_exception(exc.with_traceback(None))
+            # A failed acquisition is retryable within the request.  Removing
+            # only our own entry avoids racing a later successful producer.
+            with self._lock:
+                if self._entries.get(lookup) is future:
+                    del self._entries[lookup]
+            raise
+        future.set_result(result)
+        return result
+
+
+_ast_acquisition_scope: contextvars.ContextVar[AstAcquisitionScope | None] = (
+    contextvars.ContextVar("_ast_acquisition_scope", default=None)
+)
+
+
+@contextmanager
+def ast_acquisition_scope() -> Iterator[AstAcquisitionScope]:
+    """Install one request-local shared acquisition table.
+
+    Nested workflow layers reuse the existing table rather than hiding it.
+    Context copies used by release workers consequently share the same table.
+    """
+
+    existing = _ast_acquisition_scope.get()
+    if existing is not None:
+        yield existing
+        return
+    scope = AstAcquisitionScope()
+    token = _ast_acquisition_scope.set(scope)
+    try:
+        yield scope
+    finally:
+        _ast_acquisition_scope.reset(token)
+
+
+def run_ast_acquisition(backend: str, key: str, producer: Callable[[], _T]) -> _T:
+    """Run *producer* once per request and effective AST cache key.
+
+    *producer* must cover **every** source of that AST -- a warm disk-cache
+    decode as much as a real frontend run. A cheap path placed ahead of this
+    call still returns an equal value, so nothing observable breaks, but it
+    returns a *separate object* each time: the decode repeats per member and
+    per worker group, identity-keyed downstream work repeats with it
+    (``extract/header_ast_fields.py`` keys neutral ``SemanticIR``
+    normalization on ``id(root)``), a follow-up consumer of the same artifact
+    (``service._attach_header_graph``) re-reads the cache the primary pass
+    just decoded, and every copy stays resident for the request. Whatever the
+    producer *resolved* travels with the result too -- the post-retry language
+    mode, the DPC++ frontend context, CastXML's selected compiler -- so a
+    waiter never re-derives a stale answer of its own.
+
+    One consequence worth keeping in mind when changing a producer: because
+    its exact parsed object is published to later consumers, a lossy
+    transformation that used to be private to it no longer is (see
+    ``dumper_clang_errors._streaming_prune_enabled``, which is disabled inside
+    an acquisition scope for exactly that reason).
+    """
+
+    scope = _ast_acquisition_scope.get()
+    if scope is None:
+        return producer()
+    return scope.run(backend, key, producer)
+
+
+def resolve_request_memoization(memoize: bool | None) -> bool:
+    """Whether a header-AST parse should write this thread's memo slot.
+
+    ``None`` means "decide from context" -- :func:`ast_memoize_scope`'s own
+    answer, the pre-existing default. A request-local acquisition scope then
+    overrides it to ``False``: inside one, the request-keyed table returned by
+    :func:`run_ast_acquisition` is *the* handoff to a later consumer, and the
+    per-thread slot would be a second, never-consumed reference holding a
+    potentially multi-GB tree for the life of the thread. Outside a scope the
+    legacy one-shot handoff is untouched, so a direct ``dumper.dump()`` caller
+    behaves exactly as before.
+    """
+
+    resolved = ast_memoize_active() if memoize is None else memoize
+    return resolved and not ast_acquisition_active()
+
+
+def ast_acquisition_active() -> bool:
+    """Whether the current execution context shares request acquisition."""
+
+    return _ast_acquisition_scope.get() is not None
+
+
+def retain_ast_context_object(value: Any) -> None:
+    """Prevent ``id(value)`` reuse while request-local normalized facts exist."""
+
+    scope = _ast_acquisition_scope.get()
+    if scope is not None:
+        scope.retain(value)
 
 
 @contextmanager
@@ -150,6 +307,25 @@ def load_cached_ast(
     if memoize:
         store_cached_ast(key, backend, root)
     return root
+
+
+def read_cached_castxml(cached: Path) -> Element | None:
+    """Parse a cached castxml XML tree, discarding the entry if it is unusable.
+
+    Returns ``None`` (having unlinked *cached*) when the file cannot be parsed,
+    so the caller falls through to a fresh run rather than failing on a
+    truncated or corrupt cache entry. The CastXML counterpart of
+    :func:`load_cached_ast`; lives here, next to it, rather than in
+    ``dumper.py`` (which re-exports it under its historical private name).
+    """
+    try:
+        root = DefusedET.parse(str(cached)).getroot()
+    except Exception:
+        root = None
+    if root is None:
+        cached.unlink(missing_ok=True)
+        return None
+    return cast("Element", root)
 
 
 def _atomic_copy(src: Path, dst: Path) -> None:

@@ -1025,7 +1025,7 @@ def test_compare_not_comparable_renders_incomplete_not_no_changes():
 
 def test_summary_detail_has_no_tables():
     body = render_comment(build_model(_compare_report()), sha="x", detail="summary")
-    assert "<details" not in body
+    assert "<summary>❌ Breaking" not in body  # tables go, exact rollup stays
     assert "**2 breaking**" in body
 
 
@@ -1033,7 +1033,7 @@ def test_full_detail_expands_all_sections():
     body = render_comment(build_model(_compare_report()), sha="x", detail="full")
     # every <details> opens expanded in full mode
     assert "<details><summary>" not in body
-    assert body.count("<details open>") == 3
+    assert body.count("<details open>") == 4  # incl. the "What changed" rollup
 
 
 def test_breaking_finding_renders_impact_field():
@@ -1254,7 +1254,7 @@ def test_standard_truncates_large_breaking_table():
         for i in range(40)
     ]
     body = render_comment(build_model(_compare_report(changes)), sha="x")
-    assert "more_" in body  # truncation marker
+    assert "more not shown" in body  # truncation marker
     # full mode keeps everything
     full = render_comment(build_model(_compare_report(changes)), sha="x", detail="full")
     assert "more_" not in full
@@ -1343,7 +1343,7 @@ def test_large_diff_condensed_note_links_report():
         detail="full",
         report_url="https://e/run/2",
     )
-    assert "Condensed to fit" in body
+    assert "Shortened to fit" in body
     assert "https://e/run/2" in body
 
 
@@ -1413,7 +1413,7 @@ def test_report_url_linked_in_footer():
     body = render_comment(
         build_model(_compare_report()), sha="x", report_url="https://example/run/9"
     )
-    assert "[full report](https://example/run/9)" in body
+    assert "[View workflow run](https://example/run/9)" in body
 
 
 def test_release_render_lists_removed_libraries():
@@ -1636,7 +1636,7 @@ def test_additions_section_truncates_past_standard_row_cap():
     ]
     body = render_comment(build_model(_compare_report(changes)), sha="x")
     assert "➕ Public API additions (30)" in body
-    assert "more_" in body  # 30 > the 25-row standard cap
+    assert "more not shown" in body  # 30 > the 25-row standard cap
 
 
 def test_additions_section_absent_when_only_quality_findings():

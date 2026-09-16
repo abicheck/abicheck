@@ -38,6 +38,7 @@ import click
 if TYPE_CHECKING:
     from ....environment_matrix import EnvironmentMatrix
 
+from ....model.sided_inputs import compose_sided_paths
 from ....report.no_baseline import (
     NO_BASELINE_SUPPORTED_FORMATS,
     NO_BASELINE_UNSUPPORTED_FORMATS,
@@ -307,11 +308,13 @@ def _resolve_no_baseline_invocation(
     nothing here has to decide whether an input is allowed, only what it
     means.
     """
-    headers = list(kwargs.get("headers") or ()) + list(
-        kwargs.get("new_headers_only") or ()
+    # NEW-side-specific first, then the both-sides value -- one rule across
+    # every front end (`model.sided_inputs`).
+    headers = compose_sided_paths(
+        kwargs.get("headers") or (), kwargs.get("new_headers_only") or ()
     )
-    includes = list(kwargs.get("includes") or ()) + list(
-        kwargs.get("new_includes_only") or ()
+    includes = compose_sided_paths(
+        kwargs.get("includes") or (), kwargs.get("new_includes_only") or ()
     )
     exclude_headers = tuple(kwargs.get("exclude_headers") or ())
     public_headers, public_header_dirs = public_header_sets_for_candidate(

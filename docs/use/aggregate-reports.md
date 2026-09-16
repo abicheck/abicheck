@@ -374,3 +374,4 @@ Recipes](github-action-recipes.md) for the full fan-out/fan-in CI workflow
 - [Project Targets Schema](../reference/project-targets-schema.md) — `profiles:`/`checks:`, the source of `target@profile#channel@depth` report ids
 - [GitHub Action: Recipes](github-action-recipes.md) — the worked matrix + gate workflow
 - [Compatibility Evaluation Config](../reference/compatibility-evaluation-config.md) — what feeds a report's `contract_coverage_exit_contribution`
+- [Reporting on fork pull requests](fork-pr-reporting.md) — publishing an aggregate document as a PR comment from a trusted `workflow_run` job (its per-target member reports must sit in the same directory as the document)
