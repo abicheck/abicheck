@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "compute_confidence",
+    "detector_disablement_warning",
     "_compute_confidence",
     "_detect_evidence_tiers",
     "_determine_evidence_tier",
@@ -230,6 +231,31 @@ def _determine_confidence_level(
     return confidence
 
 
+def detector_disablement_warning(name: str, coverage_gap: str) -> str:
+    """The one spelling of a "detector X did not run" coverage warning.
+
+    ``coverage_warnings`` is a deliberately heterogeneous list: it mixes
+    *material* limitations on what the comparison could conclude (an
+    ``--exclude-header`` omission, a same-binary comparison) with the routine
+    fact that a platform detector did not apply -- on an ELF comparison the
+    PE, Mach-O, kABI, SYCL and CPython-extension detectors are disabled on
+    every run, forever, and always will be.
+
+    A consumer that must tell those apart -- the PR comment does, because
+    "there is a material limitation here" is its posting trigger and routine
+    inapplicability must not fire it -- may subtract the entries this
+    function produces, reconstructing them from the structured
+    ``detectors[]`` ledger (``name`` + ``coverage_gap``) that the report
+    already carries. Factored out so that reconstruction shares this one
+    format string with the producer rather than *parsing* the rendered
+    sentence to recover its meaning: a consumer that pattern-matched the
+    prose would silently start mis-classifying the day the wording changed,
+    and recovering semantics from human-readable text is exactly what a
+    reporting layer must not do.
+    """
+    return f"Detector '{name}' disabled: {coverage_gap}"
+
+
 def compute_confidence(
     detector_results: list[DetectorResult],
     old: AbiSnapshot | None,
@@ -266,7 +292,7 @@ def compute_confidence(
     # Check for disabled detectors and generate warnings.
     for dr in detector_results:
         if not dr.enabled and dr.coverage_gap:
-            warnings.append(f"Detector '{dr.name}' disabled: {dr.coverage_gap}")
+            warnings.append(detector_disablement_warning(dr.name, dr.coverage_gap))
 
     warnings.extend(header_exclusion_warnings(old, new))
 

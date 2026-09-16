@@ -129,4 +129,73 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="perf.cache_fast_path_bypasses_shared_coordination",
+        invariant=(
+            "When a cheap fast path (a warm cache hit) and an expensive slow "
+            "path (running the real tool) produce the SAME logical value, the "
+            "coordination that de-duplicates that value per request must sit "
+            "*above both*, not between them. A fast path placed ahead of the "
+            "coordinator still satisfies every equality assertion -- the two "
+            "results compare equal -- while silently producing a second "
+            "object: each consumer repeats the decode, identity-keyed work "
+            "downstream (`id(root)`-scoped normalization) repeats with it, "
+            "and every produced copy stays resident for the request. So the "
+            "guard counts *productions and decodes* per (backend, key), never "
+            "equality of results, and covers the shapes in which a second "
+            "consumer appears at all: a later member, a later worker group, "
+            "and a follow-up pass over the same artifact. The coordinated "
+            "result must also carry everything the slow path resolved (the "
+            "post-retry language mode, the selected compiler, the frontend "
+            "context), or a waiter silently re-derives a stale answer; and "
+            "sharing one parsed object retroactively constrains what the "
+            "producer may do to it -- a lossy transformation that was private "
+            "to the producer becomes visible to every later consumer."
+        ),
+        # PR #1303 added the request-local L2 AST singleflight, but both
+        # backends read and decoded their disk cache *before* entering it: on
+        # a six-DSO directory compare with a warm cache every member decoded
+        # its own root (25 CastXML / 13 clang raw decodes, 12 neutral
+        # `SemanticIR` normalizations for one effective context), and the
+        # header-graph pass re-read the cache the primary pass had just
+        # decoded. Nothing was wrong in the output, which is why no existing
+        # test noticed: the defect is only visible as counts.
+        fixed_by=(1305,),
+        seed_tests=("tests/test_l2_ast_acquisition_singleflight.py",),
+        public_surfaces=("cli", "python-api"),
+        axes={
+            "acquisition_source": ("cold-compiler-run", "warm-disk-hit"),
+            "consumer_shape": (
+                "sequential-member",
+                "later-worker-group",
+                "header-graph-pass",
+            ),
+            "backend": ("clang", "castxml"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Per-binary legacy parsing and symbol binding still run "
+                    "once per member over the shared root -- deliberately, "
+                    "since each member's export evidence drives it -- so the "
+                    "counts this class guards are for the raw AST and its "
+                    "member-independent normalization only, not for the "
+                    "per-member passes above them."
+                ),
+                reference="docs/contribute/plans/vision-api-abi-evolution.md",
+            ),
+            KnownGap(
+                description=(
+                    "The directory-level guard is ELF-only. On the macOS and "
+                    "Windows runners the fixture's header parse degrades "
+                    "before either backend reaches the acquisition, so the "
+                    "counts have nothing to observe and the test is skipped "
+                    "there; the deterministic warm-path tests still run on "
+                    "every platform, and the MSVC/PDB header path has no "
+                    "coverage of this invariant at all."
+                ),
+                reference="tests/test_l2_ast_acquisition_singleflight.py",
+            ),
+        ),
+    ),
 )

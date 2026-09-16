@@ -5836,8 +5836,13 @@ _maybe_post_pr_comment() {
     PR_GATE_ARGS+=(--no-gate-breaking)
   fi
 
-  # Link the workflow run (where the full JSON/SARIF report is uploaded as an
-  # artifact) so a condensed/truncated comment always points at the full detail.
+  # Link the workflow run so a shortened comment always points somewhere
+  # useful. This is "View workflow run", NOT "Download full report": this
+  # composite Action uploads nothing itself, so it cannot know an artifact
+  # exists, let alone its id. A caller that does upload one passes its
+  # upload step's own `artifact-url` output as
+  # `pr-comment-report-artifact-url`, and only then is a direct download
+  # link rendered -- a link that can never point at an upload that failed.
   local run_url=""
   if [[ -n "${GITHUB_SERVER_URL:-}" && -n "${GITHUB_REPOSITORY:-}" && -n "${GITHUB_RUN_ID:-}" ]]; then
     run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
@@ -5874,6 +5879,8 @@ runpy.run_module("abicheck.cli_pr_comment", run_name="__main__")
     --on "${INPUT_PR_COMMENT_ON:-changes}" \
     --run-label "run #${GITHUB_RUN_NUMBER:-?}" \
     ${run_url:+--report-url "$run_url"} \
+    ${INPUT_PR_COMMENT_REPORT_ARTIFACT_URL:+--report-artifact-url "$INPUT_PR_COMMENT_REPORT_ARTIFACT_URL"} \
+    ${GITHUB_WORKSPACE:+--path-prefix "$GITHUB_WORKSPACE"} \
     ${PR_GATE_ARGS[@]+"${PR_GATE_ARGS[@]}"} \
     ${subject_args[@]+"${subject_args[@]}"} \
     -o "$PR_BODY") || true

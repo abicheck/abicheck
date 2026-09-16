@@ -4,7 +4,7 @@
 
 Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../use/github-action.md), generated directly from `action.yml` — see that page for setup, mode/input compatibility, and usage recipes; this page is the exhaustive field list only.
 
-## Inputs (83)
+## Inputs (84)
 
 | Input | Required | Default | Description |
 |---|:--:|---|---|
@@ -88,7 +88,8 @@ Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../us
 | `add-job-summary` | no | true | Write a markdown summary to the GitHub Actions Job Summary. Ignored for dump mode. |
 | `pr-comment` | no | true | Post a sticky ABI report comment on the pull request. Supports compare mode (both the two-sided shape, including directory/package operands, and the single-artifact audit-only shape), rendering the same verdict/breaking/needs-review sections plus a green "Public API additions" table, and (audit-only) a risk/coverage summary line. The comment is a content channel and never changes the check's red/green state — breaks still gate via fail-on-breaking / fail-on-api-break. Defaults to 'true', but is a no-op unless the workflow is triggered by a pull_request event and a token with 'pull-requests: write' is available. |
 | `pr-comment-mode` | no | update | 'update' (default) keeps a single sticky comment and edits it in place on every run; 'new' posts a fresh comment each run. Either way the scanned head SHA is shown in the comment. |
-| `pr-comment-on` | no | changes | When to comment: 'changes' (default) only comments when there is at least one ABI/API change, 'always' comments every run (including a clean "no changes" result), 'never' disables the comment. |
+| `pr-comment-on` | no | changes | When to comment: 'changes' (default) comments when the run produced anything a reviewer must act on -- at least one ABI/API change, a removed/added library, an incompletely checked comparison scope, a finding disposed of by a suppression rule, or a material analysis limitation the comparison itself recorded (its 'coverage_warnings', e.g. "No header/AST data; type-level changes may be missed"). A clean run whose only evidence note is a permanently-inapplicable detector (the PE and Mach-O detectors on an ELF comparison) is not such an outcome and still posts nothing. 'always' comments every run (including a clean "no changes" result), 'never' disables the comment unconditionally. Changing this input never changes the compatibility verdict, the gate, or the step's exit code -- it only decides whether a comment is written. |
+| `pr-comment-report-artifact-url` | no | — | Optional direct URL of an uploaded full-report artifact (JSON/HTML), linked in the comment footer as 'Download full report' -- distinct from the always-present 'View workflow run' link. Leave unset unless an upload step actually succeeded: set it from that step's own 'artifact-url' output, so a link in the comment always corresponds to an artifact that exists. This Action does not upload artifacts itself, so it cannot derive this value. |
 | `pr-comment-detail` | no | standard | Detail level of the comment body: 'summary' (verdict + counts only), 'standard' (default; per-symbol tables for breaking/review, grouped safe list) or 'full' (every change with locations, all sections expanded). |
 | `github-token` | no | ${{ github.token }} | Token used to post the PR comment and to auto-fetch release baselines. Defaults to the workflow token; requires 'pull-requests: write' for the comment. |
 
