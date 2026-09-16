@@ -38,6 +38,7 @@ from ..elf_symbol_filter import (
     exported_symbol_names,
 )
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.mangled_name import itanium_scope_components
 
 if TYPE_CHECKING:
     from ..checker_types import Change
@@ -325,6 +326,10 @@ def _export_only_removals(
             # the declaration said. Same rule as the addition half.
             if mangled in declared or mangled in declared_names:
                 continue
+            # The same rule, resolved structurally rather than by literal
+            # name, for the one declaration shape a name match cannot reach.
+            if _is_declared_class_ctor_or_dtor(mangled, old, new):
+                continue
             # `notype` is in both symbol-type sets; the function tier runs
             # first and keeps it, exactly as in the addition half.
             if mangled in already_reported:
@@ -357,3 +362,49 @@ def _export_only_removals(
                 )
             )
     return removals
+
+
+def _is_declared_class_ctor_or_dtor(
+    mangled: str, old: AbiSnapshot, new: AbiSnapshot
+) -> bool:
+    """Whether *mangled* is a constructor/destructor variant of a class that
+    either side's public headers declare.
+
+    This is the "declared by either side is the declaration-aware diff's
+    business" rule above, applied to the one declaration shape a literal name
+    match structurally cannot reach. A header-parsed constructor does not enter
+    ``function_map`` under any Itanium mangling: the backends key it under a
+    synthetic placeholder (``__abicheck_ctor__Widget()``, and ``~Widget`` for
+    the destructor), because one source-level declaration corresponds to
+    *several* ABI symbols -- C1/C2/C3 and D0/D1/D2 -- and no single mangling
+    is "the" one. So every ctor and dtor of every declared class looked
+    undeclared to the removal half, for every library, not just the case that
+    surfaced it.
+
+    What surfaced it: ``tests/test_cross_compiler_fp.py``'s ``-O0`` vs ``-O2``
+    false-positive gate. GCC emits and exports ``_ZN6WidgetC1Ev``/``C2Ev`` at
+    ``-O0`` and inlines both away at ``-O2``, so a rebuild of *byte-identical
+    source at a different optimization level* -- not an ABI change by this
+    repository's own FP corpus, and a class the suite already knows about
+    (that file's win32 ``xfail`` reads "MinGW -O2 inlines constructors away
+    from PE exports") -- reported two BREAKING removals.
+
+    Deliberately disjoint from the objects this detector exists to catch:
+    ``itanium_scope_components`` returns ``None`` for a ``_ZTV``/``_ZTI``/
+    ``_ZTS``/``_ZTT`` special name, so a lost vtable or typeinfo cannot reach
+    this predicate at all, whatever its owner. And the owner check is not
+    decoration: a ctor of a class no header declares is a genuinely undeclared
+    export, and its loss still reports.
+    """
+    components = itanium_scope_components(mangled)
+    if not components or len(components) < 2:
+        return False
+    if components[-1] not in ("{ctor}", "{dtor}"):
+        return False
+    owner = "::".join(components[:-1])
+    bare_owner = components[-2]
+    for side in (old, new):
+        for candidate in (owner, bare_owner):
+            if side.type_by_name(candidate) is not None:
+                return True
+    return False

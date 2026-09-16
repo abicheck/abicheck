@@ -92,6 +92,22 @@ def _require_gpp() -> None:
         pytest.skip("needs a real g++ toolchain")
 
 
+#: The toolchain-oracle test below asks a real compiler and a real `nm` about
+#: *Itanium* manglings -- the `I…E` template-argument production is the whole
+#: subject. Windows is excluded rather than papered over: that lane builds with
+#: the MSVC developer environment active (the workflow runs `msvc-dev-cmd`),
+#: where the compile does not succeed at all and MSVC's own mangling scheme is
+#: a different question entirely. Nothing is lost on that platform --
+#: `test_template_declaration_never_acquires_an_export_obligation` pins the
+#: exact manglings, ELF- and Mach-O-spelled, with no toolchain at all, and runs
+#: everywhere; and `names_a_template_specialization`'s MSVC path is covered by
+#: `test_unparseable_mangling_falls_back_to_the_display_name`.
+itanium_toolchain_only = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="asks a real compiler about Itanium manglings; that lane is MSVC",
+)
+
+
 def _build_pair(tmp_path: Path, localized: tuple[str, ...]) -> tuple[Path, Path]:
     """Build old/new ``libfoo.so`` from byte-identical sources and headers,
     differing only in which symbols the NEW link localizes.
@@ -264,6 +280,7 @@ template <typename T> bool is_specified(T v) { return v != T::Unset; }
 """
 
 
+@itanium_toolchain_only
 @pytest.mark.integration
 @pytest.mark.parametrize(
     ("decl", "call", "force"),
@@ -712,3 +729,92 @@ def test_dedup_collapses_the_tier_pair_and_keeps_distinct_losses() -> None:
     kept = _deduplicate_cross_detector(duplicated)
     symbols = [c.symbol for c in kept]
     assert sorted(symbols) == ["_ZTV3Bar", "_ZTV3Foo"], symbols
+
+
+# --------------------------------------------------------------------------
+# 4. The false positive the removal half introduced, and its negative control
+# --------------------------------------------------------------------------
+
+
+def _ctor_snapshot(symbols: list[str], *, declare_widget: bool):
+    """A header-aware snapshot exporting *symbols*, optionally declaring the
+    class ``Widget`` the way a real header parse does.
+
+    The constructor deliberately enters ``function_map`` under the synthetic
+    placeholder key a real backend uses (`__abicheck_ctor__Widget()`), never
+    an Itanium mangling -- reproducing the shape that made every declared
+    class's ctors and dtors invisible to a literal name match.
+    """
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+    from abicheck.model import AbiSnapshot, Function, RecordType, ScopeOrigin
+
+    snap = AbiSnapshot(
+        library="libwidget.so",
+        version="1.0",
+        from_headers=True,
+        elf=ElfMetadata(machine="x86-64", symbols=[ElfSymbol(name=n) for n in symbols]),
+    )
+    if declare_widget:
+        snap.types = [RecordType(name="Widget", kind="class")]
+        snap.functions = [
+            Function(
+                name="Widget",
+                mangled="__abicheck_ctor__Widget()",
+                return_type="",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )
+        ]
+    return snap
+
+
+def test_an_inlined_ctor_of_a_declared_class_is_not_an_export_loss() -> None:
+    """Rebuilding byte-identical source at a higher optimization level is not
+    an ABI change, and it is what makes a class's out-of-line ctor/dtor copies
+    come and go: GCC exports `_ZN6WidgetC1Ev`/`C2Ev` at -O0 and inlines both
+    away at -O2.
+
+    The removal half reported two BREAKING removals for exactly that, because
+    a header-parsed constructor never enters `function_map` under any Itanium
+    mangling -- the backends key it under a synthetic placeholder, since one
+    declaration corresponds to several ABI symbols (C1/C2/C3, D0/D1/D2). So
+    this was not specific to `Widget`: every ctor and dtor of every declared
+    class looked undeclared. Caught by
+    `tests/test_cross_compiler_fp.py::TestOptimizationLevelFP`, whose win32
+    `xfail` already named the class ("MinGW -O2 inlines constructors away
+    from PE exports").
+    """
+    from abicheck.compare.undeclared_exports import _diff_undeclared_exports
+
+    old = _ctor_snapshot(
+        ["_ZN6WidgetC1Ev", "_ZN6WidgetC2Ev", "_ZN6WidgetD1Ev"], declare_widget=True
+    )
+    new = _ctor_snapshot([], declare_widget=True)
+    assert _diff_undeclared_exports(old, new) == []
+
+
+def test_a_ctor_of_an_undeclared_class_is_still_an_export_loss() -> None:
+    """The negative control, and the thing a blanket "skip every ctor/dtor"
+    fix would break: the exemption is owner-declared, not ctor-shaped. A class
+    no header declares has no declaration-aware diff to hand the symbol to."""
+    from abicheck.compare.undeclared_exports import _diff_undeclared_exports
+
+    old = _ctor_snapshot(["_ZN6WidgetC1Ev"], declare_widget=False)
+    new = _ctor_snapshot([], declare_widget=False)
+    reported = {c.symbol for c in _diff_undeclared_exports(old, new)}
+    assert reported == {"_ZN6WidgetC1Ev"}
+
+
+def test_the_exemption_does_not_reach_vtables_or_typeinfo() -> None:
+    """The exemption must stay disjoint from the objects this detector exists
+    for. A vtable is an Itanium *special name*, so `itanium_scope_components`
+    declines to parse it and the ctor/dtor predicate cannot reach it -- but
+    that disjointness is a property worth pinning, not inferring, since both
+    symbols name the same declared class."""
+    from abicheck.compare.undeclared_exports import _diff_undeclared_exports
+
+    old = _ctor_snapshot(
+        ["_ZN6WidgetC1Ev", "_ZTV6Widget", "_ZTI6Widget"], declare_widget=True
+    )
+    new = _ctor_snapshot([], declare_widget=True)
+    reported = {c.symbol for c in _diff_undeclared_exports(old, new)}
+    assert reported == {"_ZTV6Widget", "_ZTI6Widget"}
