@@ -70,6 +70,12 @@ BREAKING_MEMBER = "gamma"
 
 
 def _header_text(*, with_header_only_addition: bool) -> str:
+    """The one public header every member of the fixture release includes.
+
+    *with_header_only_addition* gives a public struct an extra field: a
+    change carried purely by header (L2) evidence, with no export-table
+    counterpart anywhere.
+    """
     added_field = "  int c;\n" if with_header_only_addition else ""
     decls = "\n".join(
         f"struct Shape_{name} {{ int a; double b;\n{added_field}}};\n"
@@ -86,6 +92,7 @@ def _header_text(*, with_header_only_addition: bool) -> str:
 
 
 def _source_text(name: str, *, drop_beta: bool) -> str:
+    """One member's translation unit; *drop_beta* omits a defined export."""
     beta = "" if drop_beta else f"int {name}_beta(int x) {{ return x * 2; }}\n"
     return (
         '#include "api.h"\n'
@@ -155,16 +162,19 @@ class _AcquisitionCounters:
     """
 
     def __init__(self) -> None:
+        """Start every counter at zero."""
         self.requests: Counter[tuple[str, str]] = Counter()
         self.producer_runs: Counter[tuple[str, str]] = Counter()
         self.topology_elf_reads: Counter[str] = Counter()
 
     @property
     def ast_keys(self) -> set[tuple[str, str]]:
+        """Keys whose producer ran a real header-AST frontend/decode."""
         return {k for k in self.producer_runs if not k[0].endswith("-normalized")}
 
     @property
     def normalization_keys(self) -> set[tuple[str, str]]:
+        """Keys belonging to the separate neutral-normalization scope."""
         return {k for k in self.producer_runs if k[0].endswith("-normalized")}
 
     def keys_per_backend(self, *, normalized: bool) -> dict[str, int]:
@@ -182,19 +192,23 @@ class _AcquisitionCounters:
         return dict(counts)
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Wrap both real `run_ast_acquisition` bindings and the ELF parser."""
         real_run = dumper_cache.run_ast_acquisition
         real_elf = bundle.parse_elf_metadata
 
         def wrapped(backend, key, producer):
+            """Count the request, then the producer run it actually caused."""
             self.requests[(backend, key)] += 1
 
             def counted_producer():
+                """Count only a genuine producer run, never a waiter."""
                 self.producer_runs[(backend, key)] += 1
                 return producer()
 
             return real_run(backend, key, counted_producer)
 
         def wrapped_elf(path, *args, **kwargs):
+            """Count an ELF parse made by bundle-topology assembly."""
             self.topology_elf_reads[Path(path).name] += 1
             return real_elf(path, *args, **kwargs)
 
@@ -268,6 +282,7 @@ def test_missing_evidence_falls_back_to_a_live_parse(
     from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 
     def _evidence(name: str) -> BundleSignatureEvidence:
+        """Minimal resolved evidence carrying one real exported symbol."""
         return BundleSignatureEvidence(
             function_map={},
             variable_map={},
@@ -284,6 +299,7 @@ def test_missing_evidence_falls_back_to_a_live_parse(
     parsed: list[str] = []
 
     def fake_build(libraries):
+        """Stand in for the live-parse fallback and record who reached it."""
         parsed.extend(sorted(libraries))
         return bundle.build_bundle_snapshot_from_metadata(
             {
@@ -354,6 +370,7 @@ def release(tmp_path_factory: pytest.TempPathFactory) -> dict:
 )
 class TestBundleFactsLiveRouteReuse:
     def _run(self, release: dict, counters: _AcquisitionCounters, **kwargs):
+        """Drive the real public workflow entry point over the fixture."""
         return compare_release_against_bundle_facts(
             release["facts"],
             release["new_dir"],
@@ -481,11 +498,70 @@ class TestBundleFactsLiveRouteReuse:
             headers=[release["new_header"]],
         )
 
+        damaged = f"lib{MEMBERS[-1]}.so"
         compared = {d.library for d in result.per_library}
-        assert len(compared) >= len(MEMBERS) - 1
-        # Never a successful empty member for the damaged artifact.
-        assert f"lib{MEMBERS[-1]}.so" not in compared or any(
-            d.changes for d in result.per_library if d.library == f"lib{MEMBERS[-1]}.so"
-        )
+
+        # Exactly the healthy members compared -- not ">= n-1", which a run
+        # that silently admitted the damaged member as a successful empty
+        # diff would also satisfy (CodeRabbit review).
+        assert compared == {f"lib{name}.so" for name in MEMBERS[:-1]}
+
+        # The damaged artifact is filtered out by `discover_shared_libraries`
+        # before matching, so on *this* route it is NOT_SUPPLIED on the scope
+        # record -- deliberately not `extraction_failures`, which only
+        # receives a member that was discovered and then failed extraction
+        # (the sibling case the next test covers). Asserted as the exact
+        # state rather than "absent somewhere", since absence alone cannot
+        # distinguish a recorded gap from a silently dropped member.
+        states = {m.member: m for m in result.scope_record.members}
+        assert states[damaged].state.value == "not_supplied"
+        assert states[damaged].old_present and not states[damaged].new_present
+        # Never a proven removal: NEW's inventory is unproven (ADR-065 D2).
+        assert "unmatched, not removed" in states[damaged].reason
+        for name in MEMBERS[:-1]:
+            assert states[f"lib{name}.so"].state.value == "available"
+
         # And the workflow left no scope behind on the way out.
+        assert not ast_acquisition_active()
+
+    def test_an_extraction_failure_is_recorded_and_siblings_survive(
+        self, release: dict, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A member that fails *extraction* is recorded, not silently dropped.
+
+        The sibling of the case above: here the artifact is discovered
+        normally and then fails inside the per-member loop, which is the path
+        that populates `extraction_failures`. Exercised through the real
+        workflow so the failure crosses the shared acquisition scope -- the
+        thing this PR added -- rather than being asserted on a helper.
+        """
+        from abicheck.errors import SnapshotError
+        from abicheck.workflows import input_resolution
+
+        failing = f"lib{MEMBERS[2]}.so"
+        real_resolve = input_resolution.resolve_input
+
+        def flaky_resolve(path, *args, **kwargs):
+            """Fail extraction for one member, resolve every other for real."""
+            if Path(path).name == failing:
+                raise SnapshotError("synthetic extraction failure")
+            return real_resolve(path, *args, **kwargs)
+
+        monkeypatch.setattr(input_resolution, "resolve_input", flaky_resolve)
+
+        counters = _AcquisitionCounters()
+        counters.install(monkeypatch)
+        result = self._run(release, counters)
+
+        compared = {d.library for d in result.per_library}
+        # Every sibling still completed -- one member's failure never
+        # discards the comparisons already done.
+        assert compared == {f"lib{n}.so" for n in MEMBERS if f"lib{n}.so" != failing}
+        # ... and the failure is recorded rather than read as an empty success.
+        assert failing in result.extraction_failures
+        assert "synthetic extraction failure" in result.extraction_failures[failing]
+        assert any(failing in err for err in result.analysis_errors)
+        # The failed member contributes no evidence and no bundle metadata,
+        # but must not have been quietly re-parsed live either.
+        assert counters.topology_elf_reads[failing] == 0
         assert not ast_acquisition_active()
