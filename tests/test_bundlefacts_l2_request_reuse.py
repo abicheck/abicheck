@@ -481,6 +481,45 @@ class TestBundleFactsLiveRouteReuse:
             libraries_with_layout_evidence
         )
 
+    def test_an_unsupported_member_is_classified_separately_from_a_failure(
+        self, release: dict, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`unsupported` and `failed` are two states, not one.
+
+        The third member of the trio this route must keep distinct
+        (`not_supplied` / `failed` / `unsupported`). Asserted as the exact
+        classification rather than "absent from per_library", which all three
+        satisfy -- collapsing them would be invisible to a weaker assertion.
+        """
+        from abicheck.errors import UnsupportedArtifactError
+        from abicheck.workflows import input_resolution
+
+        odd = f"lib{MEMBERS[1]}.so"
+        real_resolve = input_resolution.resolve_input
+
+        def picky_resolve(path, *args, **kwargs):
+            """Report one member as unsupported; resolve every other for real."""
+            if Path(path).name == odd:
+                raise UnsupportedArtifactError("synthetic unsupported artifact")
+            return real_resolve(path, *args, **kwargs)
+
+        monkeypatch.setattr(input_resolution, "resolve_input", picky_resolve)
+
+        counters = _AcquisitionCounters()
+        counters.install(monkeypatch)
+        result = self._run(release, counters)
+
+        compared = {d.library for d in result.per_library}
+        assert compared == {f"lib{n}.so" for n in MEMBERS if f"lib{n}.so" != odd}
+        # Recorded as unsupported (ADR-065 D6) -- and specifically *not* as an
+        # extraction failure, which is the neighbouring `except` clause.
+        assert odd not in result.extraction_failures
+        assert any(
+            odd in err and "unsupported by this build" in err
+            for err in result.analysis_errors
+        ), result.analysis_errors
+        assert not ast_acquisition_active()
+
     def test_a_failing_member_does_not_destroy_its_siblings(
         self, release: dict, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
