@@ -62,19 +62,16 @@
 **Not evaluated:** 20 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 14 more
 
 
-## Surface changes
+## Related review groups
 
-**Additions** (0)
+### 1. `Color::GREEN`
 
-- none
-
-**Removals** (0)
-
-- none
-
-**Modifications** (1)
-
-- **Color::GREEN** — `1` → `5`
+- **Observed:** modified
+- **Implication:** Enum member value changed: Color::GREEN
+- **Action:** Review the detailed finding and its evidence.
+- **Gate contribution:** 1 finding(s)
+- **Members:** `ce32f08fb82f7c7f`
+- **Exact symbols:** `Color::GREEN`
 
 ---
 ## Legend

@@ -954,8 +954,9 @@ class TestEveryRendererTellsTheSameStory:
         from abicheck.reporter_markdown import to_review_digest
 
         digest = to_review_digest(self._scored())
-        assert "Top impacted symbols" in digest
-        assert "Internal" in digest
+        # The story, not the section heading that happens to carry it.
+        assert "Internal" in digest, digest
+        assert "Size changed" in digest, digest
 
     def test_the_workflow_annotation_is_a_notice_not_an_error(self) -> None:
         """A GitHub annotation states how a finding gated. `::error` on a

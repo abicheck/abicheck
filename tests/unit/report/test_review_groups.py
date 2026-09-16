@@ -130,3 +130,64 @@ def test_inheritance_size_evidence_does_not_claim_an_exact_base_change() -> None
     (group,) = build_review_groups((finding,))
     assert "RTTI inheritance shape changed" in group.transition
     assert "not the exact base transition" in group.transition
+
+
+# ---------------------------------------------------------------------------
+# `build_review_groups` returns a *sorted* tuple, so its key must be total
+# over every group it can itself construct. A finding with no name at all —
+# an analysis- or container-level fact carries no symbol — made every source
+# of `display_name` None, which both violated the field's declared `str` type
+# and raised `TypeError: '<' not supported between instances of 'NoneType'
+# and 'str'` the moment such a group met a named one. The crash needed two
+# groups to surface, so a single-finding test could not have found it.
+# ---------------------------------------------------------------------------
+
+
+def _unnamed_finding(kind: ChangeKind, *, library: str | None = None):
+    change = Change(kind, None, kind.value, library=library)
+    return ReportFinding(change, Verdict.BREAKING, IssueCategory.ABI_BREAKING)
+
+
+def test_a_finding_with_no_name_still_groups_and_sorts() -> None:
+    """The reported crash, and the property behind it."""
+    groups = build_review_groups(
+        [
+            _unnamed_finding(ChangeKind.FUNC_REMOVED),
+            _finding(ChangeKind.FUNC_REMOVED, "_ZN1A3addEv"),
+        ]
+    )
+    assert groups, "an unnamed finding must still produce a group"
+    for group in groups:
+        assert isinstance(group.display_name, str) and group.display_name, (
+            f"display_name is not a non-empty str: {group.display_name!r}"
+        )
+
+
+def test_the_sort_is_total_over_every_mix_of_named_and_unnamed() -> None:
+    """Order-independence too: the result must not depend on input order.
+
+    Stated over the combinations rather than the one reported pair — the
+    crash surfaced only when an unnamed group was compared against a named
+    one, so which side of the comparison each lands on is the axis.
+    """
+    import itertools
+
+    population = [
+        _unnamed_finding(ChangeKind.FUNC_REMOVED),
+        _unnamed_finding(ChangeKind.VAR_REMOVED, library="libb.so"),
+        _finding(ChangeKind.FUNC_REMOVED, "_ZN1A3addEv"),
+        _finding(ChangeKind.VAR_REMOVED, "global_x", library="liba.so"),
+    ]
+    baseline = [g.group_id for g in build_review_groups(population)]
+    for order in itertools.permutations(population):
+        assert [g.group_id for g in build_review_groups(list(order))] == baseline, (
+            f"group order depends on input order for {order}"
+        )
+
+
+def test_the_unnamed_case_is_really_unnamed() -> None:
+    """Vacuity guard: the fixture must actually exercise the None path."""
+    change = Change(ChangeKind.FUNC_REMOVED, None, ChangeKind.FUNC_REMOVED.value)
+    assert change.symbol is None
+    assert not getattr(change, "qualified_name", None)
+    assert not getattr(change, "demangled_symbol", None)

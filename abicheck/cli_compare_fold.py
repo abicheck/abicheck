@@ -438,7 +438,11 @@ class _ScopedFold:
 #: :func:`_fold_use_case_impact_into_text` below. sarif/junit/html render
 #: from the same attributed result and carry none of it. ``text`` is here
 #: because the fold accepts it, not because ``compare -o`` offers it.
-_USE_CASE_IMPACT_BEARING_FORMATS = frozenset({"json", "markdown", "text", "review"})
+#: ``terminal`` joined when it became `compare`'s default human format:
+#: the fold below is gated on ``TEXT_REPORT_FORMATS``, which includes it,
+#: so leaving it out here rejected ``--use-cases`` on a default-format run
+#: whose output would in fact have carried the attribution.
+_USE_CASE_IMPACT_BEARING_FORMATS = frozenset({"json"}) | TEXT_REPORT_FORMATS
 
 
 def format_carries_use_case_impact(fmt: str | None) -> bool:
@@ -480,7 +484,8 @@ def _fold_use_case_impact_into_text(
 ) -> str:
     """Fold ``compare --use-cases``'s attribution into the rendered report.
 
-    Markdown/text/review only. The JSON paths already carry the block --
+    The text-shaped human formats only (:data:`TEXT_REPORT_FORMATS`, which
+    `terminal` joined when it became `compare`'s default). The JSON paths already carry the block --
     ``reporter._add_use_case_impact`` emits it straight off
     ``DiffResult.use_case_impact`` -- so folding it again here would write
     the key twice; the structured formats (sarif, junit, html) are left
@@ -504,11 +509,7 @@ def _fold_use_case_impact_into_text(
     from .impact.use_case_impact import UseCaseImpact, render_use_case_impact_lines
 
     impact = getattr(result, "use_case_impact", None)
-    if not isinstance(impact, UseCaseImpact) or fmt not in (
-        "markdown",
-        "text",
-        "review",
-    ):
+    if not isinstance(impact, UseCaseImpact) or fmt not in TEXT_REPORT_FORMATS:
         return text
     if show_only:
         from .reporter import apply_show_only

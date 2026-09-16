@@ -266,7 +266,12 @@ def test_sc_public_surface_scope(tmp_path: Path) -> None:
     # severity legend).
     scoped = _compare(tmp_path, old, new, "--scope-public-headers")
     assert scoped.exit_code == 0
-    assert "`NO_CHANGE`" in scoped.output
+    # The default human output is the bounded terminal projection, whose
+    # verdict line names the compatibility result directly. Asserted on that
+    # line rather than on a backticked cell: the backticks were a Markdown-
+    # specific way to avoid matching the severity legend, and the terminal
+    # projection has no legend to collide with.
+    assert "Compatibility: NO_CHANGE" in scoped.output
     # The private change is recorded as filtered, not dropped.
     # Plan slice 7o: the filtered ledger needs no token -- the scoped run
     # above already discloses it.
@@ -554,10 +559,35 @@ def test_sc_review_digest(tmp_path: Path) -> None:
     out = res.output
     assert "ABI review" in out
     assert "`BREAKING`" in out
-    assert "Release recommendation:" in out
     assert "| Category | Count |" in out
     # The removed symbol is surfaced as a top impacted symbol.
     assert "func_removed" in out
+    # Release/SONAME advice is withheld unless the project stated a
+    # versioning policy (ADR-036's presentation amendment): `strict_abi` is
+    # an enforcement setting, not a declaration that the project follows
+    # SemVer, so recommending a bump from it alone is a claim the run has no
+    # evidence for. Asserted in both directions so this stays a statement of
+    # the contract rather than a dropped assertion.
+    assert "Release recommendation:" not in out
+
+
+def test_review_digest_recommends_a_release_when_versioning_is_stated(
+    tmp_path: Path,
+) -> None:
+    """The other half of the rule above: a stated policy does get advice."""
+    policy = tmp_path / "versioning-policy.yml"
+    policy.write_text("versioning:\n  scheme: strict_semver\n", encoding="utf-8")
+    res = _compare(
+        tmp_path,
+        _lib("1", [_fn("a"), _fn("b")]),
+        _lib("2", [_fn("a")]),
+        "--policy",
+        str(policy),
+        "-o",
+        "review=-",
+    )
+    assert res.exit_code == 4
+    assert "Release recommendation:" in res.output
 
 
 def test_sc_scan_junit(tmp_path: Path) -> None:

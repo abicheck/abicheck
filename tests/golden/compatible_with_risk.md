@@ -68,20 +68,25 @@
 **Not evaluated:** 10 detector(s) — `fingerprint_renames`, `kabi`, `pe`, `macho`, `dwarf`, `python_ext`, … and 4 more
 
 
-## Surface changes
+## Related review groups
 
-**Additions** (0)
+### 1. `GLIBC_2.34`
 
-- none
+- **Observed:** added
+- **Implication:** New symbol version requirement: GLIBC_2.34 (from libc.so.6)
+- **Action:** Review the detailed finding and its evidence.
+- **Gate contribution:** 0 finding(s)
+- **Members:** `35180fb322cb60f6`
+- **Exact symbols:** `GLIBC_2.34`
 
-**Removals** (0)
+### 2. `libc.so.6:GLIBC`
 
-- none
-
-**Modifications** (2)
-
-- **GLIBC_2.34** — `libc.so.6:GLIBC_2.34`
-- **libc.so.6:GLIBC** — `GLIBC_2.5` → `GLIBC_2.34`
+- **Observed:** modified
+- **Implication:** Runtime floor raised for libc.so.6: GLIBC_2.5 → GLIBC_2.34 (required by: (no import evidence captured))
+- **Action:** Review the detailed finding and its evidence.
+- **Gate contribution:** 0 finding(s)
+- **Members:** `a564f2a932181d50`
+- **Exact symbols:** `libc.so.6:GLIBC`
 
 ---
 ## Legend
