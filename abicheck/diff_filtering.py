@@ -245,6 +245,7 @@ def _qualified_name_for_change(
         ChangeKind.FUNC_REMOVED,
         ChangeKind.FUNC_REMOVED_ELF_ONLY,
         ChangeKind.VAR_REMOVED,
+        ChangeKind.VAR_REMOVED_ELF_ONLY,
     ):
         return old_qualified.get(c.symbol)
 
@@ -741,6 +742,7 @@ _ALWAYS_INDEPENDENT_KINDS: frozenset[ChangeKind] = frozenset(
         ChangeKind.FUNC_ADDED_ELF_ONLY,
         ChangeKind.FUNC_REMOVED_ELF_ONLY,
         ChangeKind.VAR_REMOVED,
+        ChangeKind.VAR_REMOVED_ELF_ONLY,
         ChangeKind.VAR_ADDED,
         ChangeKind.SONAME_CHANGED,
         ChangeKind.SONAME_MISSING,
@@ -1596,7 +1598,7 @@ def _deduplicate_cross_detector(
     Categories:
     - "func_removal": FUNC_REMOVED, FUNC_REMOVED_ELF_ONLY
     - "func_addition": FUNC_ADDED, FUNC_ADDED_ELF_ONLY
-    - "var_removal": VAR_REMOVED
+    - "var_removal": VAR_REMOVED, VAR_REMOVED_ELF_ONLY
     - "var_addition": VAR_ADDED
     - "enum_member_removed"/"enum_member_value_changed"/
       "enum_last_member_value_changed"/"enum_underlying_size_changed": each
@@ -1628,6 +1630,9 @@ def _deduplicate_cross_detector(
         # finding rather than be counted as two additions.
         ChangeKind.FUNC_ADDED_ELF_ONLY: "func_addition",
         ChangeKind.VAR_REMOVED: "var_removal",
+        # Same category as `VAR_REMOVED`, mirroring the `func_removal` pair
+        # above: the two are the same observation at two evidence tiers.
+        ChangeKind.VAR_REMOVED_ELF_ONLY: "var_removal",
         ChangeKind.VAR_ADDED: "var_addition",
         # Version node removal and version definition removal both fire for
         # the same version string.  Keep the more specific node-level change.

@@ -109,6 +109,10 @@ VALUE_INSENSITIVE = frozenset(
         # and its `new_value` holds that same name, not a type spelling.
         "var_added_elf_only",
         "var_removed",
+        # The removal counterpart, and in this bucket for the same reason its
+        # addition sibling is: identity is the mangled export name, and
+        # `old_value` holds that same name rather than a C/C++ type spelling.
+        "var_removed_elf_only",
     }
 )
 

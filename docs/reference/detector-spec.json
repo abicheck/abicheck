@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 409,
+  "count": 410,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -3484,6 +3484,15 @@
       "min_evidence": "L0",
       "doc_slug": "var_removed",
       "examples": "case58_var_removed"
+    },
+    {
+      "kind": "var_removed_elf_only",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "var_removed_elf_only",
+      "examples": ""
     },
     {
       "kind": "var_type_changed",

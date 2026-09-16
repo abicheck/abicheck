@@ -78,6 +78,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "func_added_elf_only": "L0",
     "var_added_elf_only": "L0",
     "func_removed_elf_only": "L0",
+    "var_removed_elf_only": "L0",
     "func_added": "L0",
     "var_added": "L0",
     "var_removed": "L0",

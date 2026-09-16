@@ -168,6 +168,7 @@ class ChangeKind(str, Enum):
     DECLARATION_COORDINATES_SHIFTED = 'declaration_coordinates_shifted'
     DECLARATION_IDENTITY_UNCHANGED = 'declaration_identity_unchanged'
     DECLARATION_IDENTITY_RECONCILED_UNRESOLVED = 'declaration_identity_reconciled_unresolved'
+    VAR_REMOVED_ELF_ONLY = 'var_removed_elf_only'
     FUNC_BECAME_INLINE = 'func_became_inline'
     FUNC_LOST_INLINE = 'func_lost_inline'
     FUNC_DELETED_ELF_FALLBACK = 'func_deleted_elf_fallback'
