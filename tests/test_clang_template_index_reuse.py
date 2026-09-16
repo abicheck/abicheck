@@ -376,38 +376,76 @@ class TestReuseIsScoped:
 
 
 class TestMemberIndependence:
-    @pytest.mark.parametrize(
-        "exported_dynamic,exported_static,public_headers",
-        [
-            (frozenset(), frozenset(), None),
-            (frozenset({"_ZN2ns5InnerE"}), frozenset(), None),
-            (frozenset(), frozenset({"Chain"}), None),
-            (frozenset({"a", "b", "c"}), frozenset({"d"}), []),
-        ],
-    )
-    def test_export_sets_do_not_change_the_header_index_values(
-        self,
-        exported_dynamic: frozenset[str],
-        exported_static: frozenset[str],
-        public_headers: list[str] | None,
+    #: Every constructor argument that distinguishes one member's parser from
+    #: another's, swept together rather than one axis at a time -- these are
+    #: exactly the inputs the shared key deliberately does *not* fold in, so
+    #: the sweep is the audit. `dumper.py` builds the neutral parser from the
+    #: same root with empty export sets and `no_binary_evidence=False`, which
+    #: is the second row.
+    _MEMBER_INPUTS = [
+        dict(exported_dynamic=frozenset(), exported_static=frozenset()),
+        dict(
+            exported_dynamic=frozenset(),
+            exported_static=frozenset(),
+            no_binary_evidence=False,
+        ),
+        dict(
+            exported_dynamic=frozenset({"_ZN2ns5InnerE"}), exported_static=frozenset()
+        ),
+        dict(exported_dynamic=frozenset(), exported_static=frozenset({"Chain"})),
+        dict(
+            exported_dynamic=frozenset({"a", "b", "c"}),
+            exported_static=frozenset({"d"}),
+            public_header_paths=[],
+        ),
+        dict(
+            exported_dynamic=frozenset({"z"}),
+            exported_static=frozenset(),
+            public_header_paths=["/some/public.hpp"],
+            public_dir_paths=["/some"],
+        ),
+        dict(
+            exported_dynamic=frozenset(),
+            exported_static=frozenset(),
+            target_triple="aarch64-unknown-linux-gnu",
+        ),
+        dict(
+            exported_dynamic=frozenset(),
+            exported_static=frozenset(),
+            is_cxx=False,
+        ),
+        dict(
+            exported_dynamic=frozenset(),
+            exported_static=frozenset(),
+            no_binary_evidence=True,
+        ),
+    ]
+
+    @pytest.mark.parametrize("member", _MEMBER_INPUTS)
+    def test_no_member_input_changes_the_header_index_values(
+        self, member: dict[str, Any]
     ) -> None:
         """Different members, one header answer.
 
-        The audit that makes sharing legal at all, stated executably: the
-        three builders read the AST and nothing else, so a member's export
-        evidence and public-header selection cannot move their output. If this
-        ever fails, the sharing is unsound and the count tests above are
-        measuring a bug.
+        The audit that makes sharing legal at all, stated executably. The
+        shared key is the AST's identity and nothing else, which is only sound
+        because none of a parser's *other* constructor inputs -- export
+        evidence, the public-header/-directory selection, the target triple,
+        the C-vs-C++ language mode, the header-only evidence flag -- can move
+        what these three builders answer. If any row here ever fails, the
+        sharing is unsound and the build-count tests above are measuring a bug
+        rather than a win.
         """
         from abicheck.dumper_clang import _ClangAstParser
 
         root = _rich_tree()
         baseline = _independent(root)
+        kwargs = dict(member)
         parser = _ClangAstParser(
             root,
-            set(exported_dynamic),
-            set(exported_static),
-            public_header_paths=public_headers,
+            set(kwargs.pop("exported_dynamic")),
+            set(kwargs.pop("exported_static")),
+            **kwargs,
         )
         assert (
             _as_plain(
