@@ -231,3 +231,178 @@ class TestDeepDetachmentIsPreserved:
 
         assert frozen["a"][0]["b"][0] == "x"
         assert len(frozen["a"]) == 1
+
+
+class TestRealSectionPayloadsRoundTripThroughThePublicEntryPoints:
+    """The format-boundary half: real payloads, real chokepoints, real scale.
+
+    Everything above drives ``_freeze``/``_unfreeze`` directly, which is the
+    right grain for the dispatch itself and the wrong grain for the contract
+    these codecs actually owe -- "a stored section round-trips through this
+    wrapper without changing the stored bytes". ``AGENTS.md``'s
+    third-party-boundary lesson (ADR-059 §12) is precisely about that gap: a
+    hand-constructed shortcut into the lower-level API can pass identically
+    before and after a regression, because it never exercises the path a real
+    document takes.
+
+    So these go through ``TypesSection``/``GraphSection``'s own
+    ``from_document``/``to_document`` -- the entry points
+    ``storage.legacy_sections`` and ``storage.dto`` use -- over payloads
+    built from a real ``AbiSnapshot`` via the real
+    ``snapshot_to_dict``/``split_legacy_document`` chain, at a scale where
+    the scalar leaves the fast path claims actually dominate (hundreds of
+    records, nested field/member lists, mixed scalar types) rather than a
+    two-key toy.
+    """
+
+    @staticmethod
+    def _snapshot(records: int = 400):
+        from abicheck.model import (
+            AbiSnapshot,
+            EnumMember,
+            EnumType,
+            RecordType,
+            ScopeOrigin,
+            TypeField,
+        )
+
+        return AbiSnapshot(
+            library="lib",
+            version="1",
+            types=[
+                RecordType(
+                    name=f"Rec{i}",
+                    kind="struct",
+                    size_bits=64 + i,
+                    fields=[
+                        TypeField(name=f"f{j}", type="int", offset_bits=j * 32)
+                        for j in range(8)
+                    ],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    source_header=f"/proj/include/h{i % 7}.hpp",
+                )
+                for i in range(records)
+            ],
+            enums=[
+                EnumType(
+                    name=f"E{i}",
+                    members=[EnumMember(name=f"M{j}", value=j) for j in range(6)],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+                for i in range(records // 4)
+            ],
+            from_headers=True,
+        )
+
+    def _types_payload(self) -> dict:
+        from abicheck.storage.legacy_sections import split_legacy_document
+        from abicheck.storage.snapshot_encode import snapshot_to_dict
+
+        sections = split_legacy_document(snapshot_to_dict(self._snapshot()))
+        payload = sections.get("types")
+        assert payload, "fixture produced no 'types' section to round-trip"
+        return payload["payload"] if "payload" in payload else payload
+
+    def test_a_real_types_section_round_trips_byte_identically(self) -> None:
+        """Once canonicalized, a real section round-trips unchanged.
+
+        The raw ``snapshot_to_dict`` payload is deliberately NOT the fixed
+        point: ``canonical_form`` normalizes tuples to lists on the way in
+        (``Fact.diagnostics`` arrives as ``()``), which is pre-existing,
+        intended behaviour and nothing to do with the dispatch. The contract
+        that matters -- and the one a storage regression would break -- is
+        that the canonical form is a fixed point of this wrapper.
+        """
+        payload = self._types_payload()
+        assert len(payload["types"]) >= 400, "guard: scale is the point here"
+
+        canonical = types_section_codec.TypesSection.from_document(
+            payload
+        ).to_document()
+        again = types_section_codec.TypesSection.from_document(canonical).to_document()
+
+        assert again == canonical
+
+    def test_the_fast_path_produces_what_the_old_dispatch_produced(self) -> None:
+        """The real-dependency assertion this class exists for.
+
+        Every other check here would pass against a codec whose dispatch had
+        silently changed shape, because they compare the module against
+        itself. This one runs a real, full-scale section payload through BOTH
+        the shipped dispatch and the independent reference implementation of
+        the pre-change one, and requires the produced object graphs to match
+        -- container types included, so a mapping left as a bare ``dict``
+        rather than a ``MappingProxyType`` is caught rather than compared
+        equal.
+        """
+        payload = self._types_payload()
+
+        def shape(value):
+            if isinstance(value, MappingProxyType):
+                return ("map", {k: shape(v) for k, v in value.items()})
+            if isinstance(value, tuple):
+                return ("tuple", [shape(v) for v in value])
+            return (type(value).__name__, value)
+
+        assert shape(types_section_codec._freeze(payload)) == shape(
+            reference_freeze(payload)
+        )
+
+    def test_a_real_types_section_is_stable_across_repeated_round_trips(
+        self,
+    ) -> None:
+        """Idempotence through the real entry points: a second pass over an
+        already-round-tripped document must not drift (a fast path that
+        returned a container unchanged on one pass and froze it on the next
+        would show up here and nowhere else)."""
+        payload = self._types_payload()
+
+        once = types_section_codec.TypesSection.from_document(payload).to_document()
+        twice = types_section_codec.TypesSection.from_document(once).to_document()
+        thrice = types_section_codec.TypesSection.from_document(twice).to_document()
+
+        assert once == twice == thrice
+
+    def test_the_round_tripped_document_is_fully_detached(self) -> None:
+        """Mutating what ``to_document`` hands back must not reach the DTO --
+        the property the deep thaw exists for, asserted on a real payload."""
+        payload = self._types_payload()
+        section = types_section_codec.TypesSection.from_document(payload)
+
+        before = section.to_document()
+        emitted = section.to_document()
+        emitted["types"][0]["fields"][0]["name"] = "CLOBBERED"
+        emitted["types"].append({"name": "Injected"})
+
+        assert section.to_document() == before
+
+    def test_a_real_graph_section_round_trips_byte_identically(self) -> None:
+        """``GraphSection``'s own entry points over a realistically-shaped
+        surface-graph payload -- nested node/edge maps, the shape whose
+        scalar leaves the fast path claims."""
+        surface_graph = {
+            "nodes": {
+                f"record:Rec{i}": {
+                    "kind": "record",
+                    "name": f"Rec{i}",
+                    "public": i % 3 == 0,
+                    "size_bits": 64 + i,
+                    "fields": [
+                        {"name": f"f{j}", "type": "int", "offset": j * 32}
+                        for j in range(6)
+                    ],
+                    "header": f"/proj/include/h{i % 5}.hpp",
+                    "unresolved": None,
+                }
+                for i in range(300)
+            },
+            "edges": [
+                {"from": f"record:Rec{i}", "to": f"record:Rec{(i + 1) % 300}"}
+                for i in range(300)
+            ],
+        }
+        payload = {"surface_graph": surface_graph}
+
+        restored = graph_section_codec.GraphSection.from_document(payload)
+
+        assert restored.to_document() == payload
