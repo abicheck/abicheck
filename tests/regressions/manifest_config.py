@@ -39,7 +39,7 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
             "disjoint lists simply names nothing shared, the additive rule "
             "expresses everything replacement did and one thing more."
         ),
-        fixed_by=(),
+        fixed_by=(1314,),
         seed_tests=(
             "tests/test_sided_include_composition.py",
             "tests/test_cov95_cli.py",
@@ -86,7 +86,7 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
             "And a rule that matched nothing is never recorded as an "
             "achieved narrowing of the analyzed surface."
         ),
-        fixed_by=(),
+        fixed_by=(1314,),
         seed_tests=(
             "tests/test_descriptor_skip_rules.py",
             "tests/test_compat_dump_descriptor_expansion.py",
@@ -127,7 +127,7 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
             "request through any other route, and the failure names neither "
             "the step nor the front end."
         ),
-        fixed_by=(),
+        fixed_by=(1314,),
         seed_tests=("tests/test_descriptor_include_inference.py",),
         public_surfaces=("compat check", "compat dump"),
         known_gaps=(

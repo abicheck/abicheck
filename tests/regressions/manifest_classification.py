@@ -44,7 +44,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "*missing*; applying it where both sources answered turns a "
             "provable disposition into permanent noise."
         ),
-        fixed_by=(),
+        fixed_by=(1314,),
         seed_tests=("tests/test_undocumented_export_surface_scope.py",),
         public_surfaces=("compare --scope-public-headers",),
         axes={
