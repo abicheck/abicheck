@@ -269,6 +269,18 @@ suppression:
 | `pr-comment-report-artifact-url` | — | Direct URL of an uploaded full-report artifact, shown as **Download full report**; leave unset unless the upload succeeded |
 | `github-token` | `${{ github.token }}` | Token for the PR comment and baseline auto-fetch (needs `pull-requests: write`) |
 
+!!! note "Pull requests from forks"
+
+    `pr-comment` is a no-op outside a `pull_request` event and needs
+    `pull-requests: write`, which a fork's pull request deliberately does not
+    get. Publishing a fork PR's result needs a separate, trusted
+    `workflow_run` job — see
+    [Reporting on fork pull requests](fork-pr-reporting.md) for the supported
+    two-workflow split and the
+    [`report`](../reference/report-action.md) /
+    [`verify-source-run`](../reference/verify-source-run.md) Actions that
+    implement it.
+
 #### What the default comments on
 
 `pr-comment-on: changes` (the default) posts when the run produced

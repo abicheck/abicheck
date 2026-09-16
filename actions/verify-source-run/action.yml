@@ -1,0 +1,172 @@
+name: 'abicheck verify-source-run'
+description: >-
+  Select and unpack the producer run a trusted `workflow_run` publisher is
+  about to report on: verify the run's repository, workflow, event, id,
+  attempt and conclusion; resolve the pull request through the GitHub API
+  rather than from the artifact; distinguish the PR head SHA from the
+  commit that was actually analysed and verify their association; and
+  extract the artifact as hostile input (ADR-073). Runs no analysis.
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  source-run-id:
+    description: >
+      The producer run to publish from -- `github.event.workflow_run.id` in
+      a `workflow_run` job.
+    required: true
+  expect-repository:
+    description: >
+      owner/repo the source run must belong to. Defaults to the current
+      repository. This is the check that stops a publisher being pointed at
+      an arbitrary run somewhere else on GitHub.
+    required: false
+    default: ''
+  expect-workflow:
+    description: >
+      The workflow the source run must be, as its file path
+      (`.github/workflows/abi.yml`) or its name. Strongly recommended: a
+      run of a *different* workflow in the same repository may have been
+      produced by a job with different trust.
+    required: false
+    default: ''
+  expect-event:
+    description: "Event the source run must have been triggered by, e.g. pull_request."
+    required: false
+    default: 'pull_request'
+  expect-run-attempt:
+    description: "Attempt number the source run must be. Empty means any."
+    required: false
+    default: ''
+  allowed-conclusions:
+    description: >
+      Comma-separated conclusions that may be published, e.g.
+      'success,failure'. Empty allows any, which is a real choice for a
+      publisher that reports analysis failures.
+    required: false
+    default: 'success'
+  artifact-name:
+    description: "Name of the artifact to download from that run."
+    required: true
+  tested-sha:
+    description: >
+      The commit the producer actually analysed, if it recorded one. For a
+      `pull_request` run this is normally the ephemeral merge commit, not
+      the PR head; its association with the PR head is verified through the
+      API. Empty means "the run's own head SHA".
+    required: false
+    default: ''
+  claimed-pr-number:
+    description: >
+      A PR number the artifact states, if any. It is only ever
+      cross-checked against the API's answer -- a disagreement fails the
+      step. Never pass this *as* the PR number to publish to.
+    required: false
+    default: ''
+  destination:
+    description: 'Directory to extract the artifact into.'
+    required: false
+    default: 'abicheck-source-artifact'
+  max-total-bytes:
+    description: 'Total uncompressed bytes the artifact may expand to.'
+    required: false
+    default: '67108864'
+  max-entry-bytes:
+    description: 'Uncompressed bytes any single entry may expand to.'
+    required: false
+    default: '33554432'
+  max-entries:
+    description: 'Maximum number of entries in the artifact.'
+    required: false
+    default: '2000'
+  max-ratio:
+    description: 'Maximum uncompressed-to-compressed expansion ratio.'
+    required: false
+    default: '200'
+  github-token:
+    description: "Token with `actions: read` on the source repository."
+    required: true
+  python-version:
+    description: 'Python version for setup-python.'
+    required: false
+    default: '3.13'
+  abicheck-version:
+    description: >
+      PyPI version specifier to install instead of this Action's own
+      checked-out source. Leave empty to install the checkout the Action ref
+      already pins.
+    required: false
+    default: ''
+
+outputs:
+  verified:
+    description: "'true' when every check passed."
+    value: ${{ steps.verify.outputs.verified }}
+  pr-number:
+    description: 'The pull request the API associates with this run.'
+    value: ${{ steps.verify.outputs.pr-number }}
+  pr-head-sha:
+    description: "The pull request's own head commit."
+    value: ${{ steps.verify.outputs.pr-head-sha }}
+  tested-sha:
+    description: >
+      The commit that was actually analysed, verified as the PR head or a
+      merge of it. Display this, not the PR head, when they differ.
+    value: ${{ steps.verify.outputs.tested-sha }}
+  from-fork:
+    description: "'true' when the pull request head is in a different repository."
+    value: ${{ steps.verify.outputs.from-fork }}
+  artifact-path:
+    description: 'Directory the artifact was extracted into.'
+    value: ${{ steps.verify.outputs.artifact-path }}
+  refusal-code:
+    description: >
+      Machine-readable reason the step refused, e.g. wrong-repository,
+      ambiguous-pull-request, artifact-compression-bomb. Empty on success.
+    value: ${{ steps.verify.outputs.refusal-code }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    # As in actions/report: abicheck itself and nothing else. This Action
+    # analyses nothing, so it needs no toolchain at all.
+    - name: Install abicheck
+      shell: bash
+      env:
+        INPUT_ABICHECK_VERSION: ${{ inputs.abicheck-version }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        if [[ -n "${INPUT_ABICHECK_VERSION}" ]]; then
+          python -m pip install --disable-pip-version-check "abicheck==${INPUT_ABICHECK_VERSION}"
+        else
+          python -m pip install --disable-pip-version-check "${ACTION_PATH}/../.."
+        fi
+
+    - name: Verify and extract
+      id: verify
+      shell: bash
+      env:
+        INPUT_SOURCE_RUN_ID: ${{ inputs.source-run-id }}
+        INPUT_EXPECT_REPOSITORY: ${{ inputs.expect-repository }}
+        INPUT_EXPECT_WORKFLOW: ${{ inputs.expect-workflow }}
+        INPUT_EXPECT_EVENT: ${{ inputs.expect-event }}
+        INPUT_EXPECT_RUN_ATTEMPT: ${{ inputs.expect-run-attempt }}
+        INPUT_ALLOWED_CONCLUSIONS: ${{ inputs.allowed-conclusions }}
+        INPUT_ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        INPUT_TESTED_SHA: ${{ inputs.tested-sha }}
+        INPUT_CLAIMED_PR_NUMBER: ${{ inputs.claimed-pr-number }}
+        INPUT_DESTINATION: ${{ inputs.destination }}
+        INPUT_MAX_TOTAL_BYTES: ${{ inputs.max-total-bytes }}
+        INPUT_MAX_ENTRY_BYTES: ${{ inputs.max-entry-bytes }}
+        INPUT_MAX_ENTRIES: ${{ inputs.max-entries }}
+        INPUT_MAX_RATIO: ${{ inputs.max-ratio }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: bash "${{ github.action_path }}/run.sh"

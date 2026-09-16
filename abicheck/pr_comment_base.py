@@ -97,6 +97,17 @@ class Finding:
     # unavailable, in which case `symbol` is already the raw mangled/plain
     # name and there is nothing distinct left to show here.
     mangled: str = ""
+    # Which component/target this finding came from, for a model folded out
+    # of several reports (`mode="aggregate"`, see
+    # `report/pr_comment_aggregate.py`). Empty for every single-report mode,
+    # where the whole comment already names one subject.
+    #
+    # Load-bearing for grouping, not only for display: the renderer keys its
+    # API rollup on (component, api) rather than api alone, so the *same*
+    # symbol reported by three targets stays three attributable rows instead
+    # of collapsing into one row that lists the name three times and says
+    # nothing about which target each came from.
+    component: str = ""
 
 
 @dataclass
@@ -107,7 +118,7 @@ class CommentModel:
     reviewer buckets, and the release-mode rollup.
     """
 
-    mode: str  # "compare" | "release" | "appcompat"
+    mode: str  # "compare" | "release" | "appcompat" | "aggregate"
     subject: str
     old_label: str
     new_label: str
@@ -341,7 +352,13 @@ class CommentModel:
     @property
     def counts(self) -> tuple[int, int, int]:
         """(breaking, needs-review, safe) totals across the report."""
-        if self.mode == "release":
+        if self.mode in ("release", "aggregate"):
+            # `aggregate` shares release mode's rollup source deliberately:
+            # its per-target rows are built from each member model's own
+            # `counts`, and a member that is itself a *release* report has
+            # populated rows but empty `breaking`/`review`/`safe` lists --
+            # so summing the folded lists would report zero for exactly the
+            # member shape that already reports only in aggregate.
             return (
                 sum(r[2] for r in self.library_rows),
                 sum(r[3] for r in self.library_rows),
@@ -426,6 +443,32 @@ def _normalize_location(raw: str, path_prefix: str = "") -> str:
     if match:
         path = path[match.end() :]
     return f"{path}:{rest}" if rest else path
+
+
+def _component_key(f: Finding, key: str) -> str:
+    """*key* qualified by the finding's component, when it has one.
+
+    A folded (``mode="aggregate"``) model carries findings from several
+    targets in one bucket, and the same symbol legitimately appears once per
+    target. Grouping on the bare key would collapse those into one row whose
+    member list reads ```foo`, `foo`, `foo``` -- three identical names and no
+    way to tell which target each came from -- so the component is part of
+    the grouping key, not merely a decoration on the rendered row. Unchanged
+    (``key`` itself) for every single-report mode, where ``component`` is
+    always empty.
+    """
+    return f"{f.component} · {key}" if f.component else key
+
+
+def _component_tag(f: Finding) -> str:
+    """Per-target attribution for one rendered row, or ``""``.
+
+    Rendered in the Symbol column rather than appended to the detail text:
+    the detail cell is the first thing a row budget shortens, and *which
+    target reported this* is identity, not detail -- a row that loses it
+    stops being attributable at all.
+    """
+    return f"<br><sub>{_esc(f.component)}</sub>" if f.component else ""
 
 
 def _severity_levels(report: dict[str, object]) -> dict[str, str]:

@@ -74,6 +74,8 @@ both the header and the footer.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from .demangle import demangle_batch
 from .pr_comment_base import (
     _ADDITION_KIND_VALUES,
@@ -1248,6 +1250,8 @@ def build_model(
     gate_api_break: bool = False,
     gate_breaking: bool = True,
     path_prefix: str = "",
+    *,
+    report_dir: Path | None = None,
 ) -> CommentModel:
     """Detect the report shape and normalise it into a :class:`CommentModel`.
 
@@ -1260,6 +1264,13 @@ def build_model(
     classification is a compatibility judgement, not a gate one (ADR-042),
     so it is unaffected by either flag.
 
+    *report_dir* is the directory the report itself was read from. It is
+    used only by the ``aggregate`` shape, whose per-target detail lives in
+    separate member reports the document names relatively; every other shape
+    is self-contained and ignores it. ``None`` (the default) means "no
+    directory is known", and the aggregate adapter then refuses every member
+    rather than resolving one against the process's working directory.
+
     Raises :class:`UnsupportedReportShapeError` for a report carrying
     ``scan_schema_version`` -- the ``scan``-shaped report dict
     (``diff.findings``/``crosscheck.counts_by_check`` rather than
@@ -1271,6 +1282,31 @@ def build_model(
     ``changes`` instead of ``diff.findings``, and would render a false
     "no changes" comment for a report that may carry real findings).
     """
+    if "aggregate_schema_version" in report:
+        # `abicheck aggregate`'s fan-in document (`report/aggregate.py`).
+        # Dispatched ahead of every other shape because it is the *only*
+        # one recognised by a dedicated version key rather than by the
+        # presence of a payload array, and because falling through to
+        # `_from_compare` is exactly what made it render a false "no
+        # changes" comment (this adapter's own module docstring).
+        from .report.pr_comment_aggregate import build_aggregate_model
+
+        def _member(data: dict[str, object]) -> CommentModel:
+            return build_model(
+                data,
+                gate_api_break=gate_api_break,
+                gate_breaking=gate_breaking,
+                path_prefix=path_prefix,
+                # A member report is itself read from the same directory, so
+                # an aggregate document naming another aggregate document
+                # keeps working; the loader's own containment rules apply at
+                # every level.
+                report_dir=report_dir,
+            )
+
+        return build_aggregate_model(
+            report, build_member_model=_member, base_dir=report_dir
+        )
     if isinstance(report.get("libraries"), list):
         return _from_release(report, gate_api_break)
     if "application" in report or isinstance(report.get("relevant_changes"), list):

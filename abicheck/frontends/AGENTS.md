@@ -137,3 +137,14 @@ that would only exist in one front end, or that changes analysis under the
 name of a presentation switch, is a request-model gap to fix at the owner,
 not a Click callback. Root `AGENTS.md` "Product decisions and change
 routing" states the rule.
+
+## `action/` — the report-publication Actions' engine side (ADR-073)
+
+`frontends/action/` holds everything `actions/report` and
+`actions/verify-source-run` *decide* (`report_publication.py`,
+`run_selection.py`, `cli.py` — each module's docstring is the detail), so
+their shells keep only argument marshalling and the API call. Two rules,
+both enforced by `tests/test_action_report_contract.py`: **no network I/O
+here**, and **no analysis anywhere in either Action** — the second is what
+makes them safe in a privileged `workflow_run` job. See
+`docs/use/fork-pr-reporting.md`.

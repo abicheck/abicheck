@@ -873,3 +873,21 @@ topics:
       - abicheck/project_snapshot_legacy.py
       - abicheck/storage/sectioned_document.py
       - abicheck/workflows/release_package.py
+
+  # ADR-073: report-only publication. Registered with the PR that adds the
+  # two Actions, per docs/AGENTS.md's "every NEW public-facing surface
+  # registers a topic in the same PR" rule.
+  fork-pr-reporting:
+    canonical_page: use/fork-pr-reporting.md
+    fact_sources:
+      - actions/report/action.yml
+      - actions/report/run.sh
+      - actions/verify-source-run/action.yml
+      - actions/verify-source-run/run.sh
+      - abicheck/frontends/action/report_publication.py
+      - abicheck/frontends/action/run_selection.py
+      - abicheck/frontends/action/cli.py
+    reference_page: reference/report-action.md
+    allowed_summaries:
+      - reference/verify-source-run.md
+      - use/github-action.md

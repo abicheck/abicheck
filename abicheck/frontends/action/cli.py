@@ -1,0 +1,409 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Action-only entry point for ``actions/report`` and ``actions/verify-source-run``.
+
+Invoked as ``python -m abicheck.frontends.action.cli <command>``, never as an
+``abicheck`` subcommand: like :mod:`abicheck.cli_pr_comment` (ADR-043 D1),
+this is Action/library tooling and is deliberately not attached to the public
+``main`` group. It is a Click command group purely for its argument parsing
+and ``--help``.
+
+Each command reads files and writes files. None of them performs network
+I/O: the Actions' shells make the GitHub API calls and hand the responses in,
+which is what lets every decision here be tested with no credentials at all
+(ADR-073). None of them analyses anything either -- no snapshot, no
+comparison, no compiler, no build query.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import click
+
+from .report_publication import (
+    DEFAULT_MAX_COMMENT_BYTES,
+    DEFAULT_MAX_SUMMARY_BYTES,
+    POST_MODES,
+    PublicationError,
+    PublicationIdentity,
+    decide,
+    read_comments,
+    render_report,
+    render_summary,
+    request_payload,
+)
+from .run_selection import (
+    DEFAULT_MAX_ENTRIES,
+    DEFAULT_MAX_ENTRY_BYTES,
+    DEFAULT_MAX_RATIO,
+    DEFAULT_MAX_TOTAL_BYTES,
+    ExtractionLimits,
+    RunExpectation,
+    SourceRun,
+    SourceRunRejected,
+    extract_artifact,
+    resolve_pull_request,
+    select_artifact,
+    verify_source_run,
+    verify_tested_sha,
+)
+
+#: Exit code for a refusal that is about the *publication boundary* -- a
+#: wrong run, an unresolvable PR, a hostile artifact, a failed post. It is
+#: deliberately distinct from Click's own usage exit (2) and from every
+#: compatibility exit abicheck uses, because the one thing this tooling must
+#: never do is let a publication failure be read as a compatibility result.
+EXIT_REFUSED = 3
+
+
+def _read_json(path: Path) -> object:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise click.ClickException(f"Cannot read {path}: {exc}") from exc
+
+
+def _write_json(path: Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+@click.group("abicheck-action")
+def action_cli() -> None:
+    """Internal helpers for abicheck's report-publication Actions."""
+
+
+# ---------------------------------------------------------------------------
+# `comment` — render, bound, and decide
+# ---------------------------------------------------------------------------
+
+
+@action_cli.command("comment")
+@click.argument("report", type=click.Path(exists=True, path_type=Path))
+@click.option("--identity", required=True, help="Sticky comment identity.")
+@click.option("--run-id", default="", help="Producer run id, for the ordering guard.")
+@click.option("--run-attempt", default=1, type=int, help="Producer run attempt (>= 1).")
+@click.option("--sha", default="", help="The analysed head/build SHA to display.")
+@click.option(
+    "--detail",
+    type=click.Choice(["summary", "standard", "full"]),
+    default="standard",
+    show_default=True,
+)
+@click.option(
+    "--on",
+    "post_on",
+    type=click.Choice(list(POST_MODES)),
+    default="changes",
+    show_default=True,
+)
+@click.option("--run-label", default=None)
+@click.option("--report-url", default=None)
+@click.option("--report-artifact-url", default=None)
+@click.option("--path-prefix", default="")
+@click.option("--gate-api-break", is_flag=True, default=False)
+@click.option("--gate-breaking/--no-gate-breaking", default=True)
+@click.option(
+    "--max-comment-bytes",
+    type=int,
+    default=DEFAULT_MAX_COMMENT_BYTES,
+    show_default=True,
+)
+@click.option(
+    "--max-summary-bytes",
+    type=int,
+    default=DEFAULT_MAX_SUMMARY_BYTES,
+    show_default=True,
+)
+@click.option(
+    "--existing-comments",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Newline-delimited {id, body} records for the PR's current comments. "
+    "Omit for a dry run, which decides as though the PR had none.",
+)
+@click.option("--body-out", type=click.Path(path_type=Path), required=True)
+@click.option("--request-out", type=click.Path(path_type=Path), default=None)
+@click.option("--summary-out", type=click.Path(path_type=Path), default=None)
+@click.option("--plan-out", type=click.Path(path_type=Path), required=True)
+def comment_cmd(
+    report: Path,
+    identity: str,
+    run_id: str,
+    run_attempt: int,
+    sha: str,
+    detail: str,
+    post_on: str,
+    run_label: str | None,
+    report_url: str | None,
+    report_artifact_url: str | None,
+    path_prefix: str,
+    gate_api_break: bool,
+    gate_breaking: bool,
+    max_comment_bytes: int,
+    max_summary_bytes: int,
+    existing_comments: Path | None,
+    body_out: Path,
+    request_out: Path | None,
+    summary_out: Path | None,
+    plan_out: Path,
+) -> None:
+    """Render REPORT and decide what to do with the resulting comment.
+
+    Writes the rendered body, the API request document, the job-summary
+    text, and a plan (``create``/``update``/``clear``/``skip``). Performs no
+    network I/O whatsoever: the caller posts what this wrote.
+    """
+    data = _read_json(report)
+    if not isinstance(data, dict):
+        raise click.ClickException("The report must be a JSON object")
+    stamp = PublicationIdentity(
+        identity=identity,
+        run_id=run_id,
+        run_attempt=max(run_attempt, 1),
+        head_sha=sha,
+    )
+    try:
+        rendered = render_report(
+            data,
+            identity=stamp,
+            report_dir=report.resolve().parent,
+            detail=detail,
+            on=post_on,
+            sha=sha,
+            run_label=run_label,
+            report_url=report_url,
+            report_artifact_url=report_artifact_url,
+            path_prefix=path_prefix,
+            gate_api_break=gate_api_break,
+            gate_breaking=gate_breaking,
+            max_comment_bytes=max_comment_bytes,
+        )
+    except PublicationError as exc:
+        raise click.ClickException(str(exc)) from exc
+    comments = (
+        read_comments(existing_comments.read_text(encoding="utf-8"))
+        if existing_comments is not None
+        else []
+    )
+    plan = decide(rendered, identity=stamp, comments=comments, sha=sha)
+    body = plan.body or rendered.body
+    body_out.parent.mkdir(parents=True, exist_ok=True)
+    body_out.write_text(body, encoding="utf-8")
+    if request_out is not None and plan.posts:
+        request_out.parent.mkdir(parents=True, exist_ok=True)
+        request_out.write_text(request_payload(body), encoding="utf-8")
+    summary_truncated = False
+    # Only when something is actually published. A run that skipped as
+    # `stale` rendered a body it deliberately did not post; writing that
+    # body to the job summary would publish the superseded result on the
+    # one channel the ordering guard does not cover.
+    if summary_out is not None and plan.posts:
+        summary, summary_truncated = render_summary(
+            body, max_summary_bytes=max_summary_bytes, report_url=report_url
+        )
+        summary_out.parent.mkdir(parents=True, exist_ok=True)
+        summary_out.write_text(summary, encoding="utf-8")
+    _write_json(
+        plan_out,
+        {
+            **plan.to_dict(),
+            "body_bytes": len(body.encode("utf-8")),
+            "comment_truncated": rendered.truncated,
+            "summary_truncated": summary_truncated,
+        },
+    )
+    click.echo(f"abicheck report: plan={plan.action} bytes={len(body.encode())}")
+
+
+# ---------------------------------------------------------------------------
+# `verify-run` — is this the run we think it is, and whose PR is it?
+# ---------------------------------------------------------------------------
+
+
+@action_cli.command("verify-run")
+@click.option("--run-json", type=click.Path(exists=True, path_type=Path), required=True)
+@click.option(
+    "--associated-pulls-json",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="GET /repos/{repo}/commits/{sha}/pulls for the run's head SHA.",
+)
+@click.option(
+    "--tested-commit-json",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="GET /repos/{repo}/commits/{tested-sha}, needed when the analysed "
+    "commit is a merge commit rather than the PR head.",
+)
+@click.option(
+    "--artifacts-json", type=click.Path(exists=True, path_type=Path), default=None
+)
+@click.option("--expect-repository", default="")
+@click.option("--expect-workflow", default="")
+@click.option("--expect-event", default="")
+@click.option("--expect-run-id", default="")
+@click.option("--expect-run-attempt", type=int, default=None)
+@click.option(
+    "--allow-conclusion",
+    multiple=True,
+    default=("success",),
+    show_default=True,
+    help="Repeatable. Pass an empty value to allow any conclusion.",
+)
+@click.option("--artifact-name", default="")
+@click.option(
+    "--claimed-pr-number",
+    type=int,
+    default=None,
+    help="A PR number the artifact states. Cross-checked against the API's "
+    "answer; a disagreement is a refusal, never a preference.",
+)
+@click.option("--tested-sha", default="")
+@click.option("--out", type=click.Path(path_type=Path), required=True)
+def verify_run_cmd(
+    run_json: Path,
+    associated_pulls_json: Path | None,
+    tested_commit_json: Path | None,
+    artifacts_json: Path | None,
+    expect_repository: str,
+    expect_workflow: str,
+    expect_event: str,
+    expect_run_id: str,
+    expect_run_attempt: int | None,
+    allow_conclusion: tuple[str, ...],
+    artifact_name: str,
+    claimed_pr_number: int | None,
+    tested_sha: str,
+    out: Path,
+) -> None:
+    """Verify a producer run and resolve the pull request it belongs to."""
+    run_data = _read_json(run_json)
+    conclusions = tuple(c for c in allow_conclusion if c)
+    result: dict[str, object] = {}
+    try:
+        run = SourceRun.from_api(run_data)  # type: ignore[arg-type]
+        verify_source_run(
+            run,
+            RunExpectation(
+                repository=expect_repository,
+                workflow=expect_workflow,
+                event=expect_event,
+                run_id=expect_run_id,
+                run_attempt=expect_run_attempt,
+                allowed_conclusions=conclusions,
+            ),
+        )
+        result.update(
+            {
+                "run_id": run.run_id,
+                "run_attempt": run.run_attempt,
+                "head_sha": run.head_sha,
+                "head_repository": run.head_repository,
+                "event": run.event,
+            }
+        )
+        if associated_pulls_json is not None:
+            associated = _read_json(associated_pulls_json)
+            if not isinstance(associated, list):
+                raise SourceRunRejected(
+                    "no-pull-request",
+                    "the commit-to-pull-request association is not a list",
+                )
+            pull = resolve_pull_request(
+                run,
+                associated,
+                repository=expect_repository or run.repository,
+                claimed_number=claimed_pr_number,
+            )
+            verified_sha = verify_tested_sha(
+                run,
+                pull,
+                tested_sha=tested_sha or run.head_sha,
+                tested_commit=(
+                    _read_json(tested_commit_json)  # type: ignore[arg-type]
+                    if tested_commit_json is not None
+                    else None
+                ),
+            )
+            result.update(
+                {
+                    "pr_number": pull.number,
+                    "pr_head_sha": pull.head_sha,
+                    "tested_sha": verified_sha,
+                    "from_fork": pull.from_fork,
+                }
+            )
+        if artifacts_json is not None and artifact_name:
+            listing = _read_json(artifacts_json)
+            entries = listing.get("artifacts") if isinstance(listing, dict) else listing
+            artifact = select_artifact(
+                entries if isinstance(entries, list) else [],
+                artifact_name,
+                run_id=run.run_id,
+            )
+            result["artifact_id"] = artifact.get("id")
+    except SourceRunRejected as exc:
+        _write_json(out, {"verified": False, "code": exc.code, "reason": exc.message})
+        click.echo(f"abicheck: refused source run — {exc}", err=True)
+        raise SystemExit(EXIT_REFUSED) from exc
+    result["verified"] = True
+    _write_json(out, result)
+    click.echo("abicheck: source run verified")
+
+
+# ---------------------------------------------------------------------------
+# `extract-artifact` — treat the archive as hostile
+# ---------------------------------------------------------------------------
+
+
+@action_cli.command("extract-artifact")
+@click.argument("archive", type=click.Path(exists=True, path_type=Path))
+@click.argument("destination", type=click.Path(path_type=Path))
+@click.option("--max-total-bytes", type=int, default=DEFAULT_MAX_TOTAL_BYTES)
+@click.option("--max-entry-bytes", type=int, default=DEFAULT_MAX_ENTRY_BYTES)
+@click.option("--max-entries", type=int, default=DEFAULT_MAX_ENTRIES)
+@click.option("--max-ratio", type=float, default=DEFAULT_MAX_RATIO)
+def extract_artifact_cmd(
+    archive: Path,
+    destination: Path,
+    max_total_bytes: int,
+    max_entry_bytes: int,
+    max_entries: int,
+    max_ratio: float,
+) -> None:
+    """Unpack ARCHIVE into DESTINATION, refusing anything hostile."""
+    try:
+        written = extract_artifact(
+            archive,
+            destination,
+            ExtractionLimits(
+                max_total_bytes=max_total_bytes,
+                max_entry_bytes=max_entry_bytes,
+                max_entries=max_entries,
+                max_ratio=max_ratio,
+            ),
+        )
+    except SourceRunRejected as exc:
+        click.echo(f"abicheck: refused artifact — {exc}", err=True)
+        raise SystemExit(EXIT_REFUSED) from exc
+    click.echo(f"abicheck: extracted {len(written)} file(s)")
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised via subprocess
+    action_cli()

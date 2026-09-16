@@ -1,0 +1,222 @@
+name: 'abicheck report'
+description: >-
+  Publish an already-produced abicheck JSON report to a pull request as a
+  sticky comment and/or a job summary. Renders only -- it installs no
+  project dependencies, invokes no compiler, runs no build query and
+  performs no comparison, so it is safe to run in the trusted
+  `workflow_run` job that publishes a fork PR's results (ADR-073). A
+  non-clean compatibility verdict never fails this Action; a failed
+  publication always does.
+
+branding:
+  icon: 'message-square'
+  color: 'blue'
+
+inputs:
+  report:
+    description: >
+      Path to a canonical abicheck JSON report: a `compare` report, a
+      directory/package release report, a `compare --no-baseline` audit
+      report, or an `aggregate` fan-in document. An aggregate document's
+      per-target member reports are read from that document's own
+      directory; a member report outside it is refused and reported as a
+      limitation rather than dropped.
+    required: true
+  detail:
+    description: "How much per-change detail to render: summary, standard or full."
+    required: false
+    default: 'standard'
+  "on":
+    description: >
+      When to publish: 'always', 'changes' (default), or 'never'. Under
+      'changes', a report with nothing to say publishes nothing -- except
+      that an existing comment for this identity is still cleared, so a
+      fixed break never keeps showing. NOTE the quoting: `on` is a YAML 1.1
+      boolean, so a caller must write `"on": changes` under `with:`, or use
+      the `post-on` alias below, which needs no quoting.
+    required: false
+    default: 'changes'
+  post-on:
+    description: >
+      Alias for `on`, spelled so it survives an unquoted YAML key. When
+      both are set to a non-empty value this one wins, since a caller who
+      spelled out the unambiguous name meant it.
+    required: false
+    default: ''
+  sha:
+    description: >
+      The analysed head/build SHA to display. This is what was actually
+      compared, which for a `pull_request` run is the ephemeral merge
+      commit rather than the PR head -- pass the one the analysis really
+      used, not whichever is convenient.
+    required: false
+    default: ''
+  run-label:
+    description: "Run label shown in the comment footer, e.g. 'run #128'."
+    required: false
+    default: ''
+  report-url:
+    description: "URL linked as 'View workflow run', and used when the body is shortened."
+    required: false
+    default: ''
+  report-artifact-url:
+    description: >
+      Direct URL of the uploaded full-report artifact, linked as 'Download
+      full report'. Pass it only for an upload that actually succeeded: a
+      link rendered here is a promise that the artifact exists.
+    required: false
+    default: ''
+  path-prefix:
+    description: >
+      Absolute checkout root to strip from rendered source locations, so
+      rows show repo-relative paths. Applied only as a whole leading path
+      component.
+    required: false
+    default: ''
+  gate-api-break:
+    description: >
+      Render API/source breaks under 'Breaking', mirroring a producer that
+      gated on them. Affects presentation only -- this Action never gates.
+    required: false
+    default: 'false'
+  gate-breaking:
+    description: >
+      Whether the producer gated on ABI breaks. Affects only the
+      analysis-incomplete section's blocking wording, so the comment does
+      not claim a run was blocked when it was not.
+    required: false
+    default: 'true'
+  profile:
+    description: >
+      Profile name this report covers (e.g. 'linux-gcc'). Used to derive a
+      default comment identity, so one PR can carry one sticky comment per
+      profile instead of several profiles overwriting each other.
+    required: false
+    default: 'default'
+  comment-identity:
+    description: >
+      Explicit sticky-comment identity. Defaults to 'abicheck:<profile>'.
+      One comment per identity per pull request; changing it starts a new
+      comment rather than updating the old one.
+    required: false
+    default: ''
+  repository:
+    description: "owner/repo to publish into. Defaults to the current repository."
+    required: false
+    default: ''
+  pr-number:
+    description: >
+      The pull request to publish to. Required unless dry-run is true.
+      Resolve it through the API (see actions/verify-source-run) rather
+      than reading it out of a contributor-produced artifact.
+    required: false
+    default: ''
+  github-token:
+    description: "Token with `pull-requests: write`. Required unless dry-run is true."
+    required: false
+    default: ''
+  job-summary:
+    description: "Also write the rendered body to this job's summary."
+    required: false
+    default: 'true'
+  max-comment-bytes:
+    description: >
+      Byte budget for the comment body. The default leaves headroom under
+      GitHub's 65,536-character limit; a body over budget is truncated on a
+      line boundary and the truncation is disclosed in the body itself.
+    required: false
+    default: '60000'
+  max-summary-bytes:
+    description: >
+      Byte budget for the job summary, bounded independently of the
+      comment. The default leaves headroom under GitHub's 1 MiB per-step
+      limit, over which a summary is dropped entirely.
+    required: false
+    default: '900000'
+  dry-run:
+    description: >
+      Render and write body-path without contacting the API at all. No
+      token or pr-number is needed.
+    required: false
+    default: 'false'
+  python-version:
+    description: 'Python version for setup-python.'
+    required: false
+    default: '3.13'
+  abicheck-version:
+    description: >
+      PyPI version specifier to install instead of this Action's own
+      checked-out source, e.g. '1.4.2'. Leave empty to install the checkout
+      the Action ref already pins.
+    required: false
+    default: ''
+
+outputs:
+  posted:
+    description: "'true' when a comment was created, updated or cleared."
+    value: ${{ steps.publish.outputs.posted }}
+  comment-url:
+    description: 'URL of the comment that was created or updated, when one was.'
+    value: ${{ steps.publish.outputs.comment-url }}
+  body-path:
+    description: 'Path to the rendered comment body on disk.'
+    value: ${{ steps.publish.outputs.body-path }}
+  body-bytes:
+    description: 'Size of the rendered body in UTF-8 bytes.'
+    value: ${{ steps.publish.outputs.body-bytes }}
+  skipped-reason:
+    description: >
+      Why nothing was published: 'never', 'no-changes', 'stale' (a newer
+      producer run already published), or '' when something was.
+    value: ${{ steps.publish.outputs.skipped-reason }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    # Deliberately the only install this Action performs: abicheck itself,
+    # and nothing it analyses with. No project dependencies, no compiler,
+    # no header toolchain -- see tests/test_action_report_contract.py, which
+    # fails if this Action's scripts ever reach for one.
+    - name: Install abicheck
+      shell: bash
+      env:
+        INPUT_ABICHECK_VERSION: ${{ inputs.abicheck-version }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        if [[ -n "${INPUT_ABICHECK_VERSION}" ]]; then
+          python -m pip install --disable-pip-version-check "abicheck==${INPUT_ABICHECK_VERSION}"
+        else
+          python -m pip install --disable-pip-version-check "${ACTION_PATH}/../.."
+        fi
+
+    - name: Render and publish
+      id: publish
+      shell: bash
+      env:
+        INPUT_REPORT: ${{ inputs.report }}
+        INPUT_DETAIL: ${{ inputs.detail }}
+        INPUT_ON: ${{ inputs.on }}
+        INPUT_POST_ON: ${{ inputs.post-on }}
+        INPUT_SHA: ${{ inputs.sha }}
+        INPUT_RUN_LABEL: ${{ inputs.run-label }}
+        INPUT_REPORT_URL: ${{ inputs.report-url }}
+        INPUT_REPORT_ARTIFACT_URL: ${{ inputs.report-artifact-url }}
+        INPUT_PATH_PREFIX: ${{ inputs.path-prefix }}
+        INPUT_GATE_API_BREAK: ${{ inputs.gate-api-break }}
+        INPUT_GATE_BREAKING: ${{ inputs.gate-breaking }}
+        INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_COMMENT_IDENTITY: ${{ inputs.comment-identity }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+        INPUT_JOB_SUMMARY: ${{ inputs.job-summary }}
+        INPUT_MAX_COMMENT_BYTES: ${{ inputs.max-comment-bytes }}
+        INPUT_MAX_SUMMARY_BYTES: ${{ inputs.max-summary-bytes }}
+        INPUT_DRY_RUN: ${{ inputs.dry-run }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: bash "${{ github.action_path }}/run.sh"
