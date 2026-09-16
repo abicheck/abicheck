@@ -42,6 +42,7 @@ import pytest
 
 from abicheck.confidence import detector_disablement_warning
 from abicheck.pr_comment import build_model, should_post
+from abicheck.pr_comment_base import Finding
 from abicheck.pr_comment_render import (
     _BODY_BUDGET,
     GITHUB_COMMENT_LIMIT,
@@ -687,3 +688,203 @@ def test_large_report_does_not_collapse_to_a_summary_body() -> None:
     assert len(body) > 5000, "body collapsed past every detail section"
     assert "❌ Breaking" in body
     assert "**1000 breaking**" in body
+
+
+# ---------------------------------------------------------------------------
+# Review round 1 (CodeRabbit): each of these is a way this work could
+# reacquire the very defect it exists to fix -- an authoritative fact the
+# report states and the comment does not show, or shows a wrong number for.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "value,description",
+    [
+        ("0", "10 fields were reordered"),
+        ("1", "21 members"),
+        ("2", "a 1234-byte buffer"),
+        ("x", "the xyz accessor"),
+    ],
+)
+def test_a_value_is_never_dropped_for_being_a_description_substring(
+    value: str, description: str
+) -> None:
+    """The de-duplication rule must be a whole-value match.
+
+    A substring test reacquires this PR's own bug: a one-sided ``0`` is a
+    substring of "10 fields", so the row would render the description alone
+    and say nothing about the value the report actually carried.
+    """
+    change = {
+        "kind": "type_size_changed",
+        "symbol": "struct Ctx",
+        "description": description,
+        "new_value": value,
+        "severity": "breaking",
+    }
+    body = _body(_report([change], verdict="BREAKING"), detail="full")
+    row = next(ln for ln in body.splitlines() if "struct Ctx" in ln)
+    assert f"→ {value}" in row
+
+
+def test_a_two_sided_delta_the_description_already_spells_is_not_repeated() -> None:
+    """The one case the rule does suppress, matched as a whole phrase."""
+    change = {
+        "kind": "type_size_changed",
+        "symbol": "Ctx",
+        "description": "Size changed: Ctx (64 → 96 bits)",
+        "old_value": "64",
+        "new_value": "96",
+        "severity": "breaking",
+    }
+    body = _body(_report([change], verdict="BREAKING"), detail="full")
+    row = next(ln for ln in body.splitlines() if "Ctx" in ln and "Size changed" in ln)
+    assert row.count("64 → 96") == 1
+
+
+@pytest.mark.parametrize(
+    "location,prefix,expected",
+    [
+        # A Windows runner: $GITHUB_WORKSPACE is native, the header-AST
+        # backend reports forward slashes. Comparing them raw never matched,
+        # so the absolute runner path stayed in the comment.
+        ("D:/a/repo/repo/include/foo.h:7", "D:\\a\\repo\\repo", "include/foo.h:7"),
+        (
+            "D:\\a\\repo\\repo\\include\\foo.h:7",
+            "D:\\a\\repo\\repo",
+            "include\\foo.h:7",
+        ),
+        ("D:/a/repo/repo/include/foo.h:7", "D:/a/repo/repo", "include/foo.h:7"),
+        # Still component-aligned after normalization.
+        (
+            "D:/a/repo/repo-extra/foo.h:7",
+            "D:\\a\\repo\\repo",
+            "D:/a/repo/repo-extra/foo.h:7",
+        ),
+    ],
+)
+def test_path_prefix_stripping_survives_mixed_separators(
+    location: str, prefix: str, expected: str
+) -> None:
+    change = {
+        "kind": "func_removed",
+        "symbol": "s",
+        "description": "gone",
+        "severity": "breaking",
+        "source_location": location,
+    }
+    model = build_model(_report([change], verdict="BREAKING"), path_prefix=prefix)
+    assert model.breaking[0].location == expected
+
+
+@pytest.mark.parametrize("shape", ["no_baseline", "appcompat"])
+def test_path_prefix_reaches_every_finding_bearing_report_shape(shape: str) -> None:
+    """`compare` was wired; the other two shapes carry `source_location`
+    findings too and were left showing absolute runner paths."""
+    finding = {
+        "kind": "func_removed",
+        "symbol": "s",
+        "description": "gone",
+        "source_location": "/ws/include/foo.h:7",
+    }
+    if shape == "no_baseline":
+        report = {
+            "audit_report_schema_version": "1.0",
+            "library": "libfoo.so",
+            "exit_code": 0,
+            "findings": [{**finding, "verdict": "BREAKING"}],
+        }
+    else:
+        report = {
+            "application": "app",
+            "relevant_changes": [{**finding, "severity": "breaking"}],
+        }
+    model = build_model(report, path_prefix="/ws")
+    assert model.breaking[0].location == "include/foo.h:7"
+
+
+def test_no_baseline_change_summary_is_built_from_the_findings_it_renders() -> None:
+    """An audit's findings live under `findings`; its `changes` is always
+    empty. Summarizing the latter produced an empty rollup beside populated
+    buckets -- the summary contradicting its own detail sections."""
+    report = {
+        "audit_report_schema_version": "1.0",
+        "library": "libfoo.so",
+        "exit_code": 0,
+        "findings": [
+            {"kind": "func_removed", "symbol": "a", "verdict": "BREAKING"},
+            {"kind": "var_added", "symbol": "b", "verdict": "COMPATIBLE"},
+        ],
+    }
+    model = build_model(report)
+    assert model.change_summary is not None
+    assert model.change_summary.counted == 2
+    assert "📋 What changed (2 findings)" in render_comment(model, sha="a")
+
+
+def test_appcompat_change_summary_counts_the_findings_it_invents() -> None:
+    """`missing_symbols`/`missing_versions` are not `Change`s in the report;
+    the comment turns each into a Breaking finding, so the rollup must see
+    them or it undercounts exactly what the Breaking section shows."""
+    report = {
+        "application": "app",
+        "relevant_changes": [
+            {"kind": "func_removed", "symbol": "a", "severity": "breaking"}
+        ],
+        "missing_symbols": ["sym_a", "sym_b"],
+        "missing_versions": ["V_1.0"],
+    }
+    model = build_model(report)
+    assert model.change_summary is not None
+    assert model.change_summary.counted == len(model.breaking) == 4
+
+
+@pytest.mark.parametrize("cap", [1, 3, 7, 20])
+def test_a_section_never_renders_more_rows_than_its_budget(cap: int) -> None:
+    """A group is not a row: a family whose members all name one symbol
+    expands to one row per member, so capping group *keys* let a section
+    exceed its budget outright."""
+    from abicheck.pr_comment_render import _findings_table
+
+    findings = [
+        Finding(kind=f"k{i}", symbol="ns::C::one", detail=f"d{i}", severity="breaking")
+        for i in range(30)
+    ]
+    out = _findings_table(
+        "T", findings, "standard", open_default=True, row_cap=cap, report_url=None
+    )
+    rows = [ln for ln in out if ln.startswith("| `") or ln.startswith("| … |")]
+    data_rows = [ln for ln in rows if not ln.startswith("| … |")]
+    assert len(data_rows) <= cap
+
+
+@pytest.mark.parametrize("cap", [1, 3, 7, 20])
+def test_the_omission_notice_counts_findings_not_groups(cap: int) -> None:
+    """The section header counts findings, so its omission notice must too;
+    counting groups put two different quantities under one number."""
+    from abicheck.pr_comment_render import _findings_table
+
+    findings = [
+        Finding(
+            kind="func_removed", symbol=f"ns{i}::f", detail="d", severity="breaking"
+        )
+        for i in range(30)
+    ]
+    out = _findings_table(
+        "T", findings, "standard", open_default=True, row_cap=cap, report_url=None
+    )
+    notice = next(ln for ln in out if "more not shown" in ln)
+    assert f"{30 - cap} more not shown" in notice
+
+
+def test_informational_section_respects_the_row_budget_at_full_detail() -> None:
+    from abicheck.pr_comment_render import _safe_section
+
+    findings = [
+        Finding(kind="public_surface_grew", symbol=f"s{i}", detail="d")
+        for i in range(50)
+    ]
+    out = _safe_section(findings, "full", 10, None)
+    data_rows = [ln for ln in out if ln.startswith("| `")]
+    assert len(data_rows) == 10
+    assert any("40 more not shown" in ln for ln in out)

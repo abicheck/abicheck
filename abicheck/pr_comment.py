@@ -188,29 +188,41 @@ def _detail_text(change: dict[str, object], symbol: str = "") -> str:
     including ``full`` -- while remaining present in the JSON the comment
     was built from.
 
-    *symbol* (the finding's own display symbol) suppresses a value that
-    merely repeats it: ``func_added``-shaped kinds carry the function name
-    as ``new_value``, which adds a full signature's worth of width to the
-    row and no information, since the Symbol column already shows it. A
-    value the description already spells out verbatim is dropped for the
-    same reason. Neither rule can hide a value the reviewer cannot already
-    read elsewhere in the same row.
+    Two narrow de-duplication rules apply, and both are *whole-value* or
+    *whole-phrase* matches rather than substring tests. A substring test is
+    how this very function would reacquire the defect it exists to fix: a
+    one-sided ``new_value`` of ``0`` is a substring of a description reading
+    "10 fields", so a loose rule silently drops the authoritative value and
+    leaves the row claiming nothing about it (CodeRabbit review).
+
+    * A value *exactly equal* to *symbol* is dropped: ``func_added``-shaped
+      kinds carry the function name as ``new_value``, which adds a full
+      signature's width to the row and no information, since the Symbol
+      column already shows it.
+    * A two-sided delta whose *rendered phrase* the description already
+      contains verbatim is dropped as a pair: ``type_size_changed``'s
+      description reads "Size changed: Ctx (64 → 96 bits)", so appending
+      "(64 → 96)" repeats it. The phrase is matched whole; no individual
+      value is tested against the description at all.
+
+    Neither rule can hide a value the reviewer cannot already read
+    elsewhere in the same row.
     """
     desc = str(change.get("description", "") or "").strip()
     old = _value_or_absent(change, "old_value")
     new = _value_or_absent(change, "new_value")
 
-    def _redundant(value: object) -> bool:
-        if not isinstance(value, str) or not value:
-            return False
-        return value == symbol or (bool(desc) and value in desc)
+    def _repeats_symbol(value: object) -> bool:
+        return isinstance(value, str) and bool(value) and value == symbol
 
-    if old is not _ABSENT and _redundant(old):
+    if _repeats_symbol(old):
         old = _ABSENT
-    if new is not _ABSENT and _redundant(new):
+    if _repeats_symbol(new):
         new = _ABSENT
     if old is not _ABSENT and new is not _ABSENT:
         delta = f"{_value_repr(old)} → {_value_repr(new)}"
+        if desc and delta in desc:
+            return desc
     elif new is not _ABSENT:
         delta = f"→ {_value_repr(new)}"
     elif old is not _ABSENT:
@@ -597,6 +609,7 @@ def _from_no_baseline(
     report: dict[str, object],
     gate_api_break: bool = False,
     gate_breaking: bool = True,
+    path_prefix: str = "",
 ) -> CommentModel:
     """Build a :class:`CommentModel` from ``compare --no-baseline``'s audit
     report shape (``audit_report_schema_version``/top-level ``findings``) --
@@ -652,7 +665,7 @@ def _from_no_baseline(
             )
             changes_shaped.append(item)
     breaking, review, safe, incomplete = _bucket_changes(
-        changes_shaped, gate_api_break, {}
+        changes_shaped, gate_api_break, {}, path_prefix
     )
     incomplete_blocking = _incomplete_is_blocking(
         incomplete, gate_api_break, gate_breaking, {}
@@ -693,18 +706,53 @@ def _from_no_baseline(
         no_baseline_audit_gate_fired=audit_gate_fired,
         suppressed_count=suppressed_count if isinstance(suppressed_count, int) else 0,
         evidence=evidence_summary(report),
-        change_summary=summarize_changes(_changes_list(report.get("changes"))),
+        # `changes_shaped`, not `report["changes"]`: an audit report's
+        # findings live under the top-level `findings` key and its
+        # `changes` is always empty, so summarizing the latter produced an
+        # empty rollup beside populated buckets -- the summary and its own
+        # detail sections disagreeing, which is the one thing this rollup
+        # may not do (CodeRabbit review).
+        change_summary=summarize_changes(changes_shaped),
     )
+
+
+def _appcompat_synthetic_changes(report: dict[str, object]) -> list[dict[str, object]]:
+    """Summary-shaped entries for the findings `_from_appcompat` *invents*.
+
+    A missing required symbol or version tag is not a ``Change`` in the
+    report at all -- appcompat reports them as bare name lists, and this
+    module turns each into a Breaking finding. The entity-by-operation
+    rollup must see them too, or it undercounts exactly the findings the
+    Breaking section renders (CodeRabbit review).
+
+    ``operation`` is stated as ``removed``, which is what "not provided by
+    the new library" means and is more than the registry could say (neither
+    synthetic kind is registered, so a lookup answers the neutral
+    "modified"). ``entity`` is deliberately *not* stated: a missing export
+    may be a function or a variable and this layer cannot tell, so the row
+    lands under ``Unclassified`` -- which that label exists to mean, rather
+    than being folded into a real entity row on a guess.
+    """
+    synthetic: list[dict[str, object]] = []
+    for key, kind in (
+        ("missing_symbols", "symbol_missing"),
+        ("missing_versions", "version_missing"),
+    ):
+        raw = report.get(key)
+        if isinstance(raw, list):
+            synthetic += [{"kind": kind, "operation": "removed"} for _ in raw]
+    return synthetic
 
 
 def _from_appcompat(
     report: dict[str, object],
     gate_api_break: bool = False,
     gate_breaking: bool = True,
+    path_prefix: str = "",
 ) -> CommentModel:
     levels = _severity_levels(report)
     breaking, review, safe, incomplete = _bucket_changes(
-        report.get("relevant_changes"), gate_api_break, levels
+        report.get("relevant_changes"), gate_api_break, levels, path_prefix
     )
     missing = report.get("missing_symbols")
     if isinstance(missing, list):
@@ -753,7 +801,10 @@ def _from_appcompat(
         breaking_categories=_breaking_categories(breaking),
         breaking_severities=_breaking_severities(breaking),
         evidence=evidence_summary(report),
-        change_summary=summarize_changes(_changes_list(report.get("relevant_changes"))),
+        change_summary=summarize_changes(
+            _changes_list(report.get("relevant_changes"))
+            + _appcompat_synthetic_changes(report)
+        ),
     )
 
 
@@ -1223,7 +1274,7 @@ def build_model(
     if isinstance(report.get("libraries"), list):
         return _from_release(report, gate_api_break)
     if "application" in report or isinstance(report.get("relevant_changes"), list):
-        return _from_appcompat(report, gate_api_break, gate_breaking)
+        return _from_appcompat(report, gate_api_break, gate_breaking, path_prefix)
     if "scan_schema_version" in report:
         raise UnsupportedReportShapeError(
             "This report was produced by the retired `scan` command "
@@ -1234,7 +1285,7 @@ def build_model(
             "and feed this tool the resulting report instead."
         )
     if "audit_report_schema_version" in report:
-        return _from_no_baseline(report, gate_api_break, gate_breaking)
+        return _from_no_baseline(report, gate_api_break, gate_breaking, path_prefix)
     return _from_compare(report, gate_api_break, gate_breaking, path_prefix)
 
 

@@ -424,8 +424,16 @@ def _findings_table(
     # singletons render as a normal per-symbol row, families aggregate.
     groups = _group_by_api(findings)
     cap = _STANDARD_ROW_CAP if row_cap is None else min(_STANDARD_ROW_CAP, row_cap)
-    keys = list(groups)
-    for key in keys[:cap]:
+    # Rows are built for *every* group first and only then capped, because
+    # a group is not a row: a family whose members all name one symbol
+    # expands to one row per member (see below). Capping the group keys
+    # instead let a section emit more rows than `row_cap` allowed and made
+    # the omission notice count *groups* while the section header counts
+    # findings -- two different quantities under one number (CodeRabbit
+    # review). Each row carries the number of findings it represents, so
+    # the notice can state an exact finding count.
+    rendered: list[tuple[str, int, str]] = []
+    for key in groups:
         members = groups[key]
         # Aggregate only when the rollup actually summarises *several
         # entities*. A family whose members are all findings about the one
@@ -434,19 +442,28 @@ def _findings_table(
         # read "`foo_init`, `foo_init`" and drop both findings' own values,
         # which is strictly worse than the two flat rows it replaced.
         if len(members) == 1 or len({m.symbol for m in members}) == 1:
-            out += [_flat_row(m) for m in members]
+            rendered += [(_flat_row(m), 1, key) for m in members]
         else:
-            out.append(_group_row(key, members))
-    if len(keys) > cap:
-        out.append(_omitted_row(len(keys) - cap, report_url))
+            rendered.append((_group_row(key, members), len(members), key))
+    shown_rows = rendered[:cap]
+    out += [row for row, _, _ in shown_rows]
+    omitted = sum(n for _, n, _ in rendered[len(shown_rows) :])
+    if omitted:
+        out.append(_omitted_row(omitted, report_url))
     out += ["</details>", ""]
+    shown_keys = list(dict.fromkeys(key for _, _, key in shown_rows))
     out += _group_members_block(
-        OrderedDict((k, groups[k]) for k in keys[:cap]), row_cap, report_url
+        OrderedDict((k, groups[k]) for k in shown_keys), row_cap, report_url
     )
     return out
 
 
-def _safe_section(findings: list[Finding], detail: str) -> list[str]:
+def _safe_section(
+    findings: list[Finding],
+    detail: str,
+    row_cap: int | None = None,
+    report_url: str | None = None,
+) -> list[str]:
     if not findings:
         return []
     is_open = " open" if detail == "full" else ""
@@ -460,21 +477,29 @@ def _safe_section(findings: list[Finding], detail: str) -> list[str]:
     ]
     if detail == "full":
         out += ["| Change | Symbol | Detail |", "|---|---|---|"]
-        for f in findings:
+        # Full detail here obeys the same row budget every other section
+        # does; without it this one section emitted every finding while the
+        # budget was being tightened around it, which is how a body stayed
+        # over the limit at a budget that should have fitted (CodeRabbit
+        # review).
+        shown = findings if row_cap is None else findings[:row_cap]
+        for f in shown:
             out.append(f"| `{_esc(f.kind)}` | `{_esc(f.symbol)}` | {_esc(f.detail)} |")
+        if len(findings) > len(shown):
+            out.append(_omitted_row(len(findings) - len(shown), report_url))
     else:
         groups: OrderedDict[str, list[str]] = OrderedDict()
         for f in findings:
             groups.setdefault(f.kind, []).append(f.symbol)
         parts: list[str] = []
         for kind, syms in groups.items():
-            shown = syms[:_SAFE_SYMBOLS_PER_KIND]
+            shown_syms = syms[:_SAFE_SYMBOLS_PER_KIND]
             more = (
                 f" _(+{len(syms) - _SAFE_SYMBOLS_PER_KIND})_"
                 if len(syms) > _SAFE_SYMBOLS_PER_KIND
                 else ""
             )
-            joined = ", ".join(f"`{_esc(x)}`" for x in shown)
+            joined = ", ".join(f"`{_esc(x)}`" for x in shown_syms)
             parts.append(f"`{_esc(kind)}`: {joined}{more}")
         out.append(" · ".join(parts))
     out += ["", "</details>", ""]
@@ -643,7 +668,7 @@ def _body_sections(
         row_cap=row_cap,
         report_url=report_url,
     )
-    out += _safe_section(quality, detail)
+    out += _safe_section(quality, detail, row_cap, report_url)
     return out
 
 

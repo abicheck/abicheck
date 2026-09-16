@@ -408,10 +408,20 @@ def _normalize_location(raw: str, path_prefix: str = "") -> str:
     # $GITHUB_WORKSPACE), so there is nothing to infer and no way to
     # over-strip. Applied only as a whole leading path component, so a
     # sibling directory sharing the root's name prefix is never cut.
+    #
+    # Both sides are compared with separators normalized, because on a
+    # Windows runner they genuinely differ: `$GITHUB_WORKSPACE` is native
+    # (`D:\a\repo\repo`) while a header-AST backend reports
+    # `source_location` with forward slashes. Comparing them raw made the
+    # prefix never match there, leaving the absolute runner path in the
+    # comment -- the exact thing this strip exists to remove (CodeRabbit
+    # review). The *returned* remainder is sliced out of the original
+    # string, so nothing else about the path's spelling is rewritten.
     if path_prefix:
-        root = path_prefix.rstrip("/") + "/"
-        if path.startswith(root):
-            return f"{path[len(root) :]}:{rest}" if rest else path[len(root) :]
+        root = path_prefix.replace("\\", "/").rstrip("/") + "/"
+        if path.replace("\\", "/").startswith(root):
+            trimmed = path[len(root) :]
+            return f"{trimmed}:{rest}" if rest else trimmed
     match = _CI_WORKDIR_RE.match(path)
     if match:
         path = path[match.end() :]
