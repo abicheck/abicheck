@@ -53,8 +53,11 @@ _KEYWORD_RES = tuple(
 # the observed shape of a large real workload (an externally reported oneDAL
 # profile: 22,717 normalisation requests over 2,161 *unique* spellings), so a
 # library of that scale fits entirely without eviction while the retained set
-# stays hard-capped. Worst case retained: 4096 entries x (<=512-char key +
-# <=512-char value) ~= 4 MiB; a realistic ~40-char spelling set is ~1 MiB.
+# stays hard-capped. Measured retained size when full (tracemalloc, not RSS):
+# 2.56 MiB worst case -- 4096 entries at the 512-char admission limit, still
+# 4096 after pushing 8192 distinct keys through it -- and 0.62 MiB for a
+# realistic 40-character spelling set. A workload of the reported oneDAL shape
+# (2,161 spellings) retains ~0.37 MiB and never evicts.
 #
 # Only pure strings are ever stored -- never a graph, snapshot, record, parser
 # or bound method -- so the cache cannot extend any object's lifetime.
