@@ -359,6 +359,19 @@ class TestOptimizationLevelFP:
         assert not r.breaking, [(c.kind.value, c.symbol) for c in r.changes]
 
     @pytest.mark.integration
+    @pytest.mark.skipif(
+        sys.platform != "linux",
+        reason=(
+            "The runtime oracle behind this assertion is an ELF one: a client "
+            "linked against the -O0 build fails to load against the -O2 build "
+            "with `undefined symbol: _ZN6WidgetC1Ev`. On macOS the same two "
+            "sources build Mach-O dylibs whose only observed difference is the "
+            "LC_ID_DYLIB install name, so there is no measured loss to assert "
+            "there and this test would be pinning an unverified claim. The "
+            "sibling `test_o0_vs_o2_cpp_no_break` stays unrestricted: it "
+            "asserts an absence, which holds on every platform."
+        ),
+    )
     def test_o0_vs_o2_cpp_out_of_line_ctor_is_a_real_loss(self, tmp_path):
         """The negative control for the test above, and the reason its header
         changed: with the *same two binaries* and a header that declares the

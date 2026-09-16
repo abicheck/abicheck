@@ -208,14 +208,31 @@ def special_member_export_coverage(
             join=OwnerJoin.UNSUPPORTED, reason="not_a_parsed_special_member"
         )
     qualified = owner.qualified_owner
-    base = SpecialMemberCoverage(
-        join=OwnerJoin.UNRESOLVED,
-        reason="",
-        owner=qualified,
-        member=owner.member,
-        templated=owner.owner_carries_template_arguments,
-        inherited=owner.inherited,
-    )
+
+    def answer(
+        join: OwnerJoin, reason: str, *, covered: bool = False
+    ) -> SpecialMemberCoverage:
+        """Every exit below goes through here, with the name-derived fields
+        filled once and the two decision fields named explicitly at each
+        call.
+
+        Deliberately not ``dataclasses.replace(base, **changes)``: a starred
+        ``replace`` is what ``tests/test_fact_bridged_replace_guard.py``
+        rejects repo-wide, because a keyword the scan cannot read by name is
+        the exact spelling that once hid a silent backfill. Spelling the two
+        varying fields out costs nothing here and keeps that guard able to
+        see this code.
+        """
+        return SpecialMemberCoverage(
+            join=join,
+            reason=reason,
+            owner=qualified,
+            member=owner.member,
+            templated=owner.owner_carries_template_arguments,
+            inherited=owner.inherited,
+            covered=covered,
+        )
+
     old_index = declared_special_members(old)
     new_index = declared_special_members(new)
     key = (owner.member, qualified)
@@ -233,27 +250,14 @@ def special_member_export_coverage(
             if member == owner.member and declared_owner.rpartition("::")[2] == tail
         }
         if len(colliding) >= 1:
-            return _with(
-                base, join=OwnerJoin.AMBIGUOUS, reason="bare_name_collision_only"
-            )
-        return _with(base, join=OwnerJoin.UNRESOLVED, reason="owner_not_declared")
+            return answer(OwnerJoin.AMBIGUOUS, "bare_name_collision_only")
+        return answer(OwnerJoin.UNRESOLVED, "owner_not_declared")
     if not old_decls or not new_decls:
-        return _with(
-            base, join=OwnerJoin.UNIQUE, reason="owner_declared_on_one_side_only"
-        )
+        return answer(OwnerJoin.UNIQUE, "owner_declared_on_one_side_only")
     if owner.owner_carries_template_arguments:
-        return _with(base, join=OwnerJoin.UNIQUE, reason="template_specialization")
+        return answer(OwnerJoin.UNIQUE, "template_specialization")
     if not all(d.is_inline for d in (*old_decls, *new_decls)):
-        return _with(base, join=OwnerJoin.UNIQUE, reason="out_of_line_definition")
-    return _with(
-        base,
-        join=OwnerJoin.UNIQUE,
-        reason="inline_declaration_unchanged_on_both_sides",
-        covered=True,
+        return answer(OwnerJoin.UNIQUE, "out_of_line_definition")
+    return answer(
+        OwnerJoin.UNIQUE, "inline_declaration_unchanged_on_both_sides", covered=True
     )
-
-
-def _with(base: SpecialMemberCoverage, **changes: object) -> SpecialMemberCoverage:
-    from dataclasses import replace
-
-    return replace(base, **changes)  # type: ignore[arg-type]
