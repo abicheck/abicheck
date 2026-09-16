@@ -41,6 +41,7 @@ work fails here rather than only showing up as wall time:
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -480,6 +481,69 @@ class TestBundleFactsLiveRouteReuse:
         assert len(libraries_with_layout_evidence) == len(MEMBERS), (
             libraries_with_layout_evidence
         )
+
+    def test_the_public_cli_route_gets_the_same_reuse_and_verdict(
+        self, release: dict, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The real `abicheck compare` BundleFacts -> directory route.
+
+        Every other test here drives the workflow function directly. This one
+        goes through the actual public CLI command
+        (`frontends/cli/commands/compare_bundle_facts.py`), because the scope
+        is opened by the workflow precisely so that *both* front ends get it
+        -- a claim only a real CLI invocation can check. Asserts the reuse
+        counters, the real break's exit code, and that the rendered report
+        carries the cross-library attribution and assurance a reviewer reads.
+        """
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        counters = _AcquisitionCounters()
+        counters.install(monkeypatch)
+        report = tmp_path / "cli.json"
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(release["facts"]),
+                str(release["new_dir"]),
+                "--header",
+                str(release["new_header"]),
+                "-o",
+                f"json={report}",
+            ],
+        )
+
+        # 4 == ABI break: the real export loss survives the CLI path.
+        assert result.exit_code == 4, result.output
+        payload = json.loads(report.read_text())
+        assert payload["verdict"] == "BREAKING"
+
+        # The same one-acquisition-per-context invariant holds here, so the
+        # workflow-owned scope really does serve the CLI and not just the
+        # typed API.
+        per_backend = counters.keys_per_backend(normalized=False)
+        assert per_backend, "no header-AST acquisition observed through the CLI"
+        assert all(n == 1 for n in per_backend.values()), per_backend
+
+        # Vacuity guard: the two assertions below quantify over `libraries`,
+        # so an empty map would satisfy both while checking nothing.
+        assert len(payload["libraries"]) == len(MEMBERS), payload["libraries"].keys()
+
+        # No resolved member is re-parsed for bundle topology on this path.
+        for name in {d["library"] for d in payload["libraries"].values()} | set(
+            payload["libraries"]
+        ):
+            assert counters.topology_elf_reads[name] == 0
+
+        # Cross-library attribution and assurance survive -- the fields a
+        # reviewer actually reads, not just the top-line verdict.
+        assert any(
+            f.get("provider_library") and f.get("consumer_library")
+            for f in payload["bundle_findings"]
+        ), payload["bundle_findings"]
+        assert all("analysis_assurance" in lib for lib in payload["libraries"].values())
 
     def test_an_unsupported_member_is_classified_separately_from_a_failure(
         self, release: dict, monkeypatch: pytest.MonkeyPatch
