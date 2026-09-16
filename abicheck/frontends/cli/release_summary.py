@@ -67,6 +67,7 @@ def _write_release_summary_file(
     write_output: Callable[[Path, str], None] | None = None,
     env_matrix_source_sha256: str | None = None,
     require_complete_analysis: bool = False,
+    excluded_header_patterns: str = "",
 ) -> None:
     """Write per-library summary JSON to output directory.
 
@@ -130,6 +131,7 @@ def _write_release_summary_file(
         fail_on_removed_library=fail_on_removed,
         env_matrix_source_sha256=env_matrix_source_sha256,
         require_complete_analysis=require_complete_analysis,
+        excluded_header_patterns=excluded_header_patterns,
     )
     release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
     # `require_complete_analysis` reaches this sidecar's own decision too,

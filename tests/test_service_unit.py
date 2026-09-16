@@ -3456,7 +3456,7 @@ class TestContractEvaluationThreading:
         # docstring), then project_policy_overrides (findings-analysis-fixes
         # batch, second review round, defect 4: the release fan-out's own
         # `.abicheck.yml` `policy.overrides` gap), same rule.
-        assert params[-13:] == [
+        assert params[-14:] == [
             "diagnostic_comparison",
             "contract_evaluation",
             "include_dependencies",
@@ -3470,6 +3470,12 @@ class TestContractEvaluationThreading:
             "collapse_versioned_symbols",
             "project_policy_overrides",
             "env_matrix",
+            # The release fan-out's own `--exclude-header` gap: a
+            # directory/package `compare` reaches this shim rather than
+            # `cli_resolve._resolve_compare_snapshots`, so the rules had no
+            # channel to a member's own comparison at all. Appended last,
+            # same rule as every entry above it.
+            "exclude_headers",
         ]
 
     def test_new_gate_params_are_keyword_only_without_breaking_older_ones(self):

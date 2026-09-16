@@ -153,6 +153,53 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="classification.demotion_applied_beyond_its_justification",
+        invariant=(
+            "A demotion rule reaches only the cases its own justification "
+            "covers. A rule argued for one direction of a change -- churn "
+            "on a thing that already existed -- does not silently apply to "
+            "the other, where its premise is simply absent: a symbol that "
+            "newly appears has no prior state to have churned, and the "
+            "evidence that placed it in the classifier's universe at all is "
+            "the evidence that it is now reachable. Concretely, a rule "
+            "keyed on a *set* answers the direction-appropriate side: a "
+            "removal against the side that still had the subject, an "
+            "addition against the side that newly has it -- never a union "
+            "of both, which for an addition asks nothing at all. A reason "
+            "code must also not contradict the evidence it rests on."
+        ),
+        fixed_by=(),
+        seed_tests=("tests/test_undocumented_export_surface_scope.py",),
+        public_surfaces=("compare --scope-public-headers",),
+        axes={
+            "direction": ("added", "removed", "property churn"),
+            "entity": ("function", "variable"),
+            "visibility": ("elf-only", "declared"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The sibling class above seeds an export-table-only "
+                    "symbol into the surface universe so *property* churn "
+                    "on it can be demoted. Two separate follow-ups were "
+                    "needed because that demotion also swallowed the "
+                    "symbol's removal (caught by the example matrix) and "
+                    "then its addition (caught in the field: `Additions: 0` "
+                    "and a `PATCH` recommendation for a release whose "
+                    "exported surface had genuinely grown). Both were the "
+                    "same mistake in two directions, which is why the class "
+                    "is stated over the existence axis rather than "
+                    "enumerating kinds. What is not mechanized: nothing "
+                    "sweeps the classifier for other rules whose "
+                    "justification is narrower than their predicate, and a "
+                    "kind added to one of the seeded families without being "
+                    "placed on the existence axis would not be caught."
+                ),
+                reference="abicheck/surface.py",
+            ),
+        ),
+    ),
+    BugClass(
         id="classification.name_shape_as_contract_membership",
         invariant=(
             "A symbol's spelling answers how it is *represented* and what "

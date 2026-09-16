@@ -35,6 +35,7 @@ import re
 from pathlib import Path, PurePosixPath
 from typing import cast
 
+from .extract.public_root_ownership import retain_owning_roots
 from .model import AbiSnapshot, Fact, ScopeOrigin
 from .model.surface_facts import (
     SurfaceFactBearing,
@@ -574,25 +575,43 @@ def build_public_set(
     return headers, dirs, bool(headers or dirs)
 
 
-def _public_dirs_from_include_roots(
+def public_dirs_with_owned_roots(
+    header_segs: list[tuple[str, ...]],
+    dir_segs: list[tuple[str, ...]],
     include_search_dirs: list[Path] | list[str] | None,
 ) -> list[tuple[str, ...]]:
-    """Segment *include_search_dirs* (a header-AST dump's own ``-I`` roots)
-    into public-directory candidates, dropping a bare system-header prefix
-    (``/usr/include``, an MSVC toolchain root, ...) the same way an
-    :func:`is_system_header_path` root already is (Codex review: a stray
+    """*dir_segs* plus every ``-I`` root that qualifies as a public root.
+
+    The whole fold, shared rather than mirrored: :func:`apply_provenance`
+    below and ``buildsource.header_graph``'s header-level node
+    classification must reach the same answer, or a transitively-included
+    header classifies one way for its declarations and the other way for
+    its own node.
+
+    Two filters, for two independent reasons. A bare system-header prefix
+    (``/usr/include``, an MSVC toolchain root, ...) is dropped the same way
+    an :func:`is_system_header_path` root already is (Codex review: a stray
     ``-I /usr/include`` must not make every system header underneath
-    classify as project-owned).
+    classify as project-owned). Then ``extract.public_root_ownership.
+    retain_owning_roots`` drops every root that owns no declared public
+    surface -- see its docstring for that rule and why it exists.
+
+    An empty declared set is the "classification was never opted in" case
+    (:func:`build_public_set`'s own third return value is exactly
+    ``bool(headers or dirs)``), and is answered here rather than by a
+    parameter each caller re-passes: an ``-I`` root can never turn origin
+    classification on by itself.
     """
+    if not include_search_dirs or not (header_segs or dir_segs):
+        return dir_segs
     # Resolve first (mirroring the identical reasoning in
     # _absolutize_header_root / is_system_header_path above): an unresolved
     # relative root like ``.`` or ``include`` either segments to nothing at
     # all or becomes a short, generic segment that could spuriously match
     # unrelated paths sharing that same component elsewhere.
-    segs = [
-        _segments(str(_absolutize_header_root(d))) for d in (include_search_dirs or [])
-    ]
-    return [s for s in segs if s and not _is_bare_system_dir(s)]
+    segs = [_segments(str(_absolutize_header_root(d))) for d in include_search_dirs]
+    kept = [s for s in segs if s and not _is_bare_system_dir(s)]
+    return [*dir_segs, *retain_owning_roots(kept, [*header_segs, *dir_segs])]
 
 
 def apply_provenance(
@@ -611,28 +630,32 @@ def apply_provenance(
     invocations are unaffected (decision D4).
 
     ``include_search_dirs`` -- the ``-I`` roots a header-AST dump was given --
-    are folded into the public-directory set, but *only* once a real
-    ``-H``/``--public-header-dir`` set already opted classification in (they
-    can never turn opt-in on by themselves). This closes the "every
-    transitively-`#include`d header is private" gap: a header-AST dump only
-    ever parses declarations reachable by `#include` from its own `-H`
-    root(s) in the first place -- there is no other way for a declaration to
-    end up in the snapshot at all -- so a header elsewhere under the same
-    include root that the umbrella header pulled in is exactly as much a
-    dependency of the public surface as the umbrella header itself, not a
-    private implementation detail merely because it isn't the literal `-H`
-    file. Treating it as `PRIVATE_HEADER` let a real, breaking layout change
-    reached only transitively (e.g. a struct defined in a header the public
-    umbrella `#include`s) silently drop out of the compared surface with no
-    disclosure. System/generated headers are unaffected: a bare system-dir
-    root is filtered out before folding, and ``classify_origin`` still checks
-    the system/generated patterns for anything this doesn't match.
+    are folded into the public-directory set by
+    :func:`public_dirs_with_owned_roots`, and only the roots that actually
+    root this run's own declared public surface survive that fold. Both
+    halves matter and they answer different failures.
+
+    Folding at all closes the "every transitively-`#include`d header is
+    private" gap: a header-AST dump only ever parses declarations reachable
+    by `#include` from its own `-H` root(s), so a header elsewhere under the
+    *library's own* include root that the umbrella header pulled in is as
+    much a dependency of the public surface as the umbrella header itself.
+    Treating it as `PRIVATE_HEADER` let a real, breaking layout change
+    reached only transitively silently drop out of the compared surface.
+
+    Narrowing the fold closes the opposite one: a root the compiler needed
+    purely to resolve a *dependency's* ``#include`` is compile context, not
+    an ownership declaration, and promoting it made every declaration
+    underneath it an export obligation of this library
+    (``extract.public_root_ownership``). System/generated headers are
+    unaffected either way: a bare system-dir root is filtered out before
+    folding, and ``classify_origin`` still checks the system/generated
+    patterns for anything this doesn't match.
     """
     header_segs, dir_segs, have_set = build_public_set(
         public_headers, public_header_dirs
     )
-    if have_set and include_search_dirs:
-        dir_segs = [*dir_segs, *_public_dirs_from_include_roots(include_search_dirs)]
+    dir_segs = public_dirs_with_owned_roots(header_segs, dir_segs, include_search_dirs)
     # A large surface has far fewer distinct declaring headers than
     # declarations (e.g. thousands of oneDAL functions share a handful of
     # umbrella headers) — reuse each header's classification across every

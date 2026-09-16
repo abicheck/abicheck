@@ -710,7 +710,7 @@ def compare_release_against_bundle_facts(
     # deployment contract at all" whenever the run completes zero matched
     # pairs). Same shared `env_matrix_content_digest()` the fan-out uses, so
     # the two can't independently drift.
-    from .checker import env_matrix_content_digest
+    from .workflows.comparison_input_receipt import env_matrix_content_digest
 
     result.env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
     return result

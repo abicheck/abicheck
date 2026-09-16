@@ -28,6 +28,81 @@ from .bug_class_schema import BugClass, KnownGap
 
 CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
+        id="config.option_dropped_at_a_dispatch_branch",
+        invariant=(
+            "An option the front end accepts reaches every dispatch branch "
+            "that can act on it, or the branch rejects it. A branch that "
+            "silently discards a value the parser accepted is the one "
+            "failure mode nothing announces: the flag parses, the run "
+            "proceeds, and the only symptom is that the thing the flag was "
+            "asked to prevent happens anyway -- while the run still records "
+            "the option as part of its resolved configuration. Concretely: "
+            "given the same arguments, a set-shaped operand (a directory, a "
+            "package, a fan-out) and a scalar operand resolve the same "
+            "option to the same value, and the option contributes to the "
+            "effective-configuration identity either way, so two runs "
+            "configured differently cannot fingerprint identically."
+        ),
+        fixed_by=(),
+        seed_tests=("tests/test_release_header_exclusions.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "No mechanical sweep exists for the class. The seed "
+                    "test states the parity invariant for "
+                    "`--exclude-header` -- the reported instance, where "
+                    "`compare`'s directory/package branch forwarded every "
+                    "other header input and not this one, so an MKL release "
+                    "tree failed all 28 libraries under the exact arguments "
+                    "that made the single-library comparison exit 0 -- but "
+                    "the release fan-out re-states roughly forty parameters "
+                    "by hand, and nothing compares that list against "
+                    "`compare`'s own. A gate would mean pinning the two "
+                    "parameter sets against each other, which is real but "
+                    "larger than this fix: several of `compare`'s options "
+                    "are legitimately rejected rather than forwarded for a "
+                    "set operand (`--view leaf`, `-o sarif=`), so the "
+                    "correct invariant is 'forwarded or rejected', not "
+                    "'forwarded'."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="config.input_granted_unrelated_authority",
+        invariant=(
+            "An input consulted for one purpose does not silently grant "
+            "authority for another. A path given so a tool can *find* "
+            "something is not a declaration that the thing found is owned, "
+            "public, or promised; a value read to *resolve* a reference is "
+            "not a claim about what that reference means. Where the two "
+            "questions genuinely overlap, the overlap is established "
+            "structurally -- by what the caller separately declared -- not "
+            "by the fact that one input happened to be consulted."
+        ),
+        fixed_by=(),
+        seed_tests=("tests/test_dependency_include_root_ownership.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The seed test covers the reported instance and the "
+                    "containment primitive behind it: a dependency's `-I` "
+                    "root (compile context) was promoted wholesale into the "
+                    "public-provenance set (ownership), so Intel MKL -- "
+                    "which passes an MPI include directory solely so "
+                    "`mkl_cdft.h` can parse `#include <mpi.h>` -- reported "
+                    "2,211 `public_not_exported` findings about an API it "
+                    "does not own. What is not mechanized is the *search* "
+                    "for other inputs carrying two meanings at once; each "
+                    "is found by noticing that a consumer reads a value for "
+                    "a question the value was never answering."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="config.sided_shared_input_dropped",
         invariant=(
             "A repeatable option modelled as 'a both-sides value plus "

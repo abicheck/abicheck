@@ -555,17 +555,54 @@ _UNDECLARED_EXPORT_KEEP_KINDS: frozenset[str] = frozenset(
     }
 )
 
+#: The addition counterpart of :data:`_UNDECLARED_EXPORT_KEEP_KINDS`, and the
+#: reason this rule is side-aware rather than a single union test.
+#:
+#: Seeding placed an export-table-only symbol in ``all_symbols`` so *property*
+#: churn on it could be demoted. A symbol's **appearance** is not churn. The
+#: demotion policy's whole argument is that an undocumented export's ongoing
+#: existence is not a promise the library made -- which says nothing about a
+#: symbol the new artifact newly exports and the old one did not. Treating
+#: that as "not-exported" was doubly wrong: the export table is the very
+#: evidence that placed the symbol in the surface, so the reason code
+#: contradicted its own premise, and the run then reported ``Additions: 0``
+#: and recommended ``PATCH`` for a release that had genuinely grown its
+#: exported surface -- a SemVer misclassification, not a noise filter.
+#:
+#: Symmetric with the removal set above: persistence or removal of an
+#: undocumented export may follow the intended demotion policy; introduction
+#: of a new externally exported symbol stays visible as an addition.
+_UNDECLARED_EXPORT_ADDITION_KINDS: frozenset[str] = frozenset(
+    {
+        "func_added",
+        "func_added_elf_only",
+        "var_added",
+        "var_added_elf_only",
+    }
+)
+
 
 def _is_undeclared_export_existence_change(
     change: Change, surf_old: PublicSurface, surf_new: PublicSurface
 ) -> bool:
-    """Whether *change* is a removal of a symbol only the export table knew."""
-    if change.kind.value not in _UNDECLARED_EXPORT_KEEP_KINDS:
-        return False
+    """Whether *change* is an appearance or disappearance of a symbol only
+    the export table knew.
+
+    Side-aware, because the two directions rest on different evidence. A
+    removal is answered against the side that still *had* the symbol (OLD);
+    an addition against the side that newly has it (NEW). A union test over
+    both sides answers neither question -- it merely asks whether the name
+    was undeclared *somewhere*, which for an addition is the same as asking
+    nothing at all.
+    """
     sym = change.symbol or ""
-    return sym in (
-        surf_old.undeclared_export_symbols | surf_new.undeclared_export_symbols
-    )
+    if not sym:
+        return False
+    if change.kind.value in _UNDECLARED_EXPORT_KEEP_KINDS:
+        return sym in surf_old.undeclared_export_symbols
+    if change.kind.value in _UNDECLARED_EXPORT_ADDITION_KINDS:
+        return sym in surf_new.undeclared_export_symbols
+    return False
 
 
 def classify_change_surface(

@@ -465,13 +465,13 @@ def run_no_baseline_compare(
     a run governed by a declared ``deployment.runtime_floors`` contract from
     one with no deployment contract at all, even though the matrix changed
     this run's findings and verdict (Codex review, P2). Computed with
-    ``checker.env_matrix_content_digest``, the identical shared function
+    ``workflows.comparison_input_receipt.env_matrix_content_digest``, the identical shared function
     ``compare()`` itself calls, as a plain post-hoc field replacement --
     not a second comparison.
     """
     import dataclasses as _dataclasses
 
-    from ..checker import env_matrix_content_digest
+    from .comparison_input_receipt import env_matrix_content_digest
     from .env_matrix_audit import fold as _fold_env_matrix
 
     extra_changes = _fold_env_matrix(None, new, env_matrix)

@@ -103,9 +103,9 @@ from ..model.graph_facts import (
 )
 from ..model.source_graph import SourceGraphSummary, _header_node_id
 from ..provenance import (
-    _public_dirs_from_include_roots,
     build_public_set,
     classify_origin,
+    public_dirs_with_owned_roots,
 )
 from .call_graph import augment_graph_with_calls, parse_clang_ast_calls
 from .inline_graph_fold import _mark_role_coverage
@@ -600,8 +600,7 @@ def build_header_only_graph(
     header_segs, dir_segs, have_public_set = build_public_set(
         public_header_paths, public_dir_paths
     )
-    if have_public_set and include_search_dirs:
-        dir_segs = [*dir_segs, *_public_dirs_from_include_roots(include_search_dirs)]
+    dir_segs = public_dirs_with_owned_roots(header_segs, dir_segs, include_search_dirs)
 
     def header_node(path: str) -> str:
         node_id = _header_node_id(path)

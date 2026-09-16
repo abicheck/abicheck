@@ -487,3 +487,114 @@ class TestCase182EndToEnd:
         # export's removal must survive.
         assert result.exit_code == 4, result.output
         assert "internal_helper" in result.output
+
+
+class TestIntroductionOfAnUndocumentedExportIsNeverDemoted:
+    """The addition counterpart of ``TestRemovalOfAnUndocumentedExport...``.
+
+    Same bug class, the other direction. The seeding argument is that an
+    undocumented export's *ongoing existence* is not a promise, so property
+    churn on it is out of the declared contract. Neither half of that
+    argument reaches a symbol the new artifact exports and the old one did
+    not: there is no churn (the symbol had no prior state), and the export
+    table -- the very evidence that placed the name in the surface universe
+    -- proves it is externally reachable now. Demoting it reported
+    ``Additions: 0`` and recommended ``PATCH`` for a release whose exported
+    surface had genuinely grown, and labelled an export-table-backed symbol
+    ``not-exported``.
+
+    Stated as an *invariant over the whole existence axis* rather than as
+    the one reported input: for every removal kind and every addition kind
+    in the seeded family, an existence change on an undocumented export
+    survives, while property churn on the identical symbol does not. The
+    oracle is the axis itself (existence vs. property), derived
+    independently of ``_UNDECLARED_EXPORT_KEEP_KINDS``/
+    ``_UNDECLARED_EXPORT_ADDITION_KINDS``, which is what the implementation
+    folds over.
+    """
+
+    #: Deliberately spelled out here rather than imported from
+    #: ``abicheck.surface``: importing the implementation's own set would
+    #: make this test agree with the code by construction, including when
+    #: both are wrong. Every one of these is an *existence* change.
+    _ADDITION_KINDS = [
+        ChangeKind.FUNC_ADDED,
+        ChangeKind.FUNC_ADDED_ELF_ONLY,
+        ChangeKind.VAR_ADDED,
+        ChangeKind.VAR_ADDED_ELF_ONLY,
+    ]
+    _REMOVAL_KINDS = [
+        ChangeKind.FUNC_REMOVED,
+        ChangeKind.FUNC_REMOVED_ELF_ONLY,
+        ChangeKind.VAR_REMOVED,
+        ChangeKind.VAR_REMOVED_ELF_ONLY,
+    ]
+
+    @staticmethod
+    def _sides() -> tuple[AbiSnapshot, AbiSnapshot]:
+        """OLD has no ``brand_new_export``; NEW exports it, undeclared."""
+        old = _elf_snapshot(declared=[_public_fn()], exports=["api"])
+        new = _elf_snapshot(
+            declared=[_public_fn()], exports=["api", "brand_new_export"]
+        )
+        return old, new
+
+    @pytest.mark.parametrize("kind", _ADDITION_KINDS)
+    def test_a_new_undocumented_export_survives(self, kind: ChangeKind) -> None:
+        old, new = self._sides()
+        assert _classify(kind, "brand_new_export", old, new) == (True, None)
+
+    @pytest.mark.parametrize("kind", _ADDITION_KINDS)
+    def test_no_reason_calls_an_exported_symbol_not_exported(
+        self, kind: ChangeKind
+    ) -> None:
+        """The narrower claim the report itself made, checked directly: the
+        export table is what placed this name in the surface at all, so
+        ``not-exported`` is self-contradicting regardless of the verdict."""
+        old, new = self._sides()
+        _, reason = _classify(kind, "brand_new_export", old, new)
+        assert reason != "not-exported"
+
+    @pytest.mark.parametrize("kind", _BINARY_CHURN_KINDS)
+    def test_property_churn_on_a_new_undocumented_export_is_still_demoted(
+        self, kind: ChangeKind
+    ) -> None:
+        """The negative control. Keeping *everything* about the symbol would
+        pass the two claims above while undoing the demotion policy."""
+        old, new = self._sides()
+        assert _classify(kind, "brand_new_export", old, new) == (False, "not-exported")
+
+    def test_the_existence_axis_holds_for_every_kind_in_both_directions(
+        self,
+    ) -> None:
+        """One batched assertion over the whole axis, so a failure names
+        every disagreeing kind at once rather than the first.
+
+        The vacuity guard is the mixed expectation: this cannot pass for an
+        implementation that keeps everything, nor for one that demotes
+        everything, because both outcomes are asserted over the same symbol
+        and the same surface pair.
+        """
+        old, new = self._sides()
+        removal_old = _elf_snapshot(
+            declared=[_public_fn()], exports=["api", "gone_export"]
+        )
+        removal_new = _elf_snapshot(declared=[_public_fn()], exports=["api"])
+        observed: dict[str, tuple[bool, str | None]] = {}
+        expected: dict[str, tuple[bool, str | None]] = {}
+        for kind in self._ADDITION_KINDS:
+            observed[kind.value] = _classify(kind, "brand_new_export", old, new)
+            expected[kind.value] = (True, None)
+        for kind in self._REMOVAL_KINDS:
+            observed[kind.value] = _classify(
+                kind, "gone_export", removal_old, removal_new
+            )
+            expected[kind.value] = (True, None)
+        for kind in _BINARY_CHURN_KINDS:
+            observed["churn:" + kind.value] = _classify(
+                kind, "brand_new_export", old, new
+            )
+            expected["churn:" + kind.value] = (False, "not-exported")
+        assert observed == expected
+        # Vacuity guard on the oracle itself: it must actually distinguish.
+        assert len(set(expected.values())) == 2

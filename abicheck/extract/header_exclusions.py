@@ -91,6 +91,26 @@ def apply_header_exclusions(
     return kept
 
 
+def _expanded_header_inputs(headers: Sequence[Path]) -> list[Path]:
+    """*headers* with every directory entry walked into its real headers.
+
+    The one expansion both :func:`apply_header_exclusions_to_inputs` and
+    :func:`unmatched_exclusion_patterns` use, so "which headers a pattern was
+    tried against" cannot be answered one way when filtering and another way
+    when reporting an unmatched rule.
+    """
+    from ..buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
+    from ..header_utils import iter_directory_headers
+
+    expanded: list[Path] = []
+    for h in headers:
+        if h.is_dir():
+            expanded.extend(iter_directory_headers(h, PRUNED_HEADER_DIR_SEGMENTS))
+        else:
+            expanded.append(h)
+    return expanded
+
+
 def apply_header_exclusions_to_inputs(
     headers: list[Path], exclude_headers: Sequence[str]
 ) -> list[Path]:
@@ -120,16 +140,44 @@ def apply_header_exclusions_to_inputs(
     """
     if not exclude_headers:
         return headers
-    from ..buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
-    from ..header_utils import iter_directory_headers
+    return apply_header_exclusions(_expanded_header_inputs(headers), exclude_headers)
 
-    expanded: list[Path] = []
-    for h in headers:
-        if h.is_dir():
-            expanded.extend(iter_directory_headers(h, PRUNED_HEADER_DIR_SEGMENTS))
-        else:
-            expanded.append(h)
-    return apply_header_exclusions(expanded, exclude_headers)
+
+def unmatched_exclusion_patterns(
+    headers: Sequence[Path], patterns: Sequence[str]
+) -> list[str]:
+    """Which of *patterns* matched no header in *headers* at all.
+
+    A rule that matches nothing is a request the run recorded as honoured
+    and never performed: the pattern is stamped on the snapshot, folded into
+    the configuration digest and reported as an omission, while the header
+    it was meant to remove is still being parsed. That is the same
+    "recorded as achieved when it was not" failure
+    :func:`reject_exclusions_against_a_manifest` refuses outright -- but a
+    typo in one pattern is not a reason to refuse the run, so it is a
+    warning here rather than an error.
+
+    Answered against the *expanded* list (a directory operand walked into
+    its real headers), because a directory is the operand
+    ``--exclude-header`` exists for and a pattern naming one header could
+    otherwise never match a directory entry -- the same expansion
+    :func:`apply_header_exclusions_to_inputs` performs, sharing that
+    function rather than repeating the walk, so the set this reports on is
+    exactly the set that was filtered.
+
+    Returns the unmatched patterns in their canonical (sorted, unique) order
+    -- the rules are a set, so a caller rendering them cannot make two runs
+    that stated the same thing read differently.
+    """
+    if not patterns:
+        return []
+    expanded = _expanded_header_inputs(headers)
+    unmatched = {
+        pat
+        for pat in patterns
+        if pat and len(apply_header_exclusions(expanded, [pat])) == len(expanded)
+    }
+    return sorted(unmatched)
 
 
 def reject_exclusions_against_a_manifest(

@@ -237,6 +237,7 @@ def _finalize_release_output(
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
     require_complete_analysis: bool = False,
+    excluded_header_patterns: str = "",
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit.
 
@@ -282,6 +283,7 @@ def _finalize_release_output(
         show_only=show_only,
         env_matrix_source_sha256=env_matrix_source_sha256,
         require_complete_analysis=require_complete_analysis,
+        excluded_header_patterns=excluded_header_patterns,
     )
     _write_or_echo(output, text)
 
@@ -317,6 +319,7 @@ def _finalize_release_output(
             write_output=_safe_write_output,
             env_matrix_source_sha256=env_matrix_source_sha256,
             require_complete_analysis=require_complete_analysis,
+            excluded_header_patterns=excluded_header_patterns,
         )
 
     # ADR-065 D6/D7, the completeness axis's own stderr notice -- the same

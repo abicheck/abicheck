@@ -823,6 +823,7 @@ def run_compare(
     collapse_versioned_symbols: bool = False,
     project_policy_overrides: dict[Any, Any] | None = None,
     env_matrix: EnvironmentMatrix | None = None,
+    exclude_headers: tuple[str, ...] = (),
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -884,6 +885,26 @@ def run_compare(
     named field so a release fan-out member gets the same declared-floor
     reclassification a single-pair compare would. `None` is a no-op.
 
+    ``exclude_headers``: the run's ``--exclude-header`` patterns, folded
+    identically into *both* sides' :attr:`InputSpec.exclude_headers` -- the
+    same both-sides granularity ``include_dependencies`` has in this shim,
+    and the granularity the flag itself promises ("applies to both sides").
+    Applying them asymmetrically is what
+    ``extract.header_exclusions.exclusion_asymmetry_reason`` refuses, so
+    there is deliberately no per-side knob here; a caller needing one builds
+    a :class:`CompareRequest` directly and accepts that gate.
+
+    This shim is the release fan-out's only route to the exclusion rules: a
+    directory/package ``compare`` reaches it through
+    ``cli_compare_release_pairwise._run_compare_pair``, not through
+    ``cli_resolve._resolve_compare_snapshots`` (which already threaded them
+    for a single-pair compare). Without this parameter the patterns were
+    accepted on the command line, dropped at the directory branch, and every
+    library parsed the unfiltered header tree -- so an MKL release whose
+    ``include/`` cannot be parsed whole failed on all 28 libraries under the
+    exact arguments that made the single-library comparison succeed. ``()``
+    (the default) is a no-op, matching every pre-existing caller.
+
     ``collapse_versioned_symbols`` (Codex review, fresh evidence): forwards
     onto ``CompareRequest``'s identically-named field -- closes the release
     fan-out's own gap the same way ``public_header_dirs`` above did: a
@@ -904,10 +925,12 @@ def run_compare(
         ValidationError: If inputs have unrecognised formats.
     """
     _public_header_dirs = tuple(public_header_dirs or ())
+    _exclude_headers = tuple(exclude_headers or ())
     request = CompareRequest(
         old=InputSpec(
             path=old_input,
             headers=tuple(old_headers or ()),
+            exclude_headers=_exclude_headers,
             includes=tuple(old_includes or ()),
             version=old_version,
             pdb=old_pdb_path,
@@ -919,6 +942,7 @@ def run_compare(
         new=InputSpec(
             path=new_input,
             headers=tuple(new_headers or ()),
+            exclude_headers=_exclude_headers,
             includes=tuple(new_includes or ()),
             version=new_version,
             pdb=new_pdb_path,

@@ -750,6 +750,7 @@ def _release_summary_effective_config_block(
     fail_on_removed_library: bool | None = None,
     require_complete_analysis: bool = False,
     env_matrix_source_sha256: str | None = None,
+    excluded_header_patterns: str = "",
 ) -> tuple[str, dict[str, str]]:
     """The ``(digest, fields)`` pair for a release-level *summary* document
     (the primary release JSON and a per-component export's ``summary.json``
@@ -790,6 +791,11 @@ def _release_summary_effective_config_block(
     forced-public-symbols concept of its own (unlike single-pair ``compare``,
     where the two can diverge), so both fields are simply the raw CLI value
     here.
+
+    *excluded_header_patterns* is the release's canonical ``--exclude-header``
+    identity (``model.header_exclusion_record.canonical_exclusion_identity``
+    of the resolved rules), computed once at release scope for the same
+    reason *env_matrix_source_sha256* below is.
 
     *env_matrix_source_sha256* (Codex review, P2 follow-up): the release-
     wide deployment-floor digest, computed once by the caller at release
@@ -838,6 +844,11 @@ def _release_summary_effective_config_block(
         scope_to_public_surface_requested=scope_public_headers,
         # Codex review, P2 follow-up: feeds `policy.env_matrix` below.
         env_matrix_source_sha256=env_matrix_source_sha256,
+        # Feeds `surface.exclude_headers`; release-wide for the same reason
+        # `env_matrix_source_sha256` above is (no per-library DiffResult
+        # survives to this scope, and a release that matched nothing must
+        # still report the rules it would have applied).
+        excluded_header_patterns=excluded_header_patterns,
         # ADR-068 D4/Phase 5 + §4.1's AUTO rows: modulation, surface metrics and ADR-039 reconciliation are unconditional now (forced on at the Tier-2 chokepoint every library here routes through), so this stand-in must agree rather than default to the old "off".
         pattern_verdicts_enabled=True,
         surface_metrics_enabled=True,

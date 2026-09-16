@@ -184,6 +184,35 @@ matches `ns::foo`); **globs/wildcards are not supported** (`mylib_*` matches
 nothing), list each symbol. See
 [API-surface intelligence](../use/api-surface-intelligence.md).
 
+`exclude_headers:` (default `[]`) is the config spelling of
+`--exclude-header`: fnmatch-style patterns naming headers to drop from the
+**parsed** surface, so a header *directory* containing two headers that
+cannot be parsed in one translation unit stays usable as a `-H` operand
+(the reported case is Intel MKL's `include/`, which ships FFTW2 and FFTW3
+headers declaring conflicting typedefs). Anything only an excluded header
+declared is simply not observed, and is reported as reduced evidence rather
+than as a removal. Both sides of a comparison are narrowed by the same
+rules, and a pair whose two sides were narrowed differently is refused
+rather than compared.
+
+**This is not `sources.exclude`, and the distinction is load-bearing.**
+`sources.exclude` narrows *source collection* — which files the L3–L5
+build/source evidence layers gather. `scope.exclude_headers` narrows
+*header extraction* — which declarations the L2 header-AST parse ever sees.
+They act on different inputs at different layers, and neither implies the
+other: a project that wants a vendored header out of the parse is not
+asking for it to disappear from source collection, and the reverse.
+
+A `--exclude-header` on the command line takes the whole decision: a run
+that states the flag at all uses exactly the rules it stated and ignores
+this key, rather than unioning the two. The rule *set* is part of the run's
+scope identity (it feeds `effective_config_fields["surface.exclude_headers"]`
+and therefore the configuration digest), so silently widening a stated set
+would make the run narrower than the command line says it is. A rule that
+matches no header warns once for the whole run — including a
+directory/package comparison, where the rules are release-wide and are
+stated once rather than repeated per library.
+
 `on_incomplete:` (`warn`, the default, or `block`) is Phase 7d's
 (one-comparison-product.md §4.1) CONFIG-only replacement for the former
 `compare --on-incomplete-scope` on the directory/package release fan-out —

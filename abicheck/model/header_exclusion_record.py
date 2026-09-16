@@ -176,3 +176,52 @@ def exclusions_are_symmetric(
     if UNKNOWN_MATCHING in (old_matching, new_matching):
         return False
     return old_matching == new_matching
+
+
+def canonical_exclusion_identity(
+    patterns: Sequence[str],
+    matching: str = GLOB_MATCHING,
+) -> str:
+    """*patterns* as one stable identity string, or ``""`` for none.
+
+    The one spelling every consumer that needs an *identity* for a run's
+    header exclusions uses -- the configuration digest
+    (``DiffResult.excluded_header_patterns`` ->
+    ``effective_config_digest``'s ``surface.exclude_headers``) and the
+    dry-run/diagnostic emit alike -- so the same rules never read as two
+    different configurations depending on who rendered them.
+
+    Canonical in exactly the way :func:`exclusions_are_symmetric` compares:
+    sorted and de-duplicated, because the patterns are a filter and stating
+    one twice or in the other order narrows the surface identically; and
+    prefixed with the matching rule, because the same text does not name
+    the same set of headers under ``glob`` as under a descriptor's rules.
+    Two runs that excluded the same headers share this string; two runs
+    that excluded different ones cannot.
+    """
+    unique = sorted(frozenset(p for p in patterns if p))
+    if not unique:
+        return ""
+    return f"{normalize_matching(matching)}:" + ",".join(unique)
+
+
+def comparison_exclusion_identity(old: AbiSnapshot | None, new: AbiSnapshot) -> str:
+    """The canonical exclusion identity for a *comparison* of *old* and *new*.
+
+    Read off the snapshots rather than from a caller's parameter: they
+    record what was actually excluded when each side was extracted, which is
+    the thing that narrowed the compared surface -- a stored baseline
+    carries its own rules, and no parameter at the comparison layer would
+    describe it.
+
+    One value, not two. NEW is consulted, with OLD as the fallback for a
+    declared-absent baseline, because an asymmetric pair never reaches a
+    comparison at all: ``comparability`` refuses it
+    (``extract.header_exclusions.exclusion_asymmetry_reason``), so the two
+    sides agree by construction whenever both exist.
+    """
+    side = new if getattr(new, "excluded_header_patterns", ()) else old
+    return canonical_exclusion_identity(
+        getattr(side, "excluded_header_patterns", ()) or (),
+        getattr(side, "excluded_header_matching", GLOB_MATCHING) or GLOB_MATCHING,
+    )

@@ -124,6 +124,7 @@ from .dwarf_advanced import (
 )
 from .model import AbiSnapshot, advanced_facts_collected as _advanced_collected
 from .model.change_catalog.kinds import ChangeKind
+from .model.header_exclusion_record import comparison_exclusion_identity
 from .model.surface_facts import is_abi_visible
 from .policy.classification import (
     API_BREAK_KINDS as _API_BREAK_KINDS,
@@ -145,6 +146,7 @@ from .policy.policy_file_namespaces import (
     internal_namespaces as _internal_namespaces,
 )
 from .policy_file import PolicyFile
+from .workflows.comparison_input_receipt import comparison_input_receipt
 
 if TYPE_CHECKING:
     from .buildsource.source_inputs import SourceReadLicence
@@ -857,24 +859,6 @@ def _env_matrix_contract_changes(
     return produced
 
 
-def env_matrix_content_digest(env_matrix: EnvironmentMatrix | None) -> str | None:
-    """The canonical ``sha256:<hex>`` content digest of *env_matrix*'s
-    resolved configuration, or ``None`` when none was declared (Codex
-    review, PR #1221 follow-up). The one place this is computed: reused by
-    :func:`~abicheck.workflows.no_baseline_compare.run_no_baseline_compare`
-    and a release fan-out at release scope (no per-library ``DiffResult``
-    to read it off of when zero pairs complete). Uses ``EnvironmentMatrix.
-    to_dict()``, not ``dataclasses.asdict()``: the latter cannot traverse
-    the ``MappingProxyType``-typed ``runtime_floors`` field (frozen for the
-    hash-invariant fix, same follow-up).
-    """
-    if env_matrix is None:
-        return None
-    from .contract_evidence_collect import content_digest
-
-    return "sha256:" + content_digest(env_matrix.to_dict())
-
-
 @releases_reconciliation
 def compare(
     old: AbiSnapshot | None,
@@ -1398,47 +1382,9 @@ def compare(
         _suppression_config.sha256 if _suppression_config is not None else None
     )
 
-    # Canonical content digest of every resolved explicit-scope input (Codex
-    # review, PR #803): both `force_public_symbols` and
-    # `public_surface_allowlist` are already-resolved `set[str] | None` here
-    # and each independently changes which findings `compare()` retains, so
-    # a digest of just one axis would let two differing-only-by-the-other
-    # runs collide. Keyed JSON (not delimiter-joined) keeps the axes
-    # distinguishable, avoiding the non-injective-join bug class already
-    # fixed elsewhere in this digest work.
-    #
-    # `public_surface_allowlist` is gated on `is not None`, not truthiness
-    # (Codex review, PR #803): an empty allowlist is a real, distinct,
-    # active configuration -- a POST manifest committing to zero exports --
-    # matching `scope_active`'s identical `is not None` check above (line
-    # ~1038); collapsing `set()` to "no scope" would hash an absent manifest
-    # identically to a zero-export one. `force_public_symbols` deliberately
-    # keeps plain truthiness: every other consumer in this codebase already
-    # treats an empty set as equivalent to `None` for that axis, so the two
-    # are intentionally asymmetric here.
-    #
-    # `content_digest` is the same canonical-JSON-then-SHA-256 primitive
-    # `contract_context.py` uses for overlay digests (CodeRabbit, PR #803) --
-    # reused rather than a second hand-rolled hashing convention.
-    from .contract_evidence_collect import content_digest
-
-    _explicit_scope_sources: dict[str, list[str]] = {}
-    if force_public_symbols:
-        _explicit_scope_sources["force_public_symbols"] = sorted(force_public_symbols)
-    if public_surface_allowlist is not None:
-        _explicit_scope_sources["public_surface_allowlist"] = sorted(
-            public_surface_allowlist
-        )
-    explicit_scope_source_sha256 = (
-        "sha256:" + content_digest(_explicit_scope_sources)
-        if _explicit_scope_sources
-        else None
+    receipt = comparison_input_receipt(
+        force_public_symbols, public_surface_allowlist, env_matrix
     )
-
-    # Canonical content digest of the resolved deployment matrix (Codex
-    # review, PR #803; `.abicheck.yml`'s `deployment:` key, ADR-068 D5) --
-    # see `env_matrix_content_digest`'s own docstring above.
-    env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
 
     result = DiffResult(
         # `""` (an AbiSnapshot's own "no version declared" value), not
@@ -1454,11 +1400,12 @@ def compare(
         suppressed_changes=suppressed,
         suppression_file_provided=suppression is not None,
         suppression_source_sha256=suppression_source_sha256,
-        explicit_scope_source_sha256=explicit_scope_source_sha256,
+        explicit_scope_source_sha256=receipt.explicit_scope_source_sha256,
+        excluded_header_patterns=comparison_exclusion_identity(old, new),
         pattern_verdicts_enabled=bool(pattern_verdicts),
         collapse_versioned_symbols_enabled=bool(collapse_versioned_symbols),
         surface_metrics_enabled=bool(surface_metrics),
-        env_matrix_source_sha256=env_matrix_source_sha256,
+        env_matrix_source_sha256=receipt.env_matrix_source_sha256,
         reconcile_build_context_enabled=bool(reconcile_build_context),
         scope_to_public_surface_requested=bool(scope_to_public_surface),
         detector_results=detector_results,

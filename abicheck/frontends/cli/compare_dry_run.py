@@ -113,6 +113,7 @@ def build_compare_dry_run_result(
     required_symbols: tuple[str, ...] = (),
     select: tuple[str, ...] = (),
     select_required: tuple[str, ...] = (),
+    exclude_headers: tuple[str, ...] = (),
 ) -> Any:
     """Build the ``compare --dry-run`` report (ADR-043 D4): resolve, never diff.
 
@@ -179,10 +180,20 @@ def build_compare_dry_run_result(
             f"headers (old): {_fmt(old_effective) or '(none)'}",
             f"headers (new): {_fmt(new_effective) or '(none)'}",
         ]
+    # The effective `--exclude-header` rules, stated wherever the receipt
+    # states the header list they narrow -- and for a directory/package
+    # operand exactly as much as for a file pair, since silently dropping
+    # them at the directory branch was the defect this line makes visible.
+    # Rendered canonically (sorted, de-duplicated, with the matching rule)
+    # so it reads as the same identity the configuration digest computes.
+    from ...model.header_exclusion_record import canonical_exclusion_identity
+
+    exclusion_identity = canonical_exclusion_identity(exclude_headers)
     result.add(
         "Headers and compile context",
         f"ast-frontend: {header_backend}",
         *header_lines,
+        f"exclude-header: {exclusion_identity}" if exclusion_identity else None,
     )
     result.add(
         "Build/source inputs",

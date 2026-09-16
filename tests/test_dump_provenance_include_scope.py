@@ -130,7 +130,18 @@ def test_explicit_include_dir_still_promotes_transitively_reached_header(
     """Positive control -- the original defect-4/5 fix this module's own
     defect is adjacent to must keep working: a header reached transitively
     from the ``-H`` root, living under a directory the caller *explicitly*
-    passed via ``-I``, is still promoted to ``PUBLIC_HEADER``."""
+    passed via ``-I``, is still promoted to ``PUBLIC_HEADER``.
+
+    Note what this fixture does and does not claim, since "explicit ``-I``"
+    on its own no longer buys the promotion. ``include_dir`` is the root the
+    declared ``-H`` header itself lives under -- the library's *own* include
+    tree -- and that containment is what keeps the widening
+    (``extract.public_root_ownership``). An ``-I`` root a library passes so
+    a *dependency's* ``#include`` resolves has no declared public header
+    underneath it and widens nothing; see
+    ``tests/test_dependency_include_root_ownership.py``, which is the
+    counterpart case rather than a contradiction of this one.
+    """
     _require_tools()
     include_dir = tmp_path / "include"
     detail_dir = include_dir / "detail"
@@ -185,7 +196,10 @@ def test_compiler_option_include_dir_promotes_transitively_reached_header(
     ``public_include_search_dirs``, so a header reached ONLY through such a
     directory stayed ``PRIVATE_HEADER`` even though the caller had named
     that directory explicitly, just via ``--compiler-option`` rather than a
-    bare ``-I``. Exercised end to end through the real ``abicheck dump`` CLI
+    bare ``-I``. Same containment caveat as the test above: ``include_dir``
+    is the declared ``-H`` header's own root, which is what keeps the
+    widening -- "explicit" and "owned" are separate questions now.
+    Exercised end to end through the real ``abicheck dump`` CLI
     (the fix lives in ``cli_dump_helpers.py``, one layer above
     ``dumper.dump()``, so a direct ``dump()`` call cannot reproduce it)."""
     _require_tools()
