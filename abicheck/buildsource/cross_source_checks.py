@@ -88,10 +88,6 @@ from ..model.change_catalog.kinds import ChangeKind
 from ..model.graph_facts import GraphNode
 from ..model.source_graph import DEPENDENCY_EDGE_KINDS, SourceGraphSummary
 from ..policy.evidence_status import Confidence
-
-# Export accounting (ADR-035 D4) lives in a sibling module (crosscheck hit the
-# 2000-line file cap). Re-exported so ``_check_exported_not_public`` and the tests
-# keep importing these names from ``crosscheck``.
 from .export_accounting import (
     _ALLOCATOR_INTERPOSER_MARKER,
     _ALLOCATOR_INTERPOSER_SYMBOLS,
@@ -107,6 +103,11 @@ from .export_accounting import (
     _library_self_names,
     _linked_library_names,
 )
+
+# Export accounting (ADR-035 D4) lives in a sibling module (crosscheck hit the
+# 2000-line file cap). Re-exported so ``_check_exported_not_public`` and the tests
+# keep importing these names from ``crosscheck``.
+from .template_linkage import names_a_template_specialization
 
 #: Cross-check fact-schema version. Independent of every other buildsource
 #: schema version (see ``buildsource/CLAUDE.md`` "Versioning").
@@ -1521,9 +1522,13 @@ def _has_export_obligation(fn: Function) -> bool:
     # binary's real ``_ZN…`` symbols would false-positive (Codex review).
     if not _looks_mangled(fn):
         return False
-    # Template instantiations are spelled with angle brackets; an uninstantiated
-    # template emits no symbol, so skip anything template-shaped to stay low-FP.
-    if _looks_templated(fn.name):
+    # A template specialization/instantiation has vague linkage: its
+    # definition is in the public header, so a consumer's own translation
+    # unit emits it and no dynamic export is owed. Decided from the *mangled*
+    # name's own template-argument production, not from the display spelling
+    # -- see `_names_a_template_specialization` for the false
+    # `public_not_exported` the spelling check produced.
+    if names_a_template_specialization(fn.name, fn.mangled):
         return False
     return True
 
@@ -1550,25 +1555,12 @@ def _var_has_export_obligation(var: Variable) -> bool:
         return False
     if var.is_const:
         return False
-    if _looks_templated(var.name):
+    # Same structural template test as the function path, and for the same
+    # reason: a variable-template specialization's definition is in the
+    # header and the consumer emits its own copy.
+    if names_a_template_specialization(var.name, var.mangled):
         return False
     return True
-
-
-def _looks_templated(name: str) -> bool:
-    """Whether *name* is a template instantiation spelling (``Foo<int>``), not an operator.
-
-    A bare ``<`` is not enough: ``operator<``, ``operator<<``, and ``operator<=>``
-    legitimately contain one but are ordinary (non-template) functions with a real
-    exported symbol, so testing ``"<" in name`` would wrongly skip a genuinely
-    missing exported operator (Codex review). A template's ``<`` opens an argument
-    list immediately after the template name, so the token right before the first
-    ``<`` is the template's name — never ``operator``.
-    """
-    idx = name.find("<")
-    if idx == -1:
-        return False
-    return not name[:idx].rstrip().endswith("operator")
 
 
 def _abi_relevant_build_flags(snapshot: AbiSnapshot) -> list[str] | None:

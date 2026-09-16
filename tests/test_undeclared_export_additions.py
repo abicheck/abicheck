@@ -89,12 +89,28 @@ class TestGainedUndeclaredExportIsAnAddition:
     def test_unchanged_export_sets_report_nothing(self) -> None:
         assert _diff_undeclared_exports(_snap(["a", "b"]), _snap(["a", "b"])) == []
 
-    def test_a_lost_export_is_not_reported(self) -> None:
-        """Deliberately one-directional. Asserting a *removal* from
-        export-table evidence alone, for a symbol the headers never promised,
-        is the kind of unproven finding the vision forbids -- and
-        ``exported_not_public``'s own RESOLVED state already shows it."""
-        assert _diff_undeclared_exports(_snap(["a", "gone"]), _snap(["a"])) == []
+    def test_a_lost_export_is_reported_as_an_export_table_only_removal(
+        self,
+    ) -> None:
+        """This detector used to be deliberately one-directional, on the
+        reasoning that a removal inferred from export-table evidence alone,
+        for a symbol the headers never promised, was an unproven finding and
+        that ``exported_not_public``'s RESOLVED state already showed it.
+
+        The SVS PR-387 findings audit falsified that. A class's
+        compiler-emitted vtable/typeinfo is precisely a promised-by-nobody
+        export that old consumers bind to, so on a fixture whose only change
+        was localizing ``_ZTV3Foo`` the binary-only comparison said BREAKING
+        and the header-aware one said NO_CHANGE with zero findings -- adding
+        evidence erased a real break. Both directions are emitted now, under
+        the weak export-table-only kinds, and relevance is decided downstream
+        by public-surface scoping, contract evaluation and policy rather than
+        here. See ``tests/test_export_reconciliation_and_obligations.py``.
+        """
+        changes = _diff_undeclared_exports(_snap(["a", "gone"]), _snap(["a"]))
+        assert [(c.kind, c.symbol) for c in changes] == [
+            (ChangeKind.FUNC_REMOVED_ELF_ONLY, "gone")
+        ]
 
 
 class TestItDoesNotStealTheOrdinaryDiffsWork:

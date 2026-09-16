@@ -460,6 +460,43 @@ def itanium_scope_components_with_template_positions(
     return components, frozenset(template_positions)
 
 
+def itanium_name_carries_template_arguments(mangled: str) -> bool | None:
+    """Whether *mangled* encodes a template-argument list (``I…E``) on any
+    component of its name production -- i.e. whether the entity it names is a
+    template specialization/instantiation rather than an ordinary function.
+
+    ``True``/``False`` when the structural parser reached a verdict, ``None``
+    when it could not parse the name at all (an unmodelled or malformed
+    production, or a non-Itanium spelling). A caller must treat ``None`` as
+    "unknown", never as ``False``.
+
+    This exists because the *display* spelling is not a template model. The
+    header backends can supply a bare display name (``is_specified``) for an
+    entity whose real mangling is ``_Z12is_specifiedI12OptionalBoolEbT_``, so a
+    bracket-spotting check over ``Function.name`` -- which is what
+    ``buildsource.cross_source_checks._has_export_obligation`` used -- silently
+    missed exactly the instantiations it was written to exclude and demanded a
+    dynamic export for a function template whose definition is right there in
+    the public header. Measured: a consumer that takes the address of
+    ``is_specified<OptionalBool>`` compiles, links and runs at ``-O0
+    -fno-inline`` under both GCC and Clang with no library present at all,
+    because its own translation unit emits the vague-linkage definition; the
+    library exporting nothing for it is correct, not a missing export.
+
+    Structural, from the mangling the ABI actually specifies, not from text:
+    it reuses :func:`itanium_scope_components_with_template_positions`'s own
+    parse-time signal, so an ordinary identifier that merely *looks* like a
+    balanced template block (the ``"ICE"`` case that function's docstring
+    names) cannot be misread as one, and the answer never varies with whether
+    an optional demangler is installed on the host.
+    """
+    parsed = itanium_scope_components_with_template_positions(mangled)
+    if parsed is None:
+        return None
+    _components, template_positions = parsed
+    return bool(template_positions)
+
+
 #: The three Itanium ``<special-name>`` productions
 #: ``diff_elf_layout.py``'s ELF-layout-only detectors synthesize a symbol
 #: for (``TV`` vtable, ``TI`` typeinfo, ``TT`` VTT/construction-vtable-table)

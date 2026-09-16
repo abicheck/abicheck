@@ -61,6 +61,11 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "var_added_elf_only",
         "exported ELF-only data symbol added -> compatible addition",
     ),
+    (
+        "VAR_REMOVED_ELF_ONLY",
+        "var_removed_elf_only",
+        "exported ELF-only data symbol removed -> binary break",
+    ),
     ("FUNC_RETURN_CHANGED", "func_return_changed", "return type changed → BREAKING"),
     (
         "FUNC_PARAMS_CHANGED",
