@@ -37,7 +37,6 @@ import weakref
 import pytest
 
 from abicheck import idioms
-from abicheck.policy import public_use_index, type_spelling
 from abicheck.idioms import Idiom, detect_antipatterns, recognise_idioms
 from abicheck.model import (
     AbiSnapshot,
@@ -49,6 +48,7 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.model.surface_facts import in_public_surface
+from abicheck.policy import public_use_index, type_spelling
 from abicheck.surface_graph import SurfaceGraph, build_surface_graph
 
 # --------------------------------------------------------------------------
