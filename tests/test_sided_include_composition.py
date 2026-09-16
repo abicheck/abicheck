@@ -164,6 +164,85 @@ class TestResolveReleaseHeaders:
         assert new_h == [*nh, *shared]
 
 
+class TestDryRunReceiptRendersEachSidesEffectiveHeaders:
+    """The receipt has to describe what will actually be parsed.
+
+    Driven through ``build_compare_dry_run_result`` directly rather than
+    only through the real CLI: the end-to-end receipt test below needs a
+    compiler and is ``integration``-marked, so the canonical coverage lane
+    never reaches this rendering at all -- including the equal-sides branch,
+    which is precisely the one claimed to read exactly as it did before the
+    receipt became side-aware. A claim of unchanged behavior with no test in
+    the gating lane is the gap worth closing, not the percentage.
+    """
+
+    @staticmethod
+    def _render(
+        headers: tuple[Path, ...],
+        old_only: tuple[Path, ...] = (),
+        new_only: tuple[Path, ...] = (),
+    ) -> list[str]:
+        from abicheck.frontends.cli.compare_dry_run import (
+            build_compare_dry_run_result,
+        )
+
+        result = build_compare_dry_run_result(
+            old_input=Path("old.so"),
+            new_input=Path("new.so"),
+            old_kind="binary",
+            new_kind="binary",
+            depth=None,
+            collect_mode="none",
+            effective_depth_label="headers",
+            headers=headers,
+            includes=(),
+            old_headers_only=old_only,
+            new_headers_only=new_only,
+            old_sources=None,
+            new_sources=None,
+            old_build_info=None,
+            new_build_info=None,
+            cfg_path=None,
+            fmt="text",
+            exit_code_scheme=None,
+            header_backend="castxml",
+        )
+        # Only the receipt's own header lines: a loose `"headers" in line`
+        # also catches "effective depth: headers" and the cost preview's
+        # "no headers supplied", which say nothing about this rendering.
+        return [
+            line.strip()
+            for line in str(result.render()).splitlines()
+            if line.strip().startswith(("headers:", "headers (old):", "headers (new):"))
+        ]
+
+    def test_agreeing_sides_render_one_unqualified_line(self) -> None:
+        """The compatibility claim: no side-aware spelling appears unless
+        the two sides actually differ."""
+        lines = self._render((Path("inc/a.h"),))
+        assert any(line.strip().startswith("headers: ") for line in lines)
+        assert not any("headers (old)" in line for line in lines)
+
+    def test_differing_sides_render_both(self) -> None:
+        lines = "\n".join(
+            self._render((Path("shared.h"),), (Path("old.h"),), (Path("new.h"),))
+        )
+        assert "headers (old): old.h, shared.h" in lines
+        assert "headers (new): new.h, shared.h" in lines
+
+    def test_a_side_with_nothing_reads_as_none_not_as_an_empty_line(self) -> None:
+        """Only reachable when the sides differ, which needs one side empty
+        -- an operand pair where only NEW was given headers."""
+        lines = "\n".join(self._render((), (), (Path("new.h"),)))
+        assert "headers (old): (none)" in lines
+        assert "headers (new): new.h" in lines
+
+    def test_no_headers_at_all_renders_no_header_line(self) -> None:
+        """The other half of the equal-sides branch: a binary-only compare
+        must not grow an empty `headers:` line."""
+        assert self._render(()) == []
+
+
 _DEP_HEADER = "struct sic_dep { int a; };\n"
 #: The NEW side gains a second parameter. Deliberately a *header-only*
 #: difference: the C symbol name is identical on both sides, so the change

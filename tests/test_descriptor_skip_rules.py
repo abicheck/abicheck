@@ -158,6 +158,35 @@ class TestPathRules:
         assert _r("/opt/mkl/include/").matches("/opt/mkl/include/sub/x.h")
         assert not _r("/opt/mkl/include/x.h").matches("/other/opt/mkl/include/x.h")
 
+    @pytest.mark.parametrize(
+        ("rule", "header"),
+        [
+            ("fftw//fftw.h", "/opt/mkl/include/fftw/fftw.h"),
+            ("fftw/fftw.h", "/opt/mkl//include//fftw/fftw.h"),
+            ("fftw\\\\fftw.h", "/opt/mkl/include/fftw/fftw.h"),
+            ("fftw/offload//", "/opt/mkl/include/fftw/offload/a.h"),
+        ],
+    )
+    def test_a_doubled_separator_names_the_same_thing(
+        self, rule: str, header: str
+    ) -> None:
+        """On either side, and in either spelling.
+
+        A descriptor concatenating a root and a relative path, or a header
+        list built the same way, routinely carries `//`. It names the same
+        header as a single separator does, so the rule must too -- otherwise
+        a skip silently stops matching for a reason invisible in the text.
+        """
+        assert _r(rule).matches(header)
+
+    def test_a_lone_separator_rule_matches_nothing(self) -> None:
+        """`/` normalizes to an empty component list, which would otherwise
+        make the boundary test degenerate and take every header. A rule that
+        names no component excludes nothing."""
+        rule = _r("/")
+        assert not rule.matches("/opt/mkl/include/x.h")
+        assert not rule.matches("x.h")
+
     def test_duplicate_basenames_under_different_subtrees_are_distinguished(
         self,
     ) -> None:
