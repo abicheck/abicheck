@@ -408,3 +408,34 @@ def validated_degraded_members(raw: object) -> dict[str, str]:
             )
         out[name] = reason
     return out
+
+
+def require_public_surface_marker_version(
+    public_surface: object,
+    schema_version: int,
+    *,
+    what: str = "bundle facts",
+) -> None:
+    """Reject a ``public_surface`` block on a document declaring a version
+    that predates it.
+
+    The exact discipline :func:`require_degraded_marker_version` applies,
+    for the same reason: the writer stamps version 4 on such a document so a
+    reader that cannot honor the block refuses it, rather than ignoring an
+    unknown key and reconciling the stored members against no product
+    contract at all -- which would resurrect the per-member
+    Cartesian-product findings the block exists to remove. A document
+    carrying the block under a lower version is self-contradictory, so this
+    reader refuses it too. *schema_version* is the version the document
+    *declares*; a caller whose reader defaults an absent key must pass the
+    legacy version that absence means (1).
+    """
+    from ..model.bundle_facts import PUBLIC_SURFACE_SCHEMA_VERSION
+
+    if public_surface is not None and schema_version < PUBLIC_SURFACE_SCHEMA_VERSION:
+        raise ValueError(
+            f"{what}: a 'public_surface' block requires schema_version "
+            f"{PUBLIC_SURFACE_SCHEMA_VERSION}; this document declares "
+            f"schema_version {schema_version}, which a reader that cannot "
+            "honor the block would still accept"
+        )

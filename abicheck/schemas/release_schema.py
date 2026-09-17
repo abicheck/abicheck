@@ -147,4 +147,30 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       requires >= 1.5.
 #: ``1.6`` adds each member's scalar-parity ``review_groups`` and
 #: ``result_counts`` blocks; both are additive and presentation-only.
-RELEASE_SCHEMA_VERSION = "1.6"
+#: - ``1.7`` adds the top-level ``public_surface_reconciliation`` object: the
+#:       release's one public contract reconciled against the union of its
+#:       members' exports (``report.release_public_surface``). It states, per
+#:       side, how many public declarations carry an export obligation, how
+#:       many the bundle satisfies, which are missing, which are *unresolved*
+#:       because a member was unread, the export totals and the
+#:       documented/undocumented split; plus the release-level
+#:       ``public_not_exported`` findings, the ``shared_findings`` folded out
+#:       of the per-library tables (each naming every affected library), the
+#:       per-member undocumented-export counts, and the header-acquisition
+#:       instrumentation (``acquisitions``/``reuses`` -- one acquisition per
+#:       side for an ordinary directory comparison). Two related, additive
+#:       per-member changes come with it: a ``libraries[]`` entry gains
+#:       ``product_level_findings`` (how many of its findings were folded
+#:       into the release section, so an entry whose ``findings`` list is
+#:       shorter than its counts is never silently so), and the
+#:       whole-product ``public_not_exported`` check no longer runs per
+#:       member at all -- a multi-member release reports it once, at release
+#:       level, instead of once per member per declaration a sibling
+#:       provides. That last part is the one non-additive consequence: a
+#:       consumer counting per-member ``public_not_exported`` findings on a
+#:       directory comparison will now find them under
+#:       ``public_surface_reconciliation.missing_exports`` instead, and far
+#:       fewer of them, because the per-member answer was a Cartesian
+#:       product (787,833 on a 28-library Intel MKL release). Every other
+#:       block is "present only when it states something", following 1.3-1.5.
+RELEASE_SCHEMA_VERSION = "1.7"

@@ -193,6 +193,15 @@ def bundle_facts_to_dict(
         # reader that predates it ignores the key and, as before, proves
         # nothing from this document.
         "inventory_complete": facts.inventory_complete,
+        # The release's one public contract (schema_version 4). Omitted --
+        # not `null` -- when the capture recorded none, so every pre-v4
+        # document round-trips byte-identically and keeps declaring its own
+        # lower version.
+        **(
+            {"public_surface": facts.public_surface.to_dict()}
+            if facts.public_surface is not None
+            else {}
+        ),
         "manifest": manifest_to_dict(facts.manifest) if facts.manifest else None,
     }
 
@@ -222,9 +231,11 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
         DEFAULT_VARIANT_FINGERPRINT,
         BundleFacts,
     )
+    from ..model.release_surface import ReleasePublicSurface
     from ..serialization import snapshot_from_dict
     from .bundle_facts_validation import (
         require_degraded_marker_version,
+        require_public_surface_marker_version,
         validated_alias_map,
         validated_degraded_members,
         validated_filename_map,
@@ -335,6 +346,15 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
     require_degraded_marker_version(
         degraded_members, schema_version if "schema_version" in d else 1
     )
+    raw_public_surface = d.get("public_surface")
+    if raw_public_surface is not None and not isinstance(raw_public_surface, dict):
+        raise ValueError(
+            "bundle facts: 'public_surface' must be a mapping, got "
+            f"{type(raw_public_surface).__name__}"
+        )
+    require_public_surface_marker_version(
+        raw_public_surface, schema_version if "schema_version" in d else 1
+    )
     return BundleFacts(
         schema_version=schema_version,
         variant_fingerprint=validated_variant_fingerprint(
@@ -348,6 +368,11 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
         degraded_members=degraded_members,
         inventory_complete=validated_inventory_complete(
             d.get("inventory_complete", False)
+        ),
+        public_surface=(
+            ReleasePublicSurface.from_dict(raw_public_surface)
+            if raw_public_surface is not None
+            else None
         ),
         manifest=manifest_from_dict(raw_manifest) if raw_manifest is not None else None,
     )

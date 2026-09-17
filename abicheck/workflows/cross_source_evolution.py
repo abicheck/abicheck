@@ -72,6 +72,21 @@ of plan §3 #3 closed, this module's own extension point (below) is done for
 now -- a future new cross-source check registers here the same way, but
 there is no more backlog to work through.
 
+**Checks an enclosing comparison has taken over are skipped.** The set run
+here is :data:`CROSS_SOURCE_EVOLUTION_CHECKS` minus whatever
+``crosscheck_ownership.release_owned_checks()`` reports -- empty outside a
+release fan-out, so every single-pair ``compare``, ``appcompat`` and
+typed-API call is unchanged. A release comparison declares
+``public_not_exported`` release-owned for the duration of its member pass,
+because that check's *answer* depends on the whole product's exports: a
+declaration this member does not export may be exported by a sibling, so
+answering it per member against the complete product header surface is a
+Cartesian product (787,833 findings on a 28-library Intel MKL release). It
+is then answered once, at release level, against the union of the bundle's
+exports -- moved, never disabled. See
+:mod:`abicheck.workflows.crosscheck_ownership` for the mechanism and why it
+is run-scoped rather than a parameter.
+
 **Per-check identity, not a bare ``Change.symbol`` key.** A first version of
 this module keyed every check's OLD/NEW pairing on ``symbol`` alone, on the
 premise that "the folding logic is check-agnostic, keyed only by symbol, so
@@ -180,6 +195,7 @@ from ..buildsource.cross_source_checks import (
 from ..checker_types import Change
 from ..model import AbiSnapshot
 from ..policy.evidence_status import CrossSourceEvolution
+from .crosscheck_ownership import member_owned_checks
 
 
 def _default_identity(change: Change) -> Hashable:
@@ -294,9 +310,11 @@ def compute_candidate_cross_source_findings(new: AbiSnapshot) -> list[Change]:
     An unevaluated check contributes nothing, the same way it does in the
     two-sided fold: a check whose evidence gate closed leaves no findings,
     and "not run" is recorded as an absent finding rather than a clean one.
+    A check an enclosing comparison owns is not run here at all -- see the
+    module docstring's "Checks an enclosing comparison has taken over".
     """
     results: list[Change] = []
-    for check in sorted(CROSS_SOURCE_EVOLUTION_CHECKS):
+    for check in sorted(member_owned_checks(CROSS_SOURCE_EVOLUTION_CHECKS)):
         evaluated, findings = _run_one_side(new, check)
         if not evaluated:
             continue
@@ -335,10 +353,12 @@ def compute_cross_source_evolution(old: AbiSnapshot, new: AbiSnapshot) -> list[C
       to confirm or deny it.
 
     An identity flagged on neither side never appears here at all -- there
-    is nothing to report and no evolution to state.
+    is nothing to report and no evolution to state. A check an enclosing
+    comparison owns is not run here at all -- see the module docstring's
+    "Checks an enclosing comparison has taken over".
     """
     results: list[Change] = []
-    for check in sorted(CROSS_SOURCE_EVOLUTION_CHECKS):
+    for check in sorted(member_owned_checks(CROSS_SOURCE_EVOLUTION_CHECKS)):
         old_evaluated, old_findings = _run_one_side(old, check)
         new_evaluated, new_findings = _run_one_side(new, check)
 

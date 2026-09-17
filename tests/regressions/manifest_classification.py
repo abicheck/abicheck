@@ -323,4 +323,59 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="release.cartesian_product_contract",
+        invariant=(
+            "A comparison whose candidate is a *set* of artifacts sharing one "
+            "declared contract judges the contract against the set, not "
+            "against each member independently. Concretely, for N members "
+            "sharing one public header surface: an obligation the set "
+            "satisfies is satisfied for every member (no member is short of "
+            "a sibling's declaration), a fact several members observe "
+            "identically is reported once with every member attributed, and "
+            "the reported finding count therefore does not grow with the "
+            "number of members that merely share the surface. The failure "
+            "this closes is a cardinality law, not a bad finding: N members "
+            "x |surface| manufactured findings, none of them a real "
+            "compatibility signal. Its honesty half: when a member's "
+            "evidence was never read, an obligation nothing else satisfies "
+            "is recorded as unresolved with the coverage gap named -- never "
+            "concluded as missing from the set, which would rest a "
+            "high-confidence conclusion on unread evidence."
+        ),
+        fixed_by=(),
+        seed_tests=(
+            "tests/test_release_public_surface.py",
+            "tests/test_release_public_surface_integration.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "members": ("2", "3", "8", "28"),
+            "coverage": ("complete", "failed_member", "no_export_table"),
+            "evolution": ("introduced", "resolved", "persistent", "not_evaluated"),
+            "export_binding": ("default", "non_default_version_alias"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The invariant is stated for the one set-shaped "
+                    "comparison that exists (the directory/package release "
+                    "fan-out). No mechanical sweep finds another place where "
+                    "a shared declared contract is judged per member; a "
+                    "second instance would still be found by hand."
+                ),
+                reference="docs/learn/products-not-libraries.md",
+            ),
+            KnownGap(
+                description=(
+                    "Output cardinality is closed; storage cardinality is "
+                    "not. Each member snapshot still persists its own copy "
+                    "of the shared header evidence, so a stored product "
+                    "baseline remains O(surface x members) on disk even "
+                    "though the report and the reconciliation are not."
+                ),
+                reference="docs/learn/products-not-libraries.md",
+            ),
+        ),
+    ),
 )

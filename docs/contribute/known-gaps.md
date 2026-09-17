@@ -8322,7 +8322,43 @@ mechanisms implement the same rule and one is documented as "the one place",
 the other one silently winning on a subset of surfaces is not a redundancy,
 it is a divergence waiting for a front-end change to expose it.
 
-## A directory `compare`'s `-H`/`--header` set is applied to every member, so header-derived findings are reported against libraries they do not belong to
+## A directory `compare`'s `-H`/`--header` set is applied to every member, so header-derived findings are reported against libraries they do not belong to — steps 1 and the export-obligation half CLOSED (2026-09-17); steps 2/3 open
+
+**Update (2026-09-17), read this first.** The release product model landed:
+a directory/package comparison now judges **one** public contract backed by
+**several** binary providers (`docs/learn/products-not-libraries.md` § "One
+public surface, many providers"). Concretely, against the three steps this
+entry proposes below:
+
+- **Step 1 ("de-duplicate first") is done.** A finding several members report
+  identically is rendered once, release-scoped, naming every affected library
+  (`report.release_public_surface.dedupe_shared_member_findings`), and each
+  member entry records how many of its findings were folded there
+  (`product_level_findings`). Counts, verdicts and exit codes are untouched by
+  the fold, so nothing is hidden or downgraded — only the duplicated evidence
+  stops being emitted N times.
+- **The `public_not_exported` half is not merely de-duplicated, it is
+  answered correctly.** It was never a duplication problem at heart: the
+  obligation is satisfied by *any* member, so the per-member answer was a
+  Cartesian product. It now runs once, at release level, against the union of
+  the bundle's usable exports (`policy.release_contract_reconciliation`), with
+  the member pass no longer running it at all
+  (`workflows.crosscheck_ownership`). Measured on a 12-library / 480-declaration
+  fixture: 5,280 findings -> 0, report 8.7 MiB -> 77 KiB.
+- **`exported_not_public` stayed per member, deliberately.** The example below
+  reads it as the same defect, and it is not: the exporting member *is* its
+  correct attribution. It is judged against the one shared declaration index
+  and folded only when several members really do export the same symbol.
+- **Steps 2 and 3 remain open exactly as written below** (a per-member header
+  operand; reachability-based attribution where no map is declared). The type
+  findings in the example above are still not *attributed* to the member whose
+  surface reaches `Widget` — they are now reported once for the release,
+  naming both members, which is the honest "which member this affects was not
+  established" reading step 1 asks for, not the attribution step 3 would give.
+  Over-reporting attribution, not duplication, is what is left.
+
+The original entry follows, unchanged.
+
 
 Reproduced while verifying the `--depth`/header-graph behaviour above, on a
 two-member fixture (`libfoo.so` built from `foo.h`, `libbar.so` from nothing
@@ -10089,3 +10125,58 @@ policy; the missing DWARF/layout evidence is an artifact-build limitation;
 and the configured header exclusions match nothing and should be removed
 from the SVS integration.
 
+## The release public surface is acquired once, but each member snapshot still stores its own copy of the header evidence
+
+Recorded with the release product model (2026-09-17), measured rather than
+assumed. The *output* cardinality is closed: the contract is reconciled once,
+a shared finding is rendered once, and a release's report size now scales as
+O(public surface + members + real findings) — 8.7 MiB -> 77 KiB on a
+12-library / 480-declaration fixture. Two costs are not closed:
+
+1. **Storage.** Every entry in `BundleFacts.per_library_snapshots` still
+   carries its own copy of the header evidence its dump parsed.
+   `BundleFacts.public_surface` (schema 4) gives the *product contract* one
+   canonical home and records the acquisition identity it was acquired
+   under, which is what lets a stored baseline be reconciled against the
+   union of its members' exports — but it does not deduplicate the
+   per-member header evidence beside it. Doing that is a change to snapshot
+   persistence itself (a shared-surface reference plus a migration for every
+   existing baseline), not to the release layer, which is why it was
+   recorded rather than half-done here.
+2. **One extra header parse per side.** The release-level surface is acquired
+   through `header_only_dump.build_header_only_snapshot`, whose acquisition
+   key legitimately differs from the member dumps' own (a header-only parse
+   resolves its language mode without a binary's export evidence), so it
+   does not hit the AST cache entry the member dumps share. Measured on the
+   two-library fixture: 2 castxml cache entries before, 4 after — i.e. two
+   parses per side rather than one, and **O(1) per side either way**, never
+   O(members). The requirement it does meet is the one that mattered:
+   castxml is not invoked once per library for an identical acquisition
+   request, and the release acquisition ledger reports exactly one
+   acquisition per side (`public_surface_reconciliation.acquisition`).
+   Closing it means letting the release surface reuse a member dump's
+   already-parsed header AST under the *same* acquisition key, which is a
+   change to how `dumper`'s language-mode resolution keys a header-only
+   parse — worth doing, and not a correctness issue in the meantime.
+
+3. **The `ProjectSnapshot` import adapter refuses a schema-4 document.**
+   `storage/import_bundle_facts.py` has no composition section for
+   `public_surface`, so it keeps its own `_BUNDLE_FACTS_SCHEMA_VERSION = 3`
+   and its existing "newer than this build knows how to interpret" gate
+   refuses such a document outright. That is deliberate, and it is the
+   fail-closed half of "no silent reinterpretation": carrying the version
+   forward without the block would import members whose recorded contract
+   had been discarded, leaving them reconciled against nothing. It is still
+   a gap. The adapter has no in-tree production caller today (it is a
+   public storage API exercised by tests), which is why teaching it a
+   `public_surface` composition section -- another `storage/dto.py` section
+   version -- was recorded rather than done here.
+   `tests/test_release_public_surface.py::TestBundleFactsSchema::test_the_project_snapshot_importer_refuses_a_v4_document`
+   states the refusal so it cannot silently become a drop.
+
+Also open, and smaller: the JUnit projection of a release carries per-member
+test cases only, so the release-level public-surface section appears in the
+JSON and Markdown renders but not there. The gate is unaffected — a
+release-level contract finding folds into `worst_verdict` and the exit code
+before any format renders — so this is a traceability gap in one format, not
+a missed finding.

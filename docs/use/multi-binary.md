@@ -497,6 +497,9 @@ analysis ran:
                                           //   completeness, policy, proven_removed/proven_added
   "analysis_assurance": { ... },          // ADR-071 (release schema 1.3): the per-member assurance fold --
                                           //   present only under assurance.require_complete
+  "public_surface_reconciliation": { ... },// release schema 1.7: the product's ONE public
+                                          //   contract reconciled against the union of its
+                                          //   members' exports -- see below
   "bundle_verdict": "BREAKING",           // new (ADR-023)
   "bundle_findings": [                    // new (ADR-023)
     {
@@ -521,7 +524,86 @@ predate this change and are unrelated to it: no libraries matched on
 either side (and no manifest), or the bundle-level snapshot build itself
 failed (a warning is printed; the run does not abort).
 
-Each finding has:
+### `public_surface_reconciliation`
+
+A product's installed headers are one public contract; its DSOs are several
+providers of it. This block is that contract's own reconciliation, computed
+once for the release rather than once per member — see
+[Products, Not Libraries § One public surface, many providers](../learn/products-not-libraries.md#one-public-surface-many-providers)
+for why a per-member answer is a Cartesian product (787,833 findings on a
+28-library Intel MKL release) rather than a stricter check.
+
+```jsonc
+{
+  "version": 1,
+  "evaluated": true,
+  "sides": {
+    "old": { ... },                       // same shape as "new"
+    "new": {
+      "acquisition_key": "09ed55cd…",     // WHICH public surface produced these numbers
+      "surface_resolvable": true,         // false = no header evidence, NOT "promises nothing"
+      "public_declarations_with_export_obligation": 2,
+      "satisfied_by_bundle_exports": 2,   // satisfied by ANY member
+      "missing_from_bundle": [],          // no member provides it, coverage proven complete
+      "unresolved_under_incomplete_coverage": [],  // a member was unread -- recorded, not concluded
+      "exports_total": 2,
+      "exports_declared_in_headers": 2,
+      "exports_not_declared_in_headers": 0,
+      "coverage_complete": true,
+      "coverage_reason": null             // present when coverage_complete is false
+    }
+  },
+  "missing_exports": [                    // one per declaration the whole bundle lacks
+    {
+      "kind": "public_not_exported",
+      "symbol": "api_b",
+      "scope": "release",
+      "description": "The release's public headers declare function 'api_b' …",
+      "old_value": "api_b",
+      "source_location": "include/product.h:6",
+      "cross_source_evolution": "introduced"
+    }
+  ],
+  "shared_findings": [                    // one product fact several members observed
+    {
+      "kind": "type_size_changed",
+      "symbol": "Cfg",
+      "description": "Size changed: Cfg (32 → 64 bits)",
+      "affected_libraries": ["libA.so", "libB.so"]
+    }
+  ],
+  "undocumented_exports_by_member": {"libA.so": 0, "libB.so": 1},
+  "acquisition": {"acquisitions": 2, "reuses": 0, "keys": [ ... ]}
+}
+```
+
+Four things to read it by:
+
+- **A missing export names no owning library.** A symbol nothing in the
+  bundle exports has no provider to attribute it to, so the finding carries
+  the declaring header instead of an invented owner.
+- **An unread member narrows the conclusion.** If a member's acquisition
+  failed, a declaration nobody else exports may simply live in the library
+  nobody read: it lands in `unresolved_under_incomplete_coverage`,
+  `coverage_complete` goes `false` with a `coverage_reason`, and no
+  missing-export finding is claimed. The successful evidence is kept.
+- **`shared_findings` is de-duplication, not filtering.** A fact several
+  members report identically is emitted once with every affected library
+  named, and each `libraries[]` entry records how many of its findings were
+  folded there (`product_level_findings`). Per-library counts, verdicts and
+  the exit code are unchanged by the fold; `--output-dir`'s per-library
+  reports stay full and unfolded.
+- **`acquisition.acquisitions` is the instrumentation.** One header
+  acquisition per side for an ordinary comparison, however many members the
+  release has; two sides passing the identical header request share one.
+
+`undocumented_exports_by_member` is deliberately counts, not a symbol-keyed
+map: a real product can carry hundreds of thousands of undocumented exports,
+and the symbols themselves stay where they are already attributed — each
+member's own `exported_not_public` findings, which remain per member because
+the exporting member *is* the attribution.
+
+Each bundle finding has:
 
 - `kind` — one of the nine `bundle_*` ChangeKind values
   (see [Change Kinds reference](../reference/change-kinds.md)).

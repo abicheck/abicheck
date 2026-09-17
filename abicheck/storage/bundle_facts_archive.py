@@ -48,11 +48,13 @@ from ..model.bundle_facts import (
     BundleFacts,
     document_schema_version,
 )
+from ..model.release_surface import ReleasePublicSurface
 from .bundle_facts_validation import (
     BUNDLE_ARCHIVE_ARTIFACT_TYPE,
     load_bundle_facts_blob_json,
     require_degraded_marker_version,
     require_int_schema_version,
+    require_public_surface_marker_version,
     validate_bundle_archive_artifact_type,
     validated_alias_map,
     validated_degraded_members,
@@ -320,6 +322,18 @@ def write_bundle_facts_archive(
             "library_filenames": dict(sorted(facts.library_filenames.items())),
             "degraded_members": dict(sorted(facts.degraded_members.items())),
             "inventory_complete": facts.inventory_complete,
+            # The release's one public contract. Written here as well as in
+            # the JSON document because the container declares
+            # `bundle_facts_schema_version: 4` above the moment the block
+            # exists -- omitting it would make an archive claim to carry a
+            # contract it silently dropped, and its members would then be
+            # reconciled against nothing on reload. Omitted, not `null`,
+            # when there is none, so every pre-v4 archive is byte-identical.
+            **(
+                {"public_surface": facts.public_surface.to_dict()}
+                if facts.public_surface is not None
+                else {}
+            ),
         }
         # A third cap: manifest.json's own reader-side size ceiling. Checked
         # incrementally via iterencode() (fully materializing the string
@@ -600,6 +614,17 @@ def read_bundle_facts_archive(
             bundle_facts_schema_version,
             what=f"{path}: bundle archive",
         )
+        raw_public_surface = manifest.get("public_surface")
+        if raw_public_surface is not None and not isinstance(raw_public_surface, dict):
+            raise SnapshotError(
+                f"{path}: bundle archive 'public_surface' must be a mapping, got "
+                f"{type(raw_public_surface).__name__}"
+            )
+        require_public_surface_marker_version(
+            raw_public_surface,
+            bundle_facts_schema_version,
+            what=f"{path}: bundle archive",
+        )
         return BundleFacts(
             schema_version=bundle_facts_schema_version,
             variant_fingerprint=validated_variant_fingerprint(
@@ -616,5 +641,10 @@ def read_bundle_facts_archive(
             degraded_members=degraded_members,
             inventory_complete=validated_inventory_complete(
                 manifest.get("inventory_complete", False)
+            ),
+            public_surface=(
+                ReleasePublicSurface.from_dict(raw_public_surface)
+                if raw_public_surface is not None
+                else None
             ),
         )

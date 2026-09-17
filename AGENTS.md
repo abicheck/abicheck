@@ -733,6 +733,37 @@ Core pipeline (in order of data flow):
      field/base spelling naming nothing the snapshot carries — resolved
      through `type_reachability.py`'s namespace-suffix and stdlib-stripping
      machinery, so a bare `string` for `std::string` still resolves)
+5b. **Release product model (one contract, many providers)** — a
+   directory/package comparison judges **one** public contract backed by
+   **several** binary providers, not the Cartesian product of the two.
+   `model/release_surface.py` owns the acquisition identity
+   (`SurfaceAcquisitionIdentity`: every input that can change the header
+   AST, folded into one key) and the acquired surface itself
+   (`ReleasePublicSurface` — the declarations that owe an export, the
+   symbols the headers declare, and whether the acquisition resolved at
+   all; an `unresolved_surface` is never an empty one).
+   `workflows/release_surface_acquisition.py` acquires it **once per
+   acquisition key** through a counted, thread-safe ledger, so an ordinary
+   directory comparison performs one acquisition per side however many
+   members it has — and two members whose request genuinely differs key
+   apart instead of being forced onto one snapshot.
+   `compare/bundle_export_index.py` indexes `exported symbol -> exporting
+   member(s)` using the *same* `model.export_index.default_versioned_names`
+   projection the single-artifact check uses.
+   `policy/release_contract_reconciliation.py` reconciles the contract
+   against the union of those exports and folds OLD/NEW into one
+   evolution-stated finding set. `workflows/release_public_surface.py`
+   orchestrates the stage; `report/release_public_surface.py` owns the
+   report section and the shared-finding fold.
+   **Two rules not to relearn:** only `public_not_exported` moves off the
+   member pass (`workflows/crosscheck_ownership.py`'s run-scoped
+   ownership) — `exported_not_public` stays per member because the
+   exporting member *is* its attribution; and an unread member makes the
+   reconciliation *incomplete* (obligations recorded as unresolved, coverage
+   warning) rather than turning an absent symbol into a missing export.
+   Reference: `docs/learn/products-not-libraries.md` § "One public surface,
+   many providers".
+
 6. **Reporting** — output results
    - `reporter.py` — JSON/Markdown/text output
    - `html_report.py` — HTML reports

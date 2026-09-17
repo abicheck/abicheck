@@ -55,12 +55,24 @@ from .frontends.cli.runtime import _safe_write_output
 from .model import AbiSnapshot
 from .reporter import disposition_ledger_blocks, to_json
 from .workflows.contracts import CompareResult
+from .workflows.crosscheck_ownership import (
+    release_level_checks,
+    release_owned_checks_scope,
+)
 
 if TYPE_CHECKING:
     from .compile_context import CompileContext
     from .environment_matrix import EnvironmentMatrix
     from .pack_application import PackApplication
     from .workflows.gate import SeverityConfig
+
+
+def _release_owned_crosschecks() -> frozenset[str]:
+    """The checks the release level answers -- a thin wrapper so a test can
+    monkeypatch this module's own name (the ``_release_job_mem_budget_gib``
+    pattern below). Reached through ``workflows.crosscheck_ownership``
+    because ``frontends -> policy`` is a forbidden edge."""
+    return release_level_checks()
 
 
 def _release_job_mem_budget_gib(depth: str | None = None) -> float:
@@ -838,16 +850,25 @@ def _compare_release_libraries(
         exclude_headers,
     )
 
-    if effective_jobs > 1 and len(matched_keys) > 1:
-        library_results.extend(
-            _compare_release_parallel(
-                matched_keys, common_args, old_map, effective_jobs
-            ),
-        )
-    else:
-        library_results.extend(
-            _compare_release_sequential(matched_keys, common_args),
-        )
+    # `workflows.crosscheck_ownership`: the whole-product cross-source check
+    # is answered once at release level, so the member pass must not answer
+    # it per member against the complete product header surface. Entered
+    # around the dispatch because a copy of *this* thread's context is what
+    # reaches each parallel worker (see `_compare_release_parallel`). A
+    # one-member release is excluded on purpose -- no union to take, so the
+    # per-member answer already agrees with the scalar path.
+    owned = _release_owned_crosschecks() if len(matched_keys) > 1 else frozenset()
+    with release_owned_checks_scope(owned):
+        if effective_jobs > 1 and len(matched_keys) > 1:
+            library_results.extend(
+                _compare_release_parallel(
+                    matched_keys, common_args, old_map, effective_jobs
+                ),
+            )
+        else:
+            library_results.extend(
+                _compare_release_sequential(matched_keys, common_args),
+            )
 
     # Post-process all results: compute worst verdict, collect annotations,
     # and optionally collect diff_pairs (for JUnit).

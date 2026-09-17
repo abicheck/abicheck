@@ -107,11 +107,17 @@ from .report.comparison_scope import (
     release_scope_warnings,
 )
 from .report.release_assurance import release_assurance_terms
+from .report.release_public_surface import assemble_release_public_surface
 from .workflows.gate import resolve_scope_decision
 from .workflows.header_exclusion_audit import (
     observed_member_exclusion_identities,
 )
 from .workflows.release_assurance_members import release_assurance_from_entries
+from .workflows.release_public_surface import (
+    reconcile_release_public_surface,
+    release_surface_severity_exit,
+    release_surface_verdict,
+)
 from .workflows.release_scope import (
     DIRECT_PAIR_KEY,
     StrandedLibraryResolution,
@@ -899,6 +905,52 @@ def compare_release_cmd(
                 ) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
                     worst_verdict = entry_verdict
 
+            # One product contract, many binary providers: acquire each
+            # side's public surface once and reconcile it against the union
+            # of the bundle's exports (`cli_compare_release_surface`), while
+            # the per-member export evidence is still stashed. The two
+            # whole-product cross-source check was taken off the member pass
+            # for exactly this (`workflows.crosscheck_ownership`), so this
+            # stage is where it is answered -- once. Run before the
+            # `--bundle-facts-out` write below so the stored baseline
+            # records the very surface this run reconciled against, rather
+            # than a second, separately-acquired one.
+            release_surface_stage = reconcile_release_public_surface(
+                library_results,
+                # The DSOs this release expected to compare -- `library_results`
+                # also carries entries that are not members at all (a
+                # support-promise finding is keyed by the promise, not a DSO).
+                # Keyed by the OLD path's basename, which is the spelling
+                # `_compare_one_library` stamps as each entry's `library`.
+                expected_members=[
+                    (old_map[key] if key in old_map else new_map[key]).name
+                    for key in compare_keys
+                ],
+                old_headers=old_h,
+                new_headers=new_h,
+                old_includes=old_inc,
+                new_includes=new_inc,
+                lang=lang,
+                exclude_headers=exclude_headers,
+                public_header_dirs=public_header_dirs,
+                compile_context=compile_context,
+                depth=depth,
+                include_dependencies=include_dependencies,
+            )
+            # Folded with the same `_RELEASE_VERDICT_ORDER` ranking every
+            # other release-global contributor (bundle findings, the probe
+            # matrix, a removed library) uses, so a release-level contract
+            # finding can never rank differently from a bundle one.
+            _surface_verdict = release_surface_verdict(
+                release_surface_stage, policy=policy
+            )
+            if _RELEASE_VERDICT_ORDER.get(
+                _surface_verdict, 0
+            ) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
+                worst_verdict = _surface_verdict
+            for _msg in release_surface_stage.warnings:
+                warning_msgs.append(_msg)
+
             if bundle_facts_out is not None:
                 # Resolved here, not in the leaf write_bundle_facts_out() (see its docstring).
                 #
@@ -1019,6 +1071,8 @@ def compare_release_cmd(
                     # inventory -- unless --dso-only left a member
                     # unclassified, which the assertion must not paper over.
                     inventory_complete=not old_unclassified,
+                    # The OLD side's own acquired public contract (schema 4).
+                    public_surface=release_surface_stage.old_surface,
                     # ADR-062 A1.7: the same explicit-or-embedded manifest
                     # resolution the bundle-analysis call below applies, so
                     # a stored OLD side's own manifest-drift contract is
@@ -1158,6 +1212,15 @@ def compare_release_cmd(
                 show_impact=show_impact,
             )
 
+            # Both halves of "one product fact, reported once": fold the
+            # findings several members reported identically out of the
+            # per-library tables (a reporting-layer de-duplication -- no
+            # count, verdict or exit code changes) and assemble the release
+            # public-surface section every format then reads.
+            release_public_surface_terms = assemble_release_public_surface(
+                release_surface_stage, library_results
+            )
+
             # Build-configuration matrix findings (G2: probe -> compare-release).
             # These are release-global, not per-library, so they fold into the
             # worst-of verdict and surface as their own report section.
@@ -1182,6 +1245,15 @@ def compare_release_cmd(
                     bundle_result,
                     matrix_result,
                     gate,
+                )
+                # The same blind spot, for the release-level contract
+                # findings: the severity exit is aggregated per library and
+                # a release-level finding belongs to no library.
+                severity_exit_code = max(
+                    severity_exit_code,
+                    release_surface_severity_exit(
+                        release_surface_stage, gate.severity, policy=policy
+                    ),
                 )
 
             # Codex review, P2 follow-up: the release-wide deployment-floor
@@ -1261,6 +1333,7 @@ def compare_release_cmd(
                     env_matrix_source_sha256=env_matrix_source_sha256,
                     require_complete_analysis=require_complete_analysis,
                     excluded_header_patterns=release_excluded_header_patterns,
+                    public_surface=release_public_surface_terms,
                 )
                 _write_or_echo(secondary_output, secondary_text)
 
@@ -1297,6 +1370,7 @@ def compare_release_cmd(
                 env_matrix_source_sha256=env_matrix_source_sha256,
                 require_complete_analysis=require_complete_analysis,
                 excluded_header_patterns=release_excluded_header_patterns,
+                public_surface=release_public_surface_terms,
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths)

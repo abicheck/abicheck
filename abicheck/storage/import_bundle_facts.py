@@ -104,7 +104,7 @@ BUNDLE_FACTS_ARTIFACT_TYPE = "abicheck.bundle-facts"
 
 #: `abicheck.model.bundle_facts.BUNDLE_FACTS_SCHEMA_VERSION`/`..._BASE_SCHEMA_VERSION`, duplicated as
 #: `BUNDLE_FACTS_ARTIFACT_TYPE` is. `export_bundle_facts` applies `bundle_facts_to_dict()`'s
-#: writer rule (base, or 3 once `degraded_members` is non-empty -- ADR-065 D8).
+#: writer rule (base, or 3 once `degraded_members` is non-empty -- ADR-065 D8). Still 3 while the canonical reader is at 4: a v4 document's `public_surface` contract has no composition section here, so the gate below refuses such a document rather than importing one whose contract it discarded (`docs/contribute/known-gaps.md`).
 _BUNDLE_FACTS_SCHEMA_VERSION = 3
 _BUNDLE_FACTS_BASE_SCHEMA_VERSION = 2
 

@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING
 from ..bundle_manifest import InstantiationManifest
 from ..model import AbiSnapshot
 from ..model.bundle_facts import DEFAULT_VARIANT_FINGERPRINT, BundleFacts
+from ..model.release_surface import ReleasePublicSurface
 
 if TYPE_CHECKING:
     from ..bundle_models import BundleSnapshot
@@ -55,12 +56,23 @@ def capture_bundle_facts(
     library_paths: dict[str, Path] | None = None,
     degraded_members: dict[str, str] | None = None,
     inventory_complete: bool = False,
+    public_surface: ReleasePublicSurface | None = None,
 ) -> BundleFacts:
     """Build a :class:`~abicheck.model.bundle_facts.BundleFacts` from
     already-dumped per-library snapshots.
 
     No new *ABI* extraction happens here -- *per_library_snapshots* is what
     a real ``dump``/``compare`` run already produced (each with its ``.elf``).
+
+    *public_surface*, when given, is the release's **one** acquired public
+    contract (``model.release_surface.ReleasePublicSurface``): a
+    multi-library product has one public surface backed by many binary
+    providers, so it is stored once on the document rather than re-derived
+    per member, and its acquisition key records *which* surface the members
+    were reconciled against. Storing it bumps the document's declared
+    schema version to 4, so a reader that cannot honor it refuses the
+    document instead of dropping the contract (see
+    ``model.bundle_facts.PUBLIC_SURFACE_SCHEMA_VERSION``).
 
     *library_paths*, when given, is a ``{library_name: Path}`` map of each
     snapshot's real on-disk file (or a stored member's materialized
@@ -104,6 +116,7 @@ def capture_bundle_facts(
         library_filenames=library_filenames,
         degraded_members=dict(degraded_members or {}),
         inventory_complete=inventory_complete,
+        public_surface=public_surface,
     )
 
 
