@@ -105,8 +105,11 @@ def test_graph_is_deterministic() -> None:
     g1 = build_surface_graph(snap)
     g2 = build_surface_graph(snap)
     assert list(g1.types_by_name) == list(g2.types_by_name)
-    assert g1.reached_by == g2.reached_by
     assert list(g1.type_refs) == sorted(g1.type_refs)
+    assert g1.public_roots() == g2.public_roots()
+    assert {r: g1.reachable_types(r) for r in g1.public_roots()} == {
+        r: g2.reachable_types(r) for r in g2.public_roots()
+    }
 
 
 def test_public_roots_exclude_hidden() -> None:
@@ -132,10 +135,21 @@ def test_fan_in_and_fan_out() -> None:
     assert g.fan_in("Island") == 0  # referenced by nobody
 
 
-def test_reached_by_inverse() -> None:
+def test_inverse_reachability_derivable_from_supported_surface() -> None:
+    """The inverse relation (type -> roots reaching it) is a *derived* query.
+
+    ``SurfaceGraph`` no longer materialises it eagerly (it had no production
+    consumer and cost O(roots x types) to build). The semantic claim it used
+    to guard still holds and is asserted here through the supported API:
+    ``Widget`` is reached only by ``foo_open``, and ``Island`` by nobody.
+    """
     g = build_surface_graph(_snap())
-    assert g.reached_by.get("Widget") == frozenset({"foo_open"})
-    assert "Island" not in g.reached_by
+    inverse: dict[str, set[str]] = {}
+    for root in g.public_roots():
+        for t in g.reachable_types(root):
+            inverse.setdefault(t, set()).add(root)
+    assert inverse.get("Widget") == {"foo_open"}
+    assert "Island" not in inverse
 
 
 def test_metrics_counts_and_undocumented_ratio() -> None:

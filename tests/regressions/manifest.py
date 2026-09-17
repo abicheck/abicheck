@@ -52,6 +52,7 @@ from .manifest_evidence import EVIDENCE_BUG_CLASSES
 from .manifest_guards import GUARD_BUG_CLASSES
 from .manifest_performance import PERFORMANCE_BUG_CLASSES
 from .manifest_report import REPORT_BUG_CLASSES
+from .manifest_serialization import SERIALIZATION_BUG_CLASSES
 from .manifest_test_harness import TEST_HARNESS_BUG_CLASSES
 from .manifest_tool_surface import TOOL_SURFACE_BUG_CLASSES
 
@@ -905,27 +906,6 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
-        id="serialization.str_enum_downcast_via_generic_rewrite",
-        invariant=(
-            "A generic tree-walking string-collect/rewrite primitive "
-            "(`isinstance(value, str)`-gated) must never treat a "
-            "`str`-subclass `Enum` field (e.g. `ParamKind(str, Enum)`) as "
-            "ordinary rewritable free text -- even though isinstance() is "
-            "true for it too -- because a real rewrite function (`re.sub`) "
-            "returns a genuinely new, plain `str` object even on zero "
-            "substitutions, silently downcasting the field's type while "
-            "leaving its string value unchanged. The walk must exclude any "
-            "`str`-subclass `Enum` member regardless of that enum's own "
-            "vocabulary, not special-case the one field that happened to "
-            "crash a caller."
-        ),
-        fixed_by=(985,),
-        seed_tests=(
-            "tests/test_param_kind_enum_identity.py",
-            "tests/test_str_enum_downcast_walk.py",
-        ),
-    ),
-    BugClass(
         id="identity.platform_decorated_mangled_name",
         invariant=(
             "A signal derived from comparing a declaration's mangled "
@@ -1470,6 +1450,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     + CONFIG_BUG_CLASSES
     + EVIDENCE_BUG_CLASSES
     + PERFORMANCE_BUG_CLASSES
+    + SERIALIZATION_BUG_CLASSES
     + GUARD_BUG_CLASSES
     + REPORT_BUG_CLASSES
     + TEST_HARNESS_BUG_CLASSES

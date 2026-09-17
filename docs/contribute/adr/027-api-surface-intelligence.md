@@ -112,8 +112,6 @@ class SurfaceGraph:
     types_by_name: Mapping[str, RecordType]
     # adjacency: type name → set of type names it references
     type_refs: Mapping[str, frozenset[str]]
-    # inverse: type name → public roots that reach it (memoised closure)
-    reached_by: Mapping[str, frozenset[str]]
     # provenance index: header path → declarations defined there
     by_header: Mapping[str, frozenset[str]]
 

@@ -23,9 +23,13 @@ direction lives in that module and its own siblings
 
 from __future__ import annotations
 
+import copy
+import datetime
+import enum
 import hashlib
 import json
-from dataclasses import asdict
+import pathlib
+from dataclasses import fields as dataclass_fields, is_dataclass
 from typing import Any
 
 from ..model import AbiSnapshot
@@ -37,47 +41,141 @@ from .semantic_ir_codec import encode_semantic_ir
 from .snapshot_schema_versions import SCHEMA_VERSION
 from .surface_graph_codec import encode_surface_graph
 
+# Leaf types that are immutable, so the "detached container" contract
+# :func:`snapshot_to_dict` promises its callers is satisfied by sharing the
+# value itself rather than copying it. Anything *not* listed here falls back
+# to ``copy.deepcopy``, exactly as ``dataclasses.asdict`` did, so a mutable
+# leaf can still never be aliased back into the caller's snapshot.
+#
+# Matched by **exact type**, never ``isinstance``. A subclass of an immutable
+# built-in is not itself immutable -- ``class Tagged(str): ...`` with an
+# instance attribute is an ordinary mutable object that ``isinstance(x, str)``
+# happily accepts -- so an ``isinstance`` test would share it and let a
+# mutation through the encoded document reach the caller's snapshot, which is
+# exactly what this contract forbids and what ``asdict``'s unconditional
+# ``deepcopy`` never allowed (CodeRabbit, PR #1323). A subclass falls through
+# to ``deepcopy``: correct, and rare enough that the cost does not matter.
+# ``datetime`` is listed alongside ``date`` because it *is* a ``date``
+# subclass, and exact matching would otherwise send every timestamp to
+# ``deepcopy``; the concrete ``Path`` flavours are listed for the same reason.
+_IMMUTABLE_LEAF_TYPES: frozenset[type] = frozenset(
+    {
+        str,
+        int,
+        float,
+        bool,
+        bytes,
+        complex,
+        type(None),
+        pathlib.PurePosixPath,
+        pathlib.PureWindowsPath,
+        pathlib.PosixPath,
+        pathlib.WindowsPath,
+        datetime.date,
+        datetime.datetime,
+        datetime.time,
+        datetime.timedelta,
+    }
+)
 
-def _sets_to_lists(obj: Any) -> Any:
-    """Recursively convert any set to a sorted list for JSON serialization.
 
-    dataclasses.asdict() does NOT convert set → list, so json.dumps() would
-    raise TypeError. This post-processes the entire dict tree.
+def _encode_value(obj: Any) -> Any:
+    """Project one model value into its JSON-shaped, detached equivalent.
+
+    This is the *single* structural walk of the snapshot tree. It replaces
+    the former ``dataclasses.asdict(snap)`` followed by a second full
+    ``_sets_to_lists(...)`` pass: those built two complete container trees
+    where one suffices, so the encoder's transient peak was roughly twice
+    the encoded size before anything had been written.
+
+    Semantics are ``asdict``'s, fused with the set-to-sorted-list conversion
+    the second pass used to perform (``asdict`` leaves sets alone, and
+    ``json.dumps`` raises ``TypeError`` on one):
+
+    * a dataclass instance becomes a plain ``dict`` of its fields;
+    * ``set``/``frozenset`` becomes a sorted ``list`` (elements are *not*
+      recursed into, matching the pass this replaces);
+    * ``list``/``tuple`` keep their type and are recursed into;
+    * ``dict`` keeps its keys as-is and recurses into its values -- keys are
+      left alone deliberately, since ``asdict`` recursing into a *key* is
+      what made an ``OccurrenceId``-keyed mapping raise (unhashable dict
+      key) rather than encode;
+    * any other leaf is shared when provably immutable, and deep-copied
+      otherwise.
     """
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return {
+            f.name: _encode_value(getattr(obj, f.name)) for f in dataclass_fields(obj)
+        }
+    # ``Enum`` stays an ``isinstance`` test: a member's type is its own enum
+    # class, never ``Enum`` itself, so exact matching cannot express it -- and
+    # sharing one is safe regardless of what the enum subclasses, because
+    # members are singletons that ``deepcopy`` returns unchanged anyway.
+    if type(obj) in _IMMUTABLE_LEAF_TYPES or isinstance(obj, enum.Enum):
+        return obj
     if isinstance(obj, (set, frozenset)):
         return sorted(obj)
     if isinstance(obj, dict):
-        return {k: _sets_to_lists(v) for k, v in obj.items()}
+        return {k: _encode_value(v) for k, v in obj.items()}
+    if isinstance(obj, tuple):
+        if hasattr(obj, "_fields"):  # namedtuple, as asdict special-cases it
+            return type(obj)(*[_encode_value(v) for v in obj])
+        return tuple(_encode_value(v) for v in obj)
     if isinstance(obj, list):
-        return [_sets_to_lists(v) for v in obj]
-    return obj
+        return [_encode_value(v) for v in obj]
+    return copy.deepcopy(obj)
+
+
+def _encode_dataclass_skipping(obj: Any, skip: frozenset[str]) -> dict[str, Any]:
+    """:func:`_encode_value` over *obj*'s fields, omitting the names in *skip*.
+
+    Omission happens at the point of the walk, which is what lets
+    :func:`snapshot_to_dict` stay a pure function of its argument. The
+    previous implementation instead *assigned ``None``* to those fields on
+    the caller's live snapshot, ran ``asdict``, and restored them in a
+    ``finally``: correct for one thread in isolation, but it made the
+    snapshot observably wrong to anything else holding it for the duration
+    of the encode -- a second serialization, a concurrent reader, or a
+    reader in a thread this one never knew about.
+    """
+    return {
+        f.name: _encode_value(getattr(obj, f.name))
+        for f in dataclass_fields(obj)
+        if f.name not in skip
+    }
+
+
+# Fields of ``AbiSnapshot`` the generic walk above must never descend into.
+# Each is either a runtime-only lookup cache, or a field whose persisted form
+# is owned by a dedicated codec that reprojects it from the still-typed
+# object further down (never from this recursion's output).
+_SNAPSHOT_SKIP_FIELDS = frozenset(
+    {
+        # Lazy lookup caches -- recursively copying them would cost the size
+        # of the snapshot again for something that is never persisted.
+        "_func_by_mangled",
+        "_var_by_mangled",
+        "_type_by_name",
+        # Owned by encode_surface_graph() below, which unconditionally
+        # replaces the key with the graph codec's own to_dict()
+        # (Codex review, PR #962).
+        "surface_graph",
+        # ADR-063 Phase 6 (v38): owned by encode_semantic_ir() below. Its
+        # OccurrenceId-keyed mapping is also exactly the shape ``asdict``
+        # could not walk at all.
+        "semantic_ir",
+    }
+)
 
 
 def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
-    # asdict() would recursively copy the lazy lookup caches, and
-    # surface_graph's potentially-large nodes/edges, for nothing --
-    # encode_surface_graph() below unconditionally replaces the latter with
-    # its own to_dict(), never this recursion (Codex review, PR #962). Clear
-    # them for the call and restore after, so this stays pure from the caller.
-    caches = (snap._func_by_mangled, snap._var_by_mangled, snap._type_by_name)
-    graph = snap.surface_graph
-    # ADR-063 Phase 6 (v38): asdict() recurses into a dict's KEYS, so an
-    # OccurrenceId-keyed mapping raises (unhashable dict key) inside asdict()
-    # itself -- encode_semantic_ir() below owns this field's encoding, from
-    # the still-typed object, exactly as surface_graph's codec does.
-    semantic_ir = snap.semantic_ir
-    try:
-        snap._func_by_mangled = snap._var_by_mangled = snap._type_by_name = None
-        snap.surface_graph = None
-        snap.semantic_ir = None
-        d = asdict(snap)
-    finally:
-        snap._func_by_mangled, snap._var_by_mangled, snap._type_by_name = caches
-        snap.surface_graph = graph
-        snap.semantic_ir = semantic_ir
-    d.pop("_func_by_mangled", None)
-    d.pop("_var_by_mangled", None)
-    d.pop("_type_by_name", None)
+    """Encode *snap* into its canonical, fully-detached dictionary form.
+
+    Pure with respect to *snap*: nothing here reads, writes, or temporarily
+    clears a field on the caller's object, so serializing a snapshot another
+    thread is concurrently reading is safe.
+    """
+    d = _encode_dataclass_skipping(snap, _SNAPSHOT_SKIP_FIELDS)
     # Runtime-only provenance qualifier — never persisted.
     d.pop("from_headers_inferred", None)
     # Runtime-only source-read licence — never persisted, by design. Writing it
@@ -101,9 +199,12 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
     encode_fact_fields(d)
 
-    # Convert all sets → sorted lists (needed for AdvancedDwarfMetadata.packed_structs and ToolchainInfo.abi_flags; json.dumps raises TypeError on set objects), having first encoded the ADR-063 Phase 2 (c1) `entity_id` carrier (storage/entity_id_codec.py).
-    converted: dict[str, Any] = _sets_to_lists(
-        encode_sidecar_entity_ids(encode_entity_ids(d, snap), snap)
+    # ADR-063 Phase 2 (c1): encode the `entity_id` carrier
+    # (storage/entity_id_codec.py). Sets were already converted to sorted
+    # lists by the single walk above -- the former second full-tree
+    # `_sets_to_lists(...)` pass over this result is gone.
+    converted: dict[str, Any] = encode_sidecar_entity_ids(
+        encode_entity_ids(d, snap), snap
     )
 
     # BuildMode enums are (str, Enum), so dataclasses.asdict() carries
@@ -174,7 +275,19 @@ def snapshot_content_digest(snap: AbiSnapshot) -> str:
 
 
 def _uncached_snapshot_content_digest(snap: AbiSnapshot) -> str:
-    """The digest computation itself, with no memoization around it."""
+    """The digest computation itself, with no memoization around it.
+
+    Deliberately still a single ``dumps(...).encode()``. Feeding
+    ``json.JSONEncoder.iterencode`` fragments into a running sha256 was
+    measured here and rejected: it removes the whole-JSON ``str`` and its
+    ``bytes`` copy, but both of those are allocated *after*
+    ``to_sectioned_document`` has already peaked well above them, so the
+    measured peak of this function did not move at all (576.1 MiB, both
+    ways, for a 20k-function snapshot) while wall time grew ~20% from the
+    per-fragment encode loop. The amplification that actually dominates
+    this path is inside ``to_sectioned_document``/``ObjectStore.put`` --
+    see ``docs/contribute/known-gaps.md``.
+    """
     return hashlib.sha256(snapshot_to_json(snap).encode()).hexdigest()
 
 
