@@ -5856,7 +5856,7 @@ _maybe_post_pr_comment() {
     _build_json_cmd
     # Re-run for JSON; a non-zero exit here is expected on breaks — the report
     # file is still written, so we ignore the status.
-    "${PR_CMD_JSON[@]}" >/dev/null 2>/dev/null || true
+    ${PR_CMD_JSON[@]+"${PR_CMD_JSON[@]}"} >/dev/null 2>/dev/null || true
   fi
   if [[ ! -s "$PR_JSON" ]]; then
     echo "::warning::abicheck: no JSON report produced; skipping PR comment."

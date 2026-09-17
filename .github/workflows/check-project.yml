@@ -412,7 +412,7 @@ jobs:
           # alias) -- set the policy in CONFIG directly.
           abicheck project plan "$CONFIG_PATH" \
             --project "$PROJECT" --head-sha "$HEAD_SHA" \
-            "${args[@]}" -o run-plan.json
+            ${args[@]+"${args[@]}"} -o run-plan.json
           python3 -c "
           import json
           plan = json.load(open('run-plan.json'))

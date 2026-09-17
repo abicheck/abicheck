@@ -739,8 +739,16 @@ jobs:
             args+=(--tag-object-json "$work/tag.json")
           fi
 
+          # `${args[@]+"${args[@]}"}`, not a bare `"${args[@]}"`: under
+          # macOS's stock (GPLv2-frozen) bash 3.2 and `set -u`, expanding an
+          # EMPTY array as `"${args[@]}"` is itself an unbound-variable
+          # reference (bash 4.4+ special-cased it away). `args` is empty on
+          # the *common* path here -- a lightweight tag needs no peel -- so a
+          # bare expansion aborts the step for the ordinary case, on a runner
+          # the Linux lane never exercises. Same guard actions/aggregate and
+          # action/run.sh already apply throughout.
           python3 -m abicheck.frontends.action.cli resolve-tag \
-            "$RELEASE_TAG" "$work/ref.json" "${args[@]}" \
+            "$RELEASE_TAG" "$work/ref.json" ${args[@]+"${args[@]}"} \
             --expected-project-ref "$DECLARED" --out "$work/resolved.json"
 
           {

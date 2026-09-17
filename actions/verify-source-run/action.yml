@@ -163,9 +163,13 @@ outputs:
   tested-sha-source:
     description: >
       Where `tested-sha` came from: 'analysis-context' when the producer
-      recorded it and the API confirmed the association, 'run-head'
-      otherwise. A publisher that must never display an unestablished
-      identity branches on this rather than on whether the value is empty.
+      recorded it and the API confirmed the association, 'input' when the
+      caller stated it on `tested-sha` and it was verified against this
+      pull request, 'run-head' when neither applied and the value is the
+      producer run's own head commit. A publisher that must never display
+      an unestablished identity branches on this rather than on whether the
+      value is empty -- and 'input' stays distinct from 'run-head' because
+      a caller-stated commit is not the fallback it would otherwise read as.
     value: ${{ steps.verify.outputs.tested-sha-source }}
   provenance:
     description: >

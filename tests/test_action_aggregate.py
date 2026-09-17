@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -252,9 +253,39 @@ def test_every_declared_input_reaches_run_sh() -> None:
         if name in consumed_elsewhere:
             continue
         expected = f"INPUT_{name.upper().replace('-', '_')}"
-        assert expected in forwarded or f"inputs.{name}" in referenced, (
+        # Anchored on the right: a bare substring makes a SHORTER name pass
+        # on the strength of a longer one that happens to start with it --
+        # `inputs.report` found inside `inputs.report-from`. The next
+        # character must not continue the identifier. GitHub expression
+        # names are `[A-Za-z0-9_-]`, so `-` counts as continuation.
+        mentioned = re.search(
+            rf"inputs\.{re.escape(name)}(?![A-Za-z0-9_-])", referenced
+        )
+        assert expected in forwarded or mentioned, (
             f"input {name!r} is never read by any composite step"
         )
+
+
+def test_a_prefix_of_another_input_name_does_not_satisfy_the_scan() -> None:
+    """The anchoring itself, stated as a rule over synthetic text.
+
+    Unanchored, an input named `report` was reported wired by the presence
+    of `inputs.report-from` -- a real pair in this very Action. The failure
+    is silent and in the *permissive* direction: an input nothing reads
+    looks read.
+    """
+    referenced = "run: echo ${{ inputs.report-from }}"
+
+    def wired(name: str) -> bool:
+        return bool(
+            re.search(rf"inputs\.{re.escape(name)}(?![A-Za-z0-9_-])", referenced)
+        )
+
+    assert wired("report-from")
+    assert not wired("report")
+    assert not wired("report-fro")
+    # And the underscore form of continuation, which GitHub also allows.
+    assert not re.search(r"inputs\.a(?![A-Za-z0-9_-])", "inputs.a_b")
 
 
 def test_the_input_wiring_scan_can_actually_fail() -> None:

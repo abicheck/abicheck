@@ -226,12 +226,12 @@ jobs:
             REPEAT=7
           fi
           python scripts/benchmark_scaling.py \
-            "${SIZES_ARG[@]}" \
+            ${SIZES_ARG[@]+"${SIZES_ARG[@]}"} \
             --repeat "$REPEAT" \
             --max-exponent 1.4 \
             --max-rss-mb 2048 \
             --json-out reports/perf/scaling.json \
-            "${GATE[@]}" | tee reports/perf/scaling.txt
+            ${GATE[@]+"${GATE[@]}"} | tee reports/perf/scaling.txt
 
       - name: Run slow perf tests
         # tests/test_perf_binary_scan.py used to run here too -- deleted

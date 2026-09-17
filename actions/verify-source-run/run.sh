@@ -66,6 +66,46 @@ fi
 # a typo reads as this Action's input error.
 PROVENANCE_FROM="${INPUT_PROVENANCE_FROM:-}"
 REPORT_FROM="${INPUT_REPORT_FROM:-}"
+
+# Both name a member INSIDE the extracted artifact, and both are then
+# concatenated onto $DESTINATION. A `..` component, a leading `/`, or a
+# backslash would name something outside the extraction the bounded
+# extractor just staged -- the one place a member name may not be allowed
+# to reach. Refused rather than normalized: a workflow author who wrote one
+# meant something, and quietly resolving it elsewhere is how the caller
+# ends up reading a file nobody checked.
+_require_member_name() {
+  local label="$1" value="$2"
+  [[ -n "$value" ]] || return 0
+  case "$value" in
+    /*|*'\'*) _fail "'$label' must be a path inside the artifact, not '$value'." ;;
+  esac
+  local component
+  while IFS= read -r component; do
+    # An `if`, not a trailing `&&`: a `[[ ]] && _fail` as the loop's last
+    # statement makes the LOOP's status that of the final (false) test, so
+    # the function returns non-zero for every *valid* name -- refusing the
+    # ordinary case while still accepting nothing extra. Caught by the
+    # accept-half of this guard's own tests, which is why they exist.
+    if [[ "$component" == ".." || "$component" == "." ]]; then
+      _fail "'$label' must not contain a '$component' component (got '$value')."
+    fi
+  done < <(printf '%s\n' "${value//\//$'\n'}")
+  return 0
+}
+_require_member_name "provenance-from" "$PROVENANCE_FROM"
+_require_member_name "report-from" "$REPORT_FROM"
+
+# Exactly `true` or `false`. Treating every other spelling as `false` means
+# a typo (`ture`, `True`, an unset-but-intended expression expanding empty)
+# silently DISABLES the requirement -- the one direction a misreading must
+# never take, since the whole point of the flag is to refuse a run whose
+# provenance is missing.
+REQUIRE_PROVENANCE="${INPUT_REQUIRE_PROVENANCE:-true}"
+case "$REQUIRE_PROVENANCE" in
+  true|false) ;;
+  *) _fail "'require-provenance' must be exactly 'true' or 'false' (got '$REQUIRE_PROVENANCE')." ;;
+esac
 for _relative in "$PROVENANCE_FROM" "$REPORT_FROM"; do
   case "$_relative" in
     /*|*..*|*$'\n'*) _fail "'provenance-from'/'report-from' must be a relative path inside the artifact with no '..' segment (got '$_relative')." ;;
@@ -230,12 +270,20 @@ fi
 # artifact parsing in the trusted job. Both are closed by doing it here: one
 # download, and every field shape-checked by an importable owner before it
 # can reach a step output.
-TESTED_SHA_SOURCE="run-head"
+# Three distinguishable states, not two. An explicit `tested-sha` input was
+# verified above against the very same rules, but reporting it as `run-head`
+# tells a caller the Action fell back to the run's own head commit -- which
+# is exactly the claim that must stay separable from "a caller stated this".
+if [[ -n "$TESTED_SHA" ]]; then
+  TESTED_SHA_SOURCE="input"
+else
+  TESTED_SHA_SOURCE="run-head"
+fi
 PROVENANCE_STATE="not-requested"
 if [[ -n "$PROVENANCE_FROM" ]]; then
   PROVENANCE_STATE="absent"
   REQUIRE_FLAG="--require"
-  if [[ "${INPUT_REQUIRE_PROVENANCE:-true}" != "true" ]]; then
+  if [[ "$REQUIRE_PROVENANCE" == "false" ]]; then
     REQUIRE_FLAG="--no-require"
   fi
   if ! python -m abicheck.frontends.action.cli read-analysis-context \

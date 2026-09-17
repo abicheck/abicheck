@@ -371,4 +371,102 @@ class TestTheBindOptionParsing:
 
         result = self._invoke(tmp_path)
         assert result.exit_code == EXIT_REFUSED, result.output
-        assert "ARCH" in result.output
+        # The *specific* refusal, not merely a refusal mentioning the name.
+        # With no `--bind` given the CLI passes an EMPTY binding map, and
+        # under a truthiness test that map skipped binding altogether -- the
+        # declaration then reached the resolver with a literal `${ARCH}` in
+        # the path and failed as a missing artifact, whose message also
+        # contains "ARCH". This test passed against both behaviours until
+        # it named the one it means.
+        assert "is not a value this run binds" in result.output
+
+
+class TestBindingIsAppliedForAnEmptyMap:
+    """An explicitly empty binding map still binds -- and so still refuses.
+
+    Distinguished from *no* map at all: ``bindings=None`` means the caller
+    is not using the feature and a `${NAME}` is whatever the resolver makes
+    of it; ``bindings={}`` means the caller stated that this declaration
+    binds nothing, which makes every placeholder in it unbound.
+    """
+
+    SPEC = [{"name": "core", "path": "build/${ARCH}/libcore.so"}]
+
+    def test_an_empty_map_refuses_an_unbound_placeholder(self, tmp_path: Any) -> None:
+        from abicheck.frontends.action.library_selection import (
+            SelectionError,
+            resolve_library_set,
+        )
+
+        with pytest.raises(SelectionError) as excinfo:
+            resolve_library_set(self.SPEC, root=tmp_path, bindings={})
+        assert "is not a value this run binds" in str(excinfo.value)
+
+    def test_a_declaration_with_no_placeholder_is_unaffected_by_an_empty_map(
+        self, tmp_path: Any
+    ) -> None:
+        # Vacuity guard on the test above: if an empty map refused
+        # *everything*, that assertion would pass without saying anything
+        # about placeholders.
+        from abicheck.frontends.action.library_selection import (
+            SelectionError,
+            resolve_library_set,
+        )
+
+        spec = [{"name": "core", "path": "build/libcore.so"}]
+        with pytest.raises(SelectionError) as excinfo:
+            resolve_library_set(spec, root=tmp_path, bindings={})
+        assert "is not a value this run binds" not in str(excinfo.value)
+
+
+class TestTwoKeysMayNotCollapseOntoOne:
+    """Binding a dict key is allowed; binding two onto one is not."""
+
+    def test_two_distinct_keys_binding_to_the_same_key_refuses(self) -> None:
+        from abicheck.frontends.action.library_selection import (
+            SelectionError,
+            bind_declaration,
+        )
+
+        with pytest.raises(SelectionError) as excinfo:
+            bind_declaration(
+                [{"${A}": "first", "${B}": "second"}], {"A": "path", "B": "path"}
+            )
+        assert "collapses two distinct keys" in str(excinfo.value)
+
+    def test_the_colliding_key_is_named(self) -> None:
+        from abicheck.frontends.action.library_selection import (
+            SelectionError,
+            bind_declaration,
+        )
+
+        with pytest.raises(SelectionError) as excinfo:
+            bind_declaration([{"${A}": 1, "${B}": 2}], {"A": "p", "B": "p"})
+        assert "'p'" in str(excinfo.value)
+
+    def test_keys_that_stay_distinct_are_bound_normally(self) -> None:
+        # Vacuity guard: a rule that refused every bound key would pass the
+        # two assertions above while breaking the feature entirely.
+        from abicheck.frontends.action.library_selection import bind_declaration
+
+        bound = bind_declaration([{"${A}": 1, "${B}": 2}], {"A": "left", "B": "right"})
+        assert bound == [{"left": 1, "right": 2}]
+
+    def test_a_collision_nested_deeper_is_caught_too(self) -> None:
+        # The walk is recursive, so the rule must hold at every depth, not
+        # only at the object the caller happens to hand in.
+        from abicheck.frontends.action.library_selection import (
+            SelectionError,
+            bind_declaration,
+        )
+
+        with pytest.raises(SelectionError):
+            bind_declaration([{"outer": {"${A}": 1, "${B}": 2}}], {"A": "x", "B": "x"})
+
+    def test_the_same_key_in_two_different_objects_is_not_a_collision(self) -> None:
+        # Scoped per object: two sibling components legitimately carry the
+        # same field name.
+        from abicheck.frontends.action.library_selection import bind_declaration
+
+        bound = bind_declaration([{"${A}": 1}, {"${A}": 2}], {"A": "k"})
+        assert bound == [{"k": 1}, {"k": 2}]

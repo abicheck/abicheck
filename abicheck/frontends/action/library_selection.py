@@ -495,7 +495,22 @@ def bind_declaration(spec: Any, bindings: Mapping[str, str]) -> Any:
         if isinstance(node, list):
             return [_walk(item) for item in node]
         if isinstance(node, dict):
-            return {_walk(key): _walk(value) for key, value in node.items()}
+            bound: dict[Any, Any] = {}
+            for key, value in node.items():
+                new_key = _walk(key)
+                if new_key in bound:
+                    # Two distinct declared keys that bind to the SAME key
+                    # silently lose one -- last write wins, and the field
+                    # that vanished is the one the author wrote first. That
+                    # is a configuration error the author must see, not a
+                    # dropped component discovered later as a mismatch.
+                    raise SelectionError(
+                        f"binding collapses two distinct keys onto {new_key!r} "
+                        "in the same object -- one would silently overwrite the "
+                        "other; give them values that stay distinct"
+                    )
+                bound[new_key] = _walk(value)
+            return bound
         return node
 
     return _walk(spec)
@@ -522,7 +537,11 @@ def resolve_library_set(
     must see before any dump runs, not a component quietly dropped from the
     baseline-set (which would later read as "this library was removed").
     """
-    if bindings:
+    if bindings is not None:
+        # `is not None`, not truthiness: an explicitly EMPTY binding map is a
+        # caller stating "this declaration binds nothing", and must therefore
+        # still refuse an unbound `${NAME}` rather than pass the template
+        # through to be parsed as a literal path.
         spec = bind_declaration(spec, bindings)
     root = Path(root).resolve()
     if not root.is_dir():
