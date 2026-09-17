@@ -140,9 +140,13 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from perf_baseline import (  # noqa: E402
+    add_memory_gate_arguments,
     apply_regression_gate,
+    check_memory_ceiling as _check_memory_gate,
     check_regressions as check_regressions,
+    check_rss_ceiling as _check_rss_gate,
     load_baseline as _load_baseline,
+    load_memory_baseline,
     matched_baseline_points,
 )
 from perf_measurement import (  # noqa: E402
@@ -1712,6 +1716,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "percentage tolerance, the historical behaviour). CI passes a nonzero "
         "value; see docs/contribute/performance.md.",
     )
+    add_memory_gate_arguments(p)
     p.add_argument(
         "--meta",
         action="append",
@@ -1773,53 +1778,13 @@ def _check_exponent_gate(
     return []
 
 
-def _check_memory_gate(
-    scenario: str,
-    points: list[Point],
-    max_memory_mb: float,
-) -> list[str]:
-    """Return a failure message if peak memory of any point exceeds *max_memory_mb*."""
-    mem_points = [p for p in points if p.peak_mb is not None]
-    if not mem_points:
-        return []
-    worst_mem = max(mem_points, key=lambda p: p.peak_mb or 0.0)
-    if worst_mem.peak_mb is not None and worst_mem.peak_mb > max_memory_mb:
-        return [
-            f"{scenario}: peak {worst_mem.peak_mb:.1f} MiB at "
-            f"size={worst_mem.size} exceeds "
-            f"--max-memory-mb={max_memory_mb}"
-        ]
-    return []
-
-
-def _check_rss_gate(
-    scenario: str,
-    points: list[Point],
-    max_rss_mb: float,
-) -> list[str]:
-    """Return a failure message if process peak RSS exceeds *max_rss_mb*.
-
-    ``rss_mb`` is a monotonic process high-water mark, so the largest point's
-    value is the true peak.
-    """
-    rss_points = [p for p in points if p.rss_mb is not None]
-    if not rss_points:
-        return []
-    worst = max(rss_points, key=lambda p: p.rss_mb or 0.0)
-    if worst.rss_mb is not None and worst.rss_mb > max_rss_mb:
-        return [
-            f"{scenario}: process peak RSS {worst.rss_mb:.1f} MiB "
-            f"exceeds --max-rss-mb={max_rss_mb}"
-        ]
-    return []
-
-
 def _run_scenario(
     scenario: str,
     args: argparse.Namespace,
     track_memory: bool,
     baseline_points: dict[tuple[str, int], float],
     report: dict[str, object],
+    memory_baseline_points: dict[tuple[str, int], float] | None = None,
 ) -> tuple[list[str], int]:
     """Run a single scenario; return (gate-failure messages, baseline-overlap count).
 
@@ -1888,6 +1853,9 @@ def _run_scenario(
                 spec_tolerance=spec.regress_tolerance,
                 spec_min_delta=spec.regress_min_delta_seconds,
                 record_into=report["scenarios"][scenario],  # type: ignore[index,arg-type]
+                memory_baseline=memory_baseline_points,
+                cli_memory_tolerance=args.regress_memory_tolerance,
+                cli_min_delta_mb=args.regress_min_delta_mb,
             )
         )
     return failures, overlap
@@ -1943,6 +1911,7 @@ def main(argv: list[str] | None = None) -> int:
     failures: list[str] = []
 
     baseline_points: dict[tuple[str, int], float] = {}
+    memory_baseline_points: dict[tuple[str, int], float] = {}
     baseline_required = args.baseline is not None
     if baseline_required:
         baseline_points = _load_baseline(args.baseline, args.regress_tolerance)
@@ -1962,10 +1931,23 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
 
+        # Memory comes from the *same* report; see load_memory_baseline() for
+        # why that half is not fail-closed the way the timing half above is.
+        memory_baseline_points = load_memory_baseline(
+            args.baseline,
+            tolerance=args.regress_memory_tolerance,
+            track_memory=track_memory,
+        )
+
     overlap_total = 0
     for scenario in scenarios:
         scenario_failures, overlap = _run_scenario(
-            scenario, args, track_memory, baseline_points, report
+            scenario,
+            args,
+            track_memory,
+            baseline_points,
+            report,
+            memory_baseline_points=memory_baseline_points,
         )
         failures.extend(scenario_failures)
         overlap_total += overlap

@@ -677,6 +677,7 @@ peak-memory tracking and PR-vs-base drift detection. Current status:
 | **Fuzzy rename matching (accept path)** | ✅ covered | `fuzzy_rename_churn` — every symbol genuinely renamed → one `func_likely_renamed` per pair, the cost driver P11-refined identified (ICU 2134 renames = 94.5 s; rename detection, *not* symbol count, dominates). The pre-existing `rename_churn` only exercised the *reject* path (disjoint names, zero matches). Linear at ICU scale (≤8 k). |
 | **Version-node migration fan-out (LLVM bump)** | ✅ covered | `version_node_churn` — every export moves `LIB_1.0 → LIB_2.0`, reproducing the LLVM 17→18 36,991-`symbol_moved_version_node` shape and the post-processing fan-out over it. Linear to 50 k. |
 | Peak memory (all scenarios) | ✅ covered | `tracemalloc` `peak_mb` column + `--max-memory-mb` gate (cold-cache pass), **plus** process `rss_mb` (`resource.getrusage`) + `--max-rss-mb` gate — RSS catches native (pyelftools / `c++filt`) allocations `tracemalloc` cannot see (the ~330 MiB LLVM-scale figure). |
+| **Historical / PR-vs-base memory regression** | ✅ covered (gating) | `--regress-memory-tolerance`/`--regress-min-delta-mb` + the `memory-regression` workflow job compare peak tracked heap against the base branch under `max(20%, 4 MiB)`. Before it, memory was gated only against an absolute ceiling, which a doubling well under that ceiling passed silently. See [Memory regression](#memory-regression). |
 | **Historical / PR-vs-base regression** | ✅ covered (now gating) | `--baseline`/`--regress-tolerance` + the `regression` workflow job measure the base branch and PR head on the same runner and flag scenarios that got slower by more than the tolerance — catching *gradual* drift the per-run exponent misses. `continue-on-error` is dropped, so it now blocks. See [Baseline regression](#baseline-regression). |
 | **Dump / snapshot creation (DWARF/PE/PDB)** | ⚠️ partial | The synthetic harness can't run the real parsers. The ELF **symbol-table** parse **and** the **DWARF** debug-info parse (`-g` build) are now guarded by `tests/test_perf_dump_scaling.py` (`integration`, gcc-only) — DWARF being the dominant real-library dump cost (ICU 18.6 MB snapshot, openblas 23 MB / 9.5 s). The `serialize` scenario proxies the rest of the pipeline. **PE/COFF + PDB parsing remains unbenchmarked** — those need a committed binary or a synthetic byte-stream generator (no Linux-only toolchain produces them). |
 | Appcompat HTML / stack analysis / appcompat filtering | ⚠️ not benchmarked | `stack_checker` runs one `compare()` per dependency (inherent). Appcompat filtering uses set-membership lookups (`appcompat.py` — O(1) per change, **likely already fine**) and `appcompat_html.py` is linear by inspection; neither is timed. |
@@ -720,6 +721,60 @@ python scripts/benchmark_scaling.py --repeat 5 \
     --baseline base.json \
     --regress-tolerance 0.15 --regress-min-delta-seconds 0.1
 ```
+
+### Memory regression
+
+The rule above gates *time*. Peak memory has had the same treatment since the
+`memory-regression` workflow job was added:
+
+```bash
+# Same two-step shape, with memory tracking left ON (no --no-memory), and
+# --repeat 1 because a tracemalloc peak is an allocation count, not a
+# wall-clock duration, so repeats buy far less than they do for timing.
+python scripts/benchmark_scaling.py --repeat 1 --json-out base-memory.json
+
+python scripts/benchmark_scaling.py --repeat 1 \
+    --baseline base-memory.json \
+    --regress-tolerance 100 \
+    --regress-memory-tolerance 0.20 --regress-min-delta-mb 4
+```
+
+A point regresses once its peak exceeds the baseline's by more than
+`max(--regress-memory-tolerance x baseline, --regress-min-delta-mb)` — the
+same combined relative/absolute rule as the timing gate, computed by the same
+`perf_measurement.combined_regression_threshold`, so the two cannot drift
+apart. The memory defaults are **tighter** (20 % / 4 MiB, against 50 % / 0 s):
+a `tracemalloc` peak counts bytes the interpreter actually allocated and does
+not move with GC timing, scheduler preemption or a cold cache, so the noise
+that forces a loose timing tolerance is largely absent. Baseline peaks below
+an 8 MiB floor are skipped, for the same reason the timing rule ignores
+sub-50 ms points: at that size, fixture and import allocations dominate the
+figure rather than the code under test.
+
+The memory baseline is read from the *same* `--baseline` report — a
+`benchmark_scaling.py` report already carries `peak_mb` on every point, so
+there is no second file to keep in sync. A baseline produced with
+`--no-memory` (or by a build predating this gate) carries no `peak_mb` at all;
+that is reported as an inactive memory gate rather than treated as "allocated
+nothing", which would otherwise flag every point in every run. The timing gate
+still fails closed on an empty baseline, so a wholly missing or malformed
+baseline is still caught.
+
+**Why this is a separate CI job** (`memory-regression`, not another flag on
+`regression`): tracing the heap is not timing-neutral. `measure()`'s memory
+pass clears every live `lru_cache` between sizes and runs an extra untimed
+cold call, which is precisely the bias the timing job's own `--no-memory`
+comment documents. Timing and memory therefore cannot be gated from one run.
+In the memory job memory is on for *both* sides, so that bias applies equally
+and cancels; the timing tolerance there is explicitly neutralised
+(`--regress-tolerance 100`) so a distorted timing can never fail a memory job.
+
+**What it closes.** `peak_mb` was recorded long before it was gated, and was
+checked only against the absolute ceilings `--max-memory-mb`/`--max-rss-mb`.
+An absolute ceiling catches a regression only once it crosses the ceiling, so
+a change doubling a scenario's allocation from 200 MiB to 400 MiB passed the
+2048 MiB ceiling in silence — exactly the gradual drift the timing side had
+had a base-branch comparison for since PR #768.
 
 Each point's reported/gated figure is the **median** of its timed repeats (plus
 one untimed warmup) — not the fastest one; see `scripts/perf_measurement.py`

@@ -14,6 +14,16 @@ name: Performance
 # deliberately CLI flags so the budget lives in this workflow, not the script —
 # loosen a threshold rather than re-adding `continue-on-error` if normal drift
 # ever flakes the lane.
+#
+# Time and memory are gated by two separate jobs, `regression` and
+# `memory-regression`, because they cannot be measured in one run: tracing the
+# heap is not timing-neutral (see `regression`'s own --no-memory comment). The
+# memory job blocks on a PR-vs-base growth of more than max(20%, 4 MiB) in peak
+# tracked heap for the same (scenario, size) — tighter than the timing
+# tolerance because an allocation count does not move with scheduler noise the
+# way a wall-clock duration does. Before it existed, memory was gated only
+# against an absolute ceiling, which a doubling well under that ceiling passed
+# in silence.
 
 on:
   workflow_dispatch:
@@ -372,6 +382,119 @@ jobs:
             cat regression.txt 2>/dev/null || echo "(no output captured)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Memory regression (PR vs base) — the space counterpart of the `regression`
+  # job above, and a separate job on purpose rather than another flag on it.
+  #
+  # Why it exists: `benchmark_scaling.py` has always *recorded* `peak_mb`, and
+  # the `scaling` job gates it against an absolute ceiling (--max-rss-mb 2048).
+  # An absolute ceiling only catches a regression once it crosses the ceiling,
+  # so a change that doubled a scenario's allocation from 200 MiB to 400 MiB
+  # passed in silence. The gradual drift the timing side has had a base-branch
+  # comparison for since PR #768 had no equivalent on the memory side; this is
+  # that equivalent.
+  #
+  # Why not just drop --no-memory from `regression`: that job measures *time*,
+  # and measure()'s memory pass is not timing-neutral (it clears every live
+  # lru_cache between sizes and runs an extra untimed cold call) — the exact
+  # bias its own --no-memory comment documents. Timing and memory therefore
+  # cannot be gated from one run; they are two runs. Here memory is on for
+  # *both* sides, so that bias applies equally to base and head and cancels.
+  #
+  # The timing gate is explicitly disabled here (--regress-tolerance 100), not
+  # left at its default: with tracemalloc active these timings are distorted by
+  # construction, so a timing failure from this job would be an artifact of the
+  # instrument. Timing is gated by `regression`, memory by this job, and
+  # neither pretends to gate the other.
+  #
+  # --repeat 1 because a tracemalloc peak is a count of bytes the interpreter
+  # actually allocated, not a wall-clock duration: it does not move with GC
+  # timing or scheduler preemption, so repeats buy far less here than they do
+  # for timing and cost the full run again.
+  memory-regression:
+    name: Memory regression (PR vs base)
+    needs: classify
+    if: github.event_name == 'pull_request' && needs.classify.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout base
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+
+      - name: Checkout head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          path: head
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.14"
+
+      - name: Install system tools
+        env:
+          INPUT_PACKAGES: binutils
+        run: bash head/.github/actions/install-system-deps/install.sh
+
+      - name: Measure base branch memory
+        run: |
+          set -euo pipefail
+          python -m venv base_env
+          ./base_env/bin/pip install -q --upgrade pip
+          ./base_env/bin/pip install -q -e "./base[dev]"
+          # HEAD's harness against base's installed package, for the same two
+          # reasons the `regression` job documents: base's copy may not know a
+          # flag this PR added, and a changed measurement methodology must not
+          # be compared against itself.
+          ./base_env/bin/python head/scripts/benchmark_scaling.py \
+            --sizes 500 1000 2000 --repeat 1 \
+            --meta git_sha=${{ github.event.pull_request.base.sha }} \
+            --meta side=base \
+            --meta os_image=${ImageOS:-unknown} \
+            --json-out base-memory.json
+
+      - name: Measure head memory and compare to base
+        run: |
+          # pipefail so the harness's nonzero exit on a detected regression is
+          # not masked by `tee`.
+          set -euo pipefail
+          python -m venv head_env
+          ./head_env/bin/pip install -q --upgrade pip
+          ./head_env/bin/pip install -q -e "./head[dev]"
+          ./head_env/bin/python head/scripts/benchmark_scaling.py \
+            --sizes 500 1000 2000 --repeat 1 \
+            --meta git_sha=${{ github.event.pull_request.head.sha }} \
+            --meta side=head \
+            --meta os_image=${ImageOS:-unknown} \
+            --baseline base-memory.json \
+            --regress-tolerance 100 \
+            --regress-memory-tolerance 0.20 --regress-min-delta-mb 4 \
+            | tee memory-regression.txt
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## Memory regression (PR vs base)"
+            echo ""
+            echo '```'
+            cat memory-regression.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload memory reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: memory-regression-reports
+          path: |
+            base-memory.json
+            memory-regression.txt
+          if-no-files-found: warn
 
   # G31 Phase D: the header-only (L2) semantic graph's always-on attach cost
   # (service._attach_header_graph, unconditional since G31 Phase A). Report-only
