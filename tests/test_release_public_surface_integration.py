@@ -43,6 +43,7 @@ witness that they hold through ``abicheck compare``.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -389,3 +390,122 @@ class TestUnrelatedMembersDoNotMultiplyFindings:
         ]
         assert len(three["shared_findings"]) == len(two["shared_findings"])
         assert len(three["missing_exports"]) == len(two["missing_exports"])
+
+
+class TestAConditionalDeclarationStaysInTheContract:
+    """The reported input, end to end: a declaration behind ``#ifdef
+    FEATURE`` with ``compile.defines: [FEATURE]`` configured.
+
+    Before the fix the release-level acquisition hashed the resolved compile
+    context into its key but parsed without it, so this declaration never
+    entered the product's contract at all: the two-library release saw 2
+    obligations instead of 3, reported no missing export, and exited 0 --
+    while the same product as a single member reported
+    ``public_not_exported: api_c`` and exited 2 (Codex security review, PR
+    #1328). The class-level guard lives in
+    ``tests/test_release_public_surface.py``'s
+    ``TestTheResolvedCompileContextReachesTheParse``; this is the
+    real-toolchain witness.
+    """
+
+    _HEADER = """\
+#pragma once
+#ifdef __cplusplus
+extern "C" {
+#endif
+int api_a(int x);
+int api_b(int x);
+#ifdef FEATURE
+int api_c(int x);
+#endif
+#ifdef __cplusplus
+}
+#endif
+"""
+
+    def _product(self, root: Path) -> Path:
+        include = root / "include"
+        lib = root / "lib"
+        include.mkdir(parents=True)
+        lib.mkdir(parents=True)
+        (include / "product.h").write_text(self._HEADER, encoding="utf-8")
+        for name, body in (("a", "api_a"), ("b", "api_b")):
+            src = root / f"{name}.c"
+            src.write_text(
+                f'#include "product.h"\nint {body}(int x) {{ return x; }}\n',
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    "gcc",
+                    "-shared",
+                    "-fPIC",
+                    "-o",
+                    str(lib / f"lib{name.upper()}.so"),
+                    str(src),
+                    f"-I{include}",
+                ],
+                check=True,
+                capture_output=True,
+            )
+        return root
+
+    @pytest.fixture
+    def configured_product(self, tmp_path: Path) -> tuple[Path, Path]:
+        _require_toolchain()
+        (tmp_path / ".abicheck.yml").write_text(
+            "compile:\n  lang: c\n  defines:\n    - FEATURE\n", encoding="utf-8"
+        )
+        return self._product(tmp_path / "old"), self._product(tmp_path / "new")
+
+    @staticmethod
+    def _compare_in(cwd: Path, old: Path, new: Path) -> dict:
+        """Run `compare` with *cwd* as the working directory, which is how
+        the `.abicheck.yml` beside the fixture is discovered at all."""
+        out = cwd / "report.json"
+        previous = Path.cwd()
+        os.chdir(cwd)
+        try:
+            result = CliRunner().invoke(
+                main,
+                [
+                    "compare",
+                    str(old / "lib"),
+                    str(new / "lib"),
+                    "--header",
+                    f"old={old / 'include'}",
+                    "--header",
+                    f"new={new / 'include'}",
+                    "-o",
+                    f"json={out}",
+                ],
+            )
+        finally:
+            os.chdir(previous)
+        assert out.exists(), result.output
+        return json.loads(out.read_text(encoding="utf-8"))
+
+    def test_the_guarded_declaration_is_part_of_the_contract(
+        self, configured_product: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        report = self._compare_in(tmp_path, *configured_product)
+        side = report["public_surface_reconciliation"]["sides"]["new"]
+        assert side["public_declarations_with_export_obligation"] == 3
+
+    def test_its_missing_export_is_reported_once_at_release_level(
+        self, configured_product: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        report = self._compare_in(tmp_path, *configured_product)
+        missing = report["public_surface_reconciliation"]["missing_exports"]
+        assert [f["symbol"] for f in missing] == ["api_c"]
+
+    def test_the_declarations_a_sibling_provides_are_still_satisfied(
+        self, configured_product: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """The fix must not reintroduce the Cartesian product: ``api_a`` and
+        ``api_b`` are each exported by one member and stay satisfied."""
+        side = self._compare_in(tmp_path, *configured_product)[
+            "public_surface_reconciliation"
+        ]["sides"]["new"]
+        assert side["satisfied_by_bundle_exports"] == 2
+        assert [f["symbol"] for f in side["missing_from_bundle"]] == ["api_c"]

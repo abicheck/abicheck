@@ -54,3 +54,16 @@
   reconciliation *incomplete* — obligations recorded as unresolved with the
   coverage gap named — rather than turning an absent symbol into a missing
   export.
+
+- The release-level public-surface acquisition now parses under the run's
+  resolved `compile:` context (compiler, prefix, options/defines, sysroot,
+  `nostdinc`, AST frontend and frontend context), not only keys on it. It
+  hashed the context into its acquisition key while parsing without it, so
+  a declaration behind `#ifdef FEATURE` with `compile.defines: [FEATURE]`
+  configured never entered the product's contract: a two-library release
+  saw 2 export obligations instead of 3 and exited 0, while the identical
+  product as a single member reported `public_not_exported: api_c` and
+  exited 2. The AST frontend is now derived from that same context by one
+  resolver feeding both the key and the parse, closing the sibling case
+  where two runs differing only in `compile.frontend` keyed identically.
+  Found by Codex security review on PR #1328.

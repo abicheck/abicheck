@@ -127,6 +127,18 @@ def _compile_options(
     return tuple(sorted(pairs))
 
 
+def resolve_surface_backend(compile_context: CompileContext | None) -> str:
+    """The header-AST backend the run's resolved compile context selects.
+
+    One function, used for *both* the acquisition identity and the parse, so
+    the two cannot disagree: a key that folded in a backend the parse did not
+    actually use would let two genuinely different acquisitions share one
+    surface. ``"auto"`` with no context, which is what every pre-existing
+    caller already got.
+    """
+    return str(getattr(compile_context, "frontend", None) or "auto")
+
+
 def build_side_identity(
     headers: Sequence[Path],
     includes: Sequence[Path],
@@ -137,7 +149,6 @@ def build_side_identity(
     compile_context: CompileContext | None,
     depth: str | None,
     include_dependencies: bool,
-    backend: str = "auto",
 ) -> SurfaceAcquisitionIdentity:
     """The acquisition identity for one release side's header request.
 
@@ -163,7 +174,7 @@ def build_side_identity(
         ),
         lang=lang or "",
         lang_explicit=bool(lang),
-        backend=backend,
+        backend=resolve_surface_backend(compile_context),
         frontend_context=str(
             getattr(compile_context, "frontend_context", None) or "host"
         ),
@@ -295,6 +306,18 @@ def reconcile_release_public_surface(
             ledger=ledger,
             headers=expanded,
             includes=[Path(i) for i in includes],
+            # The resolved compile context reaches the *parse*, not only the
+            # key. Hashing it while parsing without it is the worst of both:
+            # two differently-configured runs key apart, and every one of
+            # them acquires a surface that ignores the configuration the
+            # member dumps honor -- so a declaration behind `#ifdef FEATURE`
+            # with `compile.defines: [FEATURE]` set silently leaves the
+            # product's contract, and its missing export stops being
+            # reported at all (Codex security review, PR #1328). The backend
+            # comes from the same resolved context, through the one function
+            # the identity above also uses.
+            compile_context=compile_context,
+            backend=resolve_surface_backend(compile_context),
             public_headers=[Path(h) for h in headers if Path(h).is_file()],
             public_header_dirs=[
                 *(Path(h) for h in headers if Path(h).is_dir()),

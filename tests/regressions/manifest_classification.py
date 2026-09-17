@@ -346,6 +346,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(),
         seed_tests=(
             "tests/test_release_public_surface.py",
+            "tests/test_release_surface_acquisition_context.py",
             "tests/test_release_public_surface_integration.py",
         ),
         public_surfaces=("cli",),
@@ -354,6 +355,9 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "coverage": ("complete", "failed_member", "no_export_table"),
             "evolution": ("introduced", "resolved", "persistent", "not_evaluated"),
             "export_binding": ("default", "non_default_version_alias"),
+            # The set-level acquisition must parse under the configuration
+            # the per-member pass honors, not only key on it.
+            "acquisition_context": ("absent", "resolved_compile_context"),
         },
         known_gaps=(
             KnownGap(
@@ -365,6 +369,19 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
                     "second instance would still be found by hand."
                 ),
                 reference="docs/learn/products-not-libraries.md",
+            ),
+            KnownGap(
+                description=(
+                    "Moving a check to the set level moves what its answer "
+                    "depends on: the set-level acquisition must honor every "
+                    "AST-affecting input the per-member pass honors, or the "
+                    "move turns a reported finding into a silently lost one. "
+                    "Covered for `CompileContext` by an exhaustive field "
+                    "sweep; an AST-affecting input that is *not* a field of "
+                    "that object (a future config key read elsewhere) would "
+                    "still be found by hand."
+                ),
+                reference="tests/test_release_public_surface.py",
             ),
             KnownGap(
                 description=(
