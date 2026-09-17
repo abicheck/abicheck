@@ -182,8 +182,7 @@ The GitHub Action supports severity configuration via inputs:
   with:
     old-library: libfoo-v1.json
     new-library: libfoo-v2.json
-    severity-addition: error        # fail on new API additions
-    # severity-preset: strict       # or use a preset
+    severity-preset: strict         # fail on new API additions too
 ```
 
 Per-category overrides are not Action inputs and are not `extra-args`

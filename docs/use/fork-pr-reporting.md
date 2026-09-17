@@ -88,11 +88,11 @@ jobs:
       - uses: abicheck/abicheck@v1
         continue-on-error: true          # the gate is reported, not enforced here
         with:
-          old: baseline/libexample.so
-          new: build/libexample.so
-          headers: include/
+          old-library: baseline/libexample.so
+          new-library: build/libexample.so
+          header: include/
           format: json
-          output: reports/compare.json
+          output-file: reports/compare.json
 
       - uses: actions/upload-artifact@v4
         with:
