@@ -66,8 +66,6 @@ class SurfaceGraph:
     types_by_name: Mapping[str, RecordType]
     # type name -> set of type names it references (fields, bases, typedef target)
     type_refs: Mapping[str, frozenset[str]]
-    # type name -> public root symbols that transitively reach it
-    reached_by: Mapping[str, frozenset[str]]
     # header path -> declaration names defined there
     by_header: Mapping[str, frozenset[str]]
     # public root symbol -> the type names its signature directly references
@@ -242,15 +240,6 @@ def _build_by_header(snap: AbiSnapshot) -> dict[str, set[str]]:
     return by_header
 
 
-def _build_reached_by(graph: SurfaceGraph) -> dict[str, frozenset[str]]:
-    """Compute the inverse reachability closure: type name -> public roots that reach it."""
-    reached_by: dict[str, set[str]] = {}
-    for root in graph.public_roots():
-        for t in graph.reachable_types(root):
-            reached_by.setdefault(t, set()).add(root)
-    return {k: frozenset(v) for k, v in sorted(reached_by.items())}
-
-
 def build_surface_graph(
     snap: AbiSnapshot, *, public_entity_ids: frozenset[EntityId] | None = None
 ) -> SurfaceGraph:
@@ -274,13 +263,9 @@ def build_surface_graph(
         functions_by_name=dict(sorted(functions_by_name.items())),
         types_by_name=dict(sorted(types_by_name.items())),
         type_refs=dict(sorted(type_refs.items())),
-        reached_by={},  # filled below
         by_header={k: frozenset(v) for k, v in sorted(by_header.items())},
         _root_seed_types=dict(sorted(root_seed_types.items())),
     )
-
-    # Inverse closure: type name -> roots that reach it.
-    object.__setattr__(graph, "reached_by", _build_reached_by(graph))
     return graph
 
 

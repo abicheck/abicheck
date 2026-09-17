@@ -9877,3 +9877,93 @@ declaration's `is_inline`, which is a fact about declaration linkage, not
 proof that a consumer emitted its own copy; and the recovered owner path for
 a class-template specialization names only the primary template, since this
 repository has no Itanium type decoder.
+
+## Snapshot digest/save amplification is dominated by `to_sectioned_document`, not by the encoder (2026-09-17)
+
+Measured while fusing `snapshot_to_dict()`'s two encoding passes into one (see
+that change's changelog fragment). Stage-by-stage `tracemalloc` peaks for
+`_uncached_snapshot_content_digest()` over a synthetic 20,000-function
+snapshot whose live model is 36.35 MiB:
+
+| stage | peak |
+|---|---|
+| `snapshot_to_dict()` (after the fusing change) | 102.2 MiB |
+| `to_sectioned_document(...)` | **576.1 MiB** |
+| `json.dumps(..., indent=2)` | 318.2 MiB (an 87.0 MiB string) |
+| `.encode()` | 396.4 MiB |
+| whole function | 576.1 MiB |
+
+So the digest path peaks at roughly **16x the live model**, and the single
+largest contributor is neither the encoder nor the JSON text but
+`to_sectioned_document()`, which repackages the already-encoded document
+through `import_legacy_snapshot` -> `InMemoryObjectStore.put`. That path builds
+a DTO tree, a `to_dict()` tree, a `strip_capture_metadata()` tree, and a
+canonical-JSON string for hashing — several more whole-document copies, layered
+on top of the one the encoder just produced.
+
+**What was tried and deliberately reverted.** Feeding
+`json.JSONEncoder.iterencode` fragments into a running `sha256`, instead of
+`dumps(...).encode()`, was implemented and measured. It removes the 318 MiB
+string and the 396 MiB bytes copy, and it is exactly equivalent
+(`"".join(iterencode(o)) == dumps(o)`) — but it changed the measured peak of
+the function *not at all* (576.1 MiB either way), because both allocations
+happen strictly after `to_sectioned_document` has already peaked above them,
+and it cost ~20% wall time from the per-fragment encode loop. It is recorded in
+`_uncached_snapshot_content_digest`'s own docstring so the next person does not
+re-derive it. The lesson generalises: optimising a stage downstream of the peak
+buys nothing, so profile the stages before picking one.
+
+**Why it was not fixed here.** The copies live in the content-addressed package
+layer, and the digests it produces are persisted content addresses — bounding
+them means changing how `ObjectStore.put` canonicalises and hashes, which is a
+storage-format decision needing its own ADR and migration rather than a
+serializer patch. ADR-063 Phase 8's `project-snapshot-dto-no-asdict` gate is
+already pointed at the same family of DTO files, which is the natural place for
+that work to land.
+
+Note this is the *digest and single-file save* path specifically. The
+multi-library bundle writer does not go through it — it encodes each member
+with `snapshot_to_dict()` directly, and its own whole-bundle retention was
+fixed (see `storage/bundle_facts_archive.py`). **No claim is made here that
+large-library OOM is solved**: the remaining resident cost of a real comparison
+is still the two side models plus, on this path, several transient copies of
+the encoded document.
+
+## `SurfaceGraph.reached_by` was built for every graph and read by nobody (2026-09-17)
+
+Recorded as a class, not an incident. `reached_by` was materialised eagerly at
+`build_surface_graph()` time from ADR-027's original design sketch, at
+O(roots x types) cost, and a full-tree audit found its only readers were three
+test assertions and the ADR's own code block — no production consumer ever
+existed. It has been removed; the relation is still derivable in two lines from
+`public_roots()` and `reachable_types()`.
+
+The general point for the next index added to a shared structure: an eagerly
+materialised derived relation on a widely-constructed object is paid for by
+every construction, including the overwhelming majority that never read it, and
+nothing in the type system or the test suite reports that. When adding a field
+like this, either give it a consumer in the same change or compute it at the
+query that needs it.
+
+## The release fan-out's future map is not a last owner, so dropping it saves nothing (2026-09-17)
+
+Checked while looking for lifetime wins after the encoder/archive work above,
+and recorded as a negative result so it is not "fixed" speculatively later.
+
+`cli_compare_release_pairwise.py`'s parallel fan-out builds
+`futures = {executor.submit(...): key for key in matched_keys}` and keeps the
+whole mapping alive until the `with ThreadPoolExecutor(...)` block exits. That
+looks like per-member results being retained for the length of the run, and it
+is a real retention — but not of the results. `results_by_key[key] =
+future.result()` stores *the same object* the completed `Future` holds in its
+own `_result` slot, so the dict and the future are two references to one
+result. Releasing the future frees the `Future` wrapper and nothing else; the
+per-library result dict stays owned by `results_by_key`, which the function
+returns.
+
+So the available saving here is a few hundred bytes per member, not a member's
+worth of findings, and any patch that deletes futures as they complete while
+claiming a memory reduction would be measuring its own wrapper objects. A real
+reduction on this path has to shrink or stream what `results_by_key` holds —
+the per-library result payloads themselves — which is a change to what the
+release fan-out returns to its caller, not a lifetime tweak inside the loop.
