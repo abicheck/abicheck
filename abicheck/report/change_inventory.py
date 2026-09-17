@@ -69,6 +69,13 @@ class ChangeInventorySplit:
 
     @property
     def hygiene_total(self) -> int:
+        """Every evolution-stamped finding, whatever state it is in.
+
+        The complement of :attr:`compatibility_changes` within the report's
+        ``total_changes`` -- summed here rather than at each call site so
+        the two populations cannot drift apart when a
+        ``CrossSourceEvolution`` state is added.
+        """
         return (
             self.hygiene_introduced
             + self.hygiene_resolved
@@ -78,6 +85,12 @@ class ChangeInventorySplit:
 
     @property
     def has_hygiene(self) -> bool:
+        """Whether this run carries standing inventory at all.
+
+        What a renderer tests before stating the split: a comparison with
+        no hygiene finding must read exactly as it did before this block
+        existed.
+        """
         return self.hygiene_total > 0
 
 
