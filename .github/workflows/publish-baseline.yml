@@ -53,6 +53,71 @@ on:
           manifest claim is a claim until the files on disk agree.
         type: string
         default: ''
+      baseline-set-source-run-id:
+        description: >-
+          Take the pre-captured baseline-sets from a DIFFERENT, already
+          completed producer run instead of from this workflow's own run
+          (existing-set mode only).
+
+          The same-run path is the easy half: a `workflow_call` job and the
+          job that uploaded the artifact share a run, so the artifact's
+          provenance is the caller's own. A project whose release baselines
+          are published by an automatic `workflow_run` job has no such
+          luxury -- the capture lives in a run that finished earlier -- and
+          at that point the artifact is an input whose origin has to be
+          established rather than assumed.
+
+          So setting this turns on real producer verification: the run's
+          repository, workflow identity, event, id, attempt and conclusion
+          are each checked against what is declared below, its artifacts are
+          selected by their own ids (never re-matched by name at download
+          time, so discovery and download cannot disagree about which bytes
+          these are), and a pull-request-triggered producer is refused
+          unconditionally -- a contributor's own build may not mint a
+          release-contract baseline whatever else is configured.
+
+          Owner: abicheck.frontends.action.precaptured_source.
+        type: string
+        default: ''
+      baseline-set-source-repository:
+        description: >-
+          owner/repo the source run must belong to. Defaults to the calling
+          repository. This is the check that stops the publisher being
+          pointed at an arbitrary run somewhere else on GitHub.
+        type: string
+        default: ''
+      baseline-set-source-run-attempt:
+        description: >-
+          Attempt number the source run must be. Bind this to the attempt
+          that actually triggered the publication
+          (`github.event.workflow_run.run_attempt`) rather than leaving it
+          open: a re-run started between the trigger and the lookup is a
+          different capture, and publishing it under the first attempt's
+          decision is not a choice this workflow gets to make silently.
+          Empty means any attempt.
+        type: string
+        default: ''
+      baseline-set-expect-workflow:
+        description: >-
+          The workflow the source run must be, as its file path
+          (`.github/workflows/release.yml`) or its name. Strongly
+          recommended: a run of a *different* workflow in the same
+          repository may have been produced by a job with different trust.
+        type: string
+        default: ''
+      baseline-set-expect-event:
+        description: >-
+          Event the source run must have been triggered by, e.g. `push`.
+          Narrowing beyond the unconditional pull-request refusal.
+        type: string
+        default: ''
+      baseline-set-allowed-conclusions:
+        description: >-
+          Comma-separated conclusions the source run may have. Empty allows
+          any, which is a real choice for a producer whose capture step
+          deliberately runs after an unrelated test failure.
+        type: string
+        default: 'success'
       release-tag:
         description: 'Release tag this run publishes assets to, and records as each baseline-set''s project-ref. Defaults to github.ref_name (the tag that triggered the calling release workflow).'
         type: string
@@ -174,10 +239,20 @@ jobs:
     name: 'Discover contract profiles'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # `actions: read` only, and only this job. The read-only producer query
+    # and the write-capable publication stay in separate jobs with separate
+    # permission sets: establishing where a capture came from must not be
+    # able to write a release asset, and the job that writes one never
+    # queries a foreign run.
+    permissions:
+      contents: read
+      actions: read
     outputs:
       matrix: ${{ steps.discover.outputs.matrix }}
       has-profiles: ${{ steps.discover.outputs.has-profiles }}
       mode: ${{ steps.mode.outputs.mode }}
+      acquisition: ${{ steps.mode.outputs.acquisition }}
+      source-repository: ${{ steps.mode.outputs.source-repository }}
     steps:
       # Exactly one of the two modes may be configured. Checked before
       # anything is downloaded: a run that captured AND was handed a set
@@ -189,6 +264,9 @@ jobs:
         env:
           BUILD_PREFIX: ${{ inputs.build-output-artifact-prefix }}
           SET_PREFIX: ${{ inputs.baseline-set-artifact-prefix }}
+          SOURCE_RUN_ID: ${{ inputs.baseline-set-source-run-id }}
+          SOURCE_REPOSITORY: ${{ inputs.baseline-set-source-repository }}
+          FALLBACK_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           if [[ -n "$SET_PREFIX" ]]; then
@@ -197,9 +275,46 @@ jobs:
               exit 1
             fi
             echo "mode=existing-set" >> "$GITHUB_OUTPUT"
+            # Where the SET comes from is a second, orthogonal axis: the
+            # same-run path needs no producer verification because the
+            # artifact's provenance is this run's own, while the cross-run
+            # path must establish it. Resolved once here so no later step
+            # re-decides it from whether a value happens to be empty.
+            if [[ -n "$SOURCE_RUN_ID" ]]; then
+              [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]] \
+                || { echo "::error::baseline-set-source-run-id must be a positive integer (got '$SOURCE_RUN_ID')." >&2; exit 1; }
+              echo "acquisition=cross-run" >> "$GITHUB_OUTPUT"
+            else
+              echo "acquisition=same-run" >> "$GITHUB_OUTPUT"
+            fi
           else
+            if [[ -n "$SOURCE_RUN_ID" ]]; then
+              echo "::error::baseline-set-source-run-id names a producer run to publish from, but baseline-set-artifact-prefix is unset, so this run would CAPTURE instead and silently ignore it. Set both, or neither." >&2
+              exit 1
+            fi
             echo "mode=capture" >> "$GITHUB_OUTPUT"
+            echo "acquisition=none" >> "$GITHUB_OUTPUT"
           fi
+          repository="${SOURCE_REPOSITORY:-$FALLBACK_REPOSITORY}"
+          [[ "$repository" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] \
+            || { echo "::error::baseline-set-source-repository must look like owner/repo (got '$repository')." >&2; exit 1; }
+          echo "source-repository=$repository" >> "$GITHUB_OUTPUT"
+
+      # Same self-identification the publish job does (see its own step for
+      # the fuller writeup): a reusable workflow must check out ITS OWN
+      # source, not whatever sits at the calling repository's root.
+      - name: Capture this reusable workflow's identity
+        id: discover-identity
+        shell: bash
+        env:
+          WORKFLOW_REF: ${{ job.workflow_ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          FALLBACK_REPOSITORY: ${{ github.repository }}
+          FALLBACK_REF: ${{ github.sha }}
+        run: |
+          repository="${WORKFLOW_REF%%/.github/workflows/*}"
+          echo "repository=${repository:-$FALLBACK_REPOSITORY}" >> "$GITHUB_OUTPUT"
+          echo "ref=${WORKFLOW_SHA:-$FALLBACK_REF}" >> "$GITHUB_OUTPUT"
 
       - name: Download build-output artifacts
         if: steps.mode.outputs.mode == 'capture'
@@ -209,13 +324,139 @@ jobs:
           pattern: '${{ inputs.build-output-artifact-prefix }}*'
           merge-multiple: false
 
-      - name: Download pre-captured baseline-sets
-        if: steps.mode.outputs.mode == 'existing-set'
+      - name: Download pre-captured baseline-sets (same run)
+        if: steps.mode.outputs.mode == 'existing-set' && steps.mode.outputs.acquisition == 'same-run'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           path: baseline-sets
           pattern: '${{ inputs.baseline-set-artifact-prefix }}*'
           merge-multiple: false
+
+      # ── cross-run acquisition ────────────────────────────────────────────
+      #
+      # `actions/download-artifact` reaches this run's own artifacts and no
+      # others, which is why the same-run path above cannot serve a
+      # `workflow_run` publisher: its capture lives in the run that finished
+      # earlier. So the bytes come through the API instead -- and because
+      # they are then an input with an origin rather than this run's own
+      # evidence, they arrive through the same establishment
+      # `actions/verify-source-run` applies at the publication boundary.
+      - name: Set up Python (cross-run acquisition)
+        if: steps.mode.outputs.mode == 'existing-set' && steps.mode.outputs.acquisition == 'cross-run'
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Checkout abicheck (cross-run acquisition)
+        if: steps.mode.outputs.mode == 'existing-set' && steps.mode.outputs.acquisition == 'cross-run'
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          repository: ${{ steps.discover-identity.outputs.repository }}
+          ref: ${{ steps.discover-identity.outputs.ref }}
+          path: .publish-baseline-src
+          persist-credentials: false
+
+      - name: Install abicheck (cross-run acquisition)
+        if: steps.mode.outputs.mode == 'existing-set' && steps.mode.outputs.acquisition == 'cross-run'
+        shell: bash
+        run: pip install ./.publish-baseline-src
+
+      # Verification and selection in one call, so discovery and download
+      # agree on IDENTITY rather than on a name pattern: the artifacts come
+      # back as ids and every fetch below is bound to one. Re-matching the
+      # prefix at download time would let an artifact added to the run
+      # between the two requests be the one published.
+      - name: Verify the producer run and select its baseline-sets
+        id: source
+        if: steps.mode.outputs.mode == 'existing-set' && steps.mode.outputs.acquisition == 'cross-run'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token != '' && secrets.github-token || secrets.GITHUB_TOKEN }}
+          SOURCE_REPOSITORY: ${{ steps.mode.outputs.source-repository }}
+          SOURCE_RUN_ID: ${{ inputs.baseline-set-source-run-id }}
+          SOURCE_RUN_ATTEMPT: ${{ inputs.baseline-set-source-run-attempt }}
+          EXPECT_WORKFLOW: ${{ inputs.baseline-set-expect-workflow }}
+          EXPECT_EVENT: ${{ inputs.baseline-set-expect-event }}
+          ALLOWED_CONCLUSIONS: ${{ inputs.baseline-set-allowed-conclusions }}
+          SET_PREFIX: ${{ inputs.baseline-set-artifact-prefix }}
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d "${RUNNER_TEMP:-/tmp}/abicheck-source.XXXXXX")"
+          echo "source-work=$work" >> "$GITHUB_OUTPUT"
+
+          if [[ -n "$SOURCE_RUN_ATTEMPT" ]]; then
+            [[ "$SOURCE_RUN_ATTEMPT" =~ ^[0-9]+$ ]] \
+              || { echo "::error::baseline-set-source-run-attempt must be a positive integer (got '$SOURCE_RUN_ATTEMPT')." >&2; exit 1; }
+            # Read the ATTEMPT's own document rather than the run's current
+            # state. Asking for the run and then comparing its run_attempt
+            # answers about whatever attempt is latest by the time the
+            # request lands, so a re-run started after the trigger would
+            # either be published under the first attempt's decision or be
+            # reported as a mismatch that is really a race.
+            endpoint="repos/$SOURCE_REPOSITORY/actions/runs/$SOURCE_RUN_ID/attempts/$SOURCE_RUN_ATTEMPT"
+          else
+            endpoint="repos/$SOURCE_REPOSITORY/actions/runs/$SOURCE_RUN_ID"
+          fi
+          if ! gh api "$endpoint" > "$work/run.json" 2>"$work/run.err"; then
+            echo "::error::could not read $endpoint (need 'actions: read' on $SOURCE_REPOSITORY): $(tr '\n' ' ' < "$work/run.err")" >&2
+            exit 1
+          fi
+
+          if ! gh api --paginate "repos/$SOURCE_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts" \
+                 --jq '.artifacts' > "$work/artifacts.raw" 2>"$work/artifacts.err"; then
+            echo "::error::could not list artifacts for run $SOURCE_RUN_ID: $(tr '\n' ' ' < "$work/artifacts.err")" >&2
+            exit 1
+          fi
+          python3 -m abicheck.frontends.action.cli flatten-pages "$work/artifacts.raw" "$work/artifacts.json"
+
+          SELECT_ARGS=(
+            select-precaptured-source
+            --run-json "$work/run.json"
+            --artifacts-json "$work/artifacts.json"
+            --artifact-prefix "$SET_PREFIX"
+            --expect-repository "$SOURCE_REPOSITORY"
+            --expect-run-id "$SOURCE_RUN_ID"
+            --out "$work/source.json"
+          )
+          [[ -n "$EXPECT_WORKFLOW" ]] && SELECT_ARGS+=(--expect-workflow "$EXPECT_WORKFLOW")
+          [[ -n "$EXPECT_EVENT" ]] && SELECT_ARGS+=(--expect-event "$EXPECT_EVENT")
+          [[ -n "$SOURCE_RUN_ATTEMPT" ]] && SELECT_ARGS+=(--expect-run-attempt "$SOURCE_RUN_ATTEMPT")
+          # `${VAR+set}`, not `${VAR:-}`: "empty allows any conclusion" is a
+          # documented choice, and `:-` would silently substitute the
+          # default over it.
+          if [[ -z "${ALLOWED_CONCLUSIONS:+set}" ]]; then
+            SELECT_ARGS+=(--allow-conclusion "")
+          else
+            IFS=',' read -r -a _conclusions <<< "$ALLOWED_CONCLUSIONS"
+            for _c in "${_conclusions[@]}"; do SELECT_ARGS+=(--allow-conclusion "$_c"); done
+          fi
+
+          if ! python3 -m abicheck.frontends.action.cli "${SELECT_ARGS[@]}"; then
+            code="$(python3 -m abicheck.frontends.action.cli emit-fields --tolerant "$work/source.json" code || true)"
+            echo "::error::run $SOURCE_RUN_ID may not supply a release-contract baseline (${code:-unknown})." >&2
+            exit 1
+          fi
+
+          # Every fetch below names an artifact ID the step above returned.
+          # The archive is then unpacked through the same hostile-input
+          # protections the publication boundary uses -- it came from another
+          # run, so it gets the same treatment regardless of who produced it.
+          mkdir -p baseline-sets
+          while read -r artifact_id artifact_name; do
+            [[ -n "$artifact_id" ]] || continue
+            gh api "repos/$SOURCE_REPOSITORY/actions/artifacts/$artifact_id/zip" \
+              > "$work/$artifact_id.zip" 2>"$work/download.err" \
+              || { echo "::error::could not download artifact $artifact_id ($artifact_name): $(tr '\n' ' ' < "$work/download.err")" >&2; exit 1; }
+            python3 -m abicheck.frontends.action.cli extract-artifact \
+              "$work/$artifact_id.zip" "baseline-sets/$artifact_name" \
+              || { echo "::error::refused the baseline-set artifact $artifact_name from run $SOURCE_RUN_ID." >&2; exit 1; }
+            echo "acquired $artifact_name (artifact $artifact_id)"
+          done < <(python3 -c "
+          import json, sys
+          for entry in json.load(open(sys.argv[1]))['artifacts']:
+              print(entry['artifact_id'], entry['name'])
+          " "$work/source.json")
+          cp "$work/source.json" source-artifacts.json
 
       # Reads each build-output.json's OWN profile.id field (ADR-047 section
       # 2: "one build-output.json = one build profile, always") rather than
@@ -237,20 +478,43 @@ jobs:
         run: |
           set -euo pipefail
           python3 -c "
-          import glob, json, sys
+          import glob, json, os, sys
 
-          profiles = []
+          # In cross-run mode each set was extracted into
+          # baseline-sets/<artifact-name>/, and the ids the verified
+          # selection returned are carried alongside. The id -- not the name
+          # -- travels into the matrix, so the publish job re-fetches the
+          # exact artifact discovery looked at rather than whatever the name
+          # resolves to by then.
+          ids = {}
+          if os.path.exists('source-artifacts.json'):
+              ids = {
+                  entry['name']: entry['artifact_id']
+                  for entry in json.load(open('source-artifacts.json'))['artifacts']
+              }
+
+          rows = []
           for manifest in sorted(glob.glob('baseline-sets/**/manifest.json', recursive=True)):
               profile_id = json.load(open(manifest)).get('profile', '')
               if not profile_id:
                   print(f'::error::{manifest} declares no profile -- cannot determine which contract profile this baseline-set belongs to', file=sys.stderr)
                   sys.exit(1)
-              profiles.append(profile_id)
+              row = {'profile_id': profile_id}
+              if ids:
+                  # rel[0] is baseline-sets/<artifact-name>.
+                  parts = os.path.relpath(manifest, 'baseline-sets').split(os.sep)
+                  artifact_id = ids.get(parts[0], '') if parts else ''
+                  if not artifact_id:
+                      print(f'::error::{manifest} was not extracted from any verified source artifact -- refusing to publish a set whose origin this run did not establish', file=sys.stderr)
+                      sys.exit(1)
+                  row['artifact_id'] = artifact_id
+              rows.append(row)
+          profiles = [row['profile_id'] for row in rows]
           if len(set(profiles)) != len(profiles):
               print('::error::two downloaded baseline-sets declare the same profile -- each contract profile publishes exactly one asset', file=sys.stderr)
               sys.exit(1)
-          print('matrix=' + json.dumps({'include': [{'profile_id': p} for p in profiles]}))
-          print('has-profiles=' + ('true' if profiles else 'false'))
+          print('matrix=' + json.dumps({'include': rows}))
+          print('has-profiles=' + ('true' if rows else 'false'))
           " >> "$GITHUB_OUTPUT"
 
       - name: Discover profile ids
@@ -316,6 +580,11 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
+      # For the cross-run artifact fetch only. The read-only producer QUERY
+      # stays in the discovery job, which has no write token at all; what
+      # this job needs is the bytes of an artifact discovery already
+      # established, by an id it was handed.
+      actions: read
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
@@ -373,12 +642,38 @@ jobs:
       # branches on mode again: an already-captured set that reaches
       # packaging is a set this workflow has checked as thoroughly as one it
       # built itself, so it earns the identical treatment from there on.
-      - name: Download pre-captured baseline-set
-        if: needs.discover.outputs.mode == 'existing-set'
+      - name: Download pre-captured baseline-set (same run)
+        if: needs.discover.outputs.mode == 'existing-set' && needs.discover.outputs.acquisition == 'same-run'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: '${{ inputs.baseline-set-artifact-prefix }}${{ matrix.profile_id }}'
           path: 'baseline-set/${{ matrix.profile_id }}'
+
+      # Fetched by the ARTIFACT ID the discovery job's verified selection
+      # returned, never by re-matching the name prefix: an artifact can be
+      # added to a run between discovery and publication, and a
+      # name-resolved fetch would then publish bytes no eligibility check
+      # ever looked at. Unpacked through the same hostile-input protections,
+      # because a set from another run is an input whatever its origin
+      # turned out to be.
+      - name: Download pre-captured baseline-set (cross run)
+        if: needs.discover.outputs.mode == 'existing-set' && needs.discover.outputs.acquisition == 'cross-run'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token != '' && secrets.github-token || secrets.GITHUB_TOKEN }}
+          SOURCE_REPOSITORY: ${{ needs.discover.outputs.source-repository }}
+          ARTIFACT_ID: ${{ matrix.artifact_id }}
+          PROFILE_ID: ${{ matrix.profile_id }}
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[0-9]+$ ]] \
+            || { echo "::error::the discovery job named no artifact id for profile '$PROFILE_ID'; refusing to fall back to a name lookup, which could fetch a different artifact than the one whose origin was established." >&2; exit 1; }
+          work="$(mktemp -d "${RUNNER_TEMP:-/tmp}/abicheck-fetch.XXXXXX")"
+          gh api "repos/$SOURCE_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > "$work/set.zip" \
+            2>"$work/err" \
+            || { echo "::error::could not download artifact $ARTIFACT_ID from $SOURCE_REPOSITORY: $(tr '\n' ' ' < "$work/err")" >&2; exit 1; }
+          python3 -m abicheck.frontends.action.cli extract-artifact \
+            "$work/set.zip" "baseline-set/$PROFILE_ID"
 
       # A release tag names a release; a capture records the revision it
       # built. This step is where the two stop being the same string.

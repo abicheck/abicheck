@@ -270,11 +270,11 @@ class TestDeclaredSurface:
         }
         assert required <= names, sorted(required - names)
 
-    def test_verify_action_outputs(self) -> None:
-        action = yaml.safe_load(
-            (VERIFY_ACTION / "action.yml").read_text(encoding="utf-8")
-        )
-        assert set(action["outputs"]) == {
+    #: Outputs published before ADR-073's provenance slice. A consumer may
+    #: already read any of them, so none may DISAPPEAR; adding one is not a
+    #: breaking change and is not pinned here.
+    ESTABLISHED_VERIFY_OUTPUTS = frozenset(
+        {
             "verified",
             "pr-number",
             "pr-head-sha",
@@ -283,6 +283,35 @@ class TestDeclaredSurface:
             "artifact-path",
             "refusal-code",
         }
+    )
+
+    def test_verify_action_outputs(self) -> None:
+        """No published output disappears, and every declared one is wired.
+
+        Exact-set equality pinned the wrong thing: it fails for an added
+        output, which breaks nobody, while saying nothing about whether the
+        outputs it lists actually resolve. An output declared with a typo in
+        the step id is silently empty for every consumer, which is the
+        failure that actually reaches people.
+        """
+        action = yaml.safe_load(
+            (VERIFY_ACTION / "action.yml").read_text(encoding="utf-8")
+        )
+        declared = set(action["outputs"])
+        missing = self.ESTABLISHED_VERIFY_OUTPUTS - declared
+        assert not missing, f"published outputs removed: {sorted(missing)}"
+
+        step_ids = {step["id"] for step in action["runs"]["steps"] if step.get("id")}
+        for name, spec in action["outputs"].items():
+            value = str(spec["value"])
+            referenced = {
+                fragment.split(".")[0]
+                for fragment in value.split("steps.")[1:]
+                if "." in fragment
+            }
+            assert referenced, f"output {name} names no step"
+            unknown = referenced - step_ids
+            assert not unknown, f"output {name} names missing step(s) {unknown}"
 
     def test_every_input_carries_help_text(self) -> None:
         for action_dir in (REPORT_ACTION, VERIFY_ACTION):

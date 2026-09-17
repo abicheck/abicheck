@@ -56,9 +56,14 @@ from ...model.analysis_context import (
     AnalysisContextError,
 )
 from .cli_base import EXIT_REFUSED, _read_json, _write_json, action_cli
+from .precaptured_source import (
+    select_precaptured_artifacts,
+    verify_precaptured_producer,
+)
 from .run_selection import (
     DEFAULT_MAX_ENTRY_BYTES,
     ResolvedPullRequest,
+    RunExpectation,
     SourceRun,
     SourceRunRejected,
     load_json_document,
@@ -360,3 +365,88 @@ def resolve_tag_cmd(
     if out is not None:
         _write_json(out, document)
     click.echo(json.dumps(document, sort_keys=True))
+
+
+# ---------------------------------------------------------------------------
+# `select-precaptured-source` — may this run's captures be published?
+# ---------------------------------------------------------------------------
+
+
+@action_cli.command("select-precaptured-source")
+@click.option("--run-json", type=click.Path(exists=True, path_type=Path), required=True)
+@click.option(
+    "--artifacts-json",
+    type=click.Path(exists=True, path_type=Path),
+    required=True,
+    help="GET /repos/{repo}/actions/runs/{id}/artifacts, flattened.",
+)
+@click.option("--artifact-prefix", required=True)
+@click.option("--expect-repository", default="")
+@click.option("--expect-workflow", default="")
+@click.option("--expect-event", default="")
+@click.option("--expect-run-id", default="")
+@click.option("--expect-run-attempt", type=int, default=None)
+@click.option(
+    "--allow-conclusion",
+    multiple=True,
+    default=("success",),
+    help="Run conclusions that may supply a baseline. Empty allows any.",
+)
+@click.option("--out", type=click.Path(path_type=Path), required=True)
+def select_precaptured_source_cmd(
+    run_json: Path,
+    artifacts_json: Path,
+    artifact_prefix: str,
+    expect_repository: str,
+    expect_workflow: str,
+    expect_event: str,
+    expect_run_id: str,
+    expect_run_attempt: int | None,
+    allow_conclusion: tuple[str, ...],
+    out: Path,
+) -> None:
+    """Verify a producer run and name the baseline-set artifacts to publish.
+
+    The cross-run half of ``publish-baseline.yml``'s pre-captured mode. Both
+    answers are produced here, in one place, because discovery and download
+    must agree on *identity*: the artifacts come back as ids, and the
+    workflow carries those through its matrix rather than re-matching the
+    name prefix when it is time to fetch the bytes.
+    """
+    document: dict[str, object] = {}
+    try:
+        run = verify_precaptured_producer(
+            _read_json(run_json),  # type: ignore[arg-type]
+            RunExpectation(
+                repository=expect_repository,
+                workflow=expect_workflow,
+                event=expect_event,
+                run_id=expect_run_id,
+                run_attempt=expect_run_attempt,
+                allowed_conclusions=tuple(c for c in allow_conclusion if c),
+            ),
+        )
+        listing = _read_json(artifacts_json)
+        entries = listing.get("artifacts") if isinstance(listing, dict) else listing
+        artifacts = select_precaptured_artifacts(
+            entries if isinstance(entries, list) else [],
+            prefix=artifact_prefix,
+            run_id=run.run_id,
+        )
+    except SourceRunRejected as exc:
+        _write_json(out, {"eligible": False, "code": exc.code, "reason": exc.message})
+        click.echo(f"abicheck: refused baseline source — {exc}", err=True)
+        raise SystemExit(EXIT_REFUSED) from exc
+    document = {
+        "eligible": True,
+        "run_id": run.run_id,
+        "run_attempt": run.run_attempt,
+        "head_sha": run.head_sha,
+        "event": run.event,
+        "artifacts": [a.to_dict() for a in artifacts],
+    }
+    _write_json(out, document)
+    click.echo(
+        f"abicheck: run {run.run_id} may supply "
+        f"{len(artifacts)} baseline-set artifact(s)"
+    )

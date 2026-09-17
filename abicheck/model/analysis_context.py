@@ -185,8 +185,7 @@ class AnalysisContext:
         if not isinstance(data, Mapping):
             raise AnalysisContextError(
                 "analysis-context-malformed",
-                f"the analysis context is not an object "
-                f"(got {type(data).__name__})",
+                f"the analysis context is not an object (got {type(data).__name__})",
             )
         schema = data.get("schema", ANALYSIS_CONTEXT_SCHEMA)
         if schema != ANALYSIS_CONTEXT_SCHEMA:
