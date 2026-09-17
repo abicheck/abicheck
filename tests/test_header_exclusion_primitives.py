@@ -402,3 +402,98 @@ class TestReleaseIdentityComesFromWhatWasObserved:
         self,
     ) -> None:
         assert release_exclusion_identity([], 'glob:["z.h"]') == 'glob:["z.h"]'
+
+
+class TestMatchedExclusionPatternsIsTheComplement:
+    """``matched_exclusion_patterns`` is exactly what ``unmatched`` is not.
+
+    Bug class: a *request* recorded as an achieved narrowing. Every
+    downstream reader (the coverage warning, the comparability gate, the
+    configuration digest) treats a recorded pattern as a header that was
+    removed from the parsed surface, so a pattern that matched nothing made
+    all three describe a coverage limitation that did not exist. Stated as
+    a partition invariant over generated pattern sets rather than as the
+    one reported "every configured pattern matched nothing" case.
+    """
+
+    @staticmethod
+    def _tree(tmp_path: Path) -> list[Path]:
+        for name in ("a.h", "b.h", "sub/c.h", "sub/d.hpp"):
+            p = tmp_path / name
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("")
+        return [tmp_path]
+
+    @pytest.mark.parametrize(
+        "patterns",
+        [
+            (),
+            ("nope.h",),
+            ("a.h",),
+            ("a.h", "nope.h"),
+            ("*.hpp", "missing-*.h", "b.h"),
+            ("nope.h", "also-nope.h"),
+            ("*.h", "*.hpp"),
+            ("a.h", "a.h"),
+        ],
+    )
+    def test_matched_and_unmatched_partition_the_rule_set(
+        self, tmp_path: Path, patterns: tuple[str, ...]
+    ) -> None:
+        from abicheck.extract.header_exclusions import matched_exclusion_patterns
+
+        headers = self._tree(tmp_path)
+        matched = matched_exclusion_patterns(headers, patterns)
+        unmatched = unmatched_exclusion_patterns(headers, patterns)
+        assert set(matched).isdisjoint(unmatched)
+        assert set(matched) | set(unmatched) == {p for p in patterns if p}
+        assert matched == sorted(set(matched))
+
+    def test_a_matched_pattern_really_removed_a_header(self, tmp_path: Path) -> None:
+        """The oracle is the filter itself, not the same membership test.
+
+        Each reported match must be independently demonstrable: applying
+        that one pattern alone must shorten the expanded header list.
+        """
+        from abicheck.extract.header_exclusions import (
+            _expanded_header_inputs,
+            matched_exclusion_patterns,
+        )
+
+        headers = self._tree(tmp_path)
+        expanded = _expanded_header_inputs(headers)
+        patterns = ("a.h", "*.hpp", "nope.h", "sub/c.h")
+        matched = matched_exclusion_patterns(headers, patterns)
+        for pat in patterns:
+            shortened = len(apply_header_exclusions(expanded, [pat])) < len(expanded)
+            assert shortened is (pat in matched), pat
+
+    def test_no_headers_means_no_rule_was_achieved(self, tmp_path: Path) -> None:
+        from abicheck.extract.header_exclusions import matched_exclusion_patterns
+
+        assert matched_exclusion_patterns([], ("a.h", "*.h")) == []
+
+
+class TestOnlyAchievedExclusionsReachTheSnapshot:
+    """``resolve_input`` stamps the achieved narrowing, never the request."""
+
+    def test_unmatched_patterns_produce_no_coverage_claim(self, tmp_path: Path) -> None:
+        from abicheck.confidence import header_exclusion_warnings
+        from abicheck.model.header_exclusion_record import record_header_exclusions
+        from abicheck.model.snapshot import AbiSnapshot
+
+        old = record_header_exclusions(AbiSnapshot("lib", "1.0"), ())
+        new = record_header_exclusions(AbiSnapshot("lib", "1.0"), ())
+        assert new.excluded_header_patterns == ()
+        assert header_exclusion_warnings(old, new) == []
+
+    def test_a_real_narrowing_still_reports_reduced_coverage(self) -> None:
+        from abicheck.confidence import header_exclusion_warnings
+        from abicheck.model.header_exclusion_record import record_header_exclusions
+        from abicheck.model.snapshot import AbiSnapshot
+
+        old = record_header_exclusions(AbiSnapshot("lib", "1.0"), ("fftw3.h",))
+        new = record_header_exclusions(AbiSnapshot("lib", "1.0"), ("fftw3.h",))
+        warnings = header_exclusion_warnings(old, new)
+        assert len(warnings) == 1
+        assert "fftw3.h" in warnings[0]

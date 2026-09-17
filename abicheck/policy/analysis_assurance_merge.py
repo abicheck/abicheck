@@ -78,6 +78,7 @@ FIELD_MERGE_POLICY: dict[str, str] = {
     "schema_version": "derived",
     "status": "derived",
     "requested_depth": "derived",
+    "requested_depth_source": "derived",
     "effective_depth": "derived",
     "depth_satisfied": "derived",
     "notes": "derived",
@@ -241,6 +242,15 @@ def merge_analysis_assurance(
         # shallowest any member reached, and the request is satisfied only if
         # it was satisfied for every member.
         requested_depth=next(iter(requested)) if len(requested) == 1 else None,
+        # "explicit" only when *every* member's request was explicit: one
+        # implicitly-normalized member makes the release-wide request
+        # implicit too, so the roll-up can never present a normalization as
+        # something a caller asked for.
+        requested_depth_source=(
+            "explicit"
+            if present and all(b.requested_depth_source == "explicit" for b in present)
+            else "implicit"
+        ),
         effective_depth=_shallowest_depth(effective) if effective else None,
         depth_satisfied=all(satisfied) if satisfied else None,
         l0_context_status=_weakest(

@@ -198,7 +198,7 @@ class TestPublicDepthValue:
     def test_result_is_always_a_real_public_rung(self):
         # The property the fix actually needs to hold, over every possible
         # input: whatever comes in, what comes out is always something
-        # `analysis_assurance._DEPTH_RANK` (and EVIDENCE_DEPTH_VALUES) can
+        # `evidence_depth.DEPTH_RANK` (and EVIDENCE_DEPTH_VALUES) can
         # actually rank -- never one of the internal-only spellings.
         public_values = {d.value for d in USER_DEPTHS}
         for depth in EvidenceDepth:

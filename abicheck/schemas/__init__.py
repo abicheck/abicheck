@@ -983,7 +983,24 @@ _ARTIFACT_NAMES = frozenset(
 #:        the *digest value* changes for every run, since
 #:        ``EFFECTIVE_CONFIG_FIELD_KEYS`` is hashed positionally (the same
 #:        note 4.3 records for its own new key).
-REPORT_SCHEMA_VERSION = "5.2"
+#: 5.3 -- additive ``summary.change_inventory``: the change-versus-inventory
+#:        split (``report/change_inventory.py``). A cross-source hygiene
+#:        finding stamped ``persistent`` states that OLD and NEW carry the
+#:        identical problem, so it is standing inventory rather than
+#:        something this comparison observed -- ``checker`` already refuses
+#:        to charge one to the verdict, but every count a reader saw still
+#:        folded it in beside genuine compatibility changes, so a
+#:        byte-identical rebuild announced ``NO_CHANGE: 32 risk (32
+#:        total)``. The block names the five non-overlapping populations
+#:        (``compatibility_changes`` and its four verdict counters, plus
+#:        the four ``hygiene_*`` states) whose sum is the unchanged
+#:        ``total_changes``. Additive: ``breaking``/``source_breaks``/
+#:        ``risk_changes``/``compatible_additions``/``total_changes`` keep
+#:        their existing, inclusive meanings. The ``--stat`` one-line
+#:        summary *does* now count only the observed subset and states the
+#:        inventory in its own ``; hygiene: ...`` clause -- text output,
+#:        not a machine contract.
+REPORT_SCHEMA_VERSION = "5.3"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

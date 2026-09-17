@@ -129,7 +129,11 @@ from .analysis_assurance_layout import (
 from .buildsource.fact_set import check_fact_compatibility
 from .buildsource.model import CoverageStatus, DataLayer
 from .checker_types import DiffResult
-from .evidence_depth import DEPTH_RANK, depth_label_for, weaker_depth
+from .evidence_depth import (
+    reported_depth_label,
+    resolve_reported_depth,
+    weaker_depth,
+)
 from .model import AbiSnapshot
 from .model.change_catalog.kinds import ChangeKind
 from .policy.analysis_assurance_l0_context import (
@@ -163,7 +167,17 @@ __all__ = [
 #: can version-check without caring about the report's own MAJOR.MINOR.
 #: 1.0 -> 1.1: added ``schema_staleness_status`` (additive; a 1.0-only
 #: reader ignores the new key).
-ANALYSIS_ASSURANCE_SCHEMA_VERSION = "1.1"
+#: 1.1 -> 1.2: added ``requested_depth_source`` (``"explicit"``/
+#: ``"implicit"``). Additive in the key set, but note two *values* move for
+#: a run that gave no ``--depth``: ``requested_depth`` is now the depth the
+#: run reached rather than ``null``, and ``depth_satisfied`` is ``true``
+#: rather than ``null`` -- an unrequested depth is satisfied, not unknown.
+#: Separately, ``effective_depth`` no longer reads ``"source"`` for a run
+#: whose only L5 evidence is the always-on header-only declaration graph
+#: (``evidence_depth.reported_depth_label``). No verdict, assurance
+#: ``status``, or exit code moves: every gate still reads the explicit
+#: request.
+ANALYSIS_ASSURANCE_SCHEMA_VERSION = "1.2"
 
 #: The required top-level status vocabulary.
 AssuranceStatus = Literal[
@@ -172,12 +186,6 @@ AssuranceStatus = Literal[
 ASSURANCE_STATUS_VALUES: frozenset[str] = frozenset(
     {"complete", "partial", "failed", "not_comparable", "not_requested"}
 )
-
-# The ladder is owned by ``evidence_depth.DEPTH_RANK``, derived from
-# ``scan_levels.USER_DEPTHS``. It used to be duplicated here to avoid a
-# CLI-layer import; ADR-061 Phase 3 moved the vocabulary to a leaf, so the
-# copy is gone and this is an alias.
-_DEPTH_RANK = DEPTH_RANK
 
 #: The real ``ExtractorRecord.name`` families for L5 source-graph extractors,
 #: as actually constructed in ``buildsource/inline_graph_fold.py`` (grepped
@@ -347,12 +355,23 @@ class AnalysisAssurance:
 
     schema_version: str = ANALYSIS_ASSURANCE_SCHEMA_VERSION
     status: AssuranceStatus = "not_requested"
+    #: The depth this run was asked for. ``"implicit"``
+    #: :attr:`requested_depth_source` means no ``--depth`` was given and
+    #: this was normalized to :attr:`effective_depth` (see
+    #: ``compute_analysis_assurance``); ``"explicit"`` means a front end
+    #: stated it. Still ``None`` only on a hand-built block.
     requested_depth: str | None = None
     effective_depth: str | None = None
-    #: ``None`` when no depth was requested (nothing to be satisfied or not);
-    #: otherwise whether ``effective_depth`` reaches ``requested_depth`` on
-    #: the ``EVIDENCE_DEPTH_VALUES`` ladder.
+    #: ``None`` only on a hand-built block; otherwise whether
+    #: ``effective_depth`` reaches ``requested_depth`` on the
+    #: ``EVIDENCE_DEPTH_VALUES`` ladder. Trivially ``True`` for an implicit
+    #: request, which is the point: an unrequested depth is *satisfied*, not
+    #: *unknown*, and the two must not share a ``null``.
     depth_satisfied: bool | None = None
+    #: ``"explicit"`` (a front end stated ``--depth``) or ``"implicit"``.
+    #: Every gate reads the explicit value only, so this field records the
+    #: normalization without ever licensing one.
+    requested_depth_source: str = "implicit"
     target_accounting: TargetAccounting = field(default_factory=TargetAccounting)
     translation_units: TranslationUnitAccounting = field(
         default_factory=TranslationUnitAccounting
@@ -439,6 +458,7 @@ class AnalysisAssurance:
             "schema_version": self.schema_version,
             "status": self.status,
             "requested_depth": self.requested_depth,
+            "requested_depth_source": self.requested_depth_source,
             "effective_depth": self.effective_depth,
             "depth_satisfied": self.depth_satisfied,
             "target_accounting": self.target_accounting.to_dict(),
@@ -454,30 +474,6 @@ class AnalysisAssurance:
             "layout_unverified_detectors": list(self.layout_unverified_detectors),
             "notes": list(self.notes),
         }
-
-
-def _effective_depth_label(snap: AbiSnapshot, pack: BuildSourcePack | None) -> str:
-    """One side's own effective depth.
-
-    Delegates to :func:`abicheck.evidence_depth.depth_label_for`, which owns
-    the rule. This was a hand-copy of ``cli_dump_helpers.evidence_depth_label``
-    kept in sync by comment, because importing it would have pulled a CLI-layer
-    module (and through it ``cli.py``/``checker.py``) into this one; ADR-061
-    Phase 3 moved the rule to a leaf, so the copy is gone.
-
-    *pack* is the caller-resolved ``BuildSourcePack`` for this side (see
-    :func:`compute_analysis_assurance`'s own docstring for why this must not
-    default to ``snap.build_source`` internally) -- ``None`` when this side
-    carries no pack at all, out-of-band or embedded. The leaf takes its pack
-    explicitly for exactly that reason, so the no-defaulting rule is now
-    enforced by the shared signature rather than by two docstrings agreeing.
-    """
-    return depth_label_for(snap, pack)
-
-
-def _weaker_depth(a: str, b: str) -> str:
-    """Compatibility alias for :func:`abicheck.evidence_depth.weaker_depth`."""
-    return weaker_depth(a, b)
 
 
 def _surface_fact_set(sa: Any) -> dict[str, Any]:
@@ -1327,24 +1323,24 @@ def compute_analysis_assurance(
     # -- depth --------------------------------------------------------------
     requested_depth = result.requested_depth
     effective_depth = result.effective_depth or (
-        _weaker_depth(
-            _effective_depth_label(old, old_pack), _effective_depth_label(new, new_pack)
+        weaker_depth(
+            reported_depth_label(old, old_pack), reported_depth_label(new, new_pack)
         )
         if old is not None
         # One side, so the run's effective depth *is* the candidate's own --
         # not the weaker of it and a stand-in.
-        else _effective_depth_label(new, new_pack)
+        else reported_depth_label(new, new_pack)
     )
-    depth_satisfied: bool | None = None
-    if requested_depth is not None:
-        depth_satisfied = _DEPTH_RANK.get(effective_depth, 0) >= _DEPTH_RANK.get(
-            requested_depth, 0
-        )
-        if not depth_satisfied:
-            notes.append(
-                f"requested depth {requested_depth!r} not reached; effective "
-                f"depth is {effective_depth!r}"
-            )
+    # ``evidence_depth.resolve_reported_depth`` owns what an absent
+    # ``--depth`` means; every gate below reads ``explicit_depth``, so no
+    # verdict, status, or exit code moves.
+    explicit_depth = requested_depth
+    reported = resolve_reported_depth(explicit_depth, effective_depth)
+    requested_depth = reported.requested
+    requested_depth_source = reported.source
+    depth_satisfied: bool | None = reported.satisfied
+    if reported.note is not None:
+        notes.append(reported.note)
 
     # -- fact-set comparability ---------------------------------------------
     fact_set_comparability, fs_notes = _fact_set_comparability(old_pack, new_pack)
@@ -1441,7 +1437,7 @@ def compute_analysis_assurance(
 
     # -- overall status -------------------------------------------------------
     nothing_requested = (
-        requested_depth is None
+        explicit_depth is None
         and old_pack is None
         and new_pack is None
         and result.contract_context is None
@@ -1449,7 +1445,7 @@ def compute_analysis_assurance(
     )
     if fact_set_comparability == "inconsistent":
         status: AssuranceStatus = "failed"
-    elif requested_depth is not None and depth_satisfied is False:
+    elif explicit_depth is not None and depth_satisfied is False:
         status = "failed"
     elif (
         l0_context_status == "asymmetric"
@@ -1477,6 +1473,7 @@ def compute_analysis_assurance(
     return AnalysisAssurance(
         status=status,
         requested_depth=requested_depth,
+        requested_depth_source=requested_depth_source,
         effective_depth=effective_depth,
         depth_satisfied=depth_satisfied,
         target_accounting=target_accounting,

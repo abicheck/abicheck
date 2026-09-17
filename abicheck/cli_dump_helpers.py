@@ -59,9 +59,9 @@ from .cli_dump_depth import (
 )
 from .evidence_depth import (
     DEPTH_RANK,
-    depth_label_for,
     gated_source_label,
     l4_source_abi_was_attempted,
+    reported_depth_label,
 )
 from .workflows.extraction import (
     _manifest_declared_includes,
@@ -132,8 +132,15 @@ def evidence_depth_label(
     """Report which evidence depth a snapshot *actually* carries (CLI-audit P2).
 
     The embedded-only defaulting wrapper over
-    :func:`abicheck.evidence_depth.depth_label_for`, which owns the rule and
-    documents it. *build_source*, when given, overrides ``snap.build_source``
+    :func:`abicheck.evidence_depth.reported_depth_label`, which owns the rule
+    and documents it. That is the *gate*'s rule, not
+    :func:`~abicheck.evidence_depth.depth_label_for`'s more permissive
+    L4-or-L5 one: the always-on header-only L5 declaration graph otherwise
+    made a ``dump --depth headers`` snapshot report ``source``, while the
+    same run's L3/L4 rows read ``not_collected`` and
+    ``check_requested_depth_satisfied`` would have refused an explicit
+    ``--depth source``. One question, one rule, for the gate and every
+    report alike. *build_source*, when given, overrides ``snap.build_source``
     -- ``compare`` can resolve an out-of-band ``--old/new-sources`` pack that
     is never attached back to the snapshot object (``_resolve_side_pack``
     returns it standalone), and without this override a compare run using only
@@ -142,7 +149,7 @@ def evidence_depth_label(
     single-artifact ``dump -o`` case wants; the leaf itself deliberately takes
     the pack explicitly so no other caller can acquire the default by accident.
     """
-    return depth_label_for(
+    return reported_depth_label(
         snap, snap.build_source if build_source is None else build_source
     )
 
