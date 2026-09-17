@@ -401,9 +401,12 @@ class TestCompareStoredBundleFactsPair:
         either, so every stored/stored ``--depth`` run persisted them as
         ``None`` despite the evidence contract this driver actually
         enforced (Codex review, PR #1060, round 10). ``None`` (the default,
-        no explicit depth) must leave both unset, matching every other
-        comparison path's identical "no request, nothing to stamp"
-        contract."""
+        no explicit depth) must leave ``DiffResult.requested_depth`` -- the
+        *record of the request* -- unset, matching every other comparison
+        path's identical "no request, nothing to stamp" contract. The
+        assurance block is the *report* and normalizes the implicit request
+        to the depth reached, labelled ``implicit``, so a reader can tell an
+        unrequested depth from an unanswered one."""
         old_path = self._facts_path(
             tmp_path, "old.bundlefacts.json", "old", Visibility.PUBLIC
         )
@@ -413,7 +416,10 @@ class TestCompareStoredBundleFactsPair:
 
         unrequested = compare_stored_bundle_facts_pair(old_path, new_path)
         assert unrequested.per_library[0].requested_depth is None
-        assert unrequested.per_library[0].analysis_assurance.depth_satisfied is None
+        unrequested_aa = unrequested.per_library[0].analysis_assurance
+        assert unrequested_aa.requested_depth_source == "implicit"
+        assert unrequested_aa.requested_depth == unrequested_aa.effective_depth
+        assert unrequested_aa.depth_satisfied is True
 
         result = compare_stored_bundle_facts_pair(old_path, new_path, depth="binary")
         assert result.per_library[0].requested_depth == "binary"

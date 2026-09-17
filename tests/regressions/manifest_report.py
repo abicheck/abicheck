@@ -556,11 +556,11 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
         # declarations of headers it had parsed in full were unobserved
         # because every configured `--exclude-header` pattern was recorded
         # despite matching nothing.
-        fixed_by=(),
+        fixed_by=(1324,),
         seed_tests=(
             "tests/unit/report/test_change_inventory.py",
             "tests/test_analysis_assurance_implicit_depth.py",
-            "tests/test_header_exclusion_primitives.py::TestMatchedExclusionPatternsIsTheComplement",
+            "tests/test_header_exclusion_primitives.py",
         ),
         public_surfaces=(
             "summary.change_inventory",
