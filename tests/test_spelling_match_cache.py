@@ -586,3 +586,74 @@ class TestKeepaliveDoesNotLeak:
         assert pattern is not None
         spelling_matches(pattern, "Foo")
         assert list(MATCH_CACHE._keepalive.values()) == [(pattern, 1)]
+
+
+class TestCacheBookkeepingEdges:
+    """The bookkeeping paths a single-threaded lookup never reaches.
+
+    ``put`` and ``_release`` are the cache class's own API, and both carry a
+    guard that the ``matches_for`` path cannot exercise (it checks ``get``
+    before ``put``, and evicts one entry per pattern in these tests). They
+    are not dead code — each prevents a specific corruption of the byte
+    budget or the keepalive refcount — so they are stated here against the
+    class directly rather than left as unexercised lines.
+    """
+
+    def test_putting_one_key_twice_does_not_double_count(self) -> None:
+        """Re-inserting a key must not charge its bytes or its pattern twice.
+
+        Without the guard, the aggregate budget would drift upward by one
+        entry's size on every repeat and the keepalive refcount would never
+        reach zero, so the pattern would be retained after its last entry
+        was evicted — a slow leak of exactly what the budget bounds.
+        """
+        pattern = _compile_spelling_pattern(["Foo"])
+        assert pattern is not None
+        key = (MATCH_CACHE.token_for(pattern), "Foo", 0, 3)
+        matches = (SpellingMatch("Foo", 0, 3),)
+        MATCH_CACHE.put(key, matches, pattern)
+        bytes_after_first = MATCH_CACHE.retained_bytes
+        refs_after_first = MATCH_CACHE._keepalive[key[0]][1]
+        MATCH_CACHE.put(key, matches, pattern)
+        assert len(MATCH_CACHE) == 1
+        assert MATCH_CACHE.retained_bytes == bytes_after_first
+        assert MATCH_CACHE._keepalive[key[0]][1] == refs_after_first
+
+    def test_a_pattern_with_two_entries_survives_losing_one(self) -> None:
+        """Eviction releases one reference, not the whole pattern.
+
+        The refcount exists because several entries share one pattern: a
+        release that deleted the keepalive outright would drop a pattern
+        that other live entries still key on, and its ``id()`` could then be
+        reused by a different pattern while those entries remained — the
+        one way an ``id()``-derived token can go wrong.
+        """
+        pattern = _compile_spelling_pattern(["Foo"])
+        assert pattern is not None
+        spelling_matches(pattern, "Foo a")
+        spelling_matches(pattern, "Foo b")
+        token = MATCH_CACHE.token_for(pattern)
+        assert MATCH_CACHE._keepalive[token][1] == 2
+        MATCH_CACHE._release(token)
+        assert MATCH_CACHE._keepalive[token] == (pattern, 1)
+        MATCH_CACHE._release(token)
+        assert token not in MATCH_CACHE._keepalive
+
+    def test_releasing_an_unheld_token_is_a_no_op(self) -> None:
+        """Eviction must be idempotent against an already-cleared keepalive.
+
+        ``clear()`` drops the keepalive wholesale while eviction releases
+        per entry, so a release can legitimately arrive for a token nothing
+        holds; it must not raise.
+        """
+        MATCH_CACHE._release(123456789)
+        assert MATCH_CACHE._keepalive == {}
+
+    def test_token_for_does_not_mutate_the_cache(self) -> None:
+        pattern = _compile_spelling_pattern(["Foo"])
+        assert pattern is not None
+        first = MATCH_CACHE.token_for(pattern)
+        second = MATCH_CACHE.token_for(pattern)
+        assert first == second
+        assert len(MATCH_CACHE) == 0
+        assert MATCH_CACHE._keepalive == {}

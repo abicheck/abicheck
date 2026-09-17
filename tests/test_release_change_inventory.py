@@ -49,6 +49,7 @@ from abicheck.report.release_change_inventory import (
     RELEASE_INVENTORY_COUNTERS,
     RELEASE_OPERATIONAL_SENTINELS,
     fold_release_change_inventory,
+    release_change_inventory,
     release_inventory_counters,
 )
 from abicheck.report.release_member_summary import add_member_review_summary
@@ -419,3 +420,48 @@ class TestRenderersAgree:
         from abicheck.schemas import RELEASE_SCHEMA_VERSION
 
         assert tuple(int(p) for p in RELEASE_SCHEMA_VERSION.split(".")) >= (1, 7)
+
+
+class TestCounterProjection:
+    """``release_inventory_counters``: the renderers' reduced view."""
+
+    def test_absent_inventory_projects_to_none_not_an_empty_mapping(self) -> None:
+        """A release with nothing to state must give a renderer ``None``.
+
+        ``format_hygiene_note`` treats an empty mapping and ``None`` alike
+        today, but the distinction is the one this whole change rests on:
+        "no member carried an inventory" is not "the inventory is all
+        zeroes", and a renderer that received ``{}`` could legitimately
+        print a zeroed split for a release that never inventoried anything.
+        """
+        assert (
+            release_inventory_counters([{"library": "l.so", "verdict": "NO_CHANGE"}])
+            is None
+        )
+        assert release_inventory_counters([]) is None
+
+    def test_projection_keeps_only_the_integer_counters(self) -> None:
+        entry: dict[str, object] = {"library": "libx.so", "verdict": "NO_CHANGE"}
+        add_member_review_summary(entry, _mixed_result(), None)
+        counters = release_inventory_counters([entry])
+        assert counters is not None
+        assert set(counters) == set(RELEASE_INVENTORY_COUNTERS)
+        assert all(isinstance(v, int) for v in counters.values())
+        # The scope-accounting keys are for a document reader, not a
+        # one-line clause, so they must not leak into this view.
+        assert "members_contributing" not in counters
+
+    def test_projection_agrees_with_the_document_block(self) -> None:
+        """Both views come from one fold, so their counters cannot differ.
+
+        This is the same "one computation, many renders" property the
+        member-versus-scalar invariant states, applied to the release's own
+        two consumers.
+        """
+        entry: dict[str, object] = {"library": "libx.so", "verdict": "NO_CHANGE"}
+        add_member_review_summary(entry, _mixed_result(), None)
+        folded = release_change_inventory([entry])
+        counters = release_inventory_counters([entry])
+        assert folded is not None and counters is not None
+        for key in RELEASE_INVENTORY_COUNTERS:
+            assert counters[key] == folded[key], key
