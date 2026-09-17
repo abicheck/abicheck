@@ -51,6 +51,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _workflow_files import read_repo_text
 
 _ACTIONS = Path(__file__).resolve().parents[1] / "actions"
 
@@ -119,7 +120,7 @@ class TestDetector:
 class TestCoveredShells:
     @pytest.mark.parametrize("script", _COVERED, ids=lambda p: p.parent.name)
     def test_no_unguarded_expansion(self, script: Path) -> None:
-        findings = unguarded_expansions(script.read_text(encoding="utf-8"))
+        findings = unguarded_expansions(read_repo_text(script))
         assert not findings, (
             f"{script} expands a possibly-empty array without the "
             f'${{arr[@]+"${{arr[@]}}"}} guard at: '
@@ -140,7 +141,7 @@ class TestCoveredShells:
         the gate above pass, which would not mean the contract is held.
         """
         for script in _COVERED:
-            text = script.read_text(encoding="utf-8")
+            text = read_repo_text(script)
             assert re.search(r'\$\{[A-Za-z_][A-Za-z0-9_]*\[@\]\+"', text), script
 
 
@@ -183,7 +184,7 @@ def _shell_sources() -> list[tuple[str, str]]:
     for script in sorted(REPO_ROOT.glob("actions/*/*.sh")) + sorted(
         REPO_ROOT.glob("action/*.sh")
     ):
-        sources.append((str(script.relative_to(REPO_ROOT)), script.read_text("utf-8")))
+        sources.append((str(script.relative_to(REPO_ROOT)), read_repo_text(script)))
 
     documents = sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")) + sorted(
         REPO_ROOT.glob("actions/*/action.yml")
@@ -193,7 +194,7 @@ def _shell_sources() -> list[tuple[str, str]]:
         if not path.is_file():
             continue
         try:
-            parsed = yaml.safe_load(path.read_text("utf-8"))
+            parsed = yaml.safe_load(read_repo_text(path))
         except yaml.YAMLError:  # pragma: no cover - a parse failure is its own test
             continue
         label = str(path.relative_to(REPO_ROOT))
