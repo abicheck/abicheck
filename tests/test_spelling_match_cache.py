@@ -1,0 +1,588 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Contract of the bounded type-spelling match/vocabulary caches.
+
+Written as a *primitive-level* property suite per AGENTS.md's own guidance:
+this is a reusable memoization primitive sitting under nine independent
+reachability call sites, so its contract is stated here as invariants over
+randomized inputs, decoupled from any one caller's domain logic, rather
+than only through example tests of whichever caller motivated it.
+
+The oracle throughout is the **uncached** matcher
+(``_finditer_allow_nested``), never the cache's own bookkeeping -- a cache
+that agreed with itself would assert nothing. The invariants are:
+
+* reuse is *lexically transparent* -- cached and uncached results agree on
+  text, span and order, for every vocabulary/text/window, empty results
+  included;
+* reuse is *vocabulary-scoped* and *window-scoped* -- two vocabularies, or
+  two windows over one text, never serve each other's answer;
+* reuse does not skip the *reachability operation* -- the same lexical
+  result consumed under two different provenance origins still produces the
+  two different findings it would have without any cache;
+* retention is *bounded and incremental* -- an oversized input is analyzed
+  but not retained, and exceeding the budget evicts least-recently-used
+  entries rather than clearing the cache.
+"""
+
+from __future__ import annotations
+
+import random
+import re
+
+import pytest
+
+from abicheck.compare.spelling_match_cache import (
+    MATCH_CACHE,
+    MAX_CACHED_TEXT_CHARS,
+    MAX_ENTRIES,
+    MAX_RETAINED_BYTES,
+    VOCABULARY_CACHE,
+    SpellingMatch,
+    clear_caches,
+)
+from abicheck.compare.spelling_pattern import (
+    _build_spelling_pattern,
+    finditer_allow_nested,
+)
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    Param,
+    RecordType,
+    ScopeOrigin,
+    TypeField,
+    Visibility,
+)
+from abicheck.type_reachability import (
+    _compile_spelling_pattern,
+    _finditer_allow_nested,
+    directly_referenced_stdlib_types,
+    spelling_matches,
+    type_string_references_name,
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_caches():
+    clear_caches()
+    yield
+    clear_caches()
+
+
+def _shape(matches) -> list[tuple[str, int, int]]:
+    """The observable shape of a match list: what every caller reads."""
+    return [(m.group(0), m.start(), m.end()) for m in matches]
+
+
+class TestLexicalTransparency:
+    """Cached results agree with the uncached matcher, always."""
+
+    @staticmethod
+    def _random_case(rng: random.Random) -> tuple[list[str], str, int, int]:
+        atoms = ["Foo", "Bar", "std::string", "Inner", "Wrapper", "ns::Baz", "T"]
+        vocab = rng.sample(atoms, rng.randint(1, len(atoms)))
+        if rng.random() < 0.5:
+            # A deliberate outer/inner pair *both* in the vocabulary: the
+            # only shape that exercises nested matching at all, which the
+            # class's own vacuity guard then insists actually occurred.
+            inner = rng.choice(atoms)
+            vocab.extend([f"Wrapper<{inner}>", inner])
+        if rng.random() < 0.3:
+            vocab.extend(["std::vector<std::string>", "std::string"])
+        pieces = []
+        for _ in range(rng.randint(0, 6)):
+            pieces.append(
+                rng.choice(
+                    [
+                        *atoms,
+                        "std::vector<std::string>",
+                        "Wrapper<Inner>",
+                        "const ",
+                        " *",
+                        ", ",
+                        "unrelated_token",
+                        "FooBar",
+                        "ns::FooExtra",
+                    ]
+                )
+            )
+        text = "".join(pieces)
+        start = rng.randint(0, len(text)) if text else 0
+        end = rng.randint(start, len(text)) if text else 0
+        return vocab, text, start, end
+
+    def test_cached_matches_equal_uncached_over_randomized_inputs(self) -> None:
+        rng = random.Random(20260917)
+        empties = 0
+        nested = 0
+        for _ in range(1000):
+            vocab, text, start, end = self._random_case(rng)
+            pattern = _compile_spelling_pattern(vocab)
+            assert pattern is not None
+            expected = _shape(_finditer_allow_nested(pattern, text, start, end))
+            # Cold, then warm: both must equal the uncached oracle.
+            cold = _shape(spelling_matches(pattern, text, start, end))
+            warm = _shape(spelling_matches(pattern, text, start, end))
+            assert cold == expected
+            assert warm == expected
+            if not expected:
+                empties += 1
+            spans = {(m[1], m[2]) for m in expected}
+            if any(
+                a != b and a[0] <= b[0] and a[1] >= b[1] for a in spans for b in spans
+            ):
+                nested += 1
+        # Vacuity guards: the sweep must actually have produced the two
+        # interesting shapes, or it proved transparency only for the easy
+        # case. A generator that stopped emitting either one would otherwise
+        # keep this test passing while asserting much less.
+        assert empties > 0, "no empty-result case generated"
+        assert nested > 0, "no nested-match case generated"
+
+    def test_empty_result_is_cached_rather_than_recomputed(self) -> None:
+        pattern = _compile_spelling_pattern(["Absent"])
+        assert pattern is not None
+        assert spelling_matches(pattern, "nothing here") == ()
+        misses = MATCH_CACHE.misses
+        assert spelling_matches(pattern, "nothing here") == ()
+        assert MATCH_CACHE.misses == misses, "empty result was not retained"
+        assert MATCH_CACHE.hits >= 1
+
+
+class TestKeyScoping:
+    """No two distinct queries share one answer."""
+
+    def test_distinct_vocabularies_do_not_share_results(self) -> None:
+        text = "Foo Bar"
+        foo = _compile_spelling_pattern(["Foo"])
+        bar = _compile_spelling_pattern(["Bar"])
+        assert foo is not None and bar is not None
+        assert _shape(spelling_matches(foo, text)) == [("Foo", 0, 3)]
+        assert _shape(spelling_matches(bar, text)) == [("Bar", 4, 7)]
+
+    def test_cache_key_includes_the_window_bounds(self) -> None:
+        # The "an untested key component is not an unnecessary one" lesson:
+        # every production caller today passes the default full window, so a
+        # key that dropped start/end would pass every other test here.
+        text = "Foo Foo"
+        pattern = _compile_spelling_pattern(["Foo"])
+        assert pattern is not None
+        assert _shape(spelling_matches(pattern, text)) == [("Foo", 0, 3), ("Foo", 4, 7)]
+        assert _shape(spelling_matches(pattern, text, 1)) == [("Foo", 4, 7)]
+        assert _shape(spelling_matches(pattern, text, 0, 3)) == [("Foo", 0, 3)]
+
+    def test_cache_key_includes_the_text(self) -> None:
+        pattern = _compile_spelling_pattern(["Foo"])
+        assert pattern is not None
+        assert _shape(spelling_matches(pattern, "Foo")) == [("Foo", 0, 3)]
+        assert _shape(spelling_matches(pattern, "Bar")) == []
+
+    def test_cache_that_caches_nothing_is_distinguishable(self) -> None:
+        # Output equivalence alone cannot tell a correct cache from an absent
+        # one, so assert the retained state directly.
+        pattern = _compile_spelling_pattern(["Foo"])
+        assert pattern is not None
+        spelling_matches(pattern, "Foo")
+        assert len(MATCH_CACHE) == 1
+        assert MATCH_CACHE.retained_bytes > 0
+
+
+class TestVocabularyReuse:
+    """One vocabulary compiles to one pattern, whatever its order."""
+
+    def test_same_vocabulary_in_any_order_reuses_one_pattern_object(self) -> None:
+        a = _compile_spelling_pattern(["Foo", "Bar", "Baz"])
+        b = _compile_spelling_pattern(["Baz", "Foo", "Bar"])
+        assert a is b
+
+    def test_builder_is_order_independent_for_equal_length_candidates(self) -> None:
+        """The *builder* must be order-independent, not just the cache.
+
+        Length-only ordering left equal-length alternatives in incoming
+        order, so an identical vocabulary from two differently-ordered
+        sources built two different pattern strings -- a genuine regex
+        recompilation, not merely a second helper call. This drives
+        ``_build_spelling_pattern`` directly and with *sequences*, because
+        ``_compile_spelling_pattern`` normalizes through a ``frozenset``
+        first and so hides an order-dependent builder entirely: written
+        against the cached entry point, this assertion passed even with the
+        tie-break reverted.
+        """
+        rng = random.Random(7)
+        vocab = ["Aaa", "Bbb", "Ccc", "Dddd", "Eeee", "F"]
+        texts = set()
+        for _ in range(25):
+            shuffled = vocab[:]
+            rng.shuffle(shuffled)
+            pattern = _build_spelling_pattern(shuffled)
+            assert pattern is not None
+            texts.add(pattern.pattern)
+        assert len(texts) == 1
+
+    def test_builder_ordering_never_changes_which_spellings_match(self) -> None:
+        """Whatever the alternation order, the match set is identical.
+
+        The boundary anchors on both sides are what make this true, so it
+        must hold for a vocabulary where one spelling is a strict prefix of
+        another and for one where two spellings tie on length.
+        """
+        rng = random.Random(11)
+        vocab = ["Foo", "FooBar", "Bar", "Baz", "std::string", "std::stringstream"]
+        text = "FooBar Foo Bar Baz std::stringstream std::string Fo"
+        shapes = set()
+        for _ in range(25):
+            shuffled = vocab[:]
+            rng.shuffle(shuffled)
+            pattern = _build_spelling_pattern(shuffled)
+            assert pattern is not None
+            shapes.add(tuple(sorted(_shape(_finditer_allow_nested(pattern, text)))))
+        assert len(shapes) == 1
+        assert shapes.pop(), "the ordering sweep matched nothing at all"
+
+    def test_cached_entry_point_is_order_insensitive(self) -> None:
+        rng = random.Random(13)
+        vocab = ["Aaa", "Bbb", "Ccc", "Dddd", "Eeee", "F"]
+        patterns = set()
+        for _ in range(10):
+            shuffled = vocab[:]
+            rng.shuffle(shuffled)
+            patterns.add(id(_compile_spelling_pattern(shuffled)))
+        assert len(patterns) == 1
+
+    def test_different_vocabularies_compile_to_different_patterns(self) -> None:
+        a = _compile_spelling_pattern(["Foo"])
+        b = _compile_spelling_pattern(["Foo", "Bar"])
+        assert a is not None and b is not None
+        assert a is not b
+        assert a.pattern != b.pattern
+
+    def test_empty_vocabulary_is_none_and_is_itself_cached(self) -> None:
+        assert _compile_spelling_pattern([]) is None
+        assert _compile_spelling_pattern(set()) is None
+        assert VOCABULARY_CACHE.hits >= 1
+
+    def test_vocabulary_cache_is_bounded(self) -> None:
+        from abicheck.compare.spelling_match_cache import MAX_CACHED_VOCABULARIES
+
+        for i in range(MAX_CACHED_VOCABULARIES * 2):
+            _compile_spelling_pattern([f"Type{i}"])
+        assert len(VOCABULARY_CACHE) <= MAX_CACHED_VOCABULARIES
+
+
+class TestReachabilityOperationStillRuns:
+    """Reuse is lexical only -- the scan's own state updates are not skipped."""
+
+    @staticmethod
+    def _snapshot(origin: ScopeOrigin) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libx.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="f",
+                    mangled="f",
+                    return_type="void",
+                    params=[Param(name="s", type="std::string")],
+                    visibility=Visibility.PUBLIC,
+                    origin=origin,
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+
+    def test_same_lexical_text_under_two_origins_keeps_two_answers(self) -> None:
+        """A public-header and a private-header root name the identical type string.
+
+        The lexical answer for ``"std::string"`` is the same in both runs,
+        so a cache keyed on the text alone would serve the first run's
+        *finding* to the second. It must not: the origins differ, so the
+        second run reaches nothing.
+        """
+        public = directly_referenced_stdlib_types(
+            self._snapshot(ScopeOrigin.PUBLIC_HEADER)
+        )
+        internal = directly_referenced_stdlib_types(
+            self._snapshot(ScopeOrigin.PRIVATE_HEADER)
+        )
+        assert public == frozenset({"std::string"})
+        assert internal == frozenset()
+
+    def test_repeated_scans_are_identical_cold_and_warm(self) -> None:
+        snap = AbiSnapshot(
+            library="libx.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="f",
+                    mangled="f",
+                    return_type="Wrapper<std::string>",
+                    params=[Param(name="v", type="std::vector<std::string>")],
+                    visibility=Visibility.PUBLIC,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            types=[
+                RecordType(name="std::string", kind="class"),
+                RecordType(
+                    name="vector",
+                    qualified_name="std::vector<std::string>",
+                    kind="class",
+                ),
+                RecordType(
+                    name="Wrapper",
+                    qualified_name="Wrapper",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                ),
+            ],
+        )
+        clear_caches()
+        cold = directly_referenced_stdlib_types(snap)
+        warm = directly_referenced_stdlib_types(snap)
+        assert cold == warm
+        assert MATCH_CACHE.hits > 0, "the warm scan never reused a cached result"
+
+
+class TestRetentionBounds:
+    """Retention is capped three ways, and eviction is incremental."""
+
+    def test_oversized_text_is_analyzed_but_not_retained(self) -> None:
+        pattern = _compile_spelling_pattern(["Foo"])
+        assert pattern is not None
+        text = "x" * (MAX_CACHED_TEXT_CHARS + 1) + " Foo"
+        assert _shape(spelling_matches(pattern, text)) == _shape(
+            _finditer_allow_nested(pattern, text)
+        )
+        assert len(MATCH_CACHE) == 0
+        assert MATCH_CACHE.bypasses == 1
+        # Still correct on the second call, just recomputed.
+        assert _shape(spelling_matches(pattern, text)) == _shape(
+            _finditer_allow_nested(pattern, text)
+        )
+
+    def test_oversized_result_is_not_retained(self) -> None:
+        from abicheck.compare.spelling_match_cache import MAX_CACHED_RESULT_MATCHES
+
+        pattern = _compile_spelling_pattern(["A"])
+        assert pattern is not None
+        text = " ".join(["A"] * (MAX_CACHED_RESULT_MATCHES + 5))
+        assert len(text) <= MAX_CACHED_TEXT_CHARS
+        got = spelling_matches(pattern, text)
+        assert len(got) == MAX_CACHED_RESULT_MATCHES + 5
+        assert len(MATCH_CACHE) == 0
+
+    def test_budget_is_never_exceeded_and_eviction_is_incremental(self) -> None:
+        pattern = _compile_spelling_pattern(["Foo"])
+        assert pattern is not None
+        filler = "Foo " + "y" * (MAX_CACHED_TEXT_CHARS - 16)
+        peak = 0
+        for i in range(400):
+            spelling_matches(pattern, f"{i:06d}{filler}")
+            assert MATCH_CACHE.retained_bytes <= MAX_RETAINED_BYTES
+            assert len(MATCH_CACHE) <= MAX_ENTRIES
+            peak = max(peak, len(MATCH_CACHE))
+            # Incremental, not a cliff: recording one more entry at the limit
+            # must never drop the cache to (near) empty the way a
+            # clear-the-whole-thing overflow policy does.
+            assert len(MATCH_CACHE) > peak // 2 or peak < 4
+        assert peak > 1, "the budget experiment never populated the cache"
+
+    def test_eviction_is_least_recently_used(self) -> None:
+        pattern = _compile_spelling_pattern(["Foo"])
+        assert pattern is not None
+        # Shrink the budget for a deterministic, cheap experiment.
+        import abicheck.compare.spelling_match_cache as cache_mod
+
+        original = cache_mod.MAX_ENTRIES
+        cache_mod.MAX_ENTRIES = 2
+        try:
+            spelling_matches(pattern, "Foo a")
+            spelling_matches(pattern, "Foo b")
+            spelling_matches(pattern, "Foo a")  # refresh 'a'
+            spelling_matches(pattern, "Foo c")  # evicts 'b', not 'a'
+            misses = MATCH_CACHE.misses
+            spelling_matches(pattern, "Foo a")
+            assert MATCH_CACHE.misses == misses, "'a' was evicted despite recent use"
+            spelling_matches(pattern, "Foo b")
+            assert MATCH_CACHE.misses == misses + 1, "'b' survived eviction"
+        finally:
+            cache_mod.MAX_ENTRIES = original
+
+    def test_pattern_keepalive_is_released_with_its_last_entry(self) -> None:
+        import abicheck.compare.spelling_match_cache as cache_mod
+
+        original = cache_mod.MAX_ENTRIES
+        cache_mod.MAX_ENTRIES = 1
+        try:
+            first = _compile_spelling_pattern(["Alpha"])
+            second = _compile_spelling_pattern(["Beta"])
+            assert first is not None and second is not None
+            spelling_matches(first, "Alpha")
+            spelling_matches(second, "Beta")
+            # One entry survives, so exactly one pattern stays held: an
+            # id()-keyed token may only be reused once nothing refers to it.
+            assert len(MATCH_CACHE._keepalive) == 1
+        finally:
+            cache_mod.MAX_ENTRIES = original
+
+    def test_clear_releases_everything(self) -> None:
+        pattern = _compile_spelling_pattern(["Foo"])
+        assert pattern is not None
+        spelling_matches(pattern, "Foo")
+        clear_caches()
+        assert len(MATCH_CACHE) == 0
+        assert MATCH_CACHE.retained_bytes == 0
+        assert len(VOCABULARY_CACHE) == 0
+
+
+class TestSpellingMatchValue:
+    """Cached results are immutable and hold no regex/subject references."""
+
+    def test_result_is_an_immutable_tuple_of_slotted_values(self) -> None:
+        pattern = _compile_spelling_pattern(["Foo"])
+        assert pattern is not None
+        got = spelling_matches(pattern, "Foo")
+        assert isinstance(got, tuple)
+        assert not any(isinstance(m, re.Match) for m in got)
+        with pytest.raises(AttributeError):
+            got[0].extra = 1  # type: ignore[attr-defined]
+
+    def test_group_start_end_reject_other_groups(self) -> None:
+        m = SpellingMatch("Foo", 0, 3)
+        assert (m.group(), m.group(0), m.start(), m.end()) == ("Foo", "Foo", 0, 3)
+        for call in (m.group, m.start, m.end):
+            with pytest.raises(IndexError):
+                call(1)
+
+    def test_value_equality_and_hashing(self) -> None:
+        assert SpellingMatch("Foo", 0, 3) == SpellingMatch("Foo", 0, 3)
+        assert SpellingMatch("Foo", 0, 3) != SpellingMatch("Foo", 1, 4)
+        assert SpellingMatch("Foo", 0, 3) != "Foo"
+        assert len({SpellingMatch("Foo", 0, 3), SpellingMatch("Foo", 0, 3)}) == 1
+        assert "Foo" in repr(SpellingMatch("Foo", 0, 3))
+
+
+class TestBoundarySemanticsAgree:
+    """The single-name check and the compiled alternation decide alike.
+
+    ``BOUNDARY_CHARS`` is documented as existing so these two
+    implementations "cannot silently drift apart" -- but
+    ``type_string_references_name`` spelled the character class out
+    literally as ``"_:"`` for its whole life, so the claim had no
+    executable content and the constant was load-bearing for only one of
+    the two. It now reads the constant, and this states the agreement over
+    generated inputs rather than trusting that one string literal matches
+    another.
+
+    The oracle here is deliberately the *other implementation*, which is
+    legitimate precisely because neither is derived from the other: one is
+    a manual index walk, the other a compiled lookaround. A disagreement
+    means one of them is wrong, which is the thing worth knowing.
+    """
+
+    @staticmethod
+    def _cases() -> list[tuple[str, str]]:
+        names = ["std::string", "Foo", "ns::Bar", "T", "a_b"]
+        contexts = [
+            "{0}",
+            "const {0} &",
+            "std::vector<{0}>",
+            "x{0}",
+            "{0}x",
+            "{0}::inner",
+            "outer::{0}",
+            "_{0}",
+            "{0}_",
+            "{0}{0}",
+            "({0}, int)",
+            "{0}*",
+            "a {0} b",
+            ":{0}",
+            "{0}:",
+            "9{0}",
+            "{0}9",
+        ]
+        return [(ctx.format(name), name) for name in names for ctx in contexts]
+
+    def test_single_name_and_compiled_pattern_agree(self) -> None:
+        disagreements = []
+        for text, name in self._cases():
+            manual = type_string_references_name(text, name)
+            pattern = _build_spelling_pattern([name])
+            assert pattern is not None
+            compiled = bool(finditer_allow_nested(pattern, text))
+            if manual != compiled:
+                disagreements.append((text, name, manual, compiled))
+        assert not disagreements, disagreements
+
+    def test_the_case_sweep_covers_both_answers(self) -> None:
+        """Vacuity guard: a sweep where every case agreed on ``True`` (or on
+        ``False``) would pass the test above against two broken
+        implementations.
+        """
+        answers = {
+            type_string_references_name(text, name) for text, name in self._cases()
+        }
+        assert answers == {True, False}
+
+    def test_a_divergent_boundary_class_is_detectable(self) -> None:
+        """The agreement above is sensitive to the character class itself.
+
+        Asserted by building a pattern with a deliberately narrower class
+        and showing it then disagrees -- so the test above is checking the
+        boundary rule, not merely that both sides find the substring.
+        """
+        narrow = re.compile(
+            rf"(?<![A-Za-z0-9])(?:{re.escape('std::string')})(?![A-Za-z0-9])"
+        )
+        # `_` is in the real class but not the narrow one, so the narrow
+        # pattern matches where the documented rule says it must not.
+        assert not type_string_references_name("_std::string", "std::string")
+        assert bool(finditer_allow_nested(narrow, "_std::string"))
+
+
+class TestKeepaliveDoesNotLeak:
+    """A pattern is held only while an entry actually needs it.
+
+    The retention this module exists to bound includes its own bookkeeping:
+    an implementation that took the keepalive reference at *lookup* time
+    would hold every compiled pattern it was ever asked about forever --
+    including ones whose every result was too large to cache, so the cache
+    stored nothing and retained the pattern anyway.
+    """
+
+    def test_a_lookup_that_stores_nothing_retains_nothing(self) -> None:
+        pattern = _compile_spelling_pattern(["Foo"])
+        assert pattern is not None
+        oversized = "x" * (MAX_CACHED_TEXT_CHARS + 1) + " Foo"
+        spelling_matches(pattern, oversized)
+        assert len(MATCH_CACHE) == 0
+        assert MATCH_CACHE._keepalive == {}
+
+    def test_many_bypassed_patterns_do_not_accumulate(self) -> None:
+        oversized = "y" * (MAX_CACHED_TEXT_CHARS + 1)
+        for i in range(50):
+            pattern = _build_spelling_pattern([f"Type{i}"])
+            assert pattern is not None
+            spelling_matches(pattern, oversized)
+        assert MATCH_CACHE._keepalive == {}
+
+    def test_a_stored_entry_does_retain_its_pattern(self) -> None:
+        pattern = _compile_spelling_pattern(["Foo"])
+        assert pattern is not None
+        spelling_matches(pattern, "Foo")
+        assert list(MATCH_CACHE._keepalive.values()) == [(pattern, 1)]

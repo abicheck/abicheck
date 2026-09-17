@@ -112,9 +112,9 @@ from .model.surface_facts import in_public_surface
 from .type_reachability import (
     _NON_PUBLIC_ORIGINS,
     _compile_spelling_pattern,
-    _finditer_allow_nested,
     _namespace_suffix_spellings,
     _stripped_signature_spelling,
+    spelling_matches,
 )
 
 
@@ -171,7 +171,7 @@ def _typedef_alias_reachability(
     embedded_refs: dict[str, set[str]] = {alias: set() for alias in typedefs}
     reachable: dict[str, set[str]] = {alias: set() for alias in typedefs}
     for alias, target in typedefs.items():
-        for match in _finditer_allow_nested(combined_pattern, target):
+        for match in spelling_matches(combined_pattern, target):
             token = match.group()
             # A token that is itself a *different* typedef key must be
             # resolved through that alias first, not also credited as a
@@ -654,7 +654,7 @@ def _referenced_from_haystack(
     pattern = _compile_spelling_pattern(spelling_index)
     if pattern is None:
         return set()
-    matches = _finditer_allow_nested(pattern, haystack)
+    matches = spelling_matches(pattern, haystack)
     elaborated_ends = {
         m.end() for m in matches if m.group().partition(" ")[0] in _TAG_KEYWORDS
     }
