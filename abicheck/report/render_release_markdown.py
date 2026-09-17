@@ -32,12 +32,15 @@ reports under its own name.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
 from ..bundle import render_bundle_findings_markdown
 from ..bundle_models import BundleDiffResult
 from ..checker_types import Change, DiffResult
+from .release_change_inventory import release_inventory_counters
+from .render_text import format_hygiene_note
 
 __all__ = [
     "_release_md_bundle_findings",
@@ -52,8 +55,26 @@ __all__ = [
 def _release_md_libraries_table(
     library_results: list[dict[str, object]],
     emoji: dict[str, str],
+    all_library_results: Sequence[Mapping[str, object]] | None = None,
 ) -> list[str]:
-    """Markdown per-library results table."""
+    """Markdown per-library results table.
+
+    *all_library_results* is the **unfiltered** member list, from which the
+    change-versus-inventory split is folded here
+    (``report.release_change_inventory.release_inventory_counters``). It is
+    a separate parameter rather than read off *library_results* because
+    that one may be a ``--show-only`` view: a filtered run's stated split
+    must be the release's real one. When the release carries standing
+    hygiene, a note below the table states it -- the same numbers the JSON
+    ``change_inventory`` block and the oneline's hygiene clause carry, from
+    the same fold, so the three renders of one release cannot disagree.
+
+    The table's own columns are deliberately **unchanged**: ``Breaking``/
+    ``Source``/``Risk``/``Additions`` have always been each member's
+    inclusive finding counts, and a consumer reading them (or diffing two
+    releases' tables) is entitled to that meaning. The split is stated
+    beside them rather than silently subtracted out of them.
+    """
     lines = [
         "",
         "## Libraries",
@@ -68,6 +89,22 @@ def _release_md_libraries_table(
             f"| {lib.get('breaking', '—')} | {lib.get('source_breaks', '—')} "
             f"| {lib.get('risk_changes', '—')} | {lib.get('compatible_additions', '—')} |"
         )
+    change_inventory = (
+        release_inventory_counters(all_library_results)
+        if all_library_results is not None
+        else None
+    )
+    note = format_hygiene_note(change_inventory)
+    if note:
+        observed = (
+            change_inventory.get("compatibility_changes", 0) if change_inventory else 0
+        )
+        lines += [
+            "",
+            f"> Counts above are inclusive. Of them, {observed} "
+            f"{'is' if observed == 1 else 'are'} a change this release "
+            f"observed{note.replace('; hygiene:', '; the rest is standing inventory —', 1)}.",
+        ]
     return lines
 
 

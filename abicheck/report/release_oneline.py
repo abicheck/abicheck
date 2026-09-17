@@ -140,6 +140,7 @@ def format_release_oneline(
     severity_exit_code: int | None = None,
     env_matrix_source_sha256: str | None = None,
     release_global: Mapping[str, int] | None = None,
+    change_inventory: Mapping[str, int] | None = None,
 ) -> str:
     """One line for a whole release.
 
@@ -155,6 +156,17 @@ def format_release_oneline(
     absent from *library_results* even though ``worst_verdict`` folds them.
     Omitting it would let a release whose only break is a bundle finding
     print ``BREAKING: no changes``.
+
+    *change_inventory* is the release fold of the members' own
+    change-versus-inventory split
+    (``report.release_change_inventory.fold_release_change_inventory``,
+    computed by the caller, which owns the operational-sentinel vocabulary).
+    Passed through to :func:`format_stat_line` for the identical reason the
+    single-pair line takes it: a byte-identical rebuild of a release whose
+    members carry 32 pre-existing ``exported_not_public`` exports otherwise
+    prints ``NO_CHANGE: 32 risk (32 total)`` here too -- the same verdict-
+    versus-count contradiction the scalar line already stopped making.
+    ``None`` (the default) renders exactly as this function always did.
     """
     counts = {key: 0 for key in _COUNT_KEYS}
     total = 0
@@ -187,4 +199,5 @@ def format_release_oneline(
         total_changes=total,
         gate_note=gate_note,
         deployment_note=deployment_note,
+        change_inventory=change_inventory,
     )
