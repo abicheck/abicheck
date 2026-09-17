@@ -44,7 +44,10 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind, CrossSourceEvolution, Verdict
 from abicheck.checker_types import Change, DiffResult
-from abicheck.report.change_inventory import render_change_inventory_json
+from abicheck.report.change_inventory import (
+    ChangeInventorySplit,
+    render_change_inventory_json,
+)
 from abicheck.report.release_change_inventory import (
     RELEASE_INVENTORY_COUNTERS,
     RELEASE_OPERATIONAL_SENTINELS,
@@ -195,16 +198,32 @@ class TestScalarAndMemberAgree:
 class TestReleaseFold:
     """The aggregate's four honesty rules."""
 
-    @staticmethod
-    def _member(verdict: str, **counters: int) -> dict[str, object]:
-        block = dict.fromkeys(RELEASE_INVENTORY_COUNTERS, 0)
+    #: Exactly the keys `render_change_inventory_json` emits, read off a real
+    #: split rather than restated -- the release counter tuple is NOT the
+    #: right source here. An earlier version of this fixture built the block
+    #: from `RELEASE_INVENTORY_COUNTERS`, which includes `hygiene_total`;
+    #: production member blocks never carry that key (it is a *property* of
+    #: `ChangeInventorySplit`, not a rendered field), so the fixture invented
+    #: it and hid a real bug: the fold summed `hygiene_total` from members
+    #: and therefore always reported 0 beside a nonzero `hygiene_persistent`.
+    #: A fixture unfaithful to the real emitter is the exact failure mode
+    #: `tests/CLAUDE.md` warns about.
+    _MEMBER_KEYS = tuple(
+        render_change_inventory_json(ChangeInventorySplit(0, 0, 0, 0, 0, 0, 0, 0, 0))
+    )
+
+    @classmethod
+    def _member(cls, verdict: str, **counters: int) -> dict[str, object]:
+        unknown = set(counters) - set(cls._MEMBER_KEYS)
+        assert not unknown, f"production member blocks carry no {sorted(unknown)}"
+        block = dict.fromkeys(cls._MEMBER_KEYS, 0)
         block.update(counters)
         return {"library": "l.so", "verdict": verdict, "change_inventory": block}
 
     def test_counters_are_the_plain_sum_of_the_members(self) -> None:
         folded = fold_release_change_inventory(
             [
-                self._member("NO_CHANGE", hygiene_persistent=32, hygiene_total=32),
+                self._member("NO_CHANGE", hygiene_persistent=32),
                 self._member(
                     "BREAKING",
                     compatibility_changes=3,
@@ -216,6 +235,9 @@ class TestReleaseFold:
         )
         assert folded is not None
         assert folded["hygiene_persistent"] == 32
+        # Derived by the fold from the four state counters, not summed from
+        # the members (which never carry it) -- asserted against the folded
+        # value itself, so a fold that dropped the derivation fails here.
         assert folded["hygiene_total"] == 32
         assert folded["compatibility_changes"] == 3
         assert folded["compatibility_breaking"] == 2
@@ -373,10 +395,86 @@ class TestRenderersAgree:
         line = format_release_oneline("NO_CHANGE", libs, change_inventory=inventory)
         # The contradiction this closes: a rebuild whose displayed "risk" is
         # entirely standing inventory must not print it as observed change.
-        assert "hygiene:" in line
-        assert "persistent" in line
+        # Asserted on the rendered *values*, not just the labels: a renderer
+        # emitting the wrong counts passed the label-only version of this
+        # (found in review), which is the same "asserts nothing" failure the
+        # inventory itself was introduced to fix.
+        observed = inventory["compatibility_changes"]
+        assert f"{inventory['hygiene_persistent']} persistent" in line
+        assert f"{observed} total" in line
+        assert f"{inventory['hygiene_introduced']} introduced" in line
+        assert f"{inventory['hygiene_resolved']} resolved" in line
+        # ...and the standing inventory is not counted as observed risk: the
+        # members' raw `risk_changes` is 5, which must not appear as risk.
+        assert "5 risk" not in line
         without = format_release_oneline("NO_CHANGE", libs)
         assert without != line
+
+    def test_a_release_global_break_survives_a_members_only_inventory(self) -> None:
+        """A bundle/matrix break must not vanish behind the inventory.
+
+        `format_stat_line` *replaces* its headline counts with the
+        inventory's `compatibility_*` values whenever standing hygiene is
+        present, so passing a members-only inventory discarded the
+        release-global findings already folded into those counts. A release
+        with hygiene whose only break was a bundle finding then printed
+        "no compatibility changes" beside a BREAKING verdict -- the exact
+        contradiction the inventory exists to remove, one level up.
+
+        Release-global findings carry no cross-source evolution stamp, so
+        they are observed changes, never standing inventory.
+        """
+        from abicheck.report.release_oneline import format_release_oneline
+
+        libs = self._library_results()
+        inventory = release_inventory_counters(libs)
+        assert inventory is not None
+        release_global = {
+            "breaking": 1,
+            "source_breaks": 0,
+            "risk_changes": 0,
+            "compatible_additions": 0,
+            "total": 1,
+        }
+        line = format_release_oneline(
+            "BREAKING",
+            libs,
+            change_inventory=inventory,
+            release_global=release_global,
+        )
+        # The member's own observed break PLUS the release-global one.
+        expected_breaking = inventory["compatibility_breaking"] + 1
+        assert f"{expected_breaking} breaking" in line, line
+        # The hygiene clause is still stated separately, unchanged.
+        assert f"{inventory['hygiene_persistent']} persistent" in line
+        # And the observed total accounts for the release-global finding.
+        expected_total = inventory["compatibility_changes"] + 1
+        assert f"{expected_total} total" in line, line
+        # Vacuity guard: the merge must actually be adding something, i.e.
+        # the fixture's own member inventory is not already the total.
+        assert expected_breaking > inventory["compatibility_breaking"]
+
+    def test_a_release_global_break_is_reported_without_any_inventory(self) -> None:
+        """Control: the pre-existing path is unchanged.
+
+        Without an inventory there is no override, so this would pass even
+        with the bug -- which is why it is a control rather than the
+        regression test above.
+        """
+        from abicheck.report.release_oneline import format_release_oneline
+
+        line = format_release_oneline(
+            "BREAKING",
+            [],
+            release_global={
+                "breaking": 1,
+                "source_breaks": 0,
+                "risk_changes": 0,
+                "compatible_additions": 0,
+                "total": 1,
+            },
+        )
+        assert "1 breaking" in line, line
 
     def test_markdown_table_states_the_split_without_changing_its_columns(
         self,

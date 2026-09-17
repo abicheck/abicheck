@@ -276,8 +276,24 @@ class AstAcquisitionScope:
             with self._lock:
                 if self._entries.get(lookup) is future:
                     del self._entries[lookup]
+                # A settled producer can make its group releasable, so retry
+                # the bound here -- see `set_result` below for why.
+                self._evict_groups_locked()
             raise
         future.set_result(result)
+        with self._lock:
+            # Retry the bound now that this producer has settled. Admission
+            # alone cannot enforce it: a release fan-out starts many members
+            # at once, so at admission time *every* candidate group can hold
+            # an in-flight Future, nothing is releasable, and the bound is
+            # deliberately exceeded (correctness over size). Without this
+            # retry that overflow persisted until scope exit unless some
+            # later acquisition happened to come along -- so the peak AST
+            # set stayed resident for the whole request, which is precisely
+            # what the bound exists to prevent. `protect` is not passed:
+            # this group's entry is already published, so it is an ordinary
+            # eviction candidate like any other.
+            self._evict_groups_locked()
         return result
 
 

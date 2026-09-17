@@ -388,18 +388,37 @@ class TestRetentionBounds:
     def test_budget_is_never_exceeded_and_eviction_is_incremental(self) -> None:
         pattern = _compile_spelling_pattern(["Foo"])
         assert pattern is not None
-        filler = "Foo " + "y" * (MAX_CACHED_TEXT_CHARS - 16)
-        peak = 0
-        for i in range(400):
-            spelling_matches(pattern, f"{i:06d}{filler}")
-            assert MATCH_CACHE.retained_bytes <= MAX_RETAINED_BYTES
-            assert len(MATCH_CACHE) <= MAX_ENTRIES
-            peak = max(peak, len(MATCH_CACHE))
-            # Incremental, not a cliff: recording one more entry at the limit
-            # must never drop the cache to (near) empty the way a
-            # clear-the-whole-thing overflow policy does.
-            assert len(MATCH_CACHE) > peak // 2 or peak < 4
+        # The byte budget has to actually bind for this to assert anything:
+        # 400 near-maximal entries retain ~3.4 MiB against the production
+        # 8 MiB budget, and 400 is far under MAX_ENTRIES, so neither
+        # eviction condition could ever run. Shrink the byte budget instead
+        # of inflating the experiment, so the cliff-vs-incremental question
+        # is asked cheaply and deterministically.
+        import abicheck.compare.spelling_match_cache as cache_mod
+
+        original = cache_mod.MAX_RETAINED_BYTES
+        cache_mod.MAX_RETAINED_BYTES = 64 * 1024
+        submitted = 400
+        try:
+            filler = "Foo " + "y" * (MAX_CACHED_TEXT_CHARS - 16)
+            peak = 0
+            for i in range(submitted):
+                spelling_matches(pattern, f"{i:06d}{filler}")
+                assert MATCH_CACHE.retained_bytes <= cache_mod.MAX_RETAINED_BYTES
+                assert len(MATCH_CACHE) <= MAX_ENTRIES
+                peak = max(peak, len(MATCH_CACHE))
+                # Incremental, not a cliff: recording one more entry at the
+                # limit must never drop the cache to (near) empty the way a
+                # clear-the-whole-thing overflow policy does.
+                assert len(MATCH_CACHE) > peak // 2 or peak < 4
+            retained = len(MATCH_CACHE)
+        finally:
+            cache_mod.MAX_RETAINED_BYTES = original
         assert peak > 1, "the budget experiment never populated the cache"
+        assert retained < submitted, (
+            f"byte-budget eviction never ran: all {submitted} entries retained"
+        )
+        assert original == MAX_RETAINED_BYTES, "the budget was not restored"
 
     def test_eviction_is_least_recently_used(self) -> None:
         pattern = _compile_spelling_pattern(["Foo"])

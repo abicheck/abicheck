@@ -114,12 +114,16 @@ def _emits_elf(cc: str, tmp_path) -> bool:
     probe_src = tmp_path / "probe.c"
     probe_src.write_text("int probe(void){return 0;}\n")
     probe_so = tmp_path / "libprobe.so"
-    probe = subprocess.run(
-        [cc, "-shared", "-fPIC", "-o", str(probe_so), str(probe_src)],
-        capture_output=True,
+    cmd = [cc, "-shared", "-fPIC", "-o", str(probe_so), str(probe_src)]
+    probe = subprocess.run(cmd, capture_output=True)
+    # A configured compiler that ran and rejected a two-line `-shared` build
+    # is a broken toolchain, not a non-ELF platform: reporting `False` here
+    # would launder it into this module's own skip.
+    _require_compile_success(
+        "cc", cmd, probe_src.read_text(), probe, optional_feature=None
     )
-    if probe.returncode != 0 or not probe_so.exists():
-        return False
+    if not probe_so.exists():
+        pytest.fail(f"{cc} exited 0 but produced no {probe_so.name}")
     with open(probe_so, "rb") as fh:
         return fh.read(4) == _ELF_MAGIC
 

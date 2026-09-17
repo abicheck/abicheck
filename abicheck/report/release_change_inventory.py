@@ -85,6 +85,24 @@ RELEASE_INVENTORY_COUNTERS = (
     "hygiene_total",
 )
 
+#: The subset actually summed from member blocks. ``hygiene_total`` is
+#: **not** among them and must not be: ``render_change_inventory_json``
+#: does not emit it (it is a *property* of ``ChangeInventorySplit`, not a
+#: rendered field), so summing it produced ``hygiene_total: 0`` beside a
+#: nonzero ``hygiene_persistent`` -- a release reporting no standing
+#: inventory while listing it. It is derived below instead. Caught in
+#: review; this PR's own fixture had hidden it by inventing the key.
+_SUMMED_COUNTERS = tuple(c for c in RELEASE_INVENTORY_COUNTERS if c != "hygiene_total")
+
+#: The four states ``hygiene_total`` is the sum of, named once so the
+#: derivation cannot drift from the single-pair split's own definition.
+_HYGIENE_STATE_COUNTERS = (
+    "hygiene_introduced",
+    "hygiene_resolved",
+    "hygiene_persistent",
+    "hygiene_not_evaluated",
+)
+
 
 def fold_release_change_inventory(
     library_results: Sequence[Mapping[str, object]],
@@ -97,7 +115,7 @@ def fold_release_change_inventory(
     section entirely rather than publish an all-zero inventory for a
     release that never inventoried anything.
     """
-    totals = dict.fromkeys(RELEASE_INVENTORY_COUNTERS, 0)
+    totals = dict.fromkeys(_SUMMED_COUNTERS, 0)
     contributing = 0
     no_comparison = 0
     without_inventory = 0
@@ -111,12 +129,14 @@ def fold_release_change_inventory(
             without_inventory += 1
             continue
         contributing += 1
-        for counter in RELEASE_INVENTORY_COUNTERS:
+        for counter in _SUMMED_COUNTERS:
             value = block.get(counter)
             if isinstance(value, int) and not isinstance(value, bool):
                 totals[counter] += value
     if contributing == 0:
         return None
+    # Derived, never summed: see `_SUMMED_COUNTERS`.
+    totals["hygiene_total"] = sum(totals[c] for c in _HYGIENE_STATE_COUNTERS)
     return {
         **totals,
         # The scope terms a reader needs to know what the sums cover. Named

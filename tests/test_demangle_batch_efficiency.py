@@ -41,6 +41,8 @@ Registry: ``demangle.redundant_native_work`` in
 from __future__ import annotations
 
 import random
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -150,7 +152,20 @@ class TestWithinBatchDeduplication:
     def test_a_partially_cached_batch_submits_only_the_new_names(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # The warm-up has to actually *succeed* for the second call's
+        # submission count to mean anything, and on a host with neither
+        # cxxfilt nor c++filt it resolves nothing. Inject a deterministic
+        # in-process demangler so this test measures cache reuse rather
+        # than the environment's demangler inventory.
+        monkeypatch.setitem(
+            sys.modules,
+            "cxxfilt",
+            SimpleNamespace(demangle=lambda name: f"demangled({name})"),
+        )
         dm.demangle_batch(_NAMES[:3])
+        # Vacuity guard: without three cached successes the count below
+        # would be satisfied by an implementation that caches nothing.
+        assert len(dm._BATCH_CACHE_OK) == 3
         counter = _Counter(monkeypatch)
         dm.demangle_batch(_NAMES * 5)
         assert counter.submitted == len(set(_NAMES)) - 3

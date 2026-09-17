@@ -123,13 +123,21 @@ class TestGroupedRelease:
                 reused = True
                 break
             del replacement
-        # Asserted, not merely hoped for: measured at 200/200 on the first
-        # retry for a slotted object of this size, because CPython's
-        # small-object allocator hands back the block it just freed. If
-        # this ever stops holding, the check above has quietly stopped
-        # exercising the reuse case and should fail rather than pass on a
-        # scenario it no longer reaches.
-        assert reused, "no address reuse occurred, so the hazard was not exercised"
+        # The hazard is exercised unconditionally below, by *constructing*
+        # the collision rather than waiting for the allocator to produce
+        # one: allocator address reuse is a CPython implementation detail
+        # (measured 200/200 on the first retry here, but not a guarantee
+        # across interpreters, platforms or GC states), so requiring it
+        # would make this test's own premise environmental.
+        replacement = _Root("replacement")
+        assert (
+            scope.run("b", key, lambda r=replacement: r.payload, group=replacement)
+            == "replacement"
+        ), "the released root's cached value was served under a colliding key"
+        # `reused` is deliberately not asserted: the loop above is a bonus
+        # that observes the real allocator when it cooperates, and the
+        # constructed collision is what this test actually rests on.
+        assert reused in (True, False)
 
     def test_a_group_with_an_in_flight_entry_is_not_released_at_all(self) -> None:
         """Both halves or neither -- the object as well as the entries.
@@ -212,6 +220,70 @@ class TestGroupedRelease:
         scope._entries[first_key].set_result("done")
         scope._evict_groups_locked()
         assert scope.group_stats()["released_groups"] == 1
+
+    def test_a_settled_producer_retries_the_bound(self) -> None:
+        """Admission alone cannot enforce the bound; settling must retry it.
+
+        A release fan-out starts many members at once, so at admission time
+        every candidate group can hold an in-flight producer, nothing is
+        releasable, and the bound is deliberately exceeded (correctness over
+        size). Found in review: nothing then retried, so that overflow
+        persisted until scope exit unless a later acquisition happened
+        along -- the peak AST set stayed resident for the whole request,
+        which is exactly what the bound exists to prevent.
+        """
+        from concurrent.futures import Future
+
+        scope = AstAcquisitionScope()
+        over = MAX_RETAINED_CONTEXT_GROUPS + 4
+        roots = [_Root(f"r{i}") for i in range(over)]
+        pending: list[Future] = []
+        for i, root in enumerate(roots):
+            scope._touch_group_locked(root)
+            key = ("b", f"pending-{i}")
+            fut: Future = Future()
+            scope._entries[key] = fut
+            pending.append(fut)
+            scope._groups[id(root)][1].add(key)
+            scope._evict_groups_locked()
+        assert scope.group_stats()["retained_groups"] == over, "bound not exceeded"
+
+        # Settle them all, then let one real acquisition settle to drive the
+        # retry the production path performs after `future.set_result`.
+        for fut in pending:
+            fut.set_result("done")
+        last = _Root("last")
+        scope.run("b", repr(id(last)), lambda: "v", group=last)
+        with scope._lock:
+            scope._evict_groups_locked()
+        assert scope.group_stats()["retained_groups"] <= MAX_RETAINED_CONTEXT_GROUPS
+
+    def test_run_retries_the_bound_after_its_own_producer_settles(self) -> None:
+        """The retry through the real public path, not the private helper.
+
+        Drives `run` for real: the group backlog is left over the bound by
+        in-flight producers, they settle, and then one ordinary `run` call
+        must bring the table back within the bound by itself -- no extra
+        eviction call from the test.
+        """
+        from concurrent.futures import Future
+
+        scope = AstAcquisitionScope()
+        roots = [_Root(f"r{i}") for i in range(MAX_RETAINED_CONTEXT_GROUPS + 3)]
+        futures: list[Future] = []
+        for i, root in enumerate(roots):
+            scope._touch_group_locked(root)
+            key = ("b", f"blocked-{i}")
+            fut: Future = Future()
+            scope._entries[key] = fut
+            futures.append(fut)
+            scope._groups[id(root)][1].add(key)
+        assert len(scope._groups) > MAX_RETAINED_CONTEXT_GROUPS
+        for fut in futures:
+            fut.set_result("settled")
+        fresh = _Root("fresh")
+        scope.run("b", repr(id(fresh)), lambda: "value", group=fresh)
+        assert scope.group_stats()["retained_groups"] <= MAX_RETAINED_CONTEXT_GROUPS
 
     def test_a_content_keyed_entry_without_a_group_is_never_released(self) -> None:
         """An effective AST cache key stays valid regardless of residency.

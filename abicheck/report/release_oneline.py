@@ -69,6 +69,54 @@ _VERDICT_BUCKET = {
 }
 
 
+#: How a release-global finding's own bucket maps onto the inventory's
+#: compatibility counters. Release-global (bundle-coherence, probe-matrix)
+#: findings carry no cross-source evolution stamp, so every one of them is
+#: an *observed* compatibility change, never standing inventory.
+_GLOBAL_TO_INVENTORY = {
+    "breaking": "compatibility_breaking",
+    "source_breaks": "compatibility_source_breaks",
+    "risk_changes": "compatibility_risk",
+    "compatible_additions": "compatibility_compatible",
+}
+
+
+def _inventory_including_release_global(
+    change_inventory: Mapping[str, int] | None,
+    release_global: Mapping[str, int] | None,
+) -> dict[str, int] | None:
+    """Fold bundle/probe-matrix findings into the inventory's observed half.
+
+    Necessary because :func:`format_stat_line` *replaces* its headline
+    counts with the inventory's ``compatibility_*`` values whenever standing
+    hygiene is present -- so passing a members-only inventory silently
+    discarded the release-global findings that were already folded into
+    those counts. A release with standing hygiene whose only break was a
+    bundle finding then printed "no compatibility changes (0 total)" beside
+    a BREAKING verdict: the same verdict-versus-count contradiction the
+    inventory was introduced to remove, reintroduced one level up (found in
+    review).
+
+    The members-only view stays the one the JSON document reports, because
+    there a reader has the bundle and matrix sections separately; it is only
+    this single line, which has no room to list them, that must account for
+    them here.
+    """
+    if change_inventory is None:
+        return None
+    merged = dict(change_inventory)
+    if not release_global:
+        return merged
+    for global_key, inventory_key in _GLOBAL_TO_INVENTORY.items():
+        merged[inventory_key] = merged.get(inventory_key, 0) + _count(
+            release_global, global_key
+        )
+    merged["compatibility_changes"] = merged.get("compatibility_changes", 0) + _count(
+        release_global, "total"
+    )
+    return merged
+
+
 def _count(entry: Mapping[str, object], key: str) -> int:
     value = entry.get(key, 0)
     return value if isinstance(value, int) else 0
@@ -199,5 +247,7 @@ def format_release_oneline(
         total_changes=total,
         gate_note=gate_note,
         deployment_note=deployment_note,
-        change_inventory=change_inventory,
+        change_inventory=_inventory_including_release_global(
+            change_inventory, release_global
+        ),
     )
