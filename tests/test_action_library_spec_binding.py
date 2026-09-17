@@ -284,3 +284,91 @@ def test_the_placeholder_pattern_matches_what_the_docstring_says() -> None:
     for sample in ("${A}", "x${LONG_name9}y", "$A", "${9}", "${a-b}", "${}"):
         assert bool(_PLACEHOLDER.search(sample)) == bool(independent.search(sample))
         assert _PLACEHOLDER.findall(sample) == independent.findall(sample)
+
+
+class TestTheBindOptionParsing:
+    """`--bind NAME=VALUE`, which had no test of its own at all.
+
+    `bind_declaration` above owns *what a binding means*; this owns getting
+    the map to it. Both refusal branches here were unexercised — found by
+    `codecov/patch`, not by review — and one of them is the kind of thing
+    that is silently wrong rather than loudly broken: two `--bind` flags
+    naming the same variable with different values.
+
+    Driven through Click's `CliRunner` in process rather than as a
+    subprocess, per `test_action_cli_integration_commands.py`'s own stated
+    rule: a subprocess cannot report coverage, and this is precisely the
+    argument-parsing layer that module exists to cover.
+    """
+
+    from abicheck.frontends.action import cli as _cli  # noqa: F401
+
+    def _invoke(self, tmp_path: Any, *binds: str, spec: object | None = None) -> Any:
+        import json
+
+        from click.testing import CliRunner
+
+        from abicheck.frontends.action.cli_base import action_cli
+
+        spec_path = tmp_path / "components.json"
+        spec_path.write_text(
+            json.dumps(
+                spec
+                if spec is not None
+                else [{"name": "libfoo", "artifact": "lib/${ARCH}/libfoo.so*"}]
+            ),
+            encoding="utf-8",
+        )
+        args = ["resolve-libraries", str(spec_path), "--root", str(tmp_path)]
+        for entry in binds:
+            args += ["--bind", entry]
+        return CliRunner().invoke(action_cli, args)
+
+    def test_a_binding_without_a_separator_is_a_usage_error(
+        self, tmp_path: Any
+    ) -> None:
+        result = self._invoke(tmp_path, "ARCH")
+        assert result.exit_code == 2, result.output
+        assert "NAME=VALUE" in result.output
+
+    def test_the_same_name_twice_with_different_values_is_a_usage_error(
+        self, tmp_path: Any
+    ) -> None:
+        # Taking the last one is the silent answer, and it makes which
+        # component set was captured depend on flag order.
+        result = self._invoke(tmp_path, "ARCH=linux-x86_64", "ARCH=linux-aarch64")
+        assert result.exit_code == 2, result.output
+        assert "twice with different values" in result.output
+
+    def test_the_same_name_twice_with_the_same_value_is_accepted(
+        self, tmp_path: Any
+    ) -> None:
+        # Not a conflict: a caller assembling flags from two places may
+        # legitimately state the same binding twice. It still fails on the
+        # missing artifact, which is the *next* error, not this one.
+        result = self._invoke(tmp_path, "ARCH=linux-x86_64", "ARCH=linux-x86_64")
+        assert "twice with different values" not in result.output
+        assert "linux-x86_64" in result.output
+
+    def test_a_value_containing_an_equals_sign_keeps_all_of_it(
+        self, tmp_path: Any
+    ) -> None:
+        # Only the FIRST separator is structural: a `-D` flag or a query
+        # string in a value is ordinary.
+        result = self._invoke(tmp_path, "ARCH=a=b=c")
+        assert "a=b=c" in result.output
+
+    def test_an_empty_value_is_a_binding_not_a_missing_separator(
+        self, tmp_path: Any
+    ) -> None:
+        result = self._invoke(tmp_path, "ARCH=")
+        assert result.exit_code != 2 or "NAME=VALUE" not in result.output
+
+    def test_an_unbound_placeholder_refuses_rather_than_resolving(
+        self, tmp_path: Any
+    ) -> None:
+        from abicheck.frontends.action.cli_base import EXIT_REFUSED
+
+        result = self._invoke(tmp_path)
+        assert result.exit_code == EXIT_REFUSED, result.output
+        assert "ARCH" in result.output

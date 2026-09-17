@@ -639,3 +639,95 @@ class TestTheAggregateActionRecordsIt:
             "if this stops being true the dotfile really is excluded and this "
             "guard can be relaxed -- but verify it, do not assume it"
         )
+
+
+# ---------------------------------------------------------------------------
+# The `aggregate` CLI option and the renderer, in process
+# ---------------------------------------------------------------------------
+
+
+#: abicheck maps a Click usage error to this, not to Click's own 2 --
+#: `docs/reference/exit-codes.md`'s "64 = usage error" row, which applies
+#: across commands. Imported rather than written as a literal so a change to
+#: that convention is one edit, not a hunt through test files.
+from abicheck.frontends.cli.runtime import _EXIT_USAGE_ERROR  # noqa: E402
+
+
+class TestTheAggregateOptionAndRenderer:
+    """The two in-process halves the subprocess round trip cannot report on.
+
+    ``TestTheProducerWritesWhatTheConsumerReads`` above drives real
+    subprocesses, which is what makes its claim meaningful and also what
+    makes these lines invisible to coverage. More to the point, its happy
+    path never reaches either *refusal* here: a malformed
+    ``--analysis-context`` file, and a well-formed file whose block this
+    build rejects. Both must be **usage errors** — the caller asked for this
+    identity to travel with the report, so silently publishing a document
+    without it would leave a publisher unable to tell "not recorded" from
+    "recording was refused".
+    """
+
+    def _run(self, args: list[str]) -> Any:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        return CliRunner().invoke(main, ["aggregate", *args])
+
+    def _reports(self, tmp_path: Path) -> tuple[Path, Path]:
+        reports = tmp_path / "reports"
+        reports.mkdir(exist_ok=True)
+        manifest = tmp_path / "manifest.json"
+        _write_manifest(manifest)
+        return reports, manifest
+
+    def test_a_malformed_context_file_is_a_usage_error(self, tmp_path: Path) -> None:
+        reports, manifest = self._reports(tmp_path)
+        bad = tmp_path / "ctx.json"
+        bad.write_text("{not json", encoding="utf-8")
+        result = self._run(
+            [str(reports), "--manifest", str(manifest), "--analysis-context", str(bad)]
+        )
+        assert result.exit_code == _EXIT_USAGE_ERROR, result.output
+        assert "--analysis-context" in result.output
+
+    def test_a_rejected_block_is_a_usage_error_not_a_dropped_block(
+        self, tmp_path: Path
+    ) -> None:
+        reports, manifest = self._reports(tmp_path)
+        bad = tmp_path / "ctx.json"
+        bad.write_text(json.dumps({"tested_sha": "not-a-sha"}), encoding="utf-8")
+        result = self._run(
+            [str(reports), "--manifest", str(manifest), "--analysis-context", str(bad)]
+        )
+        assert result.exit_code == _EXIT_USAGE_ERROR, result.output
+        assert "--analysis-context" in result.output
+
+    def test_an_unreadable_context_file_is_a_usage_error(self, tmp_path: Path) -> None:
+        reports, manifest = self._reports(tmp_path)
+        result = self._run(
+            [
+                str(reports),
+                "--manifest",
+                str(manifest),
+                "--analysis-context",
+                str(tmp_path / "nothing.json"),
+            ]
+        )
+        # Click's own `exists=True` rejects it; either way it is the usage
+        # exit and never a run that quietly proceeds without the block.
+        assert result.exit_code == _EXIT_USAGE_ERROR, result.output
+
+    def test_the_renderer_emits_the_block_only_when_given_one(self) -> None:
+        from abicheck.report.aggregate import render_aggregate_json
+        from abicheck.workflows.aggregate.fold import AggregateResult
+
+        result = AggregateResult(targets=())
+        assert ANALYSIS_CONTEXT_KEY not in render_aggregate_json(result)
+
+        context = AnalysisContext.from_mapping({"tested_sha": MERGE})
+        document = render_aggregate_json(result, analysis_context=context)
+        assert document[ANALYSIS_CONTEXT_KEY]["tested_sha"] == MERGE
+        # And the block is additive: nothing the renderer already produced
+        # is displaced by it.
+        assert set(render_aggregate_json(result)) < set(document)

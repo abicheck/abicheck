@@ -458,3 +458,41 @@ class TestThereIsOnlyOnePeelingOwner:
         assert legacy.ok
         assert legacy.commit_sha == strict.commit_sha == COMMIT
         assert legacy.annotated == strict.annotated
+
+
+class TestTheRemainingRefusalBranches:
+    """Three refusals the sweeps above happen not to reach.
+
+    Each is a real branch guarding a real shape the API or a caller can
+    produce, and an uncovered refusal is one nobody has checked says the
+    right thing — which for this module is the whole product, since every
+    other test here asserts a *code*.
+    """
+
+    def test_duplicate_entries_for_one_tag_are_refused_not_picked(self) -> None:
+        # The API returning two entries under the same ref should not happen;
+        # picking one by list order if it ever did is the behaviour worth
+        # foreclosing, because it would be silent.
+        answer = [lightweight("1.5.2", COMMIT), lightweight("1.5.2", OTHER_COMMIT)]
+        with pytest.raises(TagResolutionError) as excinfo:
+            resolve_tag_commit("1.5.2", answer)
+        assert _code(excinfo) == "tag-ambiguous"
+
+    @pytest.mark.parametrize("tag_object", ["a string", 17, [], True])
+    def test_a_tag_object_document_that_is_not_an_object_is_refused(
+        self, tag_object: object
+    ) -> None:
+        # Distinct from omitting it (`tag-object-missing`): the caller did
+        # fetch something, and it was not a document.
+        with pytest.raises(TagResolutionError) as excinfo:
+            resolve_tag_commit("1.5.2", annotated("1.5.2"), tag_object=tag_object)
+        assert _code(excinfo) == "tag-ref-unreadable"
+
+    def test_the_tag_mode_refuses_when_there_is_no_tag_to_name(self) -> None:
+        # `expected-project-ref: tag` answers with the tag string, so an
+        # empty tag would silently expect the empty string — which a
+        # manifest's `project_ref` can never equal, giving a confusing
+        # mismatch instead of "you gave me no tag".
+        with pytest.raises(TagResolutionError) as excinfo:
+            expected_capture_revision("tag", tag="", resolved=None)
+        assert _code(excinfo) == "tag-missing"
