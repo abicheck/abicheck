@@ -153,8 +153,13 @@ def _run_select(
     attempt: str = "1",
     expect_event: str = "push",
     run_id: str = "5001",
+    expect_workflow: str = ".github/workflows/release.yml",
+    allowed_conclusions: str = "success",
 ) -> tuple[subprocess.CompletedProcess[str], _Context]:
-    tmp = tmp_path / f"run-{run_id}-{expect_event}-{attempt}"
+    tmp = (
+        tmp_path
+        / f"run-{run_id}-{expect_event}-{attempt}-{len(expect_workflow)}-{len(allowed_conclusions)}"
+    )
     tmp.mkdir(parents=True, exist_ok=True)
     archive = _baseline_set_zip(tmp)
     entries = artifacts if isinstance(artifacts, list) else [artifacts]
@@ -178,9 +183,9 @@ def _run_select(
             "SOURCE_REPOSITORY": REPOSITORY,
             "SOURCE_RUN_ID": run_id,
             "SOURCE_RUN_ATTEMPT": attempt,
-            "EXPECT_WORKFLOW": ".github/workflows/release.yml",
+            "EXPECT_WORKFLOW": expect_workflow,
             "EXPECT_EVENT": expect_event,
-            "ALLOWED_CONCLUSIONS": "success",
+            "ALLOWED_CONCLUSIONS": allowed_conclusions,
             "SET_PREFIX": SET_PREFIX,
             "GITHUB_OUTPUT": str(github_output),
             "RUNNER_TEMP": str(tmp),
@@ -581,3 +586,86 @@ class TestTheAcquisitionStepActuallyRuns:
             workflow, tmp_path, self.RUN, [self.ARTIFACT], run_id="9999"
         )
         assert select.returncode != 0
+
+
+@_WINDOWS_PYTHON3_SKIP
+class TestEveryOptionalInputMayBeOmitted:
+    """The combinations a happy-path test never reaches.
+
+    Each optional input is assembled into an argv array by a conditional in
+    the step's shell, and every one of those conditionals is a place a run
+    with the input *unset* takes a different path than the one a test that
+    always sets it exercised. `set -euo pipefail` makes several of them
+    outright fatal when they go wrong -- an unset-variable expansion, an
+    empty-array expansion on an older bash, or a bare `[[ ... ]] && ...`
+    whose condition is false -- and none of those failures is visible to a
+    test that only ever passes every input.
+
+    `allowed-conclusions` gets its own case for a second reason: empty means
+    "any conclusion", which is a documented choice, so a `${VAR:-default}`
+    substituting `success` over it would silently make that branch
+    unreachable. That exact defect already shipped once in
+    `actions/verify-source-run/run.sh` and is recorded in its own comment
+    there; this is the same shape in a new script.
+    """
+
+    RUN = TestTheAcquisitionStepActuallyRuns.RUN
+    ARTIFACT = TestTheAcquisitionStepActuallyRuns.ARTIFACT
+
+    @pytest.mark.parametrize(
+        ("label", "overrides"),
+        [
+            (
+                "every optional input empty",
+                {"attempt": "", "expect_workflow": "", "expect_event": ""},
+            ),
+            ("empty allowed-conclusions means any", {"allowed_conclusions": ""}),
+            ("only the workflow declared", {"attempt": "", "expect_event": ""}),
+            ("only the attempt declared", {"expect_workflow": "", "expect_event": ""}),
+            ("only the event declared", {"attempt": "", "expect_workflow": ""}),
+        ],
+    )
+    def test_the_step_still_acquires(
+        self,
+        workflow: dict[str, Any],
+        tmp_path: Path,
+        label: str,
+        overrides: dict[str, str],
+    ) -> None:
+        require_bash()
+        select, context = _run_select(
+            workflow, tmp_path, self.RUN, [self.ARTIFACT], **overrides
+        )
+        assert select.returncode == 0, f"{label}: {select.stderr}"
+        assert (context.workspace / "baseline-sets").is_dir(), label
+
+    def test_an_empty_allowed_conclusions_really_allows_a_failed_run(
+        self, workflow: dict[str, Any], tmp_path: Path
+    ) -> None:
+        # The half the case above cannot state: that the branch is not only
+        # reachable but means what it says. A `${VAR:-default}` would pass
+        # the case above (success is still allowed) and fail this one.
+        require_bash()
+        select, _context = _run_select(
+            workflow,
+            tmp_path,
+            {**self.RUN, "conclusion": "failure"},
+            [self.ARTIFACT],
+            allowed_conclusions="",
+        )
+        assert select.returncode == 0, select.stderr
+
+    def test_a_declared_conclusion_still_refuses_the_others(
+        self, workflow: dict[str, Any], tmp_path: Path
+    ) -> None:
+        # Vacuity guard for the row above.
+        require_bash()
+        select, _context = _run_select(
+            workflow,
+            tmp_path,
+            {**self.RUN, "conclusion": "failure"},
+            [self.ARTIFACT],
+            allowed_conclusions="success",
+        )
+        assert select.returncode != 0
+        assert "wrong-conclusion" in select.stderr
