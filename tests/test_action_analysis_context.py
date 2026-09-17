@@ -231,8 +231,18 @@ class TestTheProducerWritesWhatTheConsumerReads:
         out = tmp_path / "ctx.json"
         import os
 
+        # Scrub every ABICHECK_CTX_* the ambient environment might carry
+        # before layering this case's own on top. The command reads its
+        # inputs from named variables, so an inherited one would silently
+        # become part of what is recorded -- and a test that records a value
+        # it did not set is a test asserting something else's state.
+        ambient = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("ABICHECK_CTX_")
+        }
         proc = _cli(
-            "record-analysis-context", str(out), env={**os.environ, **env}, cwd=tmp_path
+            "record-analysis-context", str(out), env={**ambient, **env}, cwd=tmp_path
         )
         assert proc.returncode == 0, proc.stderr
         return out
@@ -351,10 +361,15 @@ class TestTheProducerWritesWhatTheConsumerReads:
     ) -> None:
         import os
 
+        ambient = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("ABICHECK_CTX_")
+        }
         proc = _cli(
             "record-analysis-context",
             str(tmp_path / "ctx.json"),
-            env={**os.environ, "ABICHECK_CTX_TESTED_SHA": "not-a-sha"},
+            env={**ambient, "ABICHECK_CTX_TESTED_SHA": "not-a-sha"},
             cwd=tmp_path,
         )
         assert proc.returncode != 0

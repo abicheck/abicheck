@@ -37,6 +37,9 @@ subtly wrong and impossible to notice when wrong.
 | `allowed-conclusions` | `success` | Comma-separated. Explicitly empty allows any conclusion — a real choice for a publisher that reports analysis failures. |
 | `artifact-name` | *(required)* | Artifact to download from that run. |
 | `tested-sha` | *(empty)* | The commit the producer actually analysed, if it recorded one, as a **full** 40- or 64-character SHA. Verified against the PR head. Empty means the run's own head SHA. An abbreviated SHA is refused: verification is by exact equality against values the API states in full, and prefix-matching a value that decides which commit a trusted comment claims was analysed would be ambiguous by construction. |
+| `provenance-from` | *(empty)* | Read the analysed commit out of **this** artifact, at this relative path inside it — normally `aggregate.json`, whose `analysis_context` block `actions/aggregate` records when asked to (`record-analysis-context: 'true'`). Replaces the two-pass sequence a caller otherwise has to write; see [Reading the analysed commit in one pass](#reading-the-analysed-commit-in-one-pass). |
+| `require-provenance` | `true` | With `provenance-from` set, what an artifact recording no analysis context means. `true` refuses: the identity is unestablished, and substituting the PR head would name a tree the analysis never saw. `false` falls back to the run's head SHA and says so on `tested-sha-source`. |
+| `report-from` | *(empty)* | The report this publication is about, at this relative path inside the artifact. Returned on `report-path` together with the verified identity. |
 | `claimed-pr-number` | *(empty)* | A PR number the artifact states. Cross-checked only; a disagreement fails the step. |
 | `destination` | `abicheck-source-artifact` | Directory to extract into. |
 | `max-total-bytes` | `67108864` | Total uncompressed bytes the artifact may expand to. |
@@ -55,6 +58,10 @@ subtly wrong and impossible to notice when wrong.
 | `pr-number` | The pull request the **API** associates with this run. |
 | `pr-head-sha` | The pull request's own head commit. |
 | `tested-sha` | The commit that was actually analysed, verified as the PR head or a merge of it. |
+| `tested-sha-source` | `analysis-context` when the producer recorded the analysed commit and the API confirmed the association, `run-head` otherwise. Branch on this, not on whether `tested-sha` is empty — it always holds something. |
+| `provenance` | `recorded` \| `absent` \| `not-requested`. Distinguishes "the producer said what it analysed" from "it did not" from "we never asked". |
+| `report-path` | The verified report named by `report-from`, or empty. |
+| `report-available` | `false` when the verified run produced no such member — an unavailable analysis, which is not a clean compatibility result. |
 | `from-fork` | `true` when the PR head is in a different repository. |
 | `artifact-path` | Directory the artifact was extracted into. |
 | `refusal-code` | Machine-readable refusal reason; empty on success. |
@@ -109,6 +116,63 @@ compression-ratio caps. Extracted files are written without an executable
 bit. Nothing in an artifact is executed, imported, `pickle`-d or
 `yaml.load`-ed — `json.loads` is the only consumer.
 
+## Reading the analysed commit in one pass
+
+On a `pull_request` run the producer checks out an **ephemeral merge
+commit**. No GitHub API endpoint names it, so only the producer can say what
+was analysed — and reporting the PR head instead claims analysis of a tree
+nothing looked at.
+
+Before `provenance-from`, a caller had to write this:
+
+1. run this Action once, to get the artifact;
+2. parse a sidecar file out of it, in the *privileged* job;
+3. run this Action a **second** time with `tested-sha` set, to verify the
+   claim — downloading the same artifact again.
+
+That acquires the same bytes twice with no guarantee the second copy is the
+first (an artifact can be replaced between the two requests), and puts
+parsing of contributor-produced content in the job holding the write token.
+
+`provenance-from` closes both. The producer records the commit in the
+canonical aggregate document via `actions/aggregate`'s
+`record-analysis-context`; this Action reads that block out of the artifact
+it has **already** extracted, through the same bounded reader every other
+member goes through, shape-checks every field before it can reach a step
+output, and then verifies the claim's association with the pull request
+against the API exactly as a `tested-sha` input would be. One download, one
+extraction, no artifact parsing in the trusted job.
+
+The claim is still a claim. What changes is where it travels and who parses
+it — not whether it is verified.
+
+```yaml
+- uses: abicheck/abicheck/actions/verify-source-run@<sha>
+  id: source
+  with:
+    source-run-id: ${{ github.event.workflow_run.id }}
+    expect-repository: ${{ github.repository }}
+    expect-workflow: .github/workflows/ci.yml
+    expect-run-attempt: ${{ github.event.workflow_run.run_attempt }}
+    artifact-name: abicheck-reports-${{ env.PROFILE }}
+    provenance-from: aggregate.json
+    report-from: aggregate.json
+    github-token: ${{ github.token }}
+
+- uses: abicheck/abicheck/actions/report@<sha>
+  with:
+    report: ${{ steps.source.outputs.report-path }}
+    sha: ${{ steps.source.outputs.tested-sha }}
+    # ...
+```
+
+`report-path` and `tested-sha` come back together, so the document rendered
+is the one whose context was checked — not a path the caller reassembled
+from `artifact-path` and a filename, which can name a member nothing looked
+at. A verified run that produced no such member answers `report-available:
+'false'`, which is an explicit unavailable-analysis state rather than a path
+that does not resolve.
+
 ## Refusal codes
 
 | Code | Meaning |
@@ -123,6 +187,9 @@ bit. Nothing in an artifact is executed, imported, `pickle`-d or
 | `ambiguous-pull-request` | Several are; the publisher will not guess. |
 | `pull-request-mismatch` | The artifact claims a different pull request than the API reports. |
 | `no-tested-sha` | No analysed commit was recorded. |
+| `analysis-context-absent` | `provenance-from` named a document that does not exist or carries no `analysis_context` block, under `require-provenance: true`. |
+| `analysis-context-malformed` | A recorded field is not in the form that field accepts (a SHA that is not full hex, a ref carrying a control character, a value of the wrong type). |
+| `analysis-context-unsupported-schema` | The block declares a schema this build does not read. |
 | `head-sha-mismatch` | The run's head is not the pull request's head. |
 | `unverified-tested-sha` | A non-head commit was analysed and no commit document was supplied to establish the relationship. |
 | `unassociated-tested-sha` | The analysed commit is neither the PR head nor a merge of it. |

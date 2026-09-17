@@ -236,6 +236,39 @@ Two footguns it forecloses for you: the expected-target manifest must live
 inside it becomes an extra target), and a previous run's `aggregate.json` in
 that directory is refused rather than aggregated as a component result.
 
+### Recording *which* revision was analysed
+
+If a trusted `workflow_run` job will publish this run's report, add:
+
+```yaml
+    record-analysis-context: 'true'
+    profile: linux-x86_64-gcc-release
+    orchestration-ref: <the abicheck ref this workflow pins>
+```
+
+On a `pull_request` build the commit actually checked out is an **ephemeral
+merge commit** — `github.sha`, which is the `tested-sha` input's default —
+and no GitHub API endpoint names it. A publisher that cannot learn it either
+reports the PR head, which names a tree the analysis never saw, or asks the
+producer through some sidecar file it then has to parse in a privileged job.
+
+This writes it into the aggregate document instead, as an `analysis_context`
+block (`abicheck.analysis-context/1`) carrying the tested revision, the PR
+head and base, this run and attempt, and the orchestration revision as
+**five separate fields** — they are five different things, and every
+reporting error in this area is of the form "one displayed as another". A
+field the producer cannot state stays empty rather than borrowing a
+plausible sibling, and the block is emitted for a run that completed zero
+comparisons too, so an incomplete analysis is still publishable *as*
+incomplete with its identity intact.
+
+Everything recorded is a **claim** by a job that may be unprivileged or a
+fork's. Each field is shape-validated when written, here, in the job that
+can fix it; the publisher verifies the recorded commit's association with
+the pull request against the API before displaying it. See
+[`verify-source-run`](../reference/verify-source-run.md#reading-the-analysed-commit-in-one-pass)
+for the reading half.
+
 ## 6. Publish from a trusted job
 
 Analysis runs unprivileged, under the contributor's pull request, including
