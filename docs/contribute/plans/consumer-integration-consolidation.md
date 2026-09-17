@@ -16,7 +16,7 @@ what the contract now is, and what a consumer still has to supply itself.
 | What | Revision |
 |---|---|
 | abicheck, before this work | `e3e5197e4` (`origin/main`, 2026-09-17) |
-| abicheck, after this work | `da0d947a0` on `claude/relaxed-gates-b7h32y` (5 commits) |
+| abicheck, after this work | `ceb2f663b` on `claude/relaxed-gates-b7h32y` (12 commits) |
 | PVXS integration as reviewed | `napetrov/pvxs` PR #2 head `40c8eb89a` (its `f5ade4a3d` is the commit the previous review measured) |
 | PVXS migration demonstrated here | `adf909b31` — a **disposable local branch**, never pushed |
 | PVXS default branch | `3b8f5d109` (`origin/master`) |
@@ -28,12 +28,37 @@ pull request for them is the next step. `napetrov/pvxs#2` and
 commented on or published to either.** No future merge SHA is named anywhere
 in this document.
 
-Every gate run locally: `ruff check`/`ruff format --check` clean,
-`mypy abicheck/` **0 errors**, `python scripts/check_architecture.py`
-**0 errors**, `scripts/verify.py --profile pr --only docs-build,action-cli-surface`
-passed. `scripts/check_ai_readiness.py` reports 15 errors, **all of them
-pre-existing** ADR `**Verified:**` receipts naming commits unreachable from
-`origin/main`; none names a file this work touched.
+Gates run locally: `ruff check` / `ruff format --check` clean over
+`abicheck/` and `tests/`; `mypy abicheck/` **0 errors** over 869 files;
+`python scripts/check_architecture.py` **0 errors** (both new modules and the
+`cli_provenance.py` split stay under the per-file ceiling);
+`scripts/check_docs_contract.py` **0 errors**; `scripts/verify.py --profile
+pr --only docs-build,docs-contract,action-cli-surface` passed; and the full
+fast unit lane (`-m "not integration and not libabigail and not abicc and
+not slow and not golden"`), **51,348 passed** with one class of failure
+accounted for below.
+
+`scripts/check_ai_readiness.py` reports **15 errors, all pre-existing**: ADR
+`**Verified:**` receipts naming commits unreachable from `origin/main`. This
+branch touches no file under `docs/contribute/adr/`, and the same check was
+run in a worktree of `origin/main` and fails there identically — checked,
+not assumed, since "pre-existing" is the easiest thing in a handoff to
+assert and not verify. `test_ai_readiness.py::test_adr_status_sync_holds`
+is that same check and fails for the same reason.
+
+The only other failures in the full run were an environment artefact, named
+here so the next reader does not chase them: this sandbox periodically
+deletes `/tmp`, which removes the git commit-signing helper the environment
+configures, and every test that builds a throwaway repository then fails at
+`git commit` with exit 128 (`test_protect_committed_baseline_workflow.py`,
+`test_agent_evals.py`, `test_l2_real_profiles.py` — 22 of them). All pass
+once the helper is restored, and none of them touch this changeset.
+
+Not run here: the `integration`/`libabigail`/`abicc` marker lanes (no
+external toolchain for them in this environment) and the coverage floor,
+which is a canonical-lane CI measurement. Nothing in this changeset touches
+analysis, so those lanes are unaffected by construction — but that is a
+claim, not a measurement, and is recorded as such.
 
 ## What landed
 
@@ -218,8 +243,18 @@ The full diffs are reproducible from the branch:
 
 ## Tests
 
-Production code, tests and docs are separate commits' worth of change; the
-numbers below are the tests added.
+Reported separately, as added lines against `origin/main`:
+
+| | Added lines |
+|---|---:|
+| Production code and workflows | 2,179 |
+| Tests | 3,230 |
+| Documentation and changelog fragments | 798 |
+
+Consumer reduction is the separate number in the deletion map below: **−255
+integration lines (−19%)** with one whole local Action deleted.
+
+The table below is the tests added, by boundary.
 
 | Boundary | File | Cases |
 |---|---|---|
@@ -377,6 +412,32 @@ merges:
 | `identity.two_distinct_identifiers_compared_as_one` | A name and the object it names are never folded into one equality; the peel has exactly one owner and refuses every near-miss rather than guessing. | `test_action_tag_resolution.py`, `test_publish_baseline_tag_resolution_step.py` |
 | `identity.absent_evidence_defaulted_to_a_plausible_sibling` | "Not recorded" and "recorded as X" never collapse; related identities stay separate fields; which state was reached is itself published. | `test_action_analysis_context.py` |
 | `config.textual_substitution_into_a_structured_document` | A value bound into a structured document is inserted structurally, once, from a closed allowlist — never by rewriting serialized text. | `test_action_library_spec_binding.py` |
+
+## Acceptance coverage
+
+The requested acceptance table, mapped to what actually asserts each row.
+Rows this pass did **not** reach are marked as such rather than argued
+around.
+
+| Required acceptance | Where |
+|---|---|
+| Same-run and cross-run captures reach the same validator | `test_publish_baseline_cross_run.py::TestBothAcquisitionsConvergeOnOneValidator` — the validator's `if:` names no acquisition, and nothing after it does either |
+| Wrong run / attempt / profile / tag / commit is rejected | `test_action_precaptured_source.py` (each with its own refusal code) and `TestTheAcquisitionStepActuallyRuns::test_each_refusal_fails_the_step_with_its_own_code` — seven paths executed against a stubbed `gh` |
+| Numeric and annotated tags work | `test_publish_baseline_tag_resolution_step.py::TestTheStepResolvesRealTagShapes`, including that the annotated tag's own object SHA is never the answer |
+| Equal canonical content is idempotent; conflicting same-name content is not accepted | Pre-existing (`test_publish_baseline_upload_step*.py`); unchanged by this work, which routes both acquisition modes into that same chain |
+| Publication invokes no build, capture or comparison | `TestPublicationStillInvokesNoAnalysis`, `TestCrossRunModeStillNeverBuilds`, plus the pre-existing `test_publish_baseline_existing_set.py::TestExistingSetModeNeverBuilds` |
+| Head checkout, merge checkout, stale/wrong/missing context, partial analysis, absent report retain accurate identities | `test_action_analysis_context.py` — the five-identity separation, the absent-vs-recorded distinction, the zero-comparison case, and the `report-available: 'false'` state |
+| The normal path acquires the artifact once | `TestTheNormalPathAcquiresTheArtifactOnce` — exactly one download, one extraction, and one `verify-run`, counted over the real shell |
+| Applicability changes by event without fabricated failures | **Consumer-side, not upstream.** The declaration is the consumer's (`aggregate`'s `checks:` input already supports it); the gating job the migration adds is the part that still has no upstream home — see item 1 below |
+| Four requested checks retain component/channel identity and missing-state coverage | Pre-existing (`test_action_aggregate.py`, `aggregate`'s `channels` output); this pass added no orchestration adapter — see item 3 below |
+| Compatible addition, break, existing-warning resolution under `changes`, persistent-only background, incomplete analysis render correctly | Pre-existing (`report_publication.py`'s own suites); unchanged here beyond the report now arriving on `report-path` |
+| A disposable external consumer consumes official interfaces | Demonstrated and mechanically checked (see the deletion map); **not** a committed upstream test, since it needs an external checkout CI does not have. The nearest durable guard added instead is `test_docs_action_examples.py`, which holds every *documented* integration example to the same standard |
+| Hostile-artifact refusal and side-effect absence | Pre-existing (`test_action_artifact_extraction.py`); the cross-run path is asserted to route through the same extractor rather than `unzip`, and a refused acquisition is asserted to leave no staged bytes |
+
+Two measurement rows from the request are deliberately **not** claimed:
+build/capture/comparison/rendering timings were not measured (nothing here
+changes any of them, and reporting a number this pass did not take would be
+worse than saying so), and no PVXS matrix was run.
 
 ## Still missing
 

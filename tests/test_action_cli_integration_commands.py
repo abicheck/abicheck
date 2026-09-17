@@ -331,15 +331,30 @@ class TestValidateAggregate:
         assert "does not describe" in result.output or "status" in result.output
 
 
+#: Realistic git object names and a real `ref` field. `verify-tag` resolves
+#: through the shared peeling owner (`tag_resolution.resolve_tag_commit`),
+#: which selects the EXACT `refs/tags/<name>` entry out of what may be a
+#: prefix-match array and refuses an object name that is not a full one --
+#: neither rule is reachable by a symbolic fixture, and both are real API
+#: behaviours. The claims below are unchanged; only the documents are now
+#: shaped like the API's.
+TAG_COMMIT = "c3" + "0" * 38
+OTHER_COMMIT = "c9" + "0" * 38
+TAG_OBJECT_SHA = "7a6" + "0" * 37
+
+
+def _tag_ref(name: str, sha: str, kind: str = "commit") -> dict[str, object]:
+    return {"ref": f"refs/tags/{name}", "object": {"sha": sha, "type": kind}}
+
+
 class TestVerifyTag:
     def test_an_annotated_tag_is_peeled_and_reported(
         self, runner: CliRunner, tmp_path: Path
     ) -> None:
-        ref = _write(
-            tmp_path / "ref.json", {"object": {"sha": "TAGOBJ", "type": "tag"}}
-        )
+        ref = _write(tmp_path / "ref.json", _tag_ref("1.5.2", TAG_OBJECT_SHA, "tag"))
         tag_object = _write(
-            tmp_path / "tag.json", {"object": {"sha": "COMMITX", "type": "commit"}}
+            tmp_path / "tag.json",
+            {"sha": TAG_OBJECT_SHA, "object": {"sha": TAG_COMMIT, "type": "commit"}},
         )
         github_output = tmp_path / "gh"
         github_output.write_text("", encoding="utf-8")
@@ -353,7 +368,7 @@ class TestVerifyTag:
                 "--tag-object-json",
                 str(tag_object),
                 "--built-sha",
-                "COMMITX",
+                TAG_COMMIT,
                 "--github-output",
                 str(github_output),
             ],
@@ -362,7 +377,7 @@ class TestVerifyTag:
         outputs = _outputs(github_output)
         assert outputs["outcome"] == "tag"
         assert outputs["is-tag"] == "true"
-        assert outputs["commit-sha"] == "COMMITX"
+        assert outputs["commit-sha"] == TAG_COMMIT
         assert outputs["annotated"] == "true"
 
     def test_an_absent_ref_reads_as_not_a_tag(
@@ -393,9 +408,7 @@ class TestVerifyTag:
     def test_a_commit_mismatch_reports_that_outcome(
         self, runner: CliRunner, tmp_path: Path
     ) -> None:
-        ref = _write(
-            tmp_path / "ref.json", {"object": {"sha": "COMMITX", "type": "commit"}}
-        )
+        ref = _write(tmp_path / "ref.json", _tag_ref("1.5.2", TAG_COMMIT))
         github_output = tmp_path / "gh"
         github_output.write_text("", encoding="utf-8")
         result = runner.invoke(
@@ -406,7 +419,7 @@ class TestVerifyTag:
                 "--ref-json",
                 str(ref),
                 "--built-sha",
-                "SOMETHINGELSE",
+                OTHER_COMMIT,
                 "--github-output",
                 str(github_output),
             ],
