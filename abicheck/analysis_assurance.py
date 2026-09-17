@@ -120,9 +120,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from .analysis_assurance_comparability import (
+    NOT_COMPARABLE_NOTE,
     bounded_comparability_notes,
     is_comparability_bounded,
-    not_comparable_assurance,
 )
 from .analysis_assurance_layout import (
     layout_unverified_detectors as _layout_unverified_detectors,
@@ -131,6 +131,7 @@ from .buildsource.fact_set import check_fact_compatibility
 from .buildsource.model import CoverageStatus, DataLayer
 from .checker_types import DiffResult
 from .evidence_depth import (
+    depth_request_source,
     reported_depth_label,
     resolve_reported_depth,
     weaker_depth,
@@ -356,21 +357,16 @@ class AnalysisAssurance:
 
     schema_version: str = ANALYSIS_ASSURANCE_SCHEMA_VERSION
     status: AssuranceStatus = "not_requested"
-    #: The depth this run was asked for. ``"implicit"``
-    #: :attr:`requested_depth_source` means no ``--depth`` was given and
-    #: this was normalized to :attr:`effective_depth` (see
-    #: ``compute_analysis_assurance``); ``"explicit"`` means a front end
-    #: stated it. ``None`` on a hand-built block, and on the
-    #: ``not_comparable`` short-circuit when no ``--depth`` was given.
+    #: The depth this run was asked for; under an ``"implicit"``
+    #: :attr:`requested_depth_source`, the depth it reached instead --
+    #: ``evidence_depth.resolve_reported_depth`` owns that rule.
     requested_depth: str | None = None
     effective_depth: str | None = None
-    #: ``None`` on a hand-built block, and on the ``not_comparable``
-    #: short-circuit (no effective depth is computed there, so satisfaction
-    #: is unknown rather than trivially true); otherwise whether
-    #: ``effective_depth`` reaches ``requested_depth`` on the
-    #: ``EVIDENCE_DEPTH_VALUES`` ladder. Trivially ``True`` for an implicit
-    #: request, which is the point: an unrequested depth is *satisfied*, not
-    #: *unknown*, and the two must not share a ``null``.
+    #: Whether ``effective_depth`` reaches ``requested_depth`` on the
+    #: ``EVIDENCE_DEPTH_VALUES`` ladder -- trivially ``True`` for an
+    #: implicit request, which is the point: an unrequested depth is
+    #: *satisfied*, not *unknown*, and must not share a ``null`` with it.
+    #: ``None`` only where neither was resolved.
     depth_satisfied: bool | None = None
     target_accounting: TargetAccounting = field(default_factory=TargetAccounting)
     translation_units: TranslationUnitAccounting = field(
@@ -453,14 +449,13 @@ class AnalysisAssurance:
     #: round 10).
     schema_staleness_status: str = "clean"
     #: ``"explicit"`` (a front end stated ``--depth``) or ``"implicit"``.
-    #: Every gate reads the explicit value only, so this field records the
-    #: normalization without ever licensing one. Appended at the END for
-    #: exactly the reason ``schema_staleness_status`` above records -- it
-    #: was first written next to ``depth_satisfied``, where it belongs
-    #: conceptually and rebinds every positional argument from
-    #: ``target_accounting`` onward (CodeRabbit review). Second field to
-    #: learn it; ``tests/test_analysis_assurance_implicit_depth.py`` now
-    #: states the rule executably instead.
+    #: Every gate reads the explicit value only, so this records the
+    #: normalization without licensing one. Appended at the END for the
+    #: reason ``schema_staleness_status`` above records: written next to
+    #: ``depth_satisfied`` first, it rebound every positional argument from
+    #: ``target_accounting`` on (CodeRabbit review). Second field to learn
+    #: that, so ``tests/test_analysis_assurance_implicit_depth.py`` now
+    #: states the rule executably rather than in a third comment.
     requested_depth_source: str = "implicit"
 
     def to_dict(self) -> dict[str, Any]:
@@ -1314,10 +1309,15 @@ def compute_analysis_assurance(
     # nobody supplied. The candidate-side axes (depth, pack accounting,
     # scope resolution) are unaffected and stay fully computed.
 
-    # The fatal counterpart of the bounded case below lives beside it,
-    # not inline here -- inline is what let it drift when a field was added.
+    # Carrying the request keeps ``requested_depth_source`` from
+    # defaulting to a claim this path never established.
     if result.assurance == "none":
-        return not_comparable_assurance(result.requested_depth)
+        return AnalysisAssurance(
+            status="not_comparable",
+            requested_depth=result.requested_depth,
+            requested_depth_source=depth_request_source(result.requested_depth),
+            notes=(NOT_COMPARABLE_NOTE,),
+        )
 
     # Bounded (non-fatal) comparability mismatch -- owner:
     # `analysis_assurance_comparability.py` (Codex review, PR #1274).

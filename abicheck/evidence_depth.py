@@ -336,6 +336,19 @@ class ReportedDepth:
     note: str | None
 
 
+def depth_request_source(explicit: str | None) -> str:
+    """``"explicit"`` when a front end stated ``--depth``, else ``"implicit"``.
+
+    One line, but two callers now decide it -- the normalized path below
+    and ``analysis_assurance``'s ``not_comparable`` short-circuit, which
+    resolves no depth at all and so cannot go through
+    :func:`resolve_reported_depth`. Stating the rule twice is how the
+    short-circuit came to default to ``"implicit"`` and assert something it
+    never established (CodeRabbit review), so it is stated once.
+    """
+    return "explicit" if explicit is not None else "implicit"
+
+
 def resolve_reported_depth(explicit: str | None, effective: str) -> ReportedDepth:
     """The reported depth trio for an *explicit* request (or the lack of one).
 
@@ -349,8 +362,9 @@ def resolve_reported_depth(explicit: str | None, effective: str) -> ReportedDept
     honest, and it is why callers must keep gating on *explicit* rather
     than on :attr:`ReportedDepth.requested`.
     """
+    source = depth_request_source(explicit)
     if explicit is None:
-        return ReportedDepth(effective, "implicit", True, None)
+        return ReportedDepth(effective, source, True, None)
     satisfied = depth_rank(effective) >= depth_rank(explicit)
     note = (
         None
@@ -360,4 +374,4 @@ def resolve_reported_depth(explicit: str | None, effective: str) -> ReportedDept
             f"depth is {effective!r}"
         )
     )
-    return ReportedDepth(explicit, "explicit", satisfied, note)
+    return ReportedDepth(explicit, source, satisfied, note)
