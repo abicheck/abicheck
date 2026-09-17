@@ -110,6 +110,7 @@ from .model.sided_inputs import resolve_per_side_inputs
 from .report.report_modes import normalize_report_mode
 from .serialization import run_scoped_digest_cache
 from .service_render import ONELINE_FORMAT, resolve_demangle_for_format
+from .workflows.header_exclusion_audit import unmatched_exclusion_warning
 from .workflows.public_header_boundary import (
     project_config_public_header_dirs,
 )
@@ -1304,6 +1305,18 @@ def run_compare(
         scope_public_headers=scope_public_headers,
     )
     sev_config = resolved_cfg.severity
+    # `scope.exclude_headers` -- the config equivalent of `--exclude-header`
+    # (see `BuildConfig.exclude_headers` for why it is its own key and not
+    # `sources.exclude`). Weaker than the flag and never unioned with it: a
+    # run stating `--exclude-header` at all uses exactly the rules it
+    # stated, because the rule *set* is the run's scope identity and
+    # silently widening it would make the run narrower than the command
+    # line says. From here on `exclude_headers` is the run's one canonical
+    # rule set, and every path -- scalar, directory/package fan-out,
+    # stranded capture, dry-run receipt, configuration digest -- reads this
+    # value.
+    if not exclude_headers:
+        exclude_headers = tuple(getattr(project_cfg, "exclude_headers", ()) or ())
     scope_public_headers = resolved_cfg.scope_public
     collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
     strict_suppressions = resolved_cfg.strict_suppressions
@@ -1485,6 +1498,14 @@ def run_compare(
     from .pack_application import preflight_validate_project_policy_overrides
 
     preflight_validate_project_policy_overrides(project_cfg, cfg_path)
+    # One warning per run for a rule that matched nothing -- asked here,
+    # above the scalar-versus-release branch, so it is stated exactly once
+    # whatever the operand is (see the owner's docstring for why once).
+    _exclusion_warning = unmatched_exclusion_warning(
+        [*headers, *old_headers_only, *new_headers_only], exclude_headers
+    )
+    if _exclusion_warning is not None:
+        click.echo(_exclusion_warning, err=True)
     if dry_run:
         from .dry_run import emit_dry_run
         from .frontends.cli.compare_dry_run import build_compare_dry_run_result
@@ -1529,6 +1550,7 @@ def run_compare(
                 required_symbols=required_symbols,
                 select=select,
                 select_required=select_required,
+                exclude_headers=tuple(exclude_headers or ()),
             )
         )
 
@@ -1634,6 +1656,14 @@ def run_compare(
             # _dispatch_release_compare resolves and validates them.
             report_mode=report_mode,
             show_only=show_only,
+            # The canonical exclusion rules -- the same tuple the scalar
+            # path below hands `_resolve_compare_snapshots`. Forwarded
+            # rather than dropped: a directory operand accepted
+            # `--exclude-header` and silently ignored it, so a release tree
+            # that cannot be parsed whole (Intel MKL's FFTW2/FFTW3 typedef
+            # clash) failed every member under the exact arguments that made
+            # the single-file comparison succeed.
+            exclude_headers=tuple(exclude_headers or ()),
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.

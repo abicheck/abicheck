@@ -709,6 +709,15 @@ class DiffResult(ReportSideFacts):
     # different configuration. ``None`` when neither source was active at
     # all.
     explicit_scope_source_sha256: str | None = field(default=None, kw_only=True)
+    # The ``--exclude-header`` rules this comparison ran under, canonicalized
+    # (``model.header_exclusion_record.comparison_exclusion_identity``, which
+    # explains the canonicalization and why one value suffices). Read as
+    # ``surface.exclude_headers`` by ``effective_config_digest``: excluding a
+    # header removes every declaration only it carried from the parsed
+    # surface, so two runs differing only in their rules compared different
+    # surfaces and must not collide on the configuration digest -- the same
+    # reasoning ``explicit_scope_source_sha256`` above records.
+    excluded_header_patterns: str = field(default="", kw_only=True)
     # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
     # whether ADR-027 A4 pattern-aware verdict modulation
     # (``compare(..., pattern_verdicts=...)``, opt-in via

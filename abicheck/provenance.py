@@ -32,9 +32,12 @@ no existing behaviour changes (decision D4 of the provenance design).
 from __future__ import annotations
 
 import re
+from functools import partial
+from itertools import chain
 from pathlib import Path, PurePosixPath
 from typing import cast
 
+from .extract.public_root_ownership import compile_only_roots, retain_owning_roots
 from .model import AbiSnapshot, Fact, ScopeOrigin
 from .model.surface_facts import (
     SurfaceFactBearing,
@@ -147,9 +150,18 @@ def _matches_public(
             return True
         if basename and p and p[-1] == basename:
             return True
-    # Directory containment: a public dir appears among the header's parent dirs.
+    return _matches_any_dir(header_segs, public_dir_segs)
+
+
+def _matches_any_dir(
+    header_segs: tuple[str, ...],
+    dir_segs: list[tuple[str, ...]] | None,
+) -> bool:
+    """Whether one of *dir_segs* is among *header_segs*' parent directories.
+    Shared by the public-dir test above and :func:`classify_origin`'s
+    compile-only test, so both answer it one way."""
     parent_segs = header_segs[:-1]
-    return any(_contiguous_subsequence(d, parent_segs) for d in public_dir_segs)
+    return any(_contiguous_subsequence(d, parent_segs) for d in (dir_segs or []))
 
 
 #: A real GCC/Clang target triple: 2-4 non-empty ``-``-joined components,
@@ -534,6 +546,7 @@ def classify_origin(
     *,
     have_public_set: bool,
     export_only: bool = False,
+    compile_only_dir_segs: list[tuple[str, ...]] | None = None,
 ) -> ScopeOrigin:
     """Classify a single declaration into a :class:`ScopeOrigin`.
 
@@ -544,6 +557,14 @@ def classify_origin(
     ``export_only`` marks a declaration that the binary exports but that has
     no header provenance (``Visibility.ELF_ONLY``); with a public set in play
     it classifies as ``EXPORT_ONLY`` rather than ``UNKNOWN``.
+
+    ``compile_only_dir_segs`` are the ``-I`` roots this run searched but
+    could not place as public (see ``extract.public_root_ownership.
+    compile_only_roots``). A declaration found only under one of them is
+    ``UNKNOWN`` rather than ``PRIVATE_HEADER``: the run has evidence the
+    root was not *declared* public and no evidence it is *private*, and
+    only the latter licenses dropping a finding. Omitted (the default)
+    reproduces this function's pre-existing behaviour exactly.
     """
     if not have_public_set:
         return ScopeOrigin.UNKNOWN
@@ -556,6 +577,13 @@ def classify_origin(
         return ScopeOrigin.GENERATED
     if _is_system_header(header_segs):
         return ScopeOrigin.SYSTEM_HEADER
+    if _matches_any_dir(header_segs, compile_only_dir_segs):
+        # Reached only through a ``-I`` root this run could not place as
+        # public (``extract.public_root_ownership.compile_only_roots``).
+        # That is an absence of evidence, not evidence of privacy, so it
+        # must not become the confident ``PRIVATE_HEADER`` that
+        # public-surface scoping drops findings on.
+        return ScopeOrigin.UNKNOWN
     return ScopeOrigin.PRIVATE_HEADER
 
 
@@ -574,25 +602,56 @@ def build_public_set(
     return headers, dirs, bool(headers or dirs)
 
 
-def _public_dirs_from_include_roots(
+def _segmented_include_roots(
     include_search_dirs: list[Path] | list[str] | None,
 ) -> list[tuple[str, ...]]:
-    """Segment *include_search_dirs* (a header-AST dump's own ``-I`` roots)
-    into public-directory candidates, dropping a bare system-header prefix
-    (``/usr/include``, an MSVC toolchain root, ...) the same way an
-    :func:`is_system_header_path` root already is (Codex review: a stray
-    ``-I /usr/include`` must not make every system header underneath
-    classify as project-owned).
+    """*include_search_dirs* as segments, minus bare system-header roots.
+
+    Resolved first, for the reason :func:`_absolutize_header_root` gives. A
+    stray ``-I /usr/include`` is dropped here, so it is neither an ownership
+    root nor a compile-only one.
     """
-    # Resolve first (mirroring the identical reasoning in
-    # _absolutize_header_root / is_system_header_path above): an unresolved
-    # relative root like ``.`` or ``include`` either segments to nothing at
-    # all or becomes a short, generic segment that could spuriously match
-    # unrelated paths sharing that same component elsewhere.
     segs = [
         _segments(str(_absolutize_header_root(d))) for d in (include_search_dirs or [])
     ]
     return [s for s in segs if s and not _is_bare_system_dir(s)]
+
+
+def split_include_roots(
+    header_segs: list[tuple[str, ...]],
+    dir_segs: list[tuple[str, ...]],
+    include_search_dirs: list[Path] | list[str] | None,
+) -> tuple[list[tuple[str, ...]], list[tuple[str, ...]]]:
+    """Split a run's ``-I`` roots into ``(public_dirs, compile_only_dirs)``.
+
+    ``public_dirs`` is *dir_segs* plus every root that roots this run's own
+    declared public surface; ``compile_only_dirs`` is every other root. One
+    function, because the two are one decision over one segmented input --
+    computing them separately segmented the same paths twice and let the
+    halves drift.
+
+    Shared rather than mirrored: :func:`apply_provenance` and
+    ``buildsource.header_graph``'s header-level node classification must
+    reach the same answer, or a transitively-included header classifies one
+    way for its declarations and the other way for its own node. A bare
+    system prefix is dropped from both halves; the ownership rule itself,
+    and why both halves have to exist, live in
+    ``extract.public_root_ownership``.
+
+    An empty declared set is the "classification was never opted in" case
+    (:func:`build_public_set`'s third return value is exactly
+    ``bool(headers or dirs)``), answered here rather than by a parameter
+    each caller re-passes: an ``-I`` root can never turn origin
+    classification on by itself.
+    """
+    declared = [*header_segs, *dir_segs]
+    if not include_search_dirs or not declared:
+        return dir_segs, []
+    roots = _segmented_include_roots(include_search_dirs)
+    return (
+        [*dir_segs, *retain_owning_roots(roots, declared)],
+        compile_only_roots(roots, declared),
+    )
 
 
 def apply_provenance(
@@ -610,42 +669,44 @@ def apply_provenance(
     public-header set is supplied; otherwise it stays ``UNKNOWN`` so default
     invocations are unaffected (decision D4).
 
-    ``include_search_dirs`` -- the ``-I`` roots a header-AST dump was given --
-    are folded into the public-directory set, but *only* once a real
-    ``-H``/``--public-header-dir`` set already opted classification in (they
-    can never turn opt-in on by themselves). This closes the "every
-    transitively-`#include`d header is private" gap: a header-AST dump only
-    ever parses declarations reachable by `#include` from its own `-H`
-    root(s) in the first place -- there is no other way for a declaration to
-    end up in the snapshot at all -- so a header elsewhere under the same
-    include root that the umbrella header pulled in is exactly as much a
-    dependency of the public surface as the umbrella header itself, not a
-    private implementation detail merely because it isn't the literal `-H`
-    file. Treating it as `PRIVATE_HEADER` let a real, breaking layout change
-    reached only transitively (e.g. a struct defined in a header the public
-    umbrella `#include`s) silently drop out of the compared surface with no
-    disclosure. System/generated headers are unaffected: a bare system-dir
-    root is filtered out before folding, and ``classify_origin`` still checks
-    the system/generated patterns for anything this doesn't match.
+    ``include_search_dirs`` -- the ``-I`` roots a header-AST dump was given
+    -- are split in two (``extract.public_root_ownership``, which carries
+    the full reasoning). Roots that root this run's own declared public
+    surface are folded into the public-directory set, which is what stops
+    every transitively-``#include``d header classifying private. Roots that
+    do not are carried as compile-only, so a declaration found under one
+    lands on ``UNKNOWN`` -- not ``PUBLIC_HEADER``, which would make a
+    dependency's declarations this library's export obligations, and not
+    ``PRIVATE_HEADER``, which would let scoping drop a real finding about a
+    library whose public headers are split across roots.
     """
     header_segs, dir_segs, have_set = build_public_set(
         public_headers, public_header_dirs
     )
-    if have_set and include_search_dirs:
-        dir_segs = [*dir_segs, *_public_dirs_from_include_roots(include_search_dirs)]
+    dir_segs, compile_only = split_include_roots(
+        header_segs, dir_segs, include_search_dirs
+    )
     # A large surface has far fewer distinct declaring headers than
     # declarations (e.g. thousands of oneDAL functions share a handful of
     # umbrella headers) — reuse each header's classification across every
     # declaration it produced instead of re-running classify_origin per decl.
     origin_cache: dict[tuple[str | None, bool], ScopeOrigin] = {}
-    for fn in snapshot.functions:
-        tag_provenance(fn, header_segs, dir_segs, have_set, origin_cache=origin_cache)
-    for var in snapshot.variables:
-        tag_provenance(var, header_segs, dir_segs, have_set, origin_cache=origin_cache)
-    for rec in snapshot.types:
-        tag_provenance(rec, header_segs, dir_segs, have_set, origin_cache=origin_cache)
-    for en in snapshot.enums:
-        tag_provenance(en, header_segs, dir_segs, have_set, origin_cache=origin_cache)
+    # One bound call for all four declaration kinds: the trailing arguments
+    # are fixed for the batch, and four hand-repeated call sites is where
+    # "these four classify identically" silently stops being true. `chain`
+    # rather than a combined list, which would materialise for one pass.
+    tag = partial(
+        tag_provenance,
+        header_segs=header_segs,
+        dir_segs=dir_segs,
+        have_set=have_set,
+        origin_cache=origin_cache,
+        compile_only_dir_segs=compile_only,
+    )
+    for decl in chain(
+        snapshot.functions, snapshot.variables, snapshot.types, snapshot.enums
+    ):
+        tag(decl)
     return snapshot
 
 
@@ -656,6 +717,7 @@ def tag_provenance(
     have_set: bool,
     *,
     origin_cache: dict[tuple[str | None, bool], ScopeOrigin] | None = None,
+    compile_only_dir_segs: list[tuple[str, ...]] | None = None,
 ) -> None:
     """Populate ``source_header`` and ``origin`` on a single declaration in place.
 
@@ -671,6 +733,12 @@ def tag_provenance(
     because those three inputs are fixed per caller and the classification is a
     pure function of them plus the declaration's own header/export-only pair.
     Omitted (the default) reproduces the previous uncached, per-call behaviour.
+    It stays sound with ``compile_only_dir_segs`` for the same reason it is
+    sound with ``dir_segs``: both are fixed for the whole batch.
+
+    ``compile_only_dir_segs`` is forwarded to :func:`classify_origin` -- see
+    there for why a declined ``-I`` root yields ``UNKNOWN`` and not
+    ``PRIVATE_HEADER``.
     """
     loc = getattr(decl, "source_location", None)
     sh = header_from_location(loc)
@@ -704,7 +772,12 @@ def tag_provenance(
         )
     if origin_cache is None:
         origin = classify_origin(
-            sh, header_segs, dir_segs, have_public_set=have_set, export_only=export_only
+            sh,
+            header_segs,
+            dir_segs,
+            have_public_set=have_set,
+            export_only=export_only,
+            compile_only_dir_segs=compile_only_dir_segs,
         )
     else:
         cache_key = (sh, export_only)
@@ -716,6 +789,7 @@ def tag_provenance(
                 dir_segs,
                 have_public_set=have_set,
                 export_only=export_only,
+                compile_only_dir_segs=compile_only_dir_segs,
             )
             origin_cache[cache_key] = cached
         origin = cached

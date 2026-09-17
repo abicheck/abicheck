@@ -971,7 +971,19 @@ _ARTIFACT_NAMES = frozenset(
 #:         ``root_causes``/``root_cause_count`` is the supported grouping.
 #: 5.1 -- additive ``review_groups`` correlation with stable membership ids;
 #:        presentation-only and never a replacement for ``changes``.
-REPORT_SCHEMA_VERSION = "5.1"
+#: 5.2 -- additive ``effective_config_fields["surface.exclude_headers"]`` and
+#:        its contribution to ``effective_config_digest``: the run's
+#:        ``--exclude-header`` rules, canonicalized as
+#:        ``<matching-rule>:<sorted,unique,patterns>`` (``""`` when none).
+#:        Excluding a header removes every declaration only it carried from
+#:        the parsed surface, so two comparisons differing only in their
+#:        exclusion rules compared genuinely different surfaces and must not
+#:        fingerprint identically -- which they did, because the release
+#:        fan-out did not even receive the rules. Additive in the key set;
+#:        the *digest value* changes for every run, since
+#:        ``EFFECTIVE_CONFIG_FIELD_KEYS`` is hashed positionally (the same
+#:        note 4.3 records for its own new key).
+REPORT_SCHEMA_VERSION = "5.2"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

@@ -956,6 +956,7 @@ def _format_release_summary(
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
     require_complete_analysis: bool = False,
+    excluded_header_patterns: str = "",
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML.
 
@@ -1048,6 +1049,7 @@ def _format_release_summary(
             show_only=show_only,
             env_matrix_source_sha256=env_matrix_source_sha256,
             require_complete_analysis=require_complete_analysis,
+            excluded_header_patterns=excluded_header_patterns,
         )
     md = _format_release_markdown(
         worst_verdict,
@@ -1295,6 +1297,7 @@ def _format_release_json(
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
     require_complete_analysis: bool = False,
+    excluded_header_patterns: str = "",
 ) -> str:
     """Render the release summary as a JSON document (``release_schema_
     version``: :data:`~abicheck.schemas.RELEASE_SCHEMA_VERSION`).
@@ -1485,7 +1488,7 @@ def _format_release_json(
     # contract indistinguishable from none. Now passed in directly by the
     # caller, computed once at release scope from the resolved
     # `EnvironmentMatrix` before any per-library compare even runs
-    # (`checker.env_matrix_content_digest`), so this envelope field (and
+    # (`workflows.comparison_input_receipt.env_matrix_content_digest`), so this envelope field (and
     # `effective_config_fields["policy.env_matrix"]` below) is correct
     # regardless of how many library comparisons actually completed.
     # Omitted, not `null`, when this release's candidate declared no
@@ -1591,6 +1594,7 @@ def _format_release_json(
         env_matrix_source_sha256=env_matrix_source_sha256,
         # ADR-071: the receipt must name the gate that produced this report.
         require_complete_analysis=require_complete_analysis,
+        excluded_header_patterns=excluded_header_patterns,
     )
     summary["effective_config_digest"] = digest
     summary["effective_config_fields"] = fields

@@ -73,6 +73,7 @@ from ..dump_debug_config import (
     resolve_dump_build_compile_db_filter,
     resolve_dump_debug_fields,
     resolve_dump_lang_and_env_toggles,
+    resolve_dump_scope_exclude_headers,
 )
 from ..options.params import (
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
@@ -343,6 +344,13 @@ def dump_cmd(
     # §4.2's CONFIG row: `build.compile_db_filter` replaces
     # `--compile-db-filter`.
     compile_db_filter = resolve_dump_build_compile_db_filter(build_config, sources)
+    # `scope.exclude_headers` -- `--exclude-header`'s config spelling.
+    # `dump` and `compare` produce operands for each other, so a config-only
+    # rule reaching one and not the other makes the same project config
+    # succeed on one and fail on the other. Resolver docstring has the rest.
+    exclude_headers = resolve_dump_scope_exclude_headers(
+        build_config, sources, tuple(exclude_headers)
+    )
     # Phase 7c: debug.* config only
     _debug = resolve_dump_debug_fields(
         _resolved_debug,

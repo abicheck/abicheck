@@ -1446,6 +1446,13 @@ def dump(
     # directories the caller can positively attest are a real, explicit
     # dependency-search declaration (a literal `-I`/`--include`), never an
     # internal #include-resolution auto-add.
+    #
+    # Explicit is still not the same as *owned*, though: `apply_provenance`
+    # keeps only the roots this run's own declared public headers live
+    # underneath. An `-I` a library passes purely so a dependency's
+    # `#include <dep.h>` resolves stays compile context -- see
+    # `extract.public_root_ownership` for the rule and the MKL/MPI case
+    # that forced it.
     from .provenance import apply_provenance
 
     return apply_provenance(

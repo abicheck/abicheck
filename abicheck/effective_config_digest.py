@@ -120,6 +120,7 @@ EFFECTIVE_CONFIG_FIELD_KEYS: tuple[str, ...] = (
     "surface.internal_namespaces",
     "surface.experimental_namespaces",
     "surface.explicit_scope",
+    "surface.exclude_headers",
     "surface.scope_to_public_surface",
     "surface.scope_to_public_surface_requested",
     "contract.mode",
@@ -506,6 +507,14 @@ def effective_config_fields_from_full_config(
             getattr(policy_file, "experimental_namespaces", ())
         ),
         "surface.explicit_scope": _rich_tier_explicit_scope_str(surface, result),
+        # The run's canonical `--exclude-header` identity (see
+        # `DiffResult.excluded_header_patterns`). Read off the result in
+        # both tiers, like `policy.reclassify` above: header exclusion has
+        # no D7 `CompatibilityEvaluationConfig` namespace of its own, and
+        # the result records what actually narrowed the compared surface.
+        "surface.exclude_headers": str(
+            getattr(result, "excluded_header_patterns", "") or ""
+        ),
         "surface.scope_to_public_surface": str(
             bool(getattr(result, "scope_to_public_surface", False))
         ),
@@ -597,6 +606,10 @@ def effective_config_fields_from_diff_result(
         ),
         "surface.explicit_scope": str(
             getattr(result, "explicit_scope_source_sha256", "") or ""
+        ),
+        # See the rich tier's identical field above.
+        "surface.exclude_headers": str(
+            getattr(result, "excluded_header_patterns", "") or ""
         ),
         "surface.scope_to_public_surface": str(
             bool(getattr(result, "scope_to_public_surface", False))

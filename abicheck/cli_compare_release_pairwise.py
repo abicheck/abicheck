@@ -118,6 +118,7 @@ _CompareReleaseCommonArgs = tuple[
     bool,
     "dict[Any, Any] | None",
     "EnvironmentMatrix | None",
+    "tuple[str, ...]",  # exclude_headers -- the run's --exclude-header rules
 ]
 
 
@@ -154,6 +155,7 @@ def _run_compare_pair(
     collapse_versioned_symbols: bool = False,
     project_policy_overrides: dict[Any, Any] | None = None,
     env_matrix: EnvironmentMatrix | None = None,
+    exclude_headers: tuple[str, ...] = (),
 ) -> CompareResult:
     """Run compare for one old/new pair and return result + resolved snapshots.
 
@@ -210,6 +212,16 @@ def _run_compare_pair(
     parameter, closing the gap where this fan-out never threaded the config
     key a single-pair ``compare`` already honors.
 
+    *exclude_headers* is the run's ``--exclude-header`` rule set, resolved
+    once for the whole release like *compile_context* above and forwarded to
+    ``service.run_compare``'s identically-named parameter -- the canonical
+    rules, applied to both sides by the one existing implementation, no
+    second exclusion engine. See that parameter's own docstring for the gap
+    this closed (a directory operand silently discarded the flag, so an
+    unparseable-as-a-whole release tree failed every member under the exact
+    arguments that made the single-library comparison exit 0). ``()`` (the
+    default) is a true no-op.
+
     *env_matrix* (ADR-020b / ADR-068 D5): the project's declared deployment
     constraints, resolved once for the whole release from ``.abicheck.yml``'s
     ``deployment:`` config key (the former ``--env-matrix FILE``, which used
@@ -257,6 +269,7 @@ def _run_compare_pair(
         collapse_versioned_symbols=collapse_versioned_symbols,
         project_policy_overrides=project_policy_overrides,
         env_matrix=env_matrix,
+        exclude_headers=exclude_headers,
     )
     record_release_resolved_config(
         result.diff, getattr(pack_application, "resolved_config", None)
@@ -298,6 +311,7 @@ def _compare_one_library(
     collapse_versioned_symbols: bool = False,
     project_policy_overrides: dict[Any, Any] | None = None,
     env_matrix: EnvironmentMatrix | None = None,
+    exclude_headers: tuple[str, ...] = (),
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch. Any
     exception yields an ERROR entry rather than aborting the release.
@@ -367,6 +381,7 @@ def _compare_one_library(
             collapse_versioned_symbols=collapse_versioned_symbols,
             project_policy_overrides=project_policy_overrides,
             env_matrix=env_matrix,
+            exclude_headers=exclude_headers,
         )
         result = compare_result.diff
         # Plan slice 7o: unconditional, like every other disposition ledger
@@ -742,6 +757,7 @@ def _compare_release_libraries(
     collapse_versioned_symbols: bool = False,
     project_policy_overrides: dict[Any, Any] | None = None,
     env_matrix: EnvironmentMatrix | None = None,
+    exclude_headers: tuple[str, ...] = (),
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
@@ -819,6 +835,7 @@ def _compare_release_libraries(
         collapse_versioned_symbols,
         project_policy_overrides,
         env_matrix,
+        exclude_headers,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:

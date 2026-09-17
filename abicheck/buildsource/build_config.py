@@ -223,6 +223,14 @@ class BuildConfig:
     #: ``NOT_EVALUATED`` (never a fabricated finding) when neither source is
     #: present.
     public_header_dirs: list[str] = field(default_factory=list)
+    #: ``scope.exclude_headers``: the config spelling of ``--exclude-header``
+    #: -- fnmatch patterns dropping headers from the *parsed* surface.
+    #: Deliberately **not** ``sources.exclude``, which narrows *source
+    #: collection*: different inputs, different layers, neither implying the
+    #: other. Weaker than the flag and never unioned with it, since the rule
+    #: set is the run's scope identity. Full rationale:
+    #: ``docs/reference/config-file.md``'s ``scope:`` section.
+    exclude_headers: list[str] = field(default_factory=list)
     #: ``scope.show_redundant`` — a reporting/FP-tuning toggle demoted off the CLI
     #: (ADR-040 Lever 2). ``None`` = unset. The ``--show-filtered`` debugging view
     #: stays a visible CLI flag.
@@ -417,6 +425,7 @@ class BuildConfig:
                 "public_symbols",
                 "show_redundant",
                 "public_header_dirs",
+                "exclude_headers",
                 "on_incomplete",
             }
         ),
@@ -599,6 +608,7 @@ class BuildConfig:
             public_symbols=_strs(scope, "public_symbols"),
             scope_show_redundant=_opt_bool(scope, "show_redundant"),
             public_header_dirs=_strs(scope, "public_header_dirs"),
+            exclude_headers=_strs(scope, "exclude_headers"),
             scope_on_incomplete=_one_of(
                 _opt_str(scope, "on_incomplete"),
                 ("warn", "block"),
@@ -736,6 +746,8 @@ class BuildConfig:
             scope["show_redundant"] = self.scope_show_redundant
         if self.public_header_dirs:
             scope["public_header_dirs"] = list(self.public_header_dirs)
+        if self.exclude_headers:
+            scope["exclude_headers"] = list(self.exclude_headers)
         if self.scope_on_incomplete is not None:
             scope["on_incomplete"] = self.scope_on_incomplete
         return scope

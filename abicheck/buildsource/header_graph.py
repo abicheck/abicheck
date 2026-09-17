@@ -89,6 +89,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from ..fact_provenance import func_fact_key, var_fact_key
@@ -103,9 +104,9 @@ from ..model.graph_facts import (
 )
 from ..model.source_graph import SourceGraphSummary, _header_node_id
 from ..provenance import (
-    _public_dirs_from_include_roots,
     build_public_set,
     classify_origin,
+    split_include_roots,
 )
 from .call_graph import augment_graph_with_calls, parse_clang_ast_calls
 from .inline_graph_fold import _mark_role_coverage
@@ -337,9 +338,7 @@ def _seed_ast_type_nodes(
     graph: SourceGraphSummary,
     ast_root: dict[str, Any],
     header_node: Callable[[str], str],
-    header_segs: Any,
-    dir_segs: Any,
-    have_public_set: bool,
+    classify: Callable[[str], ScopeOrigin],
 ) -> None:
     """Seed ``record_type`` nodes from the AST's own qualified-name index.
 
@@ -355,9 +354,7 @@ def _seed_ast_type_nodes(
     (``is_public_dependency_node``).
     """
     for qname, file in index_declared_type_files(ast_root).items():
-        origin = classify_origin(
-            file, header_segs, dir_segs, have_public_set=have_public_set
-        )
+        origin = classify(file)
         if origin == ScopeOrigin.UNKNOWN:
             continue
         node_id = _type_node_id(qname)
@@ -428,14 +425,10 @@ def _seed_ast_graph(
     graph: SourceGraphSummary,
     ast_root: dict[str, Any],
     header_node: Callable[[str], str],
-    header_segs: Any,
-    dir_segs: Any,
-    have_public_set: bool,
+    classify: Callable[[str], ScopeOrigin],
 ) -> None:
     """Seed type nodes and fold the clang type/call edges into *graph*."""
-    _seed_ast_type_nodes(
-        graph, ast_root, header_node, header_segs, dir_segs, have_public_set
-    )
+    _seed_ast_type_nodes(graph, ast_root, header_node, classify)
     type_edges = parse_clang_ast_types(ast_root)
     call_edges = parse_clang_ast_calls(ast_root)
     for identity, file in _unseeded_decl_endpoints(ast_root, type_edges, call_edges):
@@ -445,9 +438,7 @@ def _seed_ast_graph(
         if graph.has_node(node_id):
             # Already seeded as a real function/variable.
             continue
-        origin = classify_origin(
-            file, header_segs, dir_segs, have_public_set=have_public_set
-        )
+        origin = classify(file)
         graph.add_node(
             GraphNode(
                 id=node_id,
@@ -600,14 +591,25 @@ def build_header_only_graph(
     header_segs, dir_segs, have_public_set = build_public_set(
         public_header_paths, public_dir_paths
     )
-    if have_public_set and include_search_dirs:
-        dir_segs = [*dir_segs, *_public_dirs_from_include_roots(include_search_dirs)]
+    dir_segs, compile_only_dir_segs = split_include_roots(
+        header_segs, dir_segs, include_search_dirs
+    )
+    # Bound once, here, because every consumer below must answer a header's
+    # origin identically -- `extract.public_root_ownership`'s own contract.
+    # Threading the four context values instead let one call site drop
+    # `compile_only_dir_segs` and quietly answer `PRIVATE_HEADER` where
+    # `apply_provenance` answered `UNKNOWN` (CodeRabbit review).
+    classify = partial(
+        classify_origin,
+        public_header_segs=header_segs,
+        public_dir_segs=dir_segs,
+        have_public_set=have_public_set,
+        compile_only_dir_segs=compile_only_dir_segs,
+    )
 
     def header_node(path: str) -> str:
         node_id = _header_node_id(path)
-        origin = classify_origin(
-            path, header_segs, dir_segs, have_public_set=have_public_set
-        )
+        origin = classify(path)
         attrs = {"visibility": origin.value} if origin != ScopeOrigin.UNKNOWN else {}
         graph.add_node(
             GraphNode(
@@ -675,9 +677,7 @@ def build_header_only_graph(
         seed_decl(var)
 
     if ast_root is not None:
-        _seed_ast_graph(
-            graph, ast_root, header_node, header_segs, dir_segs, have_public_set
-        )
+        _seed_ast_graph(graph, ast_root, header_node, classify)
     else:
         _seed_flat_graph(graph, snapshot, header_node)
 

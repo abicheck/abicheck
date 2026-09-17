@@ -461,7 +461,7 @@ def compare_stored_bundle_facts_pair(
     # `bundle_side_input.compare_release_against_bundle_facts`'s identical
     # fix (same shared `env_matrix_content_digest()`, so the two BundleFacts
     # drivers can't independently drift) for the full rationale.
-    from ..checker import env_matrix_content_digest
+    from .comparison_input_receipt import env_matrix_content_digest
 
     result.env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
     return result

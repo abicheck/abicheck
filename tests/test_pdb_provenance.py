@@ -427,16 +427,59 @@ class TestParsePdbEndToEnd:
         out2 = _apply_native_provenance(snap2, None, None)
         assert out2.types[0].origin == ScopeOrigin.UNKNOWN
 
-    def test_cli_apply_native_provenance_promotes_via_include_search_dirs(
+    def test_cli_apply_native_provenance_forwards_include_search_dirs(
         self,
     ) -> None:
         """Round-3 review finding (Codex, fresh evidence): the CLI/service
         PE/Mach-O ``_apply_native_provenance`` wrappers never forwarded the
         caller's ``-I`` roots to ``apply_provenance``, unlike the ELF path
-        (``dumper.dump``) fixed earlier in this PR -- so a declaration
-        reached only transitively through PE/Mach-O's own ``-I`` (never
-        itself named as a ``-H`` root) stayed ``PRIVATE_HEADER`` and could
-        be excluded from the public surface, on these two formats only."""
+        (``dumper.dump``) -- so a declaration reached only transitively
+        through PE/Mach-O's own ``-I`` (never itself named as a ``-H``
+        root) stayed ``PRIVATE_HEADER``, on these two formats only.
+
+        The *forwarding* is what this test owns, and it still holds. What
+        it no longer asserts is that forwarding an ``-I`` root is by itself
+        enough to make everything under it public: an ``-I`` root widens
+        public provenance only where the run's own declared public headers
+        live underneath it (``extract.public_root_ownership``). So the
+        promotion is checked with a root that genuinely roots the declared
+        surface, which is the case the original fix was actually about -- a
+        header reached transitively from the ``-H`` root, inside the
+        library's own include tree.
+        """
+        from abicheck.cli_resolve import _apply_native_provenance
+        from abicheck.model import AbiSnapshot
+
+        meta = DwarfMetadata(has_dwarf=True)
+        meta.structs["Detail"] = StructLayout(
+            name="Detail", byte_size=8, decl_file="/build/include/detail/impl.h"
+        )
+        records, enums = model_types_from_dwarf_metadata(meta)
+        snap = AbiSnapshot(library="lib.dll", version="1", types=records, enums=enums)
+        # No -H names detail/impl.h directly -- only the -I root does, and
+        # that root is the declared header's own include tree.
+        out = _apply_native_provenance(
+            snap,
+            [Path("/build/include/api.h")],
+            None,
+            [Path("/build/include")],
+        )
+        assert out.types[0].origin == ScopeOrigin.PUBLIC_HEADER
+
+    def test_cli_apply_native_provenance_does_not_own_a_dependency_root(
+        self,
+    ) -> None:
+        """The inverse of the test above, and the reason it had to be
+        narrowed: PE/Mach-O must apply the same ownership rule ELF does.
+
+        ``/build/dep/include`` is an ``-I`` root the compiler needs to
+        resolve a dependency's ``#include``; no declared public header of
+        this component lives under it. Promoting everything beneath it is
+        what charged Intel MKL with 2,211 ``public_not_exported`` findings
+        for an MPI API it does not own, and this format's wrapper must not
+        reach a different answer than the ELF path does
+        (``tests/test_dependency_include_root_ownership.py``).
+        """
         from abicheck.cli_resolve import _apply_native_provenance
         from abicheck.model import AbiSnapshot
 
@@ -446,14 +489,20 @@ class TestParsePdbEndToEnd:
         )
         records, enums = model_types_from_dwarf_metadata(meta)
         snap = AbiSnapshot(library="lib.dll", version="1", types=records, enums=enums)
-        # No -H names dep/include/dep.h directly -- only the -I root does.
         out = _apply_native_provenance(
             snap,
             [Path("/build/include/api.h")],
             None,
             [Path("/build/dep/include")],
         )
-        assert out.types[0].origin == ScopeOrigin.PUBLIC_HEADER
+        # Not merely "is not PUBLIC_HEADER": PRIVATE_HEADER would also
+        # satisfy that, and it is a *confident* demotion that public-surface
+        # scoping acts on to drop findings, so accepting it here would let
+        # the safety half of this rule regress unnoticed (CodeRabbit
+        # review). UNKNOWN is the exact documented answer for a root the
+        # run cannot place -- see `extract.public_root_ownership.
+        # compile_only_roots`.
+        assert out.types[0].origin is ScopeOrigin.UNKNOWN
 
     def test_bridge_feeds_provenance_classification(self) -> None:
         # The decl_file → source_location bridge lets apply_provenance classify

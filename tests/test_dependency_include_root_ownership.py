@@ -1,0 +1,674 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""A dependency's ``-I`` root is compile context, not a public API root.
+
+Bug class: *an input consulted for one purpose silently granted authority
+for another*. ``-I`` tells the parser where it may search for an
+``#include``; it says nothing about which declarations the library owns and
+promises to export. Conflating the two made every declaration under a
+dependency's include directory an export obligation of the library that
+merely needed to parse its header.
+
+The reported instance: Intel MKL passes an MPI include directory solely so
+``mkl_cdft.h`` can parse ``#include <mpi.h>``. The resulting ``libmkl_rt``
+report carried 2,211 ``public_not_exported`` findings -- 731 ``MPI_*``, 730
+``PMPI_*``, 750 ``QMPIX_*`` and friends -- about an API MKL neither owns nor
+ever promised to export.
+
+The fix is structural and names nothing (``provenance.
+_public_dirs_from_include_roots``): an ``-I`` root widens public provenance
+exactly when this run's own *declared* public headers live underneath it,
+which is what the transitively-reached-header case the parameter exists for
+always relied on, and is precisely what a dependency search path does not
+satisfy. Nothing here knows about MPI, ``mpi.h``, system paths or symbol
+prefixes -- the tests below deliberately use a dependency called ``dep``
+living in a plain ``extra/`` directory, so a name-based fix could not pass
+them.
+
+The lower half of this module tests that rule directly, as a *primitive*,
+over generated inputs -- per AGENTS.md's "Primitive-level property tests":
+the containment predicate is a reusable ancestry/grouping rule, and the
+hand-written compile cases below only ever exercise the handful of shapes
+their author thought of.
+"""
+
+from __future__ import annotations
+
+import pathlib
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from abicheck.extract.public_root_ownership import (
+    compile_only_roots,
+    retain_owning_roots,
+    roots_a_declared_public_surface,
+)
+from abicheck.model import ScopeOrigin
+from abicheck.provenance import _segments, split_include_roots
+
+pytestmark = pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="compiles an ELF .so; Linux-scoped",
+)
+
+
+def _require_toolchain() -> None:
+    """Skip unless this host can build *and parse* the fixture.
+
+    Both halves matter. ``gcc`` builds the ``.so``; a header-AST backend
+    (castxml, or clang) is what turns the ``-H`` operand into the
+    declarations these tests are about. The unit-test CI lane installs
+    neither backend, which is what the ``integration`` marker on the
+    compiling classes below is for (AGENTS.md: "if a test needs castxml,
+    mark it ``@pytest.mark.integration``"); without it these failed there
+    on a bare ``castxml not found in PATH``. This guard is the local
+    belt-and-braces for a run outside that lane.
+    """
+    if shutil.which("gcc") is None:
+        pytest.skip("gcc required")
+    if shutil.which("castxml") is None and shutil.which("clang") is None:
+        pytest.skip("a header-AST backend (castxml or clang) is required")
+
+
+def _build_dependency_tree(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """A library whose public header includes a dependency found only via ``-I``.
+
+    ``pub/api.h`` is the declared public surface. ``extra/dep.h`` is reachable
+    *only* through ``-I extra``. It declares two functions: one the binary
+    happens to export, and one it does not -- the second is the shape that
+    produced MKL's ``public_not_exported`` flood. ``api.h`` also references a
+    type defined in ``dep.h``, so type closure has something real to resolve.
+    """
+    (tmp_path / "extra").mkdir()
+    (tmp_path / "pub").mkdir()
+    (tmp_path / "extra" / "dep.h").write_text(
+        "#pragma once\n"
+        "struct DepType { int a; };\n"
+        "void dep_exported(void);\n"
+        "void dep_never_exported(void);\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "pub" / "api.h").write_text(
+        "#pragma once\n"
+        "#include <dep.h>\n"
+        "void owned_api(void);\n"
+        "void owned_but_missing(void);\n"
+        "struct DepType *owned_uses_dep(void);\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "lib.c").write_text(
+        '#include "pub/api.h"\n'
+        "void owned_api(void) {}\n"
+        "void dep_exported(void) {}\n"
+        "struct DepType *owned_uses_dep(void) { return 0; }\n",
+        encoding="utf-8",
+    )
+    so = tmp_path / "lib.so"
+    subprocess.run(
+        [
+            "gcc",
+            "-shared",
+            "-fPIC",
+            "-g",
+            f"-I{tmp_path / 'extra'}",
+            f"-I{tmp_path / 'pub'}",
+            "-o",
+            str(so),
+            str(tmp_path / "lib.c"),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return so, tmp_path / "pub", tmp_path / "extra"
+
+
+def _origins(snap: object) -> dict[str, str]:
+    return {
+        f.name: (f.origin.value if f.origin else "unknown")
+        for f in snap.functions  # type: ignore[attr-defined]
+    }
+
+
+def _dump(so: Path, pub: Path, extra: Path, **kw: object) -> object:
+    from abicheck.dumper import dump
+
+    return dump(
+        so,
+        [pub / "api.h"],
+        [extra, pub],
+        public_headers=[pub / "api.h"],
+        public_include_search_dirs=[extra, pub],
+        **kw,  # type: ignore[arg-type]
+    )
+
+
+@pytest.mark.integration
+class TestDependencyIncludeRootIsNotAPublicApiRoot:
+    def test_a_declaration_found_only_under_a_dependency_root_is_not_public(
+        self, tmp_path: Path
+    ) -> None:
+        """Requirement 1. ``dep_never_exported`` is reachable only through
+        ``-I extra``; it must not become an export obligation."""
+        _require_toolchain()
+        so, pub, extra = _build_dependency_tree(tmp_path)
+        origins = _origins(_dump(so, pub, extra))
+        assert origins["dep_never_exported"] != ScopeOrigin.PUBLIC_HEADER.value
+        assert origins["dep_exported"] != ScopeOrigin.PUBLIC_HEADER.value
+
+    def test_an_explicitly_declared_public_header_still_owes_its_exports(
+        self, tmp_path: Path
+    ) -> None:
+        """Requirement 2, and the negative control for the test above:
+        demoting everything would satisfy that claim completely.
+        ``owned_but_missing`` is declared in the real ``-H`` header and
+        absent from the binary -- still a ``public_not_exported``."""
+        _require_toolchain()
+        so, pub, extra = _build_dependency_tree(tmp_path)
+        snap = _dump(so, pub, extra)
+        origins = _origins(snap)
+        assert origins["owned_but_missing"] == ScopeOrigin.PUBLIC_HEADER.value
+        assert origins["owned_api"] == ScopeOrigin.PUBLIC_HEADER.value
+
+        from abicheck.buildsource.cross_source_checks import (
+            CrosscheckConfig,
+            _check_public_not_exported,
+        )
+
+        out = _check_public_not_exported(snap, CrosscheckConfig())  # type: ignore[arg-type]
+        reported = {c.symbol for c in out.findings}
+        assert "owned_but_missing" in reported, (
+            "an explicitly declared public header's unexported function is "
+            "still an export obligation"
+        )
+        assert "dep_never_exported" not in reported, (
+            "a dependency declaration reached only through -I must not create "
+            "an export obligation of its own"
+        )
+
+    def test_types_an_owned_api_references_stay_available_to_closure(
+        self, tmp_path: Path
+    ) -> None:
+        """Requirement 4. Narrowing *ownership* must not narrow the type
+        graph: ``owned_uses_dep`` returns a ``DepType`` defined in the
+        dependency header, so leak/closure analysis must still resolve it."""
+        _require_toolchain()
+        so, pub, extra = _build_dependency_tree(tmp_path)
+        from abicheck.surface import compute_public_surface
+
+        surface = compute_public_surface(_dump(so, pub, extra))
+        assert "DepType" in surface.public_types
+
+    def test_old_and_new_side_include_paths_stay_isolated(self, tmp_path: Path) -> None:
+        """Requirement 5, at the level the rule is decided: one side's
+        declared public roots must never license the *other* side's include
+        roots. ``apply_provenance`` is per-snapshot, so the check is that
+        the containment predicate is answered against the roots it was
+        handed and nothing else."""
+        old_pub = _segments("/old/pub")
+        new_pub = _segments("/new/pub")
+        assert split_include_roots([old_pub], [], ["/old/pub"])[0] == [
+            _segments("/old/pub")
+        ]
+        assert split_include_roots([new_pub], [], ["/old/pub"])[0] == []
+        assert split_include_roots([old_pub], [], ["/new/pub"])[0] == []
+
+
+class TestIncludeRootContainmentPredicate:
+    """The rule itself, stated as invariants over generated inputs.
+
+    ``_roots_a_declared_public_surface`` is a reusable ancestry test, and
+    the compiled cases above only ever exercise the shapes their author
+    thought of. These state its contract directly: it is exactly
+    "``dir_seg`` is a prefix of some declared root", nothing more.
+    """
+
+    @staticmethod
+    def _seg(text: str) -> tuple[str, ...]:
+        return _segments(text)
+
+    def test_every_proper_ancestor_of_a_declared_root_qualifies(self) -> None:
+        """Exhaustive over a small domain, both directions: every prefix of
+        a declared root is an owner; nothing longer is."""
+        declared = self._seg("/a/b/c/d/api.h")
+        for depth in range(1, len(declared) + 1):
+            assert roots_a_declared_public_surface(declared[:depth], [declared])
+        assert not roots_a_declared_public_surface(declared + ("more",), [declared])
+
+    def test_a_sibling_directory_never_qualifies(self) -> None:
+        """The dependency case, generalized: sharing a parent is not
+        containment. Several independently-chosen siblings, since one pair
+        could pass by coincidence."""
+        declared = self._seg("/proj/include/api.h")
+        for sibling in ("/proj/extra", "/proj/vendor/mpi/include", "/opt/mpi", "/usr"):
+            assert not roots_a_declared_public_surface(self._seg(sibling), [declared])
+
+    def test_a_shared_path_component_is_not_containment(self) -> None:
+        """A near-miss a substring- or component-membership rule would get
+        wrong: ``/other/include`` shares the ``include`` component with
+        ``/proj/include`` and is still unrelated."""
+        declared = self._seg("/proj/include/api.h")
+        assert not roots_a_declared_public_surface(
+            self._seg("/other/include"), [declared]
+        )
+        assert not roots_a_declared_public_surface(
+            self._seg("/proj/includes"), [declared]
+        )
+
+    def test_any_one_declared_root_is_enough(self) -> None:
+        """Order-independent, and independent of how many roots there are:
+        a root containing *any* declared public root qualifies, whichever
+        position that root holds in the list."""
+        roots = [self._seg(p) for p in ("/x/api.h", "/proj/include/api.h", "/y/api.h")]
+        probe = self._seg("/proj/include")
+        for rotation in range(len(roots)):
+            rotated = roots[rotation:] + roots[:rotation]
+            assert roots_a_declared_public_surface(probe, rotated)
+
+    def test_compile_only_roots_is_the_exact_complement(self) -> None:
+        """The two halves partition the input: every root is in exactly one.
+        Stated as a property over several shapes, because a root that fell
+        into *neither* would silently lose both its ownership and its
+        "UNKNOWN, do not demote" protection -- the failure this pair exists
+        to prevent, in its worst form."""
+        declared = [self._seg("/proj/include/api.h")]
+        roots = [
+            self._seg("/proj/include"),
+            self._seg("/proj"),
+            self._seg("/opt/mpi/include"),
+            self._seg("/elsewhere"),
+        ]
+        owning = retain_owning_roots(roots, declared)
+        compile_only = compile_only_roots(roots, declared)
+        assert sorted(owning + compile_only) == sorted(roots)
+        assert not set(owning) & set(compile_only)
+        # And it is not a degenerate partition either way round.
+        assert owning and compile_only
+
+    def test_compile_only_roots_with_no_declared_set(self) -> None:
+        """``None`` is the documented "no declared set to test against"
+        default, and it is not symmetric with its sibling: with nothing
+        declared, `retain_owning_roots` keeps every root (pre-containment
+        behaviour) while `compile_only_roots` claims none -- so the two do
+        not both answer "everything", which would double-count."""
+        roots = [self._seg("/opt/mpi/include")]
+        assert retain_owning_roots(roots, None) == roots
+        assert compile_only_roots(roots, None) == []
+
+    def test_no_declared_roots_means_no_owner(self) -> None:
+        """The vacuity guard: with nothing declared, nothing is owned --
+        an implementation returning True unconditionally fails here, and
+        one returning False unconditionally fails the first test above."""
+        assert not roots_a_declared_public_surface(self._seg("/anything"), [])
+
+    def test_the_filter_still_drops_a_bare_system_root_that_would_contain(
+        self,
+    ) -> None:
+        """Containment does not resurrect the pre-existing system-root
+        guard: a ``-I /usr/include`` alongside a public header living under
+        it is still not a project-owned directory."""
+        declared = _segments("/usr/include/mylib/api.h")
+        assert split_include_roots([declared], [], ["/usr/include"])[0] == []
+
+    def test_omitting_declared_segs_keeps_the_pre_containment_behavior(self) -> None:
+        """The leaf's documented default, so a caller with no declared set
+        to test against is not silently changed."""
+        roots = [self._seg("/opt/mpi/include")]
+        assert retain_owning_roots(roots, None) == roots
+        assert retain_owning_roots(roots, []) == []
+
+    def test_an_empty_declared_set_widens_nothing(self) -> None:
+        """No declared public set means classification was never opted in,
+        so an ``-I`` root cannot turn it on by itself."""
+        assert split_include_roots([], [], ["/proj/include"])[0] == []
+
+
+class TestEveryOwnershipSourceAndEntryPointAgrees:
+    """Requirements 3 and 6, checked where the rule is actually decided.
+
+    Public ownership has several spellings (a ``-H`` operand, a declared
+    public header directory, ``sources.public_headers``/
+    ``scope.public_header_dirs`` from the project config), and several
+    entry points consume it (ELF, PE/Mach-O, appcompat, the header-only
+    graph). Asserting each combination through a compiled fixture would
+    need four toolchains; asserting the *structure* is both possible here
+    and stronger: every spelling lands in the same declared set, and every
+    entry point reaches the same fold.
+    """
+
+    def test_a_declared_directory_is_as_authoritative_as_a_declared_file(
+        self,
+    ) -> None:
+        """The config route (`scope.public_header_dirs`/
+        `sources.public_headers`) reaches provenance as
+        ``public_header_dirs``/``public_headers`` -- the same two
+        parameters ``-H`` uses -- so what makes a root an owner is the
+        declared set, never which spelling produced it."""
+        include = _segments("/proj/include")
+        # Declared as a directory: the -I root above it still owns nothing
+        # of its own, but the declared directory itself does.
+        assert split_include_roots([], [include], ["/proj/include"])[0] == [
+            include,
+            include,
+        ]
+        assert split_include_roots([], [include], ["/proj/vendor"])[0] == [include]
+
+    def test_an_unrelated_include_root_never_widens_a_declared_set(self) -> None:
+        """Requirement 3 stated as the property: adding any number of
+        unrelated ``-I`` roots leaves the declared set exactly as it was.
+        Several independently-chosen roots, so one coincidence cannot
+        carry the claim."""
+        declared = [_segments("/proj/include/api.h")]
+        base = split_include_roots(declared, [], [])[0]
+        for unrelated in (
+            ["/opt/mpi/include"],
+            ["/usr/local/include", "/opt/vendor/sdk/include"],
+            ["/proj/vendor", "/proj/build/gen", "/elsewhere"],
+        ):
+            assert split_include_roots(declared, [], unrelated)[0] == base
+
+    def test_every_binary_entry_point_classifies_through_the_one_fold(self) -> None:
+        """Requirement 6, structurally: ELF, PE and Mach-O all reach
+        provenance through ``dumper``'s single ``apply_provenance`` call,
+        and appcompat and the header-only graph reach the identical rule --
+        so there is no second place where ownership could be decided
+        differently. A second call site is the thing this guards against,
+        which a per-format behavioural test could not see."""
+        import abicheck.appcompat as appcompat
+        import abicheck.dumper as dumper
+        from abicheck import provenance
+        from abicheck.buildsource import header_graph
+
+        dumper_src = pathlib.Path(dumper.__file__).read_text(encoding="utf-8")
+        assert dumper_src.count("apply_provenance(") == 1, (
+            "dumper must reach declaration provenance through exactly one "
+            "call; a second call site is a second place "
+            "ownership can be decided"
+        )
+        # appcompat supplies the same parameter rather than classifying
+        # its own way.
+        appcompat_src = pathlib.Path(appcompat.__file__).read_text(encoding="utf-8")
+        assert "public_include_search_dirs=" in appcompat_src
+        assert "apply_provenance(" not in appcompat_src
+        # And the two consumers of the ownership rule share one function.
+        graph_src = pathlib.Path(header_graph.__file__).read_text(encoding="utf-8")
+        prov_src = pathlib.Path(provenance.__file__).read_text(encoding="utf-8")
+        for src in (graph_src, prov_src):
+            assert "split_include_roots(" in src
+        assert "retain_owning_roots(" not in graph_src, (
+            "header_graph must go through the shared fold, not re-apply the "
+            "containment rule with its own filtering around it"
+        )
+
+
+@pytest.mark.integration
+class TestADeclinedRootIsUnknownNotPrivate:
+    """A root this run cannot place as public must not be called private.
+
+    Reported as a P1 by Codex's security review on the PR that introduced
+    the containment rule, and correct in principle even though four
+    attempted repros were each caught by some other mechanism. The first
+    version of this module returned only the owning half, so every declined
+    root's declarations fell through to ``PRIVATE_HEADER`` -- and
+    ``PRIVATE_HEADER`` is a *confident* signal that public-surface scoping
+    acts on to drop findings. A library whose own public headers are split
+    across include roots would then have real, breaking changes to the
+    declarations in the non-``-H`` root filtered out of its verdict.
+
+    The two states are not interchangeable and that is the whole point:
+
+    * ``PUBLIC_HEADER`` creates an export obligation, so a dependency's
+      declarations must not have it (the 2,211-finding defect).
+    * ``PRIVATE_HEADER`` licenses dropping a finding, so a root the run
+      merely could not place must not have it either.
+
+    ``UNKNOWN`` buys the first without buying the second, and is what the
+    scoping design already means by "cannot place".
+    """
+
+    def test_a_dependency_root_declaration_is_unknown(self, tmp_path: Path) -> None:
+        _require_toolchain()
+        so, pub, extra = _build_dependency_tree(tmp_path)
+        origins = _origins(_dump(so, pub, extra))
+        for name in ("dep_exported", "dep_never_exported"):
+            assert origins[name] == ScopeOrigin.UNKNOWN.value, (
+                f"{name} came from a root this run could not place as public; "
+                "that is an absence of evidence, not evidence of privacy, and "
+                "PRIVATE_HEADER would let scoping drop a real finding about it"
+            )
+
+    def test_a_genuinely_private_header_is_still_private(self, tmp_path: Path) -> None:
+        """The negative control, and why this cannot just return UNKNOWN for
+        everything: a private sibling inside the declared tree, under no
+        separate ``-I`` root at all, keeps its confident ``PRIVATE_HEADER``
+        and stays droppable -- the case184 behaviour
+        ``tests/test_dump_provenance_include_scope.py`` pins."""
+        _require_toolchain()
+        (tmp_path / "internal.h").write_text(
+            "#pragma once\nvoid priv(void);\n", encoding="utf-8"
+        )
+        (tmp_path / "api.h").write_text(
+            '#pragma once\n#include "internal.h"\nvoid pub(void);\n', encoding="utf-8"
+        )
+        (tmp_path / "lib.c").write_text(
+            '#include "api.h"\nvoid pub(void) {}\nvoid priv(void) {}\n',
+            encoding="utf-8",
+        )
+        so = tmp_path / "lib.so"
+        subprocess.run(
+            ["gcc", "-shared", "-fPIC", "-g", "-o", str(so), str(tmp_path / "lib.c")],
+            check=True,
+            capture_output=True,
+        )
+        from abicheck.dumper import dump
+
+        origins = _origins(
+            dump(
+                so,
+                [tmp_path / "api.h"],
+                [tmp_path],
+                public_headers=[tmp_path / "api.h"],
+            )
+        )
+        assert origins["pub"] == ScopeOrigin.PUBLIC_HEADER.value
+        assert origins["priv"] == ScopeOrigin.PRIVATE_HEADER.value
+
+    def test_a_break_under_a_declined_root_is_still_reported(
+        self, tmp_path: Path
+    ) -> None:
+        """The end property, guarded end to end through the real CLI: a
+        library whose public headers are split across include roots must
+        not lose a breaking change to the half that is not the ``-H`` root.
+
+        **This test does not currently discriminate**, and saying so is the
+        point. Reverting the ``UNKNOWN`` tier leaves it passing: with
+        ``PRIVATE_HEADER`` restored, this exact shape is still reported,
+        because the export-table closure keeps ``Payload`` reachable. Four
+        separate shapes were tried while verifying the P1 and each was
+        caught by some other mechanism -- the undeclared-export removal
+        exemption, the export-table closure, the conservative-unknown
+        fallback.
+
+        That is precisely why the fix is not "the repro is unreachable, so
+        leave it": the safety of a demotion rule must not rest on unrelated
+        mechanisms happening to cover it, and any of those could narrow
+        later. ``test_a_dependency_root_declaration_is_unknown`` above is
+        the discriminating regression test (it fails on the reverted
+        implementation); this one pins the property those mechanisms are
+        currently providing, so a future change that removes the last of
+        them fails here instead of shipping."""
+        _require_toolchain()
+        sdk = tmp_path / "sdkinc"
+        pub = tmp_path / "pub"
+        sdk.mkdir()
+        pub.mkdir()
+        (pub / "api.h").write_text(
+            "#pragma once\n#include <types.h>\nvoid plain_api(void);\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "v.c").write_text(
+            '#include "api.h"\n'
+            "void plain_api(void) {}\n"
+            "void use_payload(struct Payload *p) { (void)p; }\n",
+            encoding="utf-8",
+        )
+        built: list[Path] = []
+        for layout in ("int a; int b;", "int a; long b; int c;"):
+            (sdk / "types.h").write_text(
+                "#pragma once\nstruct Payload { " + layout + " };\n"
+                "void use_payload(struct Payload *p);\n",
+                encoding="utf-8",
+            )
+            so = tmp_path / f"lib{len(built)}.so"
+            subprocess.run(
+                [
+                    "gcc",
+                    "-shared",
+                    "-fPIC",
+                    "-g",
+                    f"-I{sdk}",
+                    f"-I{pub}",
+                    "-o",
+                    str(so),
+                    str(tmp_path / "v.c"),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            built.append(so)
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(built[0]),
+                str(built[1]),
+                "-H",
+                str(pub / "api.h"),
+                "-I",
+                str(sdk),
+                "-I",
+                str(pub),
+            ],
+        )
+        assert result.exit_code == 4, (
+            "a breaking layout change to the library's own type, declared in "
+            "an include root that is not the -H root, must not be scoped out "
+            f"of the verdict:\n{result.output}"
+        )
+        assert "BREAKING" in result.output
+
+
+class TestTheHeaderGraphAgreesWithDeclarationProvenance:
+    """A dependency-only root must not be ``PRIVATE_HEADER`` in the *graph*
+    either.
+
+    ``extract.public_root_ownership``'s own module docstring states the
+    contract this pins: two independent consumers -- per-declaration
+    provenance (``provenance.apply_provenance``) and header-level graph node
+    classification (``buildsource.header_graph``) -- must reach the
+    identical answer, because a transitively-included header classified one
+    way for its declarations and the other way for its own node is the
+    disagreement that widening was introduced to end.
+
+    It did not hold. ``header_graph`` called ``split_include_roots`` and
+    kept only its first result, dropping the compile-only half, so every
+    declaration reached solely through a dependency ``-I`` root became
+    ``UNKNOWN`` through ``apply_provenance`` and ``PRIVATE_HEADER`` in the
+    graph (CodeRabbit review) -- reintroducing, for graph consumers only,
+    exactly the confident demotion the P1 fix removed.
+
+    The pre-existing structural test above (``header_graph`` calls the
+    shared fold) passed throughout: calling the shared function and then
+    discarding half its answer is indistinguishable from using it, by text.
+    Only a behavioural assertion can see the difference, which is why this
+    one asserts on a built graph's node rather than on source text.
+    """
+
+    @staticmethod
+    def _graph_origin(node_label: str, **kwargs: object) -> str | None:
+        from abicheck.buildsource.header_graph import build_header_only_graph
+        from abicheck.model.snapshot import AbiSnapshot
+
+        graph = build_header_only_graph(
+            AbiSnapshot(library="lib.so", version="1"),
+            public_header_paths=["/proj/include/api.h"],
+            public_dir_paths=[],
+            header_paths=["/proj/include/api.h", node_label],
+            **kwargs,  # type: ignore[arg-type]
+        )
+        for node in graph.nodes:
+            if node.label == node_label:
+                return node.attrs.get("visibility")
+        return None
+
+    def test_a_dependency_root_header_node_is_not_private(self) -> None:
+        origin = self._graph_origin(
+            "/opt/mpi/include/mpi.h",
+            include_search_dirs=["/proj/include", "/opt/mpi/include"],
+        )
+        assert origin != ScopeOrigin.PRIVATE_HEADER.value, (
+            "a header reached only through a dependency -I root was called "
+            "PRIVATE_HEADER in the graph while apply_provenance called it "
+            "UNKNOWN; PRIVATE_HEADER licenses dropping a finding, so the "
+            "graph would act confidently on evidence that does not exist"
+        )
+        assert origin != ScopeOrigin.PUBLIC_HEADER.value, (
+            "and it must not be public either -- that is the export "
+            "obligation this whole change removes"
+        )
+
+    def test_the_two_consumers_answer_a_dependency_root_identically(self) -> None:
+        """The contract stated directly: same inputs, same answer.
+
+        Asserted as equality between the two rather than against a literal,
+        so it cannot be satisfied by both drifting together to a wrong
+        value -- the companion assertion above pins which values are
+        admissible.
+        """
+        from abicheck.provenance import (
+            build_public_set,
+            classify_origin,
+            split_include_roots,
+        )
+
+        dep = "/opt/mpi/include/mpi.h"
+        header_segs, dir_segs, have_public = build_public_set(
+            ["/proj/include/api.h"], []
+        )
+        owning, compile_only = split_include_roots(
+            header_segs, dir_segs, ["/proj/include", "/opt/mpi/include"]
+        )
+        declaration_answer = classify_origin(
+            dep,
+            header_segs,
+            owning,
+            have_public_set=have_public,
+            compile_only_dir_segs=compile_only,
+        )
+        graph_answer = self._graph_origin(
+            dep, include_search_dirs=["/proj/include", "/opt/mpi/include"]
+        )
+        # An UNKNOWN graph node carries no `visibility` attribute at all,
+        # which is that same answer in the graph's own vocabulary.
+        assert (graph_answer or ScopeOrigin.UNKNOWN.value) == declaration_answer.value

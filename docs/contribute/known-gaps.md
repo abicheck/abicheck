@@ -9602,6 +9602,56 @@ closed in the same pass as that one.
 
 ## An `-I` include root makes another library's public headers this component's export obligations (2026-09-16)
 
+> **Partially closed (2026-09-16).** An `-I` root now widens public
+> provenance only where the run's own *declared* public headers live
+> underneath it (`extract/public_root_ownership.py`, applied by
+> `provenance.public_dirs_with_owned_roots` and, identically,
+> `buildsource/header_graph.py`). That is a fourth route none of the three
+> candidates below considered, and it needs no new `ScopeOrigin` member, no
+> `Fact` retightening and no `SCHEMA_VERSION` bump: the evidence to separate
+> the two questions was already in hand at classification time, in the
+> declared `-H`/`--public-header-dir`/`sources.public_headers` set the
+> caller passes alongside the `-I` list.
+>
+> A root the rule declines is classified `UNKNOWN`, **not**
+> `PRIVATE_HEADER`. That distinction is the whole safety argument and was
+> not in the first version of the fix: `PUBLIC_HEADER` is what creates an
+> export obligation, so a dependency's declarations must not have it; but
+> `PRIVATE_HEADER` is a *confident* signal that public-surface scoping acts
+> on to drop findings, so a root the run merely could not place must not
+> have it either, or a library whose own public headers are split across
+> include roots loses real breaking changes from its verdict. Raised as a
+> P1 by Codex's security review on the PR; four attempted repros were each
+> caught by some other mechanism (the undeclared-export removal exemption,
+> the export-table closure, the conservative-unknown fallback), but the
+> safety of a demotion rule must not rest on unrelated mechanisms
+> happening to cover it.
+>
+> **What it closes:** a *dependency's* include tree. Intel MKL passes an MPI
+> include directory solely so `mkl_cdft.h` can parse `#include <mpi.h>`; no
+> MKL public header lives under it, so it no longer widens anything, and the
+> 2,211 `MPI_*`/`PMPI_*`/`QMPIX_*` `public_not_exported` findings are gone.
+> Regression tests: `tests/test_dependency_include_root_ownership.py`,
+> including a property-style statement of the containment predicate.
+>
+> **What it does not close, and this is the reported PVXS case above.**
+> `-H include/pvxs/iochooks.h` with `-I <pvxs>/include` is containment:
+> the declared header lives *under* that root, so the root keeps its
+> widening power and `version.h` beside it is still `PUBLIC_HEADER` — still
+> charging libpvxsIoc for libpvxs's exports. Containment separates "a
+> dependency's tree" from "the library's own tree"; it cannot separate *two
+> sibling libraries sharing one include tree*, because from one snapshot's
+> point of view those are the same tree. Everything below still applies to
+> that case, and the three candidate fixes are still the options — the
+> narrowest (recording the declared `-H` set on `AbiSnapshot`) remains the
+> most promising, since "which headers this run declared" is exactly the
+> evidence a shared tree makes unrecoverable at classification time.
+>
+> The positive control the entry demands is kept and tested: a symbol
+> declared in a header that *is* in `-H` and genuinely absent from the
+> binary still reports.
+
+
 **Reported on a real PVXS build** (abicheck `3737f9f9`, CastXML 0.7.0, EPICS
 Base 7.0, gcc 13, `-std=c++11`), and reproduced by comparing one snapshot
 against *itself* — byte-identical operands, verdict `NO_CHANGE`:
@@ -9668,6 +9718,75 @@ Whichever is taken, the fix must keep the positive control: a symbol declared
 in a header that *is* in `-H` and genuinely absent from the binary must still
 report. A suppression rule or a per-project carve-out is explicitly not the
 answer.
+
+## The native `dump` CLI does not stamp `excluded_header_patterns` on the snapshot it writes (2026-09-16)
+
+**Measured, not inferred** (2026-09-16, while wiring
+`scope.exclude_headers` through `dump`): a snapshot written by
+`abicheck dump ... --exclude-header c2.h -o base.json` carries
+`excluded_header_patterns: null` and `excluded_header_matching: null`. The
+config spelling behaves the same way, because both reach the same place. A
+`compare` operand, by contrast, *is* stamped -- `cli_resolve.
+_resolve_compare_snapshots` builds an `InputSpec` that reaches
+`workflows.input_resolution.resolve_input`, which calls
+`model.header_exclusion_record.record_header_exclusions`. The native `dump`
+CLI executes through `service_dump_pipeline.execute_dump_request` instead
+and never reaches that recorder.
+
+**Why it matters.** The recorded field is the entire input to two
+mechanisms, and both are blind to a `dump`-produced baseline:
+
+- `extract.header_exclusions.exclusion_asymmetry_reason`, the comparability
+  gate that refuses a pair whose two sides were narrowed by different rules.
+  A baseline dumped under `--exclude-header a.h` compared against a
+  candidate narrowed by `b.h` reads as `((), ("b.h"))` -- asymmetric in the
+  data, but the gate sees the baseline's `()` as "excluded nothing", which
+  is exactly the false-symmetry case `record_header_exclusions`'s own
+  `extracted_now` parameter was added to prevent in the other direction.
+- `confidence.header_exclusion_warnings`, so such a run reports full
+  header-aware assurance over a surface nobody looked at -- the promise
+  `--exclude-header`'s help text makes ("reported as reduced evidence") and
+  that this field exists to keep.
+
+**Not fixed here.** It is a pre-existing gap in `dump`'s own execution path,
+orthogonal to the three defects this change addresses, and the fix is a
+question about where the recorder belongs rather than a line to add: the
+`compare` path stamps inside `resolve_input`, which `execute_dump_request`
+deliberately does not go through, so either the recorder moves to a point
+both share or `execute_dump_request` grows its own call and the two can
+drift. Both are real choices with their own blast radius (the second
+reintroduces exactly the "two places record the same fact" shape the
+`extracted_now` fix had to reason about).
+
+Until it is fixed, consistency between a `dump` baseline and a `compare`
+candidate rests on both commands *resolving* the same rules, which is why
+`scope.exclude_headers` is honored by `dump` as well as `compare`
+(`frontends/cli/dump_debug_config.resolve_dump_scope_exclude_headers`) --
+that wiring is load-bearing, not a convenience on top of a gate that would
+otherwise have caught the divergence.
+
+## An `--exclude-header` pattern spelled as a path matches nothing on Windows (2026-09-16)
+
+`extract/header_exclusions.apply_header_exclusions` tries each pattern against
+three spellings of a header: the bare name (`fftw3.h`), the full path
+(`str(path)`), and `*/<pattern>`. Only the first is platform-independent.
+`str(path)` is backslash-separated on Windows, and `fnmatch` treats `/` and
+`\` as ordinary characters, so a forward-slash pattern (`include/fftw3.h`,
+`**/fftw/*`) matches no header there while matching on POSIX. A Windows user
+must either spell the pattern with backslashes or fall back to the bare name.
+
+**Not fixed here**, and deliberately not papered over in the test that found
+it (`tests/test_header_exclusion_primitives.py` states the bare-name spelling
+as an unconditional contract and marks the path-shaped spellings
+`skipif(win32)` pointing at this entry, rather than asserting a POSIX-only
+claim as if it were universal). The fix is a real decision with its own blast
+radius: normalizing both sides to POSIX separators would change which headers
+an existing Windows invocation excludes, and the patterns are hashed into
+`excluded_header_patterns`, the comparability gate
+(`exclusion_asymmetry_reason`) and the effective-configuration digest -- so a
+normalization that alters matching also alters run identity, and a baseline
+dumped before it would stop being comparable against a candidate dumped
+after. That is a migration, not a one-line `as_posix()`.
 
 ## `effective_depth` reports `source` for a `--depth headers` dump whose only L5 is the header-only graph (2026-09-16)
 

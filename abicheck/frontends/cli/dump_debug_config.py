@@ -108,6 +108,59 @@ def resolve_dump_debug_fields(
     return resolve_dump_debug_config(build_config, sources)
 
 
+def resolve_dump_scope_exclude_headers(
+    build_config: Path | None,
+    sources: Path | None,
+    exclude_headers: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Resolve ``scope.exclude_headers`` from ``.abicheck.yml`` for ``dump``.
+
+    The same key, the same precedence and the same "weaker than the flag,
+    never unioned with it" rule ``compare`` applies -- shared as a rule
+    rather than as code, since the two commands discover their config
+    differently (``compare`` has already resolved a ``BuildConfig`` by the
+    time it asks; ``dump`` discovers one here, like every other Phase 7
+    config demotion on this command).
+
+    ``dump`` has to honor it, not merely ``compare``, because the two
+    produce operands for each other. A project stating the key in its
+    config and running ``dump`` to publish a baseline would otherwise get a
+    baseline built from the *whole* header tree -- including the header the
+    config says cannot be parsed alongside its siblings, so on a tree like
+    the reported one the dump simply fails -- while the identical config
+    made ``compare`` succeed. Same front-end-default asymmetry
+    ``include_dependencies`` was fixed for, in a new place.
+
+    Note what does *not* currently catch that asymmetry, since it is the
+    obvious guard to assume: the comparability gate compares each side's
+    recorded ``excluded_header_patterns``
+    (``extract.header_exclusions.exclusion_asymmetry_reason``), and the
+    native ``dump`` CLI records nothing there -- for the flag either, not
+    just this key (measured; see ``docs/contribute/known-gaps.md``). So a
+    differently-narrowed ``dump`` baseline is not refused, it is silently
+    compared. That makes honoring the key here the thing that keeps the two
+    commands consistent, rather than a convenience on top of a gate that
+    would have caught it.
+
+    Same deliberate leniency on a malformed auto-discovered config as its
+    siblings here.
+    """
+    if exclude_headers:
+        return tuple(exclude_headers)
+    from ...workflows.extraction import discover_build_config, load_build_config
+
+    cfg_path = (
+        build_config if build_config is not None else discover_build_config(sources)
+    )
+    if cfg_path is None:
+        return ()
+    try:
+        bc = load_build_config(cfg_path)
+    except ValueError:
+        return ()
+    return tuple(bc.exclude_headers or ())
+
+
 def resolve_dump_build_compile_db_filter(
     build_config: Path | None,
     sources: Path | None,

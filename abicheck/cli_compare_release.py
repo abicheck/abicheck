@@ -95,6 +95,10 @@ from .cli_options import (
 from .errors import SnapshotError
 from .frontends.cli.runtime import _setup_verbosity, _write_or_echo
 from .model import AbiSnapshot
+from .model.header_exclusion_record import (
+    canonical_exclusion_identity,
+    release_exclusion_identity,
+)
 from .model.release_selection import ReleaseSelection
 from .model.scope_acquisition import AcquisitionState
 from .pack_application import resolve_bundle_policy_file
@@ -104,6 +108,9 @@ from .report.comparison_scope import (
 )
 from .report.release_assurance import release_assurance_terms
 from .workflows.gate import resolve_scope_decision
+from .workflows.header_exclusion_audit import (
+    observed_member_exclusion_identities,
+)
 from .workflows.release_assurance_members import release_assurance_from_entries
 from .workflows.release_scope import (
     DIRECT_PAIR_KEY,
@@ -475,6 +482,16 @@ def compare_release_cmd(
     # the fan-out, the same way `gate.fail_on_removed_library`/`release.*`
     # already do.
     env_matrix: EnvironmentMatrix | None = None,
+    # The run's `--exclude-header` patterns, resolved once by the caller
+    # (`cli_compare_helpers.run_compare`) and forwarded here -- same
+    # internal-parameter shape as `compile_context`/`public_header_dirs`
+    # above, and the canonical rule set every member is narrowed by. It
+    # applies to matched pairs and to one-sided/stranded snapshot capture
+    # alike, so a header a release tree cannot parse alongside its siblings
+    # is excluded everywhere this fan-out reads headers, not just where a
+    # scalar `compare` does. `()` (the default) is a true no-op: every
+    # library is compared exactly as it was before this parameter existed.
+    exclude_headers: tuple[str, ...] = (),
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -755,6 +772,7 @@ def compare_release_cmd(
                 collapse_versioned_symbols=collapse_versioned_symbols,
                 project_policy_overrides=project_policy_overrides,
                 env_matrix=env_matrix,
+                exclude_headers=exclude_headers,
             )
 
             for key in matched_keys:
@@ -940,6 +958,15 @@ def compare_release_cmd(
                                 compile=compile_context,
                                 include_dependencies=include_dependencies,
                                 public_header_dirs=public_header_dirs,
+                                # The same canonical rules every matched pair
+                                # is narrowed by: a stranded library reads the
+                                # identical `old_h` header tree, so without
+                                # them its capture is the one place in the
+                                # fan-out that still tries to parse the tree
+                                # whole -- and degrades to an ELF-only entry
+                                # for a reason the run had already been told
+                                # how to avoid.
+                                exclude_headers=exclude_headers,
                             ),
                             lang=lang,
                             depth=depth,
@@ -1107,6 +1134,19 @@ def compare_release_cmd(
                 scope_record=scope_result.record,
             )
 
+            # Read each completed member's *observed* exclusion identity
+            # before the `_diff_result` carrying it is stripped below. The
+            # request is not this fact: a stored snapshot is never
+            # restamped with the current `--exclude-header`, so a
+            # stored-package comparison would otherwise report the
+            # request's "excluded nothing" for two packages that were in
+            # truth narrowed differently (CodeRabbit review). Kept as the
+            # release's one identity in `release_excluded_header_patterns`
+            # further down, where the receipt is assembled.
+            observed_member_exclusions = observed_member_exclusion_identities(
+                library_results
+            )
+
             # Strip _diff_result from entries and bump verdict for removed libraries.
             worst_verdict = _strip_diff_results_and_adjust_verdict(
                 library_results,
@@ -1155,10 +1195,22 @@ def compare_release_cmd(
             # means the envelope-level field and `effective_config_fields
             # ["policy.env_matrix"]` are correct regardless of how many
             # library comparisons actually completed.
-            from .checker import env_matrix_content_digest
             from .service_render import resolve_demangle_for_format
+            from .workflows.comparison_input_receipt import env_matrix_content_digest
 
             env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
+            # The release's one canonical `--exclude-header` identity.
+            # Two releases differing only in their exclusion rules parsed
+            # genuinely different surfaces and must not share a
+            # configuration digest -- so this is read off what the member
+            # comparisons *observed* (captured above, before their
+            # `DiffResult`s were stripped), falling back to the request
+            # only when no member completed and there is nothing to
+            # observe. See `release_exclusion_identity`.
+            release_excluded_header_patterns = release_exclusion_identity(
+                observed_member_exclusions,
+                canonical_exclusion_identity(exclude_headers),
+            )
 
             for secondary_fmt, secondary_output in secondary_writes:
                 # CLI cleanup phase two, PR E, generalized: `-o` is
@@ -1208,6 +1260,7 @@ def compare_release_cmd(
                     show_only=show_only,
                     env_matrix_source_sha256=env_matrix_source_sha256,
                     require_complete_analysis=require_complete_analysis,
+                    excluded_header_patterns=release_excluded_header_patterns,
                 )
                 _write_or_echo(secondary_output, secondary_text)
 
@@ -1243,6 +1296,7 @@ def compare_release_cmd(
                 show_only=show_only,
                 env_matrix_source_sha256=env_matrix_source_sha256,
                 require_complete_analysis=require_complete_analysis,
+                excluded_header_patterns=release_excluded_header_patterns,
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths)
