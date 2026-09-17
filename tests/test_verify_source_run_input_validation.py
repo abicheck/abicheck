@@ -232,3 +232,61 @@ class TestTestedShaSourceNamesWhereTheValueCameFrom:
         described = action["outputs"]["tested-sha-source"]["description"]
         for state in ("input", "run-head", "analysis-context"):
             assert state in described, (state, described)
+
+
+class TestTheContextAndTheReportNameOneDocument:
+    """`report-path` and `tested-sha` are returned as one verified identity.
+
+    Two independent member names quietly break that claim: the context is
+    read from one member and the report published from another, and nothing
+    anywhere says the published one was looked at. Every documented shape
+    already sets both to `aggregate.json` -- the analysis context lives
+    inside the aggregate document -- so the rule costs a real caller nothing
+    and closes the gap for the one who writes two.
+    """
+
+    def _run(self, provenance: str, report: str) -> subprocess.CompletedProcess[str]:
+        require_bash()
+        match = re.search(
+            r'if \[\[ -n "\$PROVENANCE_FROM" && -n "\$REPORT_FROM" '
+            r'&& "\$PROVENANCE_FROM" != "\$REPORT_FROM" \]\]; then\n(?:.*?\n)*?fi',
+            SOURCE,
+        )
+        assert match is not None, "the same-document rule moved"
+        script = (
+            '_fail() { echo "REFUSED: $*" >&2; exit 3; }\n'
+            f'PROVENANCE_FROM="{provenance}"\nREPORT_FROM="{report}"\n'
+            + match.group(0)
+            + "\necho ACCEPTED\n"
+        )
+        return subprocess.run(
+            [bash_executable(), "-c", script],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_two_different_members_are_refused(self) -> None:
+        result = self._run("aggregate.json", "report.json")
+        assert result.returncode != 0, result.stdout
+        assert "must name the same document" in result.stderr
+
+    @pytest.mark.parametrize(
+        "provenance,report",
+        [
+            ("aggregate.json", "aggregate.json"),  # the documented shape
+            ("reports/aggregate.json", "reports/aggregate.json"),
+            ("", "report.json"),  # provenance not requested at all
+            ("aggregate.json", ""),  # no report requested
+            ("", ""),  # neither
+        ],
+    )
+    def test_the_supported_shapes_are_accepted(
+        self, provenance: str, report: str
+    ) -> None:
+        # The accept-half again: a rule that refused whenever either was set
+        # would break `provenance-from` and `report-from` used on their own,
+        # which are both supported and both documented.
+        result = self._run(provenance, report)
+        assert result.returncode == 0, result.stderr
+        assert "ACCEPTED" in result.stdout

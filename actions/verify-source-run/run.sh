@@ -96,6 +96,18 @@ _require_member_name() {
 _require_member_name "provenance-from" "$PROVENANCE_FROM"
 _require_member_name "report-from" "$REPORT_FROM"
 
+# `report-path` and `tested-sha` are documented as naming the SAME document:
+# the whole point of returning them together is that the report a caller
+# renders is the one whose context was checked. Two independent member names
+# quietly break that -- the context is read from one member and the report
+# published from another, and nothing says the second was ever looked at.
+# The analysis context lives inside the aggregate document itself, so in
+# every supported shape these are the same member; a caller who wrote two
+# different ones meant something this Action cannot honour.
+if [[ -n "$PROVENANCE_FROM" && -n "$REPORT_FROM" && "$PROVENANCE_FROM" != "$REPORT_FROM" ]]; then
+  _fail "'provenance-from' ($PROVENANCE_FROM) and 'report-from' ($REPORT_FROM) must name the same document -- 'tested-sha' and 'report-path' are returned together as one verified identity, which they cannot be if the context was read from a different member than the report."
+fi
+
 # Exactly `true` or `false`. Treating every other spelling as `false` means
 # a typo (`ture`, `True`, an unset-but-intended expression expanding empty)
 # silently DISABLES the requirement -- the one direction a misreading must
