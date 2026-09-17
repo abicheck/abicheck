@@ -1,7 +1,7 @@
 """Targeted coverage for the dump --depth strict-contract helpers in
 :mod:`abicheck.cli_dump_helpers`: ``evidence_depth_label``,
 ``check_requested_depth_satisfied``, ``_gated_source_label``,
-``fold_dump_provenance_into_json``, ``_l4_source_abi_was_attempted``, and
+``fold_dump_provenance_into_json``, ``evidence_depth.l4_source_abi_was_attempted``, and
 ``_dump_will_attempt_hybrid_l4_extraction``. Split out of
 ``test_cli_dump_helpers_coverage.py`` (CLAUDE.md file-size cap) -- that file
 still covers the rest of the module (compile-db/debug-format resolution,
@@ -85,14 +85,23 @@ def test_evidence_depth_label_source_when_source_abi_has_reachable_entities() ->
     assert evidence_depth_label(snap) == "source"
 
 
-def test_evidence_depth_label_source_when_source_graph_has_nodes() -> None:
+def test_evidence_depth_label_does_not_claim_source_for_an_l5_only_pack() -> None:
+    """An L5 graph with no L4 attempt behind it is not source depth.
+
+    This test asserted ``"source"`` until the reported label was made to
+    share the gate's rule: a non-empty L5 can be the always-on header-only
+    declaration graph, which never ran any source-tier replay, and
+    ``check_requested_depth_satisfied`` has always refused it. The report
+    claiming a rung the gate refuses is what made a byte-identical
+    headers-depth run read as a complete source-level analysis.
+    """
     from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
 
     snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
     snap.build_source = _pack(
         source_graph=SourceGraphSummary(nodes=[GraphNode(id="n1", kind="function")])
     )
-    assert evidence_depth_label(snap) == "source"
+    assert evidence_depth_label(snap) == "headers"
 
 
 def test_evidence_depth_label_does_not_overstate_empty_source_abi() -> None:
@@ -333,10 +342,12 @@ def test_check_requested_depth_satisfied_header_graph_only_does_not_satisfy_sour
     ]
     snap.build_source = pack
 
-    # Sanity check: evidence_depth_label alone (the honesty-reporting
-    # function) does read this as "source" -- that's the exact gap the
-    # strict check must independently close, not a bug in that function.
-    assert evidence_depth_label(snap) == "source"
+    # The reported label agrees with the gate. It used to read "source"
+    # here -- the gap the strict check independently closed -- and that
+    # disagreement was itself the bug: a report may not claim a rung the
+    # gate refuses. Both now answer from one rule
+    # (`evidence_depth.reported_depth_label`).
+    assert evidence_depth_label(snap) == "headers"
 
     with pytest.raises(DumpDepthNotSatisfiedError, match="--depth source"):
         check_requested_depth_satisfied("source", snap)
@@ -380,7 +391,9 @@ def test_check_requested_depth_satisfied_l3_plus_backfilled_graph_does_not_satis
     ]
     snap.build_source = backfilled_pack
 
-    assert evidence_depth_label(snap) == "source"
+    # "build" (real L3), not the "source" this used to read off a grafted
+    # header-only graph: the reported label now shares the gate's rule.
+    assert evidence_depth_label(snap) == "build"
     with pytest.raises(DumpDepthNotSatisfiedError, match="--depth source"):
         check_requested_depth_satisfied("source", snap)
     # The failure message should honestly name "build" (real L3), not
@@ -425,15 +438,17 @@ def test_check_requested_depth_satisfied_source_zero_match_no_graph_passes() -> 
     rule requires *either* L4 *or* L5 to be non-empty -- a zero-match
     source-only dump that parsed TUs but linked no declarations (no binary to
     link against) AND folded no L5 graph leaves *both* empty, so
-    evidence_depth_label reports "build" directly. The old code only called
-    _gated_source_label when evidence_depth_label already said "source",
+    the payload-emptiness rule reports "build" directly. The old code only
+    called _gated_source_label when the label already said "source",
     so this genuinely-attempted, zero-match case skipped the gated recompute
     entirely and was wrongly rejected -- exactly the "unseeded --depth source
     that selected 0 TUs" scenario _write_snapshot_output's own G21.7 warning
     describes as expected, warn-only behavior, not a hard failure. Unlike
     test_check_requested_depth_satisfied_source_with_real_l4_facts_passes
     above, this pack deliberately carries NO source_graph, so it only passes
-    once _gated_source_label runs unconditionally."""
+    once _gated_source_label runs unconditionally. Since the reported label
+    shares that rule too, this case is also where the label legitimately
+    reads *deeper* than payload-emptiness alone would."""
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface
@@ -452,7 +467,11 @@ def test_check_requested_depth_satisfied_source_zero_match_no_graph_passes() -> 
     )
     snap.build_source = pack
 
-    assert evidence_depth_label(snap) == "build"
+    # The direction that is easy to miss: the gate's rule is not uniformly
+    # stricter. Here replay genuinely ran (`compile_units_parsed`), so the
+    # gate answers "source" where the payload-emptiness rule answered
+    # "build" -- and the reported label, now sharing that rule, agrees.
+    assert evidence_depth_label(snap) == "source"
     check_requested_depth_satisfied("source", snap)  # must not raise
 
 
@@ -743,7 +762,7 @@ def test_l4_source_abi_was_attempted_false_for_unavailable_extractor() -> None:
     from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface
-    from abicheck.cli_dump_helpers import _l4_source_abi_was_attempted
+    from abicheck.evidence_depth import l4_source_abi_was_attempted
 
     pack = BuildSourcePack(
         root=Path(""),
@@ -765,7 +784,7 @@ def test_l4_source_abi_was_attempted_false_for_unavailable_extractor() -> None:
         ),
     ]
 
-    assert _l4_source_abi_was_attempted(pack) is False
+    assert l4_source_abi_was_attempted(pack) is False
 
 
 def test_l4_source_abi_was_attempted_true_for_zero_linked_but_parsed_tus() -> None:
@@ -779,7 +798,7 @@ def test_l4_source_abi_was_attempted_true_for_zero_linked_but_parsed_tus() -> No
     from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface
-    from abicheck.cli_dump_helpers import _l4_source_abi_was_attempted
+    from abicheck.evidence_depth import l4_source_abi_was_attempted
 
     surface = SourceAbiSurface()
     surface.coverage["compile_units_selected"] = 1
@@ -801,7 +820,7 @@ def test_l4_source_abi_was_attempted_true_for_zero_linked_but_parsed_tus() -> No
         ),
     ]
 
-    assert _l4_source_abi_was_attempted(pack) is True
+    assert l4_source_abi_was_attempted(pack) is True
 
 
 def test_l4_source_abi_was_attempted_true_for_coercible_string_count() -> None:
@@ -813,7 +832,7 @@ def test_l4_source_abi_was_attempted_true_for_coercible_string_count() -> None:
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface
-    from abicheck.cli_dump_helpers import _l4_source_abi_was_attempted
+    from abicheck.evidence_depth import l4_source_abi_was_attempted
 
     surface = SourceAbiSurface()
     surface.coverage["compile_units_parsed"] = "1"  # type: ignore[assignment]
@@ -825,7 +844,7 @@ def test_l4_source_abi_was_attempted_true_for_coercible_string_count() -> None:
         source_abi=surface,
     )
 
-    assert _l4_source_abi_was_attempted(pack) is True
+    assert l4_source_abi_was_attempted(pack) is True
 
 
 def test_l4_source_abi_was_attempted_false_for_infinite_count() -> None:
@@ -838,7 +857,7 @@ def test_l4_source_abi_was_attempted_false_for_infinite_count() -> None:
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.buildsource.source_abi import SourceAbiSurface
-    from abicheck.cli_dump_helpers import _l4_source_abi_was_attempted
+    from abicheck.evidence_depth import l4_source_abi_was_attempted
 
     surface = SourceAbiSurface()
     surface.coverage["compile_units_parsed"] = float("inf")
@@ -850,7 +869,7 @@ def test_l4_source_abi_was_attempted_false_for_infinite_count() -> None:
         source_abi=surface,
     )
 
-    assert _l4_source_abi_was_attempted(pack) is False
+    assert l4_source_abi_was_attempted(pack) is False
 
 
 def test_execute_dump_request_does_not_crash_on_malformed_coverage_without_depth(
@@ -860,7 +879,7 @@ def test_execute_dump_request_does_not_crash_on_malformed_coverage_without_depth
     build-source pack carries a malformed ``compile_units_parsed`` when no
     ``--depth`` was requested at all (Codex review, fresh evidence).
 
-    ``_l4_source_abi_was_attempted`` (``cli_dump_helpers.py``) now degrades a
+    ``l4_source_abi_was_attempted`` (``evidence_depth.py``) now degrades a
     non-numeric ``compile_units_parsed`` to "not attempted" instead of
     raising, so ``_gated_source_label`` still falls through to its own real
     L3-build-evidence check rather than the whole depth-label computation
