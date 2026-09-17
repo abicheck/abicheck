@@ -9822,9 +9822,11 @@ function, not a parallel copy of its reasoning. Both consumers were
 converted together, because a document whose `analysis_assurance.
 effective_depth` and whose `old_evidence_depth`/`new_evidence_depth`
 disagreed would have been worse than the original over-claim:
-`analysis_assurance._effective_depth_label` and `cli_dump_helpers.
-evidence_depth_label` (the compare report's two side depths and `dump`'s
-own provenance stamp) both delegate to it. `buildsource/check_report.
+`analysis_assurance.compute_analysis_assurance` (which calls it directly;
+the `_effective_depth_label` wrapper that used to stand in front of it was
+deleted along with two other pure-delegation aliases) and
+`cli_dump_helpers.evidence_depth_label` (the compare report's two side
+depths and `dump`'s own provenance stamp) both go through it. `buildsource/check_report.
 derive_effective_depth` needs no change and gains a correct answer: a
 `--depth source` check over header-only-L5 evidence now reads `degraded`
 instead of `complete`.

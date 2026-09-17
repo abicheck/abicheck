@@ -38,7 +38,50 @@ own account not complete.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from .analysis_assurance import AnalysisAssurance
+
+#: The one note a fatally-incomparable run's block carries.
+NOT_COMPARABLE_NOTE = (
+    "old and new snapshots were not provably comparable "
+    "(ADR-050 ProfileMismatchError/ScopeMismatchError waived by "
+    "--diagnostic-comparison); every other assurance axis is "
+    "unreliable for this run"
+)
+
+
+def not_comparable_assurance(requested_depth: str | None) -> AnalysisAssurance:
+    """The whole block for a pair that was not provably comparable.
+
+    The *fatal* counterpart of the bounded case below, and its natural
+    neighbour: both answer "what does this block say when the two sides'
+    comparability is in question", and keeping the fatal one inline in
+    ``compute_analysis_assurance`` is what let it drift from the rest of
+    that function.
+
+    Every axis but the request itself is left at its default, because none
+    was evaluated -- the caller returns this before resolving any of them.
+    *requested_depth* is carried through precisely so
+    ``requested_depth_source`` does not default to ``"implicit"`` and
+    thereby assert that no ``--depth`` was given, a claim about the run
+    that nothing on this path establishes (CodeRabbit review).
+    ``depth_satisfied`` deliberately stays ``None``: no effective depth was
+    computed, so satisfaction is unknown rather than trivially true.
+    """
+    from .analysis_assurance import AnalysisAssurance
+
+    return AnalysisAssurance(
+        status="not_comparable",
+        requested_depth=requested_depth,
+        requested_depth_source=(
+            "explicit" if requested_depth is not None else "implicit"
+        ),
+        notes=(NOT_COMPARABLE_NOTE,),
+    )
 
 
 def unverified_dimensions(

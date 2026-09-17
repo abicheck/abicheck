@@ -137,3 +137,105 @@ class TestMergedRollUpNeverPresentsANormalizationAsARequest:
         assert merged is not None
         expected = "explicit" if all(s == "explicit" for s in sources) else "implicit"
         assert merged.requested_depth_source == expected
+
+
+class TestPositionalConstructorStaysBackwardCompatible:
+    """A new ``AnalysisAssurance`` field is appended, never inserted.
+
+    ``schema_staleness_status``'s own comment already recorded this rule
+    after a review caught the same mistake (PR #1209 round 10), and
+    ``requested_depth_source`` was still first written next to
+    ``depth_satisfied`` where it conceptually belongs -- silently rebinding
+    every positional argument from ``target_accounting`` onward. A comment
+    is evidently not enough, so this states it as an executable invariant
+    over the whole field list rather than over the one field that moved.
+    """
+
+    def test_every_pre_existing_field_keeps_its_position(self) -> None:
+        import dataclasses
+
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        names = [f.name for f in dataclasses.fields(AnalysisAssurance)]
+        # The order this dataclass's generated positional constructor has
+        # published. Appending is allowed (the tail check below); reordering
+        # or inserting is not, whatever the new field is called.
+        frozen_prefix = [
+            "schema_version",
+            "status",
+            "requested_depth",
+            "effective_depth",
+            "depth_satisfied",
+            "target_accounting",
+            "translation_units",
+            "export_accounting",
+        ]
+        assert names[: len(frozen_prefix)] == frozen_prefix
+        for late_addition in ("schema_staleness_status", "requested_depth_source"):
+            assert late_addition in names
+            assert names.index(late_addition) >= len(frozen_prefix)
+
+    def test_a_positional_caller_still_binds_the_fields_it_named(self) -> None:
+        """The failure mode itself, not just the field order.
+
+        Constructed positionally through the first five slots, exactly as an
+        external caller predating either late addition would.
+        """
+        from abicheck.analysis_assurance import AnalysisAssurance
+
+        block = AnalysisAssurance("1.0", "complete", "headers", "headers", True)
+        assert block.schema_version == "1.0"
+        assert block.status == "complete"
+        assert block.requested_depth == "headers"
+        assert block.effective_depth == "headers"
+        assert block.depth_satisfied is True
+
+
+class TestNotComparableKeepsTheRequestItWasGiven:
+    """The short-circuit may not assert a provenance it never established.
+
+    ``compute_analysis_assurance`` returns early when the two sides were not
+    provably comparable, before any depth is resolved. With
+    ``requested_depth_source`` defaulting to ``"implicit"``, that early
+    return positively claimed no ``--depth`` was given -- a claim about the
+    run that this path never checked, which is precisely the defect class
+    this whole change set removes.
+    """
+
+    @staticmethod
+    def _result(depth: str | None):
+        from abicheck.checker_types import DiffResult
+
+        result = DiffResult(old_version="1", new_version="2", library="libfoo.so")
+        result.assurance = "none"
+        result.requested_depth = depth
+        return result
+
+    @pytest.mark.parametrize("depth", ["binary", "headers", "build", "source"])
+    def test_an_explicit_request_is_reported_as_explicit(self, depth: str) -> None:
+        from abicheck.analysis_assurance import compute_analysis_assurance
+
+        block = compute_analysis_assurance(
+            self._result(depth),
+            _snapshot(from_headers=True),
+            _snapshot(from_headers=True),
+        )
+        assert block.status == "not_comparable"
+        assert block.requested_depth == depth
+        assert block.requested_depth_source == "explicit"
+        # Nothing was evaluated against it, so satisfaction is unknown --
+        # never the trivially-true value the normalized path uses.
+        assert block.depth_satisfied is None
+
+    def test_no_request_stays_implicit_and_unanswered(self) -> None:
+        from abicheck.analysis_assurance import compute_analysis_assurance
+
+        block = compute_analysis_assurance(
+            self._result(None),
+            _snapshot(from_headers=True),
+            _snapshot(from_headers=True),
+        )
+        assert block.status == "not_comparable"
+        assert block.requested_depth is None
+        assert block.requested_depth_source == "implicit"
+        assert block.depth_satisfied is None
