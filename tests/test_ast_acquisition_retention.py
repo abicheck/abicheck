@@ -233,6 +233,20 @@ class TestGroupedRelease:
         assert scope.run("castxml", "sha256:abc", produce) == "content"
         assert calls["n"] == 1, "a content-keyed entry was evicted with a group"
 
+    def test_releasing_an_unknown_group_reports_nothing_released(self) -> None:
+        """An unknown token is not an error, and not a release either.
+
+        Eviction is driven from a snapshot of the group keys
+        (``list(self._groups)``), so a token can legitimately be gone by
+        the time the release runs. It must then report ``False`` rather
+        than count a release that did not happen -- otherwise the eviction
+        loop would treat the bound as satisfied without having freed
+        anything, and spin or stop early depending on the order.
+        """
+        scope = AstAcquisitionScope()
+        assert scope._release_group_locked(987654321) is False
+        assert scope.group_stats()["released_groups"] == 0
+
 
 class TestRetainSemantics:
     def test_retain_is_idempotent_per_object(self) -> None:

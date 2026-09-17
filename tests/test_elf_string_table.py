@@ -185,6 +185,48 @@ class TestFallThroughAndRestoration:
         with buffered_string_table(None) as engaged:
             assert engaged is False
 
+    def test_a_section_without_a_stream_falls_through(self) -> None:
+        """Nothing to read from, so nothing to buffer.
+
+        A pyelftools section always has ``.stream``, but this module
+        deliberately duck-types its input (``string_table_of`` returns
+        whatever ``.stringtable`` is), so the absence has to be handled
+        rather than raise inside a parse.
+        """
+
+        class NoStream(_FakeStringTable):
+            def __init__(self) -> None:
+                super().__init__(b"\x00x\x00")
+                self.stream = None  # type: ignore[assignment]
+
+        with buffered_string_table(NoStream()) as engaged:
+            assert engaged is False
+
+    def test_an_unreadable_stream_falls_through(self) -> None:
+        """A stream that raises on seek/read must not break the parse.
+
+        The point of the fall-through is that the original accessor still
+        gets its chance -- whatever it does with the same broken stream is
+        then pyelftools' own behaviour, not a new failure mode introduced
+        by buffering.
+        """
+
+        class Exploding(_FakeStringTable):
+            def __init__(self) -> None:
+                super().__init__(b"\x00x\x00")
+
+                class _Boom:
+                    def seek(self, *_a: object) -> None:
+                        raise OSError("device on fire")
+
+                    def read(self, *_a: object) -> bytes:
+                        raise OSError("device on fire")
+
+                self.stream = _Boom()  # type: ignore[assignment]
+
+        with buffered_string_table(Exploding()) as engaged:
+            assert engaged is False
+
     def test_a_malformed_header_falls_through(self) -> None:
         class Broken(_FakeStringTable):
             def __getitem__(self, key: str) -> int:
@@ -242,9 +284,24 @@ class TestRealElfParse:
     full symbol/version output.
     """
 
-    @staticmethod
-    def _minimal_so(tmp_path):
-        """A real ELF shared object, or ``None`` when no compiler is present."""
+    #: The four bytes that make a file ELF. Checked explicitly because a
+    #: host compiler produces its *own* platform's format: ``cc -shared``
+    #: on macOS emits a Mach-O dylib and on Windows a PE DLL, both happily
+    #: named ``libx.so``. An earlier version of this fixture assumed ELF
+    #: and the tests below failed on the macOS and Windows lanes -- one on
+    #: `ELFError: Magic number does not match`, the other on its own
+    #: vacuity guard, because the ELF parser correctly found nothing in a
+    #: Mach-O file. The subject here is ELF string tables, so a non-ELF
+    #: artifact is out of scope rather than a failure.
+    _ELF_MAGIC = b"\x7fELF"
+
+    @classmethod
+    def _minimal_so(cls, tmp_path):
+        """A real **ELF** shared object, or ``None`` if one can't be built.
+
+        ``None`` covers both "no compiler" and "this host's compiler does
+        not emit ELF", which the caller turns into a skip.
+        """
         import shutil
         import subprocess
 
@@ -259,18 +316,36 @@ class TestRealElfParse:
             "int shared_state = 3;\n"
         )
         so = tmp_path / "libx.so"
-        proc = subprocess.run(
-            [cc, "-shared", "-fPIC", "-o", str(so), str(src)],
-            capture_output=True,
-        )
-        return so if proc.returncode == 0 and so.exists() else None
+        cmd = [cc, "-shared", "-fPIC", "-o", str(so), str(src)]
+        proc = subprocess.run(cmd, capture_output=True)
+        if proc.returncode != 0:
+            # A configured compiler that ran and rejected a four-line C
+            # file is a broken fixture or toolchain, never an absent
+            # capability -- so it must fail with the details rather than
+            # vanish as a skip (bug class
+            # `guard.absent_capability_vs_real_failure`).
+            from tests.test_cross_platform_integration import (
+                _require_compile_success,
+            )
+
+            _require_compile_success(
+                "cc", cmd, src.read_text(), proc, optional_feature=None
+            )
+        if not so.exists():
+            return None
+        with open(so, "rb") as fh:
+            if fh.read(4) != cls._ELF_MAGIC:
+                # Mach-O or PE: this host does not build ELF, which *is* an
+                # absent capability for a test about ELF string tables.
+                return None
+        return so
 
     def test_parse_output_is_identical_with_and_without_buffering(
         self, tmp_path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         so = self._minimal_so(tmp_path)
         if so is None:
-            pytest.skip("no C compiler available to build a real .so")
+            pytest.skip("no compiler producing an ELF shared object on this host")
         import abicheck.extract.elf_string_table as mod
         from abicheck.elf_metadata import parse_elf_metadata
 
@@ -297,7 +372,7 @@ class TestRealElfParse:
         """
         so = self._minimal_so(tmp_path)
         if so is None:
-            pytest.skip("no C compiler available to build a real .so")
+            pytest.skip("no compiler producing an ELF shared object on this host")
         from elftools.elf.elffile import ELFFile
 
         with open(so, "rb") as fh:
