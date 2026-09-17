@@ -1028,6 +1028,11 @@ def _parse_dynsym(section: SymbolTableSection, meta: ElfMetadata) -> None:
 
 
 def _parse_dynsym_entries(section: SymbolTableSection, meta: ElfMetadata) -> None:
+    """The symbol walk itself, with the string table already buffered.
+
+    Split from :func:`_parse_dynsym` only so the buffering wraps the whole
+    walk in one ``with`` block; the classification logic is unchanged.
+    """
     for sym in section.iter_symbols():
         binding_str = sym.entry.st_info.bind
         type_str = sym.entry.st_info.type

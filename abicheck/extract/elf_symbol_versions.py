@@ -69,6 +69,20 @@ def apply_versions_to_symbols(
     ver_index_map: dict[int, tuple[str, str, bool]],
     meta: ElfMetadata,
 ) -> None:
+    """Attach each ``.gnu.version`` label onto the already-parsed entries.
+
+    Walks *dynsym* in ordinal order alongside *ver_entries* (one
+    ``(version_index, is_hidden)`` per symbol, positionally aligned with the
+    table) and writes the resolved version name and default/hidden binding
+    onto ``meta.symbols``/``meta.imports``.
+
+    The alignment is positional on *both* sides: this walk counts exports
+    and imports independently, in the same order the first walk appended
+    them, so the two indexes stay in step. A symbol beyond the end of
+    *ver_entries* stops the walk rather than being guessed at -- a
+    truncated ``.gnu.version`` cannot be repaired by pairing the remainder
+    with the wrong versions.
+    """
     export_idx = 0
     import_idx = 0
     for sym_ordinal, sym in enumerate(dynsym.iter_symbols()):

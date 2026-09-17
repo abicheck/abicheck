@@ -133,6 +133,13 @@ class AstAcquisitionScope:
             self._evict_groups_locked(protect=token)
 
     def _touch_group_locked(self, value: Any) -> int:
+        """Create or refresh *value*'s group, returning its token.
+
+        Re-inserting an existing group moves it to the most-recently-used
+        end while preserving the keys already recorded under it, which is
+        what makes the bound an LRU rather than a FIFO: the root a fan-out
+        keeps coming back to must not be evicted on schedule and reparsed.
+        """
         token = id(value)
         existing = self._groups.pop(token, None)
         keys = existing[1] if existing is not None else set()

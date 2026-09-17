@@ -191,6 +191,13 @@ class _MatchCache:
             self._keepalive[token] = (pattern, refs - 1)
 
     def get(self, key: tuple[int, str, int, int]) -> tuple[SpellingMatch, ...] | None:
+        """The cached matches for *key*, or ``None`` when not yet computed.
+
+        ``None`` means *not computed*, never *computed as empty*: an empty
+        result is cached like any other, because "this text names nothing
+        in this vocabulary" is exactly as reusable as a positive answer and
+        is the common case for a large vocabulary.
+        """
         cached = self._entries.get(key)
         if cached is None:
             # An empty result is cached too -- "this text names nothing in
