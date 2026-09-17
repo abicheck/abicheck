@@ -229,6 +229,7 @@ numbers below are the tests added.
 | Cross-run eligibility & selection (primitive) | `tests/test_action_precaptured_source.py` | 37 |
 | Cross-run acquisition (real step shell, stubbed `gh`) | `tests/test_publish_baseline_cross_run.py` | 36 |
 | Declared binding (primitive) | `tests/test_action_library_spec_binding.py` | 82 |
+| Documented Action examples resolve | `tests/test_docs_action_examples.py` | 122 |
 
 Written to the repository's own bug-class discipline rather than as
 fixed-input reproducers:
@@ -255,7 +256,19 @@ annotated-tag peel, the commit-mode fallback, the validator's
 `EXPECTED_PROJECT_REF` wiring, and two `verify-source-run` output declarations
 each turns the relevant tests red.
 
-Four pre-existing tests were **sharpened rather than relaxed** to accommodate
+A fourth documentation defect class turned up on the way and is fixed here
+rather than filed: three documented Action examples passed inputs the Action
+does not declare (`severity-addition` on two pages — `use/severity.md`'s own
+next paragraph says per-category overrides are not Action inputs, so the
+example contradicted the prose two lines below it — and `old`/`new`/
+`headers`/`output` on the fork-PR page). GitHub accepts an unknown `with:`
+key silently, so a reader copying any of them got no error, just an ignored
+value. `tests/test_docs_action_examples.py` now sweeps every documented
+first-party step's inputs and every `steps.<id>.outputs.<name>` expression
+against the real `action.yml`, with `contribute/adr|archive|plans` exempt as
+historical records — the same line `check_docs_contract.py` already draws.
+
+Five pre-existing tests were **sharpened rather than relaxed** to accommodate
 new surface, and each now states a stronger invariant than before:
 
 * `test_publish_baseline_workflows.py`'s permission tests pinned an exact
@@ -273,6 +286,80 @@ new surface, and each now states a stronger invariant than before:
   (`"C1"`) and omitted `ref`, which no real API response does. They are now
   shaped like the API's, which is what makes three newly-reachable refusals
   testable at all.
+* `use/fork-pr-reporting.md` — the canonical owner of the fork-PR topic —
+  documented the sidecar-plus-second-verification sequence as *the* way to
+  report an analysed merge commit. Left alone it would have kept teaching the
+  workaround the fix removes, so both halves are rewritten and the old
+  pattern stays only as a note saying why not to do it.
+
+### The migration itself
+
+The full diffs live on the disposable branch
+(`git diff origin/master...migration -- .github .ci-local`, 1177 lines) but
+that checkout does not survive; the three substantive replacements are
+recorded here so the next reader needs nothing else. `<abicheck-ref>` is the
+SHA this work is pinned to once merged.
+
+**Publishing a tag build's capture** — the whole job becomes one call:
+
+```yaml
+  publish:
+    needs: eligible                      # see the note on the gating job above
+    if: ${{ needs.eligible.outputs.is-tag == 'true' }}
+    permissions:
+      actions: read                      # the cross-run artifact fetch
+      contents: write                    # the release upload
+    uses: abicheck/abicheck/.github/workflows/publish-baseline.yml@<abicheck-ref>
+    with:
+      baseline-set-artifact-prefix: abicheck-candidate-
+      baseline-set-source-run-id: ${{ github.event.workflow_run.id }}
+      baseline-set-source-run-attempt: ${{ github.event.workflow_run.run_attempt }}
+      baseline-set-expect-workflow: .github/workflows/ci-scripts-build.yml
+      baseline-set-expect-event: push
+      baseline-set-allowed-conclusions: success
+      release-tag: ${{ github.event.workflow_run.head_branch }}
+      baseline-generation: '1'
+```
+
+The bootstrap path is the same call with `baseline-set-artifact-prefix:
+abicheck-bootstrap-` and no `baseline-set-source-*`: its capture is uploaded
+into the same run, so no producer verification applies.
+
+**Recording and reading the analysed commit** — producer side, on the
+existing `actions/aggregate` step:
+
+```yaml
+        record-analysis-context: 'true'   # tested-sha defaults to github.sha
+        profile: ${{ env.ABICHECK_PROFILE }}
+        orchestration-ref: <abicheck-ref>
+```
+
+Publisher side, on the single `verify-source-run` step:
+
+```yaml
+        provenance-from: aggregate.json
+        report-from: aggregate.json
+```
+
+and then `report: ${{ steps.source.outputs.report-path }}`,
+`sha: ${{ steps.source.outputs.tested-sha }}`. The whole second
+`verify-source-run` step, the `tested-sha.txt` reader, and every
+`steps.tested-verified.outputs.… || steps.source.outputs.…` fallback go.
+
+**Binding build-decided values** — on the existing `actions/baseline` step,
+replacing the consumer's own substitution pass:
+
+```yaml
+        library-spec-bindings: |
+          EPICS_BASE=${{ steps.epics.outputs.epics-base }}
+          EPICS_HOST_ARCH=${{ steps.epics.outputs.host-arch }}
+```
+
+Every reference above was checked against the real upstream `action.yml` /
+`workflow_call` input sets and output declarations, mechanically: 8 + 3
+reusable-workflow inputs, 11 `verify-source-run` inputs, 13 `report` inputs,
+6 `aggregate` inputs, 11 `baseline` inputs, and the 10 `verify-source-run`
+outputs the reporter reads — all declared.
 
 ### Bug classes to register on merge
 
