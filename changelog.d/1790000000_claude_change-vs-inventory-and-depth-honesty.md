@@ -7,8 +7,8 @@
   in: a byte-identical rebuild of a library carrying 32 pre-existing
   `exported_not_public` exports announced `NO_CHANGE: 32 risk (32 total)`, a
   verdict and a count contradicting each other in one line. The new
-  `summary.change_inventory` block (report schema 5.3, `report/
-  change_inventory.py`) names the five non-overlapping populations —
+  `summary.change_inventory` block (report schema 5.3,
+  `report/change_inventory.py`) names the five non-overlapping populations —
   `compatibility_changes` with its four verdict counters, plus the four
   `hygiene_*` evolution states — and the `--stat`/`-o oneline=` summary now
   counts only what the comparison observed, stating the standing inventory
