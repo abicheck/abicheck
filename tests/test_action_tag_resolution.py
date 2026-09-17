@@ -396,3 +396,65 @@ class TestExpectedCaptureRevision:
         assert expected_capture_revision(
             "commit", tag="1.5.2", resolved=self.RESOLVED
         ) != expected_capture_revision("tag", tag="1.5.2", resolved=self.RESOLVED)
+
+
+class TestThereIsOnlyOnePeelingOwner:
+    """A second module that peels tags will eventually peel differently.
+
+    This is not hypothetical here: ``baseline_source.resolve_tag`` already
+    existed and was the *looser* of the two -- it accepted an object of any
+    non-``tag`` type as the commit, so a ref pointing at a tree resolved as a
+    perfectly good release baseline. It now delegates, which is what makes
+    that a closed bug rather than a second opinion.
+
+    The assertion is over behaviour rather than over an import, because
+    "delegates" is satisfiable by importing and then ignoring.
+    """
+
+    @pytest.mark.parametrize(
+        ("document", "why"),
+        [
+            (
+                {"ref": "refs/tags/1.5.2", "object": {"type": "tree", "sha": COMMIT}},
+                "a tree is not a commit",
+            ),
+            (
+                {
+                    "ref": "refs/heads/1.5.2",
+                    "object": {"type": "commit", "sha": COMMIT},
+                },
+                "a branch of the same name is not a tag",
+            ),
+            (
+                [
+                    {
+                        "ref": "refs/tags/1.5.20",
+                        "object": {"type": "commit", "sha": COMMIT},
+                    }
+                ],
+                "a prefix match on a longer tag is not the tag asked for",
+            ),
+        ],
+    )
+    def test_both_entry_points_refuse_the_same_documents(
+        self, document: object, why: str
+    ) -> None:
+        from abicheck.frontends.action.baseline_source import resolve_tag
+
+        with pytest.raises(TagResolutionError):
+            resolve_tag_commit("1.5.2", document)
+        assert not resolve_tag("1.5.2", document).ok, why
+
+    @pytest.mark.parametrize("kind", ["lightweight", "annotated"])
+    def test_both_entry_points_reach_the_same_commit(self, kind: str) -> None:
+        from abicheck.frontends.action.baseline_source import resolve_tag
+
+        if kind == "lightweight":
+            document, peel = lightweight("1.5.2"), None
+        else:
+            document, peel = annotated("1.5.2"), tag_object()
+        strict = resolve_tag_commit("1.5.2", document, tag_object=peel)
+        legacy = resolve_tag("1.5.2", document, tag_object_document=peel)
+        assert legacy.ok
+        assert legacy.commit_sha == strict.commit_sha == COMMIT
+        assert legacy.annotated == strict.annotated
