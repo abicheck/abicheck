@@ -38,7 +38,29 @@ own account not complete.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+#: The one note a fatally-incomparable run's block carries -- the *fatal*
+#: counterpart of the bounded mismatch below, kept beside it because both
+#: answer "what does the assurance block say when the two sides'
+#: comparability is in question".
+#:
+#: Only the note lives here, not the block that carries it: constructing an
+#: ``AnalysisAssurance`` would mean importing the module that imports this
+#: one, and this module advertises itself above as a real leaf that depends
+#: on nothing. A first attempt did exactly that and the
+#: ``import-cycle-growth`` gate caught it -- AGENTS.md's rule is to move the
+#: shared thing to a leaf both sides can depend on, and a plain string is
+#: that; the dataclass is not.
+NOT_COMPARABLE_NOTE = (
+    "old and new snapshots were not provably comparable "
+    "(ADR-050 ProfileMismatchError/ScopeMismatchError waived by "
+    "--diagnostic-comparison); every other assurance axis is "
+    "unreliable for this run"
+)
 
 
 def unverified_dimensions(

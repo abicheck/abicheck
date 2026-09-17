@@ -253,6 +253,47 @@ $ abicheck compare old.json new.json -o json=-
 {"library": "libfoo", "verdict": "BREAKING", "summary": {...}, "changes": [...]}
 ```
 
+### `summary.change_inventory` — what changed vs. what is standing debt
+
+`breaking`/`source_breaks`/`risk_changes`/`compatible_additions`/
+`total_changes` count **every** retained finding, including cross-source
+hygiene findings whose problem is present identically on both sides. Those
+are standing inventory, not something this comparison observed — `compare()`
+already declines to charge one to the verdict, which is why a byte-identical
+rebuild could report `verdict: NO_CHANGE` beside `risk_changes: 32`.
+
+`summary.change_inventory` (schema 5.3) is the split, in five
+non-overlapping populations:
+
+```json
+"change_inventory": {
+  "compatibility_changes": 0,
+  "compatibility_breaking": 0,
+  "compatibility_source_breaks": 0,
+  "compatibility_risk": 0,
+  "compatibility_compatible": 0,
+  "hygiene_introduced": 0,
+  "hygiene_resolved": 0,
+  "hygiene_persistent": 32,
+  "hygiene_not_evaluated": 0
+}
+```
+
+`compatibility_changes` plus the four `hygiene_*` states equals
+`total_changes`. The four `compatibility_*` verdict counters run over the
+subset compatibility policy actually scored, so their sum can be lower when
+a finding was never evaluated. A CI gate that should not fail on
+pre-existing debt reads `compatibility_changes`; the debt itself stays fully
+listed in `changes[]` and in `cross_source_evolution`, per ADR-067's
+record-before-disposing rule.
+
+The `--stat`/`-o oneline=` one-line summary follows the same split: it
+counts only the observed subset and states the inventory in its own clause.
+
+```text
+NO_CHANGE: no compatibility changes (0 total); hygiene: 32 persistent
+```
+
 ## `--view root-cause`
 
 Groups findings that share a root cause under one entry, instead of listing
@@ -764,7 +805,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "5.2",
+  "report_schema_version": "5.3",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }

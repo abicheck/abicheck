@@ -43,6 +43,7 @@ from .policy.gate_decision import gate_decision_for_result
 from .report.change_annotations import (
     change_annotation_fields as _change_annotation_fields,
 )
+from .report.change_inventory import render_change_inventory_json
 from .report.contract_fields import (
     add_contract_evaluation_fields as _add_contract_evaluation_fields,
 )
@@ -205,6 +206,7 @@ def to_stat_json(
             "total_changes": summary.total_changes,
             "binary_compatibility_pct": round(summary.binary_compatibility_pct, 1),
             "affected_pct": round(summary.affected_pct, 1),
+            "change_inventory": render_change_inventory_json(summary.inventory),
         },
     }
     # ADR-067 D3: a compact view may collapse detail; it may not omit the
@@ -696,6 +698,7 @@ def _build_json_base(result: DiffResult) -> dict[str, object]:
         "total_changes": summary.total_changes,
         "binary_compatibility_pct": round(summary.binary_compatibility_pct, 1),
         "affected_pct": round(summary.affected_pct, 1),
+        "change_inventory": render_change_inventory_json(summary.inventory),
     }
     return d
 

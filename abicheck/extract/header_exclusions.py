@@ -180,6 +180,36 @@ def unmatched_exclusion_patterns(
     return sorted(unmatched)
 
 
+def matched_exclusion_patterns(
+    headers: Sequence[Path], patterns: Sequence[str]
+) -> list[str]:
+    """Which of *patterns* actually removed a header from *headers*.
+
+    The complement of :func:`unmatched_exclusion_patterns`, and the set a
+    snapshot should record as its achieved narrowing -- not the set the
+    caller *asked* for. A pattern that matched nothing narrowed nothing, so
+    stamping it made every downstream reader describe a coverage limitation
+    that does not exist: ``confidence.header_exclusion_warnings`` told the
+    reader that "anything only they declared was not observed" about headers
+    the run had parsed in full, and the comparability gate refused an
+    otherwise-identical operand over a rule neither side had applied.
+
+    This is the rule the descriptor path has always used
+    (``model.header_skip_rules.achieved_exclusion_patterns``, via
+    ``compat.run_inputs.record_descriptor_skips``); the native
+    ``--exclude-header`` path recorded the request instead. The two now
+    answer the same question the same way.
+
+    Sorted and unique, matching :func:`unmatched_exclusion_patterns` -- the
+    rules are a set, so two runs that stated the same thing must not read
+    differently.
+    """
+    if not patterns:
+        return []
+    unmatched = set(unmatched_exclusion_patterns(headers, patterns))
+    return sorted({pat for pat in patterns if pat and pat not in unmatched})
+
+
 def reject_exclusions_against_a_manifest(
     exclude_headers: Sequence[str],
     dump_manifest: object | None,

@@ -195,12 +195,19 @@ class TestRequestedDepthPropagation:
         )
         assert res.exit_code != 0, res.output
 
-    def test_depth_omitted_does_not_populate_requested_depth(
+    def test_depth_omitted_reports_an_implicit_request_not_an_unanswered_one(
         self, tmp_path: Path
     ) -> None:
-        """No --depth flag at all must leave requested_depth None (never an
-        inferred value), matching the pre-existing default behavior for
-        every caller that doesn't opt into an explicit depth request."""
+        """No ``--depth`` flag still ran at *some* depth, and the block says so.
+
+        This asserted ``requested_depth is None``, which reported an
+        *unrequested* depth identically to an *unanswered* one: two nulls
+        beside ``status: complete``, with nothing naming the depth the run
+        was actually asked for. The request is now normalized to the depth
+        reached and labelled ``implicit``
+        (``evidence_depth.resolve_reported_depth``); no gate reads the
+        normalized value, so ``status`` is unchanged.
+        """
         old, new = _header_pair()
         old_p, new_p = _write(tmp_path, old, new)
 
@@ -211,7 +218,9 @@ class TestRequestedDepthPropagation:
         assert res.exit_code in (0, 1, 2, 4), res.output
         payload = json.loads(res.output[res.output.index("{") :])
         aa = payload["analysis_assurance"]
-        assert aa["requested_depth"] is None, aa
+        assert aa["requested_depth_source"] == "implicit", aa
+        assert aa["requested_depth"] == aa["effective_depth"], aa
+        assert aa["depth_satisfied"] is True, aa
         assert aa["status"] == "complete", aa
 
 
@@ -291,12 +300,18 @@ class TestRequestedDepthPropagationSharedPipeline:
         validate_evidence_depth("requested_depth", result.requested_depth)
         to_json(result)
 
-    def test_direct_api_no_depth_leaves_requested_depth_none(
+    def test_direct_api_no_depth_records_no_request_but_reports_the_depth_run(
         self, tmp_path: Path
     ) -> None:
-        """Companion negative case: a caller that never sets
-        ``CompareRequest.depth`` must see the identical, unaffected
-        ``requested_depth=None`` behavior as before this fix."""
+        """Companion negative case, split across the two fields it spans.
+
+        ``DiffResult.requested_depth`` is the *record of the request* and
+        stays ``None`` when a caller never sets ``CompareRequest.depth`` --
+        unchanged, and what every gate reads. The assurance block is the
+        *report*, and it now names the depth the run reached rather than
+        leaving a reader unable to tell an unrequested depth from an
+        unanswered one.
+        """
         from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
         old_p, new_p = self._snapshot_files(tmp_path)
@@ -304,9 +319,11 @@ class TestRequestedDepthPropagationSharedPipeline:
         result = run_compare_request(request).diff
 
         assert result.requested_depth is None, result
-        assert result.analysis_assurance.requested_depth is None
-        assert result.analysis_assurance.depth_satisfied is None
-        assert result.analysis_assurance.status == "complete"
+        aa = result.analysis_assurance
+        assert aa.requested_depth_source == "implicit"
+        assert aa.requested_depth == aa.effective_depth
+        assert aa.depth_satisfied is True
+        assert aa.status == "complete"
 
     def test_classify_compare_pair_unsatisfied_depth_is_not_complete(
         self, tmp_path: Path

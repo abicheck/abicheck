@@ -30,6 +30,47 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
     from pathlib import Path
 
+    from ..model import AbiSnapshot
+
+
+def record_achieved_header_exclusions(
+    snapshot: AbiSnapshot,
+    headers: Sequence[Path],
+    exclude_headers: Sequence[str],
+    *,
+    extracted_now: bool,
+) -> AbiSnapshot:
+    """*snapshot* stamped with the narrowing that was **achieved**, not requested.
+
+    The stamp is what every downstream reader treats as "a header was
+    removed from the parsed surface": the coverage warning
+    (``confidence.header_exclusion_warnings``), the ADR-050 comparability
+    gate, and the effective-configuration digest. Recording a rule that
+    matched nothing therefore made all three describe a limitation that did
+    not exist -- the reader was told that "anything only they declared was
+    not observed" about headers this run had parsed in full.
+
+    The descriptor path (``compat.run_inputs.record_descriptor_skips``) has
+    always recorded achieved patterns only; this is the native
+    ``--exclude-header`` path answering the same question the same way.
+    Unmatched rules keep their own, separate configuration-hygiene warning
+    (:func:`unmatched_exclusion_warning`) -- they are a typo to fix, not
+    coverage that was lost.
+
+    *headers* is the **unfiltered** operand, since the question is which
+    rules removed something from it. *extracted_now* is forwarded to
+    ``model.header_exclusion_record.record_header_exclusions``, which owns
+    the "a loaded snapshot keeps its own provenance" rule.
+    """
+    from ..extract.header_exclusions import matched_exclusion_patterns
+    from ..model.header_exclusion_record import record_header_exclusions
+
+    return record_header_exclusions(
+        snapshot,
+        matched_exclusion_patterns(headers, exclude_headers),
+        extracted_now=extracted_now,
+    )
+
 
 def unmatched_exclusion_warning(
     headers: Sequence[Path],

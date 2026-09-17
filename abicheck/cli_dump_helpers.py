@@ -59,9 +59,8 @@ from .cli_dump_depth import (
 )
 from .evidence_depth import (
     DEPTH_RANK,
-    depth_label_for,
     gated_source_label,
-    l4_source_abi_was_attempted,
+    reported_depth_label,
 )
 from .workflows.extraction import (
     _manifest_declared_includes,
@@ -132,9 +131,10 @@ def evidence_depth_label(
     """Report which evidence depth a snapshot *actually* carries (CLI-audit P2).
 
     The embedded-only defaulting wrapper over
-    :func:`abicheck.evidence_depth.depth_label_for`, which owns the rule and
-    documents it. *build_source*, when given, overrides ``snap.build_source``
-    -- ``compare`` can resolve an out-of-band ``--old/new-sources`` pack that
+    :func:`abicheck.evidence_depth.reported_depth_label` -- the *gate*'s rule,
+    not ``depth_label_for``'s -- which owns and documents it. *build_source*,
+    when given, overrides ``snap.build_source`` -- ``compare`` can resolve an
+    out-of-band ``--old/new-sources`` pack that
     is never attached back to the snapshot object (``_resolve_side_pack``
     returns it standalone), and without this override a compare run using only
     out-of-band packs would report the depth of the *unrelated* embedded (or
@@ -142,7 +142,7 @@ def evidence_depth_label(
     single-artifact ``dump -o`` case wants; the leaf itself deliberately takes
     the pack explicitly so no other caller can acquire the default by accident.
     """
-    return depth_label_for(
+    return reported_depth_label(
         snap, snap.build_source if build_source is None else build_source
     )
 
@@ -203,11 +203,6 @@ class DumpDepthNotSatisfiedError(click.ClickException):
     not satisfiable" code already documented by ``render_dump_dry_run``'s
     "Output and exit-code behavior" section.
     """
-
-
-def _l4_source_abi_was_attempted(build_source: BuildSourcePack) -> bool:
-    """Compatibility alias for :func:`abicheck.evidence_depth.l4_source_abi_was_attempted`."""
-    return l4_source_abi_was_attempted(build_source)
 
 
 def _gated_source_label(build_source: BuildSourcePack | None, snap: AbiSnapshot) -> str:

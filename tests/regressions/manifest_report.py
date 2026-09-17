@@ -532,4 +532,51 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="report.unobserved_population_counted_as_observed",
+        invariant=(
+            "A report may only count, and headline, what the comparison "
+            "actually observed. A population the run carries but did not "
+            "observe changing -- standing cross-source hygiene inventory "
+            "present identically on both sides, a header-exclusion rule "
+            "that matched nothing, an unrequested evidence depth -- is "
+            "recorded and named as what it is, never folded into a counter "
+            "or a coverage claim that reads as this comparison's own "
+            "result. Corollary: when a gate and a report answer the same "
+            "question (may this run be called source-depth?), they share "
+            "one rule; two rules is how the report claimed a rung the gate "
+            "would have refused."
+        ),
+        # The SVS reproduction: a byte-identical Linux ELF C++ rebuild
+        # announced `NO_CHANGE: 32 risk (32 total)` (32 persistent
+        # `exported_not_public` findings the verdict had already declined
+        # to charge), reported `status: complete` at `effective_depth:
+        # source` over headers plus the always-on header-only L5 graph with
+        # `requested_depth`/`depth_satisfied` both null, and claimed the
+        # declarations of headers it had parsed in full were unobserved
+        # because every configured `--exclude-header` pattern was recorded
+        # despite matching nothing.
+        fixed_by=(1324,),
+        seed_tests=(
+            "tests/unit/report/test_change_inventory.py",
+            "tests/test_analysis_assurance_implicit_depth.py",
+            "tests/test_header_exclusion_primitives.py",
+        ),
+        public_surfaces=(
+            "summary.change_inventory",
+            "analysis_assurance.requested_depth_source",
+            "AbiSnapshot.excluded_header_patterns",
+        ),
+        axes={
+            "evolution_state": (
+                "unstamped",
+                "introduced",
+                "resolved",
+                "persistent",
+                "not_evaluated",
+            ),
+            "depth_request": ("explicit", "implicit"),
+            "exclusion_rule": ("matched", "unmatched", "mixed"),
+        },
+    ),
 )

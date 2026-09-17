@@ -117,6 +117,7 @@ def to_stat(
     the verdict label alone could misreport whether the run actually blocks
     CI once severity configuration is in play.
     """
+    from .report.change_inventory import render_change_inventory_json
     from .report.document import ReportDocument
     from .report.render_text import render_stat_document
 
@@ -130,6 +131,7 @@ def to_stat(
             "compatible_additions": summary.compatible_additions,
             "quality_issues": summary.quality_issues,
             "total_changes": summary.total_changes,
+            "change_inventory": render_change_inventory_json(summary.inventory),
         },
         "redundant_count": result.redundant_count,
         # ADR-067 D3: even the one-line view carries the raw-versus-effective

@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from .checker import _BREAKING_KINDS, DiffResult
 from .model.change_catalog.kinds import HasKind
+from .report.change_inventory import ChangeInventorySplit, compute_change_inventory
 
 if TYPE_CHECKING:
     from .checker_types import Change
@@ -35,6 +36,7 @@ from .model.symbol_ownership import symbol_origin as classify_symbol_origin
 
 __all__ = [
     "classify_symbol_origin",
+    "ChangeInventorySplit",
     "SurfaceBreakdown",
     "surface_breakdown",
     "ReportSummary",
@@ -110,6 +112,14 @@ class ReportSummary:
     total_changes: int
     binary_compatibility_pct: float
     affected_pct: float
+    #: The change-versus-inventory split (``report/change_inventory.py``):
+    #: which of :attr:`total_changes` the comparison actually *observed*
+    #: versus which is standing cross-source hygiene inventory present
+    #: identically on both sides. The four verdict counters above stay
+    #: inclusive -- their meaning is fixed by every existing consumer --
+    #: so this is the field a reader (or a headline) consults to avoid
+    #: announcing pre-existing debt as this release's risk.
+    inventory: ChangeInventorySplit
 
 
 @dataclass(frozen=True)
@@ -332,4 +342,5 @@ def build_summary(
         total_changes=len(result.changes),
         binary_compatibility_pct=metrics.binary_compatibility_pct,
         affected_pct=metrics.affected_pct,
+        inventory=compute_change_inventory(result.changes, evaluated, verdict_of),
     )

@@ -499,7 +499,7 @@ def execute_dump_request(
     try:
         # This call is new here -- unlike check_requested_depth_satisfied's
         # own call, it runs unconditionally, not just behind an explicit
-        # --depth. _l4_source_abi_was_attempted() itself now degrades a
+        # --depth. l4_source_abi_was_attempted() itself now degrades a
         # non-numeric compile_units_parsed to "not attempted" rather than
         # raising, so _gated_source_label still falls through to its own
         # L3/build-context checks (Codex review, two rounds); this except

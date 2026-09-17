@@ -39,6 +39,7 @@ genuinely need both:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .model.evidence_depth_levels import USER_DEPTHS
@@ -291,3 +292,86 @@ def gated_source_label(pack: BuildSourcePack | None, snap: AbiSnapshot) -> str:
     if snap.parsed_with_build_context:
         return "build"
     return "headers" if snap.from_headers else "binary"
+
+
+def reported_depth_label(snap: AbiSnapshot, pack: BuildSourcePack | None) -> str:
+    """The depth a *report* may claim for *snap*/*pack*.
+
+    :func:`depth_label_for` answers ``"source"`` whenever L4 **or** L5
+    carries facts, which is right for its own contract but wrong for a
+    report's assurance block: the always-on, header-only L5 declaration
+    graph ``service._attach_header_graph`` attaches makes *every*
+    header-parsing comparison claim ``effective_depth: "source"`` while its
+    L4 row reads ``not_collected``. A byte-identical Linux ELF C++ rebuild
+    therefore reported ``status: complete`` at ``effective_depth: source``
+    over evidence that was headers plus a reduced source graph -- reduced
+    source-graph evidence described as a complete source-level analysis.
+
+    So a report reuses the *gate*'s rule (:func:`gated_source_label`): the
+    ``source`` rung requires L4 to have been genuinely attempted. Using the
+    gate's own function rather than a second, parallel rule is deliberate --
+    it is the same question ("may this run be called source-depth?"), and
+    the two answering differently is what let ``analysis_assurance`` report
+    ``effective_depth: "source"`` for a run whose explicit ``--depth
+    source`` the CLI gate would have rejected.
+    """
+    return gated_source_label(pack, snap)
+
+
+@dataclass(frozen=True, slots=True)
+class ReportedDepth:
+    """How a report states the depth a run was asked for and reached.
+
+    Resolution lives here, with the ladder, rather than inline in
+    ``analysis_assurance.compute_analysis_assurance``: deciding what an
+    *absent* request means is a statement about the ladder's vocabulary,
+    and the rule has to hold identically for every consumer that publishes
+    a depth (the pairwise block, the release roll-up, the artifact
+    executors).
+    """
+
+    requested: str
+    source: str
+    satisfied: bool
+    note: str | None
+
+
+def depth_request_source(explicit: str | None) -> str:
+    """``"explicit"`` when a front end stated ``--depth``, else ``"implicit"``.
+
+    One line, but two callers now decide it -- the normalized path below
+    and ``analysis_assurance``'s ``not_comparable`` short-circuit, which
+    resolves no depth at all and so cannot go through
+    :func:`resolve_reported_depth`. Stating the rule twice is how the
+    short-circuit came to default to ``"implicit"`` and assert something it
+    never established (CodeRabbit review), so it is stated once.
+    """
+    return "explicit" if explicit is not None else "implicit"
+
+
+def resolve_reported_depth(explicit: str | None, effective: str) -> ReportedDepth:
+    """The reported depth trio for an *explicit* request (or the lack of one).
+
+    A run given no ``--depth`` still ran at some depth, and reporting
+    ``requested_depth``/``depth_satisfied`` as ``null`` made that
+    unauditable: the block said ``status: complete`` beside two nulls, so a
+    reader could not tell an *unrequested* depth from an *unanswered* one
+    (the identical run with an explicit ``--depth headers`` reported both).
+    The implicit request is normalized to the depth actually reached and
+    labelled ``"implicit"`` -- the label is what keeps the normalization
+    honest, and it is why callers must keep gating on *explicit* rather
+    than on :attr:`ReportedDepth.requested`.
+    """
+    source = depth_request_source(explicit)
+    if explicit is None:
+        return ReportedDepth(effective, source, True, None)
+    satisfied = depth_rank(effective) >= depth_rank(explicit)
+    note = (
+        None
+        if satisfied
+        else (
+            f"requested depth {explicit!r} not reached; effective "
+            f"depth is {effective!r}"
+        )
+    )
+    return ReportedDepth(explicit, source, satisfied, note)

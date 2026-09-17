@@ -35,7 +35,39 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from .document import ReportDocument
+
+
+#: Hygiene states rendered in the ``; hygiene: ...`` clause, in the order a
+#: reviewer cares about them: what this release *did* to the standing
+#: inventory first, what it left alone after.
+_HYGIENE_CLAUSE_ORDER: tuple[tuple[str, str], ...] = (
+    ("hygiene_introduced", "introduced"),
+    ("hygiene_resolved", "resolved"),
+    ("hygiene_persistent", "persistent"),
+    ("hygiene_not_evaluated", "not evaluated"),
+)
+
+
+def format_hygiene_note(inventory: Mapping[str, int] | None) -> str:
+    """``"; hygiene: 32 persistent"`` for a run carrying standing inventory.
+
+    Empty for a run with no cross-source hygiene finding at all, which is
+    every comparison whose findings are all genuine compatibility changes --
+    so a pre-existing report's one-line summary is unchanged.
+    """
+    if not inventory:
+        return ""
+    parts = [
+        f"{inventory[key]} {label}"
+        for key, label in _HYGIENE_CLAUSE_ORDER
+        if inventory.get(key)
+    ]
+    if not parts:
+        return ""
+    return "; hygiene: " + ", ".join(parts)
 
 
 def format_stat_line(
@@ -50,6 +82,7 @@ def format_stat_line(
     gate_note: str = "",
     audit_note: str = "",
     deployment_note: str = "",
+    change_inventory: Mapping[str, int] | None = None,
 ) -> str:
     """Render already-resolved counts/label as the one-line summary.
 
@@ -66,6 +99,19 @@ def format_stat_line(
     here rather than reinvented. Empty (the default) when no declared
     ``deployment:`` contract governed this comparison.
     """
+    hygiene_note = format_hygiene_note(change_inventory)
+    if hygiene_note and change_inventory is not None:
+        # Standing inventory is not what this comparison observed, so the
+        # headline counts only what it did observe and states the inventory
+        # separately. Without this a byte-identical rebuild announced
+        # "NO_CHANGE: 32 risk (32 total)" -- a verdict and a count
+        # contradicting each other in one line.
+        breaking = change_inventory.get("compatibility_breaking", breaking)
+        source_breaks = change_inventory.get(
+            "compatibility_source_breaks", source_breaks
+        )
+        risk_count = change_inventory.get("compatibility_risk", risk_count)
+        total_changes = change_inventory.get("compatibility_changes", total_changes)
     parts = []
     if breaking:
         parts.append(f"{breaking} breaking")
@@ -75,13 +121,16 @@ def format_stat_line(
         parts.append(f"{risk_count} risk")
     if compatible_additions:
         parts.append(f"{compatible_additions} compatible")
-    detail = ", ".join(parts) if parts else "no changes"
+    if parts:
+        detail = ", ".join(parts)
+    else:
+        detail = "no compatibility changes" if hygiene_note else "no changes"
     redundant_note = (
         f" [{redundant_count} redundant hidden]" if redundant_count > 0 else ""
     )
     return (
         f"{label}: {detail} ({total_changes} total)"
-        f"{redundant_note}{audit_note}{deployment_note}{gate_note}"
+        f"{redundant_note}{hygiene_note}{audit_note}{deployment_note}{gate_note}"
     )
 
 
@@ -116,6 +165,9 @@ def render_stat_document(document: ReportDocument) -> str:
         )
     audit_note = d.get("disposition_audit_note", "")
     assert isinstance(audit_note, str)
+    inventory = summary.get("change_inventory")
+    if not isinstance(inventory, dict):
+        inventory = None
     digest = d.get("env_matrix_source_sha256")
     deployment_note = f"; deployment floor {digest}" if digest is not None else ""
     return format_stat_line(
@@ -129,4 +181,5 @@ def render_stat_document(document: ReportDocument) -> str:
         gate_note=gate_note,
         audit_note=audit_note,
         deployment_note=deployment_note,
+        change_inventory=inventory,
     )

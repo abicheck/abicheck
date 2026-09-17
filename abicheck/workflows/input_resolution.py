@@ -59,9 +59,9 @@ from ..extract.header_exclusions import (
     reject_exclusions_against_a_manifest,
 )
 from ..model import AbiSnapshot, Function
-from ..model.header_exclusion_record import record_header_exclusions
 from ..serialization import load_snapshot
 from ..service_dump_cache import cached_run_dump
+from .header_exclusion_audit import record_achieved_header_exclusions
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -437,7 +437,7 @@ def resolve_input(
 
     What this wrapper adds is one line: the snapshot records the
     ``--exclude-header`` patterns it was built under
-    (:func:`~abicheck.model.header_exclusion_record.record_header_exclusions`).
+    (:func:`~abicheck.workflows.header_exclusion_audit.record_achieved_header_exclusions`).
     That stamp is deliberately here rather than at each of the resolution
     body's eight exits -- a snapshot that reached one of them unstamped
     would claim a complete surface it does not have, and "the branch nobody
@@ -448,8 +448,14 @@ def resolve_input(
     exclude_headers = tuple(kwargs.get("exclude_headers") or ())
     reject_exclusions_against_a_manifest(exclude_headers, kwargs.get("dump_manifest"))
     snapshot = _resolve_input_impl(path, headers, includes, version, lang, **kwargs)
-    return record_header_exclusions(
-        snapshot, exclude_headers, extracted_now=not is_stored_snapshot_operand(path)
+    # The *achieved* narrowing, never the request -- see that function.
+    # `headers` is still the unfiltered operand here; `_resolve_input_impl`
+    # applies the patterns internally.
+    return record_achieved_header_exclusions(
+        snapshot,
+        headers or [],
+        exclude_headers,
+        extracted_now=not is_stored_snapshot_operand(path),
     )
 
 
