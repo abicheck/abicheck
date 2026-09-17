@@ -197,8 +197,14 @@ class _AcquisitionCounters:
         real_run = dumper_cache.run_ast_acquisition
         real_elf = bundle.parse_elf_metadata
 
-        def wrapped(backend, key, producer):
-            """Count the request, then the producer run it actually caused."""
+        def wrapped(backend, key, producer, group=None):
+            """Count the request, then the producer run it actually caused.
+
+            *group* is forwarded verbatim: it is what keeps the AST root
+            retained for as long as a key derived from its ``id()`` lives,
+            so a double that dropped it would silently disable the
+            retention the real call sites rely on.
+            """
             self.requests[(backend, key)] += 1
 
             def counted_producer():
@@ -206,7 +212,7 @@ class _AcquisitionCounters:
                 self.producer_runs[(backend, key)] += 1
                 return producer()
 
-            return real_run(backend, key, counted_producer)
+            return real_run(backend, key, counted_producer, group=group)
 
         def wrapped_elf(path, *args, **kwargs):
             """Count an ELF parse made by bundle-topology assembly."""
