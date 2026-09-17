@@ -138,6 +138,7 @@ def _run_step(
     release_tag: str = "1.5.2",
     declared: str = "",
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, str], _GhStub]:
+    require_bash()
     script = _step(workflow, STEP_NAME)["run"]
     stub = _GhStub(tmp_path, responses)
     github_output = tmp_path / "github_output"

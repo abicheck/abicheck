@@ -54,13 +54,31 @@ case "$PHASE" in
 
   record-context)
     REPORTS_DIR="${INPUT_REPORTS_DIR:?reports-dir input is required}"
-    # Beside the aggregate document rather than in it: the block is folded
-    # INTO aggregate.json by `abicheck aggregate --analysis-context`, so
-    # this file is a transport between two steps of one Action, never a
-    # second published format. It is deliberately not written inside
-    # reports-dir, which `abicheck aggregate` globs for *.json and would
-    # read this as an extra target.
-    CONTEXT_PATH="$(dirname "$REPORTS_DIR")/.abicheck-analysis-context.json"
+    # A transport between two steps of one Action, never a second published
+    # format: the block is folded INTO aggregate.json by `abicheck aggregate
+    # --analysis-context`, and this file is read once and never uploaded.
+    #
+    # It goes in RUNNER_TEMP, not beside reports-dir. `abicheck aggregate`
+    # globs reports-dir for *.json and reads every match as a target -- and
+    # a leading dot does not exempt it, which was verified rather than
+    # assumed: a `.abicheck-analysis-context.json` dropped in a reports
+    # directory aggregates as a target named
+    # `.abicheck-analysis-context`. A sibling path derived with `dirname`
+    # looks safe and is not, because `dirname` of a bare relative
+    # `reports-dir` (or of `.`) can land right back inside it. RUNNER_TEMP
+    # cannot, for any input, which is the reason to use it rather than a
+    # cleverer relative path.
+    CONTEXT_DIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+    mkdir -p "$CONTEXT_DIR"
+    CONTEXT_PATH="$CONTEXT_DIR/abicheck-analysis-context.json"
+
+    # Belt and braces, because the consequence is a fabricated target in a
+    # published document rather than an error: refuse outright if the path
+    # would still resolve inside reports-dir.
+    _abs() { ( cd "$(dirname "$1")" >/dev/null 2>&1 && printf '%s/%s\n' "$(pwd)" "$(basename "$1")" ); }
+    if [[ -d "$REPORTS_DIR" ]] && [[ "$(_abs "$CONTEXT_PATH")" == "$( cd "$REPORTS_DIR" && pwd )/"* ]]; then
+      _fail "the analysis-context transport would land inside reports-dir ($REPORTS_DIR), where 'abicheck aggregate' globs *.json and would read it as an extra target."
+    fi
     rc=0
     python -m abicheck.frontends.action.cli record-analysis-context "$CONTEXT_PATH" || rc=$?
     if [[ "$rc" == "$_REFUSED" ]]; then

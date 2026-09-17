@@ -160,6 +160,7 @@ def _run_select(
         tmp_path
         / f"run-{run_id}-{expect_event}-{attempt}-{len(expect_workflow)}-{len(allowed_conclusions)}"
     )
+    require_bash()
     tmp.mkdir(parents=True, exist_ok=True)
     archive = _baseline_set_zip(tmp)
     entries = artifacts if isinstance(artifacts, list) else [artifacts]
@@ -208,6 +209,7 @@ def _run_select(
 def _run_discover(
     workflow: dict[str, Any], context: _Context
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, str]]:
+    require_bash()
     github_output = context.tmp / "discover_output"
     github_output.write_text("", encoding="utf-8")
     env = dict(context.env, GITHUB_OUTPUT=str(github_output))

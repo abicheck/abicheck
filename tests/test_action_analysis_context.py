@@ -40,6 +40,7 @@ precisely the claim two independent unit tests cannot make.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -47,6 +48,7 @@ from typing import Any
 
 import pytest
 import yaml
+from _workflow_exec import bash_executable, require_bash
 
 from abicheck.model.analysis_context import (
     ANALYSIS_CONTEXT_KEY,
@@ -376,6 +378,54 @@ class TestTheProducerWritesWhatTheConsumerReads:
         assert "analysis-context-malformed" in proc.stderr
 
 
+def _run_record_context_step(tmp_path: Path, reports_dir: str) -> tuple[str, int]:
+    """Execute `actions/aggregate/run.sh record-context` for real.
+
+    Returns the `context-path` it published and its exit code. The step is
+    run rather than read because where the file lands is a shell expression
+    over the caller's `reports-dir`, and reading the expression is how the
+    `dirname` version looked correct.
+    """
+    require_bash()
+    workspace = tmp_path / "ws"
+    (workspace / reports_dir).mkdir(parents=True, exist_ok=True)
+    runner_temp = tmp_path / "runner-temp"
+    runner_temp.mkdir(exist_ok=True)
+    github_output = tmp_path / "step_output"
+    github_output.write_text("", encoding="utf-8")
+    env = dict(os.environ)
+    env.update(
+        {
+            "ABICHECK_CTX_TESTED_SHA": MERGE,
+            "ABICHECK_CTX_REPOSITORY": "example/project",
+            "ABICHECK_CTX_RUN_ID": "1",
+            "ABICHECK_CTX_RUN_ATTEMPT": "1",
+            "ABICHECK_CTX_EVENT": "pull_request",
+            "INPUT_REPORTS_DIR": reports_dir,
+            "RUNNER_TEMP": str(runner_temp),
+            "GITHUB_OUTPUT": str(github_output),
+            "PYTHONPATH": str(REPO_ROOT),
+        }
+    )
+    proc = subprocess.run(
+        [
+            bash_executable(),
+            str(REPO_ROOT / "actions" / "aggregate" / "run.sh"),
+            "record-context",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=workspace,
+        env=env,
+    )
+    outputs = dict(
+        line.split("=", 1)
+        for line in github_output.read_text(encoding="utf-8").splitlines()
+        if "=" in line
+    )
+    return outputs.get("context-path", proc.stderr), proc.returncode
+
+
 # ---------------------------------------------------------------------------
 # The Action wiring
 # ---------------------------------------------------------------------------
@@ -531,12 +581,61 @@ class TestTheAggregateActionRecordsIt:
             key for key in step["env"] if key.startswith("ABICHECK_CTX_")
         }
 
-    def test_the_context_file_is_not_written_into_the_reports_directory(
-        self,
+    @pytest.mark.parametrize(
+        "reports_dir", [".", "reports", "./reports", "a/b/reports", "out/"]
+    )
+    def test_the_context_transport_never_lands_in_the_reports_directory(
+        self, tmp_path: Path, reports_dir: str
     ) -> None:
-        # `abicheck aggregate` globs *.json there and would read it as an
-        # extra target.
-        script = (REPO_ROOT / "actions" / "aggregate" / "run.sh").read_text(
-            encoding="utf-8"
+        """`abicheck aggregate` reads every `*.json` in reports-dir as a target.
+
+        So the two-step transport must land somewhere that cannot be one,
+        for **every** `reports-dir` a caller may give -- which is why this
+        sweeps the shapes rather than checking the one a happy path uses. A
+        sibling path derived with `dirname` looks safe and is not: `dirname`
+        of a bare relative name, or of `.`, resolves right back inside.
+        """
+        context_path, returncode = _run_record_context_step(tmp_path, reports_dir)
+        assert returncode == 0, context_path
+        resolved = Path(context_path).resolve()
+        assert not resolved.is_relative_to((tmp_path / "ws" / reports_dir).resolve())
+
+    def test_a_leading_dot_would_not_have_been_enough(self, tmp_path: Path) -> None:
+        """The assumption that made the first version of this wrong.
+
+        A dotfile *looks* excluded -- Python's `glob` skips leading-dot
+        names for `*` -- so `.abicheck-analysis-context.json` beside the
+        reports read as safe. It is not: `abicheck aggregate`'s own
+        discovery picks it up and reports a target named
+        `.abicheck-analysis-context`. Asserted here rather than left as a
+        comment, because the next person to move this file will reach for
+        the same reasoning.
+        """
+        reports = tmp_path / "reports"
+        reports.mkdir()
+        (reports / ".abicheck-analysis-context.json").write_text(
+            json.dumps({"schema": ANALYSIS_CONTEXT_SCHEMA, "tested_sha": MERGE}),
+            encoding="utf-8",
         )
-        assert 'CONTEXT_PATH="$(dirname "$REPORTS_DIR")/' in script
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "abicheck",
+                "aggregate",
+                ".",
+                "--discovered-only",
+                "-o",
+                "json=agg.json",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=reports,
+        )
+        assert proc.returncode in (0, 1), proc.stderr
+        document = json.loads((reports / "agg.json").read_text(encoding="utf-8"))
+        seen = [t.get("target_id") for t in document.get("targets", [])]
+        assert ".abicheck-analysis-context" in seen, (
+            "if this stops being true the dotfile really is excluded and this "
+            "guard can be relaxed -- but verify it, do not assume it"
+        )
