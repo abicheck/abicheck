@@ -52,6 +52,8 @@ wrong:
 from __future__ import annotations
 
 import os
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -417,20 +419,111 @@ def _parse_spec(index: int, raw: Any) -> _Spec:
 # ── entry point ─────────────────────────────────────────────────────────────
 
 
+#: What a ``${NAME}`` placeholder may look like. Deliberately the shell's own
+#: braced form and nothing else: no ``$NAME``, no ``$(...)``, no defaulting
+#: (``${NAME:-x}``), no nesting. A component declaration is data, and the
+#: moment a placeholder syntax grows an operator it is a language the caller
+#: now has to reason about.
+_PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def bind_declaration(spec: Any, bindings: Mapping[str, str]) -> Any:
+    """Substitute ``${NAME}`` in *spec* from *bindings*, and nothing else.
+
+    A component declaration that is checked into a repository cannot spell
+    values its build system only decides at build time -- an EPICS project's
+    ``${EPICS_HOST_ARCH}`` sits in the middle of ``lib/${EPICS_HOST_ARCH}/
+    libfoo.so*``, and the include roots name a dependency's install prefix.
+    Without somewhere to bind those, every such project writes its own
+    substitution pass beside its own capture step, which is where this
+    started.
+
+    The rules are narrow on purpose, and each forecloses a specific way that
+    pass goes wrong:
+
+    * **Substitution is structural, not textual.** The document is walked as
+      JSON and each string is rewritten in place. A ``sed``-style pass over
+      the serialized text mangles a value containing ``&`` (which means "the
+      whole match" in a replacement), emits invalid JSON for one containing a
+      quote, eats a backslash, and fails outright on one containing the
+      delimiter -- and an install prefix read out of a build configuration is
+      not the caller's to constrain.
+    * **The allowlist is the caller's map, and it is closed.** An unbound
+      ``${NAME}`` is an error, never left as literal text and never filled
+      from the environment. Leaving it would produce a path with a brace in
+      it that fails later as a confusing "no such file"; reading the
+      environment would make every variable in the runner an input to the
+      component set.
+    * **Values are literal.** They are inserted, never re-scanned, so a
+      binding whose value itself contains ``${...}`` cannot expand again.
+      One pass, no fixed point, no recursion to bound.
+
+    *bindings* keys must be plain identifiers; a key that could not appear in
+    a placeholder is refused rather than silently unused.
+    """
+    for name in bindings:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise SelectionError(
+                f"binding name {name!r} is not an identifier, so no "
+                "${...} placeholder could ever name it"
+            )
+        if not isinstance(bindings[name], str):
+            raise SelectionError(
+                f"binding {name!r} must be a string, got "
+                f"{type(bindings[name]).__name__}"
+            )
+
+    def _one(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name not in bindings:
+            known = ", ".join(sorted(bindings)) or "(none)"
+            raise SelectionError(
+                f"${{{name}}} is not a value this run binds; declared "
+                f"bindings: {known}. An unbound placeholder is refused rather "
+                "than left as text, which would fail later as a confusing "
+                "'no such file', or filled from the environment, which would "
+                "make every variable on the runner an input to the component "
+                "set."
+            )
+        return bindings[name]
+
+    def _walk(node: Any) -> Any:
+        if isinstance(node, str):
+            # `.sub` on the ORIGINAL string only: the replacement is never
+            # re-scanned, so a bound value containing `${...}` is data.
+            return _PLACEHOLDER.sub(_one, node)
+        if isinstance(node, list):
+            return [_walk(item) for item in node]
+        if isinstance(node, dict):
+            return {_walk(key): _walk(value) for key, value in node.items()}
+        return node
+
+    return _walk(spec)
+
+
 def resolve_library_set(
     spec: Any,
     *,
     root: Path | str,
     require_elf: bool = True,
     require_same_machine: bool = True,
+    bindings: Mapping[str, str] | None = None,
 ) -> list[ResolvedLibrary]:
     """Resolve a declarative component spec against the tree at *root*.
+
+    *bindings*, when given, fills ``${NAME}`` placeholders in the declaration
+    before it is parsed -- see :func:`bind_declaration` for exactly what that
+    does and, more importantly, what it deliberately does not. Binding runs
+    first so every field validates the value that will actually be used, not
+    the template it came from.
 
     Raises :class:`SelectionError` -- never returns a partially-resolved set.
     A component that could not be resolved is a configuration error the caller
     must see before any dump runs, not a component quietly dropped from the
     baseline-set (which would later read as "this library was removed").
     """
+    if bindings:
+        spec = bind_declaration(spec, bindings)
     root = Path(root).resolve()
     if not root.is_dir():
         raise SelectionError(f"root {root} is not a directory")

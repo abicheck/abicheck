@@ -80,6 +80,27 @@ inputs:
       escapes it.
     required: false
     default: '.'
+  library-spec-bindings:
+    description: >
+      Values to fill `${NAME}` placeholders in `library-spec` with, as one
+      `NAME=VALUE` per line.
+
+      A component declaration checked into a repository cannot spell the
+      values its build system decides at build time -- a dependency's
+      install prefix, or a host-arch directory component sitting in the
+      middle of `lib/${HOST_ARCH}/libfoo.so*`. Without somewhere to bind
+      those, a project writes its own substitution pass beside its own
+      capture step, and a textual one mangles any value containing `&`, a
+      quote, or a backslash.
+
+      The given set is the WHOLE allowlist. An unbound `${...}` is refused
+      rather than left as text (which fails later as a confusing "no such
+      file") or read from the environment (which would make every variable
+      on the runner an input to the component set). Values are inserted
+      literally and never re-scanned, so this is a binding, not a templating
+      language: no `$NAME`, no defaulting, no nesting, no recursion.
+    required: false
+    default: ''
   library-spec-require-elf:
     description: >
       'true' (default) -- every resolved artifact must be an ELF shared
@@ -268,6 +289,7 @@ runs:
         INPUT_LIBRARY_SPEC: ${{ inputs.library-spec }}
         INPUT_LIBRARY_ROOT: ${{ inputs.library-root }}
         INPUT_LIBRARY_SPEC_REQUIRE_ELF: ${{ inputs.library-spec-require-elf }}
+        INPUT_LIBRARY_SPEC_BINDINGS: ${{ inputs.library-spec-bindings }}
         INPUT_LIBRARIES: ${{ inputs.libraries }}
       run: |
         set -euo pipefail
@@ -281,10 +303,22 @@ runs:
           elf_flag=--no-require-elf
           machine_flag=--no-require-same-machine
         fi
+        # One `--bind` per non-blank line, read with `IFS=` and `-r` so a
+        # value keeps its leading/trailing spaces and its backslashes: an
+        # install prefix is not this step's to normalise. A blank line is
+        # skipped rather than becoming an empty binding, since a YAML block
+        # scalar routinely ends with one.
+        bind_args=()
+        while IFS= read -r line; do
+          [[ -n "${line//[[:space:]]/}" ]] || continue
+          bind_args+=(--bind "$line")
+        done <<< "${INPUT_LIBRARY_SPEC_BINDINGS:-}"
+
         python -m abicheck.frontends.action.cli resolve-libraries \
           "$INPUT_LIBRARY_SPEC" \
           --root "$INPUT_LIBRARY_ROOT" \
           "$elf_flag" "$machine_flag" \
+          ${bind_args[@]+"${bind_args[@]}"} \
           --github-output "$GITHUB_OUTPUT" >/dev/null
 
     - name: Dump baseline-set
