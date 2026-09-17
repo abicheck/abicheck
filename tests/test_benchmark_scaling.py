@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import pathlib
 import sys
 from pathlib import Path
 
@@ -486,3 +487,381 @@ class TestStatedOrDefault:
         assert (
             f"tolerance {perf_baseline.DEFAULT_REGRESS_TOLERANCE * 100:.0f}%" in out
         ), out
+
+
+# ── Baseline MEMORY regression gate ───────────────────────────────────────────
+#
+# The memory counterpart of the timing baseline gate above. It exists because
+# `benchmark_scaling.py` recorded `peak_mb` and gated it only against absolute
+# ceilings (`--max-memory-mb` / `--max-rss-mb`): an absolute ceiling catches a
+# regression only once it crosses the ceiling, so a change doubling a
+# scenario's allocation from 200 MiB to 400 MiB passed a 2048 MiB ceiling in
+# silence. The timing side already had a base-branch comparison for exactly
+# that gradual drift; the memory side had none.
+
+
+class _MemPoint:
+    """Minimal stand-in for ``benchmark_scaling.Point``'s measured fields."""
+
+    def __init__(self, size: int, peak_mb: float | None) -> None:
+        self.size = size
+        self.peak_mb = peak_mb
+
+
+def _mem_baseline(**by_size: float) -> dict[tuple[str, int], float]:
+    return {("serialize", int(size)): mb for size, mb in by_size.items()}
+
+
+def test_memory_baseline_points_parse_peak_mb() -> None:
+    report = {
+        "scenarios": {
+            "serialize": {"points": [{"size": 2000, "seconds": 2.9, "peak_mb": 85.3}]}
+        }
+    }
+    assert perf_baseline.baseline_points_from_report(report, field="peak_mb") == {
+        ("serialize", 2000): 85.3
+    }
+    # The same parser still reads timings, so the two cannot drift apart.
+    assert perf_baseline.baseline_points_from_report(report) == {
+        ("serialize", 2000): 2.9
+    }
+
+
+def test_null_peak_mb_is_not_measured_rather_than_zero() -> None:
+    """A ``--no-memory`` baseline must not read back as "allocated nothing".
+
+    If a null collapsed to 0.0, every current point would regress against it
+    by an infinite ratio -- a gate that fails every run is as useless as one
+    that fails none, and it would make the gate impossible to introduce
+    against any pre-existing baseline.
+    """
+    report = {
+        "scenarios": {
+            "serialize": {
+                "points": [
+                    {"size": 2000, "seconds": 2.9, "peak_mb": None},
+                    {"size": 4000, "seconds": 6.5},
+                    {"size": 8000, "seconds": 9.9, "peak_mb": "not-a-number"},
+                ]
+            }
+        }
+    }
+    assert perf_baseline.baseline_points_from_report(report, field="peak_mb") == {}
+
+
+def test_memory_regression_is_reported() -> None:
+    msgs = perf_baseline.check_memory_regressions(
+        [_MemPoint(2000, 170.0)], "serialize", _mem_baseline(**{"2000": 85.0}), 0.20
+    )
+    assert len(msgs) == 1
+    assert "170.0 MiB vs baseline 85.0 MiB" in msgs[0]
+
+
+def test_memory_within_tolerance_is_not_reported() -> None:
+    """The negative control: growth inside the allowance must stay silent.
+
+    Without this, a gate that flagged *every* comparison would pass the
+    regression test above and still be worthless.
+    """
+    assert (
+        perf_baseline.check_memory_regressions(
+            [_MemPoint(2000, 95.0)], "serialize", _mem_baseline(**{"2000": 85.0}), 0.20
+        )
+        == []
+    )
+
+
+def test_memory_improvement_is_never_a_regression() -> None:
+    assert (
+        perf_baseline.check_memory_regressions(
+            [_MemPoint(2000, 40.0)], "serialize", _mem_baseline(**{"2000": 85.0}), 0.20
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "base_mb,current_mb,expect_flagged",
+    [
+        # Relative arm dominates once the baseline is large: 20% of 100 = 20 MiB.
+        (100.0, 119.0, False),
+        (100.0, 121.0, True),
+        # Absolute arm dominates on a small baseline: max(20% of 10, 4) = 4 MiB.
+        (10.0, 13.0, False),
+        (10.0, 15.0, True),
+        # Below the floor, nothing is comparable at all.
+        (4.0, 400.0, False),
+    ],
+)
+def test_threshold_is_the_larger_of_the_relative_and_absolute_arms(
+    base_mb: float, current_mb: float, expect_flagged: bool
+) -> None:
+    """The rule is ``max(tolerance x baseline, min_delta_mb)``, both arms live.
+
+    Enumerated on both sides of each arm's crossover rather than asserted on
+    one example, so a change that silently drops an arm (using only the
+    percentage, or only the absolute floor) is caught: dropping the absolute
+    arm passes rows 1-2 and fails row 3; dropping the relative arm does the
+    reverse. The expectation is derived from the documented rule here, not
+    from the implementation's own helper.
+    """
+    flagged = perf_baseline.check_memory_regressions(
+        [_MemPoint(2000, current_mb)],
+        "serialize",
+        {("serialize", 2000): base_mb},
+        0.20,
+        min_delta_mb=4.0,
+        floor_mb=8.0,
+    )
+    assert bool(flagged) is expect_flagged
+
+
+def test_unmeasured_current_point_is_skipped_not_flagged() -> None:
+    assert (
+        perf_baseline.check_memory_regressions(
+            [_MemPoint(2000, None)], "serialize", _mem_baseline(**{"2000": 85.0}), 0.20
+        )
+        == []
+    )
+
+
+def test_scenario_absent_from_baseline_is_skipped() -> None:
+    assert (
+        perf_baseline.check_memory_regressions(
+            [_MemPoint(9999, 500.0)], "serialize", _mem_baseline(**{"2000": 85.0}), 0.20
+        )
+        == []
+    )
+
+
+def test_matched_memory_points_counts_only_comparable_ones() -> None:
+    """A baseline sharing zero comparable points is a gate that checked nothing.
+
+    The caller turns a zero count into a hard failure, the same way the timing
+    side already does, so this count is what stands between "passed" and
+    "passed without comparing anything".
+    """
+    baseline = {("serialize", 2000): 85.0, ("serialize", 4000): 2.0}
+    points = [
+        _MemPoint(2000, 90.0),  # comparable
+        _MemPoint(4000, 90.0),  # baseline below the floor
+        _MemPoint(8000, 90.0),  # absent from the baseline
+        _MemPoint(2000, None),  # not measured this run
+    ]
+    assert (
+        perf_baseline.matched_memory_baseline_points(points, "serialize", baseline) == 1
+    )
+
+
+def test_memory_defaults_are_tighter_than_the_timing_defaults() -> None:
+    """An allocation count is far less noisy than a wall-clock duration.
+
+    Pinned so the memory tolerance cannot be quietly relaxed to the timing
+    one, which would make the gate miss the 20-50% growths it exists to catch.
+    """
+    assert (
+        perf_baseline.DEFAULT_REGRESS_MEMORY_TOLERANCE
+        < perf_baseline.DEFAULT_REGRESS_TOLERANCE
+    )
+    assert perf_baseline.DEFAULT_REGRESS_MIN_DELTA_MB > 0
+    assert perf_baseline.DEFAULT_MEMORY_FLOOR_MB > 0
+
+
+# ── The memory gate is actually wired into CI ─────────────────────────────────
+#
+# A gate that exists only as a script flag gates nothing. These assert the
+# workflow really invokes it, which is the half that a unit test of
+# `check_memory_regressions` cannot reach — and the half AGENTS.md's
+# "clone with a different name" audit found genuinely untested for an
+# adjacent `performance.yml` claim.
+
+
+def _performance_workflow() -> dict:
+    import yaml
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    return yaml.safe_load(
+        (root / ".github" / "workflows" / "performance.yml").read_text()
+    )
+
+
+def _step_run_text(job: dict) -> str:
+    """Every `run:` body in *job*, with YAML comments stripped.
+
+    Comments are stripped because this file *documents* the flags it rejects
+    (`--no-memory` on the timing job, and why memory is not gated there). A
+    raw substring search would find those in prose and report the opposite of
+    the truth -- the exact mistake a prior review round made asserting against
+    this same workflow's text.
+    """
+    out = []
+    for step in job.get("steps", []):
+        body = step.get("run")
+        if not isinstance(body, str):
+            continue
+        out.extend(
+            line for line in body.splitlines() if not line.lstrip().startswith("#")
+        )
+    return "\n".join(out)
+
+
+def test_memory_regression_job_exists_and_gates_on_a_baseline() -> None:
+    jobs = _performance_workflow()["jobs"]
+    assert "memory-regression" in jobs, (
+        "the memory gate has no CI job, so nothing runs it on a PR"
+    )
+    runs = _step_run_text(jobs["memory-regression"])
+    assert "--baseline" in runs, "memory job never compares against a base measurement"
+    assert "--regress-memory-tolerance" in runs
+    assert "--regress-min-delta-mb" in runs
+
+
+def test_memory_regression_job_actually_measures_memory() -> None:
+    """--no-memory would make the whole job vacuous: every peak would be None,
+    the gate would compare nothing, and the job would pass unconditionally."""
+    runs = _step_run_text(_performance_workflow()["jobs"]["memory-regression"])
+    assert "--no-memory" not in runs
+
+
+def test_memory_regression_job_does_not_also_gate_timing() -> None:
+    """Timings taken under tracemalloc are distorted by construction.
+
+    Gating them here would fail PRs for an artifact of the instrument, so the
+    timing tolerance is explicitly neutralised rather than left at its
+    default.
+    """
+    runs = _step_run_text(_performance_workflow()["jobs"]["memory-regression"])
+    assert "--regress-tolerance 100" in runs
+
+
+def test_memory_regression_job_is_not_advisory() -> None:
+    """`continue-on-error` would make this report-only, not a gate."""
+    job = _performance_workflow()["jobs"]["memory-regression"]
+    assert job.get("continue-on-error") in (None, False)
+    for step in job.get("steps", []):
+        assert step.get("continue-on-error") in (None, False)
+
+
+def test_timing_regression_job_still_excludes_memory() -> None:
+    """The two jobs must stay split.
+
+    If someone 'simplifies' by dropping --no-memory from the timing job, its
+    measurements silently acquire the lru_cache-clearing bias that flag exists
+    to remove -- which would corrupt the timing gate rather than improve the
+    memory one.
+    """
+    runs = _step_run_text(_performance_workflow()["jobs"]["regression"])
+    assert "--no-memory" in runs
+
+
+# ── Non-finite baseline values, and a memory gate that compared nothing ──────
+#
+# Both are "the gate ran and could not fail" defects (CodeRabbit, PR #1323),
+# which is the failure mode this repo's own guidance treats as worse than a
+# gate that is absent: absence is visible, a vacuous pass is not.
+
+
+def test_non_finite_baseline_measurements_are_dropped() -> None:
+    """`json.loads` accepts `Infinity`/`NaN`, and neither can ever gate.
+
+    An infinite baseline makes every finite head value an infinitely large
+    *improvement*; every comparison against NaN is False. Both read as "no
+    regression" for any input a run could produce, so such a point must be
+    absent rather than present-and-unfailable.
+    """
+    document = json.loads(
+        '{"scenarios":{"s":{"points":['
+        '{"size":1,"seconds":Infinity,"peak_mb":Infinity},'
+        '{"size":2,"seconds":NaN,"peak_mb":NaN},'
+        '{"size":3,"seconds":0.5,"peak_mb":50.0}]}}}'
+    )
+    assert perf_baseline.baseline_points_from_report(document) == {("s", 3): 0.5}
+    assert perf_baseline.baseline_points_from_report(document, field="peak_mb") == {
+        ("s", 3): 50.0
+    }
+
+
+@pytest.mark.parametrize("bad", ["Infinity", "-Infinity", "NaN"])
+def test_a_non_finite_baseline_point_cannot_silently_absorb_a_regression(
+    bad: str,
+) -> None:
+    """The consequence, asserted rather than inferred from the parser.
+
+    Before the fix each of these parsed through and then reported no
+    regression against a head value hundreds of times larger.
+    """
+    document = json.loads(
+        '{"scenarios":{"s":{"points":[{"size":1,"seconds":' + bad + "}]}}}"
+    )
+    points = perf_baseline.baseline_points_from_report(document)
+
+    class _P:
+        size = 1
+        seconds = 10_000.0
+
+    # The point is gone, so there is nothing to compare -- which the
+    # zero-overlap checks then catch, rather than a false "OK".
+    assert points == {}
+    assert perf_baseline.check_regressions([_P()], "s", points, 0.15) == []
+    assert perf_baseline.matched_baseline_points([_P()], "s", points) == []
+
+
+def test_finite_negative_baselines_are_kept_for_the_floors_to_handle() -> None:
+    """Dropping non-finite values must not also drop merely odd ones."""
+    document = json.loads('{"scenarios":{"s":{"points":[{"size":1,"seconds":-2.0}]}}}')
+    assert perf_baseline.baseline_points_from_report(document) == {("s", 1): -2.0}
+
+
+def test_total_memory_points_compared_sums_across_scenarios() -> None:
+    assert (
+        perf_baseline.total_memory_points_compared(
+            {
+                "scenarios": {
+                    "a": {"memory_regression": {"compared_points": 3}},
+                    "b": {"memory_regression": {"compared_points": 2}},
+                }
+            }
+        )
+        == 5
+    )
+
+
+@pytest.mark.parametrize(
+    "report",
+    [
+        {},
+        {"scenarios": {}},
+        {"scenarios": "not-a-mapping"},
+        {"scenarios": {"a": "not-a-mapping"}},
+        {"scenarios": {"a": {}}},
+        {"scenarios": {"a": {"memory_regression": {}}}},
+        {"scenarios": {"a": {"memory_regression": {"compared_points": True}}}},
+        {"scenarios": {"a": {"memory_regression": {"compared_points": "3"}}}},
+    ],
+)
+def test_total_memory_points_compared_reads_zero_for_anything_unusable(
+    report: dict,
+) -> None:
+    """Zero is what the caller turns into a hard failure, so every shape that
+    does not carry a real count must read as zero rather than as a pass.
+
+    ``True`` is listed because ``bool`` is an ``int`` subclass: counting it
+    would let a malformed report claim one comparison it never made.
+    """
+    assert perf_baseline.total_memory_points_compared(report) == 0
+
+
+def test_memory_gate_failure_on_zero_overlap_is_wired_into_main() -> None:
+    """A gate that compared nothing must fail, not report OK.
+
+    `matched_memory_baseline_points` existed from the start, but nothing
+    aggregated it: `_run_scenario` returned only the timing overlap and
+    `main()` checked only that, so a memory baseline whose scenarios or sizes
+    stopped lining up with the run produced zero comparisons and passed. This
+    asserts the wiring, which is the half a unit test of the counter cannot
+    reach.
+    """
+    source = pathlib.Path(bench.__file__).read_text()
+    assert "total_memory_points_compared(report) == 0" in source, (
+        "main() no longer fails on a memory gate that compared nothing"
+    )

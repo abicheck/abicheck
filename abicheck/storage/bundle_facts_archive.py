@@ -35,6 +35,7 @@ way for no behavioral difference.
 from __future__ import annotations
 
 import copy
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -190,11 +191,23 @@ def write_bundle_facts_archive(
         )
     library_blobs: dict[str, str] = {}
     decoded_size_bytes = 0
-    unique_payloads: dict[str, bytes] = {}  # content hash -> its own payload
+    # Content hash -> where that blob's payload is spooled, as (offset,
+    # length) into `spool` below. Previously this held every distinct
+    # payload's *bytes*, so a whole bundle's encoded content was resident
+    # at once before a single archive member had been written -- for an
+    # N-library bundle that is N serialized snapshots simultaneously live,
+    # on top of the N model objects the caller still holds. Nothing in the
+    # pre-write validation below needs the bytes themselves: the member
+    # count needs how many distinct hashes there are, and the aggregate
+    # decoded-byte cap needs each blob's *length* and how many library
+    # names reference it. So the bytes go to a temporary spool file as
+    # they are produced and only compact metadata stays resident.
+    unique_blobs: dict[str, tuple[int, int]] = {}
     # Keyed by id(snap): many names can share one AbiSnapshot object, and
     # re-serializing it per name is unbounded work content dedup doesn't
     # prevent. Safe: every snap stays referenced for the loop's duration.
-    serialized_by_identity: dict[int, tuple[str, bytes]] = {}
+    # Holds (hash, length) rather than (hash, payload) for the same reason.
+    serialized_by_identity: dict[int, tuple[str, int]] = {}
 
     def _oversized_bundle_message() -> str:
         return (
@@ -205,120 +218,147 @@ def write_bundle_facts_archive(
             "refusing to write an archive that could not be reopened."
         )
 
-    for name, snap in sorted(facts.per_library_snapshots.items()):
-        cached = serialized_by_identity.get(id(snap))
-        if cached is not None:
-            h, payload = cached
-        else:
-            # Streamed against the *remaining* allowance -- json.dumps()+
-            # .encode() would fully materialize an oversized copy first.
-            remaining = max(DEFAULT_MAX_BUNDLE_DECODED_BYTES - decoded_size_bytes, 0)
-            encoded = bounded_encode_utf8(snapshot_to_dict(snap), remaining)
-            if encoded is None:
+    # Deleted on close by the OS; never published, and never a partial
+    # archive -- the real archive's own temp file is not opened until every
+    # validation below has passed.
+    with tempfile.TemporaryFile() as spool:
+        spool_end = 0
+
+        def _spool(h: str, payload: bytes) -> None:
+            """Retain *payload* under *h* on disk, not in memory."""
+            nonlocal spool_end
+            if h in unique_blobs:
+                return
+            spool.seek(spool_end)
+            spool.write(payload)
+            unique_blobs[h] = (spool_end, len(payload))
+            spool_end += len(payload)
+
+        for name, snap in sorted(facts.per_library_snapshots.items()):
+            cached = serialized_by_identity.get(id(snap))
+            if cached is not None:
+                h, payload_len = cached
+            else:
+                # Streamed against the *remaining* allowance -- json.dumps()+
+                # .encode() would fully materialize an oversized copy first.
+                remaining = max(
+                    DEFAULT_MAX_BUNDLE_DECODED_BYTES - decoded_size_bytes, 0
+                )
+                encoded = bounded_encode_utf8(snapshot_to_dict(snap), remaining)
+                if encoded is None:
+                    raise SnapshotError(_oversized_bundle_message())
+                h = content_hash(encoded)
+                payload_len = len(encoded)
+                serialized_by_identity[id(snap)] = (h, payload_len)
+                _spool(h, encoded)
+                del encoded
+            # Charged here too: distinct AbiSnapshot objects serializing
+            # identically still each cost a real serialization before their
+            # shared hash is known -- agrees with reader_charged_bytes below.
+            decoded_size_bytes += payload_len
+            if decoded_size_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
                 raise SnapshotError(_oversized_bundle_message())
-            payload = encoded
-            h = content_hash(payload)
-            serialized_by_identity[id(snap)] = (h, payload)
-        # Charged here too: distinct AbiSnapshot objects serializing
-        # identically still each cost a real serialization before their
-        # shared hash is known -- agrees with reader_charged_bytes below.
-        decoded_size_bytes += len(payload)
-        if decoded_size_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
-            raise SnapshotError(_oversized_bundle_message())
-        unique_payloads.setdefault(h, payload)
-        library_blobs[name] = h
-    manifest_blob = None
-    if facts.manifest is not None:
-        from ..bundle_manifest import manifest_to_dict
+            library_blobs[name] = h
+        manifest_blob = None
+        if facts.manifest is not None:
+            from ..bundle_manifest import manifest_to_dict
 
-        # Streamed the same way the per-snapshot loop above is.
-        remaining = max(DEFAULT_MAX_BUNDLE_DECODED_BYTES - decoded_size_bytes, 0)
-        encoded_manifest = bounded_encode_utf8(
-            manifest_to_dict(facts.manifest), remaining
-        )
-        if encoded_manifest is None:
-            raise SnapshotError(_oversized_bundle_message())
-        manifest_payload = encoded_manifest
-        decoded_size_bytes += len(manifest_payload)
-        manifest_blob = content_hash(manifest_payload)
-        unique_payloads.setdefault(manifest_blob, manifest_payload)
+            # Streamed the same way the per-snapshot loop above is.
+            remaining = max(DEFAULT_MAX_BUNDLE_DECODED_BYTES - decoded_size_bytes, 0)
+            encoded_manifest = bounded_encode_utf8(
+                manifest_to_dict(facts.manifest), remaining
+            )
+            if encoded_manifest is None:
+                raise SnapshotError(_oversized_bundle_message())
+            decoded_size_bytes += len(encoded_manifest)
+            manifest_blob = content_hash(encoded_manifest)
+            _spool(manifest_blob, encoded_manifest)
+            del encoded_manifest
 
-    # (a) Member-count cap: one member per *distinct* blob hash, plus one
-    # for `manifest.json` -- already inside `unique_payloads` above.
-    if len(unique_payloads) + 1 > MAX_ARCHIVE_MEMBERS:
-        raise SnapshotError(
-            f"{p}: writing this bundle's {len(unique_payloads)} distinct "
-            f"blobs would produce more than {MAX_ARCHIVE_MEMBERS} zip "
-            "members (the reader's own safety limit) -- refusing to write "
-            "an archive that could not be reopened."
-        )
-    # (b) Aggregate decoded-byte cap, mirroring read_bundle_facts_archive():
-    # every *duplicate* name's own copy, not each unique blob's bytes once.
-    hash_counts = Counter(library_blobs.values())
-    reader_charged_bytes = sum(
-        len(unique_payloads[h]) * n for h, n in hash_counts.items()
-    )
-    # manifest_blob is charged once more, whenever present.
-    if manifest_blob is not None:
-        reader_charged_bytes += len(unique_payloads[manifest_blob])
-    if reader_charged_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
-        raise SnapshotError(
-            f"{p}: writing this bundle's content, once every duplicate "
-            f"library name's own copy is counted ({reader_charged_bytes} "
-            f"bytes), would exceed the {DEFAULT_MAX_BUNDLE_DECODED_BYTES} "
-            "byte aggregate safety limit read_bundle_facts_archive() "
-            "enforces on load -- refusing to write an archive that could "
-            "not be reopened."
-        )
-
-    container_manifest = {
-        "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
-        "schema_version": BUNDLE_ARCHIVE_SCHEMA_VERSION,
-        # Not facts.schema_version -- the same writer rule as
-        # bundle_facts_to_dict()'s own schema_version field (Codex).
-        "bundle_facts_schema_version": document_schema_version(facts),
-        "variant_fingerprint": facts.variant_fingerprint,
-        "library_blobs": library_blobs,
-        "manifest_blob": manifest_blob,
-        # Also sorted -- unordered-by-name key/value data.
-        "filesystem_aliases": {
-            name: list(aliases)
-            for name, aliases in sorted(facts.filesystem_aliases.items())
-        },
-        "library_filenames": dict(sorted(facts.library_filenames.items())),
-        "degraded_members": dict(sorted(facts.degraded_members.items())),
-        "inventory_complete": facts.inventory_complete,
-    }
-    # A third cap: manifest.json's own reader-side size ceiling. Checked
-    # incrementally via iterencode() (fully materializing the string
-    # first would defeat the point, Codex); a single oversized value
-    # needs its own pre-check since iterencode() yields it as one chunk.
-    oversized = oversized_raw_string(container_manifest, DEFAULT_MAX_MANIFEST_BYTES)
-    if oversized is not None:
-        _, oversized_bytes = oversized
-        raise SnapshotError(
-            f"{p}: this bundle's manifest.json contains a single string "
-            f"value of at least {oversized_bytes} bytes, alone exceeding "
-            f"the {DEFAULT_MAX_MANIFEST_BYTES} byte safety limit "
-            "read_bundle_facts_archive() enforces on load -- refusing to "
-            "write an archive that could not be reopened."
-        )
-    manifest_member_bytes = 0
-    for chunk in _json.JSONEncoder(indent=2).iterencode(container_manifest):
-        manifest_member_bytes += len(chunk.encode("utf-8"))
-        if manifest_member_bytes > DEFAULT_MAX_MANIFEST_BYTES:
+        # (a) Member-count cap: one member per *distinct* blob hash, plus one
+        # for `manifest.json` -- already inside `unique_payloads` above.
+        if len(unique_blobs) + 1 > MAX_ARCHIVE_MEMBERS:
             raise SnapshotError(
-                f"{p}: this bundle's manifest.json would be more than "
-                f"{manifest_member_bytes} bytes, exceeding the "
-                f"{DEFAULT_MAX_MANIFEST_BYTES} byte safety limit "
-                "read_bundle_facts_archive() enforces on load -- refusing "
-                "to write an archive that could not be reopened."
+                f"{p}: writing this bundle's {len(unique_blobs)} distinct "
+                f"blobs would produce more than {MAX_ARCHIVE_MEMBERS} zip "
+                "members (the reader's own safety limit) -- refusing to write "
+                "an archive that could not be reopened."
+            )
+        # (b) Aggregate decoded-byte cap, mirroring read_bundle_facts_archive():
+        # every *duplicate* name's own copy, not each unique blob's bytes once.
+        hash_counts = Counter(library_blobs.values())
+        reader_charged_bytes = sum(
+            unique_blobs[h][1] * n for h, n in hash_counts.items()
+        )
+        # manifest_blob is charged once more, whenever present.
+        if manifest_blob is not None:
+            reader_charged_bytes += unique_blobs[manifest_blob][1]
+        if reader_charged_bytes > DEFAULT_MAX_BUNDLE_DECODED_BYTES:
+            raise SnapshotError(
+                f"{p}: writing this bundle's content, once every duplicate "
+                f"library name's own copy is counted ({reader_charged_bytes} "
+                f"bytes), would exceed the {DEFAULT_MAX_BUNDLE_DECODED_BYTES} "
+                "byte aggregate safety limit read_bundle_facts_archive() "
+                "enforces on load -- refusing to write an archive that could "
+                "not be reopened."
             )
 
-    with BundleArchiveWriter(p) as writer:
-        for h in sorted(unique_payloads):
-            writer.put_blob(unique_payloads[h])
-        writer.write_manifest(container_manifest)
+        container_manifest = {
+            "artifact_type": BUNDLE_ARCHIVE_ARTIFACT_TYPE,
+            "schema_version": BUNDLE_ARCHIVE_SCHEMA_VERSION,
+            # Not facts.schema_version -- the same writer rule as
+            # bundle_facts_to_dict()'s own schema_version field (Codex).
+            "bundle_facts_schema_version": document_schema_version(facts),
+            "variant_fingerprint": facts.variant_fingerprint,
+            "library_blobs": library_blobs,
+            "manifest_blob": manifest_blob,
+            # Also sorted -- unordered-by-name key/value data.
+            "filesystem_aliases": {
+                name: list(aliases)
+                for name, aliases in sorted(facts.filesystem_aliases.items())
+            },
+            "library_filenames": dict(sorted(facts.library_filenames.items())),
+            "degraded_members": dict(sorted(facts.degraded_members.items())),
+            "inventory_complete": facts.inventory_complete,
+        }
+        # A third cap: manifest.json's own reader-side size ceiling. Checked
+        # incrementally via iterencode() (fully materializing the string
+        # first would defeat the point, Codex); a single oversized value
+        # needs its own pre-check since iterencode() yields it as one chunk.
+        oversized = oversized_raw_string(container_manifest, DEFAULT_MAX_MANIFEST_BYTES)
+        if oversized is not None:
+            _, oversized_bytes = oversized
+            raise SnapshotError(
+                f"{p}: this bundle's manifest.json contains a single string "
+                f"value of at least {oversized_bytes} bytes, alone exceeding "
+                f"the {DEFAULT_MAX_MANIFEST_BYTES} byte safety limit "
+                "read_bundle_facts_archive() enforces on load -- refusing to "
+                "write an archive that could not be reopened."
+            )
+        manifest_member_bytes = 0
+        for chunk in _json.JSONEncoder(indent=2).iterencode(container_manifest):
+            manifest_member_bytes += len(chunk.encode("utf-8"))
+            if manifest_member_bytes > DEFAULT_MAX_MANIFEST_BYTES:
+                raise SnapshotError(
+                    f"{p}: this bundle's manifest.json would be more than "
+                    f"{manifest_member_bytes} bytes, exceeding the "
+                    f"{DEFAULT_MAX_MANIFEST_BYTES} byte safety limit "
+                    "read_bundle_facts_archive() enforces on load -- refusing "
+                    "to write an archive that could not be reopened."
+                )
+
+        # Sorted by content hash, exactly as before: member order (and so the
+        # archive's own bytes and `stored_sha256`) stays a deterministic
+        # function of content alone, independent of the order the loop above
+        # happened to produce blobs in. Reading each payload back from the
+        # spool one at a time is what keeps that determinism without holding
+        # every payload resident to sort them.
+        with BundleArchiveWriter(p) as writer:
+            for h in sorted(unique_blobs):
+                offset, length = unique_blobs[h]
+                spool.seek(offset)
+                writer.put_blob(spool.read(length))
+            writer.write_manifest(container_manifest)
     # `writer.stored_sha256`/`writer.stored_size_bytes` come from
     # BundleArchiveWriter.close()'s own still-private temp file, before
     # os.replace() publishes it -- not re-derived via a fresh open()/
