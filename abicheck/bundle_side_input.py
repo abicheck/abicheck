@@ -426,7 +426,6 @@ def compare_release_against_bundle_facts(
     # so importing `service.py` itself here would widen that workflows ->
     # frontends edge instead of letting it close (ADR-061 gap A).
     from .bundle_manifest import load_manifest
-    from .bundle_models import BundleSignatureEvidence
     from .errors import (
         IncompatibleSnapshotSchemaError,
         ProfileMismatchError,
@@ -440,6 +439,7 @@ def compare_release_against_bundle_facts(
     from .workflows.bundle_facts_library_overrides import (
         validate_matched_library_overrides,
     )
+    from .workflows.bundle_symbol_status import build_bundle_signature_evidence
     from .workflows.compare_policy import compare_snapshots
     from .workflows.extraction import ast_acquisition_scope, build_match_map
     from .workflows.input_resolution import resolve_input
@@ -592,9 +592,7 @@ def compare_release_against_bundle_facts(
                 continue
             compared.append(key)
             per_library_results.append(diff)
-            new_signature_evidence[key] = BundleSignatureEvidence.from_snapshot(
-                new_snapshot
-            )
+            new_signature_evidence[key] = build_bundle_signature_evidence(new_snapshot)
 
     # *old_facts* is already loaded in memory (needed above for the
     # per-library matching loop) -- routed straight to
@@ -642,7 +640,7 @@ def compare_release_against_bundle_facts(
         scope_record,
     )
     # Reuse the per-member evidence the loop above already resolved
-    # (`BundleSignatureEvidence.from_snapshot`, which carries the member's
+    # (`workflows.bundle_symbol_status.build_bundle_signature_evidence`, which carries the member's
     # own `ElfMetadata` and real library filename) instead of re-parsing
     # every successfully-resolved member's ELF from disk a second time just
     # to assemble the bundle graph. `build_bundle_snapshot_mixed` is the

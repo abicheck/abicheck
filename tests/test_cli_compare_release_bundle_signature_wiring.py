@@ -33,7 +33,7 @@ import json
 from pathlib import Path
 
 import abicheck.bundle as bundle_mod
-from abicheck.bundle_models import BundleSignatureEvidence, BundleSnapshot
+from abicheck.bundle_models import BundleSnapshot
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.cli_compare_release_helpers import (
@@ -44,6 +44,9 @@ from abicheck.cli_compare_release_helpers import (
 )
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.workflows.bundle_symbol_status import (
+    build_bundle_signature_evidence,
+)
 
 
 def _meta(
@@ -289,8 +292,8 @@ class TestCollectBundleResultAcceptsCompactBundleEvidence:
                 },
             ]
 
-        compact_old = BundleSignatureEvidence.from_snapshot(old_snap)
-        compact_new = BundleSignatureEvidence.from_snapshot(new_snap)
+        compact_old = build_bundle_signature_evidence(old_snap)
+        compact_new = build_bundle_signature_evidence(new_snap)
 
         compact_result, _ = _collect_bundle_result(
             _entries(compact_old, compact_new),

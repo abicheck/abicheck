@@ -285,8 +285,7 @@ def test_missing_evidence_falls_back_to_a_live_parse(
     def _evidence(name: str) -> BundleSignatureEvidence:
         """Minimal resolved evidence carrying one real exported symbol."""
         return BundleSignatureEvidence(
-            function_map={},
-            variable_map={},
+            symbol_status={},
             elf_only_mode=False,
             elf=ElfMetadata(
                 soname=name,

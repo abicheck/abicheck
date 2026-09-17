@@ -32,7 +32,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .checker_types import Change, DiffResult
-from .model import AbiSnapshot, Function, Variable
 from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import ElfMetadata, SymbolBinding
 from .model.scope_acquisition import ScopeAcquisitionRecord
@@ -531,6 +530,30 @@ def diff_change_is_breaking(
     return effective_category(change, *policy_sets) == Verdict.BREAKING
 
 
+@dataclass(frozen=True, slots=True)
+class SymbolSignatureStatus:
+    """The two answers a bundle signature check asks about one symbol.
+
+    Both are plain booleans deliberately: every tri-state and
+    legacy/unknown distinction the underlying predicates draw
+    (``Fact``-backed export evidence versus a pre-split snapshot's
+    conflated ``Visibility``, an uncaptured ``is_variadic`` or
+    ``contract_attributes``, an unresolved type spelling) is resolved
+    *while the full snapshot is alive*, by those predicates, into the same
+    yes/no the consumer would have got from the snapshot itself. Storing
+    them unresolved would mean keeping the declarations that carry them,
+    which is the retention this type exists to remove.
+
+    A symbol absent from the mapping is one that was in neither
+    ``function_map`` nor ``variable_map``: both predicates answer ``False``
+    for that case, so absence and ``(False, False)`` are the same answer,
+    and the mapping holds only symbols the snapshot actually declared.
+    """
+
+    exported: bool
+    evidence_sufficient: bool
+
+
 @dataclass(frozen=True)
 class BundleSignatureEvidence:
     """Compact, per-library stand-in for an :class:`~abicheck.model.
@@ -566,28 +589,33 @@ class BundleSignatureEvidence:
     receiving end.
     """
 
-    function_map: Mapping[str, Function]
-    variable_map: Mapping[str, Variable]
+    symbol_status: Mapping[str, SymbolSignatureStatus]
     elf_only_mode: bool
     elf: ElfMetadata | None
     library_filename: str
 
-    @classmethod
-    def from_snapshot(cls, snapshot: AbiSnapshot) -> BundleSignatureEvidence:
-        """Project *snapshot* down to its bundle-signature-evidence-relevant
-        fields. Holds references to the same ``Function``/``Variable``
-        objects (no deep copy) -- correct because those are exactly what
-        the caller wants to keep alive; everything else *not* referenced
-        from here becomes eligible for garbage collection once the caller
-        drops its own reference to ``snapshot``.
-        """
-        return cls(
-            function_map=snapshot.function_map,
-            variable_map=snapshot.variable_map,
-            elf_only_mode=snapshot.elf_only_mode,
-            elf=snapshot.elf,
-            library_filename=snapshot.library,
-        )
+    # Built by `workflows.bundle_symbol_status.build_bundle_signature_
+    # evidence`, not by a classmethod here: computing the statuses needs
+    # that module's predicates, and a classmethod reaching back for them is
+    # an import cycle this repository's own gate rejects.
+    #
+    # What the compact form buys, and why it is not simply the maps: this
+    # used to hold `snapshot.function_map`/`variable_map` by reference,
+    # which dropped the rest of the snapshot but kept every `Function` and
+    # `Variable` alive -- and with them every `Param`, type spelling and
+    # `Fact` -- for the whole release, long after the member's own
+    # comparison finished. For a template-heavy C++ library the declaration
+    # population *is* the memory: measured on a real oneDAL
+    # `libonedal_core.so.1` (89,997 symbols), 146.6 MiB of retained
+    # declaration maps became 24.8 MiB of statuses, 5.9x, freeing 121.8 MiB
+    # per member side.
+    #
+    # Deliberately *not* folded in: GNU symbol-version collapse, provider
+    # attribution and the incomplete-evidence rules all read the bundle
+    # *resolution graph* rather than these maps, so they are unaffected. A
+    # caller that needs the real snapshot for another reason (JUnit,
+    # `--bundle-facts-out`) still passes the `AbiSnapshot` itself, which
+    # every consumer accepts unchanged.
 
 
 @dataclass

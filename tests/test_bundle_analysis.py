@@ -35,11 +35,14 @@ import abicheck.bundle as bundle_mod
 import abicheck.bundle_signature_evidence as sig_mod
 from abicheck.bundle import _compute_resolution_graph
 from abicheck.bundle_analysis import analyze_bundle
-from abicheck.bundle_models import BundleSignatureEvidence, BundleSnapshot
+from abicheck.bundle_models import BundleSnapshot
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.workflows.bundle_symbol_status import (
+    build_bundle_signature_evidence,
+)
 
 
 def _meta(
@@ -183,8 +186,8 @@ class TestAnalyzeBundleCompactVsFullSnapshotInterchangeable:
         new = _snapshot(metadata)
         full_old = _elf_only_snapshot("libcore.so", "old")
         full_new = _elf_only_snapshot("libcore.so", "new")
-        compact_old = BundleSignatureEvidence.from_snapshot(full_old)
-        compact_new = BundleSignatureEvidence.from_snapshot(full_new)
+        compact_old = build_bundle_signature_evidence(full_old)
+        compact_new = build_bundle_signature_evidence(full_new)
 
         full_result = analyze_bundle(
             old,
@@ -218,7 +221,7 @@ class TestAnalyzeBundleCompactVsFullSnapshotInterchangeable:
         old = _snapshot(metadata)
         new = _snapshot(metadata)
         full_old = _elf_only_snapshot("libcore.so", "old")
-        compact_new = BundleSignatureEvidence.from_snapshot(
+        compact_new = build_bundle_signature_evidence(
             _elf_only_snapshot("libcore.so", "new")
         )
 
