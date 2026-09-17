@@ -616,7 +616,7 @@ class TestDemanglingIsPrewarmedOnEveryProjection:
         monkeypatch.setattr(dm, "demangle_batch", _spy)
         # A cold cache is the whole point: a warm one hides a missing prewarm.
         monkeypatch.setattr(dm, "_BATCH_CACHE_OK", {})
-        monkeypatch.setattr(dm, "_BATCH_CACHE_FAIL", set())
+        monkeypatch.setattr(dm, "_BATCH_CACHE_FAIL", {})
         render()
         return calls
 

@@ -45,6 +45,7 @@ from elftools.elf.sections import SymbolTableSection
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
 # parses into them and re-exports them so the historical
 # ``from abicheck.elf_metadata import ElfImport`` spelling keeps resolving.
+from .extract.elf_string_table import buffered_string_table, string_table_of
 from .model.elf_facts import (
     ElfImport as ElfImport,
     ElfMetadata as ElfMetadata,
@@ -1032,6 +1033,16 @@ def _value_alignment(st_value: int) -> int:
 
 
 def _parse_dynsym(section: SymbolTableSection, meta: ElfMetadata) -> None:
+    # Every `sym.name` below is a seek plus a chunked read of the linked
+    # string table; buffering that table for the duration of the walk turns
+    # ~N stream operations into one read (`extract/elf_string_table.py`,
+    # which also explains why this is scoped rather than cached). Measured
+    # on a real oneDAL build below in that module's docstring.
+    with buffered_string_table(string_table_of(section)):
+        _parse_dynsym_entries(section, meta)
+
+
+def _parse_dynsym_entries(section: SymbolTableSection, meta: ElfMetadata) -> None:
     for sym in section.iter_symbols():
         binding_str = sym.entry.st_info.bind
         type_str = sym.entry.st_info.type
@@ -1209,6 +1220,18 @@ def _correlate_symbol_versions(
     if dynsym is None:
         return
 
+    # Same buffering as `_parse_dynsym`: this is a second full walk of the
+    # identical symbol table, so it pays the identical per-name stream cost.
+    with buffered_string_table(string_table_of(dynsym)):
+        _apply_versions_to_symbols(dynsym, ver_entries, ver_index_map, meta)
+
+
+def _apply_versions_to_symbols(
+    dynsym: SymbolTableSection,
+    ver_entries: list[tuple[int, bool]],
+    ver_index_map: dict[int, tuple[str, str, bool]],
+    meta: ElfMetadata,
+) -> None:
     export_idx = 0
     import_idx = 0
     for sym_ordinal, sym in enumerate(dynsym.iter_symbols()):
