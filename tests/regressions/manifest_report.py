@@ -266,7 +266,18 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
         # requested one that did not; and it judged a document by content
         # alone, so one left behind by an earlier run (or committed by a PR
         # author) read as this run's own output.
-        fixed_by=(1016, 1210, 1246),
+        # #1325 added the same class's *provenance* member. A `pull_request`
+        # producer builds an ephemeral merge commit no API endpoint names, so
+        # when a publisher asked which revision was analysed and the artifact
+        # recorded none, the available answer -- the pull request's head --
+        # was a plausible sibling of the right one and wrong in exactly the
+        # case that matters. Substituting it is this class's fallthrough
+        # wearing different clothes: an unestablished identity published as
+        # an established one. It refuses now (`analysis-context-absent`), and
+        # `require-provenance: false` is what a caller states to accept the
+        # run head instead -- with `tested-sha-source` saying so, rather than
+        # the two being indistinguishable.
+        fixed_by=(1016, 1210, 1246, 1325),
         seed_tests=(
             "tests/test_action_report_query.py",
             "tests/test_action_unreadable_report_verdict.py",
@@ -296,6 +307,10 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             # the six historical instances when each is reintroduced.
             "tests/test_action_report_verdict_vocabulary.py",
             "tests/test_action_report_destinations.py",
+            # The provenance member above: an absent analysis context
+            # refuses rather than substituting the PR head, and the three
+            # states of `tested-sha-source` stay distinguishable.
+            "tests/test_action_analysis_context.py",
         ),
         public_surfaces=("github-action",),
         axes={

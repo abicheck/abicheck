@@ -396,22 +396,48 @@ reusable-workflow inputs, 11 `verify-source-run` inputs, 13 `report` inputs,
 6 `aggregate` inputs, 11 `baseline` inputs, and the 10 `verify-source-run`
 outputs the reporter reads — all declared.
 
-### Bug classes to register on merge
+### Bug classes — registered
 
-Three genuinely new classes came out of this pass. They are **not** in
-`tests/regressions/manifest.py` yet, deliberately: that registry requires a
-non-empty `fixed_by`, and its own rule is that "a class with no `fixed_by` is
-a hypothesis, not a registered escape-history entry". These trace to commits
-on an unmerged branch, and inventing a pull-request number for them would
-make the registry's traceability claim false. Add them to
-`tests/regressions/manifest_tool_surface.py` with the real number once this
-merges:
+Registered after #1325 merged, which is what supplied the real `fixed_by` the
+registry requires (a class without one is a hypothesis, not an escape-history
+entry, so they were held back rather than given an invented number).
 
-| Id | Invariant, in one line | Seed tests |
+Four classes, in three homes, because one already had one:
+
+| Id | Home | Seed tests |
 |---|---|---|
-| `identity.two_distinct_identifiers_compared_as_one` | A name and the object it names are never folded into one equality; the peel has exactly one owner and refuses every near-miss rather than guessing. | `test_action_tag_resolution.py`, `test_publish_baseline_tag_resolution_step.py` |
-| `identity.absent_evidence_defaulted_to_a_plausible_sibling` | "Not recorded" and "recorded as X" never collapse; related identities stay separate fields; which state was reached is itself published. | `test_action_analysis_context.py` |
-| `config.textual_substitution_into_a_structured_document` | A value bound into a structured document is inserted structurally, once, from a closed allowlist — never by rewriting serialized text. | `test_action_library_spec_binding.py` |
+| `identity.name_and_referent_compared_as_one` | `manifest_integration.py` | `test_action_tag_resolution.py`, `test_publish_baseline_tag_resolution_step.py` |
+| `config.textual_substitution_into_a_structured_document` | `manifest_integration.py` | `test_action_library_spec_binding.py` |
+| `shell.empty_array_expansion_under_nounset` | `manifest_integration.py` | `test_action_shell_empty_array_expansion.py` |
+| *(provenance)* → `report.unestablished_result_reads_as_success` | existing entry, extended | `test_action_analysis_context.py` |
+
+Three notes on how that differs from the table this section used to hold.
+
+**The provenance class was not registered.** What this pass called
+`identity.absent_evidence_defaulted_to_a_plausible_sibling` is
+`report.unestablished_result_reads_as_success`, already registered with three
+prior members: substituting the PR head for an unrecorded analysed commit is
+that class's `VERDICT="COMPATIBLE"` fallthrough wearing different clothes —
+an unestablished identity published as an established one. It became a fourth
+`fixed_by` and a seed test on the existing entry. The registry's own
+instruction is to check for a matching id before restating an invariant, and
+a fifth near-duplicate of a class with a good statement is worse than no
+entry: it splits the next reader's search.
+
+**A fourth class was registered that this section never listed.** The macOS
+`args[@]: unbound variable` failure arrived after this document was written.
+It is a genuinely new class with a real repo-wide guard, and it had already
+shipped twice in this repository before that guard existed, which is the
+evidence the bug-class rule asks for.
+
+**They went to a new sibling, not `manifest_tool_surface.py`.** That file is
+at 1136 of its 1200-line cap — three entries do not fit, and trimming an
+entry's prose to fit is what root `AGENTS.md` forbids.
+`manifest_integration.py` follows the split `manifest_guards.py`/
+`manifest_report.py`/`manifest_evidence.py`/`manifest_test_harness.py`
+already establish, and costs `manifest.py` (at a `no_growth` baseline) the
+import and one concatenation line — the exact shape `architecture/debt.yaml`
+records twice as the accepted answer.
 
 ## Acceptance coverage
 
