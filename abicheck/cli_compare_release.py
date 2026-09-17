@@ -95,7 +95,10 @@ from .cli_options import (
 from .errors import SnapshotError
 from .frontends.cli.runtime import _setup_verbosity, _write_or_echo
 from .model import AbiSnapshot
-from .model.header_exclusion_record import canonical_exclusion_identity
+from .model.header_exclusion_record import (
+    canonical_exclusion_identity,
+    release_exclusion_identity,
+)
 from .model.release_selection import ReleaseSelection
 from .model.scope_acquisition import AcquisitionState
 from .pack_application import resolve_bundle_policy_file
@@ -105,6 +108,9 @@ from .report.comparison_scope import (
 )
 from .report.release_assurance import release_assurance_terms
 from .workflows.gate import resolve_scope_decision
+from .workflows.header_exclusion_audit import (
+    observed_member_exclusion_identities,
+)
 from .workflows.release_assurance_members import release_assurance_from_entries
 from .workflows.release_scope import (
     DIRECT_PAIR_KEY,
@@ -1128,6 +1134,19 @@ def compare_release_cmd(
                 scope_record=scope_result.record,
             )
 
+            # Read each completed member's *observed* exclusion identity
+            # before the `_diff_result` carrying it is stripped below. The
+            # request is not this fact: a stored snapshot is never
+            # restamped with the current `--exclude-header`, so a
+            # stored-package comparison would otherwise report the
+            # request's "excluded nothing" for two packages that were in
+            # truth narrowed differently (CodeRabbit review). Kept as the
+            # release's one identity in `release_excluded_header_patterns`
+            # further down, where the receipt is assembled.
+            observed_member_exclusions = observed_member_exclusion_identities(
+                library_results
+            )
+
             # Strip _diff_result from entries and bump verdict for removed libraries.
             worst_verdict = _strip_diff_results_and_adjust_verdict(
                 library_results,
@@ -1180,15 +1199,17 @@ def compare_release_cmd(
             from .workflows.comparison_input_receipt import env_matrix_content_digest
 
             env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
-            # The release's one canonical `--exclude-header` identity,
-            # computed here at release scope for the same reason the
-            # deployment digest above is: one rule set narrows every
-            # member's header tree, and no per-library `DiffResult`
-            # survives to the point the receipt is built. Two releases
-            # differing only in their exclusion rules parsed genuinely
-            # different surfaces and must not share a configuration digest.
-            release_excluded_header_patterns = canonical_exclusion_identity(
-                exclude_headers
+            # The release's one canonical `--exclude-header` identity.
+            # Two releases differing only in their exclusion rules parsed
+            # genuinely different surfaces and must not share a
+            # configuration digest -- so this is read off what the member
+            # comparisons *observed* (captured above, before their
+            # `DiffResult`s were stripped), falling back to the request
+            # only when no member completed and there is nothing to
+            # observe. See `release_exclusion_identity`.
+            release_excluded_header_patterns = release_exclusion_identity(
+                observed_member_exclusions,
+                canonical_exclusion_identity(exclude_headers),
             )
 
             for secondary_fmt, secondary_output in secondary_writes:

@@ -577,3 +577,98 @@ class TestADeclinedRootIsUnknownNotPrivate:
             f"of the verdict:\n{result.output}"
         )
         assert "BREAKING" in result.output
+
+
+class TestTheHeaderGraphAgreesWithDeclarationProvenance:
+    """A dependency-only root must not be ``PRIVATE_HEADER`` in the *graph*
+    either.
+
+    ``extract.public_root_ownership``'s own module docstring states the
+    contract this pins: two independent consumers -- per-declaration
+    provenance (``provenance.apply_provenance``) and header-level graph node
+    classification (``buildsource.header_graph``) -- must reach the
+    identical answer, because a transitively-included header classified one
+    way for its declarations and the other way for its own node is the
+    disagreement that widening was introduced to end.
+
+    It did not hold. ``header_graph`` called ``split_include_roots`` and
+    kept only its first result, dropping the compile-only half, so every
+    declaration reached solely through a dependency ``-I`` root became
+    ``UNKNOWN`` through ``apply_provenance`` and ``PRIVATE_HEADER`` in the
+    graph (CodeRabbit review) -- reintroducing, for graph consumers only,
+    exactly the confident demotion the P1 fix removed.
+
+    The pre-existing structural test above (``header_graph`` calls the
+    shared fold) passed throughout: calling the shared function and then
+    discarding half its answer is indistinguishable from using it, by text.
+    Only a behavioural assertion can see the difference, which is why this
+    one asserts on a built graph's node rather than on source text.
+    """
+
+    @staticmethod
+    def _graph_origin(node_label: str, **kwargs: object) -> str | None:
+        from abicheck.buildsource.header_graph import build_header_only_graph
+        from abicheck.model.snapshot import AbiSnapshot
+
+        graph = build_header_only_graph(
+            AbiSnapshot(library="lib.so", version="1"),
+            public_header_paths=["/proj/include/api.h"],
+            public_dir_paths=[],
+            header_paths=["/proj/include/api.h", node_label],
+            **kwargs,  # type: ignore[arg-type]
+        )
+        for node in graph.nodes:
+            if node.label == node_label:
+                return node.attrs.get("visibility")
+        return None
+
+    def test_a_dependency_root_header_node_is_not_private(self) -> None:
+        origin = self._graph_origin(
+            "/opt/mpi/include/mpi.h",
+            include_search_dirs=["/proj/include", "/opt/mpi/include"],
+        )
+        assert origin != ScopeOrigin.PRIVATE_HEADER.value, (
+            "a header reached only through a dependency -I root was called "
+            "PRIVATE_HEADER in the graph while apply_provenance called it "
+            "UNKNOWN; PRIVATE_HEADER licenses dropping a finding, so the "
+            "graph would act confidently on evidence that does not exist"
+        )
+        assert origin != ScopeOrigin.PUBLIC_HEADER.value, (
+            "and it must not be public either -- that is the export "
+            "obligation this whole change removes"
+        )
+
+    def test_the_two_consumers_answer_a_dependency_root_identically(self) -> None:
+        """The contract stated directly: same inputs, same answer.
+
+        Asserted as equality between the two rather than against a literal,
+        so it cannot be satisfied by both drifting together to a wrong
+        value -- the companion assertion above pins which values are
+        admissible.
+        """
+        from abicheck.provenance import (
+            build_public_set,
+            classify_origin,
+            split_include_roots,
+        )
+
+        dep = "/opt/mpi/include/mpi.h"
+        header_segs, dir_segs, have_public = build_public_set(
+            ["/proj/include/api.h"], []
+        )
+        owning, compile_only = split_include_roots(
+            header_segs, dir_segs, ["/proj/include", "/opt/mpi/include"]
+        )
+        declaration_answer = classify_origin(
+            dep,
+            header_segs,
+            owning,
+            have_public_set=have_public,
+            compile_only_dir_segs=compile_only,
+        )
+        graph_answer = self._graph_origin(
+            dep, include_search_dirs=["/proj/include", "/opt/mpi/include"]
+        )
+        # An UNKNOWN graph node carries no `visibility` attribute at all,
+        # which is that same answer in the graph's own vocabulary.
+        assert (graph_answer or ScopeOrigin.UNKNOWN.value) == declaration_answer.value

@@ -44,7 +44,17 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
             "configured differently cannot fingerprint identically."
         ),
         fixed_by=(1321,),
-        seed_tests=("tests/test_release_header_exclusions.py",),
+        seed_tests=(
+            "tests/test_release_header_exclusions.py",
+            # The identity half of the same invariant: an option that
+            # reaches every branch still fails it if two differently
+            # configured runs render one identity. Three ways that
+            # happened here -- a non-injective join over arbitrary glob
+            # text, an asymmetric pair read from one side only, and a
+            # release identity taken from the request rather than from
+            # what its members observed.
+            "tests/test_header_exclusion_primitives.py",
+        ),
         known_gaps=(
             KnownGap(
                 description=(

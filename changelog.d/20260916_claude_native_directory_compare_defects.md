@@ -60,3 +60,31 @@
   side-aware now: a removal is answered against the side that still had the
   symbol, an addition against the side that newly has it. Persistence and
   removal of an undocumented export keep their existing treatment.
+
+- **A comparison's exclusion identity can no longer collide with a different
+  one** — three separate ways two genuinely different compared surfaces
+  shared one `surface.exclude_headers` value, and so one configuration
+  digest. The patterns were joined on a comma, which is not injective over
+  arbitrary glob text (`["a", "b,c"]` and `["a,b", "c"]` both rendered
+  `glob:a,b,c`); they are now JSON-encoded. A comparison read only its
+  non-empty side, collapsing "baseline narrowed", "candidate narrowed" and
+  "both narrowed" onto one value — reachable because
+  `compare(..., diagnostic_comparison=True)` skips the comparability check
+  that otherwise refuses an asymmetric pair; both sides are now kept when
+  they differ. And a directory/package release derived its identity from the
+  rule set the command line *requested* rather than from what its member
+  comparisons *observed*, which is not the same fact for a stored snapshot
+  (never restamped with the current request); it is now read off each
+  completed member, with disagreeing members staying distinguishable.
+
+- **The header graph agrees with declaration provenance about a dependency
+  root** — `buildsource.header_graph` called the shared include-root fold
+  but kept only its first result, discarding the compile-only half, so a
+  declaration reached solely through a dependency `-I` root was `UNKNOWN`
+  through `apply_provenance` and `PRIVATE_HEADER` in the graph. That is the
+  disagreement `extract.public_root_ownership` exists to prevent, and
+  `PRIVATE_HEADER` is the confident demotion public-surface scoping acts on
+  to drop findings — so graph consumers could act on evidence the run does
+  not have. The classification context is now bound once for every consumer
+  in that module rather than threaded as four separate values, which is what
+  allowed one call site to drop one of them.

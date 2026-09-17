@@ -31,6 +31,7 @@ operation with no extraction dependency at all.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 #: The rules a run may have matched its exclusion patterns by. ``glob`` is
@@ -198,11 +199,23 @@ def canonical_exclusion_identity(
     the same set of headers under ``glob`` as under a descriptor's rules.
     Two runs that excluded the same headers share this string; two runs
     that excluded different ones cannot.
+
+    That last sentence is why the patterns are JSON-encoded rather than
+    joined on a separator. A glob pattern is arbitrary text and may contain
+    the separator: ``["a", "b,c"]`` and ``["a,b", "c"]`` both render
+    ``glob:a,b,c`` under a comma join, so two rule sets that narrow
+    genuinely different header trees would share one configuration digest
+    (CodeRabbit review; reproduced). JSON is injective over a list of
+    strings -- it quotes and escapes each element -- so the encoding cannot
+    lose the boundary between two patterns whatever they spell. ``unique``
+    is already sorted, so the encoding stays stable across runs.
     """
     unique = sorted(frozenset(p for p in patterns if p))
     if not unique:
         return ""
-    return f"{normalize_matching(matching)}:" + ",".join(unique)
+    return f"{normalize_matching(matching)}:" + json.dumps(
+        unique, ensure_ascii=False, separators=(",", ":")
+    )
 
 
 def comparison_exclusion_identity(old: AbiSnapshot | None, new: AbiSnapshot) -> str:
@@ -214,14 +227,82 @@ def comparison_exclusion_identity(old: AbiSnapshot | None, new: AbiSnapshot) -> 
     carries its own rules, and no parameter at the comparison layer would
     describe it.
 
-    One value, not two. NEW is consulted, with OLD as the fallback for a
-    declared-absent baseline, because an asymmetric pair never reaches a
-    comparison at all: ``comparability`` refuses it
-    (``extract.header_exclusions.exclusion_asymmetry_reason``), so the two
-    sides agree by construction whenever both exist.
+    One value whenever the two sides agree, which is the ordinary case:
+    ``comparability`` refuses an asymmetric pair
+    (``extract.header_exclusions.exclusion_asymmetry_reason``), so a
+    symmetric pair collapses to the single identity its one real rule set
+    deserves. So does a comparison with no baseline object at all, which
+    has no second side to be asymmetric with.
+
+    A baseline that exists and excluded nothing is **not** that case: its
+    ``()`` is a certainty, not an unknown -- no flag existed before schema
+    v47 to request an exclusion -- so ``(old=[], new=["a.h"])`` is a
+    genuinely one-sided narrowing and keeps an identity of its own,
+    distinct from the symmetric pair that narrowed both sides.
+
+    **Both sides when they differ**, because that refusal is not absolute:
+    ``checker.compare(..., diagnostic_comparison=True)`` is ADR-050 D2's
+    sanctioned escape hatch and skips ``check_contracts_comparable``
+    entirely, so an asymmetric pair does reach report generation. Reading
+    only the non-empty side there gave ``(old=["a.h"], new=[])``,
+    ``(old=[], new=["a.h"])`` and a symmetric ``["a.h"]`` pair one identity
+    (CodeRabbit review; reproduced) -- three genuinely different compared
+    surfaces sharing one configuration digest, which is the single thing
+    this identity exists to prevent.
     """
-    side = new if getattr(new, "excluded_header_patterns", ()) else old
-    return canonical_exclusion_identity(
-        getattr(side, "excluded_header_patterns", ()) or (),
-        getattr(side, "excluded_header_matching", GLOB_MATCHING) or GLOB_MATCHING,
+    old_identity = canonical_exclusion_identity(
+        getattr(old, "excluded_header_patterns", ()) or (),
+        getattr(old, "excluded_header_matching", GLOB_MATCHING) or GLOB_MATCHING,
     )
+    new_identity = canonical_exclusion_identity(
+        getattr(new, "excluded_header_patterns", ()) or (),
+        getattr(new, "excluded_header_matching", GLOB_MATCHING) or GLOB_MATCHING,
+    )
+    if old_identity == new_identity:
+        return new_identity
+    if old is None:
+        # No baseline object at all (a no-baseline comparison): there is no
+        # second side to be asymmetric with, so the candidate's own rules
+        # are the comparison's rules.
+        return new_identity
+    return f"old={old_identity}|new={new_identity}"
+
+
+def release_exclusion_identity(
+    member_identities: Sequence[str],
+    requested: str,
+) -> str:
+    """One exclusion identity for a *release* (directory/package) comparison.
+
+    Derived from what each completed member comparison actually recorded
+    (``DiffResult.excluded_header_patterns``, already canonical), not from
+    the rule set the command line requested. The two are not the same fact
+    whenever a side is a *stored* snapshot: a stored baseline carries the
+    rules it was dumped under and is never restamped with the current
+    request, so a stored-package comparison of two genuinely
+    differently-narrowed packages recorded the request's ``()`` for both
+    and handed them one configuration digest (CodeRabbit review) -- the
+    exact collision the release identity exists to prevent.
+
+    *requested* is the fallback, used only when no member completed. A run
+    that compared nothing has no observation to report, and the request is
+    then the only honest statement of what was asked for; it is never
+    preferred over an observation.
+
+    Members that agree collapse to their one shared identity, which is the
+    ordinary case (one rule set narrows every member's header tree). Members
+    that disagree keep every distinct identity, sorted, rather than electing
+    one: a release where one library was narrowed and another was not
+    compared a different surface than one where both were, and a single
+    value could not say so.
+    """
+    observed = sorted({i for i in member_identities if i})
+    if not member_identities:
+        return requested
+    if not observed:
+        # Every completed member recorded "excluded nothing" -- an
+        # observation in its own right, not an absence of one.
+        return ""
+    if len(observed) == 1:
+        return observed[0]
+    return "mixed=" + json.dumps(observed, ensure_ascii=False, separators=(",", ":"))

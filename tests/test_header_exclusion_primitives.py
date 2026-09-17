@@ -41,6 +41,7 @@ from abicheck.model.header_exclusion_record import (
     GLOB_MATCHING,
     canonical_exclusion_identity,
     comparison_exclusion_identity,
+    release_exclusion_identity,
 )
 from abicheck.workflows.header_exclusion_audit import unmatched_exclusion_warning
 
@@ -183,19 +184,31 @@ class TestComparisonExclusionIdentity:
 
     def test_both_sides_agree_is_that_value(self) -> None:
         both = _Snap(("a.h",))
-        assert comparison_exclusion_identity(both, both) == "glob:a.h"
+        assert comparison_exclusion_identity(both, both) == (
+            canonical_exclusion_identity(["a.h"])
+        )
 
     def test_neither_side_narrowed_is_empty(self) -> None:
         assert comparison_exclusion_identity(_Snap(()), _Snap(())) == ""
 
     def test_a_declared_absent_baseline_falls_back_to_new(self) -> None:
-        assert comparison_exclusion_identity(None, _Snap(("a.h",))) == "glob:a.h"
+        assert comparison_exclusion_identity(None, _Snap(("a.h",))) == (
+            canonical_exclusion_identity(["a.h"])
+        )
 
     def test_an_old_only_record_is_still_reported(self) -> None:
-        """NEW is consulted first, but a NEW that recorded nothing must not
-        erase what OLD recorded -- a stored baseline carries its own rules
-        and this run may have loaded rather than extracted the new side."""
-        assert comparison_exclusion_identity(_Snap(("a.h",)), _Snap(())) == "glob:a.h"
+        """A NEW that recorded nothing must not erase what OLD recorded --
+        a stored baseline carries its own rules and this run may have
+        loaded rather than extracted the new side.
+
+        It is reported as the *one-sided* narrowing it is, not folded onto
+        the symmetric pair's identity: under ``diagnostic_comparison`` an
+        asymmetric pair does reach report generation, and the two compared
+        different surfaces (see
+        ``TestAnAsymmetricComparisonKeepsBothSides``)."""
+        old_only = comparison_exclusion_identity(_Snap(("a.h",)), _Snap(()))
+        assert canonical_exclusion_identity(["a.h"]) in old_only
+        assert old_only != canonical_exclusion_identity(["a.h"])
 
     def test_the_recorded_matching_rule_is_carried(self) -> None:
         snap = _Snap(("a.h",), DESCRIPTOR_MATCHING)
@@ -247,3 +260,145 @@ class TestApplyHeaderExclusionsIsUnchangedWithoutPatterns:
         dependent."""
         headers = [Path("/inc/a.h"), Path("/inc/b.h")]
         assert apply_header_exclusions(headers, [pattern]) == kept
+
+
+class TestTheIdentityEncodingIsInjective:
+    """Two different rule sets can never share one identity string.
+
+    The single property the configuration digest rests on, and the one the
+    task's P0-A requirement states outright: two otherwise identical runs
+    with different exclusion rules must not share a digest. A comma join
+    did not satisfy it -- a glob pattern is arbitrary text and may itself
+    contain the separator, so ``["a", "b,c"]`` and ``["a,b", "c"]`` both
+    rendered ``glob:a,b,c`` (CodeRabbit review; reproduced) and two
+    genuinely different header trees were recorded as one configuration.
+
+    Stated over a generated domain rather than as the one reported pair,
+    per the bug-class contract: the oracle is set equality of the
+    *canonicalized* rule sets, derived independently of the encoding under
+    test.
+    """
+
+    @staticmethod
+    def _canonical(patterns: list[str]) -> frozenset[str]:
+        return frozenset(p for p in patterns if p)
+
+    def test_distinct_rule_sets_never_collide(self) -> None:
+        # Every arrangement of separator-bearing and plain patterns that a
+        # join-based encoding conflates, plus ordinary siblings as a
+        # control. Enumerated exhaustively over the small domain rather
+        # than sampled, and asserted in one batch so a failure names every
+        # colliding pair at once.
+        candidates = [
+            ["a", "b,c"],
+            ["a,b", "c"],
+            ["a,b,c"],
+            ["a", "b", "c"],
+            ['a"b'],
+            ["a\\b"],
+            ["a", "b"],
+            ["ab"],
+            ["a:b"],
+            ["glob:a"],
+            [],
+            [""],
+        ]
+        seen: dict[str, frozenset[str]] = {}
+        collisions = []
+        for patterns in candidates:
+            identity = canonical_exclusion_identity(patterns)
+            canonical = self._canonical(patterns)
+            if identity in seen and seen[identity] != canonical:
+                collisions.append((sorted(seen[identity]), sorted(canonical), identity))
+            seen.setdefault(identity, canonical)
+        assert not collisions, (
+            "these rule sets narrow different header trees but share one "
+            f"identity: {collisions}"
+        )
+
+    def test_equal_rule_sets_still_share_one_identity(self) -> None:
+        """The vacuity guard. An encoding that hashed in something unique
+        per call would satisfy the property above completely and be
+        useless; order and repetition must still collapse."""
+        assert canonical_exclusion_identity(["b,c", "a", "a"]) == (
+            canonical_exclusion_identity(["a", "b,c"])
+        )
+
+    def test_the_matching_rule_still_separates_two_readings(self) -> None:
+        assert canonical_exclusion_identity(["a.h"], "glob") != (
+            canonical_exclusion_identity(["a.h"], "abicc")
+        )
+
+
+class TestAnAsymmetricComparisonKeepsBothSides:
+    """``diagnostic_comparison=True`` lets an asymmetric pair through.
+
+    ``comparability`` refuses a pair whose two sides were narrowed
+    differently, which is why this identity was originally a single value.
+    That refusal is not absolute: ``checker.compare(...,
+    diagnostic_comparison=True)`` is ADR-050 D2's sanctioned escape hatch
+    and skips the contract check entirely, so the pair does reach report
+    generation -- where reading only the non-empty side gave three
+    genuinely different compared surfaces one identity (CodeRabbit review;
+    reproduced).
+    """
+
+    def test_the_three_asymmetric_shapes_are_all_distinct(self) -> None:
+        one_sided_old = comparison_exclusion_identity(_Snap(("a.h",)), _Snap(()))
+        one_sided_new = comparison_exclusion_identity(_Snap(()), _Snap(("a.h",)))
+        symmetric = comparison_exclusion_identity(_Snap(("a.h",)), _Snap(("a.h",)))
+        assert len({one_sided_old, one_sided_new, symmetric}) == 3, (
+            "narrowing only the baseline, only the candidate, and both "
+            "sides are three different compared surfaces: "
+            f"{one_sided_old!r} / {one_sided_new!r} / {symmetric!r}"
+        )
+
+    def test_a_symmetric_pair_keeps_its_single_value(self) -> None:
+        """The vacuity guard: always encoding both sides would satisfy the
+        property above and lose the ordinary case's stable identity."""
+        assert comparison_exclusion_identity(
+            _Snap(("a.h",)), _Snap(("a.h",))
+        ) == canonical_exclusion_identity(["a.h"])
+
+    def test_no_baseline_object_is_not_an_asymmetry(self) -> None:
+        assert comparison_exclusion_identity(None, _Snap(("a.h",))) == (
+            canonical_exclusion_identity(["a.h"])
+        )
+
+    def test_neither_side_excluded_anything(self) -> None:
+        assert comparison_exclusion_identity(_Snap(()), _Snap(())) == ""
+
+
+class TestReleaseIdentityComesFromWhatWasObserved:
+    """A release's identity is read off its members, not off the request.
+
+    A stored snapshot is never restamped with the current
+    ``--exclude-header``, so deriving the release identity from the request
+    reported "excluded nothing" for two stored packages that were in truth
+    narrowed differently, handing them one configuration digest
+    (CodeRabbit review).
+    """
+
+    def test_members_that_agree_collapse_to_their_shared_identity(self) -> None:
+        assert release_exclusion_identity(['glob:["a.h"]'] * 3, "") == 'glob:["a.h"]'
+
+    def test_members_that_disagree_stay_distinguishable(self) -> None:
+        mixed = release_exclusion_identity(['glob:["a.h"]', 'glob:["b.h"]'], "")
+        agreed = release_exclusion_identity(['glob:["a.h"]', 'glob:["a.h"]'], "")
+        other = release_exclusion_identity(['glob:["b.h"]'], "")
+        assert len({mixed, agreed, other}) == 3
+
+    def test_an_observation_is_never_overridden_by_the_request(self) -> None:
+        assert release_exclusion_identity(['glob:["a.h"]'], 'glob:["z.h"]') == (
+            'glob:["a.h"]'
+        )
+
+    def test_every_member_observed_no_exclusion(self) -> None:
+        """An observation in its own right, not an absence of one -- so the
+        request must not fill it in."""
+        assert release_exclusion_identity(["", ""], 'glob:["z.h"]') == ""
+
+    def test_the_request_is_the_fallback_only_when_nothing_completed(
+        self,
+    ) -> None:
+        assert release_exclusion_identity([], 'glob:["z.h"]') == 'glob:["z.h"]'

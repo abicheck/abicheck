@@ -24,10 +24,10 @@ review). The front end asks the question and prints the answer.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Mapping, Sequence
     from pathlib import Path
 
 
@@ -67,3 +67,29 @@ def unmatched_exclusion_warning(
         "run's exclusion configuration -- check the pattern against the "
         "header names actually under -H."
     )
+
+
+def observed_member_exclusion_identities(
+    library_results: Iterable[Mapping[str, Any]],
+) -> list[str]:
+    """Each completed member comparison's *observed* exclusion identity.
+
+    Read off the stashed ``_diff_result`` of every entry that produced one,
+    which is only possible before ``_strip_diff_results_and_adjust_verdict``
+    removes them -- hence a named function called at that point rather than
+    an expression buried in the receipt assembly further down, where the
+    evidence no longer exists.
+
+    An entry with no ``_diff_result`` contributed no observation and is
+    skipped rather than counted as "excluded nothing": a member that failed,
+    was unmatched, or was never compared did not observe an empty rule set,
+    it observed nothing at all. Collapsing those two is the same
+    absence-of-evidence-as-evidence error the surrounding change exists to
+    correct, and it would silently turn a mixed release into an agreeing
+    one.
+    """
+    return [
+        getattr(entry["_diff_result"], "excluded_header_patterns", "") or ""
+        for entry in library_results
+        if entry.get("_diff_result") is not None
+    ]

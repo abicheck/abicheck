@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -532,3 +533,67 @@ class TestTheConfigKeyReachesDumpAndCompareAlike:
             f"union with it:\n{result.output}"
         )
         assert "clash_t" in result.output
+
+
+class TestTheReleaseIdentityIsReadFromItsMembers:
+    """The release's exclusion identity states what was observed.
+
+    A stored snapshot is never restamped with the current
+    ``--exclude-header``, so deriving the release identity from the request
+    reported "excluded nothing" for two stored packages that had in truth
+    been narrowed differently -- one configuration digest for two different
+    compared surfaces (CodeRabbit review), which is the exact collision
+    this identity exists to prevent.
+    """
+
+    @staticmethod
+    def _entry(identity: str | None) -> dict[str, object]:
+        if identity is None:
+            return {"library": "x"}
+        return {
+            "library": "x",
+            "_diff_result": SimpleNamespace(excluded_header_patterns=identity),
+        }
+
+    def test_it_reads_each_completed_member(self) -> None:
+        from abicheck.workflows.header_exclusion_audit import (
+            observed_member_exclusion_identities,
+        )
+
+        entries = [self._entry('glob:["a.h"]'), self._entry('glob:["b.h"]')]
+        assert observed_member_exclusion_identities(entries) == [
+            'glob:["a.h"]',
+            'glob:["b.h"]',
+        ]
+
+    def test_a_member_that_never_compared_contributes_no_observation(self) -> None:
+        """Not an empty one. A failed, unmatched or uncompared member did
+        not observe "excluded nothing" -- counting it as such would turn a
+        mixed release into an agreeing one, which is the same
+        absence-as-evidence error in a new place."""
+        from abicheck.workflows.header_exclusion_audit import (
+            observed_member_exclusion_identities,
+        )
+
+        entries = [self._entry('glob:["a.h"]'), self._entry(None)]
+        assert observed_member_exclusion_identities(entries) == ['glob:["a.h"]']
+
+    def test_the_capture_precedes_the_strip(self) -> None:
+        """An ordering guard, because the evidence is destroyed in place.
+
+        ``_strip_diff_results_and_adjust_verdict`` removes the very
+        ``_diff_result`` the capture reads, so a capture that drifted below
+        it would silently observe nothing at all and fall back to the
+        request -- restoring the defect with every unit test still passing.
+        """
+        import inspect
+
+        from abicheck import cli_compare_release
+
+        src = inspect.getsource(cli_compare_release)
+        capture = src.index("observed_member_exclusion_identities(")
+        strip = src.index("_strip_diff_results_and_adjust_verdict(\n")
+        assert capture < strip, (
+            "the observed-member capture must run before the DiffResults "
+            "it reads are stripped"
+        )

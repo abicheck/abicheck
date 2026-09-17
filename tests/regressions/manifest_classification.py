@@ -286,10 +286,18 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         # for that population and the claim survived in the ChangeKind's
         # own `impact` text and RISK verdict, which is why prose was not
         # the fix.
-        fixed_by=(1232,),
+        fixed_by=(1232, 1321),
         seed_tests=(
             "tests/test_graph_reconcile_outcome_properties.py",
             "tests/test_graph_reconcile_coordinate_outcome.py",
+            # Same shape in provenance: an include root the run cannot
+            # place as public fell through to PRIVATE_HEADER -- the label
+            # that licenses dropping a finding -- rather than to UNKNOWN,
+            # the vocabulary's own "cannot place" outcome. Fixed once in
+            # `provenance`, then a second time in `buildsource.header_graph`,
+            # which called the shared fold and discarded the half carrying
+            # the answer.
+            "tests/test_dependency_include_root_ownership.py",
         ),
         public_surfaces=("cli",),
         axes={

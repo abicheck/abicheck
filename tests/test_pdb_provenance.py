@@ -495,7 +495,14 @@ class TestParsePdbEndToEnd:
             None,
             [Path("/build/dep/include")],
         )
-        assert out.types[0].origin != ScopeOrigin.PUBLIC_HEADER
+        # Not merely "is not PUBLIC_HEADER": PRIVATE_HEADER would also
+        # satisfy that, and it is a *confident* demotion that public-surface
+        # scoping acts on to drop findings, so accepting it here would let
+        # the safety half of this rule regress unnoticed (CodeRabbit
+        # review). UNKNOWN is the exact documented answer for a root the
+        # run cannot place -- see `extract.public_root_ownership.
+        # compile_only_roots`.
+        assert out.types[0].origin is ScopeOrigin.UNKNOWN
 
     def test_bridge_feeds_provenance_classification(self) -> None:
         # The decl_file → source_location bridge lets apply_provenance classify
