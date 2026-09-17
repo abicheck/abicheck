@@ -42,3 +42,16 @@
   projection relies on `copy.copy` carrying a whole instance without re-running
   `__init__`, and its 43 ownership tests still pass — `copy` goes through the
   slots reducer instead of `__dict__`, with the same result.
+
+  One interaction is recorded rather than left to be rediscovered: `Fact` is
+  `frozen=True`, and `frozen=True, slots=True` changes the *undeclared
+  attribute* error path. `slots=True` builds a new class object while the
+  generated frozen `__setattr__` closure still refers to the original in its
+  `super()` call, so setting an attribute no field declares raises
+  `TypeError` from CPython's own machinery rather than `AttributeError`.
+  Assignment to a real field still raises `FrozenInstanceError`,
+  `dataclasses.replace` is unaffected, and no caller catches that exception
+  type around a `Fact` -- the write is refused either way, which is the
+  property that matters. `tests/test_model_slots_memory_contract.py` asserts
+  the refusal without pinning the exception type, since that detail belongs
+  to the interpreter and varies by version.
