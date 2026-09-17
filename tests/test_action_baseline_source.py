@@ -85,31 +85,55 @@ _EXPECT = BaselineProducerExpectation(
 )
 
 
+#: Realistic git object names. The fixtures below used short symbolic
+#: strings ("C1", "TAGOBJ") and omitted the `ref` field, which no real
+#: `git/ref/tags/<name>` response ever does. That looseness mattered once
+#: `resolve_tag` started delegating to the shared peeling owner
+#: (`tag_resolution.resolve_tag_commit`), which selects the EXACT
+#: `refs/tags/<name>` entry out of an answer that may be a prefix-match
+#: array and refuses an object name that is not a full one -- neither rule
+#: is reachable by a symbolic fixture at all. The claims below are
+#: unchanged; only the documents are now shaped like the API's.
+C1 = "c1" + "0" * 38
+C2 = "c2" + "0" * 38
+TAGOBJ = "7a6" + "0" * 37
+COMMITX = "cx".replace("x", "3") + "0" * 38
+COMMITY = "c4" + "0" * 38
+
+
+def _ref(name: str, sha: str, kind: str = "commit") -> dict[str, Any]:
+    """One `git/ref/tags/<name>` entry, shaped the way the API answers."""
+    return {"ref": f"refs/tags/{name}", "object": {"sha": sha, "type": kind}}
+
+
 class TestTags:
     def test_a_lightweight_tag_resolves_to_its_commit(self) -> None:
-        resolution = resolve_tag("1.5.2", {"object": {"sha": "C1", "type": "commit"}})
+        resolution = resolve_tag("1.5.2", _ref("1.5.2", C1))
         assert (resolution.outcome, resolution.commit_sha, resolution.annotated) == (
             "tag",
-            "C1",
+            C1,
             False,
         )
 
     def test_an_annotated_tag_is_peeled(self) -> None:
         resolution = resolve_tag(
             "1.5.2",
-            {"object": {"sha": "TAGOBJ", "type": "tag"}},
-            tag_object_document={"object": {"sha": "C1", "type": "commit"}},
+            _ref("1.5.2", TAGOBJ, "tag"),
+            tag_object_document={
+                "sha": TAGOBJ,
+                "object": {"sha": C1, "type": "commit"},
+            },
         )
         assert (resolution.outcome, resolution.commit_sha, resolution.annotated) == (
             "tag",
-            "C1",
+            C1,
             True,
         )
 
     def test_an_annotated_tag_is_never_read_as_its_own_tag_object(self) -> None:
         """Using the tag-object sha as the commit compares against an object
         that is not a commit at all -- and it silently 'works'."""
-        resolution = resolve_tag("1.5.2", {"object": {"sha": "TAGOBJ", "type": "tag"}})
+        resolution = resolve_tag("1.5.2", _ref("1.5.2", TAGOBJ, "tag"))
         assert resolution.outcome == "lookup_failed"
         assert resolution.commit_sha == ""
 
@@ -121,7 +145,7 @@ class TestTags:
     ) -> None:
         """A ``v``-prefix guard excludes every release of a project that
         doesn't use one, which is most of them."""
-        assert resolve_tag(name, {"object": {"sha": "C1", "type": "commit"}}).ok
+        assert resolve_tag(name, _ref(name, C1)).ok
 
     def test_a_branch_is_not_a_tag(self) -> None:
         resolution = resolve_tag("main", None)
@@ -137,9 +161,15 @@ class TestTags:
         [
             "a string",
             {"no_object": True},
-            {"object": {"type": "commit"}},
-            {"object": "not-a-mapping"},
-            {"object": {"sha": "TAGOBJ", "type": "tag"}},
+            {"ref": "refs/tags/1.5.2", "object": {"type": "commit"}},
+            {"ref": "refs/tags/1.5.2", "object": "not-a-mapping"},
+            {"ref": "refs/tags/1.5.2", "object": {"sha": TAGOBJ, "type": "tag"}},
+            # Newly reachable now that the shared owner decides: a ref that
+            # is not the tag asked for, an answer that only prefix-matches a
+            # longer tag, and an object that is neither a commit nor a tag.
+            {"ref": "refs/heads/1.5.2", "object": {"sha": C1, "type": "commit"}},
+            [_ref("1.5.20", C1), _ref("1.5.21", C2)],
+            {"ref": "refs/tags/1.5.2", "object": {"sha": C1, "type": "tree"}},
         ],
     )
     def test_a_malformed_ref_response_never_resolves(self, document: Any) -> None:
@@ -149,27 +179,27 @@ class TestTags:
     def test_an_annotated_tag_object_naming_no_commit_is_refused(self) -> None:
         resolution = resolve_tag(
             "1.5.2",
-            {"object": {"sha": "TAGOBJ", "type": "tag"}},
-            tag_object_document={"object": {}},
+            _ref("1.5.2", TAGOBJ, "tag"),
+            tag_object_document={"sha": TAGOBJ, "object": {}},
         )
         assert resolution.outcome == "lookup_failed"
 
     def test_the_capture_must_belong_to_the_tagged_commit(self) -> None:
-        resolution = resolve_tag("1.5.2", {"object": {"sha": "C1", "type": "commit"}})
-        verify_tag_commit(resolution, "C1")
+        resolution = resolve_tag("1.5.2", _ref("1.5.2", C1))
+        verify_tag_commit(resolution, C1)
         with pytest.raises(SourceRunRejected) as excinfo:
-            verify_tag_commit(resolution, "C2")
+            verify_tag_commit(resolution, C2)
         assert excinfo.value.code == "tag-commit-mismatch"
 
     def test_a_capture_naming_no_commit_is_refused(self) -> None:
-        resolution = resolve_tag("1.5.2", {"object": {"sha": "C1", "type": "commit"}})
+        resolution = resolve_tag("1.5.2", _ref("1.5.2", C1))
         with pytest.raises(SourceRunRejected) as excinfo:
             verify_tag_commit(resolution, "")
         assert excinfo.value.code == "tag-commit-unknown"
 
     def test_a_non_tag_never_passes_the_commit_check(self) -> None:
         with pytest.raises(SourceRunRejected) as excinfo:
-            verify_tag_commit(resolve_tag("main", None), "C1")
+            verify_tag_commit(resolve_tag("main", None), C1)
         assert excinfo.value.code == "not_a_tag"
 
 
@@ -448,9 +478,9 @@ class TestVerifyBaselineSourceShell:
         stub.write_text(
             "#!/usr/bin/env bash\n"
             'case "$2" in\n'
-            '  */git/ref/tags/1.5.2) echo \'{"object":{"sha":"TAGOBJ","type":"tag"}}\'; exit 0 ;;\n'
-            '  */git/tags/TAGOBJ) echo \'{"object":{"sha":"COMMITX","type":"commit"}}\'; exit 0 ;;\n'
-            '  */git/ref/tags/light) echo \'{"object":{"sha":"COMMITY","type":"commit"}}\'; exit 0 ;;\n'
+            f'  */git/ref/tags/1.5.2) echo \'{{"ref":"refs/tags/1.5.2","object":{{"sha":"{TAGOBJ}","type":"tag"}}}}\'; exit 0 ;;\n'
+            f'  */git/tags/{TAGOBJ}) echo \'{{"sha":"{TAGOBJ}","object":{{"sha":"{COMMITX}","type":"commit"}}}}\'; exit 0 ;;\n'
+            f'  */git/ref/tags/light) echo \'{{"ref":"refs/tags/light","object":{{"sha":"{COMMITY}","type":"commit"}}}}\'; exit 0 ;;\n'
             '  */git/ref/tags/main) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;\n'
             '  */git/ref/tags/boom) echo "gh: connection reset by peer" >&2; exit 1 ;;\n'
             '  *) echo "unexpected: $*" >&2; exit 1 ;;\n'
@@ -493,22 +523,22 @@ class TestVerifyBaselineSourceShell:
 
     @pytest.mark.skipif(not _RUN_SH.is_file(), reason="run.sh not found")
     def test_an_annotated_tag_is_fetched_and_peeled(self, tmp_path: Path) -> None:
-        outputs = self._run(tmp_path, "1.5.2", "COMMITX")
+        outputs = self._run(tmp_path, "1.5.2", COMMITX)
         assert outputs["__rc__"] == "0"
         assert outputs["outcome"] == "tag"
         assert outputs["eligible"] == "true"
-        assert outputs["commit-sha"] == "COMMITX"
+        assert outputs["commit-sha"] == COMMITX
         assert outputs["annotated"] == "true"
 
     @pytest.mark.skipif(not _RUN_SH.is_file(), reason="run.sh not found")
     def test_a_lightweight_tag_needs_no_second_call(self, tmp_path: Path) -> None:
-        outputs = self._run(tmp_path, "light", "COMMITY")
+        outputs = self._run(tmp_path, "light", COMMITY)
         assert outputs["outcome"] == "tag"
         assert outputs["annotated"] == "false"
 
     @pytest.mark.skipif(not _RUN_SH.is_file(), reason="run.sh not found")
     def test_a_wrong_commit_is_ineligible_not_a_crash(self, tmp_path: Path) -> None:
-        outputs = self._run(tmp_path, "1.5.2", "SOMETHINGELSE")
+        outputs = self._run(tmp_path, "1.5.2", C2)
         assert outputs["__rc__"] == "0"
         assert outputs["outcome"] == "tag-commit-mismatch"
         assert outputs["eligible"] == "false"

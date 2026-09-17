@@ -116,6 +116,13 @@ Reusable workflow (`workflow_call`); wire it to a `release: types:
 | `depth` | `''` | Evidence depth passed to every dump call. |
 | `baseline-generation` | `''` | Forwarded to `actions/baseline`'s `baseline-generation` input, and substituted for `{generation}` in `asset-name-template` (see above). Omit to leave the generation unset. |
 | `validation` | `strict` | Forwarded to `actions/baseline`'s `validation` input. |
+| `expected-project-ref` | `''` | Existing-set mode only: what a pre-captured set's own `project_ref` must equal. `''`/`commit` resolves `release-tag` through `refs/tags/<tag>` (peeling an annotated tag) and expects that commit; `tag` expects the literal tag string, which is what *this* workflow's own capture path stamps; a full SHA expects exactly that. A closed set — anything else is a usage error, never a fallback. See [Publishing a set someone else captured](#publishing-a-set-someone-else-captured). |
+| `baseline-set-source-run-id` | `''` | Existing-set mode only: take the sets from a **different, already completed** producer run rather than from this workflow's own run. Turns on real producer verification; see below. |
+| `baseline-set-source-repository` | `github.repository` | `owner/repo` the source run must belong to. |
+| `baseline-set-source-run-attempt` | `''` | Attempt the source run must be. Bind it to the attempt that triggered publication; empty means any. |
+| `baseline-set-expect-workflow` | `''` | Workflow the source run must be, as a file path or a name. Strongly recommended. |
+| `baseline-set-expect-event` | `''` | Event the source run must have been triggered by, narrowing beyond the unconditional pull-request refusal. |
+| `baseline-set-allowed-conclusions` | `success` | Conclusions the source run may have; empty allows any. |
 | `snapshot-compression` | `none` | Forwarded to `actions/baseline`'s `snapshot-compression` input (ADR-059) — independent of this workflow's own archive packaging of the *whole* baseline-set directory (encoding chosen from `asset-name-template`'s extension, via [`actions/stage-baseline`](#actionsstage-baseline)); see [Storing Baselines](../use/baseline-storage.md#compressing-stored-snapshots). |
 
 Secret: `github-token` (optional) — falls back to the job's own
@@ -152,6 +159,59 @@ quietly stopped meaning what it said. To genuinely change a
 release-contract baseline-set, delete the existing asset explicitly
 (`gh release delete-asset <tag> <asset-name>`) and re-run, or publish under
 a new release tag.
+
+### Publishing a set someone else captured
+
+`baseline-set-artifact-prefix` publishes an **already-captured** baseline-set
+instead of capturing one. Two things then need saying that the capture path
+never has to ask, because a set this workflow did not build is an input
+rather than its own evidence.
+
+**Which revision the set must record.** A release tag and the revision a
+capture recorded are different identifiers. `release-tag` selects the
+release the asset is attached *to*; a producer's capture records the commit
+it actually built. Comparing one against the other rejected every genuine
+cross-run capture, so the expectation is stated separately by
+`expected-project-ref` — which defaults to *the commit the tag names*, read
+through `refs/tags/<tag>` and peeled when the tag is annotated. A name that
+only prefix-matches a longer tag, a `refs/heads/` ref of the same name, and
+a tag object that does not peel to a commit are each refused rather than
+resolved. Set `expected-project-ref: tag` to re-publish a set this
+workflow's own capture path produced, since that path stamps the tag string
+itself.
+
+**Where the bytes come from.** By default the sets are downloaded from this
+workflow's own run, which is the easy case: the uploading job and the
+publishing job share a run, so the artifact's provenance is the caller's
+own. A project whose release baselines are published by an automatic
+`workflow_run` job has no such luxury, and sets `baseline-set-source-run-id`
+to name the producer. That turns on real verification:
+
+* the run's repository, workflow identity, event, id, attempt and conclusion
+  are each checked against what was declared;
+* a **pull-request-triggered producer is refused unconditionally**. ADR-047
+  §12 forbids a baseline-publishing workflow from triggering on a pull
+  request; a capture taken from one reaches the same immutable channel by a
+  longer route, so the restriction holds for the producer too and is not
+  configurable;
+* artifacts are selected by their own **ids**, and the publication fetches
+  those ids. An artifact can be added to a run between discovery and
+  publication, so a name-resolved fetch could publish bytes no eligibility
+  check ever looked at;
+* a declared attempt reads *that attempt's* own document, so a re-run started
+  after the trigger cannot be published under the first attempt's decision;
+* the archives are unpacked under the same size/entry/ratio caps
+  `actions/verify-source-run` applies, because a set from another run is an
+  input whatever its origin turned out to be.
+
+The read-only producer query lives in the discovery job (`actions: read`, no
+write scope at all) and the write-capable publication in the publishing job,
+which only fetches an id it was handed. Both acquisition modes then converge
+on the same member/schema/path/profile/generation/content validation and the
+same immutability chain described above — there is one validator, not two.
+
+The token needs `actions: read` on `baseline-set-source-repository` in
+addition to `contents: write` on the publishing repository.
 
 ### `actions/stage-baseline`
 

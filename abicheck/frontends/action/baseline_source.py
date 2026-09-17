@@ -59,6 +59,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .run_selection import SourceRun, SourceRunRejected, verify_source_run
+from .tag_resolution import TagResolutionError, resolve_tag_commit
 
 __all__ = [
     "BaselineProducerExpectation",
@@ -87,6 +88,12 @@ class TagResolution:
     commit_sha: str = ""
     #: ``True`` when peeling was needed, purely so a caller can say so.
     annotated: bool = False
+    #: The shared resolver's own, more specific code for a refusal -- e.g.
+    #: ``tag-object-missing`` or ``tag-not-a-commit``. Empty on success and
+    #: for the two outcomes this module decides itself. Kept alongside
+    #: ``outcome`` rather than folded into it because callers branch on the
+    #: coarse vocabulary and a report reader wants the precise reason.
+    refusal_code: str = ""
     message: str = ""
 
     @property
@@ -112,6 +119,17 @@ def resolve_tag(
     than 404'd. It is a separate parameter rather than something inferred from
     a missing document precisely because the two are indistinguishable at the
     shell level unless the caller keeps them apart deliberately.
+
+    The peeling itself belongs to
+    :func:`~abicheck.frontends.action.tag_resolution.resolve_tag_commit` and
+    is not restated here. Two modules that each decide which commit a tag
+    names will eventually decide differently, and this one used to be the
+    looser of the two: it accepted an object of *any* non-``tag`` type as the
+    commit, so a ref pointing at a tree resolved as a perfectly good release
+    baseline. What this function adds is its own outcome vocabulary
+    (``tag``/``not_a_tag``/``lookup_failed``), which its callers branch on;
+    the shared owner's more specific refusal code travels alongside it on
+    :attr:`TagResolution.refusal_code` rather than replacing it.
     """
     if lookup_failed:
         return TagResolution(
@@ -132,55 +150,32 @@ def resolve_tag(
                 "them may publish a release-contract baseline."
             ),
         )
-    if not isinstance(ref_document, Mapping):
+    try:
+        resolved = resolve_tag_commit(
+            name, ref_document, tag_object=tag_object_document
+        )
+    except TagResolutionError as exc:
+        # `tag-not-found` is the one refusal that means "this name is not a
+        # tag" rather than "the answer could not be read". Everything else --
+        # an unreadable document, an unpeeled annotated tag, a ref pointing
+        # at a tree -- is an operational failure, and specifically NOT a
+        # missing baseline, for the reason this module's docstring gives.
         return TagResolution(
-            outcome="lookup_failed",
+            outcome="not_a_tag" if exc.code == "tag-not-found" else "lookup_failed",
             name=name,
-            message="the git-ref response is not a JSON object",
-        )
-    obj = ref_document.get("object")
-    if not isinstance(obj, Mapping):
-        return TagResolution(
-            outcome="lookup_failed",
-            name=name,
-            message="the git-ref response carries no object block",
-        )
-    sha = str(obj.get("sha", "") or "")
-    kind = str(obj.get("type", "") or "")
-    if not sha:
-        return TagResolution(
-            outcome="lookup_failed", name=name, message="the git ref names no sha"
-        )
-    if kind != "tag":
-        # A lightweight tag points straight at the commit.
-        return TagResolution(
-            outcome="tag", name=name, commit_sha=sha, message=f"{name} -> {sha}"
-        )
-    if not isinstance(tag_object_document, Mapping):
-        return TagResolution(
-            outcome="lookup_failed",
-            name=name,
-            message=(
-                f"{name!r} is an annotated tag, whose ref points at a tag object "
-                f"({sha}) rather than a commit. Fetch git/tags/{sha} and pass it "
-                "as tag_object_document -- treating the tag-object sha as the "
-                "commit would compare against an object that is not a commit at all."
-            ),
-        )
-    peeled = tag_object_document.get("object")
-    peeled_sha = str(peeled.get("sha", "") or "") if isinstance(peeled, Mapping) else ""
-    if not peeled_sha:
-        return TagResolution(
-            outcome="lookup_failed",
-            name=name,
-            message=f"the tag object {sha} names no target commit",
+            refusal_code=exc.code,
+            message=exc.message,
         )
     return TagResolution(
         outcome="tag",
         name=name,
-        commit_sha=peeled_sha,
-        annotated=True,
-        message=f"{name} -> (annotated {sha}) -> {peeled_sha}",
+        commit_sha=resolved.commit_sha,
+        annotated=resolved.annotated,
+        message=(
+            f"{name} -> (annotated) -> {resolved.commit_sha}"
+            if resolved.annotated
+            else f"{name} -> {resolved.commit_sha}"
+        ),
     )
 
 

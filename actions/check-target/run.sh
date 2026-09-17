@@ -171,7 +171,7 @@ elif [[ "$MODE" == "bootstrap" ]]; then
 elif [[ "$MODE" == "new-target" ]]; then
   ENVELOPE_ARGS+=(--resolve-message "${RESOLVE_MESSAGE:-target not found in this baseline-set yet.}")
 else
-  ENVELOPE_ARGS+=("${RESOLVE_ARGS[@]}")
+  ENVELOPE_ARGS+=(${RESOLVE_ARGS[@]+"${RESOLVE_ARGS[@]}"})
 fi
 
 echo "::group::Write check-target report envelope (mode: $MODE)"

@@ -31,6 +31,18 @@ _fail() {
   exit 1
 }
 
+# `_fail` with a machine-readable code. Every refusal a consumer may branch
+# on carries one -- a bare `_fail` leaves `refusal-code` EMPTY, which is
+# indistinguishable from "some other failure" and forces a caller to match
+# on English prose. The codes are documented in
+# `docs/reference/verify-source-run.md`'s refusal-code table, and
+# `tests/test_verify_source_run_input_validation.py` asserts the script and
+# that table name the same set, so neither can gain an entry the other lacks.
+_fail_with_code() {
+  _out "refusal-code" "$1"
+  _fail "$2"
+}
+
 _out() {
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     printf '%s=%s\n' "$1" "$2" >> "$GITHUB_OUTPUT"
@@ -60,6 +72,69 @@ if [[ -n "$TESTED_SHA" && ! "$TESTED_SHA" =~ ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
   _fail "'tested-sha' must be a full 40- or 64-character commit SHA (got '$TESTED_SHA'); an abbreviated SHA cannot be verified against the pull request."
 fi
 
+# A relative member of the extracted artifact, never a path this step
+# joins itself: the whole point is that the provenance comes out of the
+# artifact the run already produced. Rejected here rather than in Python so
+# a typo reads as this Action's input error.
+PROVENANCE_FROM="${INPUT_PROVENANCE_FROM:-}"
+REPORT_FROM="${INPUT_REPORT_FROM:-}"
+
+# Both name a member INSIDE the extracted artifact, and both are then
+# concatenated onto $DESTINATION. A `..` component, a leading `/`, or a
+# backslash would name something outside the extraction the bounded
+# extractor just staged -- the one place a member name may not be allowed
+# to reach. Refused rather than normalized: a workflow author who wrote one
+# meant something, and quietly resolving it elsewhere is how the caller
+# ends up reading a file nobody checked.
+_require_member_name() {
+  local label="$1" value="$2"
+  [[ -n "$value" ]] || return 0
+  case "$value" in
+    /*|*'\'*) _fail_with_code "member-name-unsafe" "'$label' must be a path inside the artifact, not '$value'." ;;
+  esac
+  # A control character (a newline above all) would reach `$GITHUB_OUTPUT`,
+  # where one forges every other output of this step.
+  if [[ "$value" =~ [[:cntrl:]] ]]; then
+    _fail_with_code "member-name-unsafe" "'$label' must not contain a control character."
+  fi
+  local component
+  while IFS= read -r component; do
+    # An `if`, not a trailing `&&`: a `[[ ]] && _fail` as the loop's last
+    # statement makes the LOOP's status that of the final (false) test, so
+    # the function returns non-zero for every *valid* name -- refusing the
+    # ordinary case while still accepting nothing extra. Caught by the
+    # accept-half of this guard's own tests, which is why they exist.
+    if [[ "$component" == ".." || "$component" == "." ]]; then
+      _fail_with_code "member-name-unsafe" "'$label' must not contain a '$component' component (got '$value')."
+    fi
+  done < <(printf '%s\n' "${value//\//$'\n'}")
+  return 0
+}
+_require_member_name "provenance-from" "$PROVENANCE_FROM"
+_require_member_name "report-from" "$REPORT_FROM"
+
+# `report-path` and `tested-sha` are documented as naming the SAME document:
+# the whole point of returning them together is that the report a caller
+# renders is the one whose context was checked. Two independent member names
+# quietly break that -- the context is read from one member and the report
+# published from another, and nothing says the second was ever looked at.
+# The analysis context lives inside the aggregate document itself, so in
+# every supported shape these are the same member; a caller who wrote two
+# different ones meant something this Action cannot honour.
+if [[ -n "$PROVENANCE_FROM" && -n "$REPORT_FROM" && "$PROVENANCE_FROM" != "$REPORT_FROM" ]]; then
+  _fail_with_code "member-name-mismatch" "'provenance-from' ($PROVENANCE_FROM) and 'report-from' ($REPORT_FROM) must name the same document -- 'tested-sha' and 'report-path' are returned together as one verified identity, which they cannot be if the context was read from a different member than the report."
+fi
+
+# Exactly `true` or `false`. Treating every other spelling as `false` means
+# a typo (`ture`, `True`, an unset-but-intended expression expanding empty)
+# silently DISABLES the requirement -- the one direction a misreading must
+# never take, since the whole point of the flag is to refuse a run whose
+# provenance is missing.
+REQUIRE_PROVENANCE="${INPUT_REQUIRE_PROVENANCE:-true}"
+case "$REQUIRE_PROVENANCE" in
+  true|false) ;;
+  *) _fail_with_code "require-provenance-invalid" "'require-provenance' must be exactly 'true' or 'false' (got '$REQUIRE_PROVENANCE')." ;;
+esac
 CLAIMED_PR="${INPUT_CLAIMED_PR_NUMBER:-}"
 if [[ -n "$CLAIMED_PR" && ! "$CLAIMED_PR" =~ ^[0-9]+$ ]]; then
   _fail "'claimed-pr-number' must be a positive integer (got '$CLAIMED_PR')."
@@ -202,10 +277,106 @@ if ! python -m abicheck.frontends.action.cli extract-artifact \
   _fail "refused the artifact from run $RUN_ID."
 fi
 
+# ── the analysed commit, read out of the artifact just extracted ─────────
+#
+# This is the single-pass half of ADR-073's provenance flow. The commit a
+# `pull_request` producer actually built is an ephemeral merge commit that
+# no API endpoint names, so the producer records it in the aggregate
+# document's `analysis_context` block; it only becomes readable *after* the
+# artifact is extracted, which is why it is read here rather than passed in
+# as `tested-sha`.
+#
+# The previous shape of this -- a caller running the whole Action once to
+# get the artifact, parsing a sidecar file in its own privileged shell, then
+# running the Action a second time with `tested-sha` set -- downloaded the
+# same bytes twice with no guarantee the second copy was the first, and put
+# artifact parsing in the trusted job. Both are closed by doing it here: one
+# download, and every field shape-checked by an importable owner before it
+# can reach a step output.
+# Three distinguishable states, not two. An explicit `tested-sha` input was
+# verified above against the very same rules, but reporting it as `run-head`
+# tells a caller the Action fell back to the run's own head commit -- which
+# is exactly the claim that must stay separable from "a caller stated this".
+if [[ -n "$TESTED_SHA" ]]; then
+  TESTED_SHA_SOURCE="input"
+else
+  TESTED_SHA_SOURCE="run-head"
+fi
+PROVENANCE_STATE="not-requested"
+if [[ -n "$PROVENANCE_FROM" ]]; then
+  PROVENANCE_STATE="absent"
+  REQUIRE_FLAG="--require"
+  if [[ "$REQUIRE_PROVENANCE" == "false" ]]; then
+    REQUIRE_FLAG="--no-require"
+  fi
+  if ! python -m abicheck.frontends.action.cli read-analysis-context \
+      "$DESTINATION/$PROVENANCE_FROM" --out "$WORK/context.json" \
+      --max-bytes "${INPUT_MAX_ENTRY_BYTES:-33554432}" "$REQUIRE_FLAG"; then
+    CODE="$(python -m abicheck.frontends.action.cli emit-fields --tolerant "$WORK/context.json" code || true)"
+    _out "refusal-code" "${CODE:-analysis-context-unreadable}"
+    _fail "the producer's analysis context could not be read (${CODE:-unknown})."
+  fi
+  {
+    read -r CTX_PRESENT
+    read -r CTX_RECORDS
+    read -r CTX_TESTED_SHA
+  } < <(python -m abicheck.frontends.action.cli emit-fields --tolerant \
+          "$WORK/context.json" present records_tested_sha tested_sha)
+
+  if [[ "$CTX_PRESENT" == "true" && "$CTX_RECORDS" == "true" ]]; then
+    PROVENANCE_STATE="recorded"
+    # Already shape-validated by the owner above; re-asserted here because
+    # this value is about to be interpolated into a URL.
+    [[ "$CTX_TESTED_SHA" =~ ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$ ]] \
+      || _fail "the recorded analysed commit is not a full SHA."
+    COMMIT_ARGS=()
+    if [[ "$CTX_TESTED_SHA" != "$RUN_HEAD_SHA" ]]; then
+      gh api "repos/$REPOSITORY/commits/$CTX_TESTED_SHA" > "$COMMIT_JSON" 2>"$WORK/commit.err" \
+        || _fail "could not read the analysed commit $CTX_TESTED_SHA: $(tr '\n' ' ' < "$WORK/commit.err")"
+      COMMIT_ARGS+=(--tested-commit-json "$COMMIT_JSON")
+    fi
+    # The run and the pull request come from the FIRST pass's own result, so
+    # the identity checked here is the identity verified there.
+    if ! python -m abicheck.frontends.action.cli verify-tested-sha \
+        --run-json "$RUN_JSON" --result-json "$RESULT_JSON" \
+        --tested-sha "$CTX_TESTED_SHA" \
+        ${COMMIT_ARGS[@]+"${COMMIT_ARGS[@]}"} \
+        --out "$WORK/tested.json"; then
+      CODE="$(python -m abicheck.frontends.action.cli emit-fields --tolerant "$WORK/tested.json" code || true)"
+      _out "refusal-code" "$CODE"
+      _fail "the producer's analysed commit does not belong to this pull request (${CODE:-unknown})."
+    fi
+    VERIFIED_TESTED_SHA="$(python -m abicheck.frontends.action.cli emit-fields "$WORK/tested.json" tested_sha)"
+    TESTED_SHA_SOURCE="analysis-context"
+  fi
+fi
+
+# ── the report location, returned WITH the identity it was checked under ──
+#
+# Returned together, so the document a caller renders is the one whose
+# context was verified -- not a path the caller reassembled from
+# `artifact-path` and a filename, which can name a member that was never
+# checked. A verified run whose report is missing gets an explicit
+# unavailable-analysis answer rather than a path that does not resolve.
+REPORT_PATH=""
+REPORT_AVAILABLE="false"
+if [[ -n "$REPORT_FROM" ]]; then
+  if [[ -s "$DESTINATION/$REPORT_FROM" ]]; then
+    REPORT_PATH="$DESTINATION/$REPORT_FROM"
+    REPORT_AVAILABLE="true"
+  else
+    echo "::notice::the verified run produced no $REPORT_FROM; the analysis is unavailable, which is not a clean compatibility result."
+  fi
+fi
+
 _out "verified" "true"
 _out "pr-number" "$PR_NUMBER"
 _out "pr-head-sha" "$PR_HEAD_SHA"
 _out "tested-sha" "$VERIFIED_TESTED_SHA"
+_out "tested-sha-source" "$TESTED_SHA_SOURCE"
+_out "provenance" "$PROVENANCE_STATE"
+_out "report-path" "$REPORT_PATH"
+_out "report-available" "$REPORT_AVAILABLE"
 # `${:-false}` so a result document that resolved no pull request still
 # publishes a boolean here, which is what this output promised before the
 # field emitter started answering "no value" for an absent key.

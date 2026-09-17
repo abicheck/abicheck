@@ -55,7 +55,12 @@ _JSON_REPORT_SRC_END_MARKER = "\n}\n"
 _FUNCS_START_MARKER = "_can_reuse_primary_json() {"
 _FUNCS_END_MARKER = "_maybe_post_pr_comment() {"
 _FRAGMENT_START_MARKER = 'echo "::group::abicheck PR comment"'
-_FRAGMENT_END_MARKER = '"${PR_CMD_JSON[@]}" >/dev/null 2>/dev/null || true\n  fi'
+_FRAGMENT_END_MARKER = (
+    # `${arr[@]+"${arr[@]}"}`, not a bare `"${arr[@]}"`: macOS's bash 3.2
+    # under `set -u` treats the bare form on an EMPTY array as an unbound
+    # reference. See `tests/test_shell_empty_array_expansion.py`.
+    '${PR_CMD_JSON[@]+"${PR_CMD_JSON[@]}"} >/dev/null 2>/dev/null || true\n  fi'
+)
 
 
 def _json_report_src_region() -> str:

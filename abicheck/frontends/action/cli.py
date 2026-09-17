@@ -504,7 +504,10 @@ def flatten_pages_cmd(raw: Path, out: Path) -> None:
 # decorates `action_cli` at import time. Kept at the foot of the file, after
 # the group and the shared helpers it uses are defined, the same way
 # `abicheck/cli.py` registers its own `cli_*` siblings.
-from . import cli_integration as _cli_integration  # noqa: E402,F401
+from . import (  # noqa: E402
+    cli_integration as _cli_integration,  # noqa: F401
+    cli_provenance as _cli_provenance,  # noqa: F401
+)
 
 if __name__ == "__main__":  # pragma: no cover - exercised via subprocess
     # Safe to call the group directly: it is `cli_base`'s single object, so

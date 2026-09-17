@@ -23,12 +23,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from abicheck.model.analysis_context import ANALYSIS_CONTEXT_KEY, AnalysisContext
 from abicheck.workflows.aggregate.fold import AggregateResult
 
 from .disposition_audit import DispositionAudit, fold_disposition_audits
 
 
-def render_aggregate_json(result: AggregateResult) -> dict[str, Any]:
+def render_aggregate_json(
+    result: AggregateResult,
+    *,
+    analysis_context: AnalysisContext | None = None,
+) -> dict[str, Any]:
     """Project *result* to the stable JSON-compatible aggregate document.
 
     Adds the top-level ``disposition_audit`` block (ADR-067 C-S2): the same
@@ -37,8 +42,19 @@ def render_aggregate_json(result: AggregateResult) -> dict[str, Any]:
     block (``fold.AggregateResult.disposition_audit_targets`` -- exposed
     rather than folded there, since ``workflows/`` may not import
     ``report/``, and this function is where the two are allowed to meet).
+
+    *analysis_context*, when a producer recorded one, is emitted as the
+    top-level ``analysis_context`` block: which revision this run actually
+    built and analysed, and which run produced it. It is carried here rather
+    than in a sidecar file precisely so a trusted publisher reads the report
+    and the identity it must be verified against out of **one** artifact, in
+    one pass (ADR-073). Omitted entirely when absent -- "the producer did not
+    record what it analysed" is a state a consumer must be able to see, and
+    an empty block would read as "it analysed nothing in particular".
     """
     d = result.to_dict()
+    if analysis_context is not None:
+        d[ANALYSIS_CONTEXT_KEY] = analysis_context.to_dict()
     audits = (
         DispositionAudit.from_dict(t.disposition_audit)
         for t in result.disposition_audit_targets

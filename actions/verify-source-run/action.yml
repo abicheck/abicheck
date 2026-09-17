@@ -58,6 +58,51 @@ inputs:
       API. Empty means "the run's own head SHA".
     required: false
     default: ''
+  provenance-from:
+    description: >
+      Read the commit the producer actually analysed out of THIS artifact,
+      at this relative path inside it -- normally `aggregate.json`, whose
+      `analysis_context` block `actions/aggregate` records when its caller
+      asks it to.
+
+      On a `pull_request` run the producer builds an ephemeral merge commit
+      that no GitHub API endpoint names, so only the producer can say what
+      was analysed. Setting this replaces the two-pass sequence a caller
+      otherwise has to write -- run this Action once for the artifact, parse
+      a sidecar in privileged shell, run it again with `tested-sha` -- which
+      downloads the same bytes twice, with no guarantee the second copy is
+      the first, and puts artifact parsing in the trusted job.
+
+      The block is read through the same bounded reader as any other member
+      and every field is shape-checked before it reaches a step output. It
+      is still a CLAIM: its association with the pull request is verified
+      through the API exactly as a `tested-sha` input would be.
+
+      Mutually exclusive with `tested-sha` in practice; `tested-sha` stays
+      for a caller that already holds a verified value.
+    required: false
+    default: ''
+  require-provenance:
+    description: >
+      With `provenance-from` set, what an artifact that records no analysis
+      context means. 'true' (default) refuses: the identity is unestablished
+      and a publisher must not substitute the PR head, which names a tree the
+      analysis never saw. 'false' falls back to the run's own head SHA and
+      says so on `tested-sha-source`, for a caller whose producers have not
+      all been updated yet.
+    required: false
+    default: 'true'
+  report-from:
+    description: >
+      The report this publication is about, at this relative path inside the
+      artifact -- normally `aggregate.json`. Returned on `report-path`
+      together with the verified identity, so the document a caller renders
+      is the one whose context was checked rather than a path the caller
+      reassembled from `artifact-path`. A verified run that produced no such
+      member sets `report-available` to 'false', which is an explicit
+      unavailable-analysis answer, not a clean result.
+    required: false
+    default: ''
   claimed-pr-number:
     description: >
       A PR number the artifact states, if any. It is only ever
@@ -115,6 +160,33 @@ outputs:
       The commit that was actually analysed, verified as the PR head or a
       merge of it. Display this, not the PR head, when they differ.
     value: ${{ steps.verify.outputs.tested-sha }}
+  tested-sha-source:
+    description: >
+      Where `tested-sha` came from: 'analysis-context' when the producer
+      recorded it and the API confirmed the association, 'input' when the
+      caller stated it on `tested-sha` and it was verified against this
+      pull request, 'run-head' when neither applied and the value is the
+      producer run's own head commit. A publisher that must never display
+      an unestablished identity branches on this rather than on whether the
+      value is empty -- and 'input' stays distinct from 'run-head' because
+      a caller-stated commit is not the fallback it would otherwise read as.
+    value: ${{ steps.verify.outputs.tested-sha-source }}
+  provenance:
+    description: >
+      'recorded' | 'absent' | 'not-requested'. Distinguishes "the producer
+      said what it analysed" from "it did not" from "we never asked", which
+      the tested-sha value alone cannot.
+    value: ${{ steps.verify.outputs.provenance }}
+  report-path:
+    description: >
+      The verified report named by `report-from`, or empty. Returned with
+      the identity above so the two cannot disagree.
+    value: ${{ steps.verify.outputs.report-path }}
+  report-available:
+    description: >
+      "'false' when the verified run produced no `report-from` member -- an
+      unavailable analysis, which is not a clean compatibility result."
+    value: ${{ steps.verify.outputs.report-available }}
   from-fork:
     description: "'true' when the pull request head is in a different repository."
     value: ${{ steps.verify.outputs.from-fork }}
@@ -162,6 +234,9 @@ runs:
         INPUT_ALLOWED_CONCLUSIONS: ${{ inputs.allowed-conclusions }}
         INPUT_ARTIFACT_NAME: ${{ inputs.artifact-name }}
         INPUT_TESTED_SHA: ${{ inputs.tested-sha }}
+        INPUT_PROVENANCE_FROM: ${{ inputs.provenance-from }}
+        INPUT_REQUIRE_PROVENANCE: ${{ inputs.require-provenance }}
+        INPUT_REPORT_FROM: ${{ inputs.report-from }}
         INPUT_CLAIMED_PR_NUMBER: ${{ inputs.claimed-pr-number }}
         INPUT_DESTINATION: ${{ inputs.destination }}
         INPUT_MAX_TOTAL_BYTES: ${{ inputs.max-total-bytes }}

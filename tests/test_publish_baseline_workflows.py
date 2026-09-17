@@ -292,16 +292,48 @@ class TestNoProfilesGuard:
 
 
 class TestPublishBaselinePermissions:
+    """Write capability is confined to the one job that publishes an asset.
+
+    Stated as "no scope in any other job is writable" rather than as an
+    exact permissions dict. The exact-dict form pinned the wrong thing: it
+    failed for `actions: read`, which is not elevated at all, while a job
+    that quietly gained `packages: write` next to `contents: write` would
+    have satisfied a per-key spot check. The claim that matters is the
+    separation, so that is what is asserted.
+    """
+
+    #: Everything GitHub grants that can change something. `read` and
+    #: `none` are the only other values a scope can take.
+    WRITE_VALUES = {"write", "admin"}
+
+    def _permissions(self, job: str) -> dict[str, str]:
+        return dict(_load(PUBLISH_BASELINE)["jobs"][job].get("permissions", {}))
+
     def test_publish_job_declares_contents_write(self) -> None:
+        assert self._permissions("publish").get("contents") == "write"
+
+    def test_the_publish_job_is_the_only_writer(self) -> None:
         data = _load(PUBLISH_BASELINE)
-        assert data["jobs"]["publish"]["permissions"] == {"contents": "write"}
+        for name, job in data["jobs"].items():
+            if name == "publish":
+                continue
+            granted = dict(job.get("permissions", {}))
+            writable = {k: v for k, v in granted.items() if v in self.WRITE_VALUES}
+            assert not writable, f"job {name!r} grants {writable}"
 
     def test_discover_job_declares_no_elevated_permissions(self) -> None:
-        # The profile-discovery job only downloads artifacts -- it must not
-        # carry contents: write, keeping the elevated scope confined to the
-        # one job that actually publishes a release asset.
-        data = _load(PUBLISH_BASELINE)
-        assert "permissions" not in data["jobs"]["discover"]
+        # The profile-discovery job reads artifacts and, in cross-run mode,
+        # queries a producer run. Neither needs to change anything: the
+        # read-only establishment of where a capture came from must not be
+        # able to write the release asset it is establishing for.
+        granted = self._permissions("discover")
+        assert not {k: v for k, v in granted.items() if v in self.WRITE_VALUES}
+
+    def test_the_writable_scan_can_actually_fire(self) -> None:
+        # Vacuity guard: `publish` itself must be caught by the same rule
+        # the loop above applies to everybody else.
+        granted = self._permissions("publish")
+        assert {k: v for k, v in granted.items() if v in self.WRITE_VALUES}
 
 
 class TestAcceptedMainCacheKeyRotation:

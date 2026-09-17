@@ -86,7 +86,7 @@ jobs:
           if [ -n "${ONLY_INPUT:-}" ]; then
             ONLY=(--only "$ONLY_INPUT")
           fi
-          python eval/runner.py --tier binary --fail-on-drift "${ONLY[@]}"
+          python eval/runner.py --tier binary --fail-on-drift ${ONLY[@]+"${ONLY[@]}"}
 
       - name: Upload eval results
         if: always()
@@ -156,7 +156,7 @@ jobs:
           # failure is still recorded as a per-row error and does not fail
           # this step, matching this job's own "exploratory per library"
           # design (see eval/runner.py's source_tier_broken() docstring).
-          python eval/runner.py --tier source --fail-on-empty-source "${ONLY[@]}"
+          python eval/runner.py --tier source --fail-on-empty-source ${ONLY[@]+"${ONLY[@]}"}
 
       - name: Write coverage to job summary
         if: always()

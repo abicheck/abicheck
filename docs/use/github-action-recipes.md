@@ -602,10 +602,14 @@ Block PRs that accidentally add new public symbols or types:
           new-library: build/libfoo.so
           new-header: include/foo.h
           fail-on-breaking: true
-          severity-addition: error   # exit code 1 if any new public API appears
+          severity-preset: strict    # exit code 1 if any new public API appears
 ```
 
-When `severity-addition: error`:
+`severity-preset: strict` raises the `addition` category to `error`. A
+per-category override is not an Action input — put it in `.abicheck.yml`'s
+`severity:` block (see [Severity](severity.md)).
+
+Under that preset:
 - Exit code `1` → new public symbol/type added (`verdict: SEVERITY_ERROR`)
 - Exit code `0` → no additions, no breaks (`verdict: COMPATIBLE`)
 - Exit code `4` → binary ABI break (`verdict: BREAKING`)

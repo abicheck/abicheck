@@ -50,15 +50,15 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
+from _workflow_files import read_repo_text
 
 _ACTIONS = Path(__file__).resolve().parents[1] / "actions"
 
-#: Shells this change introduces. Deliberately not the whole tree: the other
-#: action shells carry ~22 pre-existing bare expansions whose arrays are
-#: non-empty in practice, and sweeping them into a baseline here would widen
-#: this change well past the failure it fixes. The detector below is written
-#: to take any path, so making it repo-wide later is a scoping decision, not
-#: a rewrite.
+#: The two shells whose failure created this module. Kept as a named,
+#: unconditional pair alongside the repo-wide sweep below: they are the
+#: regression this file was written for, and a scoping change to the sweep
+#: must not be able to stop covering them.
 _COVERED = (
     _ACTIONS / "aggregate" / "run.sh",
     _ACTIONS / "verify-baseline-source" / "run.sh",
@@ -120,7 +120,7 @@ class TestDetector:
 class TestCoveredShells:
     @pytest.mark.parametrize("script", _COVERED, ids=lambda p: p.parent.name)
     def test_no_unguarded_expansion(self, script: Path) -> None:
-        findings = unguarded_expansions(script.read_text(encoding="utf-8"))
+        findings = unguarded_expansions(read_repo_text(script))
         assert not findings, (
             f"{script} expands a possibly-empty array without the "
             f'${{arr[@]+"${{arr[@]}}"}} guard at: '
@@ -141,5 +141,254 @@ class TestCoveredShells:
         the gate above pass, which would not mean the contract is held.
         """
         for script in _COVERED:
-            text = script.read_text(encoding="utf-8")
+            text = read_repo_text(script)
             assert re.search(r'\$\{[A-Za-z_][A-Za-z0-9_]*\[@\]\+"', text), script
+
+
+# ── the repo-wide half ───────────────────────────────────────────────────
+#
+# The pair above is the regression; this is the class. The note at the top
+# of this module said making the detector repo-wide was "a scoping decision,
+# not a rewrite" -- and the decision was made the next time the same bug
+# shipped, in `publish-baseline.yml`'s tag-resolution step, where the empty
+# case is a *lightweight* tag, i.e. the ordinary one.
+#
+# Two things differ from the pair above, and both narrow rather than widen.
+# The rule applies only to an array *declared empty* (`name=()`), which is
+# exactly the set that can reach an expansion with no elements -- so the ~22
+# pre-existing bare expansions the note mentions are out of scope by
+# construction, with no baseline to curate. And it covers workflow and
+# composite-action `run:` blocks too, since that is where it shipped.
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+#: `name=()` — an array that starts with no elements.
+_DECLARED_EMPTY = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=\(\s*\)\s*$", re.M)
+
+#: `${name[@]}` in any form, with the offset of the match.
+_EXPANSION = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\[@\]")
+
+#: The one safe spelling: `${name[@]+"${name[@]}"}`.
+_GUARDED = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\[@\]\+"\$\{\1\[@\]\}"\}')
+
+
+def _shell_sources() -> list[tuple[str, str]]:
+    """``(label, script)`` for every first-party shell body in the repo.
+
+    Three shapes carry shell here and all three have hit this trap: a
+    standalone ``.sh``, a workflow step's ``run:``, and a composite Action
+    step's ``run:``.
+    """
+    sources: list[tuple[str, str]] = []
+
+    for script in sorted(REPO_ROOT.glob("actions/*/*.sh")) + sorted(
+        REPO_ROOT.glob("action/*.sh")
+    ):
+        sources.append((str(script.relative_to(REPO_ROOT)), read_repo_text(script)))
+
+    documents = sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")) + sorted(
+        REPO_ROOT.glob("actions/*/action.yml")
+    )
+    documents += [REPO_ROOT / "action.yml"]
+    for path in documents:
+        if not path.is_file():
+            continue
+        try:
+            parsed = yaml.safe_load(read_repo_text(path))
+        except yaml.YAMLError:  # pragma: no cover - a parse failure is its own test
+            continue
+        label = str(path.relative_to(REPO_ROOT))
+        for index, body in enumerate(_run_blocks(parsed)):
+            sources.append((f"{label}#run[{index}]", body))
+    return sources
+
+
+def _run_blocks(node: object) -> list[str]:
+    """Every ``run:`` string anywhere in a parsed workflow or action."""
+    found: list[str] = []
+    if isinstance(node, dict):
+        run = node.get("run")
+        if isinstance(run, str):
+            found.append(run)
+        for value in node.values():
+            found.extend(_run_blocks(value))
+    elif isinstance(node, list):
+        for item in node:
+            found.extend(_run_blocks(item))
+    return found
+
+
+def _strip_comments(script: str) -> str:
+    """Blank out `#` comment bodies, keeping every byte offset intact.
+
+    A comment is prose, not shell: this module's own guard comment quotes
+    the unsafe spelling in order to explain it, and the first version of
+    this scan dutifully reported that sentence as a violation. Same trap
+    `AGENTS.md` records for the `performance.yml` assertion, and the same
+    one `test_docs_action_examples.py` already handles. Replacing with
+    spaces rather than deleting keeps the guarded-span offsets computed
+    below aligned with the original text.
+
+    Two things this must get right, because both fail in the *permissive*
+    direction -- they blank real shell, so the scan stops seeing a bare
+    expansion and the guard silently passes:
+
+    * **A backslash escapes the next character.** Reading `\\"` as closing a
+      double-quoted string leaves the rest of the line looking unquoted,
+      so the next ` #` starts a "comment" that swallows real code.
+    * **A quoted string may span lines.** Resetting the quote state per
+      line does the same thing from the second line onward.
+
+    Single quotes are the exception and not an oversight: in shell, a
+    backslash inside `'...'` is a literal backslash, so escape tracking
+    applies to double quotes only.
+    """
+    out: list[str] = []
+    quote: str | None = None  # carried ACROSS lines, not reset per line
+    for line in script.splitlines(keepends=True):
+        cut: int | None = None
+        escaped = False
+        for index, char in enumerate(line):
+            if escaped:
+                escaped = False
+                continue
+            if char == "\\" and quote != "'":
+                # Outside quotes and inside "..." alike, a backslash makes
+                # the next character literal. Inside '...' it does not.
+                escaped = True
+            elif quote is not None:
+                if char == quote:
+                    quote = None
+            elif char in "'\"":
+                quote = char
+            elif char == "#" and (index == 0 or line[index - 1] in " \t"):
+                cut = index
+                break
+        if cut is None:
+            out.append(line)
+        else:
+            tail = line[cut:]
+            out.append(
+                line[:cut]
+                + " " * len(tail.rstrip("\n"))
+                + tail[len(tail.rstrip("\n")) :]
+            )
+    return "".join(out)
+
+
+def _unguarded(script: str) -> list[str]:
+    """Names declared empty and expanded somewhere without the guard."""
+    script = _strip_comments(script)
+    declared = set(_DECLARED_EMPTY.findall(script))
+    if not declared:
+        return []
+    guarded_spans = [m.span() for m in _GUARDED.finditer(script)]
+    offenders: set[str] = set()
+    for match in _EXPANSION.finditer(script):
+        name = match.group(1)
+        if name not in declared:
+            continue
+        inside = any(
+            start <= match.start() and match.end() <= end
+            for start, end in guarded_spans
+        )
+        if not inside:
+            offenders.add(name)
+    return sorted(offenders)
+
+
+SOURCES = _shell_sources()
+
+
+def test_the_scan_found_shell_to_check() -> None:
+    """Vacuity guard: a glob that stopped matching would pass in silence."""
+    assert len(SOURCES) >= 20, len(SOURCES)
+    assert any("publish-baseline" in label for label, _ in SOURCES)
+
+
+@pytest.mark.parametrize("label,script", SOURCES, ids=[s[0] for s in SOURCES])
+def test_an_empty_capable_array_is_never_expanded_bare(label: str, script: str) -> None:
+    offenders = _unguarded(script)
+    assert not offenders, (
+        f"{label}: {offenders} may be empty and are expanded as "
+        '"${name[@]}" — on macOS\'s bash 3.2 under `set -u` that is an '
+        "unbound-variable error, not an empty expansion. Use "
+        '${name[@]+"${name[@]}"}.'
+    )
+
+
+class TestTheRuleItself:
+    """Negative and positive controls, so the scan cannot pass vacuously."""
+
+    def test_a_bare_expansion_of_an_empty_array_is_flagged(self) -> None:
+        assert _unguarded('args=()\nfoo "${args[@]}"\n') == ["args"]
+
+    def test_the_guarded_form_is_accepted(self) -> None:
+        assert _unguarded('args=()\nfoo ${args[@]+"${args[@]}"}\n') == []
+
+    def test_an_array_never_declared_empty_is_out_of_scope(self) -> None:
+        # `args=(a b)` cannot reach an expansion with no elements, so the
+        # rule does not apply and no allowlist entry is needed.
+        assert _unguarded('args=(a b)\nfoo "${args[@]}"\n') == []
+
+    def test_a_guarded_and_a_bare_use_of_the_same_array_still_flags(self) -> None:
+        script = 'args=()\nfoo ${args[@]+"${args[@]}"}\nbar "${args[@]}"\n'
+        assert _unguarded(script) == ["args"]
+
+    def test_a_comment_quoting_the_unsafe_form_is_not_a_violation(self) -> None:
+        # This module's own fix comment does exactly this, and the first
+        # version of the scan flagged the sentence.
+        script = (
+            'args=()\n# never write "${args[@]}" here\nfoo ${args[@]+"${args[@]}"}\n'
+        )
+        assert _unguarded(script) == []
+
+    def test_a_hash_inside_a_quoted_string_does_not_start_a_comment(self) -> None:
+        # Blanking from the first `#` regardless of quoting would hide a
+        # real violation living after one on the same line.
+        assert _unguarded('args=()\nfoo "a#b" "${args[@]}"\n') == ["args"]
+
+    def test_stripping_preserves_byte_offsets(self) -> None:
+        # The guarded-span containment check compares offsets against the
+        # stripped text, so a strip that shortened lines would misjudge it.
+        source = 'args=()\nfoo ${args[@]+"${args[@]}"} # trailing note\n'
+        assert len(_strip_comments(source)) == len(source)
+
+    def test_an_escaped_quote_does_not_end_the_string(self) -> None:
+        # Reading `\\"` as a closing quote leaves the rest of the line
+        # looking unquoted, so the ` #` inside the string starts a
+        # "comment" that blanks the real expansion after it. The scan then
+        # reports clean. Fails if escape tracking is removed.
+        script = 'args=()\nfoo "a\\" # b" "${args[@]}"\n'
+        assert _unguarded(script) == ["args"]
+
+    def test_a_quoted_string_spanning_lines_keeps_its_state(self) -> None:
+        # Same failure from the second line on, if quote state resets per
+        # line: the ` #` on line 2 is inside the string, not a comment.
+        # The expansion must sit AFTER the `#` on the continuation line:
+        # that is the text a per-line reset blanks. A first version put it
+        # on the next line instead, where the mutation does no damage, and
+        # the test passed with the fix removed -- vacuous for the very
+        # thing it names.
+        script = 'args=()\nfoo "opening\nstill inside # not a comment" "${args[@]}"\n'
+        assert _unguarded(script) == ["args"]
+
+    def test_a_backslash_inside_single_quotes_is_literal(self) -> None:
+        # The shell rule the fix must NOT over-apply: inside '...' a
+        # backslash escapes nothing, so the quote still closes here and the
+        # trailing ` #` really is a comment.
+        assert _strip_comments("a='x\\' # real comment\n").rstrip() == "a='x\\'"
+
+    def test_stripping_still_preserves_offsets_with_escapes(self) -> None:
+        source = 'foo "a\\" b" # note\n'
+        assert len(_strip_comments(source)) == len(source)
+
+    def test_the_real_regression_would_have_been_caught(self) -> None:
+        # The exact shape that shipped: an array built conditionally and
+        # then expanded bare. This is the line the macOS lane failed on.
+        script = (
+            "args=()\n"
+            'if [[ -n "$peel" ]]; then args+=(--tag-object-json "$f"); fi\n'
+            'cmd "$TAG" "$REF" "${args[@]}" --out "$OUT"\n'
+        )
+        assert _unguarded(script) == ["args"]

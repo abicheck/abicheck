@@ -86,6 +86,20 @@ from .run_selection import SourceRunRejected
     help="Write the libraries JSON here.",
 )
 @click.option(
+    "--bind",
+    "bind",
+    multiple=True,
+    metavar="NAME=VALUE",
+    help=(
+        "Fill ${NAME} in SPEC with VALUE, literally. Repeatable, and the "
+        "given set is the WHOLE allowlist: an unbound ${...} is refused "
+        "rather than left as text or read from the environment. For the "
+        "values a checked-in declaration cannot spell because the build "
+        "system decides them (an install prefix, a host-arch directory "
+        "component) -- not a templating language."
+    ),
+)
+@click.option(
     "--github-output",
     type=click.Path(path_type=Path),
     default=None,
@@ -97,6 +111,7 @@ def resolve_libraries_cmd(
     require_elf: bool,
     require_same_machine: bool,
     out: Path | None,
+    bind: tuple[str, ...],
     github_output: Path | None,
 ) -> None:
     """Resolve declarative component SPEC into ``actions/baseline``'s ``libraries``.
@@ -111,12 +126,28 @@ def resolve_libraries_cmd(
     malformed invocation.
     """
     document = _read_json(spec)
+    bindings: dict[str, str] = {}
+    for entry in bind:
+        # `split("=", 1)`: a VALUE is a path or an arch string and may well
+        # contain `=`, so only the FIRST separator is structural.
+        name, separator, value = entry.partition("=")
+        if not separator:
+            raise click.UsageError(f"--bind expects NAME=VALUE, got {entry!r}")
+        if name in bindings and bindings[name] != value:
+            raise click.UsageError(
+                f"--bind {name} was given twice with different values "
+                f"({bindings[name]!r} and {value!r}); which one the "
+                "declaration meant is not a question this can answer by "
+                "taking the last one"
+            )
+        bindings[name] = value
     try:
         resolved = resolve_library_set(
             document,
             root=root,
             require_elf=require_elf,
             require_same_machine=require_same_machine,
+            bindings=bindings,
         )
     except SelectionError as exc:
         click.echo(f"library selection refused: {exc}", err=True)
