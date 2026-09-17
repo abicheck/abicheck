@@ -522,24 +522,28 @@ class TestTheReportAndItsIdentityAreReturnedTogether:
 
     def test_a_relative_member_path_is_required(self, verify_script: str) -> None:
         # The location must be a member of the artifact that was verified,
-        # not a path the caller can point anywhere.
-        assert "provenance-from'/'report-from" in verify_script
+        # not a path the caller can point anywhere. Only the plumbing is
+        # asserted here -- that the inputs exist and route through the one
+        # guard. The guard's own behaviour is executed against real bash in
+        # `tests/test_verify_source_run_input_validation.py`
+        # (`TestAMemberNameStaysInsideTheArtifact`), which is where a claim
+        # about what it accepts and refuses belongs.
         assert 'PROVENANCE_FROM="${INPUT_PROVENANCE_FROM:-}"' in verify_script
+        assert 'REPORT_FROM="${INPUT_REPORT_FROM:-}"' in verify_script
+        assert (
+            '_require_member_name "provenance-from" "$PROVENANCE_FROM"' in verify_script
+        )
+        assert '_require_member_name "report-from" "$REPORT_FROM"' in verify_script
 
-    @pytest.mark.parametrize(
-        "hostile", ["/etc/passwd", "../../etc/passwd", "a/../../b"]
-    )
-    def test_the_traversal_guard_pattern_matches_what_it_claims(
-        self, hostile: str
-    ) -> None:
-        # The guard itself is a bash `case`; this asserts the classification
-        # it encodes, so a future edit that drops one arm is visible here
-        # too rather than only in a live runner.
-        assert hostile.startswith("/") or ".." in hostile
-
-    def test_the_guard_accepts_an_ordinary_member(self) -> None:
-        # Vacuity guard for the row above.
-        assert not ("aggregate.json".startswith("/") or ".." in "aggregate.json")
+    # Three tests were removed here rather than repaired. They read
+    #     assert hostile.startswith("/") or ".." in hostile
+    # over a parametrized list of hostile paths -- a property of the test's
+    # OWN parameter, true whatever the guard does, and passing in full with
+    # the guard deleted outright (verified by deletion). That is the failure
+    # root `AGENTS.md` names under "a matrix test needs an oracle, not just
+    # a type check", and the sibling "vacuity guard" was the same tautology
+    # negated. The real check now executes the extracted guard against a
+    # real shell over accepted AND refused names, in the module named above.
 
 
 class TestTheAggregateActionRecordsIt:

@@ -186,6 +186,9 @@ that does not resolve.
 | `no-pull-request` | No pull request in this repository is associated with the run's head commit. |
 | `ambiguous-pull-request` | Several are; the publisher will not guess. |
 | `pull-request-mismatch` | The artifact claims a different pull request than the API reports. |
+| `require-provenance-invalid` | `require-provenance` was neither exactly `true` nor exactly `false`. Refused rather than read as `false`, since that direction silently disables the requirement. |
+| `member-name-unsafe` | `provenance-from` or `report-from` names something outside the extracted artifact — an absolute path, a backslash, a `.` or `..` component — or contains a control character. |
+| `member-name-mismatch` | `provenance-from` and `report-from` name different documents, so `tested-sha` and `report-path` could not be one verified identity. |
 | `no-tested-sha` | No analysed commit was recorded. |
 | `analysis-context-absent` | `provenance-from` named a document that does not exist or carries no `analysis_context` block, under `require-provenance: true`. |
 | `analysis-context-malformed` | A recorded field is not in the form that field accepts (a SHA that is not full hex, a ref carrying a control character, a value of the wrong type). |

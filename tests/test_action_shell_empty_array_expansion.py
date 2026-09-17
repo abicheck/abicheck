@@ -227,13 +227,35 @@ def _strip_comments(script: str) -> str:
     one `test_docs_action_examples.py` already handles. Replacing with
     spaces rather than deleting keeps the guarded-span offsets computed
     below aligned with the original text.
+
+    Two things this must get right, because both fail in the *permissive*
+    direction -- they blank real shell, so the scan stops seeing a bare
+    expansion and the guard silently passes:
+
+    * **A backslash escapes the next character.** Reading `\\"` as closing a
+      double-quoted string leaves the rest of the line looking unquoted,
+      so the next ` #` starts a "comment" that swallows real code.
+    * **A quoted string may span lines.** Resetting the quote state per
+      line does the same thing from the second line onward.
+
+    Single quotes are the exception and not an oversight: in shell, a
+    backslash inside `'...'` is a literal backslash, so escape tracking
+    applies to double quotes only.
     """
     out: list[str] = []
+    quote: str | None = None  # carried ACROSS lines, not reset per line
     for line in script.splitlines(keepends=True):
-        quote: str | None = None
         cut: int | None = None
+        escaped = False
         for index, char in enumerate(line):
-            if quote is not None:
+            if escaped:
+                escaped = False
+                continue
+            if char == "\\" and quote != "'":
+                # Outside quotes and inside "..." alike, a backslash makes
+                # the next character literal. Inside '...' it does not.
+                escaped = True
+            elif quote is not None:
                 if char == quote:
                     quote = None
             elif char in "'\"":
@@ -329,6 +351,35 @@ class TestTheRuleItself:
         # The guarded-span containment check compares offsets against the
         # stripped text, so a strip that shortened lines would misjudge it.
         source = 'args=()\nfoo ${args[@]+"${args[@]}"} # trailing note\n'
+        assert len(_strip_comments(source)) == len(source)
+
+    def test_an_escaped_quote_does_not_end_the_string(self) -> None:
+        # Reading `\\"` as a closing quote leaves the rest of the line
+        # looking unquoted, so the ` #` inside the string starts a
+        # "comment" that blanks the real expansion after it. The scan then
+        # reports clean. Fails if escape tracking is removed.
+        script = 'args=()\nfoo "a\\" # b" "${args[@]}"\n'
+        assert _unguarded(script) == ["args"]
+
+    def test_a_quoted_string_spanning_lines_keeps_its_state(self) -> None:
+        # Same failure from the second line on, if quote state resets per
+        # line: the ` #` on line 2 is inside the string, not a comment.
+        # The expansion must sit AFTER the `#` on the continuation line:
+        # that is the text a per-line reset blanks. A first version put it
+        # on the next line instead, where the mutation does no damage, and
+        # the test passed with the fix removed -- vacuous for the very
+        # thing it names.
+        script = 'args=()\nfoo "opening\nstill inside # not a comment" "${args[@]}"\n'
+        assert _unguarded(script) == ["args"]
+
+    def test_a_backslash_inside_single_quotes_is_literal(self) -> None:
+        # The shell rule the fix must NOT over-apply: inside '...' a
+        # backslash escapes nothing, so the quote still closes here and the
+        # trailing ` #` really is a comment.
+        assert _strip_comments("a='x\\' # real comment\n").rstrip() == "a='x\\'"
+
+    def test_stripping_still_preserves_offsets_with_escapes(self) -> None:
+        source = 'foo "a\\" b" # note\n'
         assert len(_strip_comments(source)) == len(source)
 
     def test_the_real_regression_would_have_been_caught(self) -> None:

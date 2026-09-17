@@ -31,6 +31,18 @@ _fail() {
   exit 1
 }
 
+# `_fail` with a machine-readable code. Every refusal a consumer may branch
+# on carries one -- a bare `_fail` leaves `refusal-code` EMPTY, which is
+# indistinguishable from "some other failure" and forces a caller to match
+# on English prose. The codes are documented in
+# `docs/reference/verify-source-run.md`'s refusal-code table, and
+# `tests/test_verify_source_run_input_validation.py` asserts the script and
+# that table name the same set, so neither can gain an entry the other lacks.
+_fail_with_code() {
+  _out "refusal-code" "$1"
+  _fail "$2"
+}
+
 _out() {
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     printf '%s=%s\n' "$1" "$2" >> "$GITHUB_OUTPUT"
@@ -78,8 +90,13 @@ _require_member_name() {
   local label="$1" value="$2"
   [[ -n "$value" ]] || return 0
   case "$value" in
-    /*|*'\'*) _fail "'$label' must be a path inside the artifact, not '$value'." ;;
+    /*|*'\'*) _fail_with_code "member-name-unsafe" "'$label' must be a path inside the artifact, not '$value'." ;;
   esac
+  # A control character (a newline above all) would reach `$GITHUB_OUTPUT`,
+  # where one forges every other output of this step.
+  if [[ "$value" =~ [[:cntrl:]] ]]; then
+    _fail_with_code "member-name-unsafe" "'$label' must not contain a control character."
+  fi
   local component
   while IFS= read -r component; do
     # An `if`, not a trailing `&&`: a `[[ ]] && _fail` as the loop's last
@@ -88,7 +105,7 @@ _require_member_name() {
     # ordinary case while still accepting nothing extra. Caught by the
     # accept-half of this guard's own tests, which is why they exist.
     if [[ "$component" == ".." || "$component" == "." ]]; then
-      _fail "'$label' must not contain a '$component' component (got '$value')."
+      _fail_with_code "member-name-unsafe" "'$label' must not contain a '$component' component (got '$value')."
     fi
   done < <(printf '%s\n' "${value//\//$'\n'}")
   return 0
@@ -105,7 +122,7 @@ _require_member_name "report-from" "$REPORT_FROM"
 # every supported shape these are the same member; a caller who wrote two
 # different ones meant something this Action cannot honour.
 if [[ -n "$PROVENANCE_FROM" && -n "$REPORT_FROM" && "$PROVENANCE_FROM" != "$REPORT_FROM" ]]; then
-  _fail "'provenance-from' ($PROVENANCE_FROM) and 'report-from' ($REPORT_FROM) must name the same document -- 'tested-sha' and 'report-path' are returned together as one verified identity, which they cannot be if the context was read from a different member than the report."
+  _fail_with_code "member-name-mismatch" "'provenance-from' ($PROVENANCE_FROM) and 'report-from' ($REPORT_FROM) must name the same document -- 'tested-sha' and 'report-path' are returned together as one verified identity, which they cannot be if the context was read from a different member than the report."
 fi
 
 # Exactly `true` or `false`. Treating every other spelling as `false` means
@@ -116,14 +133,8 @@ fi
 REQUIRE_PROVENANCE="${INPUT_REQUIRE_PROVENANCE:-true}"
 case "$REQUIRE_PROVENANCE" in
   true|false) ;;
-  *) _fail "'require-provenance' must be exactly 'true' or 'false' (got '$REQUIRE_PROVENANCE')." ;;
+  *) _fail_with_code "require-provenance-invalid" "'require-provenance' must be exactly 'true' or 'false' (got '$REQUIRE_PROVENANCE')." ;;
 esac
-for _relative in "$PROVENANCE_FROM" "$REPORT_FROM"; do
-  case "$_relative" in
-    /*|*..*|*$'\n'*) _fail "'provenance-from'/'report-from' must be a relative path inside the artifact with no '..' segment (got '$_relative')." ;;
-  esac
-done
-
 CLAIMED_PR="${INPUT_CLAIMED_PR_NUMBER:-}"
 if [[ -n "$CLAIMED_PR" && ! "$CLAIMED_PR" =~ ^[0-9]+$ ]]; then
   _fail "'claimed-pr-number' must be a positive integer (got '$CLAIMED_PR')."

@@ -15,3 +15,7 @@
 - Arrays that can be empty are no longer expanded bare in shell steps:
   under macOS's bash 3.2 and `set -u` that is an unbound-variable error,
   not an empty expansion.
+- `actions/verify-source-run`'s input refusals now emit a machine-readable
+  `refusal-code` (`require-provenance-invalid`, `member-name-unsafe`,
+  `member-name-mismatch`) instead of failing with an empty one, which a
+  consumer could not distinguish from any other failure.

@@ -58,6 +58,16 @@ RUN_SH = (
 )
 SOURCE = RUN_SH.read_text(encoding="utf-8")
 
+#: The two helpers every extracted fragment may call. `_out` records the
+#: code so a test can assert WHICH refusal fired, not merely that one did --
+#: `_fail_with_code` writes it through `_out`, so stubbing only `_fail`
+#: leaves the fragment calling an undefined function.
+_HARNESS_PRELUDE = (
+    '_out() { echo "OUT:$1=$2" >&2; }\n'
+    '_fail() { echo "REFUSED: $*" >&2; exit 3; }\n'
+    '_fail_with_code() { _out "refusal-code" "$1"; _fail "$2"; }\n'
+)
+
 
 def _function(name: str) -> str:
     """The real body of one shell function, by name, from the real file."""
@@ -82,7 +92,7 @@ class TestTheExtractionItself:
 def _check_member(value: str) -> subprocess.CompletedProcess[str]:
     require_bash()
     script = (
-        '_fail() { echo "REFUSED: $*" >&2; exit 3; }\n'
+        _HARNESS_PRELUDE
         + _function("_require_member_name")
         + '\n_require_member_name "report-from" "$1"\necho ACCEPTED\n'
     )
@@ -137,6 +147,10 @@ class TestAMemberNameStaysInsideTheArtifact:
         assert result.returncode != 0, result.stdout
         assert "REFUSED" in result.stderr
         assert "ACCEPTED" not in result.stdout
+        # The specific code, not merely that something failed: a consumer
+        # branches on this, and an empty `refusal-code` reads the same as
+        # any unrelated failure.
+        assert "OUT:refusal-code=member-name-unsafe" in result.stderr
 
 
 class TestRequireProvenanceIsExactlyTrueOrFalse:
@@ -156,11 +170,7 @@ class TestRequireProvenanceIsExactlyTrueOrFalse:
             SOURCE,
         )
         assert match is not None, "the require-provenance validation moved"
-        script = (
-            '_fail() { echo "REFUSED: $*" >&2; exit 3; }\n'
-            + match.group(0)
-            + '\necho "OK:$REQUIRE_PROVENANCE"\n'
-        )
+        script = _HARNESS_PRELUDE + match.group(0) + '\necho "OK:$REQUIRE_PROVENANCE"\n'
         return subprocess.run(
             [bash_executable(), "-c", script],
             capture_output=True,
@@ -190,6 +200,7 @@ class TestRequireProvenanceIsExactlyTrueOrFalse:
         result = self._run(value)
         assert result.returncode != 0, result.stdout
         assert "REFUSED" in result.stderr
+        assert "OUT:refusal-code=require-provenance-invalid" in result.stderr
 
 
 class TestTestedShaSourceNamesWhereTheValueCameFrom:
@@ -254,8 +265,8 @@ class TestTheContextAndTheReportNameOneDocument:
         )
         assert match is not None, "the same-document rule moved"
         script = (
-            '_fail() { echo "REFUSED: $*" >&2; exit 3; }\n'
-            f'PROVENANCE_FROM="{provenance}"\nREPORT_FROM="{report}"\n'
+            _HARNESS_PRELUDE
+            + f'PROVENANCE_FROM="{provenance}"\nREPORT_FROM="{report}"\n'
             + match.group(0)
             + "\necho ACCEPTED\n"
         )
@@ -270,6 +281,7 @@ class TestTheContextAndTheReportNameOneDocument:
         result = self._run("aggregate.json", "report.json")
         assert result.returncode != 0, result.stdout
         assert "must name the same document" in result.stderr
+        assert "OUT:refusal-code=member-name-mismatch" in result.stderr
 
     @pytest.mark.parametrize(
         "provenance,report",
@@ -290,3 +302,74 @@ class TestTheContextAndTheReportNameOneDocument:
         result = self._run(provenance, report)
         assert result.returncode == 0, result.stderr
         assert "ACCEPTED" in result.stdout
+
+
+class TestEveryInputRefusalCarriesADocumentedCode:
+    """A refusal a consumer may branch on must be machine-readable.
+
+    `_fail` alone writes only `verified=false`, leaving `refusal-code`
+    empty — indistinguishable from any other failure, so a caller has to
+    match on English prose. This states the two halves as one rule: every
+    code the script emits is in the reference table, and every code the
+    table lists is emitted somewhere. Either direction alone lets the two
+    drift, which is how a documented code comes to name nothing.
+    """
+
+    DOC = (
+        Path(__file__).resolve().parents[1]
+        / "docs"
+        / "reference"
+        / "verify-source-run.md"
+    )
+
+    #: Codes this module's own fixes introduced.
+    INTRODUCED = {
+        "require-provenance-invalid",
+        "member-name-unsafe",
+        "member-name-mismatch",
+    }
+
+    def _script_codes(self) -> set[str]:
+        return set(re.findall(r'_fail_with_code "([a-z-]+)"', SOURCE))
+
+    def _documented_codes(self) -> set[str]:
+        text = self.DOC.read_text(encoding="utf-8")
+        return set(re.findall(r"\| `([a-z-]+)`[^|]*\|", text))
+
+    def test_the_new_refusals_emit_a_code(self) -> None:
+        # Vacuity guard for both directions below: they compare two sets,
+        # and two empty sets agree.
+        assert self.INTRODUCED <= self._script_codes(), self._script_codes()
+
+    def test_every_emitted_code_is_documented(self) -> None:
+        undocumented = self._script_codes() - self._documented_codes()
+        assert not undocumented, (
+            f"{sorted(undocumented)} are emitted by run.sh but appear in no "
+            "row of the refusal-code table — a consumer branching on them "
+            "has nothing to read"
+        )
+
+    def test_the_introduced_codes_are_documented(self) -> None:
+        assert self.INTRODUCED <= self._documented_codes()
+
+    def test_no_bare_fail_remains_on_the_new_input_checks(self) -> None:
+        # The specific regression: these four refusals were added calling
+        # `_fail` directly, so they reported no code at all.
+        for fragment in (
+            "must be exactly 'true' or 'false'",
+            "must be a path inside the artifact",
+            "must not contain a control character",
+            "must name the same document",
+        ):
+            index = SOURCE.index(fragment)
+            line_start = SOURCE.rfind("\n", 0, index) + 1
+            line = SOURCE[line_start : SOURCE.index("\n", index)]
+            assert "_fail_with_code" in line, line
+
+    def test_there_is_one_owner_for_the_member_name_rule(self) -> None:
+        # An earlier commit in this same branch added a second, stricter
+        # path check over the same two inputs; it rejected a legal
+        # `report..json` that `_require_member_name` accepts, so the two
+        # owners disagreed. One owner only.
+        assert "_relative" not in SOURCE
+        assert SOURCE.count("_require_member_name()") == 1
