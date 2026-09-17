@@ -60,6 +60,7 @@ from abicheck.frontends.action.report_publication import (
     find_existing,
     read_comments,
 )
+from tests._action_run_sh_harness import REQUIRES_POSIX_SHELL
 from tests._composite_action_env import (
     declared_inputs,
     forwarded_input_names,
@@ -79,11 +80,25 @@ RENDER_STEP = "Render and publish"
 PUBLISHER_RUN_ID = "7777777"
 PUBLISHER_RUN_ATTEMPT = "5"
 
-# Deliberately no module-level platform mark. The shell-executing tests call
-# `require_bash()` (which skips), and `TestNoDeclaredInputIsUnforwarded` only
-# reads metadata and computed environment values -- skipping the whole module on
-# Windows would drop that coverage for no reason, which is the loss
-# `require_bash`'s own docstring warns about.
+# Deliberately no *module-level* platform mark: `TestNoDeclaredInputIsUnforwarded`
+# and `TestTheForwardingScanMatchesWholeInputNames` only read metadata and
+# computed environment values, and skipping the whole module on Windows would
+# drop that coverage for no reason -- the loss `require_bash`'s own docstring
+# warns about.
+#
+# The shell-executing classes *are* marked, because `require_bash()` alone does
+# not cover Windows: `windows-latest` ships Git Bash, so the guard passes and
+# the tests run under MSYS, where arguments are re-parsed as they cross from
+# the MSYS shell to a native `python.exe`. A `source-run-id` of `*` -- the
+# `glob` hostile case, quoted correctly by `run.sh` in `"${RENDER_ARGS[@]}"`
+# and passed through verbatim by any POSIX shell -- is expanded against the
+# working directory at that boundary, and the CLI receives `outputs.txt` and
+# `runner-temp` as extra positional arguments. That is an artifact of the
+# MSYS/native handoff, not of the script under test, so asserting the POSIX
+# quoting contract there asserts something the platform cannot honour. This is
+# the marker `tests/_action_run_sh_harness.py` defines and its siblings already
+# apply; omitting it here is what reddened `unit-tests (windows-latest, 3.13)`
+# from the commit that added this module.
 
 
 def _report(tmp_path: Path) -> Path:
@@ -173,6 +188,7 @@ def _marker_identity(outputs: dict[str, str]) -> ExistingComment:
     return comments[0]
 
 
+@REQUIRES_POSIX_SHELL
 class TestProducerIdentityReachesTheMarker:
     """metadata -> environment -> shell -> stored marker, end to end."""
 
@@ -254,6 +270,7 @@ class TestProducerIdentityReachesTheMarker:
         assert outputs["skipped-reason"] == "never"
 
 
+@REQUIRES_POSIX_SHELL
 class TestOrderingUsesProducerCoordinates:
     """The consequence of the marker: which result a reviewer is left with.
 
@@ -382,6 +399,7 @@ class TestNoDeclaredInputIsUnforwarded:
         assert "INPUT_REPORT" in env and env["INPUT_REPORT"] == "r.json"
 
 
+@REQUIRES_POSIX_SHELL
 class TestAHostileProducerIdentityIsInert:
     """The new wire crosses a trust boundary, so attack it rather than read it.
 
