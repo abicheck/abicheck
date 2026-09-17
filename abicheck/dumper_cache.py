@@ -129,8 +129,8 @@ class AstAcquisitionScope:
         """
 
         with self._lock:
-            self._touch_group_locked(value)
-            self._evict_groups_locked()
+            token = self._touch_group_locked(value)
+            self._evict_groups_locked(protect=token)
 
     def _touch_group_locked(self, value: Any) -> int:
         token = id(value)
@@ -140,31 +140,69 @@ class AstAcquisitionScope:
         self._groups[token] = (value, keys)
         return token
 
-    def _evict_groups_locked(self) -> None:
-        while len(self._groups) > MAX_RETAINED_CONTEXT_GROUPS:
-            oldest = next(iter(self._groups))
-            self._release_group_locked(oldest)
+    def _evict_groups_locked(self, protect: int | None = None) -> None:
+        """Release least-recently-used groups until the bound is met.
 
-    def _release_group_locked(self, token: int) -> None:
+        *protect* is the group the caller is in the middle of populating,
+        and it must be exempt. Least-recently-used order alone is not
+        enough: when every older candidate holds an in-flight producer the
+        scan falls through to the newest group -- the caller's own -- and
+        releasing it drops the group while ``run`` goes on to create the
+        entry, leaving a key mentioning a no-longer-retained object's id.
+        That is the same orphan the release policy exists to prevent, and
+        it is *not* hypothetical: an earlier version of this method
+        reasoned that the just-touched group "is the most recent and can
+        never evict itself", which is true only while some older group is
+        releasable. The table-wide invariant test caught it.
+        """
+        while len(self._groups) > MAX_RETAINED_CONTEXT_GROUPS:
+            for token in list(self._groups):
+                if token == protect:
+                    continue
+                if self._release_group_locked(token):
+                    break
+            else:
+                # Nothing releasable: every candidate has an in-flight
+                # producer (or is the caller's own). Exceeding the bound is
+                # the correct outcome -- the alternative is a wrong answer
+                # rather than a large one -- and it is reclaimed as soon as
+                # a producer finishes.
+                return
+
+    def _release_group_locked(self, token: int) -> bool:
         """Drop one group's object *and* every entry keyed off its id.
 
-        Both halves, always: dropping the object while leaving an
-        id-mentioning entry behind is the exact hazard ``retain`` exists to
-        prevent, and dropping the entries while keeping the object would
-        free nothing worth freeing.
+        Both halves or neither, and that is load-bearing. Dropping the
+        object while leaving an id-mentioning entry behind is the exact
+        hazard ``retain`` exists to prevent: the object can then be freed,
+        a new one can land on its address, and ``run`` will serve it the
+        stale entry -- a wrong answer, and an unrecoverable one, since the
+        key set that would have identified the orphan went with the group.
+
+        So a group holding an *in-flight* entry is not released at all, and
+        this returns ``False``. An in-flight Future cannot be discarded (a
+        waiter is blocked on that exact object and would wait forever for a
+        result nobody will set), and if it is kept then its key mentions
+        this object's id, so the object must be kept too. An earlier
+        version of this method popped the group unconditionally and dropped
+        only the *completed* entries, which is precisely that hazard --
+        caught in review, not by the test that asserted the surviving
+        Future and never noticed the object had stopped being retained.
         """
-        entry = self._groups.pop(token, None)
+        entry = self._groups.get(token)
         if entry is None:
-            return
+            return False
         _obj, keys = entry
+        if any(
+            (future := self._entries.get(key)) is not None and not future.done()
+            for key in keys
+        ):
+            return False
+        del self._groups[token]
         for key in keys:
-            future = self._entries.get(key)
-            # An in-flight producer must not be discarded: a waiter is
-            # blocked on that exact Future and would otherwise wait for a
-            # result nobody will ever set.
-            if future is not None and future.done():
-                del self._entries[key]
+            self._entries.pop(key, None)
         self.released_groups += 1
+        return True
 
     def group_stats(self) -> dict[str, int]:
         """Counts for a memory trace: retained groups, entries, releases.
@@ -194,9 +232,9 @@ class AstAcquisitionScope:
                 # Evict here too, not only in `retain`: an id-keyed entry
                 # can be the *first* thing a group is created by, so
                 # bounding only the `retain` path left `run`-created groups
-                # growing without limit. This group was just touched, so it
-                # is the most recent and can never evict itself.
-                self._evict_groups_locked()
+                # growing without limit. `protect` keeps this group, whose
+                # entry is created just below, out of the candidate set.
+                self._evict_groups_locked(protect=token)
             future = self._entries.get(lookup)
             if future is None:
                 future = Future()

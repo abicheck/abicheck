@@ -392,8 +392,16 @@ def test_compare_one_library_stashes_old_snapshot_only_when_requested(
     assert "_old_snapshot" not in bundle_entry
     evidence = bundle_entry["_old_bundle_evidence"]
     assert isinstance(evidence, BundleSignatureEvidence)
-    assert evidence.function_map is old_snap.function_map
-    assert evidence.variable_map is old_snap.variable_map
+    # The evidence covers exactly the snapshot's declared symbols, by
+    # *answer* rather than by holding its declaration maps -- this used to
+    # assert `evidence.function_map is old_snap.function_map`, which is the
+    # retention the compact projection removed (it kept every Function,
+    # Variable and Param alive for the whole release). See
+    # `tests/test_bundle_signature_evidence_projection.py` for the
+    # per-symbol equivalence with a full snapshot.
+    assert set(evidence.symbol_status) == set(old_snap.function_map) | set(
+        old_snap.variable_map
+    )
     assert evidence.elf_only_mode == old_snap.elf_only_mode
 
     junit_entry = _compare_one_library(

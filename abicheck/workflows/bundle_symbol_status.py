@@ -308,7 +308,7 @@ def symbol_signature_statuses(
 ) -> dict[str, SymbolSignatureStatus]:
     """Resolve both per-symbol answers for *snapshot*, once, up front.
 
-    Called from ``BundleSignatureEvidence.from_snapshot`` while the full
+    Called from :func:`build_bundle_signature_evidence` while the full
     snapshot is still alive, so the release can then drop it. The answers
     come from :func:`_symbol_was_exported` and
     :func:`_symbol_evidence_sufficient` themselves -- the same functions

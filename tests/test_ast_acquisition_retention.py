@@ -131,12 +131,17 @@ class TestGroupedRelease:
         # scenario it no longer reaches.
         assert reused, "no address reuse occurred, so the hazard was not exercised"
 
-    def test_releasing_never_drops_an_in_flight_future(self) -> None:
-        """A blocked waiter must not be left waiting on a discarded producer.
+    def test_a_group_with_an_in_flight_entry_is_not_released_at_all(self) -> None:
+        """Both halves or neither -- the object as well as the entries.
 
-        Eviction removes only *completed* entries: discarding a Future that
-        no producer will ever complete would hang the waiter instead of
-        costing it a re-parse.
+        This is the finding an earlier version of this test missed. It
+        asserted only that the in-flight Future survived (it must: a waiter
+        is blocked on that exact object), and did not notice that the
+        *group* had been popped anyway. That left the object unretained
+        while a key mentioning its id lived on -- so once freed and its
+        address reused, `run` would serve the stale entry: a wrong answer,
+        and unrecoverable, since the key set that could have identified the
+        orphan went with the group.
         """
         from concurrent.futures import Future
 
@@ -147,9 +152,66 @@ class TestGroupedRelease:
         scope._entries[pending_key] = pending
         scope._touch_group_locked(root)
         scope._groups[id(root)][1].add(pending_key)
-        scope._release_group_locked(id(root))
+        assert scope._release_group_locked(id(root)) is False
         assert pending_key in scope._entries
         assert not pending.done()
+        # The half the old test did not check: the object is still held, so
+        # its id cannot be reused while that entry names it.
+        assert id(root) in scope._groups
+        assert scope._groups[id(root)][0] is root
+        assert scope.group_stats()["released_groups"] == 0
+
+    def test_no_surviving_entry_is_ever_left_without_its_group(self) -> None:
+        """The invariant behind the above, over a mixed table.
+
+        Some entries complete, some do not; whatever the release policy
+        does, every key left in the table must still belong to a retained
+        group. Stated over the table rather than one group, so a future
+        policy change that releases more aggressively is checked too.
+        """
+        from concurrent.futures import Future
+
+        scope = AstAcquisitionScope()
+        roots = [_Root(f"r{i}") for i in range(MAX_RETAINED_CONTEXT_GROUPS * 3)]
+        for i, root in enumerate(roots):
+            scope.run("b", repr(id(root)), lambda r=root: r.payload, group=root)
+            if i % 3 == 0:  # leave every third group holding a pending entry
+                key = ("b", f"pending-{i}")
+                scope._entries[key] = Future()
+                scope._groups[id(root)][1].add(key)
+                scope._evict_groups_locked()
+        owned = set()
+        for _obj, keys in scope._groups.values():
+            owned |= keys
+        assert set(scope._entries) <= owned
+
+    def test_the_bound_yields_to_correctness_when_nothing_is_releasable(
+        self,
+    ) -> None:
+        """Exceeding the bound is the right answer, not a bug.
+
+        If every candidate group holds an in-flight producer, releasing any
+        of them would be the hazard above. Retention above the bound is
+        recovered as soon as a producer finishes, so the cost is temporary
+        memory; the alternative cost is a wrong answer.
+        """
+        from concurrent.futures import Future
+
+        scope = AstAcquisitionScope()
+        roots = [_Root(f"r{i}") for i in range(MAX_RETAINED_CONTEXT_GROUPS + 4)]
+        for i, root in enumerate(roots):
+            scope._touch_group_locked(root)
+            key = ("b", f"pending-{i}")
+            scope._entries[key] = Future()
+            scope._groups[id(root)][1].add(key)
+            scope._evict_groups_locked()
+        assert scope.group_stats()["retained_groups"] == len(roots)
+        assert scope.group_stats()["released_groups"] == 0
+        # Completing one makes exactly that group releasable again.
+        first_key = ("b", "pending-0")
+        scope._entries[first_key].set_result("done")
+        scope._evict_groups_locked()
+        assert scope.group_stats()["released_groups"] == 1
 
     def test_a_content_keyed_entry_without_a_group_is_never_released(self) -> None:
         """An effective AST cache key stays valid regardless of residency.
