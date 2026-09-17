@@ -5,9 +5,11 @@
 from pathlib import Path
 
 from abicheck import bundle
-from abicheck.bundle_models import BundleSignatureEvidence
 from abicheck.model import AbiSnapshot
 from abicheck.model.elf_facts import ElfMetadata
+from abicheck.workflows.bundle_symbol_status import (
+    build_bundle_signature_evidence,
+)
 
 
 def _snapshot(filename: str) -> AbiSnapshot:
@@ -40,7 +42,7 @@ def test_stored_member_uses_compact_evidence_without_snapshot_decode(
 ) -> None:
     stored = tmp_path / "libready.so.abicheck.json"
     stored.write_text("{}", encoding="utf-8")
-    evidence = BundleSignatureEvidence.from_snapshot(_snapshot("libready.so.1"))
+    evidence = build_bundle_signature_evidence(_snapshot("libready.so.1"))
 
     def fail_decode(*args, **kwargs):
         raise AssertionError("resolved stored member was decoded again")
@@ -58,7 +60,7 @@ def test_stored_directory_falls_back_to_resolved_native_filename(
 ) -> None:
     stored = tmp_path / "stored-member"
     stored.mkdir()
-    evidence = BundleSignatureEvidence.from_snapshot(_snapshot("libready.so.1"))
+    evidence = build_bundle_signature_evidence(_snapshot("libready.so.1"))
     monkeypatch.setattr(bundle, "_is_stored_member", lambda path: path == stored)
     monkeypatch.setattr(
         bundle,

@@ -722,6 +722,8 @@ def _template_param_indexes_for(root: dict[str, Any]) -> TemplateParamIndexes:
         _TEMPLATE_PARAM_INDEX_NAMESPACE,
         repr(id(root)),
         lambda: build_template_param_indexes(root),
+        # The key is this root's id, so the entry must die with the root.
+        group=root,
     )
 
 

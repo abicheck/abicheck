@@ -388,4 +388,61 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="test_double.narrower_than_the_real_signature",
+        invariant=(
+            "A test double installed over a production entry point must "
+            "accept every parameter the real one accepts. When it does not, "
+            "the failure is not a wrong answer but an *empty* one: each "
+            "wrapped call raises `TypeError`, the counters and key sets the "
+            "test was built to read come back empty, and only an assertion "
+            "that demands a non-empty observation notices. So the guard is "
+            "structural and reads the real signature with "
+            "`inspect.signature` rather than restating it -- a list of "
+            "parameter names written here would go stale the next time one "
+            "is added, which is the original defect in a new place. Two "
+            "non-vacuity conditions matter as much as the check: the "
+            "discovery must find at least one double (a renamed helper or a "
+            "changed patch spelling silently empties an AST scan), and the "
+            "oracle must not degrade to an empty required-parameter list. "
+            "The scan must also be keyed on the *object* patched and not "
+            'the attribute name alone -- `"run"` matches '
+            '`setattr(subprocess, "run", ...)` too, and the first '
+            "version of this guard reported exactly those as violations."
+        ),
+        # Adding `group` to `dumper_cache.run_ast_acquisition` and
+        # `AstAcquisitionScope.run` (the AST-root retention bound) broke the
+        # doubles in `test_bundlefacts_l2_request_reuse.py` and
+        # `test_l2_ast_acquisition_singleflight.py`. Every affected test is
+        # `integration`-marked, so the default fast command -- which is what
+        # the change was validated with -- said nothing, and the only
+        # assertion that caught it was `assert len(cold_keys) >= 12`
+        # reporting 0. The guard now runs in the fast lane.
+        fixed_by=(1326,),
+        seed_tests=("tests/test_ast_acquisition_double_signatures.py",),
+        public_surfaces=(),
+        axes={
+            "entry_point": ("module-level function", "bound method"),
+            "double_shape": (
+                "named parameters",
+                "*args",
+                "**kwargs",
+                "narrower",
+            ),
+            "owner_match": ("guarded owner", "unrelated same-named attribute"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The scan resolves a double only when the replacement "
+                    "is a bare name whose `def` is in the same module. A "
+                    "double passed as a lambda, an attribute, or imported "
+                    "from a helper module is not inspected, so the guard "
+                    "bounds the shape this suite actually uses rather than "
+                    "every shape a double could take."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )

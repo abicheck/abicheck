@@ -68,6 +68,19 @@ _ast_memo_slot: contextvars.ContextVar[tuple[str, str, Any] | None] = (
 _T = TypeVar("_T")
 
 
+#: How many distinct identity-keyed context groups (in practice: parsed AST
+#: roots and everything derived from one) a request keeps resident at once.
+#: Beyond this the least-recently-used group is released *whole* -- see
+#: :meth:`AstAcquisitionScope.retain` for why it must be whole, and why
+#: releasing is safe at all.
+#:
+#: The bound is deliberately generous rather than tuned: releasing a group
+#: costs a re-parse, so a value too low trades a large amount of time for a
+#: little memory. It exists to stop a long fan-out over many distinct header
+#: sets from growing without limit, not to keep the resident set small.
+MAX_RETAINED_CONTEXT_GROUPS = 8
+
+
 class AstAcquisitionScope:
     """Request-owned, per-key coordination for expensive header acquisition.
 
@@ -76,22 +89,159 @@ class AstAcquisitionScope:
     releasing it, so unrelated compiler contexts proceed independently.
     ``Future`` gives waiters the producer's exact completion/failure while a
     cancelled waiter cannot cancel work another member still needs.
+
+    **Why anything is retained at all.** Some acquisition keys are derived
+    from ``id()`` of a parsed AST root (``dumper_clang``'s template-parameter
+    indexes, ``extract/header_ast_fields``' neutral ``SemanticIR``
+    normalization). CPython reuses an address once its object is freed, so a
+    live entry keyed on a dead object's id could be served for a *different*
+    root that happened to land at the same address -- a silent wrong answer,
+    not a slow one. ``retain`` is what makes that impossible, by keeping the
+    object alive as long as any key mentioning its id exists.
+
+    That guarantee used to be bought with unbounded growth: every retained
+    root stayed resident for the whole request, so a release fan-out over N
+    distinct header sets held N parsed ASTs at once and never released one,
+    however long ago its last consumer finished. The retention is now
+    *grouped*: an entry created under a group is recorded with it, and a
+    group is released as a unit -- object and derived entries together, under
+    the lock -- so no key mentioning a freed id can ever survive its object.
+    Releasing is otherwise harmless because every entry here is a pure
+    cache: a later consumer re-runs the producer and gets an equal result,
+    paying time rather than reading something wrong.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._entries: dict[tuple[str, str], Future[Any]] = {}
-        self._retained_context_objects: list[Any] = []
+        #: id -> (object, keys created under it). Insertion order is the LRU
+        #: order; a group is refreshed on every use.
+        self._groups: dict[int, tuple[Any, set[tuple[str, str]]]] = {}
+        self.released_groups = 0
 
     def retain(self, value: Any) -> None:
-        """Keep an identity-keyed context object alive for this request."""
+        """Keep an identity-keyed context object alive for this request.
+
+        Idempotent per object: this is called once per *member* parse, and
+        single-flight means many members legitimately share one root, so an
+        appending list grew with the member count while holding the same few
+        objects.
+        """
 
         with self._lock:
-            self._retained_context_objects.append(value)
+            token = self._touch_group_locked(value)
+            self._evict_groups_locked(protect=token)
 
-    def run(self, backend: str, key: str, producer: Callable[[], _T]) -> _T:
+    def _touch_group_locked(self, value: Any) -> int:
+        """Create or refresh *value*'s group, returning its token.
+
+        Re-inserting an existing group moves it to the most-recently-used
+        end while preserving the keys already recorded under it, which is
+        what makes the bound an LRU rather than a FIFO: the root a fan-out
+        keeps coming back to must not be evicted on schedule and reparsed.
+        """
+        token = id(value)
+        existing = self._groups.pop(token, None)
+        keys = existing[1] if existing is not None else set()
+        # Re-inserting moves it to the most-recently-used end.
+        self._groups[token] = (value, keys)
+        return token
+
+    def _evict_groups_locked(self, protect: int | None = None) -> None:
+        """Release least-recently-used groups until the bound is met.
+
+        *protect* is the group the caller is in the middle of populating,
+        and it must be exempt. Least-recently-used order alone is not
+        enough: when every older candidate holds an in-flight producer the
+        scan falls through to the newest group -- the caller's own -- and
+        releasing it drops the group while ``run`` goes on to create the
+        entry, leaving a key mentioning a no-longer-retained object's id.
+        That is the same orphan the release policy exists to prevent, and
+        it is *not* hypothetical: an earlier version of this method
+        reasoned that the just-touched group "is the most recent and can
+        never evict itself", which is true only while some older group is
+        releasable. The table-wide invariant test caught it.
+        """
+        while len(self._groups) > MAX_RETAINED_CONTEXT_GROUPS:
+            for token in list(self._groups):
+                if token == protect:
+                    continue
+                if self._release_group_locked(token):
+                    break
+            else:
+                # Nothing releasable: every candidate has an in-flight
+                # producer (or is the caller's own). Exceeding the bound is
+                # the correct outcome -- the alternative is a wrong answer
+                # rather than a large one -- and it is reclaimed as soon as
+                # a producer finishes.
+                return
+
+    def _release_group_locked(self, token: int) -> bool:
+        """Drop one group's object *and* every entry keyed off its id.
+
+        Both halves or neither, and that is load-bearing. Dropping the
+        object while leaving an id-mentioning entry behind is the exact
+        hazard ``retain`` exists to prevent: the object can then be freed,
+        a new one can land on its address, and ``run`` will serve it the
+        stale entry -- a wrong answer, and an unrecoverable one, since the
+        key set that would have identified the orphan went with the group.
+
+        So a group holding an *in-flight* entry is not released at all, and
+        this returns ``False``. An in-flight Future cannot be discarded (a
+        waiter is blocked on that exact object and would wait forever for a
+        result nobody will set), and if it is kept then its key mentions
+        this object's id, so the object must be kept too. An earlier
+        version of this method popped the group unconditionally and dropped
+        only the *completed* entries, which is precisely that hazard --
+        caught in review, not by the test that asserted the surviving
+        Future and never noticed the object had stopped being retained.
+        """
+        entry = self._groups.get(token)
+        if entry is None:
+            return False
+        _obj, keys = entry
+        if any(
+            (future := self._entries.get(key)) is not None and not future.done()
+            for key in keys
+        ):
+            return False
+        del self._groups[token]
+        for key in keys:
+            self._entries.pop(key, None)
+        self.released_groups += 1
+        return True
+
+    def group_stats(self) -> dict[str, int]:
+        """Counts for a memory trace: retained groups, entries, releases.
+
+        Exists so a trace can attribute request-resident memory to *shared
+        raw ASTs* rather than to per-member evidence or output buffers --
+        the distinction a Python CPU profile cannot make and the one that
+        decides which of the two is worth compacting next.
+        """
+        with self._lock:
+            return {
+                "retained_groups": len(self._groups),
+                "entries": len(self._entries),
+                "released_groups": self.released_groups,
+            }
+
+    def run(
+        self, backend: str, key: str, producer: Callable[[], _T], group: Any = None
+    ) -> _T:
         lookup = (backend, key)
         with self._lock:
+            if group is not None:
+                # Record the association *before* the entry exists, so a
+                # release can never see a key it does not know the owner of.
+                token = self._touch_group_locked(group)
+                self._groups[token][1].add(lookup)
+                # Evict here too, not only in `retain`: an id-keyed entry
+                # can be the *first* thing a group is created by, so
+                # bounding only the `retain` path left `run`-created groups
+                # growing without limit. `protect` keeps this group, whose
+                # entry is created just below, out of the candidate set.
+                self._evict_groups_locked(protect=token)
             future = self._entries.get(lookup)
             if future is None:
                 future = Future()
@@ -126,8 +276,24 @@ class AstAcquisitionScope:
             with self._lock:
                 if self._entries.get(lookup) is future:
                     del self._entries[lookup]
+                # A settled producer can make its group releasable, so retry
+                # the bound here -- see `set_result` below for why.
+                self._evict_groups_locked()
             raise
         future.set_result(result)
+        with self._lock:
+            # Retry the bound now that this producer has settled. Admission
+            # alone cannot enforce it: a release fan-out starts many members
+            # at once, so at admission time *every* candidate group can hold
+            # an in-flight Future, nothing is releasable, and the bound is
+            # deliberately exceeded (correctness over size). Without this
+            # retry that overflow persisted until scope exit unless some
+            # later acquisition happened to come along -- so the peak AST
+            # set stayed resident for the whole request, which is precisely
+            # what the bound exists to prevent. `protect` is not passed:
+            # this group's entry is already published, so it is an ordinary
+            # eviction candidate like any other.
+            self._evict_groups_locked()
         return result
 
 
@@ -156,7 +322,9 @@ def ast_acquisition_scope() -> Iterator[AstAcquisitionScope]:
         _ast_acquisition_scope.reset(token)
 
 
-def run_ast_acquisition(backend: str, key: str, producer: Callable[[], _T]) -> _T:
+def run_ast_acquisition(
+    backend: str, key: str, producer: Callable[[], _T], group: Any = None
+) -> _T:
     """Run *producer* once per request and effective AST cache key.
 
     *producer* must cover **every** source of that AST -- a warm disk-cache
@@ -172,6 +340,13 @@ def run_ast_acquisition(backend: str, key: str, producer: Callable[[], _T]) -> _
     mode, the DPC++ frontend context, CastXML's selected compiler -- so a
     waiter never re-derives a stale answer of its own.
 
+    Pass *group* whenever *key* is derived from ``id()`` of a context
+    object: it ties this entry to that object's retention group, so the two
+    are released together and no key mentioning a freed id can outlive it
+    (see :class:`AstAcquisitionScope`). A content-derived *key* -- an
+    effective AST cache key, say -- needs no group and should not pass one:
+    it stays valid regardless of which objects are still resident.
+
     One consequence worth keeping in mind when changing a producer: because
     its exact parsed object is published to later consumers, a lossy
     transformation that used to be private to it no longer is (see
@@ -182,7 +357,7 @@ def run_ast_acquisition(backend: str, key: str, producer: Callable[[], _T]) -> _
     scope = _ast_acquisition_scope.get()
     if scope is None:
         return producer()
-    return scope.run(backend, key, producer)
+    return scope.run(backend, key, producer, group=group)
 
 
 def resolve_request_memoization(memoize: bool | None) -> bool:

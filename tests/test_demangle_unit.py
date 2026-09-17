@@ -946,7 +946,7 @@ def test_demangle_batch_cache_fail_short_circuits(monkeypatch):
 
     dm.demangle.cache_clear()
     sym = "_Znot_really_mangled_p11"
-    dm._BATCH_CACHE_FAIL.add(sym)
+    dm._BATCH_CACHE_FAIL[sym] = None
 
     def _boom(*a, **k):
         raise AssertionError("demangle() spawned a subprocess for a known-fail name")
@@ -956,7 +956,7 @@ def test_demangle_batch_cache_fail_short_circuits(monkeypatch):
     try:
         assert dm.demangle(sym) is None
     finally:
-        dm._BATCH_CACHE_FAIL.discard(sym)
+        dm._BATCH_CACHE_FAIL.pop(sym, None)
         dm.demangle.cache_clear()
 
 

@@ -147,4 +147,22 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       requires >= 1.5.
 #: ``1.6`` adds each member's scalar-parity ``review_groups`` and
 #: ``result_counts`` blocks; both are additive and presentation-only.
-RELEASE_SCHEMA_VERSION = "1.6"
+#: - ``1.7`` adds the change-versus-inventory split at both cardinalities:
+#:       ``libraries[].change_inventory`` (the *identical* block, from the
+#:       identical computation, that a scalar ``compare`` report carries as
+#:       ``summary.change_inventory``) and the release fold
+#:       ``change_inventory`` (``report/release_change_inventory.py``).
+#:       Additive: every existing counter keeps its documented meaning, so a
+#:       pre-1.7 consumer reads nothing differently. The member block closes
+#:       a real discrepancy -- the fan-out already computed
+#:       ``build_summary(result)`` and copied two of its fields, leaving the
+#:       inventory behind, so a release whose displayed "risk" was entirely
+#:       standing hygiene could not say so the way the scalar report could.
+#:       The release fold is members-only and states its own scope
+#:       (``members_contributing``/``members_no_comparison_completed``/
+#:       ``members_without_inventory``): bundle-coherence and probe-matrix
+#:       findings are a different unit over a different operand and are
+#:       never folded in, and a member with no completed comparison is
+#:       counted rather than summed as zero findings. Absent when no member
+#:       carries a block, rather than an all-zero aggregate.
+RELEASE_SCHEMA_VERSION = "1.7"

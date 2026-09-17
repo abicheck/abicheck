@@ -45,6 +45,8 @@ from elftools.elf.sections import SymbolTableSection
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
 # parses into them and re-exports them so the historical
 # ``from abicheck.elf_metadata import ElfImport`` spelling keeps resolving.
+from .extract.elf_string_table import buffered_string_table, string_table_of
+from .extract.elf_symbol_versions import apply_versions_to_symbols
 from .model.elf_facts import (
     ElfImport as ElfImport,
     ElfMetadata as ElfMetadata,
@@ -60,31 +62,15 @@ log = logging.getLogger(__name__)
 # Internal constants
 # ---------------------------------------------------------------------------
 
-_BINDING_MAP: dict[str, SymbolBinding] = {
-    "STB_GLOBAL": SymbolBinding.GLOBAL,
-    "STB_WEAK": SymbolBinding.WEAK,
-    "STB_LOCAL": SymbolBinding.LOCAL,
-    # STB_GNU_UNIQUE (bind value 10, GNU OS-specific range). pyelftools reports
-    # it as "STB_GNU_UNIQUE"; older versions surface the raw OS range as
-    # "STB_LOOS", which on Linux ELF coincides with STB_GNU_UNIQUE.
-    "STB_GNU_UNIQUE": SymbolBinding.UNIQUE,
-    "STB_LOOS": SymbolBinding.UNIQUE,
-}
-
-_TYPE_MAP: dict[str, SymbolType] = {
-    "STT_FUNC": SymbolType.FUNC,
-    "STT_OBJECT": SymbolType.OBJECT,
-    "STT_TLS": SymbolType.TLS,
-    "STT_GNU_IFUNC": SymbolType.IFUNC,
-    # pyelftools < 0.33 reports STT_GNU_IFUNC (type=10, OS-specific range) as STT_LOOS.
-    # On Linux ELF, STT_LOOS == STT_GNU_IFUNC, so we map it to IFUNC.
-    "STT_LOOS": SymbolType.IFUNC,
-    "STT_COMMON": SymbolType.COMMON,
-    "STT_NOTYPE": SymbolType.NOTYPE,
-}
-
-_HIDDEN_VISIBILITIES = frozenset({"STV_HIDDEN", "STV_INTERNAL"})
-
+# Moved to `extract/elf_symbol_tables.py` so the version-correlation walk
+# (`extract/elf_symbol_versions.py`) can share the *same* objects rather
+# than keeping a second copy that could drift from these. Re-exported by
+# value, so every existing reference in this module still resolves.
+from .extract.elf_symbol_tables import (  # noqa: E402
+    _BINDING_MAP as _BINDING_MAP,
+    _HIDDEN_VISIBILITIES as _HIDDEN_VISIBILITIES,
+    _TYPE_MAP as _TYPE_MAP,
+)
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -1032,6 +1018,21 @@ def _value_alignment(st_value: int) -> int:
 
 
 def _parse_dynsym(section: SymbolTableSection, meta: ElfMetadata) -> None:
+    # Every `sym.name` below is a seek plus a chunked read of the linked
+    # string table; buffering that table for the duration of the walk turns
+    # ~N stream operations into one read (`extract/elf_string_table.py`,
+    # which also explains why this is scoped rather than cached). Measured
+    # on a real oneDAL build below in that module's docstring.
+    with buffered_string_table(string_table_of(section)):
+        _parse_dynsym_entries(section, meta)
+
+
+def _parse_dynsym_entries(section: SymbolTableSection, meta: ElfMetadata) -> None:
+    """The symbol walk itself, with the string table already buffered.
+
+    Split from :func:`_parse_dynsym` only so the buffering wraps the whole
+    walk in one ``with`` block; the classification logic is unchanged.
+    """
     for sym in section.iter_symbols():
         binding_str = sym.entry.st_info.bind
         type_str = sym.entry.st_info.type
@@ -1128,26 +1129,6 @@ def _build_verneed_index(
                 ver_index_map[idx] = (lib, name, False)
 
 
-def _is_import_sym(sym: object) -> bool:
-    """Check if a dynsym entry is a counted import symbol."""
-    if sym.entry.st_shndx != "SHN_UNDEF":
-        return False
-    return bool(
-        sym.name
-        and _BINDING_MAP.get(sym.entry.st_info.bind, SymbolBinding.OTHER)
-        != SymbolBinding.LOCAL
-    )
-
-
-def _is_export_sym(sym: object) -> bool:
-    """Check if a dynsym entry is a counted export symbol."""
-    if sym.entry.st_shndx in ("SHN_UNDEF", "SHN_ABS"):
-        return False
-    binding = _BINDING_MAP.get(sym.entry.st_info.bind, SymbolBinding.OTHER)
-    vis_str = sym.entry.st_other.visibility
-    return binding != SymbolBinding.LOCAL and vis_str not in _HIDDEN_VISIBILITIES
-
-
 def _parse_ver_entries(
     ver_sym_section: object,
     num_vers: int,
@@ -1209,62 +1190,7 @@ def _correlate_symbol_versions(
     if dynsym is None:
         return
 
-    export_idx = 0
-    import_idx = 0
-    for sym_ordinal, sym in enumerate(dynsym.iter_symbols()):
-        if sym_ordinal >= len(ver_entries):
-            break
-        ver_idx, is_hidden = ver_entries[sym_ordinal]
-        export_idx, import_idx = _apply_version_to_symbol(
-            sym,
-            ver_idx,
-            is_hidden,
-            ver_index_map,
-            meta,
-            export_idx,
-            import_idx,
-        )
-
-
-def _apply_version_to_symbol(
-    sym: object,
-    ver_idx: int,
-    is_hidden: bool,
-    ver_index_map: dict[int, tuple[str, str, bool]],
-    meta: ElfMetadata,
-    export_idx: int,
-    import_idx: int,
-) -> tuple[int, int]:
-    """Apply version info to a single symbol, returning updated indices."""
-    if ver_idx < 2:
-        if _is_import_sym(sym):
-            import_idx += 1
-        elif _is_export_sym(sym):
-            export_idx += 1
-        return export_idx, import_idx
-
-    entry = ver_index_map.get(ver_idx)
-    if entry is None:
-        if _is_import_sym(sym):
-            import_idx += 1
-        elif _is_export_sym(sym):
-            export_idx += 1
-        return export_idx, import_idx
-
-    _lib_name, ver_name, _is_defined = entry
-
-    if _is_import_sym(sym):
-        if import_idx < len(meta.imports):
-            meta.imports[import_idx].version = ver_name
-            meta.imports[import_idx].is_default = not is_hidden
-            # Record the verneed provider soname so consumers can resolve which
-            # DSO satisfies this import even when a version label collides.
-            meta.imports[import_idx].version_soname = _lib_name
-        import_idx += 1
-    elif _is_export_sym(sym):
-        if export_idx < len(meta.symbols):
-            meta.symbols[export_idx].version = ver_name
-            meta.symbols[export_idx].is_default = not is_hidden
-        export_idx += 1
-
-    return export_idx, import_idx
+    # Same buffering as `_parse_dynsym`: this is a second full walk of the
+    # identical symbol table, so it pays the identical per-name stream cost.
+    with buffered_string_table(string_table_of(dynsym)):
+        apply_versions_to_symbols(dynsym, ver_entries, ver_index_map, meta)
