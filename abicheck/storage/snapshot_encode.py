@@ -46,19 +46,36 @@ from .surface_graph_codec import encode_surface_graph
 # value itself rather than copying it. Anything *not* listed here falls back
 # to ``copy.deepcopy``, exactly as ``dataclasses.asdict`` did, so a mutable
 # leaf can still never be aliased back into the caller's snapshot.
-_IMMUTABLE_LEAVES: tuple[type, ...] = (
-    str,
-    int,
-    float,
-    bool,
-    bytes,
-    complex,
-    type(None),
-    enum.Enum,
-    pathlib.PurePath,
-    datetime.date,
-    datetime.time,
-    datetime.timedelta,
+#
+# Matched by **exact type**, never ``isinstance``. A subclass of an immutable
+# built-in is not itself immutable -- ``class Tagged(str): ...`` with an
+# instance attribute is an ordinary mutable object that ``isinstance(x, str)``
+# happily accepts -- so an ``isinstance`` test would share it and let a
+# mutation through the encoded document reach the caller's snapshot, which is
+# exactly what this contract forbids and what ``asdict``'s unconditional
+# ``deepcopy`` never allowed (CodeRabbit, PR #1323). A subclass falls through
+# to ``deepcopy``: correct, and rare enough that the cost does not matter.
+# ``datetime`` is listed alongside ``date`` because it *is* a ``date``
+# subclass, and exact matching would otherwise send every timestamp to
+# ``deepcopy``; the concrete ``Path`` flavours are listed for the same reason.
+_IMMUTABLE_LEAF_TYPES: frozenset[type] = frozenset(
+    {
+        str,
+        int,
+        float,
+        bool,
+        bytes,
+        complex,
+        type(None),
+        pathlib.PurePosixPath,
+        pathlib.PureWindowsPath,
+        pathlib.PosixPath,
+        pathlib.WindowsPath,
+        datetime.date,
+        datetime.datetime,
+        datetime.time,
+        datetime.timedelta,
+    }
 )
 
 
@@ -90,7 +107,11 @@ def _encode_value(obj: Any) -> Any:
         return {
             f.name: _encode_value(getattr(obj, f.name)) for f in dataclass_fields(obj)
         }
-    if isinstance(obj, _IMMUTABLE_LEAVES):
+    # ``Enum`` stays an ``isinstance`` test: a member's type is its own enum
+    # class, never ``Enum`` itself, so exact matching cannot express it -- and
+    # sharing one is safe regardless of what the enum subclasses, because
+    # members are singletons that ``deepcopy`` returns unchanged anyway.
+    if type(obj) in _IMMUTABLE_LEAF_TYPES or isinstance(obj, enum.Enum):
         return obj
     if isinstance(obj, (set, frozenset)):
         return sorted(obj)

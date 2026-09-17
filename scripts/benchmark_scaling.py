@@ -148,6 +148,7 @@ from perf_baseline import (  # noqa: E402
     load_baseline as _load_baseline,
     load_memory_baseline,
     matched_baseline_points,
+    total_memory_points_compared,
 )
 from perf_measurement import (  # noqa: E402
     SampleStats,
@@ -1955,6 +1956,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.json_out:
         _write_json_out(args.json_out, report)
 
+    if memory_baseline_points and total_memory_points_compared(report) == 0:
+        print(
+            f"\nPERFORMANCE GATE FAILED: --baseline {args.baseline} carries "
+            "peak_mb points, but none of them were comparable with what this "
+            "run measured -- the memory gate compared nothing. Check that both "
+            "sides ran the same scenarios and --sizes."
+        )
+        return 1
     if baseline_required and overlap_total == 0:
         # baseline_points is non-empty (checked above) but shares no
         # (scenario, size) point with anything this run actually measured --

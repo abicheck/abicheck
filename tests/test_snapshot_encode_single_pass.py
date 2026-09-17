@@ -34,8 +34,10 @@ oracle for the projection itself. They are deliberately written against the
 from __future__ import annotations
 
 import copy
+import datetime
+import pathlib
 from dataclasses import asdict
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
 
@@ -274,3 +276,118 @@ def test_skip_fields_are_absent_from_the_generic_walk() -> None:
     for cache_field in ("_func_by_mangled", "_var_by_mangled", "_type_by_name"):
         assert cache_field in _SNAPSHOT_SKIP_FIELDS
         assert cache_field not in encoded
+
+
+# --------------------------------------------------------------------------- #
+# 4. A subclass of an immutable built-in is not immutable.
+# --------------------------------------------------------------------------- #
+#
+# `isinstance(obj, str)` is true for a `str` subclass carrying instance
+# attributes, which is an ordinary mutable object. Sharing one would let a
+# mutation made through the encoded document reach the caller's snapshot --
+# the detached-container contract broken for exactly the values that look
+# safest. `asdict`'s unconditional `deepcopy` never had this hole; the fused
+# walk's fast path introduced it, and matching on exact type closes it
+# (CodeRabbit, PR #1323).
+
+
+class _TaggedStr(str):
+    """A `str` subclass that is, despite `isinstance`, mutable."""
+
+    def __init__(self, *_args: object) -> None:
+        self.attached: list[str] = []
+
+
+class _TaggedInt(int):
+    def __init__(self, *_args: object) -> None:
+        self.attached: list[str] = []
+
+
+@pytest.mark.parametrize("factory", [_TaggedStr, _TaggedInt])
+def test_mutable_subclass_of_an_immutable_builtin_is_copied(
+    factory: type,
+) -> None:
+    original = factory(1)
+    encoded = _encode_value(original)
+    assert encoded is not original, (
+        f"{factory.__name__} was shared with the caller despite being mutable"
+    )
+    encoded.attached.append("mutated")
+    assert original.attached == [], "mutating the encoded value reached the source"
+
+
+def test_mutable_subclass_nested_in_a_snapshot_cannot_reach_back() -> None:
+    """The same hazard through the real entry point, not just the helper."""
+    snap = _snapshot(1)
+    snap.functions[0].return_type = _TaggedStr("int")  # type: ignore[assignment]
+    encoded = snapshot_to_dict(snap)
+    encoded["functions"][0]["return_type"].attached.append("mutated")
+    assert snap.functions[0].return_type.attached == []  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "plain",
+        7,
+        3.5,
+        True,
+        None,
+        b"bytes",
+        pathlib.PurePosixPath("a/b"),
+        datetime.date(2026, 1, 1),
+        datetime.datetime(2026, 1, 1, 12, 0),
+        datetime.time(12, 0),
+        datetime.timedelta(seconds=5),
+        Visibility.PUBLIC,
+    ],
+)
+def test_genuinely_immutable_leaves_are_still_shared(value: object) -> None:
+    """The fast path must survive the fix, or every scalar pays a deepcopy.
+
+    ``datetime`` and the concrete ``Path`` flavours are included deliberately:
+    a naive exact-type set that listed only ``date``/``PurePath`` would send
+    every timestamp and every real path to ``deepcopy`` without failing any
+    other test here.
+    """
+    assert _encode_value(value) is value
+
+
+# --------------------------------------------------------------------------- #
+# 5. Container shapes the walk must preserve, not flatten.
+# --------------------------------------------------------------------------- #
+
+
+class _Pair(NamedTuple):
+    """A namedtuple, which ``asdict`` special-cases rather than treating as a
+    plain tuple."""
+
+    first: object
+    second: object
+
+
+def test_namedtuple_keeps_its_type_and_is_recursed_into() -> None:
+    """``asdict`` rebuilds a namedtuple *as that namedtuple*, not as a tuple.
+
+    Losing the type would turn a field a consumer reads by name into one
+    readable only by index -- and the recursion matters too, or a nested set
+    inside one would reach ``json.dumps`` unconverted and raise.
+    """
+    encoded = _encode_value(_Pair(first={"s"}, second=["x"]))
+    assert isinstance(encoded, _Pair)
+    assert encoded.first == ["s"], "a set inside a namedtuple was not converted"
+    assert encoded.second == ["x"]
+
+
+def test_plain_tuple_stays_a_tuple_and_is_recursed_into() -> None:
+    encoded = _encode_value(({"b", "a"}, [1]))
+    assert isinstance(encoded, tuple) and not hasattr(encoded, "_fields")
+    assert encoded == (["a", "b"], [1])
+
+
+def test_nested_containers_are_all_fresh_objects() -> None:
+    """Detachment holds at depth, not just at the top level."""
+    source: dict[str, object] = {"outer": [{"inner": [1]}]}
+    encoded = _encode_value(source)
+    encoded["outer"][0]["inner"].append(2)  # type: ignore[index,union-attr]
+    assert source == {"outer": [{"inner": [1]}]}

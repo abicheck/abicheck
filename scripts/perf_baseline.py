@@ -28,9 +28,10 @@ the parent module.
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
+import math
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 # No sys.path mutation here (CodeRabbit review): this is an imported helper
 # module, not a script entry point, so it must not have global side effects
@@ -132,9 +133,21 @@ def baseline_points_from_report(
             if value is None:
                 continue
             try:
-                out[(name, int(pt["size"]))] = float(value)
-            except (TypeError, ValueError):
+                parsed = float(value)
+            except (TypeError, ValueError, OverflowError):
                 continue
+            # `json.loads` accepts `Infinity`/`NaN`, so a malformed or
+            # corrupted baseline can carry one. Neither can gate anything: an
+            # infinite baseline makes every finite head value an
+            # infinitely-large *improvement*, and every comparison against NaN
+            # is False, so both read as "no regression" for any input the run
+            # could possibly produce -- a point that silently cannot fail
+            # (CodeRabbit, PR #1323). Dropped here, with the other malformed
+            # values, so it is absent rather than un-failable; finite negative
+            # values are kept, since the floors below already handle those.
+            if not math.isfinite(parsed):
+                continue
+            out[(name, int(pt["size"]))] = parsed
     return out
 
 
@@ -509,6 +522,37 @@ def apply_memory_regression_gate(
             "regressions": msgs,
         }
     return msgs
+
+
+def total_memory_points_compared(report: Mapping[str, Any]) -> int:
+    """How many points the memory gate actually compared, across all scenarios.
+
+    Read back from the report that :func:`apply_memory_regression_gate` already
+    writes, rather than threaded through every caller's return value, so the
+    number a reader sees in the JSON and the number the gate is judged on are
+    the same one by construction.
+
+    Its purpose is the check the timing side has always had: a ``--baseline``
+    that shares zero comparable points with what was measured is a gate that
+    ran and compared *nothing*, which must fail rather than report OK. Without
+    it the memory gate could pass unconditionally whenever the two sides'
+    scenario sets or sizes stopped lining up -- exactly the silent no-op the
+    timing gate's own zero-overlap check exists to prevent (CodeRabbit,
+    PR #1323).
+    """
+    total = 0
+    scenarios = report.get("scenarios", {})
+    if not isinstance(scenarios, Mapping):
+        return 0
+    for body in scenarios.values():
+        if not isinstance(body, Mapping):
+            continue
+        memory = body.get("memory_regression")
+        if isinstance(memory, Mapping):
+            compared = memory.get("compared_points")
+            if isinstance(compared, int) and not isinstance(compared, bool):
+                total += compared
+    return total
 
 
 def resolve_scenario_threshold(

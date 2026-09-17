@@ -752,3 +752,116 @@ def test_timing_regression_job_still_excludes_memory() -> None:
     """
     runs = _step_run_text(_performance_workflow()["jobs"]["regression"])
     assert "--no-memory" in runs
+
+
+# ── Non-finite baseline values, and a memory gate that compared nothing ──────
+#
+# Both are "the gate ran and could not fail" defects (CodeRabbit, PR #1323),
+# which is the failure mode this repo's own guidance treats as worse than a
+# gate that is absent: absence is visible, a vacuous pass is not.
+
+
+def test_non_finite_baseline_measurements_are_dropped() -> None:
+    """`json.loads` accepts `Infinity`/`NaN`, and neither can ever gate.
+
+    An infinite baseline makes every finite head value an infinitely large
+    *improvement*; every comparison against NaN is False. Both read as "no
+    regression" for any input a run could produce, so such a point must be
+    absent rather than present-and-unfailable.
+    """
+    document = json.loads(
+        '{"scenarios":{"s":{"points":['
+        '{"size":1,"seconds":Infinity,"peak_mb":Infinity},'
+        '{"size":2,"seconds":NaN,"peak_mb":NaN},'
+        '{"size":3,"seconds":0.5,"peak_mb":50.0}]}}}'
+    )
+    assert perf_baseline.baseline_points_from_report(document) == {("s", 3): 0.5}
+    assert perf_baseline.baseline_points_from_report(document, field="peak_mb") == {
+        ("s", 3): 50.0
+    }
+
+
+@pytest.mark.parametrize("bad", ["Infinity", "-Infinity", "NaN"])
+def test_a_non_finite_baseline_point_cannot_silently_absorb_a_regression(
+    bad: str,
+) -> None:
+    """The consequence, asserted rather than inferred from the parser.
+
+    Before the fix each of these parsed through and then reported no
+    regression against a head value hundreds of times larger.
+    """
+    document = json.loads(
+        '{"scenarios":{"s":{"points":[{"size":1,"seconds":' + bad + "}]}}}"
+    )
+    points = perf_baseline.baseline_points_from_report(document)
+
+    class _P:
+        size = 1
+        seconds = 10_000.0
+
+    # The point is gone, so there is nothing to compare -- which the
+    # zero-overlap checks then catch, rather than a false "OK".
+    assert points == {}
+    assert perf_baseline.check_regressions([_P()], "s", points, 0.15) == []
+    assert perf_baseline.matched_baseline_points([_P()], "s", points) == []
+
+
+def test_finite_negative_baselines_are_kept_for_the_floors_to_handle() -> None:
+    """Dropping non-finite values must not also drop merely odd ones."""
+    document = json.loads('{"scenarios":{"s":{"points":[{"size":1,"seconds":-2.0}]}}}')
+    assert perf_baseline.baseline_points_from_report(document) == {("s", 1): -2.0}
+
+
+def test_total_memory_points_compared_sums_across_scenarios() -> None:
+    assert (
+        perf_baseline.total_memory_points_compared(
+            {
+                "scenarios": {
+                    "a": {"memory_regression": {"compared_points": 3}},
+                    "b": {"memory_regression": {"compared_points": 2}},
+                }
+            }
+        )
+        == 5
+    )
+
+
+@pytest.mark.parametrize(
+    "report",
+    [
+        {},
+        {"scenarios": {}},
+        {"scenarios": "not-a-mapping"},
+        {"scenarios": {"a": "not-a-mapping"}},
+        {"scenarios": {"a": {}}},
+        {"scenarios": {"a": {"memory_regression": {}}}},
+        {"scenarios": {"a": {"memory_regression": {"compared_points": True}}}},
+        {"scenarios": {"a": {"memory_regression": {"compared_points": "3"}}}},
+    ],
+)
+def test_total_memory_points_compared_reads_zero_for_anything_unusable(
+    report: dict,
+) -> None:
+    """Zero is what the caller turns into a hard failure, so every shape that
+    does not carry a real count must read as zero rather than as a pass.
+
+    ``True`` is listed because ``bool`` is an ``int`` subclass: counting it
+    would let a malformed report claim one comparison it never made.
+    """
+    assert perf_baseline.total_memory_points_compared(report) == 0
+
+
+def test_memory_gate_failure_on_zero_overlap_is_wired_into_main() -> None:
+    """A gate that compared nothing must fail, not report OK.
+
+    `matched_memory_baseline_points` existed from the start, but nothing
+    aggregated it: `_run_scenario` returned only the timing overlap and
+    `main()` checked only that, so a memory baseline whose scenarios or sizes
+    stopped lining up with the run produced zero comparisons and passed. This
+    asserts the wiring, which is the half a unit test of the counter cannot
+    reach.
+    """
+    source = pathlib.Path(bench.__file__).read_text()
+    assert "total_memory_points_compared(report) == 0" in source, (
+        "main() no longer fails on a memory gate that compared nothing"
+    )

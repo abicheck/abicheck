@@ -29,6 +29,17 @@
   otherwise flag every point of every run and make the gate impossible to
   introduce; the timing gate still fails closed on an empty baseline.
 
+  Two ways the gate could have run without being able to fail are closed
+  explicitly. A baseline point whose value is non-finite is dropped rather
+  than kept: `json.loads` accepts `Infinity`/`NaN`, an infinite baseline makes
+  every finite head value an infinitely large *improvement*, and every
+  comparison against `NaN` is False, so such a point reads as "no regression"
+  for any input a run could produce. And a memory baseline that shares zero
+  comparable points with what was measured is now a hard failure, the same way
+  the timing side has always treated its own zero overlap — previously only
+  the timing overlap was aggregated, so a memory gate that compared nothing
+  reported OK.
+
   It is a separate CI job rather than another flag on `regression` because
   tracing the heap is not timing-neutral — `measure()`'s memory pass clears
   every live `lru_cache` between sizes and runs an extra untimed cold call,
