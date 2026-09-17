@@ -41,6 +41,7 @@ import re
 
 from ..bundle_models import BundleSignatureEvidence, SymbolSignatureStatus
 from ..model import AbiSnapshot, Visibility
+from ..model.export_index import build_raw_export_index, default_versioned_names
 from ..model.surface_facts import (
     binary_exported,
     is_confirmed_true,
@@ -347,9 +348,17 @@ def build_bundle_signature_evidence(
     predicates above, and a classmethod reaching back for them is the
     import cycle this module exists to avoid.
     """
+    # Projected here, while the full snapshot is still in hand: `elf` below
+    # carries ELF members only, so a PE/Mach-O member's exports would
+    # otherwise be unrecoverable from the compact form (see the field's own
+    # docstring for the release-reconciliation failure that caused).
+    raw_exports = build_raw_export_index(snapshot)
     return BundleSignatureEvidence(
         symbol_status=symbol_signature_statuses(snapshot),
         elf_only_mode=snapshot.elf_only_mode,
         elf=snapshot.elf,
         library_filename=snapshot.library,
+        export_names=(
+            None if raw_exports is None else default_versioned_names(raw_exports)
+        ),
     )

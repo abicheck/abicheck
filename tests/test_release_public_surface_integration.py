@@ -86,9 +86,13 @@ def _build_product(
 ) -> Path:
     """A two-library product with one shared umbrella header.
 
-    Canonical, non-symlinked paths throughout -- symlink/path provenance
-    matching is deliberately out of scope for this fixture.
+    Canonical, non-symlinked paths throughout (`root` is resolved first):
+    symlink/path provenance matching is deliberately out of scope for this
+    fixture, and on macOS pytest's own `tmp_path` lives under a symlinked
+    `/var` -> `/private/var`, so resolving here keeps that question out of
+    every assertion below.
     """
+    root = root.resolve()
     include = root / "include"
     lib = root / "lib"
     include.mkdir(parents=True)
@@ -196,9 +200,17 @@ class TestOneContractManyProviders:
     def test_the_release_stays_clean(
         self, unchanged_product: tuple[Path, Path], tmp_path: Path
     ) -> None:
+        """No contract finding, and nothing gating. Deliberately not a
+        verdict whitelist: on macOS the two separately-built dylibs differ
+        in their `LC_ID_DYLIB` install name, a real (non-gating) observation
+        about the fixture rather than anything this test is about."""
         report = _compare(tmp_path, *unchanged_product)
         assert report["exit"]["code"] == 0
-        assert report["verdict"] in {"NO_CHANGE", "COMPATIBLE"}
+        assert report["public_surface_reconciliation"]["missing_exports"] == []
+        for library in ("libA.so", "libB.so"):
+            kinds = _kinds(report, library)
+            assert "public_not_exported" not in kinds
+            assert "exported_not_public" not in kinds
 
 
 class TestDeclarationRemovedFromTheWholeBundle:
@@ -279,21 +291,35 @@ class TestUndocumentedExportAttribution:
     def test_the_release_accounting_attributes_it_to_that_member(
         self, product: tuple[Path, Path], tmp_path: Path
     ) -> None:
-        section = _compare(tmp_path, *product)["public_surface_reconciliation"]
-        assert section["undocumented_exports_by_member"] == {
-            "libA.so": 0,
-            "libB.so": 1,
-        }
+        """Attribution, stated as a relation rather than exact totals: only
+        `libB` gained `internal_c`, so only `libB`'s undocumented count
+        moves. Exact numbers would pin a toolchain's own baseline export set
+        (a MinGW DLL auto-exports more than an ELF `.so` does), which is not
+        what this asserts."""
+        counts = _compare(tmp_path, *product)["public_surface_reconciliation"][
+            "undocumented_exports_by_member"
+        ]
+        assert set(counts) == {"libA.so", "libB.so"}
+        assert counts["libB.so"] >= counts["libA.so"] + 1
 
     def test_the_release_export_totals_add_up(
         self, product: tuple[Path, Path], tmp_path: Path
     ) -> None:
+        """The partition identity, plus the two facts the fixture fixes: the
+        header's two declarations are exported, and `internal_c` is not
+        declared. The total itself is a toolchain property (see the
+        attribution test above), so it is checked as a sum rather than a
+        constant."""
         side = _compare(tmp_path, *product)["public_surface_reconciliation"]["sides"][
             "new"
         ]
-        assert side["exports_total"] == 3
         assert side["exports_declared_in_headers"] == 2
-        assert side["exports_not_declared_in_headers"] == 1
+        assert side["exports_not_declared_in_headers"] >= 1
+        assert (
+            side["exports_total"]
+            == side["exports_declared_in_headers"]
+            + side["exports_not_declared_in_headers"]
+        )
 
 
 class TestPublicTypeChangeRenderedOnce:
@@ -310,19 +336,35 @@ class TestPublicTypeChangeRenderedOnce:
     def test_the_type_change_is_reported_once_not_once_per_dso(
         self, product: tuple[Path, Path], tmp_path: Path
     ) -> None:
+        """Selects the `Cfg` findings rather than asserting the shared set
+        contains nothing else: on macOS the two dylibs also share a real
+        `LC_ID_DYLIB` install-name change, which is a *correct* product-level
+        fold and none of this test's business. The claim under test is the
+        cardinality -- one entry per distinct fact, naming every affected
+        library, rather than one per DSO."""
         section = _compare(tmp_path, *product)["public_surface_reconciliation"]
-        shared = {f["kind"] for f in section["shared_findings"]}
-        assert shared, section
-        for finding in section["shared_findings"]:
-            assert finding["symbol"] == "Cfg"
+        cfg = [f for f in section["shared_findings"] if f["symbol"] == "Cfg"]
+        assert cfg, section["shared_findings"]
+        assert len({f["kind"] for f in cfg}) == len(cfg), cfg
+        for finding in cfg:
             assert finding["affected_libraries"] == ["libA.so", "libB.so"]
 
     def test_the_per_library_tables_carry_no_clone(
         self, product: tuple[Path, Path], tmp_path: Path
     ) -> None:
+        """No member table repeats a fact the release section already
+        states. Asserted against the promoted set rather than emptiness, so
+        a platform that legitimately gives one member its *own* finding
+        (which by definition is not shared, and stays where it belongs)
+        does not read as a clone."""
         report = _compare(tmp_path, *product)
-        for library in ("libA.so", "libB.so"):
-            assert _kinds(report, library) == []
+        promoted = {
+            (f["kind"], f["symbol"])
+            for f in report["public_surface_reconciliation"]["shared_findings"]
+        }
+        for entry in report["libraries"]:
+            for finding in entry.get("findings", []):
+                assert (finding["kind"], finding["symbol"]) not in promoted
 
     def test_each_member_discloses_what_was_folded(
         self, product: tuple[Path, Path], tmp_path: Path
@@ -424,6 +466,7 @@ int api_c(int x);
 """
 
     def _product(self, root: Path) -> Path:
+        root = root.resolve()
         include = root / "include"
         lib = root / "lib"
         include.mkdir(parents=True)

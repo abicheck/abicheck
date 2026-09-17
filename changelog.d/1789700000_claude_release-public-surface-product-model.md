@@ -67,3 +67,15 @@
   resolver feeding both the key and the parse, closing the sibling case
   where two runs differing only in `compile.frontend` keyed identically.
   Found by Codex security review on PR #1328.
+
+- The release contract reconciliation now sees a member's exports on **every**
+  container format. `BundleSignatureEvidence` — the compact per-member evidence
+  the release fan-out keeps instead of full snapshots — carried ELF metadata
+  only, so on Windows and macOS the export index read *no exports at all* for
+  every member. That is indistinguishable from a member exporting nothing, so
+  coverage degraded to "incomplete" and every real missing-export finding was
+  suppressed on both platforms while Linux was unaffected. The evidence now
+  carries an already-projected, platform-agnostic export-name set (names only,
+  through the same canonical `model.export_index` projection), appended so no
+  positional caller rebinds. Caught by this change's own `integration-tests`
+  matrix on `macos-latest`/`windows-latest`.

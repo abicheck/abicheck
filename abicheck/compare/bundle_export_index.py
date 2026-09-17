@@ -44,8 +44,9 @@ retain every member's full snapshot.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from typing import cast
 
 from ..model.export_index import (
     build_raw_export_index_from_elf,
@@ -53,6 +54,12 @@ from ..model.export_index import (
     build_raw_export_index_from_pe,
     default_versioned_names,
 )
+
+#: Sentinel distinguishing "this object has no such attribute" from an
+#: attribute whose value is a legitimate `None` ("observed, no export
+#: table") -- the two must not collapse, since only the first may fall
+#: through to the container chain.
+_UNSET = object()
 
 
 def member_export_names(member: object) -> frozenset[str] | None:
@@ -65,6 +72,17 @@ def member_export_names(member: object) -> frozenset[str] | None:
     looking unsatisfied. :attr:`BundleExportIndex.members_without_exports`
     records it and :attr:`BundleExportIndex.complete` goes False.
     """
+    # The compact per-member evidence the release fan-out keeps carries an
+    # already-projected, platform-agnostic name set; a full `AbiSnapshot`
+    # does not, and falls through to the container chain below. Checked
+    # first precisely because the compact form's own `elf` is ELF-only, so
+    # reading that instead would report "no export table" for every PE and
+    # Mach-O member.
+    projected = getattr(member, "export_names", _UNSET)
+    if projected is not _UNSET:
+        if projected is None:
+            return None
+        return frozenset(cast("Iterable[str]", projected))
     elf = getattr(member, "elf", None)
     if elf is not None:
         return default_versioned_names(build_raw_export_index_from_elf(elf))

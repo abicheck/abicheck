@@ -593,6 +593,8 @@ class BundleSignatureEvidence:
     elf_only_mode: bool
     elf: ElfMetadata | None
     library_filename: str
+    #: Default-export names via the canonical `model.export_index` projection; `None` (never an empty set) with no export table, that projection's own "no evidence" contract. Precomputed because `elf` above is ELF-only: a PE/Mach-O member's metadata never reaches this compact form, so deriving exports from it reported *none* on Windows and macOS -- indistinguishable from a member exporting nothing, which degraded the release contract reconciliation to "coverage incomplete" on both and suppressed real findings. **Appended**: inserting a field mid-list rebinds every positional caller (`api.positional_slot_rebinding`).
+    export_names: frozenset[str] | None = None
 
     # Built by `workflows.bundle_symbol_status.build_bundle_signature_
     # evidence`, not by a classmethod here: computing the statuses needs

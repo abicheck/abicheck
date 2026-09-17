@@ -1040,3 +1040,137 @@ class TestTheStageNeverRaises:
         assert stage.new_surface.resolvable is False
         # Nothing was parsed, so nothing is counted as acquired.
         assert stage.ledger.total_acquisitions == 0
+
+
+class TestEveryContainerFormatSurvivesTheCompactProjection:
+    """The release fan-out keeps a *compact* per-member evidence object, and
+    the export index must read exports off it on every platform.
+
+    The class, not the one platform: ``BundleSignatureEvidence`` carries an
+    ``elf`` field and nothing for PE or Mach-O, so an index deriving exports
+    from container metadata saw **no exports at all** for a Windows or macOS
+    member -- indistinguishable from a member that genuinely exports
+    nothing. The release contract reconciliation therefore read coverage as
+    *incomplete* on both platforms and suppressed every real missing-export
+    finding, while Linux was unaffected. Caught by this PR's own
+    ``integration-tests`` matrix on ``macos-latest`` and ``windows-latest``,
+    not by any Linux run.
+    """
+
+    @staticmethod
+    def _snapshot_with(**platform: object):
+        from abicheck.model import AbiSnapshot
+
+        return AbiSnapshot(library="libX", version="1", **platform)  # type: ignore[arg-type]
+
+    def _elf(self):
+        return self._snapshot_with(
+            elf=ElfMetadata(
+                soname="",
+                needed=[],
+                symbols=[ElfSymbol(name="api_a", is_default=True)],
+                imports=[],
+            )
+        )
+
+    def _pe(self):
+        from abicheck.pe_metadata import PeExport, PeMetadata
+
+        return self._snapshot_with(
+            pe=PeMetadata(exports=[PeExport(name="api_a", ordinal=1)])
+        )
+
+    def _macho(self):
+        from abicheck.macho_metadata import MachoExport, MachoMetadata
+
+        return self._snapshot_with(
+            macho=MachoMetadata(exports=[MachoExport(name="api_a")])
+        )
+
+    @pytest.mark.parametrize("platform", ["elf", "pe", "macho"])
+    def test_the_compact_evidence_carries_that_platforms_exports(
+        self, platform: str
+    ) -> None:
+        from abicheck.workflows.bundle_symbol_status import (
+            build_bundle_signature_evidence,
+        )
+
+        snapshot = getattr(self, f"_{platform}")()
+        evidence = build_bundle_signature_evidence(snapshot)
+        assert member_export_names(evidence) == frozenset({"api_a"})
+
+    @pytest.mark.parametrize("platform", ["elf", "pe", "macho"])
+    def test_the_index_is_complete_for_that_platform(self, platform: str) -> None:
+        """The consequence that actually bit: an unreadable member makes
+        coverage incomplete, which suppresses the findings this whole
+        workstream exists to produce."""
+        from abicheck.workflows.bundle_symbol_status import (
+            build_bundle_signature_evidence,
+        )
+
+        snapshot = getattr(self, f"_{platform}")()
+        index = build_bundle_export_index(
+            "new", {"libX": build_bundle_signature_evidence(snapshot)}
+        )
+        assert index.complete is True
+        assert index.members_without_exports == ()
+        assert index.providers("api_a") == ("libX",)
+
+    @pytest.mark.parametrize("platform", ["elf", "pe", "macho"])
+    def test_the_compact_form_agrees_with_the_full_snapshot(
+        self, platform: str
+    ) -> None:
+        """A compact member and a full one must index identically -- the
+        fan-out picks between them for memory reasons only (JUnit and
+        ``--bundle-facts-out`` keep the full snapshot), and which one a run
+        happened to keep must never change a finding."""
+        from abicheck.workflows.bundle_symbol_status import (
+            build_bundle_signature_evidence,
+        )
+
+        snapshot = getattr(self, f"_{platform}")()
+        assert member_export_names(
+            build_bundle_signature_evidence(snapshot)
+        ) == member_export_names(snapshot)
+
+    def test_a_snapshot_with_no_container_still_reports_no_evidence(self) -> None:
+        """`None` stays "nothing was observed", never "exports nothing" --
+        the distinction the coverage gate rests on."""
+        from abicheck.workflows.bundle_symbol_status import (
+            build_bundle_signature_evidence,
+        )
+
+        evidence = build_bundle_signature_evidence(self._snapshot_with())
+        assert member_export_names(evidence) is None
+        index = build_bundle_export_index("new", {"libX": evidence})
+        assert index.complete is False
+        assert index.members_without_exports == ("libX",)
+
+    def test_the_projection_is_the_canonical_one(self) -> None:
+        """Not a second notion of "exported": the compact projection must
+        equal `model.export_index`'s own, including its default/unversioned
+        ELF rule."""
+        from abicheck.model.export_index import (
+            build_raw_export_index,
+            default_versioned_names,
+        )
+        from abicheck.workflows.bundle_symbol_status import (
+            build_bundle_signature_evidence,
+        )
+
+        snapshot = self._snapshot_with(
+            elf=ElfMetadata(
+                soname="",
+                needed=[],
+                symbols=[
+                    ElfSymbol(name="api_a", is_default=True),
+                    ElfSymbol(name="api_old", version="V1", is_default=False),
+                ],
+                imports=[],
+            )
+        )
+        raw = build_raw_export_index(snapshot)
+        assert raw is not None
+        assert member_export_names(
+            build_bundle_signature_evidence(snapshot)
+        ) == default_versioned_names(raw)
