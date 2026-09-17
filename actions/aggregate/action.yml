@@ -80,6 +80,54 @@ inputs:
       elsewhere silently costs every per-target detail downstream.
     required: false
     default: 'json=aggregate.json text=aggregate.txt'
+  record-analysis-context:
+    description: >
+      Record WHICH revision this run analysed into the aggregate document's
+      own `analysis_context` block.
+
+      On a `pull_request` build the commit actually checked out is an
+      ephemeral merge commit that no GitHub API endpoint names, so a trusted
+      `workflow_run` publisher cannot learn it except from the producer.
+      This is how the producer says it -- inside the artifact it already
+      publishes, in the canonical document, read back by
+      `actions/verify-source-run`'s `provenance-from` in one pass. It exists
+      so an integrator stops hand-writing a `tested-sha.txt` sidecar and a
+      privileged shell parser for it.
+
+      Everything recorded is a CLAIM by a possibly-unprivileged, possibly-
+      fork job. Each field is shape-validated when written, and the
+      publisher verifies the recorded commit's association with the pull
+      request through the API before displaying it (ADR-073). Off by
+      default, so no existing caller's document changes shape.
+    required: false
+    default: 'false'
+  tested-sha:
+    description: >
+      The revision this job actually checked out, built and analysed. The
+      default is `github.sha`, which on a `pull_request` run IS the ephemeral
+      merge commit -- the value that is worth recording, and the one a
+      publisher cannot obtain any other way. Override it when the analysed
+      tree is not the one this workflow checked out. Only read when
+      `record-analysis-context` is 'true'.
+    required: false
+    default: ${{ github.sha }}
+  profile:
+    description: >
+      The contract profile this analysis was performed under, recorded
+      alongside the revision. Only read when `record-analysis-context` is
+      'true'.
+    required: false
+    default: ''
+  orchestration-ref:
+    description: >
+      The revision of the *orchestration* that ran -- the abicheck Action ref
+      this producer is pinned to. Deliberately separate from every commit
+      above: a historical bootstrap builds an old captured revision with a
+      current orchestration, and flattening the two makes that look like a
+      tag push of the old one. Only read when `record-analysis-context` is
+      'true'.
+    required: false
+    default: ''
   install:
     description: "'true' (default) to pip install abicheck from this Action's own checkout."
     required: false
@@ -147,6 +195,32 @@ runs:
         INPUT_GATE: ${{ inputs.gate }}
       run: bash "${{ github.action_path }}/run.sh" collect
 
+    # Written before aggregation, so a malformed value fails the PRODUCER's
+    # own job rather than the trusted publisher's -- the job that can
+    # actually fix it. Every value arrives through a named environment
+    # variable rather than an argv position: a branch name may contain any
+    # character, and an argv round trip through a composite step's shell is
+    # exactly where it stops being data.
+    - name: Record the analysis context
+      id: context
+      if: inputs.record-analysis-context == 'true'
+      shell: bash
+      env:
+        ABICHECK_CTX_TESTED_SHA: ${{ inputs.tested-sha }}
+        ABICHECK_CTX_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        ABICHECK_CTX_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        ABICHECK_CTX_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        ABICHECK_CTX_PR_NUMBER: ${{ github.event.pull_request.number }}
+        ABICHECK_CTX_REPOSITORY: ${{ github.repository }}
+        ABICHECK_CTX_RUN_ID: ${{ github.run_id }}
+        ABICHECK_CTX_RUN_ATTEMPT: ${{ github.run_attempt }}
+        ABICHECK_CTX_WORKFLOW_REF: ${{ github.workflow_ref }}
+        ABICHECK_CTX_EVENT: ${{ github.event_name }}
+        ABICHECK_CTX_ORCHESTRATION_REF: ${{ inputs.orchestration-ref }}
+        ABICHECK_CTX_PROFILE: ${{ inputs.profile }}
+        INPUT_REPORTS_DIR: ${{ inputs.reports-dir }}
+      run: bash "${{ github.action_path }}/run.sh" record-context
+
     - name: Aggregate
       id: aggregate
       shell: bash
@@ -154,6 +228,7 @@ runs:
         INPUT_REPORTS_DIR: ${{ inputs.reports-dir }}
         INPUT_MANIFEST_PATH: ${{ inputs.manifest-path }}
         INPUT_OUTPUTS: ${{ inputs.outputs }}
+        INPUT_ANALYSIS_CONTEXT: ${{ steps.context.outputs.context-path }}
       run: bash "${{ github.action_path }}/run.sh" aggregate
 
     - name: Validate the aggregate document

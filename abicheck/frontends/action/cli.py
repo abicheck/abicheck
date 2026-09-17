@@ -64,12 +64,6 @@ from .run_selection import (
     verify_source_run,
     verify_tested_sha,
 )
-from .tag_resolution import (
-    TagResolutionError,
-    expected_capture_revision,
-    resolve_tag_commit,
-    tag_object_to_fetch,
-)
 
 
 @action_cli.command("comment")
@@ -472,94 +466,6 @@ def emit_fields_cmd(document: Path, fields: tuple[str, ...], tolerant: bool) -> 
     sys.stdout.write(payload.decode("utf-8"))
 
 
-# ---------------------------------------------------------------------------
-# `tag-peel` / `resolve-tag` — which commit does a publication tag name?
-# ---------------------------------------------------------------------------
-
-
-@action_cli.command("tag-peel")
-@click.argument("tag")
-@click.argument("ref_json", type=click.Path(exists=True, path_type=Path))
-def tag_peel_cmd(tag: str, ref_json: Path) -> None:
-    """Print the annotated-tag object to peel for TAG, or nothing.
-
-    Two commands rather than one because the caller has to make a *second*
-    API request in between, and only for an annotated tag. Deciding whether
-    there is one is still a rule about what GitHub's document means, so it
-    stays here instead of becoming a `jq` expression in a workflow (ADR-073:
-    the shells call the API, this decides what the answers mean).
-    """
-    try:
-        click.echo(tag_object_to_fetch(tag, _read_json(ref_json)))
-    except TagResolutionError as exc:
-        click.echo(f"abicheck: {exc}", err=True)
-        raise SystemExit(EXIT_REFUSED) from exc
-
-
-@action_cli.command("resolve-tag")
-@click.argument("tag")
-@click.argument("ref_json", type=click.Path(exists=True, path_type=Path))
-@click.option(
-    "--tag-object-json",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="GET /repos/{repo}/git/tags/{sha}, required when TAG is annotated.",
-)
-@click.option(
-    "--expected-project-ref",
-    default="",
-    help=(
-        "What a pre-captured set's project_ref must equal: 'commit' (default), "
-        "'tag' for the legacy tag-valued behavior, or a full commit SHA."
-    ),
-)
-@click.option("--out", type=click.Path(path_type=Path), default=None)
-def resolve_tag_cmd(
-    tag: str,
-    ref_json: Path,
-    tag_object_json: Path | None,
-    expected_project_ref: str,
-    out: Path | None,
-) -> None:
-    """Resolve TAG to its commit and to the revision a capture must record.
-
-    The two answers are emitted side by side precisely because they are not
-    the same value: ``commit_sha`` is what the tag names, and
-    ``expected_project_ref`` is what the caller declared a published
-    baseline-set's own manifest has to say. Conflating them is the defect
-    :mod:`abicheck.frontends.action.tag_resolution` exists to close.
-    """
-    try:
-        resolved = resolve_tag_commit(
-            tag,
-            _read_json(ref_json),
-            tag_object=(
-                _read_json(tag_object_json) if tag_object_json is not None else None
-            ),
-        )
-        expected = expected_capture_revision(
-            expected_project_ref, tag=tag, resolved=resolved
-        )
-    except TagResolutionError as exc:
-        if out is not None:
-            _write_json(
-                out, {"resolved": False, "code": exc.code, "reason": exc.message}
-            )
-        click.echo(f"abicheck: {exc}", err=True)
-        raise SystemExit(EXIT_REFUSED) from exc
-    document = {
-        "resolved": True,
-        "tag": resolved.tag,
-        "ref": resolved.ref,
-        "commit_sha": resolved.commit_sha,
-        "annotated": resolved.annotated,
-        "expected_project_ref": expected,
-    }
-    if out is not None:
-        _write_json(out, document)
-    click.echo(json.dumps(document, sort_keys=True))
-
-
 @action_cli.command("flatten-pages")
 @click.argument("raw", type=click.Path(exists=True, path_type=Path))
 @click.argument("out", type=click.Path(path_type=Path))
@@ -598,7 +504,10 @@ def flatten_pages_cmd(raw: Path, out: Path) -> None:
 # decorates `action_cli` at import time. Kept at the foot of the file, after
 # the group and the shared helpers it uses are defined, the same way
 # `abicheck/cli.py` registers its own `cli_*` siblings.
-from . import cli_integration as _cli_integration  # noqa: E402,F401
+from . import (  # noqa: E402
+    cli_integration as _cli_integration,  # noqa: F401
+    cli_provenance as _cli_provenance,  # noqa: F401
+)
 
 if __name__ == "__main__":  # pragma: no cover - exercised via subprocess
     # Safe to call the group directly: it is `cli_base`'s single object, so

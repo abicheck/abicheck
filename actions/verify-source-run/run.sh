@@ -60,6 +60,18 @@ if [[ -n "$TESTED_SHA" && ! "$TESTED_SHA" =~ ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
   _fail "'tested-sha' must be a full 40- or 64-character commit SHA (got '$TESTED_SHA'); an abbreviated SHA cannot be verified against the pull request."
 fi
 
+# A relative member of the extracted artifact, never a path this step
+# joins itself: the whole point is that the provenance comes out of the
+# artifact the run already produced. Rejected here rather than in Python so
+# a typo reads as this Action's input error.
+PROVENANCE_FROM="${INPUT_PROVENANCE_FROM:-}"
+REPORT_FROM="${INPUT_REPORT_FROM:-}"
+for _relative in "$PROVENANCE_FROM" "$REPORT_FROM"; do
+  case "$_relative" in
+    /*|*..*|*$'\n'*) _fail "'provenance-from'/'report-from' must be a relative path inside the artifact with no '..' segment (got '$_relative')." ;;
+  esac
+done
+
 CLAIMED_PR="${INPUT_CLAIMED_PR_NUMBER:-}"
 if [[ -n "$CLAIMED_PR" && ! "$CLAIMED_PR" =~ ^[0-9]+$ ]]; then
   _fail "'claimed-pr-number' must be a positive integer (got '$CLAIMED_PR')."
@@ -202,10 +214,98 @@ if ! python -m abicheck.frontends.action.cli extract-artifact \
   _fail "refused the artifact from run $RUN_ID."
 fi
 
+# ── the analysed commit, read out of the artifact just extracted ─────────
+#
+# This is the single-pass half of ADR-073's provenance flow. The commit a
+# `pull_request` producer actually built is an ephemeral merge commit that
+# no API endpoint names, so the producer records it in the aggregate
+# document's `analysis_context` block; it only becomes readable *after* the
+# artifact is extracted, which is why it is read here rather than passed in
+# as `tested-sha`.
+#
+# The previous shape of this -- a caller running the whole Action once to
+# get the artifact, parsing a sidecar file in its own privileged shell, then
+# running the Action a second time with `tested-sha` set -- downloaded the
+# same bytes twice with no guarantee the second copy was the first, and put
+# artifact parsing in the trusted job. Both are closed by doing it here: one
+# download, and every field shape-checked by an importable owner before it
+# can reach a step output.
+TESTED_SHA_SOURCE="run-head"
+PROVENANCE_STATE="not-requested"
+if [[ -n "$PROVENANCE_FROM" ]]; then
+  PROVENANCE_STATE="absent"
+  REQUIRE_FLAG="--require"
+  if [[ "${INPUT_REQUIRE_PROVENANCE:-true}" != "true" ]]; then
+    REQUIRE_FLAG="--no-require"
+  fi
+  if ! python -m abicheck.frontends.action.cli read-analysis-context \
+      "$DESTINATION/$PROVENANCE_FROM" --out "$WORK/context.json" \
+      --max-bytes "${INPUT_MAX_ENTRY_BYTES:-33554432}" "$REQUIRE_FLAG"; then
+    CODE="$(python -m abicheck.frontends.action.cli emit-fields --tolerant "$WORK/context.json" code || true)"
+    _out "refusal-code" "${CODE:-analysis-context-unreadable}"
+    _fail "the producer's analysis context could not be read (${CODE:-unknown})."
+  fi
+  {
+    read -r CTX_PRESENT
+    read -r CTX_RECORDS
+    read -r CTX_TESTED_SHA
+  } < <(python -m abicheck.frontends.action.cli emit-fields --tolerant \
+          "$WORK/context.json" present records_tested_sha tested_sha)
+
+  if [[ "$CTX_PRESENT" == "true" && "$CTX_RECORDS" == "true" ]]; then
+    PROVENANCE_STATE="recorded"
+    # Already shape-validated by the owner above; re-asserted here because
+    # this value is about to be interpolated into a URL.
+    [[ "$CTX_TESTED_SHA" =~ ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$ ]] \
+      || _fail "the recorded analysed commit is not a full SHA."
+    COMMIT_ARGS=()
+    if [[ "$CTX_TESTED_SHA" != "$RUN_HEAD_SHA" ]]; then
+      gh api "repos/$REPOSITORY/commits/$CTX_TESTED_SHA" > "$COMMIT_JSON" 2>"$WORK/commit.err" \
+        || _fail "could not read the analysed commit $CTX_TESTED_SHA: $(tr '\n' ' ' < "$WORK/commit.err")"
+      COMMIT_ARGS+=(--tested-commit-json "$COMMIT_JSON")
+    fi
+    # The run and the pull request come from the FIRST pass's own result, so
+    # the identity checked here is the identity verified there.
+    if ! python -m abicheck.frontends.action.cli verify-tested-sha \
+        --run-json "$RUN_JSON" --result-json "$RESULT_JSON" \
+        --tested-sha "$CTX_TESTED_SHA" \
+        ${COMMIT_ARGS[@]+"${COMMIT_ARGS[@]}"} \
+        --out "$WORK/tested.json"; then
+      CODE="$(python -m abicheck.frontends.action.cli emit-fields --tolerant "$WORK/tested.json" code || true)"
+      _out "refusal-code" "$CODE"
+      _fail "the producer's analysed commit does not belong to this pull request (${CODE:-unknown})."
+    fi
+    VERIFIED_TESTED_SHA="$(python -m abicheck.frontends.action.cli emit-fields "$WORK/tested.json" tested_sha)"
+    TESTED_SHA_SOURCE="analysis-context"
+  fi
+fi
+
+# ── the report location, returned WITH the identity it was checked under ──
+#
+# Returned together, so the document a caller renders is the one whose
+# context was verified -- not a path the caller reassembled from
+# `artifact-path` and a filename, which can name a member that was never
+# checked. A verified run whose report is missing gets an explicit
+# unavailable-analysis answer rather than a path that does not resolve.
+REPORT_PATH=""
+REPORT_AVAILABLE="false"
+if [[ -n "$REPORT_FROM" ]]; then
+  if [[ -s "$DESTINATION/$REPORT_FROM" ]]; then
+    REPORT_PATH="$DESTINATION/$REPORT_FROM"
+    REPORT_AVAILABLE="true"
+  else
+    echo "::notice::the verified run produced no $REPORT_FROM; the analysis is unavailable, which is not a clean compatibility result."
+  fi
+fi
+
 _out "verified" "true"
 _out "pr-number" "$PR_NUMBER"
 _out "pr-head-sha" "$PR_HEAD_SHA"
 _out "tested-sha" "$VERIFIED_TESTED_SHA"
+_out "tested-sha-source" "$TESTED_SHA_SOURCE"
+_out "provenance" "$PROVENANCE_STATE"
+_out "report-path" "$REPORT_PATH"
+_out "report-available" "$REPORT_AVAILABLE"
 # `${:-false}` so a result document that resolved no pull request still
 # publishes a boolean here, which is what this output promised before the
 # field emitter started answering "no value" for an absent key.

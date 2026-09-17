@@ -223,20 +223,57 @@ def test_every_declared_input_reaches_run_sh() -> None:
     ignored by the *published* Action, even though every test that invokes
     ``run.sh`` directly still passes -- the same gap
     ``test_action_resolve_baseline`` pins for its own Action.
+
+    The claim is "every declared input is *read somewhere in the composite
+    steps*", which is what a caller setting it is owed. It is asserted two
+    ways because the Action wires inputs two ways: most arrive as
+    ``INPUT_<NAME>`` for ``run.sh``, while the analysis-context block names
+    its variables for the CLI command that reads them
+    (``ABICHECK_CTX_*``) and gates the whole step on
+    ``inputs.record-analysis-context``. Matching only the first spelling
+    would report a genuinely-wired input as dead; matching on the
+    ``inputs.<name>`` *reference* covers both without weakening the check --
+    an input nothing mentions at all still fails.
     """
     import yaml
 
-    document = yaml.safe_load((ACTION_DIR / "action.yml").read_text(encoding="utf-8"))
+    raw = (ACTION_DIR / "action.yml").read_text(encoding="utf-8")
+    document = yaml.safe_load(raw)
     forwarded: set[str] = set()
+    referenced = ""
     for step in document["runs"]["steps"]:
         forwarded.update(step.get("env", {}))
+        referenced += yaml.safe_dump(
+            {k: step.get(k) for k in ("if", "env", "run", "with", "uses")}
+        )
     # Consumed by the setup-python / install steps rather than by run.sh.
     consumed_elsewhere = {"python-version", "install"}
     for name in document["inputs"]:
         if name in consumed_elsewhere:
             continue
         expected = f"INPUT_{name.upper().replace('-', '_')}"
-        assert expected in forwarded, f"input {name!r} never reaches run.sh"
+        assert expected in forwarded or f"inputs.{name}" in referenced, (
+            f"input {name!r} is never read by any composite step"
+        )
+
+
+def test_the_input_wiring_scan_can_actually_fail() -> None:
+    """Vacuity guard for the check above.
+
+    The assertion is a disjunction over a dumped blob, which is exactly the
+    shape that quietly becomes true for everything. So prove the negative
+    case: a name no step mentions must not be found by either arm.
+    """
+    import yaml
+
+    document = yaml.safe_load((ACTION_DIR / "action.yml").read_text(encoding="utf-8"))
+    referenced = "".join(
+        yaml.safe_dump({k: step.get(k) for k in ("if", "env", "run", "with", "uses")})
+        for step in document["runs"]["steps"]
+    )
+    forwarded = {k for step in document["runs"]["steps"] for k in step.get("env", {})}
+    assert "INPUT_NO_SUCH_INPUT" not in forwarded
+    assert "inputs.no-such-input" not in referenced
 
 
 class TestActionCliSurface:

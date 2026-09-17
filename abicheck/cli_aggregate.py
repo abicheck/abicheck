@@ -45,6 +45,7 @@ from .cli import main
 from .cli_options import export_options, verbose_option
 from .frontends.cli.options.export import ExportSet
 from .frontends.cli.runtime import _setup_verbosity, emit_export_set
+from .model.analysis_context import AnalysisContext, AnalysisContextError
 from .report.aggregate import render_aggregate_json, render_aggregate_text
 from .workflows.aggregate import (
     DEFAULT_REPORT_PREFIX,
@@ -92,12 +93,29 @@ from .workflows.aggregate.expected_input import (
     "operator has no expected inventory, which no document's contents can "
     "say for them.",
 )
+@click.option(
+    "--analysis-context",
+    "analysis_context_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="A JSON document recording WHICH revision this run analysed, "
+    "emitted verbatim into the aggregate document's `analysis_context` "
+    "block. On a pull-request build the commit actually checked out is an "
+    "ephemeral merge commit that no GitHub API endpoint names, so a trusted "
+    "publisher has no way to learn it except from the producer -- this is "
+    "how the producer says it, inside the artifact it already publishes, "
+    "rather than in a sidecar file a publisher would have to parse in "
+    "privileged shell. Every field is a CLAIM and is shape-validated here, "
+    "never trusted: a publisher verifies it against the API before "
+    "displaying it (ADR-073).",
+)
 @export_options(["text", "json"], default_format="text")
 @verbose_option
 def aggregate_cmd(
     reports_dir: Path,
     manifest: Path | None,
     discovered_only: bool,
+    analysis_context_path: Path | None,
     exports: ExportSet,
     verbose: bool,
 ) -> None:
@@ -131,6 +149,7 @@ def aggregate_cmd(
     _setup_verbosity(verbose)
 
     expected, policy_source_hint = _resolve_expected(manifest, discovered_only)
+    analysis_context = _resolve_analysis_context(analysis_context_path)
 
     try:
         result = aggregate_reports_dir(
@@ -146,13 +165,37 @@ def aggregate_cmd(
     emit_export_set(
         exports,
         lambda fmt: (
-            json.dumps(render_aggregate_json(result), indent=2)
+            json.dumps(
+                render_aggregate_json(result, analysis_context=analysis_context),
+                indent=2,
+            )
             if fmt == "json"
             else render_aggregate_text(result)
         ),
     )
 
     sys.exit(result.exit_code())
+
+
+def _resolve_analysis_context(path: Path | None) -> AnalysisContext | None:
+    """Read and shape-validate a recorded analysis context, or ``None``.
+
+    A malformed document is a usage error, not a silently dropped block: the
+    caller asked for this identity to travel with the report, and a
+    publisher that finds no ``analysis_context`` cannot tell "the producer
+    did not record one" from "the producer recorded one this build refused".
+    Those are different states with different publication policies.
+    """
+    if path is None:
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise click.UsageError(f"--analysis-context {path}: {exc}") from exc
+    try:
+        return AnalysisContext.from_mapping(raw)
+    except AnalysisContextError as exc:
+        raise click.UsageError(f"--analysis-context {path}: {exc}") from exc
 
 
 def _resolve_expected(

@@ -9,7 +9,7 @@ set -euo pipefail
 
 _fail() { echo "::error::$*"; exit 1; }
 
-PHASE="${1:?usage: run.sh collect|aggregate|validate}"
+PHASE="${1:?usage: run.sh collect|record-context|aggregate|validate}"
 
 # Refusals from the Python owners (EXIT_REFUSED). Distinguished from an
 # ordinary crash so the message says which contract was broken.
@@ -52,6 +52,25 @@ case "$PHASE" in
     fi
     ;;
 
+  record-context)
+    REPORTS_DIR="${INPUT_REPORTS_DIR:?reports-dir input is required}"
+    # Beside the aggregate document rather than in it: the block is folded
+    # INTO aggregate.json by `abicheck aggregate --analysis-context`, so
+    # this file is a transport between two steps of one Action, never a
+    # second published format. It is deliberately not written inside
+    # reports-dir, which `abicheck aggregate` globs for *.json and would
+    # read this as an extra target.
+    CONTEXT_PATH="$(dirname "$REPORTS_DIR")/.abicheck-analysis-context.json"
+    rc=0
+    python -m abicheck.frontends.action.cli record-analysis-context "$CONTEXT_PATH" || rc=$?
+    if [[ "$rc" == "$_REFUSED" ]]; then
+      _fail "the analysis context could not be recorded (see above). A malformed value fails here, in the job that can fix it, rather than in the trusted publisher."
+    elif [[ "$rc" != 0 ]]; then
+      _fail "recording the analysis context failed with exit $rc."
+    fi
+    echo "context-path=$CONTEXT_PATH" >> "$GITHUB_OUTPUT"
+    ;;
+
   aggregate)
     REPORTS_DIR="${INPUT_REPORTS_DIR:?reports-dir input is required}"
     MANIFEST_PATH="${INPUT_MANIFEST_PATH:?manifest-path input is required}"
@@ -80,8 +99,15 @@ case "$PHASE" in
     # operational one: 0 pass, 1 coverage/quality, 2 API break, 4 ABI break.
     # It is captured and reported, never swallowed with `|| true` and never
     # allowed to fail this step. 64 is a usage error -- ours, and fatal.
+    CONTEXT_ARGS=()
+    if [[ -n "${INPUT_ANALYSIS_CONTEXT:-}" ]]; then
+      [[ -s "$INPUT_ANALYSIS_CONTEXT" ]] \
+        || _fail "the recording step named $INPUT_ANALYSIS_CONTEXT but it is missing or empty -- publishing an aggregate document with no analysis_context after asking for one would leave a publisher unable to tell 'not recorded' from 'recording failed'."
+      CONTEXT_ARGS=(--analysis-context "$(cd "$(dirname "$INPUT_ANALYSIS_CONTEXT")" && pwd)/$(basename "$INPUT_ANALYSIS_CONTEXT")")
+    fi
+
     rc=0
-    ( cd "$REPORTS_DIR" && abicheck aggregate . --manifest "$(cd "$(dirname "$MANIFEST_PATH")" && pwd)/$(basename "$MANIFEST_PATH")" ${OUT_ARGS[@]+"${OUT_ARGS[@]}"} ) || rc=$?
+    ( cd "$REPORTS_DIR" && abicheck aggregate . --manifest "$(cd "$(dirname "$MANIFEST_PATH")" && pwd)/$(basename "$MANIFEST_PATH")" ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} ${OUT_ARGS[@]+"${OUT_ARGS[@]}"} ) || rc=$?
     if [[ "$rc" == 64 ]]; then
       _fail "abicheck aggregate rejected its inputs (usage error)."
     fi
