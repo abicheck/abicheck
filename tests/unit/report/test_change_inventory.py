@@ -22,7 +22,12 @@ from abicheck.report.change_inventory import (
     compute_change_inventory,
     render_change_inventory_json,
 )
-from abicheck.report.render_text import format_hygiene_note, format_stat_line
+from abicheck.report.document import ReportDocument
+from abicheck.report.render_text import (
+    format_hygiene_note,
+    format_stat_line,
+    render_stat_document,
+)
 
 _VERDICTS = (
     Verdict.BREAKING,
@@ -146,3 +151,60 @@ def test_hygiene_note_orders_what_changed_before_what_did_not() -> None:
     assert note == "; hygiene: 1 introduced, 2 resolved, 3 persistent, 4 not evaluated"
     assert format_hygiene_note(None) == ""
     assert format_hygiene_note({"hygiene_persistent": 0}) == ""
+
+
+_BASE_SUMMARY = {
+    "breaking": 0,
+    "source_breaks": 0,
+    "risk_changes": 32,
+    "compatible_additions": 0,
+    "total_changes": 32,
+}
+
+
+def _stat_document(summary: dict[str, object]) -> ReportDocument:
+    return ReportDocument.from_mapping(
+        {"verdict_label": "NO_CHANGE", "summary": summary}
+    )
+
+
+class TestStatDocumentProjection:
+    """``render_stat_document`` reads the block, and tolerates its absence.
+
+    The projection is generic over any ``ReportDocument``, and
+    ``format_stat_line``'s ``change_inventory`` is optional -- so a document
+    built by a caller that carries no ``summary.change_inventory`` (every
+    pre-5.3 one) must render exactly the line it always did. Asserting that
+    through the projection, rather than through ``format_stat_line`` alone,
+    is what makes it a statement about the report rather than about the
+    formatter.
+    """
+
+    def test_a_document_carrying_the_block_states_the_inventory(self) -> None:
+        split = compute_change_inventory(
+            [_change(CrossSourceEvolution.PERSISTENT) for _ in range(32)],
+            [],
+            lambda _c: Verdict.COMPATIBLE_WITH_RISK,
+        )
+        summary = {
+            **_BASE_SUMMARY,
+            "change_inventory": render_change_inventory_json(split),
+        }
+        assert render_stat_document(_stat_document(summary)) == (
+            "NO_CHANGE: no compatibility changes (0 total); hygiene: 32 persistent"
+        )
+
+    @pytest.mark.parametrize("absent", [None, "not-an-object", 7, []])
+    def test_a_document_without_the_block_renders_the_pre_5_3_line(
+        self, absent: object
+    ) -> None:
+        """Absent, null, and a non-object value all fall back identically.
+
+        Parametrized over the shapes a hand-built or older document can
+        actually carry, because the guard is an ``isinstance`` check: a
+        single ``None`` case would leave the other three asserting nothing.
+        """
+        expected = render_stat_document(_stat_document(dict(_BASE_SUMMARY)))
+        assert expected == "NO_CHANGE: 32 risk (32 total)"
+        summary = {**_BASE_SUMMARY, "change_inventory": absent}
+        assert render_stat_document(_stat_document(summary)) == expected
