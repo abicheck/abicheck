@@ -266,7 +266,18 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
         # requested one that did not; and it judged a document by content
         # alone, so one left behind by an earlier run (or committed by a PR
         # author) read as this run's own output.
-        fixed_by=(1016, 1210, 1246),
+        # #1325 added the same class's *provenance* member. A `pull_request`
+        # producer builds an ephemeral merge commit no API endpoint names, so
+        # when a publisher asked which revision was analysed and the artifact
+        # recorded none, the available answer -- the pull request's head --
+        # was a plausible sibling of the right one and wrong in exactly the
+        # case that matters. Substituting it is this class's fallthrough
+        # wearing different clothes: an unestablished identity published as
+        # an established one. It refuses now (`analysis-context-absent`), and
+        # `require-provenance: false` is what a caller states to accept the
+        # run head instead -- with `tested-sha-source` saying so, rather than
+        # the two being indistinguishable.
+        fixed_by=(1016, 1210, 1246, 1325),
         seed_tests=(
             "tests/test_action_report_query.py",
             "tests/test_action_unreadable_report_verdict.py",
@@ -296,6 +307,10 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             # the six historical instances when each is reintroduced.
             "tests/test_action_report_verdict_vocabulary.py",
             "tests/test_action_report_destinations.py",
+            # The provenance member above: an absent analysis context
+            # refuses rather than substituting the PR head, and the three
+            # states of `tested-sha-source` stay distinguishable.
+            "tests/test_action_analysis_context.py",
         ),
         public_surfaces=("github-action",),
         axes={
@@ -578,5 +593,77 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             "depth_request": ("explicit", "implicit"),
             "exclusion_rule": ("matched", "unmatched", "mixed"),
         },
+    ),
+    BugClass(
+        id="report.scalar_release_projection_drift",
+        invariant=(
+            "A block the scalar single-pair report derives from a shared "
+            "computation must reach every cardinality that already runs that "
+            "same computation. The release fan-out calls the identical "
+            "`build_summary(result)` per member, so a member entry and a "
+            "scalar report over the identical pair state the identical "
+            "block — asserted field-wise over the scalar block's own key "
+            "set, never over the one counter a fix happened to notice, so a "
+            "counter added later is covered without editing the test. The "
+            "release aggregate derives only from those already-stamped "
+            "member blocks (never from display-filtered or display-capped "
+            "findings, never re-derived from kind names), keeps every "
+            "counter's documented meaning, holds the single-pair split's "
+            "own conservation rule across the fold, keeps member totals "
+            "distinguishable from release-global (bundle/probe-matrix) "
+            "findings, counts a member with no completed comparison rather "
+            "than summing it as zero findings, and is absent rather than "
+            "all-zero when no member carries a block."
+        ),
+        # `summary.change_inventory` shipped in the scalar report from a
+        # shared owner (#1324) while the release path — which already
+        # computed the same `build_summary(result)` — copied two of its
+        # fields into each member entry and dropped the inventory. Nothing
+        # failed anywhere: the scalar module's own tests never reach that
+        # hand-written projection boundary, so a release whose entire
+        # displayed "risk" was standing hygiene still printed it as
+        # observed change, in the JSON document, the oneline and the
+        # Markdown table alike. Same shape as #753 -> #759: the defect was a
+        # *missing* propagation, which produces no failing assertion to
+        # find. The class is "a projection boundary that re-states a shared
+        # computation by hand", not "this one counter".
+        fixed_by=(1324,),
+        seed_tests=("tests/test_release_change_inventory.py",),
+        # `()`: the seed tests drive `add_member_review_summary`, the fold
+        # and the three renderers directly, never through Click or
+        # `abicheck.service`.
+        public_surfaces=(),
+        axes={
+            "cardinality": ("scalar", "one_member_release", "multi_member_release"),
+            "render": ("json", "oneline", "markdown"),
+            "member_state": (
+                "completed",
+                "no_comparison_completed",
+                "no_inventory_block",
+            ),
+            "evolution_state": (
+                "unstamped",
+                "introduced",
+                "resolved",
+                "persistent",
+                "not_evaluated",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The aggregate is verified over hand-built and "
+                    "`add_member_review_summary`-stamped member entries and "
+                    "through `_format_release_json`, not through a real "
+                    "multi-binary `compare` of a directory pair: no native "
+                    "toolchain fixture in this workspace produces members "
+                    "carrying cross-source hygiene findings. The JUnit and "
+                    "full baseline-capture paths have their own data "
+                    "requirements and deliberately do not carry this block; "
+                    "whether either should is unevaluated."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
     ),
 )

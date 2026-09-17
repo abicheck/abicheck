@@ -136,7 +136,12 @@ def parse_header_ast_fields(
             semantic_ir = _normalize_context()
         else:
             semantic_ir = run_ast_acquisition(
-                f"{producer}-normalized", scope_key, _normalize_context
+                f"{producer}-normalized",
+                scope_key,
+                _normalize_context,
+                # `scope_key` embeds `id(root)`, so this entry is only
+                # meaningful while that exact root is alive.
+                group=root,
             )
     return replace(legacy, semantic_ir=semantic_ir)
 

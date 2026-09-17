@@ -30,10 +30,14 @@ the import-cycle-growth AI-readiness check.
 
 from __future__ import annotations
 
-import re
-from collections.abc import Collection
 from typing import TYPE_CHECKING
 
+from .compare.spelling_pattern import (
+    BOUNDARY_CHARS,
+    compile_spelling_pattern,
+    finditer_allow_nested,
+    spelling_matches as spelling_matches,
+)
 from .diff_cxx_rules import itanium_qualified_name, msvc_qualified_name
 from .model import ScopeOrigin
 from .model.namespace_spelling import (
@@ -54,6 +58,17 @@ if TYPE_CHECKING:
 
 __all__: list[str] = []
 
+# The matcher half moved to `compare/spelling_pattern.py` (see that module's
+# docstring for why). Re-exported under their historical private names so
+# every existing `from .type_reachability_spelling import
+# _compile_spelling_pattern` call site keeps resolving -- written as
+# assignments rather than aliased imports because a rename-on-import is an
+# unused import to the linter, which is how three of these silently
+# disappeared once.
+_BOUNDARY_CHARS = BOUNDARY_CHARS
+_compile_spelling_pattern = compile_spelling_pattern
+_finditer_allow_nested = finditer_allow_nested
+
 # libc++ (and Android NDK's libc++) wrap the whole standard library in an
 # inline namespace directly under ``std::`` -- ``std::__1::vector<int>``,
 # ``std::__ndk1::vector<int>`` -- invisible to normal C++ code (inline
@@ -68,11 +83,6 @@ __all__: list[str] = []
 # ``"std::__cxx11::basic_string<...>"`` while ``snapshot.typedefs["std::string"]``
 # resolves to the bare ``"basic_string<...>"`` (no ``__cxx11::`` at all).
 _STDLIB_ABI_NAMESPACE_MARKERS: tuple[str, ...] = ("__1::", "__ndk1::", "__cxx11::")
-
-# Boundary character class shared by type_string_references_name's manual
-# check and the compiled multi-spelling pattern below -- kept as one
-# constant so the two implementations can't silently drift apart.
-_BOUNDARY_CHARS = "_:"
 
 # Provenance origins that are confidently NOT part of the public header
 # surface (same set as idioms.py's _NON_PUBLIC_ORIGINS, ADR-024/027) -- a
@@ -122,8 +132,12 @@ def type_string_references_name(type_string: str, name: str) -> bool:
         before = type_string[idx - 1] if idx > 0 else ""
         after_idx = idx + len(name)
         after = type_string[after_idx] if after_idx < len(type_string) else ""
-        before_ok = before == "" or not (before.isalnum() or before in "_:")
-        after_ok = after == "" or not (after.isalnum() or after in "_:")
+        # Reads BOUNDARY_CHARS rather than repeating "_:" inline: the
+        # constant's whole purpose is that this manual check and the
+        # compiled alternation cannot drift, and this function had in fact
+        # been spelling the class out literally the entire time.
+        before_ok = before == "" or not (before.isalnum() or before in BOUNDARY_CHARS)
+        after_ok = after == "" or not (after.isalnum() or after in BOUNDARY_CHARS)
         if before_ok and after_ok:
             return True
         start = idx + 1
@@ -584,79 +598,6 @@ def _raw_typedef_spellings(typedefs: dict[str, str]) -> dict[str, frozenset[str]
             if form is not None:
                 targets.setdefault(form, set()).add(target)
     return {spelling: frozenset(ts) for spelling, ts in targets.items()}
-
-
-def _compile_spelling_pattern(spellings: Collection[str]) -> re.Pattern[str] | None:
-    """One compiled alternation matching any of *spellings* as a whole type
-    token — the same boundary semantics as :func:`type_string_references_name`
-    (non-identifier, non-``:``-scope character, or the string boundary, on
-    both sides), but resolved in a single pass over each declaration's type
-    string regardless of how many spellings there are.
-
-    This is the fix for the quadratic candidate-by-candidate scan (Codex
-    review, fresh evidence: a synthetic snapshot with 1,000 functions and
-    1,000 unreferenced stdlib records took over a second in a single
-    ``directly_referenced_stdlib_types`` call, and nine independent
-    ``diff_types.py`` call sites each repeated it) — building one pattern
-    once turns the scan from O(candidates × declarations) into
-    O(declarations), independent of candidate count. Longest-first ordering
-    doesn't change *whether* something matches (every alternative is
-    anchored to the same boundary, so a shorter spelling can't "shadow" a
-    longer one the way it could in an unanchored first-match scan) but keeps
-    the compiled pattern's alternation order deterministic for a stable
-    ``.finditer()`` iteration order.
-    """
-    if not spellings:
-        return None
-    ordered = sorted(spellings, key=len, reverse=True)
-    alternation = "|".join(re.escape(s) for s in ordered)
-    return re.compile(
-        rf"(?<![A-Za-z0-9{_BOUNDARY_CHARS}])(?:{alternation})(?![A-Za-z0-9{_BOUNDARY_CHARS}])"
-    )
-
-
-def _finditer_allow_nested(
-    pattern: re.Pattern[str], text: str, start: int = 0, end: int | None = None
-) -> list[re.Match[str]]:
-    """Every match of *pattern* in ``text[start:end]``, including one nested
-    strictly inside another match's own span (Codex review, fresh evidence):
-    plain ``.finditer()`` only returns *non-overlapping* matches, continuing
-    its search from the end of each match — so when one candidate's spelling
-    is a substring of another's own registered spelling (e.g. ``"std::string"``
-    inside ``"std::vector<std::string>"``, or a non-stdlib ``"Inner"`` inside
-    ``"Wrapper<Inner>"``), the alternation's longest-first ordering matches
-    the *outer* candidate first, consuming the whole span, and the inner one
-    is never independently reported even though it is directly present in
-    the signature text. Splitting stdlib vs. non-stdlib into two independent
-    patterns (an earlier fix) only solved *cross*-index masking — two
-    candidates from the *same* index (both stdlib, or both non-stdlib
-    records) can still mask each other this way.
-
-    Uses an explicit stack rather than recursing into ``text[m.start() + 1 :
-    m.end()]`` for every match found (Codex review, fresh evidence): a
-    genuinely deep chain of registered spellings each nested one inside the
-    next — plausible for template-metaprogramming-heavy C++ under a
-    compiler's configured ``-ftemplate-depth`` (GCC/Clang both default well
-    into the hundreds, and it's routinely raised higher) — previously
-    recursed one Python call per nesting level. Confirmed empirically: 1,000
-    successively nested registered candidate spellings raised
-    ``RecursionError`` under Python's default 1,000-frame recursion limit,
-    aborting the whole comparison rather than degrading gracefully. An
-    explicit stack has no such limit — each entry is still a strictly
-    narrower window than the match that produced it, so the search still
-    always terminates, just without consuming Python's call stack to do it.
-    """
-    if end is None:
-        end = len(text)
-    matches: list[re.Match[str]] = []
-    stack: list[tuple[int, int]] = [(start, end)]
-    while stack:
-        window_start, window_end = stack.pop()
-        for m in pattern.finditer(text, window_start, window_end):
-            matches.append(m)
-            if m.end() - m.start() > 1:
-                stack.append((m.start() + 1, m.end()))
-    return matches
 
 
 def _partition_snapshot_types(

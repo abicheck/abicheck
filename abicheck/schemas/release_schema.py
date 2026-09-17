@@ -147,7 +147,25 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       requires >= 1.5.
 #: ``1.6`` adds each member's scalar-parity ``review_groups`` and
 #: ``result_counts`` blocks; both are additive and presentation-only.
-#: - ``1.7`` adds the top-level ``public_surface_reconciliation`` object: the
+#: - ``1.7`` adds the change-versus-inventory split at both cardinalities:
+#:       ``libraries[].change_inventory`` (the *identical* block, from the
+#:       identical computation, that a scalar ``compare`` report carries as
+#:       ``summary.change_inventory``) and the release fold
+#:       ``change_inventory`` (``report/release_change_inventory.py``).
+#:       Additive: every existing counter keeps its documented meaning, so a
+#:       pre-1.7 consumer reads nothing differently. The member block closes
+#:       a real discrepancy -- the fan-out already computed
+#:       ``build_summary(result)`` and copied two of its fields, leaving the
+#:       inventory behind, so a release whose displayed "risk" was entirely
+#:       standing hygiene could not say so the way the scalar report could.
+#:       The release fold is members-only and states its own scope
+#:       (``members_contributing``/``members_no_comparison_completed``/
+#:       ``members_without_inventory``): bundle-coherence and probe-matrix
+#:       findings are a different unit over a different operand and are
+#:       never folded in, and a member with no completed comparison is
+#:       counted rather than summed as zero findings. Absent when no member
+#:       carries a block, rather than an all-zero aggregate.
+#: - ``1.8`` adds the top-level ``public_surface_reconciliation`` object: the
 #:       release's one public contract reconciled against the union of its
 #:       members' exports (``report.release_public_surface``). It states, per
 #:       side, how many public declarations carry an export obligation, how
@@ -173,4 +191,10 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       fewer of them, because the per-member answer was a Cartesian
 #:       product (787,833 on a 28-library Intel MKL release). Every other
 #:       block is "present only when it states something", following 1.3-1.5.
-RELEASE_SCHEMA_VERSION = "1.7"
+#:       This entry independently claimed ``1.7`` on the same base
+#:       version as the ``change_inventory`` entry above -- a genuine
+#:       same-line collision, resolved the way this file's own history
+#:       already resolves several (``2.32``/``2.36``/``2.38``/``3.2``
+#:       in the per-comparison report's constant): renumber, don't
+#:       reuse, rather than discarding either side's change.
+RELEASE_SCHEMA_VERSION = "1.8"

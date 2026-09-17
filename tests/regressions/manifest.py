@@ -50,6 +50,7 @@ from .manifest_classification import CLASSIFICATION_BUG_CLASSES
 from .manifest_config import CONFIG_BUG_CLASSES
 from .manifest_evidence import EVIDENCE_BUG_CLASSES
 from .manifest_guards import GUARD_BUG_CLASSES
+from .manifest_integration import INTEGRATION_BUG_CLASSES
 from .manifest_performance import PERFORMANCE_BUG_CLASSES
 from .manifest_report import REPORT_BUG_CLASSES
 from .manifest_serialization import SERIALIZATION_BUG_CLASSES
@@ -1452,6 +1453,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     + PERFORMANCE_BUG_CLASSES
     + SERIALIZATION_BUG_CLASSES
     + GUARD_BUG_CLASSES
+    + INTEGRATION_BUG_CLASSES
     + REPORT_BUG_CLASSES
     + TEST_HARNESS_BUG_CLASSES
     + TOOL_SURFACE_BUG_CLASSES

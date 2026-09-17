@@ -120,6 +120,7 @@ from .type_reachability_spelling import (
     _stripped_signature_spelling as _stripped_signature_spelling,
     _typedef_candidate_spellings as _typedef_candidate_spellings,
     _typedef_spelling_targets as _typedef_spelling_targets,
+    spelling_matches as spelling_matches,
     type_string_references_name as type_string_references_name,
 )
 
@@ -389,7 +390,7 @@ class _StdlibReferenceScan:
         # avoiding recursion.
         worklist: list[tuple[str, bool, str | None]] = [
             (m.group(0), via_typedef, origin_alias)
-            for m in _finditer_allow_nested(self._typedef_pattern, type_string)
+            for m in spelling_matches(self._typedef_pattern, type_string)
         ]
         while worklist:
             alias, via_td, origin = worklist.pop()
@@ -401,7 +402,7 @@ class _StdlibReferenceScan:
                 if self._typedef_pattern is not None:
                     worklist.extend(
                         (m.group(0), True, this_origin)
-                        for m in _finditer_allow_nested(self._typedef_pattern, target)
+                        for m in spelling_matches(self._typedef_pattern, target)
                     )
             else:
                 # Already fully walked (records reached, `_referenced`
@@ -452,7 +453,7 @@ class _StdlibReferenceScan:
         :meth:`scan` itself (see its own docstring for why). *via_typedef*/
         *origin_alias* carry the exact same meaning as on :meth:`scan`.
         """
-        for match in _finditer_allow_nested(self._stdlib_pattern, type_string):
+        for match in spelling_matches(self._stdlib_pattern, type_string):
             spelling = match.group(0)
             for identity in self._stdlib_index.get(spelling, ()):
                 if identity in self._remaining:
@@ -494,7 +495,7 @@ class _StdlibReferenceScan:
                         origin_alias
                     )
         if self._record_pattern is not None:
-            for match in _finditer_allow_nested(self._record_pattern, type_string):
+            for match in spelling_matches(self._record_pattern, type_string):
                 for identity in self._record_index.get(match.group(0), ()):
                     self.reach_record(
                         snapshot_local_identity(identity),
@@ -561,24 +562,24 @@ class _StdlibReferenceScan:
                 stack.append((alias, True))
                 target = self._typedef_targets[alias]
                 if self._typedef_pattern is not None:
-                    for m in _finditer_allow_nested(self._typedef_pattern, target):
+                    for m in spelling_matches(self._typedef_pattern, target):
                         stack.append((m.group(0), False))
                 continue
             target = self._typedef_targets[alias]
             exact: set[str] = set()
             any_ids: set[str] = set()
             records: set[str] = set()
-            for m in _finditer_allow_nested(self._stdlib_pattern, target):
+            for m in spelling_matches(self._stdlib_pattern, target):
                 spelling = m.group(0)
                 for identity in self._stdlib_index.get(spelling, ()):
                     any_ids.add(identity)
                     if spelling == identity:
                         exact.add(identity)
             if self._record_pattern is not None:
-                for m in _finditer_allow_nested(self._record_pattern, target):
+                for m in spelling_matches(self._record_pattern, target):
                     records.update(self._record_index.get(m.group(0), ()))
             if self._typedef_pattern is not None:
-                for m in _finditer_allow_nested(self._typedef_pattern, target):
+                for m in spelling_matches(self._typedef_pattern, target):
                     child_exact, child_any, child_records = self._alias_reachable.get(
                         m.group(0), (frozenset(), frozenset(), frozenset())
                     )

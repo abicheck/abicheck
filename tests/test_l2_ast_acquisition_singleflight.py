@@ -291,7 +291,9 @@ def test_clang_singleflight_binds_producer_to_registered_key(
     header = tmp_path / "api.hpp"
     header.write_text("int api();\n", encoding="utf-8")
 
-    def mutate_then_run(backend: str, key: str, producer: object) -> object:
+    def mutate_then_run(
+        backend: str, key: str, producer: object, group: object = None
+    ) -> object:
         assert callable(producer)
         header.write_text("int api();\nint appeared();\n", encoding="utf-8")
         return producer()
@@ -310,7 +312,9 @@ def test_castxml_singleflight_binds_producer_to_registered_key(
     header.write_text("int api();\n", encoding="utf-8")
     monkeypatch.setattr(dumper, "_resolve_gated_castxml_bin", lambda value: "castxml")
 
-    def mutate_then_run(backend: str, key: str, producer: object) -> object:
+    def mutate_then_run(
+        backend: str, key: str, producer: object, group: object = None
+    ) -> object:
         assert callable(producer)
         header.write_text("int api();\nint appeared();\n", encoding="utf-8")
         return producer()
@@ -719,10 +723,15 @@ def acquisition_counters(monkeypatch: pytest.MonkeyPatch) -> _AcquisitionCounter
     counters = _AcquisitionCounters()
     scope_run = dumper_cache.AstAcquisitionScope.run
 
-    def counted_run(self, backend: str, key: str, producer: object):  # type: ignore[no-untyped-def]
+    def counted_run(
+        self, backend: str, key: str, producer: object, group: object = None
+    ):  # type: ignore[no-untyped-def]
+        # *group* is forwarded verbatim: it is what retains the AST root
+        # while a key derived from its ``id()`` lives, so a double that
+        # dropped it would disable the retention this test drives through.
         counters.requested_keys.append((backend, key))
         assert callable(producer)
-        return scope_run(self, backend, key, producer)
+        return scope_run(self, backend, key, producer, group=group)
 
     monkeypatch.setattr(dumper_cache.AstAcquisitionScope, "run", counted_run)
 

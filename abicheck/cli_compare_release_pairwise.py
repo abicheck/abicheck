@@ -45,7 +45,6 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from .bundle_models import BundleSignatureEvidence
 from .checker import DiffResult
 from .cli_compare_receipt import record_release_resolved_config
 from .cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
@@ -54,6 +53,7 @@ from .frontends.cli.release_member_errors import member_error_entry
 from .frontends.cli.runtime import _safe_write_output
 from .model import AbiSnapshot
 from .reporter import disposition_ledger_blocks, to_json
+from .workflows.bundle_symbol_status import build_bundle_signature_evidence
 from .workflows.contracts import CompareResult
 from .workflows.crosscheck_ownership import (
     release_level_checks,
@@ -473,10 +473,10 @@ def _compare_one_library(
                 entry["_old_snapshot"] = compare_result.old_snapshot
                 entry["_new_snapshot"] = compare_result.new_snapshot
             else:
-                entry["_old_bundle_evidence"] = BundleSignatureEvidence.from_snapshot(
+                entry["_old_bundle_evidence"] = build_bundle_signature_evidence(
                     compare_result.old_snapshot
                 )
-                entry["_new_bundle_evidence"] = BundleSignatureEvidence.from_snapshot(
+                entry["_new_bundle_evidence"] = build_bundle_signature_evidence(
                     compare_result.new_snapshot
                 )
         # ADR-064's evidence-contract axis (exit 7), per member. `compare`'s

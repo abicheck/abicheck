@@ -497,7 +497,7 @@ analysis ran:
                                           //   completeness, policy, proven_removed/proven_added
   "analysis_assurance": { ... },          // ADR-071 (release schema 1.3): the per-member assurance fold --
                                           //   present only under assurance.require_complete
-  "public_surface_reconciliation": { ... },// release schema 1.7: the product's ONE public
+  "public_surface_reconciliation": { ... },// release schema 1.8: the product's ONE public
                                           //   contract reconciled against the union of its
                                           //   members' exports -- see below
   "bundle_verdict": "BREAKING",           // new (ADR-023)

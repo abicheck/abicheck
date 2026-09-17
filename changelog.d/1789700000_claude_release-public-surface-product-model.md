@@ -22,7 +22,7 @@
 
 - Release reports carry a public-surface reconciliation section
   (`public_surface_reconciliation` in JSON, **Release public surface** in
-  Markdown; release schema 1.7): per side, the public declarations with an
+  Markdown; release schema 1.8): per side, the public declarations with an
   export obligation, how many the bundle satisfies, the missing ones, the
   ones left *unresolved* because a member was unread, export totals and the
   documented/undocumented split, per-member undocumented-export counts, and

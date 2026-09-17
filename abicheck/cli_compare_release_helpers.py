@@ -51,6 +51,7 @@ from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
 from .frontends.cli.release_exit import _exit_compare_release as _exit_compare_release
 from .model import AbiSnapshot
 from .model.release_surface import ReleasePublicSurface
+from .report import release_change_inventory as _inventory
 from .report.comparison_scope import ComparisonScopeTerms, comparison_scope_terms
 from .report.release_assurance import ReleaseAssuranceTerms, release_assurance_terms
 from .report.release_public_surface import (
@@ -134,17 +135,8 @@ def _release_global_verdict(
     return worst
 
 
-#: The two release-level sentinels that are not real `Verdict` values and
-#: must never mask a *different*, already-completed compatibility result
-#: on `RunOutcome.compatibility`'s own independent axis (Codex review, fresh
-#: evidence): `worst_verdict`'s own `_RELEASE_VERDICT_ORDER` rollup ranks
-#: both above every real verdict by design (an operational failure/refusal
-#: dominates the release's own reported "verdict"), which is exactly the
-#: right behavior for the *reported* release verdict but the wrong one for
-#: `run_outcome.compatibility`, a genuinely separate axis.
-_RELEASE_OPERATIONAL_SENTINELS = frozenset(
-    {"ERROR", "not_comparable", "unsupported", "failed"}
-)
+#: Historical private name; owned by `report/release_change_inventory.py`.
+_RELEASE_OPERATIONAL_SENTINELS = _inventory.RELEASE_OPERATIONAL_SENTINELS
 
 
 def _release_completed_compatibility_verdict(
@@ -1025,6 +1017,7 @@ def _format_release_summary(
             # absent from `library_results` even though `worst_verdict` folds
             # them -- see `release_global_counts`.
             release_global=release_global_counts(bundle_result, matrix_result),
+            change_inventory=_inventory.release_inventory_counters(library_results),
         )
     if fmt == "junit":
         return _format_release_junit(
@@ -1433,6 +1426,8 @@ def _format_release_json(
     }
     if terms.section is not None:
         summary["comparison_scope"] = terms.section
+    if (folded := _inventory.release_change_inventory(library_results)) is not None:
+        summary["change_inventory"] = folded
     # Severity config block (present only when a severity setting was in effect), mirroring
     # compare mode so downstream consumers (e.g. the PR-comment renderer) can see
     # which categories are gated to error and bucket findings accordingly.
@@ -1813,7 +1808,9 @@ def _format_release_markdown(
         lines.append("")
     if scope_section is not None:
         lines += render_comparison_scope_markdown(scope_section)
-    lines += _release_md_libraries_table(display_library_results, _VERDICT_EMOJI)
+    lines += _release_md_libraries_table(
+        display_library_results, _VERDICT_EMOJI, library_results
+    )
     lines += _release_md_coverage_warnings(library_results)
     lines += _release_md_disposed_findings(library_results)
     lines += _release_md_pattern_modulations(library_results)
