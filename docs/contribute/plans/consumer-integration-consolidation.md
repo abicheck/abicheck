@@ -274,6 +274,23 @@ new surface, and each now states a stronger invariant than before:
   shaped like the API's, which is what makes three newly-reachable refusals
   testable at all.
 
+### Bug classes to register on merge
+
+Three genuinely new classes came out of this pass. They are **not** in
+`tests/regressions/manifest.py` yet, deliberately: that registry requires a
+non-empty `fixed_by`, and its own rule is that "a class with no `fixed_by` is
+a hypothesis, not a registered escape-history entry". These trace to commits
+on an unmerged branch, and inventing a pull-request number for them would
+make the registry's traceability claim false. Add them to
+`tests/regressions/manifest_tool_surface.py` with the real number once this
+merges:
+
+| Id | Invariant, in one line | Seed tests |
+|---|---|---|
+| `identity.two_distinct_identifiers_compared_as_one` | A name and the object it names are never folded into one equality; the peel has exactly one owner and refuses every near-miss rather than guessing. | `test_action_tag_resolution.py`, `test_publish_baseline_tag_resolution_step.py` |
+| `identity.absent_evidence_defaulted_to_a_plausible_sibling` | "Not recorded" and "recorded as X" never collapse; related identities stay separate fields; which state was reached is itself published. | `test_action_analysis_context.py` |
+| `config.textual_substitution_into_a_structured_document` | A value bound into a structured document is inserted structurally, once, from a closed allowlist — never by rewriting serialized text. | `test_action_library_spec_binding.py` |
+
 ## Still missing
 
 Named explicitly rather than implied.
