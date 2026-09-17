@@ -186,6 +186,9 @@ topics:
     canonical_page: use/baseline-storage.md
     fact_sources:
       - abicheck/buildsource/baseline_set.py
+      - abicheck/buildsource/baseline_precaptured.py
+      - abicheck/frontends/action/precaptured_source.py
+      - abicheck/frontends/action/tag_resolution.py
       - actions/resolve-baseline/action.yml
       - actions/stage-baseline/action.yml
       - .github/workflows/publish-baseline.yml
@@ -884,10 +887,17 @@ topics:
       - actions/report/run.sh
       - actions/verify-source-run/action.yml
       - actions/verify-source-run/run.sh
+      - actions/aggregate/action.yml
+      - actions/aggregate/run.sh
       - abicheck/frontends/action/report_publication.py
       - abicheck/frontends/action/run_selection.py
       - abicheck/frontends/action/cli.py
+      # ADR-073's tested-commit provenance: the record the producer writes
+      # and the two ends that write and read it.
+      - abicheck/model/analysis_context.py
+      - abicheck/frontends/action/cli_provenance.py
     reference_page: reference/report-action.md
     allowed_summaries:
       - reference/verify-source-run.md
       - use/github-action.md
+      - use/multi-component-ci.md

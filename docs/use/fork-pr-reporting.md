@@ -94,14 +94,6 @@ jobs:
           format: json
           output: reports/compare.json
 
-      # The publisher resolves the pull request through the API, so it does
-      # not need one from here. What it *does* need is the commit that was
-      # actually analysed, which on a `pull_request` run is the ephemeral
-      # merge commit -- not the PR head.
-      - name: Record what was analysed
-        run: |
-          printf '%s\n' "$GITHUB_SHA" > reports/tested-sha.txt
-
       - uses: actions/upload-artifact@v4
         with:
           name: abi-reports
@@ -113,6 +105,33 @@ a trailing job runs `abicheck aggregate reports/ -o json=reports/aggregate.json`
 and the publisher is pointed at the aggregate document. Its per-target member
 reports must sit **in the same directory**, since that is where the renderer
 reads them from.
+
+### Recording the commit that was actually analysed
+
+The publisher resolves the pull request through the API, so it needs nothing
+from here to do that. There is exactly one fact it **cannot** get from the
+API: on a `pull_request` run the analysis job checks out the *ephemeral merge
+commit* (`$GITHUB_SHA`), not the pull request's head, and no endpoint names
+that commit. Only this job knows it.
+
+Record it in the aggregate document, where it travels beside the report it
+describes:
+
+```yaml
+      - uses: abicheck/abicheck/actions/aggregate@v1
+        with:
+          reports-dir: reports
+          manifest-path: expected-checks.json
+          checks: ${{ steps.declare.outputs.checks }}
+          record-analysis-context: 'true'   # `tested-sha` defaults to github.sha
+```
+
+Everything it records is a **claim** by this unprivileged, possibly-fork job.
+Each field is shape-checked when written, here; the publisher verifies the
+recorded commit against the API before displaying it. Do not write a sidecar
+file for this — the publisher would then have to parse contributor-produced
+content in the job holding the write token, which is the boundary this whole
+pattern exists to keep.
 
 ## 2. The publisher workflow (trusted)
 
@@ -173,47 +192,45 @@ never checks out the contributor's code, which is the whole point.
 
 ### Reporting a merge commit the producer analysed
 
-The example above displays `verify-source-run`'s own `tested-sha`, which
-defaults to the producer run's head commit — the pull request's head, which
-that step has verified. If your analysis job checks out the ephemeral merge
-commit instead (`$GITHUB_SHA` on a `pull_request` run) and you want the
-comment to say so, the producer must record it and the publisher must
-**verify** it:
+With `record-analysis-context` set on the producer's `aggregate` step (above),
+the publisher reads that commit out of the artifact it has **already**
+extracted and verifies it in the same pass:
 
 ```yaml
-      # Read the producer's value safely. It comes out of a fork-controlled
-      # artifact, so it is validated as a full SHA before it becomes a step
-      # output -- a raw `echo "sha=$(cat file)" >> "$GITHUB_OUTPUT"` lets a
-      # newline in that file forge any other output of this privileged job.
-      - id: tested
-        run: |
-          sha="$(head -c 100 incoming/tested-sha.txt | tr -d '[:space:]')"
-          case "$sha" in
-            [0-9a-fA-F]*) ;;
-            *) echo "::error::tested-sha.txt is not a commit SHA"; exit 1 ;;
-          esac
-          [ ${#sha} -eq 40 ] || [ ${#sha} -eq 64 ] || {
-            echo "::error::tested-sha.txt must hold a full SHA"; exit 1; }
-          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
-
-      # Verify it belongs to this pull request. Passing it to `report`
-      # without this step would display a SHA nothing checked.
-      - id: verify-tested
+      - id: verify
         uses: abicheck/abicheck/actions/verify-source-run@v1
         with:
           source-run-id: ${{ github.event.workflow_run.id }}
           expect-repository: ${{ github.repository }}
           expect-workflow: .github/workflows/abi-analysis.yml
           artifact-name: abi-reports
-          destination: incoming-verified
-          tested-sha: ${{ steps.tested.outputs.sha }}
+          destination: incoming
+          provenance-from: aggregate.json   # read the analysed commit from here
+          report-from: aggregate.json       # and return its path with the identity
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-Then pass `${{ steps.verify-tested.outputs.tested-sha }}` as the reporter's
-`sha`. The reporter displays whatever `sha` it is given; only
-`verify-source-run` can establish that the value belongs to this pull
-request.
+Then pass `${{ steps.verify.outputs.report-path }}` as the reporter's
+`report` and `${{ steps.verify.outputs.tested-sha }}` as its `sha`. The two
+come back together, so the document rendered is the one whose context was
+checked.
+
+`tested-sha-source` says which answer you got: `analysis-context` when the
+producer recorded the commit and the API confirmed it belongs to this pull
+request, `run-head` when it did not. With `require-provenance` left at its
+default (`true`) the second case **refuses** rather than quietly displaying
+the pull request head, which would claim analysis of a tree nothing looked
+at.
+
+Without `provenance-from`, `verify-source-run`'s `tested-sha` is the producer
+run's head commit — the pull request's head, which that step has verified.
+That is the right answer when your analysis job builds the head itself.
+
+> **Do not** read the commit out of the artifact in this job and pass it back
+> as `tested-sha`. That parses contributor-produced content in the privileged
+> job, and verifying the result needs a *second* run of this Action, which
+> downloads the same artifact again with no guarantee the second copy is the
+> first. `provenance-from` exists so neither is necessary.
 
 ## What the publisher checks
 
