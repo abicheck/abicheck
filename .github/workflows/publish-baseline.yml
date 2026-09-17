@@ -57,6 +57,41 @@ on:
         description: 'Release tag this run publishes assets to, and records as each baseline-set''s project-ref. Defaults to github.ref_name (the tag that triggered the calling release workflow).'
         type: string
         default: ''
+      expected-project-ref:
+        description: >-
+          What an ALREADY-CAPTURED baseline-set's own `project_ref` must
+          equal (existing-set mode only; the capture path stamps the value
+          itself and never consults this).
+
+          A release tag and the revision a capture recorded are two
+          different identifiers. `release-tag` selects the release the asset
+          is attached TO; a set captured by a *producer* records the commit
+          it actually built. Comparing one against the other rejected every
+          genuine cross-run capture, which is why this is a separate input
+          rather than a reuse of `release-tag`.
+
+          Supported values, a closed set -- anything else is a usage error,
+          never a permissive fallback:
+
+            ''  / 'commit'  the commit `release-tag` resolves to (default).
+                            The tag ref is read through the GitHub API and an
+                            annotated tag is peeled to its commit; a name
+                            that only prefix-matches a longer tag, and a
+                            branch of the same name, are both refused.
+            'tag'           the literal `release-tag` string. This is what
+                            THIS workflow's own capture path stamps into the
+                            manifests it writes, so re-publishing one of
+                            those through the pre-captured path needs it.
+                            Documented legacy behavior, reached only by
+                            asking for it.
+            <full SHA>      exactly that commit, for a caller that already
+                            knows the revision and does not want the answer
+                            to depend on a tag that could be moved between
+                            the capture and the publication.
+
+          Owner: abicheck.frontends.action.tag_resolution.
+        type: string
+        default: ''
       asset-name-template:
         description: >-
           GitHub Release asset filename template; "{profile}" is replaced
@@ -345,6 +380,83 @@ jobs:
           name: '${{ inputs.baseline-set-artifact-prefix }}${{ matrix.profile_id }}'
           path: 'baseline-set/${{ matrix.profile_id }}'
 
+      # A release tag names a release; a capture records the revision it
+      # built. This step is where the two stop being the same string.
+      #
+      # `gh api` fetches the documents, `resolve-tag` decides what they mean
+      # (abicheck/frontends/action/tag_resolution.py) -- the same split
+      # actions/verify-source-run uses, and the reason every rule here is
+      # reachable by a test with no credentials: a near-miss prefix match, a
+      # branch of the same name, and an annotated tag whose own object SHA
+      # is not the commit are all decided in Python over a fixture.
+      #
+      # `git/ref/tags/<tag>` and not `commits/<tag>`: the commits endpoint
+      # resolves a BRANCH of the same name just as happily, which would let
+      # a mutable ref decide what an immutable asset is published against.
+      - name: Resolve the release tag to the revision the capture must record
+        id: expected-ref
+        if: needs.discover.outputs.mode == 'existing-set'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.github-token != '' && secrets.github-token || secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
+          DECLARED: ${{ inputs.expected-project-ref }}
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d "${RUNNER_TEMP:-/tmp}/abicheck-tag.XXXXXX")"
+
+          # 'tag' and an explicit SHA are answerable without the API at all,
+          # and deliberately stay that way: a legacy republication must not
+          # start failing because the tag was deleted after the asset it is
+          # re-publishing was minted.
+          if [[ "$DECLARED" == "tag" || "$DECLARED" =~ ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$ ]]; then
+            expected="$(python3 -c "
+          import sys
+          from abicheck.frontends.action.tag_resolution import (
+              TagResolutionError, expected_capture_revision,
+          )
+          try:
+              print(expected_capture_revision(sys.argv[1], tag=sys.argv[2], resolved=None))
+          except TagResolutionError as exc:
+              print(f'::error::{exc}', file=sys.stderr)
+              raise SystemExit(1)
+          " "$DECLARED" "$RELEASE_TAG")"
+            echo "expected-project-ref=$expected" >> "$GITHUB_OUTPUT"
+            echo "expected capture revision: $expected (declared '$DECLARED', no tag lookup needed)"
+            exit 0
+          fi
+
+          if ! gh api "repos/$REPO/git/ref/tags/$RELEASE_TAG" > "$work/ref.json" 2>"$work/ref.err"; then
+            echo "::error::could not read refs/tags/$RELEASE_TAG in $REPO: $(tr '\n' ' ' < "$work/ref.err")" >&2
+            exit 1
+          fi
+
+          # Only an annotated tag needs the second request, and whether this
+          # is one is a rule about the document, not a jq expression.
+          peel="$(python3 -m abicheck.frontends.action.cli tag-peel "$RELEASE_TAG" "$work/ref.json")"
+          args=()
+          if [[ -n "$peel" ]]; then
+            if ! gh api "repos/$REPO/git/tags/$peel" > "$work/tag.json" 2>"$work/tag.err"; then
+              echo "::error::could not peel annotated tag object $peel: $(tr '\n' ' ' < "$work/tag.err")" >&2
+              exit 1
+            fi
+            args+=(--tag-object-json "$work/tag.json")
+          fi
+
+          python3 -m abicheck.frontends.action.cli resolve-tag \
+            "$RELEASE_TAG" "$work/ref.json" "${args[@]}" \
+            --expected-project-ref "$DECLARED" --out "$work/resolved.json"
+
+          {
+            read -r COMMIT_SHA
+            read -r EXPECTED
+          } < <(python3 -m abicheck.frontends.action.cli emit-fields \
+                  "$work/resolved.json" commit_sha expected_project_ref)
+          echo "commit-sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+          echo "expected-project-ref=$EXPECTED" >> "$GITHUB_OUTPUT"
+          echo "$RELEASE_TAG names commit $COMMIT_SHA; expecting capture revision $EXPECTED"
+
       # The whole existing-set gate, in one importable, credential-free
       # function (abicheck/buildsource/baseline_precaptured.py) rather than
       # in shell: manifest and snapshot schema this build understands, the
@@ -361,7 +473,7 @@ jobs:
         shell: bash
         env:
           PROFILE_ID: ${{ matrix.profile_id }}
-          EXPECTED_PROJECT_REF: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
+          EXPECTED_PROJECT_REF: ${{ steps.expected-ref.outputs.expected-project-ref }}
           EXPECTED_GENERATION: ${{ inputs.baseline-generation }}
         run: |
           set -euo pipefail
