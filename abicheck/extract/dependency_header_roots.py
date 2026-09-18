@@ -19,8 +19,8 @@ over it that every batch classifier wants.
 :func:`abicheck.provenance.is_dependency_header` answers "is this header a
 toolchain/dependency header, given the roots this dump was invoked with" --
 a pure path classification *given* a resolved root set, but deriving that
-set is not free. It calls ``_absolutize_header_root`` (a ``Path.resolve()``
-for a relative root) and ``Path.is_dir()`` -- a real ``stat`` -- twice per
+set is not free. It calls :func:`.path_aliases.absolutize_header_root`
+(a ``Path.resolve()`` for a relative root) and ``Path.is_dir()`` -- a real ``stat`` -- twice per
 root, then re-segments each path and rebuilds the public set. Done once per
 call that is fine; done at the call volume its real callers have, it is the
 same filesystem work repeated tens of thousands of times for an answer that
@@ -75,13 +75,12 @@ from typing import TYPE_CHECKING
 
 from ..model import ScopeOrigin
 from ..provenance import (
-    _absolutize_header_root,
     _is_bare_system_dir,
-    _segments,
     build_public_set,
     classify_origin,
     is_system_header,
 )
+from .path_aliases import absolutize_header_root, public_root_alias_segments
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Sequence
@@ -148,13 +147,22 @@ def prepare_dependency_header_roots(
     # root sitting flat in a bare system prefix does not widen at all. The one
     # difference is arithmetic, not semantic: `is_dir()` is read once per root
     # here rather than twice per call.
-    resolved = [_absolutize_header_root(h) for h in header_roots]
+    resolved = [absolutize_header_root(h) for h in header_roots]
     is_dir = [r.is_dir() for r in resolved]
     roots = [str(r) for r, d in zip(resolved, is_dir) if not d]
+    # The bare-system-prefix protection is asked of *every* spelling the
+    # parent directory has (``path_aliases.public_root_alias_segments``), not
+    # just its lexical one -- otherwise a symlink pointing at ``/usr/include``
+    # would widen a flat file root into the bare system prefix after all,
+    # which is the exact failure this check exists to prevent.
     root_dirs = [
         str(r if d else r.parent)
         for r, d in zip(resolved, is_dir)
-        if d or not _is_bare_system_dir(_segments(str(r.parent)))
+        if d
+        or not any(
+            _is_bare_system_dir(seg)
+            for seg in public_root_alias_segments(str(r.parent))
+        )
     ]
     header_segs, dir_segs, have_set = build_public_set(roots, root_dirs)
     return DependencyHeaderRoots(tuple(header_segs), tuple(dir_segs), have_set)

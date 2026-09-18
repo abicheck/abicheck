@@ -24,6 +24,12 @@ containment) rather than by resolving real paths, which would be brittle
 when a snapshot is produced on a different machine than the public-header
 set is described on.
 
+Path *spellings* -- and the conservative canonical aliases that let a
+symlinked ``-H`` root meet a parser-reported real path -- are owned by
+``extract.path_aliases``; this module re-exports the few names its own
+long-standing callers import from here (``_segments``,
+``_absolutize_header_root``, ...) so no call site moves.
+
 Classification is opt-in.  When the caller supplies no public-header set,
 every declaration keeps :class:`~abicheck.model.ScopeOrigin.UNKNOWN` and
 no existing behaviour changes (decision D4 of the provenance design).
@@ -34,9 +40,17 @@ from __future__ import annotations
 import re
 from functools import partial
 from itertools import chain
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import cast
 
+from .extract.path_aliases import (
+    absolutize_header_root,
+    dedup_segments,
+    include_root_alias_segments,
+    public_root_alias_segments,
+    segments,
+    source_header_alias_segments,
+)
 from .extract.public_root_ownership import compile_only_roots, retain_owning_roots
 from .model import AbiSnapshot, Fact, ScopeOrigin
 from .model.surface_facts import (
@@ -44,6 +58,13 @@ from .model.surface_facts import (
     is_export_table_only_record,
     public_header_contract_fact,
 )
+
+# The private spellings this module has exported since before
+# ``extract.path_aliases`` owned them. Kept so no call site or test moves;
+# new code should import from the owner.
+_segments = segments
+_dedup_segments = dedup_segments
+_absolutize_header_root = absolutize_header_root
 
 # Directory prefixes that mark a header as belonging to the toolchain or the
 # operating system rather than the project under test.  Matched as path-segment
@@ -90,34 +111,6 @@ def header_from_location(source_location: str | None) -> str | None:
     if not source_location:
         return None
     return _LINE_COL_SUFFIX.sub("", source_location) or None
-
-
-def _segments(path: str) -> tuple[str, ...]:
-    """Path components in posix order, dropping anchors and ``.`` parts.
-
-    Backslashes are normalised to forward slashes so Windows-style build
-    paths segment the same way as posix ones. A ``..`` segment is lexically
-    collapsed against the segment before it (no filesystem access -- this
-    module matches by path *segments*, never by resolving real paths, so
-    normalization has to stay purely textual too): a build-recorded compiler
-    path resolved via something like ``$(dirname "$CC")/..`` routinely
-    carries a literal ``bin/..`` segment (confirmed against a real
-    conda-forge/pixi toolchain path,
-    ``.../envs/scanner/bin/../lib/gcc/x86_64-conda-linux-gnu/14.3.0/include/c++/...``),
-    and every containment/prefix match in this module must recognize that as
-    the same directory its already-collapsed form names -- otherwise a
-    system/toolchain-header exclusion silently fails to match. A leading
-    ``..`` with nothing left to collapse against is kept as-is.
-    """
-    posix = path.replace("\\", "/")
-    parts = [p for p in PurePosixPath(posix).parts if p not in ("/", ".", "")]
-    normalized: list[str] = []
-    for p in parts:
-        if p == ".." and normalized and normalized[-1] != "..":
-            normalized.pop()
-        else:
-            normalized.append(p)
-    return tuple(normalized)
 
 
 def _contiguous_subsequence(needle: tuple[str, ...], hay: tuple[str, ...]) -> bool:
@@ -511,34 +504,6 @@ def is_system_header(source_header: str | None) -> bool:
     return _is_system_header(_segments(source_header))
 
 
-_DRIVE_ROOT_RE = re.compile(r"^[A-Za-z]:[/\\]")
-
-
-def _absolutize_header_root(h: Path | str) -> Path:
-    """Absolutize a ``-H``/``--header`` root, but only when it is genuinely
-    *relative* (e.g. ``-H include/api.h``).
-
-    An already-rooted path -- POSIX-style (a leading ``/``), a Windows
-    drive root (``C:\\...``), or a UNC path (``\\\\server\\share\\...``) --
-    is returned unchanged. Unconditionally calling :meth:`Path.resolve` here
-    (an earlier version of this fix did) is wrong on Windows: resolving a
-    POSIX-style already-rooted string like ``/usr/include/mylib/api.h``
-    drive-anchors it to the current working directory's drive (e.g.
-    ``D:\\usr\\include\\mylib\\api.h``), producing a segment sequence that no
-    longer matches the very same string's own -- never resolved -- form
-    when it later appears as a declaration's ``source_header`` (confirmed by
-    a real Windows CI failure). This module's own docstring already commits
-    to matching by path *segments* rather than resolving real paths for
-    exactly this cross-machine-safety reason; resolving an already-rooted
-    root broke that contract for itself.
-    """
-    s = str(h)
-    normalized = s.replace("\\", "/")
-    if normalized.startswith("/") or _DRIVE_ROOT_RE.match(s):
-        return Path(s)
-    return Path(h).resolve()
-
-
 def classify_origin(
     source_header: str | None,
     public_header_segs: list[tuple[str, ...]],
@@ -568,16 +533,26 @@ def classify_origin(
     """
     if not have_public_set:
         return ScopeOrigin.UNKNOWN
-    header_segs = _segments(source_header) if source_header else ()
-    if not header_segs:
+    alias_segs = source_header_alias_segments(source_header) if source_header else ()
+    if not alias_segs:
         return ScopeOrigin.EXPORT_ONLY if export_only else ScopeOrigin.UNKNOWN
-    if _matches_public(header_segs, public_header_segs, public_dir_segs):
+    # The lexical spelling is always first (see source_header_alias_segments)
+    # and stays the one the generated/system heuristics read, so neither
+    # classification changes shape because a local symlink happens to exist.
+    header_segs = alias_segs[0]
+    # Ownership, by contrast, is alias-aware in *both* directions: a
+    # declaration is public when any valid spelling of its own path matches
+    # any valid spelling of a declared public root.
+    if any(
+        _matches_public(segs, public_header_segs, public_dir_segs)
+        for segs in alias_segs
+    ):
         return ScopeOrigin.PUBLIC_HEADER
     if _is_generated_header(header_segs):
         return ScopeOrigin.GENERATED
     if _is_system_header(header_segs):
         return ScopeOrigin.SYSTEM_HEADER
-    if _matches_any_dir(header_segs, compile_only_dir_segs):
+    if any(_matches_any_dir(segs, compile_only_dir_segs) for segs in alias_segs):
         # Reached only through a ``-I`` root this run could not place as
         # public (``extract.public_root_ownership.compile_only_roots``).
         # That is an absence of evidence, not evidence of privacy, so it
@@ -594,11 +569,27 @@ def build_public_set(
     """Pre-segment the public-header inputs once for reuse across decls.
 
     Returns ``(public_header_segs, public_dir_segs, have_public_set)``.
+
+    Each input contributes *every* spelling it may legitimately be matched
+    under (:func:`public_root_alias_segments`): always its own lexical
+    segments, plus a canonical (symlink-resolved) alias when one is safely
+    obtainable on this machine. A declared root is therefore matchable
+    through whichever spelling the parser happened to record, which is what
+    makes ``-H /localdisk/.../inc`` and a castxml source location under
+    ``/mnt/cached_oses/.../inc`` name the same tree. Aliases are runtime
+    matching aids only -- nothing here is persisted or fed into a
+    configuration digest.
     """
-    headers = [_segments(str(h)) for h in (public_headers or [])]
-    dirs = [_segments(str(d)) for d in (public_header_dirs or [])]
-    headers = [h for h in headers if h]
-    dirs = [d for d in dirs if d]
+    headers = _dedup_segments(
+        [seg for h in (public_headers or []) for seg in public_root_alias_segments(h)]
+    )
+    dirs = _dedup_segments(
+        [
+            seg
+            for d in (public_header_dirs or [])
+            for seg in public_root_alias_segments(d)
+        ]
+    )
     return headers, dirs, bool(headers or dirs)
 
 
@@ -607,14 +598,21 @@ def _segmented_include_roots(
 ) -> list[tuple[str, ...]]:
     """*include_search_dirs* as segments, minus bare system-header roots.
 
-    Resolved first, for the reason :func:`_absolutize_header_root` gives. A
-    stray ``-I /usr/include`` is dropped here, so it is neither an ownership
-    root nor a compile-only one.
+    Resolved first, for the reason :func:`_absolutize_header_root` gives,
+    and alias-expanded via :func:`include_root_alias_segments` so a
+    symlinked search root and its real path are one root. A stray ``-I
+    /usr/include`` is dropped here, so it is neither an ownership root nor a
+    compile-only one -- and it is dropped when *any* of its spellings is a
+    bare system prefix, so the protection cannot be walked around by
+    pointing a symlink at one.
     """
-    segs = [
-        _segments(str(_absolutize_header_root(d))) for d in (include_search_dirs or [])
-    ]
-    return [s for s in segs if s and not _is_bare_system_dir(s)]
+    kept: list[tuple[str, ...]] = []
+    for d in include_search_dirs or []:
+        aliases = include_root_alias_segments(d)
+        if not aliases or any(_is_bare_system_dir(a) for a in aliases):
+            continue
+        kept.extend(aliases)
+    return _dedup_segments(kept)
 
 
 def split_include_roots(
