@@ -62,27 +62,35 @@ import threading
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+#: Env-var names, spelled here rather than imported. This harness is
+#: deliberately runnable at a *base* revision that predates
+#: `abicheck.workflows.memory_trace`, so a before/after pair is measured by
+#: one script over one fixture rather than by two scripts whose sampling
+#: could differ -- and an import that only sometimes resolves must not
+#: decide what the harness is called with.
+ENV_TRACE_PATH = "ABICHECK_MEMORY_TRACE"
+ENV_TRACEMALLOC = "ABICHECK_MEMORY_TRACE_TRACEMALLOC"
 
-try:
-    from abicheck.workflows import memory_trace  # noqa: E402
-except ImportError:  # pragma: no cover - running against a pre-instrumentation SHA
-    # This harness is deliberately runnable at a *base* revision too, so a
-    # before/after pair is measured by one script over one fixture rather
-    # than by two scripts whose sampling could differ. Without the module
-    # there is simply no trace to write and no cgroup helper to borrow.
-    memory_trace = None  # type: ignore[assignment]
 
-ENV_TRACE_PATH = getattr(memory_trace, "ENV_TRACE_PATH", "ABICHECK_MEMORY_TRACE")
-ENV_TRACEMALLOC = getattr(
-    memory_trace, "ENV_TRACEMALLOC", "ABICHECK_MEMORY_TRACE_TRACEMALLOC"
-)
+def _memory_trace() -> object | None:
+    """The instrumentation module, or ``None`` at a revision without it.
+
+    Resolved on demand, never at import: this module is imported by its own
+    tests, and mutating ``sys.path`` (or failing an import) at import time
+    is a process-wide side effect a caller did not ask for.
+    """
+    try:
+        from abicheck.workflows import memory_trace
+    except ImportError:  # pragma: no cover - a pre-instrumentation revision
+        return None
+    return memory_trace
 
 
 def _cgroup_memory() -> tuple[int | None, int | None]:
-    if memory_trace is not None:
-        return memory_trace._cgroup_memory()
-    return (None, None)
+    module = _memory_trace()
+    if module is None:
+        return (None, None)
+    return module._cgroup_memory()  # type: ignore[attr-defined,no-any-return]
 
 
 _PAGE = 4096
@@ -336,18 +344,28 @@ def run_variant(
     report_path = out / "report.json"
     verdict = None
     findings = None
+    members = None
     if report_path.exists():
         try:
             doc = json.loads(report_path.read_text(encoding="utf-8"))
-            verdict = doc.get("verdict") or doc.get("release", {}).get("verdict")
-            findings = len(doc.get("findings") or [])
-        except ValueError:
+            verdict = doc.get("verdict")
+            # A directory/package `compare` reports per member, not at the
+            # top level: the release's own findings live under each library
+            # entry, so counting `doc["findings"]` would read 0 on a run
+            # that found every injected break. Getting this wrong in the
+            # *validator* would be worse than not validating, since it
+            # would reject correct runs.
+            libraries = doc.get("libraries") or []
+            members = len(libraries)
+            findings = sum(len(lib.get("findings") or []) for lib in libraries)
+        except (ValueError, AttributeError):
             pass
     return {
         "variant": name,
         "exit_code": proc.returncode,
         "verdict": verdict,
         "findings": findings,
+        "members": members,
         "seconds": round(elapsed, 3),
         "parent_peak_rss_bytes": sampler.parent_peak,
         "tree_peak_rss_bytes": sampler.tree_rss_peak,
@@ -359,6 +377,61 @@ def run_variant(
         "stderr_tail": stderr.decode("utf-8", "replace")[-2000:],
         "stdout_tail": stdout.decode("utf-8", "replace")[-500:],
     }
+
+
+#: Records the parameters a kept fixture was built with, so `--keep` cannot
+#: silently reuse a differently-shaped tree and label it with the new
+#: numbers -- which would make a before/after pair compare two fixtures.
+FIXTURE_MANIFEST = "fixture.json"
+
+
+def _fixture_matches(root: Path, wanted: dict[str, int]) -> bool:
+    """Whether *root* holds a complete fixture built with *wanted*."""
+    if not (root / "old" / "lib").exists() or not (root / "new" / "lib").exists():
+        return False
+    try:
+        recorded = json.loads((root / FIXTURE_MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if recorded != wanted:
+        return False
+    # Complete, not merely present: a build interrupted part-way leaves some
+    # members compiled and the manifest already written on a later run.
+    for side in ("old", "new"):
+        built = sorted((root / side / "lib").glob("libmember*.so"))
+        if len(built) != wanted["members"]:
+            return False
+    return True
+
+
+def _require_a_measured_comparison(row: dict[str, object]) -> None:
+    """Refuse a run that did not actually compare anything.
+
+    A failed extraction, a malformed report or a crashed member produces a
+    *fast, small* run -- which is exactly what a memory benchmark would
+    otherwise record as an improvement. The fixture injects one changed
+    public record and one removed export, so the only acceptable outcome is
+    the breaking verdict and its findings.
+    """
+    if row["exit_code"] != 4:
+        raise SystemExit(
+            f"{row['variant']}: expected exit 4 (the injected break), got "
+            f"{row['exit_code']}. Not recording a measurement of a run that "
+            f"did not compare.\n{row['stderr_tail']}"
+        )
+    if row["verdict"] != "BREAKING":
+        raise SystemExit(
+            f"{row['variant']}: the release verdict is {row['verdict']!r}, "
+            "not BREAKING. Not recording a measurement of a run that did not "
+            "detect the injected break."
+        )
+    findings = row["findings"]
+    if not isinstance(findings, int) or findings <= 0:
+        raise SystemExit(
+            f"{row['variant']}: the members carry {findings!r} findings in "
+            "total, so the comparison did not produce the injected break. "
+            "Not recording."
+        )
 
 
 def _mib(value: object) -> float | None:
@@ -389,8 +462,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--label", default="")
     args = ap.parse_args(argv)
 
+    if args.tracemalloc and args.trace is None:
+        raise SystemExit(
+            "--tracemalloc needs --trace: tracemalloc is enabled inside the "
+            "measured process by the trace gate, so without a trace path it "
+            "records nothing while the receipt would still claim it did."
+        )
+
     root: Path = args.root
-    if not args.keep or not (root / "old" / "lib").exists():
+    wanted = {"members": args.members, "apis": args.apis, "records": args.records}
+    if args.keep and _fixture_matches(root, wanted):
+        print(f"reusing fixture at {root}", file=sys.stderr)
+    else:
         if root.exists():
             shutil.rmtree(root)
         print(
@@ -399,6 +482,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         build_fixture(root, args.members, args.apis, args.records)
+        (root / FIXTURE_MANIFEST).write_text(json.dumps(wanted), encoding="utf-8")
 
     cache_dir = root / "cache"
     results: list[dict[str, object]] = []
@@ -415,6 +499,10 @@ def main(argv: list[str] | None = None) -> int:
             trace = args.trace
             if trace is not None:
                 trace = trace.with_name(f"{trace.stem}-{name}-{attempt}{trace.suffix}")
+                # The trace path is deterministic and the tracer appends, so
+                # re-running the same command would interleave this run's
+                # samples with the previous one's under one file.
+                trace.unlink(missing_ok=True)
             row = run_variant(
                 root,
                 name,
@@ -425,6 +513,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             row["attempt"] = attempt
             row["cold"] = bool(args.cold)
+            _require_a_measured_comparison(row)
             results.append(row)
             print(
                 f"{name:<20} run {attempt}  exit={row['exit_code']}  "
@@ -447,7 +536,12 @@ def main(argv: list[str] | None = None) -> int:
     for name in {str(r["variant"]) for r in results}:
         rows = [r for r in results if r["variant"] == name]
         by_variant[name] = {
-            "median_seconds": statistics.median(float(r["seconds"]) for r in rows),
+            # A tracemalloc run perturbs both time and RSS, so it publishes
+            # no timing at all rather than a number a reader might compare
+            # against an ordinary run's.
+            "median_seconds": None
+            if args.tracemalloc
+            else statistics.median(float(r["seconds"]) for r in rows),
             "median_parent_peak_mib": statistics.median(
                 float(r["parent_peak_rss_bytes"]) / (1024 * 1024) for r in rows
             ),

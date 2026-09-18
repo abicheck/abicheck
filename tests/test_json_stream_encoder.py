@@ -124,6 +124,21 @@ class TestDifferentialAgainstJsonDumps:
         ):
             assert join_json_indented(doc) == json.dumps(doc, indent=2)
 
+    def test_a_large_non_str_keyed_dict_is_delegated_too(self) -> None:
+        """The delegation the size bound would otherwise skip past.
+
+        A *small* non-str-keyed dict is delegated by the size check before
+        the key check is reached, so that branch was covered only by
+        accident. Past the bound the key check is the one that has to
+        catch it -- and if it did not, the encoder would descend and
+        re-derive ``json``'s own key coercion, which is what it must never
+        do.
+        """
+        from abicheck.storage.json_stream import _DELEGATE_NODE_LIMIT
+
+        doc = {"outer": {i: list(range(3)) for i in range(_DELEGATE_NODE_LIMIT)}}
+        assert join_json_indented(doc) == json.dumps(doc, indent=2)
+
     def test_the_oracle_is_not_vacuous(self) -> None:
         """Guard the comparison itself.
 

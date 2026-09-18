@@ -51,7 +51,7 @@ plus a multiple of *indent* spaces and nothing else.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -219,9 +219,3 @@ def join_json_indented(obj: Any, *, indent: int = 2) -> str:
     formatting path that could drift from it.
     """
     return "".join(iter_json_indented(obj, indent=indent))
-
-
-def iter_encoded(chunks: Iterable[str]) -> Iterator[bytes]:
-    """UTF-8 encode a fragment stream without joining it first."""
-    for chunk in chunks:
-        yield chunk.encode("utf-8")

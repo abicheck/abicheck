@@ -212,3 +212,188 @@ class TestPhasesAndCounts:
         memory_trace.counts("c", a=1)
         # Both calls returned; nothing was written, and no exception escaped.
         assert not target.exists()
+
+
+class TestTheProbesThemselves:
+    """The probes, not just the record they produce.
+
+    These are the lines a memory investigation trusts, and each one has a
+    failure mode that looks like a plausible number rather than an error: a
+    wrong page size under-reports RSS by 4x or 16x, a missed child
+    under-reports the tree, and summing RSS instead of PSS over a forked
+    tree over-reports it. So each is checked against an independent oracle
+    rather than against itself.
+    """
+
+    def test_the_page_size_is_the_kernel_s_not_a_constant(self) -> None:
+        """The bug a hard-coded 4096 is: correct on x86_64, wrong elsewhere."""
+        import os
+
+        assert memory_trace._page_size() == os.sysconf("SC_PAGE_SIZE")
+        # ... and the module actually uses the probed value.
+        assert memory_trace._PAGE_SIZE == os.sysconf("SC_PAGE_SIZE")
+
+    def test_the_page_size_falls_back_rather_than_raising(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A platform without the constant must still produce a number."""
+        import os
+
+        def _no_such(_name: str) -> int:
+            raise ValueError("unrecognised configuration name")
+
+        monkeypatch.setattr(os, "sysconf", _no_such)
+        assert memory_trace._page_size() == 4096
+
+    def test_self_rss_agrees_with_an_independent_reading(self) -> None:
+        """``statm`` against ``status``'s VmRSS -- two different files.
+
+        Asserting a *range* rather than equality: the two are sampled at
+        different instants and the process allocates between them. What
+        this rules out is the class the page-size bug belongs to, an answer
+        off by a whole multiple.
+        """
+        from pathlib import Path
+
+        got = memory_trace._self_rss_bytes()
+        assert got is not None and got > 0
+        vm_rss = None
+        for line in Path("/proc/self/status").read_text(encoding="ascii").splitlines():
+            if line.startswith("VmRSS:"):
+                vm_rss = int(line.split()[1]) * 1024
+                break
+        assert vm_rss is not None
+        assert 0.5 < got / vm_rss < 2.0, (got, vm_rss)
+
+    def test_an_unreadable_statm_is_none_not_zero(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import builtins
+
+        real_open = builtins.open
+
+        def _fail(path, *a, **kw):  # type: ignore[no-untyped-def]
+            if str(path).endswith("statm"):
+                raise OSError("gone")
+            return real_open(path, *a, **kw)
+
+        monkeypatch.setattr(builtins, "open", _fail)
+        assert memory_trace._self_rss_bytes() is None
+
+    def test_the_tree_walk_finds_a_real_child(self) -> None:
+        """A live child must appear, or a concurrency change looks free."""
+        import os
+        import subprocess
+        import sys
+
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdin.read()"],
+            stdin=subprocess.PIPE,
+        )
+        try:
+            pids = memory_trace._proc_tree_pids()
+            assert os.getpid() in pids
+            assert proc.pid in pids, "a live child was missing from the tree"
+            rss, pss = memory_trace._smaps_rollup(proc.pid)
+            assert rss is not None and rss > 0
+            assert pss is not None and 0 < pss <= rss, (pss, rss)
+            tree_rss, tree_pss, count = memory_trace._tree_memory()
+            assert count >= 2
+            assert tree_rss is not None and tree_pss is not None
+            # PSS divides shared pages; summing RSS cannot be smaller.
+            assert tree_pss <= tree_rss
+        finally:
+            if proc.stdin is not None:
+                proc.stdin.close()
+            proc.wait(10)
+
+    def test_a_dead_pid_reads_as_unavailable(self) -> None:
+        assert memory_trace._smaps_rollup(2**30) == (None, None)
+        assert memory_trace._child_pids(2**30) == []
+
+    def test_cgroup_reading_answers_a_pair_or_nones(self) -> None:
+        """Whatever this host runs, both figures come back as ints or None.
+
+        Deliberately not asserting a value: v1, v2 and no-cgroup are all
+        legitimate hosts, and pinning one would make the test environmental.
+        """
+        current, peak = memory_trace._cgroup_memory()
+        for value in (current, peak):
+            assert value is None or isinstance(value, int)
+
+    def test_an_unreadable_cgroup_file_is_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(memory_trace, "_cgroup_cache", ("/nope/current", None))
+        assert memory_trace._cgroup_memory() == (None, None)
+
+
+class TestPhaseEach:
+    def test_each_item_is_bracketed_by_its_own_phase(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "trace.jsonl"
+        _enable(monkeypatch, out)
+        assert list(memory_trace.phase_each("member", ["a", "b"])) == ["a", "b"]
+        events = [r["event"] for r in memory_trace.read_samples(out)]
+        assert events == [
+            "member:enter",
+            "member:exit",
+            "member:enter",
+            "member:exit",
+        ]
+
+    def test_it_yields_the_items_unchanged_when_tracing_is_off(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(memory_trace.ENV_TRACE_PATH, raising=False)
+        memory_trace.reset_for_testing()
+        assert list(memory_trace.phase_each("member", ["x", "y"])) == ["x", "y"]
+
+
+class TestRecordReleaseMember:
+    def test_it_records_the_decision_the_sample_and_the_table(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Three records, because none of them attributes a peak alone."""
+        out = tmp_path / "trace.jsonl"
+        _enable(monkeypatch, out)
+        monkeypatch.setattr(
+            "abicheck.dumper_cache.ast_acquisition_stats",
+            lambda: {"retained_groups": 2, "retained_raw_entries": 4},
+        )
+        memory_trace.record_release_member("libx.so", {"old_full": True})
+        records = memory_trace.read_samples(out)
+        assert [r["event"] for r in records] == [
+            "release.member.retained",
+            "release.member.retained",
+            "release.ast_scope",
+        ]
+        assert records[0]["counts"] == {"library": "libx.so", "old_full": True}
+        assert records[2]["counts"]["retained_raw_entries"] == 4
+
+    def test_outside_an_acquisition_scope_the_table_record_is_omitted(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Absent, not zero -- the same rule the probes follow."""
+        out = tmp_path / "trace.jsonl"
+        _enable(monkeypatch, out)
+        monkeypatch.setattr("abicheck.dumper_cache.ast_acquisition_stats", lambda: None)
+        memory_trace.record_release_member("libx.so", {})
+        assert [r["event"] for r in memory_trace.read_samples(out)] == [
+            "release.member.retained",
+            "release.member.retained",
+        ]
+
+    def test_it_does_nothing_when_tracing_is_off(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(memory_trace.ENV_TRACE_PATH, raising=False)
+        memory_trace.reset_for_testing()
+        called = {"n": 0}
+        monkeypatch.setattr(
+            "abicheck.dumper_cache.ast_acquisition_stats",
+            lambda: called.update(n=called["n"] + 1),
+        )
+        memory_trace.record_release_member("libx.so", {"old_full": True})
+        assert called["n"] == 0

@@ -78,7 +78,24 @@ ENV_TRACE_PATH = "ABICHECK_MEMORY_TRACE"
 #: wall-clock/RSS measurement, never the same one (see the module docstring).
 ENV_TRACEMALLOC = "ABICHECK_MEMORY_TRACE_TRACEMALLOC"
 
-_PAGE_SIZE = 4096
+
+def _page_size() -> int:
+    """This kernel's page size, for converting ``statm``'s page counts.
+
+    ``/proc/self/statm`` reports *pages*, not bytes, so a hard-coded 4096
+    silently under-reports parent RSS by 4x on a 16 KiB-page host and 16x on
+    a 64 KiB-page one (aarch64 and ppc64le both ship such kernels). Probed
+    rather than assumed, with the common value as the fallback for a
+    platform that does not expose the constant -- where this whole probe
+    reads nothing anyway.
+    """
+    try:
+        return int(os.sysconf("SC_PAGE_SIZE"))
+    except (AttributeError, ValueError, OSError):  # pragma: no cover - probe
+        return 4096
+
+
+_PAGE_SIZE = _page_size()
 
 _lock = threading.Lock()
 _state_lock = threading.Lock()
