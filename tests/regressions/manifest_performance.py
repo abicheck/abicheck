@@ -662,4 +662,65 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="perf.per_symbol_dto_carries_a_per_instance_dict",
+        invariant=(
+            "A small frozen dataclass materialized once per row of a real "
+            "input -- an export table, a symbol table, a relocation list -- "
+            "carries no per-instance `__dict__`. The cost is invisible at "
+            "the definition site and proportional to the input, so no test "
+            "of behaviour can see it and no profile attributes it to a "
+            "line: it shows up only as allocation pressure. The "
+            "measurement that matters is the ratio, not the absolute "
+            "number -- a dict six times the size of the data it wraps is "
+            "the signal, and it is worth fixing only where the type is "
+            "built per input row rather than once per run. The structural "
+            "test must inspect a CONSTRUCTED instance for `__dict__` "
+            "rather than read the decorator's keyword, since `slots=True` "
+            "is one of several routes to the property, and must carry a "
+            "vacuity guard, because a module sweep whose discovery "
+            "predicate stops matching passes while asserting nothing."
+        ),
+        # #1333: `RawExportEntry` was frozen but unslotted -- 48 B of object
+        # plus 296 B of `__dict__` per row, against 43,864 `.dynsym` entries
+        # per side of a real oneDAL release (87,728 both sides, ~22 MiB at
+        # peak). All three consumers project the index straight to a name
+        # set and drop it, so the entries are a transient spike, not
+        # retained state.
+        fixed_by=(1333,),
+        seed_tests=("tests/test_export_index_allocation.py",),
+        public_surfaces=("python-api",),
+        axes={
+            "dto": ("RawExportEntry", "RawExportIndex"),
+            "operation": (
+                "construct",
+                "compare",
+                "hash",
+                "set-membership",
+                "field-read",
+                "default",
+                "field-assign",
+                "undeclared-assign",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Scoped to `model/export_index.py`; there is no "
+                    "repo-wide sweep for other per-row DTOs, so the next "
+                    "instance is found by reading rather than by CI. "
+                    "Deliberately so: the same rule applied to a type "
+                    "built once per run would be cargo-culting, and "
+                    "`slots=True` on a frozen dataclass carries a real "
+                    "CPython wart (an undeclared attribute assignment "
+                    "raises `TypeError: super(type, obj)...` instead of "
+                    "`FrozenInstanceError`, because slots builds a new "
+                    "class while the frozen `__setattr__` closed over the "
+                    "original) that is only acceptable where the "
+                    "allocation saving is real."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )
