@@ -893,4 +893,57 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="perf.enumerable_value_space_allocated_per_occurrence",
+        invariant=(
+            "A value type whose inhabitants are enumerable -- a frozen "
+            "record of a few booleans or a small enum -- is materialized "
+            "once per distinct VALUE, not once per occurrence, wherever it "
+            "is produced per row of a real input. The bound is the point: "
+            "the number of distinct objects a producer yields must not "
+            "grow with its input size. Two things make the sharing sound "
+            "rather than merely smaller, and both must be asserted, not "
+            "argued: the type is frozen (a shared object no caller can "
+            "write to), and no reader distinguishes two equal values by "
+            "identity. Three test obligations follow, each closing a "
+            "mutation the others miss. (1) The bound must be counted "
+            "through the REAL producer, not the factory: a correct "
+            "factory whose one call site still calls the constructor "
+            "passes every factory-only test and saves nothing. (2) The "
+            "fixture must span several distinct values, or a cache that "
+            "ignores its key entirely -- collapsing every answer onto one "
+            "-- satisfies the bound while corrupting results. (3) A "
+            "normalizing factory must be tested with an input that can "
+            "DETECT the normalization: `int` inputs are hash-equal to "
+            "`bool` and resolve through a dict key either way, so they "
+            "prove nothing about a `bool(...)` coercion."
+        ),
+        # #1333 follow-up: `SymbolSignatureStatus` is frozen, slotted, and
+        # holds two booleans -- four inhabitants -- yet
+        # `symbol_signature_statuses` allocated one per symbol. 48 B against
+        # 87,728 symbols is 4.02 MiB for one real oneDAL library, and the
+        # release fan-out retains a mapping per matched member (~24 MiB
+        # across six). About 1% of a measured ~2.3 GiB peak: taken because
+        # it is free and provably safe, NOT as a memory fix -- the
+        # member-concurrency measurement owns that question.
+        #
+        # Obligation (3) is here because it was violated in this very PR:
+        # the first version of the seed test exercised only `int(True)`,
+        # and a mutation deleting the `bool(...)` coercion passed all 24
+        # tests. The real coercion only bites on a truthy value that is not
+        # hash-equal to `True` (a string, `2`, an unhashable list), which
+        # the sweep now covers -- the same "an untested key is not an
+        # unnecessary key" lesson AGENTS.md records for the memoization
+        # cache key.
+        fixed_by=(1333,),
+        seed_tests=("tests/test_symbol_signature_status_interning.py",),
+        # Internal-module construction and a direct `symbol_signature_
+        # statuses` call -- no route through `abicheck.service`, no CLI, no
+        # Action, so this stays `()` per the schema's own rule.
+        public_surfaces=(),
+        axes={
+            "detection": ("value-equivalence", "allocation-bound"),
+            "input_size": ("16", "256", "2048"),
+        },
+    ),
 )

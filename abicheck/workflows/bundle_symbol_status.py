@@ -39,7 +39,11 @@ from __future__ import annotations
 
 import re
 
-from ..bundle_models import BundleSignatureEvidence, SymbolSignatureStatus
+from ..bundle_models import (
+    BundleSignatureEvidence,
+    SymbolSignatureStatus,
+    symbol_signature_status,
+)
 from ..model import AbiSnapshot, Visibility
 from ..model.export_index import build_raw_export_index, default_versioned_names
 from ..model.surface_facts import (
@@ -331,7 +335,10 @@ def symbol_signature_statuses(
     for symbol in (*snapshot.function_map, *snapshot.variable_map):
         if symbol in statuses:
             continue
-        statuses[symbol] = SymbolSignatureStatus(
+        # Shared rather than constructed: two booleans have four
+        # inhabitants, so one object per symbol is pure waste (see
+        # `symbol_signature_status`'s own measurement).
+        statuses[symbol] = symbol_signature_status(
             exported=_symbol_was_exported(symbol, snapshot),
             evidence_sufficient=_symbol_evidence_sufficient(symbol, snapshot),
         )

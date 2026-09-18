@@ -554,6 +554,48 @@ class SymbolSignatureStatus:
     evidence_sufficient: bool
 
 
+#: Every value this type can ever hold. Two booleans admit exactly four
+#: combinations, so the whole value space is enumerable and is built once
+#: here rather than one object per symbol.
+_SYMBOL_SIGNATURE_STATUSES: dict[tuple[bool, bool], SymbolSignatureStatus] = {
+    (exported, evidence_sufficient): SymbolSignatureStatus(
+        exported=exported, evidence_sufficient=evidence_sufficient
+    )
+    for exported in (False, True)
+    for evidence_sufficient in (False, True)
+}
+
+
+def symbol_signature_status(
+    *, exported: bool, evidence_sufficient: bool
+) -> SymbolSignatureStatus:
+    """The shared :class:`SymbolSignatureStatus` for this pair of answers.
+
+    The type is frozen, slotted, and carries two booleans, so it has
+    exactly four inhabitants -- yet the caller allocates one per symbol.
+    Measured on a real oneDAL release: 48 bytes per instance against
+    87,728 symbols is 4.02 MiB for one library, and the release fan-out
+    retains a mapping per matched member, so roughly 24 MiB across six.
+    That is about 1% of a measured ~2.3 GiB peak: this is here because it
+    is free and provably safe, **not** because it addresses the memory
+    problem -- the member-concurrency measurement owns that.
+
+    Sharing is safe precisely because the type is frozen: no consumer can
+    mutate one instance into another's value, and none distinguishes two
+    equal statuses by identity (checked across every reader, not assumed).
+    Equality and hashing are unchanged; only `is` becomes true more often,
+    which is a widening no reader depends on either way.
+
+    The arguments are coerced with :func:`bool` rather than used as-is.
+    The fields are annotated ``bool`` and every predicate feeding this is
+    documented to answer yes/no, so a truthy non-``bool`` leaking through
+    would have been stored verbatim before and silently violated that
+    annotation; normalizing here keeps the four shared values genuinely
+    interchangeable with a directly-constructed one.
+    """
+    return _SYMBOL_SIGNATURE_STATUSES[(bool(exported), bool(evidence_sufficient))]
+
+
 @dataclass(frozen=True)
 class BundleSignatureEvidence:
     """Compact, per-library stand-in for an :class:`~abicheck.model.
