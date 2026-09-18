@@ -35,6 +35,15 @@ from .checker_types import Change, DiffResult
 from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import ElfMetadata, SymbolBinding
 from .model.scope_acquisition import ScopeAcquisitionRecord
+
+# Re-exported: this type lived here until it outgrew the file's 800-line
+# production ceiling and moved to its ADR-061 owner. The old import path
+# stays valid, and this module is a real consumer of the type, not a
+# delegation-only facade.
+from .model.symbol_signature_status import (
+    SymbolSignatureStatus as SymbolSignatureStatus,
+    symbol_signature_status as symbol_signature_status,
+)
 from .policy.classification import Verdict, compute_verdict, effective_category
 from .policy.contract_finding_relevance import is_evaluated
 
@@ -528,72 +537,6 @@ def diff_change_is_breaking(
     if diff.policy_file is not None:
         return diff.policy_file.compute_verdict([change]) == Verdict.BREAKING
     return effective_category(change, *policy_sets) == Verdict.BREAKING
-
-
-@dataclass(frozen=True, slots=True)
-class SymbolSignatureStatus:
-    """The two answers a bundle signature check asks about one symbol.
-
-    Both are plain booleans deliberately: every tri-state and
-    legacy/unknown distinction the underlying predicates draw
-    (``Fact``-backed export evidence versus a pre-split snapshot's
-    conflated ``Visibility``, an uncaptured ``is_variadic`` or
-    ``contract_attributes``, an unresolved type spelling) is resolved
-    *while the full snapshot is alive*, by those predicates, into the same
-    yes/no the consumer would have got from the snapshot itself. Storing
-    them unresolved would mean keeping the declarations that carry them,
-    which is the retention this type exists to remove.
-
-    A symbol absent from the mapping is one that was in neither
-    ``function_map`` nor ``variable_map``: both predicates answer ``False``
-    for that case, so absence and ``(False, False)`` are the same answer,
-    and the mapping holds only symbols the snapshot actually declared.
-    """
-
-    exported: bool
-    evidence_sufficient: bool
-
-
-#: Every value this type can ever hold. Two booleans admit exactly four
-#: combinations, so the whole value space is enumerable and is built once
-#: here rather than one object per symbol.
-_SYMBOL_SIGNATURE_STATUSES: dict[tuple[bool, bool], SymbolSignatureStatus] = {
-    (exported, evidence_sufficient): SymbolSignatureStatus(
-        exported=exported, evidence_sufficient=evidence_sufficient
-    )
-    for exported in (False, True)
-    for evidence_sufficient in (False, True)
-}
-
-
-def symbol_signature_status(
-    *, exported: bool, evidence_sufficient: bool
-) -> SymbolSignatureStatus:
-    """The shared :class:`SymbolSignatureStatus` for this pair of answers.
-
-    The type is frozen, slotted, and carries two booleans, so it has
-    exactly four inhabitants -- yet the caller allocates one per symbol.
-    Measured on a real oneDAL release: 48 bytes per instance against
-    87,728 symbols is 4.02 MiB for one library, and the release fan-out
-    retains a mapping per matched member, so roughly 24 MiB across six.
-    That is about 1% of a measured ~2.3 GiB peak: this is here because it
-    is free and provably safe, **not** because it addresses the memory
-    problem -- the member-concurrency measurement owns that.
-
-    Sharing is safe precisely because the type is frozen: no consumer can
-    mutate one instance into another's value, and none distinguishes two
-    equal statuses by identity (checked across every reader, not assumed).
-    Equality and hashing are unchanged; only `is` becomes true more often,
-    which is a widening no reader depends on either way.
-
-    The arguments are coerced with :func:`bool` rather than used as-is.
-    The fields are annotated ``bool`` and every predicate feeding this is
-    documented to answer yes/no, so a truthy non-``bool`` leaking through
-    would have been stored verbatim before and silently violated that
-    annotation; normalizing here keeps the four shared values genuinely
-    interchangeable with a directly-constructed one.
-    """
-    return _SYMBOL_SIGNATURE_STATUSES[(bool(exported), bool(evidence_sufficient))]
 
 
 @dataclass(frozen=True)
