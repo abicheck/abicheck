@@ -47,6 +47,13 @@ from abicheck.model import export_index
 
 
 def _frozen_dataclasses():
+    """Every dataclass this module itself defines, as `(name, class)` pairs.
+
+    Filtered on `__module__` so a type merely *imported* here is not swept
+    in: the rule being enforced is about this module's own per-symbol row
+    types, and applying it to something defined elsewhere would both
+    overreach and make the failure message misleading.
+    """
     for name in dir(export_index):
         obj = getattr(export_index, name)
         if (
@@ -145,6 +152,14 @@ class TestBehaviourIsUnchanged:
     """Slotting must not alter the value semantics any consumer relies on."""
 
     def test_equality_hashing_and_field_reads_still_work(self) -> None:
+        """Value semantics survive the layout change.
+
+        Slotting alters how instances are stored, not what they mean --
+        and these are the operations the real consumers perform (set
+        membership while de-duplicating export rows, field reads while
+        projecting to names), so a regression here would be silent and
+        would change results rather than performance.
+        """
         a = export_index.RawExportEntry("_Z3foov", True, None, "FUNC", None, "default")
         b = export_index.RawExportEntry("_Z3foov", True, None, "FUNC", None, "default")
         assert a == b
@@ -155,12 +170,26 @@ class TestBehaviourIsUnchanged:
         assert a.is_default is True
 
     def test_defaults_still_apply(self) -> None:
+        """Five of the six fields are defaulted, and callers rely on that.
+
+        `build_raw_export_index_from_pe`/`_macho` construct entries
+        positionally with only the fields their format carries, so a lost
+        default would not raise -- it would silently shift every later
+        value.
+        """
         e = export_index.RawExportEntry("bare")
         assert e.is_default is True
         assert e.ordinal is None
         assert e.visibility is None
 
     def test_it_is_still_frozen(self) -> None:
+        """Assigning a *declared* field still raises `FrozenInstanceError`.
+
+        The counterpart to the undeclared-attribute case below, and the
+        half that is unaffected by the slots wart: the frozen guard fires
+        before the `super()` call that the wart lives in, so this path
+        keeps the exception type it always had.
+        """
         e = export_index.RawExportEntry("x")
         with pytest.raises(dataclasses.FrozenInstanceError):
             e.name = "y"  # type: ignore[misc]
