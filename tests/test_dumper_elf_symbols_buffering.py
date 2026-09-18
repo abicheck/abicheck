@@ -48,9 +48,21 @@ import pytest
 from abicheck.dumper_elf_symbols import _pyelftools_exported_symbols
 from abicheck.errors import SnapshotError
 
+_ELF_MAGIC = b"\x7fELF"
+
 
 def _build_so(tmp_path, names, *, hidden=(), static_only=()):
-    """A real ELF shared object exporting *names*, or ``None`` if unbuildable."""
+    """A real **ELF** shared object exporting *names*, or ``None``.
+
+    ``None`` covers two genuinely absent capabilities -- no compiler, and a
+    compiler that builds but does not emit ELF (macOS emits Mach-O, Windows
+    PE) -- which the caller turns into a skip. A compiler that ran and
+    *failed* is neither: that is a broken fixture or toolchain and must
+    surface with its own details rather than vanish as a skip (bug class
+    ``guard.absent_capability_vs_real_failure``), which is what the
+    ``returncode`` branch below is for. Mirrors the same two-way guard in
+    ``tests/test_elf_string_table.py``'s ``_minimal_so``.
+    """
     cc = shutil.which("gcc") or shutil.which("cc") or shutil.which("clang")
     if cc is None:
         return None
@@ -78,6 +90,11 @@ def _build_so(tmp_path, names, *, hidden=(), static_only=()):
         )
     if not so.exists():
         return None
+    with open(so, "rb") as fh:
+        if fh.read(4) != _ELF_MAGIC:
+            # Mach-O or PE: this host does not build ELF, which *is* an
+            # absent capability for a test about ELF symbol tables.
+            return None
     return so
 
 
