@@ -492,3 +492,137 @@ def test_os_error_during_resolution_degrades_to_lexical_matching() -> None:
     assert canonical_spelling(too_long) is None
     assert path_alias_spellings(too_long) == (too_long,)
     assert _segments(too_long) in public_root_alias_segments(too_long)
+
+
+# --------------------------------------------------------------------------
+# Scope consistency: the same ownership decision, wherever it is made
+# --------------------------------------------------------------------------
+
+
+@_symlinks
+def test_transitive_header_under_a_symlinked_owned_directory_is_owned(
+    tmp_path: Path,
+) -> None:
+    """A header the declared root ``#include``s -- reached transitively,
+    nested below the root rather than named by it -- is owned through the
+    symlinked spelling exactly as through the canonical one.
+
+    The alias must survive the *containment* test, not only an exact-root
+    match, which is what a nested path exercises and a top-level one does
+    not.
+    """
+    real, link = _linked_tree(tmp_path)
+    nested = real / "detail" / "deep"
+    nested.mkdir(parents=True)
+    (nested / "impl.h").write_text("struct Impl { int a; };\n")
+
+    via_link = _classify(str(nested / "impl.h"), dirs=[str(link)])
+    via_real = _classify(str(nested / "impl.h"), dirs=[str(real)])
+    assert via_link is ScopeOrigin.PUBLIC_HEADER
+    assert via_link is via_real
+
+
+@_symlinks
+def test_dump_scoping_keeps_declarations_under_a_symlinked_root(
+    tmp_path: Path,
+) -> None:
+    """The dependency-pruning pass reaches the same answer as provenance.
+
+    ``scope_snapshot_excluding_dependencies`` drops a declaration whose
+    header is a dependency. Before aliasing, a library installed under a
+    system prefix and named through a symlink lost that protection -- its
+    own headers read as ``/usr/include/...`` and the whole snapshot was
+    pruned away. Asserted against the real scoping entry point, not against
+    ``is_dependency_header`` alone, so the wiring is covered too.
+    """
+    from abicheck.dumper_scoping import scope_snapshot_excluding_dependencies
+    from abicheck.model import AbiSnapshot, Function
+    from abicheck.provenance import apply_provenance
+
+    real = tmp_path / "usr" / "include" / "mylib"
+    real.mkdir(parents=True)
+    (real / "api.h").write_text("int foo(void);\n")
+    link = tmp_path / "linked-sdk"
+    link.symlink_to(tmp_path / "usr" / "include" / "mylib", target_is_directory=True)
+
+    snap = AbiSnapshot(
+        library="libmylib.so",
+        version="1.0",
+        # The pass no-ops on a snapshot that did not come from headers --
+        # a dependency filter has nothing to act on there.
+        from_headers=True,
+        functions=[
+            Function(
+                name="foo",
+                mangled="foo",
+                return_type="int",
+                source_location=f"{real}/api.h:1",
+            ),
+            Function(
+                name="dep",
+                mangled="dep",
+                return_type="int",
+                source_location="/usr/include/stdio.h:1",
+            ),
+        ],
+    )
+
+    # `source_header` is what the scoping pass reads, and `apply_provenance`
+    # is what derives it from `source_location` -- go through that real step
+    # rather than hand-setting the field, so the test covers the same wiring
+    # a dump does.
+    apply_provenance(snap, public_header_dirs=[link])
+
+    kept = {
+        f.name for f in scope_snapshot_excluding_dependencies(snap, [link]).functions
+    }
+    assert "foo" in kept, "the library's own declaration was pruned as a dependency"
+    assert "dep" not in kept, "a real toolchain declaration survived pruning"
+
+
+# --------------------------------------------------------------------------
+# Determinism: aliases are matching aids, never configuration identity
+# --------------------------------------------------------------------------
+
+
+@_symlinks
+def test_alias_resolution_does_not_change_the_ast_cache_key(tmp_path: Path) -> None:
+    """The same *lexical* inputs must hash identically whatever the local
+    mount layout resolves to.
+
+    A canonical alias is a runtime matching aid; if one ever leaked into a
+    persisted identity, a baseline produced on one machine would stop
+    matching the same configuration on another. Asserted against the real
+    header-parse cache key rather than against the claim in a docstring.
+    """
+    from abicheck.dumper_ast_config import _cache_key
+
+    real, link = _linked_tree(tmp_path)
+
+    def key(root: Path) -> str:
+        return _cache_key([root / "pub.h"], [root], "cc", lang="C")
+
+    # The two spellings are genuinely different configuration inputs, so
+    # they legitimately key apart -- what must hold is that each spelling's
+    # own key is stable and derived from the spelling, not from what it
+    # resolves to.
+    assert key(link) == key(link)
+    assert key(real) == key(real)
+    assert key(link) != key(real), (
+        "two distinct lexical spellings collapsed onto one key -- "
+        "canonicalization leaked into a persisted identity"
+    )
+
+
+def test_alias_expansion_never_mutates_the_caller_s_inputs(tmp_path: Path) -> None:
+    """Alias expansion is a pure read of its arguments.
+
+    ``build_public_set`` is handed the caller's own root lists; rewriting
+    one in place would push a machine-specific canonical spelling back into
+    whatever the caller later persists.
+    """
+    roots = [str(tmp_path / "inc")]
+    dirs = [str(tmp_path / "other")]
+    before = (list(roots), list(dirs))
+    build_public_set(roots, dirs)
+    assert (roots, dirs) == before
