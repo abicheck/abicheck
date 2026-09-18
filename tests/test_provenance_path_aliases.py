@@ -476,22 +476,42 @@ def test_resolution_error_degrades_to_lexical_matching(
     assert _classify(str(root / "pub.h"), dirs=[str(root)]) is ScopeOrigin.PUBLIC_HEADER
 
 
-def test_os_error_during_resolution_degrades_to_lexical_matching() -> None:
+def test_a_path_the_filesystem_refuses_degrades_to_lexical_matching() -> None:
     """The same guarantee, reached without mocking anything.
 
-    A path component past ``NAME_MAX`` makes the filesystem itself refuse
-    the query (``ENAMETOOLONG``), which is a real instance of the class the
-    handler exists for -- so this pins the behaviour against the OS rather
-    than against a patched callable.
+    A path component past ``NAME_MAX`` is a real instance of the class the
+    handler exists for, so this pins the behaviour against the OS rather
+    than a patched callable. The *route* to it is platform-specific and
+    deliberately not asserted as if it were universal: POSIX raises
+    ``ENAMETOOLONG`` from ``Path.exists()`` and the ``except`` handler
+    delivers the guarantee, while Windows swallows that error and answers
+    ``False``, so the early return delivers it instead. An earlier revision
+    asserted the POSIX route unconditionally and failed on the Windows CI
+    lane -- a platform assumption inside the very change that exists to
+    stop making platform assumptions about paths.
+
+    What must hold everywhere is the *outcome*, which is what this asserts
+    unconditionally; the mocked siblings above cover the handler itself on
+    every platform.
     """
     too_long = "/" + ("a" * 5000)
-    with pytest.raises(OSError):
+    try:
         Path(too_long).exists()
+        refused_by_raising = False
+    except OSError:
+        refused_by_raising = True
 
     clear_path_alias_caches()
     assert canonical_spelling(too_long) is None
     assert path_alias_spellings(too_long) == (too_long,)
     assert _segments(too_long) in public_root_alias_segments(too_long)
+
+    if refused_by_raising:
+        # On this platform the guarantee came from the `except` handler,
+        # since the probe above proves `exists()` raises rather than
+        # answering False.
+        with pytest.raises(OSError):
+            Path(too_long).exists()
 
 
 # --------------------------------------------------------------------------
