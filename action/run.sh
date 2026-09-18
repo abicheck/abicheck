@@ -2038,8 +2038,9 @@ _extra_args_is_value_option() {
 # falls through to treating the token as an ordinary opaque one.
 #
 # The only short options across every command this Action invokes are one
-# boolean flag (`-v`) and three value-taking ones (`-H`/`-I`/`-o`, mirroring
-# `_extra_args_is_value_option` above) -- so the only cluster shape that
+# boolean flag (`-v`) and the value-taking ones (`-H`/`-I`/`-o`, and since
+# ADR-074 `-D` too -- all answered by `_extra_args_is_value_option` above
+# from the installed CLI, never listed here) -- so the only cluster shape that
 # needs expanding is zero or more `v`s followed by exactly one of those
 # three, with nothing else after it. (`-j` was listed here as a fourth until
 # the option-table audit: `compare` has no `-j` at all -- `jobs` was retired
@@ -2068,7 +2069,8 @@ _extra_args_expand_short_clusters() {
   # `_extra_args_is_value_option` now answers from the installed CLI. The
   # hand-listed form of this set carried `j` long after `compare` lost `-j`
   # with `jobs` (ADR-068 D5), so it expanded `-vj` into an option Click
-  # itself rejects.
+  # itself rejects -- and would equally have missed `-D` when ADR-074 added
+  # it. Deriving means a `-vD FOO` cluster works with no change here.
   _extra_args_is_value_option "-$_last" || return 1
   _flags="${_rest%?}"
   _n=${#_flags}
