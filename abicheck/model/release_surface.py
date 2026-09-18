@@ -89,7 +89,11 @@ class SurfaceAcquisitionIdentity:
     #: narrowed differently are not the same surface at all (and a pair so
     #: narrowed is refused outright downstream).
     exclude_headers: tuple[str, ...] = ()
-    #: ``-I`` include search paths.
+    #: ``-I`` include search paths, **in the caller's order**. This is a
+    #: search *order*, not a set: two same-named headers on different roots
+    #: resolve to whichever root comes first, so a producer must not sort or
+    #: de-duplicate this before handing it over (see
+    #: ``workflows.release_public_surface.build_side_identity``).
     includes: tuple[str, ...] = ()
     #: ``scope.public_header_dirs`` / ``--public-header-dir``.
     public_header_dirs: tuple[str, ...] = ()
