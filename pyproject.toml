@@ -413,18 +413,6 @@ also_copy = [
     "examples",
     "catalog",
     "mkdocs.yml",
-    # This very file. mutmut runs the suite with `mutants/` as the working
-    # directory, and a test that spawns a *subprocess* re-enters mutmut's
-    # trampoline there -- which calls `config()`, which discovers
-    # `[tool.mutmut]` from the cwd. Without this copy that discovery raises
-    # `FileNotFoundError: Could not figure out where the code to mutate
-    # is`, the subprocess exits 1, the spawning test fails, and mutmut
-    # aborts at *stats collection* before a single mutant is measured --
-    # the same dead-lane failure mode every other entry here guards
-    # against. Verified at the mechanism: running mutmut's own `config()`
-    # from a directory without this file reproduces that exact error, and
-    # from one with it resolves `mutants/abicheck`.
-    "pyproject.toml",
     "pixi.lock",
     "scripts",
     "skills-src",
