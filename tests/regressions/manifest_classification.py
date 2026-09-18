@@ -420,9 +420,12 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "drive/UNC spelling on POSIX is never reinterpreted, a "
             "cross-machine stored path is never required to exist, and a "
             "resolution failure degrades to lexical matching rather than "
-            "failing extraction. Aliasing only ever *adds* spellings, so "
-            "it can widen no root beyond the tree actually declared and "
-            "can make nothing match that did not match before."
+            "failing extraction. Aliasing only ever *adds* spellings, "
+            "which bounds it in both directions: no input that matched "
+            "before an alias existed stops matching, and no path outside "
+            "the tree actually declared starts matching -- recognizing a "
+            "second spelling of the declared tree is the fix, widening "
+            "the tree is not."
         ),
         fixed_by=(1330,),
         seed_tests=(
