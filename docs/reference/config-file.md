@@ -273,7 +273,9 @@ for the flag→key mapping.
   (ADR-074), which merges with this list **by macro name** — the CLI value wins
   for the macro it names and every other entry here stays in force. Prefer this
   key for CI and baseline generation; use `-D` for one-off runs and
-  experiments. It is the only `compile:` field with a CLI counterpart.
+  experiments. It is one of two `compile:` fields with a per-run CLI
+  counterpart — the other is `include_dirs`, whose `-I/--include` roots are
+  searched *before* the configured ones rather than merged by name.
 - `sysroot:` — was `--sysroot` on compare/dump.
 - `nostdinc:` — boolean; was `--nostdinc`/`--no-nostdinc` on compare/dump.
 - `compiler:` — path to the compiler binary, **or** a cross-toolchain

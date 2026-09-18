@@ -259,14 +259,70 @@ class TestMergeProperties:
 
 
 class TestDefineSpellingsFromTokens:
+    """What the --dry-run receipt reads back off a rendered argv tail. The
+    expectations here are anchored to *real gcc behaviour*, probed directly
+    (gcc 13.3), not to what the reader happens to do."""
+
     def test_extracts_both_styles_and_ignores_everything_else(self) -> None:
         assert define_spellings_from_tokens(
-            ["-std=gnu11", "-DA", "/DB=2", "-I", "/inc", "-UC", "-D", "-DD=x=y"]
+            ["-std=gnu11", "-DA", "/DB=2", "-I", "/inc", "-UC", "-DD=x=y"]
         ) == ("A", "B=2", "D=x=y")
 
+    def test_a_separated_D_consumes_the_next_token(self) -> None:
+        assert define_spellings_from_tokens(["-D", "FEATURE", "-DB=1"]) == (
+            "FEATURE",
+            "B=1",
+        )
+
+    def test_a_separated_D_swallowing_a_flag_defines_nothing(self) -> None:
+        """`-D -DD=1` defines NEITHER `-DD` nor `D`: gcc consumes the next
+        token as the (malformed) macro name and discards it. Verified
+        against gcc 13.3 -- `gcc -E -D -DD=1 -dM` lists no `D` and no
+        `-DD`. An earlier revision of this reader treated the second token
+        as its own attached `-DD=1`, i.e. reported a macro the compiler
+        never defines."""
+        assert define_spellings_from_tokens(["-D", "-DD=1"]) == ()
+
+    @pytest.mark.parametrize(
+        "tokens",
+        [
+            ["/I", "/Deps/include"],
+            ["-I", "/Development/sdk"],
+            ["-DFOO", "/Deps/include"],
+        ],
+    )
+    def test_a_path_operand_beginning_with_D_is_not_a_macro(
+        self, tokens: list[str]
+    ) -> None:
+        """`/Deps/include` merely starts with `/D`; to gcc it is a linker
+        input file, not a definition (probed). Only operands that really
+        parse as a macro definition are reported."""
+        assert "eps/include" not in define_spellings_from_tokens(tokens)
+        assert "evelopment/sdk" not in define_spellings_from_tokens(tokens)
+
+    def test_one_entry_per_macro_last_wins(self) -> None:
+        """A lower-precedence `-DA=9` from `compile.options` followed by the
+        winning CLI `-DA=2` must be reported as the effective value alone --
+        naming both would name a value the compiler discards."""
+        assert define_spellings_from_tokens(["-DA=9", "-DB", "-DA=2"]) == ("A=2", "B")
+
+    def test_the_collapse_keeps_first_appearance_order(self) -> None:
+        """Ordering here is a *receipt* concern, not a semantic one: each
+        macro keeps the position it first appeared at and carries its
+        effective value. (The "re-emit last" rule in `merge_compile_config`
+        is about argv, where position decides last-wins; once collapsed to
+        one entry per name there is no race left to lose.)"""
+        assert define_spellings_from_tokens(["-DZ=1", "-DA=1", "-DZ=2", "-DA=2"]) == (
+            "Z=2",
+            "A=2",
+        )
+
     @pytest.mark.parametrize("style", ["gnu", "cl"])
-    def test_round_trips_every_accepted_definition(self, style: str) -> None:
-        defs = parse_macro_definitions(ACCEPTED)
+    def test_round_trips_every_distinctly_named_definition(self, style: str) -> None:
+        """Round trip over the accepted domain reduced to one entry per name
+        -- ACCEPTED deliberately holds several spellings of `A`/`N`/`NAME`,
+        which the reader now collapses last-wins by design."""
+        defs = merge_macro_definitions((), parse_macro_definitions(ACCEPTED))
         assert list(
             define_spellings_from_tokens(macro_definition_tokens(defs, style))
         ) == [d.spelling for d in defs]

@@ -229,27 +229,60 @@ def macro_definition_tokens(
 
 
 def define_spellings_from_tokens(tokens: Iterable[str]) -> tuple[str, ...]:
-    """The macro spellings carried by an already-rendered frontend argv tail.
+    """The *effective* macro spellings an already-rendered frontend argv tail
+    defines, in the order a compiler would end up with them.
 
-    The inverse of :func:`macro_definition_tokens`, over the *effective*
+    The inverse of :func:`macro_definition_tokens`, over the effective
     ``CompileContext.gcc_option_tokens`` -- i.e. after
     ``cli_options.merge_compile_config`` folded config and CLI together. The
     ``--dry-run`` receipt reports this rather than the raw ``-D/--define``
     values so it states what the frontend will actually be given, config
     contributions included, and so it cannot drift from the real run.
 
-    Only the joined GNU form (``-DNAME``) and its ``cl`` counterpart
-    (``/DNAME``) are recognized -- the only two shapes anything in this
-    codebase emits. A separated ``-D NAME`` pair (which no emitter here
-    produces, and which `compile.options` would have to spell as two atoms)
-    is deliberately not reassembled: guessing would misreport an unrelated
-    following flag as a macro value.
+    Two rules make the answer match the compiler rather than the raw token
+    list (CodeRabbit review):
+
+    * **A token is a define only if it really is one.** Every candidate is
+      run through :func:`parse_macro_definition`, so a token that merely
+      *starts* with ``-D``/``/D`` but carries no valid macro name is
+      skipped rather than reported as a macro -- ``/Deps/include`` (a path
+      operand following a ``/I`` in ``compile.options``) is not the macro
+      ``eps/include``. The separated two-token form (``-D`` then ``NAME``)
+      is recognized too, since ``compile.options`` can legitimately spell
+      it that way.
+    * **One entry per macro, last wins.** A lower-precedence ``-DA=9`` from
+      ``compile.options`` followed by the winning ``-DA=2`` is reported as
+      ``A=2`` alone. Reporting both would name a value the compiler
+      discards, which is the opposite of an "effective" receipt.
+
+    Deliberately tolerant rather than strict: this reads a rendered argv
+    that may contain anything ``compile.options`` allowed, so an
+    unparseable candidate is skipped, never raised on -- a dry-run receipt
+    must not be the thing that fails a run.
     """
-    return tuple(t[2:] for t in tokens if t.startswith(("-D", "/D")) and len(t) > 2)
+    found: list[MacroDefinition] = []
+    items = list(tokens)
+    index = 0
+    while index < len(items):
+        token = items[index]
+        operand: str | None = None
+        if token in ("-D", "/D") and index + 1 < len(items):
+            operand = items[index + 1]
+            index += 1
+        elif token.startswith(("-D", "/D")) and len(token) > 2:
+            operand = token[2:]
+        index += 1
+        if operand is None:
+            continue
+        try:
+            found.append(parse_macro_definition(operand))
+        except MacroDefinitionError:
+            continue  # not a macro definition; some other flag's operand
+    return tuple(d.spelling for d in merge_macro_definitions((), found))
 
 
 def defines_receipt_line(tokens: Iterable[str]) -> str | None:
-    """The ``defines: …`` line a ``--dry-run`` receipt prints for an
+    """The ``defines: ...`` line a ``--dry-run`` receipt prints for an
     already-resolved frontend argv tail, or ``None`` when the run defines
     nothing (so the receipt stays exactly as it read before ADR-074).
 

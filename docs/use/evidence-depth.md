@@ -379,9 +379,12 @@ removals get reported as BREAKING.
 not a flag** — the toolchain a project's headers parse under is a stable
 property of the project, not a per-run decision
 ([ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-D5). The only per-run compile-context input either command takes on the CLI
-is `-I/--include DIR` (an include root, repeatable). Everything else lives
-in the `compile:` block:
+D5). Both commands take exactly two per-run compile-context inputs on the
+CLI: `-I/--include DIR` (an include root, repeatable — searched before the
+configured `include_dirs`) and `-D/--define NAME[=VALUE]` (a preprocessor
+macro, repeatable — merged with `defines` by macro name, the CLI value
+winning; [ADR-074](../contribute/adr/074-logical-macro-definitions-on-the-cli.md)).
+Everything else lives in the `compile:` block:
 
 | `compile:` key | Purpose |
 |---|---|

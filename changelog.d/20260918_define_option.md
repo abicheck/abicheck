@@ -10,9 +10,10 @@
   other configured define stays in force. `compile.defines` remains the
   recommendation for stable CI and baseline generation. This is not a return
   of `--gcc-options`/`--compiler-option`: the operand is a macro definition,
-  renders to exactly one `-D`-prefixed argv token, and anything that is not a
-  bare macro name is a usage error; general compiler flags remain config-only
-  under `compile.options`.
+  renders to exactly one `-D`-prefixed argv token, and an operand whose *name
+  component* is not a bare C identifier is a usage error (`NAME=VALUE` is of
+  course accepted); general compiler flags remain config-only under
+  `compile.options`.
 
 ### Changed
 

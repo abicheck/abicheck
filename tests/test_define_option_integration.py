@@ -377,3 +377,35 @@ class TestNoBaselineAudit:
         cfg.write_text("compile:\n  defines:\n    - FEATURE_API\n")
         out = self._audit(so, include, "--config", str(cfg))
         assert "guarded_expert" not in out
+
+    def test_an_auto_discovered_config_reaches_the_audit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The case an explicit `--config` test structurally cannot catch
+        (CodeRabbit review). `merge_compile_config`'s own fallback is
+        `discover_build_config(sources)`, which is anchored to a `--sources`
+        tree and returns None without one -- so passing the raw `--config`
+        kwarg applied `compile:` only when the flag was typed, and silently
+        ignored the cwd-upward `.abicheck.yml` every other `compare` shape
+        honors.
+
+        Paired with its own control below, because "no finding" is also
+        what a *broken* run that never parsed the header would produce."""
+        so, include = _build(tmp_path)
+        (tmp_path / ".abicheck.yml").write_text(
+            "compile:\n  defines:\n    - FEATURE_API\n"
+        )
+        monkeypatch.chdir(tmp_path)
+        assert "guarded_expert" not in self._audit(so, include)
+
+    def test_control_without_the_discovered_config_the_finding_returns(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The negative half: with no config to discover, the guarded
+        declaration is invisible again and the false `exported_not_public`
+        finding comes back -- so the test above cannot pass vacuously."""
+        so, include = _build(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        out = self._audit(so, include)
+        assert "guarded_expert" in out
+        assert "exported_not_public" in out

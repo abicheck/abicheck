@@ -328,15 +328,27 @@ def _resolve_no_baseline_invocation(
     # project `compile:` block and ADR-074's own `-D/--define` by macro name.
     # `--no-baseline` previously built no context at all and passed
     # `compile=None`, so neither reached the candidate's header parse.
+    #
+    # `build_config` must be the *discovered* path, not the raw `--config`
+    # kwarg: `merge_compile_config`'s own fallback is
+    # `discover_build_config(sources)`, which is anchored to a `--sources`
+    # tree and returns None without one -- so passing the bare kwarg would
+    # apply `compile:` only when `--config` was typed, and silently ignore
+    # the cwd-upward `.abicheck.yml` that every other `compare` shape honors
+    # (CodeRabbit review). `config_explicit` stays tied to the raw kwarg, so
+    # a discovered config still does not clear the `compile.compiler`
+    # untrusted-executable gate.
+    from ....cli_helpers_compare import discover_project_config
     from ....cli_options import resolve_compile_context
 
+    _discovered_config = kwargs.get("config") or discover_project_config()
     compile_context, merged_includes = resolve_compile_context(
         ctx,
         sysroot=None,
         nostdinc=False,
         header_backend="auto",
         includes=tuple(includes),
-        build_config=kwargs.get("config"),
+        build_config=_discovered_config,
         defines=tuple(kwargs.get("defines") or ()),
         config_explicit=kwargs.get("config") is not None,
     )

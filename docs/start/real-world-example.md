@@ -71,9 +71,10 @@ abicheck compare old/lib/libfoo.so.2.3.0 new/lib/libfoo.so.2.4.0 \
   clang` in a [`.abicheck.yml` `compile:` block](#4-configure-once-abicheckyml)
   — abicheck auto-detects the host libstdc++. (There is no `--ast-frontend`
   flag; `compare`/`dump` take it only via config.)
-- Need a specific `-std` to parse the headers? Set `compile.std: c++20` in that
-  same `.abicheck.yml` — the compile context is config-only, with one
-  exception: **preprocessor macros** also have a CLI spelling,
+- Need a specific `-std` to parse the headers? `compile.std` is config-only —
+  set `compile.std: c++20` in that same `.abicheck.yml`. Of the compile
+  context, only the two operand-shaped inputs have a CLI spelling:
+  `-I/--include` and **preprocessor macros**,
   `-D/--define NAME[=VALUE]` on both `compare` and `dump` (ADR-074), for a
   one-off run. `compile.defines: [FOO=1]` stays the right answer for CI; a CLI
   `-D` overrides it for that macro name only.

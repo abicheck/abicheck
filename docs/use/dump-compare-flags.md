@@ -63,9 +63,9 @@ cross-toolchain in `.abicheck.yml`'s `compile:` block. Phase 7
 off `dump`/`compare`'s CLI entirely — a stable project/toolchain property,
 not a per-run choice — so there is **no `--compiler`/`--compiler-prefix`/
 `--compiler-option`/`--sysroot`/`--nostdinc`/`--ast-frontend`/`--lang` flag
-left on any command at all — with one deliberate, narrow exception,
-`-D/--define` (ADR-074), covered under [Preprocessor
-macros](#preprocessor-macros-d-define) below:
+left on any command at all. The two per-run inputs that remain are the
+operand-shaped ones: `-I/--include` (below) and `-D/--define` (ADR-074,
+covered under [Preprocessor macros](#preprocessor-macros-d-define)):
 
 ```yaml
 # .abicheck.yml
@@ -77,8 +77,8 @@ compile:
                                     # --compiler-prefix pair into one key)
   options: [-march=armv8-a]  # was the repeatable --compiler-option
   std: c++20                 # synthesizes -std=c++20
-  defines: [FOO=1, NDEBUG]   # synthesizes -DFOO=1 -DNDEBUG; the one compile:
-                             # field that also has a CLI override, -D/--define
+  defines: [FOO=1, NDEBUG]   # synthesizes -DFOO=1 -DNDEBUG; also settable
+                             # per run with -D/--define, merged by macro name
   include_dirs: [include, third_party/inc]   # appended after -I roots
   sysroot: /opt/sysroots/aarch64
   nostdinc: false
