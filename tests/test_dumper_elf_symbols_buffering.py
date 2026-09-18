@@ -40,6 +40,7 @@ must prove both of its configurations actually ran").
 from __future__ import annotations
 
 import contextlib
+import pathlib
 import shutil
 import subprocess
 
@@ -224,3 +225,109 @@ class TestExtractSymbolsUsesTheBuffer:
 
         assert buffered_exc == unbuffered_exc
         assert buffered_result == unbuffered_result
+
+
+class TestTheFixtureGuardItself:
+    """The skip guard is load-bearing, so it is tested rather than trusted.
+
+    Every test above is vacuous on a host where `_build_so` returns
+    `None`. That makes the guard's two directions a correctness concern of
+    their own, and exactly the `guard.absent_capability_vs_real_failure`
+    class: a guard that widened to swallow real compile failures would
+    turn this whole module green-and-empty everywhere, and one that
+    narrowed would reintroduce the macOS/Windows failure it exists for.
+    Both directions are asserted, against generated non-ELF magics rather
+    than the one format that happened to break first — the original guard
+    was written for "no compiler" alone and let a *successful* non-ELF
+    build through on two platforms.
+    """
+
+    @pytest.mark.parametrize(
+        ("magic", "format_name"),
+        [
+            (b"\xcf\xfa\xed\xfe", "Mach-O 64-bit LE"),
+            (b"\xce\xfa\xed\xfe", "Mach-O 32-bit LE"),
+            (b"\xca\xfe\xba\xbe", "Mach-O universal"),
+            (b"MZ\x90\x00", "PE/COFF"),
+            (b"!<ar", "static archive"),
+        ],
+    )
+    def test_a_successful_non_elf_build_is_an_absent_capability(
+        self, tmp_path, monkeypatch, magic, format_name
+    ) -> None:
+        """A compiler that runs, succeeds, and emits something else -> skip.
+
+        This is the real macOS/Windows mode: `returncode` is 0 and the file
+        exists, so every check the guard originally had passed.
+        """
+        real_run = subprocess.run
+
+        def stamping_run(cmd, **kwargs):
+            result = real_run(cmd, **kwargs)
+            out = pathlib.Path(cmd[cmd.index("-o") + 1])
+            if out.exists():
+                blob = bytearray(out.read_bytes())
+                blob[0 : len(magic)] = magic
+                out.write_bytes(bytes(blob))
+            return result
+
+        if not (shutil.which("gcc") or shutil.which("cc") or shutil.which("clang")):
+            # Distinguished *before* calling, deliberately: keying the skip
+            # off a `None` return would make the assertion below vacuous on
+            # a compiler-less host and -- worse -- would turn a genuinely
+            # broken guard (one that returned the stamped path) into a skip
+            # rather than a failure, which is the very masking this class
+            # is about.
+            pytest.skip("no compiler on this host")
+        monkeypatch.setattr(subprocess, "run", stamping_run)
+        built = _build_so(tmp_path, ["alpha", "beta"])
+        assert built is None, (
+            f"a successful build emitting {format_name} was not treated as "
+            "an absent capability; the ELF-magic guard did not engage"
+        )
+
+    def test_an_elf_build_is_not_skipped(self, tmp_path) -> None:
+        """Vacuity guard: the guard must not reject a *genuine* ELF.
+
+        Whether this host emits ELF is established independently -- by
+        compiling one directly and reading its magic -- rather than by
+        asking `_build_so`, because on that route a guard that returned
+        `None` unconditionally would skip here too and silently reduce
+        every test in this module to a no-op. That exact mutation
+        (`if True:` in place of the magic comparison) leaves the rest of
+        the file green, so this is the only assertion that catches it.
+        """
+        cc = shutil.which("gcc") or shutil.which("cc") or shutil.which("clang")
+        if cc is None:
+            pytest.skip("no compiler on this host")
+        probe_src = tmp_path / "probe.c"
+        probe_src.write_text("int probe(void){return 0;}\n")
+        probe_so = tmp_path / "libprobe.so"
+        proc = subprocess.run(
+            [cc, "-shared", "-fPIC", "-o", str(probe_so), str(probe_src)],
+            capture_output=True,
+        )
+        if proc.returncode != 0 or not probe_so.exists():
+            pytest.skip("this host's compiler cannot build a shared object")
+        if probe_so.read_bytes()[:4] != _ELF_MAGIC:
+            pytest.skip("this host's compiler does not emit ELF")
+
+        # This host demonstrably builds ELF, so the guard must let it through.
+        built = _build_so(tmp_path, ["alpha"])
+        assert built is not None, (
+            "the ELF-magic guard rejected a genuine ELF build; every test in "
+            "this module would now skip and assert nothing"
+        )
+        assert built.read_bytes()[:4] == _ELF_MAGIC
+
+    def test_a_real_compile_failure_still_raises(self, tmp_path) -> None:
+        """The other direction: a broken fixture must never become a skip."""
+        if shutil.which("gcc") or shutil.which("cc") or shutil.which("clang"):
+            with pytest.raises(BaseException) as excinfo:
+                # Invalid C, so the compiler runs and rejects it.
+                _build_so(tmp_path, ["int int not_a_name("])
+            assert not isinstance(excinfo.value, type(pytest.skip.Exception())), (
+                "a real compile failure was converted into a skip"
+            )
+        else:  # pragma: no cover - host without any compiler
+            pytest.skip("no compiler on this host")
