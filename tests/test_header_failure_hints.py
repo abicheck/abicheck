@@ -83,7 +83,13 @@ def test_required_config_macro() -> None:
     hint = diagnose_header_compile_failure(stderr)
     assert hint is not None
     assert "PCRE2_CODE_UNIT_WIDTH" in hint
-    assert "--compiler-option" in hint
+    # ADR-074: the hint names the two supported mechanisms -- the per-run
+    # -D/--define and the stable compile.defines: config key -- not the long
+    # removed --compiler-option it used to recommend.
+    assert "-DPCRE2_CODE_UNIT_WIDTH" in hint
+    assert "compile:" in hint and "defines:" in hint
+    assert "--compiler-option" not in hint
+    assert "--gcc-options" not in hint
 
 
 def test_undeclared_type_needs_umbrella_size_t() -> None:

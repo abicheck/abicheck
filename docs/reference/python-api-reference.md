@@ -76,6 +76,7 @@ L2 header-AST compile context — shared by ``dump`` and ``scan``.
 | `gcc_prefix` | `str \| None` | `None` |
 | `gcc_options` | `str \| None` | `None` |
 | `gcc_option_tokens` | `tuple[str, ...]` | `()` |
+| `defines` | `tuple[str, ...]` | `()` |
 | `sysroot` | `Path \| None` | `None` |
 | `nostdinc` | `bool` | `False` |
 | `frontend` | `str` | `'auto'` |

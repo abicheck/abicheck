@@ -341,3 +341,39 @@ class TestOtherOperandShapes:
             main, ["dump", str(so), "-DFEATURE_API", "-o", str(tmp_path / "s.json")]
         )
         assert result.exit_code == 0, result.output
+
+
+@pytest.mark.skipif(not (_HAVE_GCC and _HAVE_CASTXML), reason="needs gcc + castxml")
+class TestNoBaselineAudit:
+    """`compare --no-baseline` runs a real header parse over one artifact, so
+    it needs the macro too -- and before ADR-074 it built no CompileContext at
+    all (`compile=None`), which meant it silently ignored `.abicheck.yml`'s
+    `compile:` block as well. Both are covered here."""
+
+    @staticmethod
+    def _audit(so: Path, include: Path, *args: str) -> str:
+        result = CliRunner().invoke(
+            main, ["compare", str(so), "--no-baseline", "-H", str(include), *args]
+        )
+        assert result.exit_code in (0, 1, 2, 4), result.output
+        return result.output
+
+    def test_the_macro_removes_the_false_accidental_surface_finding(
+        self, tmp_path: Path
+    ) -> None:
+        """Without the macro the guarded declaration is invisible, so a
+        genuinely-declared export is reported as accidental ABI surface. That
+        finding is an artifact of the missing macro, not a real defect."""
+        so, include = _build(tmp_path)
+        without = self._audit(so, include)
+        with_macro = self._audit(so, include, "-DFEATURE_API")
+        assert "guarded_expert" in without
+        assert "exported_not_public" in without
+        assert "guarded_expert" not in with_macro
+
+    def test_config_defines_reach_the_audit_too(self, tmp_path: Path) -> None:
+        so, include = _build(tmp_path)
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("compile:\n  defines:\n    - FEATURE_API\n")
+        out = self._audit(so, include, "--config", str(cfg))
+        assert "guarded_expert" not in out
