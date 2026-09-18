@@ -60,6 +60,13 @@ def _frozen_dataclasses():
             isinstance(obj, type)
             and dataclasses.is_dataclass(obj)
             and obj.__module__ == export_index.__name__
+            # The invariant is about *frozen* row types, and the helper's
+            # name says so -- so it has to actually check it. Without this
+            # a future non-frozen helper dataclass in this module would be
+            # swept in and fail a rule that was never meant to cover it:
+            # a false positive, and the "name promises X, body does Y"
+            # shape AGENTS.md's own duplicate-test audit calls out.
+            and obj.__dataclass_params__.frozen
         ):
             yield name, obj
 

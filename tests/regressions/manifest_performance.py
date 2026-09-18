@@ -469,7 +469,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # resolving every `Symbol.name` with one seek-and-read per name.
         fixed_by=(1331,),
         seed_tests=("tests/test_dumper_elf_symbols_buffering.py",),
-        public_surfaces=("python-api",),
+        public_surfaces=(),
         axes={
             "symbol_table": (".dynsym", ".symtab"),
             "symbol_shape": (
@@ -518,7 +518,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # `SurfaceAcquisitionIdentity.key()`.
         fixed_by=(1331,),
         seed_tests=("tests/test_surface_acquisition_include_order.py",),
-        public_surfaces=("python-api",),
+        public_surfaces=(),
         axes={
             "input_kind": ("ordered", "membership-only"),
             "sequence_shape": ("permuted", "duplicate-bearing", "equal"),
@@ -568,7 +568,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # accepted `match._text = ...`.
         fixed_by=(1331,),
         seed_tests=("tests/test_spelling_match_cache_retention.py",),
-        public_surfaces=("python-api",),
+        public_surfaces=(),
         axes={
             "pattern_population": ("single", "shared", "distinct", "oversized"),
             "budget_direction": ("retain", "release", "round-trip"),
@@ -625,7 +625,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # guard and to pass with their own check deleted.
         fixed_by=(1331,),
         seed_tests=("tests/test_elf_symbol_fastpath.py",),
-        public_surfaces=("python-api",),
+        public_surfaces=(),
         axes={
             "elf_class": ("32", "64"),
             "endianness": ("little", "big"),
@@ -859,7 +859,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # for one and still lose to the other.
         fixed_by=(1333,),
         seed_tests=("tests/test_export_index_allocation.py",),
-        public_surfaces=("python-api",),
+        public_surfaces=(),
         axes={
             "dto": ("RawExportEntry", "RawExportIndex"),
             "operation": (
