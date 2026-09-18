@@ -192,6 +192,24 @@ class TestCastxmlBackend:
         assert [a for a in args if a.startswith("-D")] == ["-DFEATURE_API", "-DMODE=2"]
 
 
+@pytest.mark.skipif(
+    not (_HAVE_GCC and _HAVE_CASTXML and _HAVE_CLANG), reason="needs gcc+castxml+clang"
+)
+def test_castxml_driven_by_clang_receives_the_same_definitions(tmp_path: Path) -> None:
+    """The fourth row of ADR-074's matrix: CastXML emulating *clang* rather
+    than gcc. Same unconditional `-D`, since the emulation id selects which
+    compiler's built-ins CastXML probes, not how user arguments are spelled."""
+    so, include = _build(tmp_path)
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: castxml\n  compiler: clang++\n")
+    out = tmp_path / "cx-clang.json"
+    _dump(tmp_path, so, include, "--config", str(cfg), "-DFEATURE_API", out=out)
+    snap = load_snapshot(str(out))
+    assert "guarded_expert" in {f.name for f in snap.functions}
+    assert "-DFEATURE_API" in snap.ast_compile_args
+    assert "clang" in (snap.ast_toolchain.get("compiler_selected") or "")
+
+
 @pytest.mark.skipif(not (_HAVE_GCC and _HAVE_CLANG), reason="needs gcc + clang")
 def test_direct_clang_backend_receives_the_same_definitions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

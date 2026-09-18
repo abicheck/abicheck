@@ -359,6 +359,19 @@ class TestDryRunReceiptsWithoutAToolchain:
         assert result.exit_code == 0, result.output
         assert result.output.count("defines: FEATURE_API") == 1
 
+    def test_a_source_only_dump_reports_the_defines(self, tmp_path: Path) -> None:
+        """A source-only dump (no binary operand) still runs an L2 header
+        parse, so the macros apply and the receipt states them."""
+        src = tmp_path / "src"
+        (src / "include").mkdir(parents=True)
+        (src / "include" / "x.h").write_text("int x(void);\n")
+        (src / "x.c").write_text("int x(void){return 0;}\n")
+        result = CliRunner().invoke(
+            main, ["dump", "--sources", str(src), "-DFEATURE_API", "--dry-run"]
+        )
+        assert result.exit_code == 0, result.output
+        assert "defines: FEATURE_API" in result.output
+
     def test_a_dump_manifest_run_still_reports_the_defines(
         self, tmp_path: Path
     ) -> None:
