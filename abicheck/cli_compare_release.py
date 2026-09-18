@@ -126,6 +126,7 @@ from .workflows.release_scope import (
     resolve_release_scope_result,
     scoped_bundle_maps,
 )
+from .workflows.release_snapshot_retention import resolve_snapshot_retention
 from .workflows.release_stored_inventory import stored_side_degraded_members
 from .workflows.release_support_promise import support_promise_results
 
@@ -754,11 +755,14 @@ def compare_release_cmd(
                 # is unconditionally True rather than only for JUnit/
                 # --bundle-facts-out.
                 collect_diff_results=True,
-                # Phase 9: only JUnit/--bundle-facts-out need AbiSnapshot.
-                need_full_snapshots=(
-                    fmt == "junit"
-                    or "junit" in secondary_formats
-                    or bundle_facts_out is not None
+                # Phase 9 kept the full AbiSnapshot only for JUnit/
+                # --bundle-facts-out; the memory work made that a *per-side*
+                # answer, since both of those consumers read the OLD side
+                # only and nothing reads a stashed NEW snapshot at all. See
+                # `workflows.release_snapshot_retention`.
+                retention=resolve_snapshot_retention(
+                    junit=(fmt == "junit" or "junit" in secondary_formats),
+                    bundle_facts_out=bundle_facts_out is not None,
                 ),
                 # ADR-068 D5 / plan Phase 7h: -j/--jobs removed outright --
                 # always auto-detect (and memory-clamp), never a manual

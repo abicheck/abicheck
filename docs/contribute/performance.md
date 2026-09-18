@@ -1,5 +1,10 @@
 # Comparison Performance
 
+This page documents the runtime *time* cost of comparing **real, large**
+shared libraries. Its companion, [Comparison Memory](memory.md), covers what
+a multi-library comparison keeps resident, how to measure that in a way that
+attributes a peak to an owner, and the current owners.
+
 This page documents the runtime cost of comparing **real, large** shared
 libraries, the bottlenecks that were found and fixed, and the tooling that
 guards against regressions in CI.

@@ -370,12 +370,21 @@ class TestRetainSemantics:
 
 
 class TestStats:
-    def test_group_stats_reports_the_three_quantities_a_trace_needs(self) -> None:
+    def test_group_stats_reports_the_quantities_a_trace_needs(self) -> None:
+        """Both halves of the table, not just the grouped one.
+
+        The ungrouped counters were added by the memory work: a trace that
+        reported only ``retained_groups``/``released_groups`` described the
+        bounded half correctly while the unbounded content-keyed half was
+        what actually held the raw ASTs.
+        """
         scope = AstAcquisitionScope()
         assert scope.group_stats() == {
             "retained_groups": 0,
             "entries": 0,
             "released_groups": 0,
+            "retained_raw_entries": 0,
+            "released_raw_entries": 0,
         }
         root = _Root()
         scope.run("b", repr(id(root)), lambda: "v", group=root)
@@ -383,7 +392,11 @@ class TestStats:
             "retained_groups": 1,
             "entries": 1,
             "released_groups": 0,
+            "retained_raw_entries": 0,
+            "released_raw_entries": 0,
         }
+        scope.run("b", "content-key", lambda: "v")
+        assert scope.group_stats()["retained_raw_entries"] == 1
 
 
 class TestThroughThePublicEntryPoint:

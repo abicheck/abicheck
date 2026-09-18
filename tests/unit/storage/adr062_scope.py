@@ -87,6 +87,14 @@ import pathlib
 #: the ADR-061 new-file production line ceiling. Same class as
 #: `snapshot_load_normalization` above: real snapshot codec/migration
 #: logic, not a Phase 0 identity/availability/versioning/package primitive.
+#: `json_stream`/`json_chunked_write`/`snapshot_stream_write` are an
+#: eleventh, and the same class as `zstd_frame_guard` above: *how* a
+#: document is written, not *what* one contains. Two are JSON encoders
+#: (indent-aware with lazy members, and the compact chunked writer moved
+#: here from `dumper_cache.py`) and the third feeds a fragment stream
+#: through `snapshot_io`'s existing envelope. None stores a document, owns a
+#: schema, or has a v2 surface, so none belongs in the plan's Phase 0 module
+#: table.
 #: `snapshot_digest_cache` is a tenth, and rides with that ninth group: the
 #: run-scoped memo for `snapshot_encode.snapshot_content_digest`, whose
 #: whole subject is how often that codec's serialization runs within one
@@ -124,6 +132,9 @@ NON_ADR062_MODULES = frozenset(
         "snapshot_decode_declarations",
         "snapshot_reliability_flags",
         "snapshot_digest_cache",
+        "json_stream",
+        "json_chunked_write",
+        "snapshot_stream_write",
     }
 )
 

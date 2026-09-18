@@ -80,6 +80,40 @@ _T = TypeVar("_T")
 #: sets from growing without limit, not to keep the resident set small.
 MAX_RETAINED_CONTEXT_GROUPS = 8
 
+#: How many *ungrouped* completed acquisition results a request keeps
+#: resident at once.
+#:
+#: The group bound above covers only entries created with a ``group=``,
+#: i.e. keys derived from ``id()`` of a context object. The other kind --
+#: a content-derived effective-AST-cache key, which is how ``dumper.py``
+#: acquires the raw parsed root itself -- was never bounded at all: its
+#: ``Future`` holds the parsed root as its *result*, so every distinct
+#: header set a release fan-out touched kept one full raw AST alive in
+#: ``_entries`` for the life of the request, however long ago its last
+#: consumer finished.
+#:
+#: That is not a small residual. A measured six-member release retained 24
+#: raw roots this way while ``group_stats()`` reported the expected eight
+#: retained groups and sixteen releases -- the bookkeeping was correct and
+#: described the wrong half of the table. Evicting the completed ungrouped
+#: entries took the live root count to eight.
+#:
+#: Releasing one is safe for the same reason releasing a group is: every
+#: entry here is a pure cache, and a later consumer re-runs the producer
+#: for an equal result. It is safe *in particular* against the id-reuse
+#: hazard :meth:`AstAcquisitionScope.retain` exists to prevent, because a
+#: group holds its own strong reference to the object it is keyed on --
+#: dropping a content-keyed entry that happens to hold the same object
+#: cannot free it while any id-keyed entry still mentions it.
+#:
+#: Bounded rather than flushed. Flushing between members was measured and
+#: rejected: it reparsed (18 legacy model constructions became 28) without
+#: reducing the peak, because the peak is one member's own working set, not
+#: the accumulation. An LRU keeps the shared-header case -- every member
+#: parsing the *same* header set -- at exactly one resident root, while a
+#: fan-out over genuinely distinct header sets stops accumulating.
+MAX_RETAINED_RAW_ENTRIES = 4
+
 
 class AstAcquisitionScope:
     """Request-owned, per-key coordination for expensive header acquisition.
@@ -117,7 +151,11 @@ class AstAcquisitionScope:
         #: id -> (object, keys created under it). Insertion order is the LRU
         #: order; a group is refreshed on every use.
         self._groups: dict[int, tuple[Any, set[tuple[str, str]]]] = {}
+        #: Keys with no owning group, in least-recently-used order. Bounded
+        #: separately by MAX_RETAINED_RAW_ENTRIES -- see that constant.
+        self._ungrouped: dict[tuple[str, str], None] = {}
         self.released_groups = 0
+        self.released_entries = 0
 
     def retain(self, value: Any) -> None:
         """Keep an identity-keyed context object alive for this request.
@@ -208,8 +246,57 @@ class AstAcquisitionScope:
         del self._groups[token]
         for key in keys:
             self._entries.pop(key, None)
+            self._ungrouped.pop(key, None)
         self.released_groups += 1
         return True
+
+    def _touch_ungrouped_locked(self, lookup: tuple[str, str]) -> None:
+        """Mark *lookup* as ungrouped and most-recently-used."""
+        self._ungrouped.pop(lookup, None)
+        self._ungrouped[lookup] = None
+
+    def _grouped_keys_locked(self) -> set[tuple[str, str]]:
+        keys: set[tuple[str, str]] = set()
+        for _obj, group_keys in self._groups.values():
+            keys |= group_keys
+        return keys
+
+    def _evict_ungrouped_locked(self, protect: tuple[str, str] | None = None) -> None:
+        """Drop least-recently-used *completed* ungrouped entries.
+
+        Three things are never evicted, and each is load-bearing:
+
+        * an entry a producer is still running (``not future.done()``) -- a
+          waiter is blocked on that exact ``Future`` object and would wait
+          for a result nobody would set;
+        * *protect*, the caller's own entry, which is about to be published
+          and whose eviction would make this call's single-flight
+          guarantee vacuous for a concurrent sibling;
+        * a key some group also owns. A key is never in both tables today,
+          but if one ever were, the group's release is what keeps the
+          id-keyed invariant, and quietly removing the entry from under it
+          would strand the group's bookkeeping.
+
+        Unlike a group release this drops only the entry, never an object:
+        an ungrouped key is content-derived, so nothing is keyed on the
+        result's identity and there is nothing to keep alive. The result
+        becomes collectable once its real consumers let go, which is the
+        whole point.
+        """
+        if len(self._ungrouped) <= MAX_RETAINED_RAW_ENTRIES:
+            return
+        grouped = self._grouped_keys_locked()
+        for key in list(self._ungrouped):
+            if len(self._ungrouped) <= MAX_RETAINED_RAW_ENTRIES:
+                return
+            if key == protect or key in grouped:
+                continue
+            future = self._entries.get(key)
+            if future is not None and not future.done():
+                continue
+            self._entries.pop(key, None)
+            del self._ungrouped[key]
+            self.released_entries += 1
 
     def group_stats(self) -> dict[str, int]:
         """Counts for a memory trace: retained groups, entries, releases.
@@ -224,6 +311,8 @@ class AstAcquisitionScope:
                 "retained_groups": len(self._groups),
                 "entries": len(self._entries),
                 "released_groups": self.released_groups,
+                "retained_raw_entries": len(self._ungrouped),
+                "released_raw_entries": self.released_entries,
             }
 
     def run(
@@ -236,6 +325,10 @@ class AstAcquisitionScope:
                 # release can never see a key it does not know the owner of.
                 token = self._touch_group_locked(group)
                 self._groups[token][1].add(lookup)
+                # The group owns this key now; it must not also sit in the
+                # ungrouped LRU, whose eviction knows nothing about the
+                # object identity this key is derived from.
+                self._ungrouped.pop(lookup, None)
                 # Evict here too, not only in `retain`: an id-keyed entry
                 # can be the *first* thing a group is created by, so
                 # bounding only the `retain` path left `run`-created groups
@@ -249,6 +342,12 @@ class AstAcquisitionScope:
                 owns_production = True
             else:
                 owns_production = False
+            if group is None:
+                # A content-keyed entry: refresh its LRU position (so a
+                # header set every member shares is never the one evicted)
+                # and bound the ungrouped half of the table.
+                self._touch_ungrouped_locked(lookup)
+                self._evict_ungrouped_locked(protect=lookup)
         if not owns_production:
             deadline.check()
             left = deadline.remaining()
@@ -276,9 +375,11 @@ class AstAcquisitionScope:
             with self._lock:
                 if self._entries.get(lookup) is future:
                     del self._entries[lookup]
+                self._ungrouped.pop(lookup, None)
                 # A settled producer can make its group releasable, so retry
                 # the bound here -- see `set_result` below for why.
                 self._evict_groups_locked()
+                self._evict_ungrouped_locked()
             raise
         future.set_result(result)
         with self._lock:
@@ -294,6 +395,13 @@ class AstAcquisitionScope:
             # this group's entry is already published, so it is an ordinary
             # eviction candidate like any other.
             self._evict_groups_locked()
+            # Same argument for the ungrouped half, and it matters more
+            # there: a fan-out admits many members at once, so at admission
+            # time every older candidate can still be in flight and nothing
+            # is releasable. Without this retry the raw roots stayed
+            # resident for the whole request -- exactly the accumulation
+            # MAX_RETAINED_RAW_ENTRIES exists to stop.
+            self._evict_ungrouped_locked()
         return result
 
 
@@ -381,6 +489,21 @@ def ast_acquisition_active() -> bool:
     """Whether the current execution context shares request acquisition."""
 
     return _ast_acquisition_scope.get() is not None
+
+
+def ast_acquisition_stats() -> dict[str, int] | None:
+    """This request's acquisition-table counts, or ``None`` outside a scope.
+
+    The attribution half of the memory work: a release peak has to be
+    ascribed either to *shared raw ASTs* (this table) or to per-member
+    evidence and output buffers, and nothing else can tell the two apart.
+    Both halves of the table are reported -- the grouped, id-keyed one and
+    the content-keyed one -- because reporting only the first is exactly how
+    24 resident raw roots hid behind eight retained groups.
+    """
+
+    scope = _ast_acquisition_scope.get()
+    return None if scope is None else scope.group_stats()
 
 
 def retain_ast_context_object(value: Any) -> None:
@@ -522,207 +645,6 @@ def _atomic_copy(src: Path, dst: Path) -> None:
         with os.fdopen(fd, "wb") as out, open(src, "rb") as inp:
             shutil.copyfileobj(inp, out)
         os.replace(tmp_name, dst)
-    except OSError:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
-
-
-#: Subtree size, in *nodes* (containers + scalars), at or below which
-#: :func:`_write_json_chunked` hands a subtree to the one-shot C encoder
-#: whole instead of descending into it. Sizing note: this is one of the two
-#: knobs that bound peak transient memory, so it is deliberately modest.
-_JSON_CHUNK_NODE_LIMIT = 200_000
-
-#: The *other* bound, in estimated encoded bytes. A node count alone does not
-#: bound the encoded size of a subtree: a DPC++ AST full of long
-#: template-qualified spellings can hold well under
-#: :data:`_JSON_CHUNK_NODE_LIMIT` nodes and still encode to hundreds of MiB,
-#: which would be handed to a single ``json.dumps`` call and reintroduce
-#: exactly the second full-size copy this writer exists to avoid (Codex
-#: review, PR #1275). Both bounds are checked, so a subtree is delegated whole
-#: only when it is small in *both* dimensions.
-_JSON_CHUNK_BYTE_LIMIT = 8 << 20
-
-#: Hard cap on how deep :func:`_write_json_chunked` descends before it
-#: delegates a subtree whole regardless of size. Bounds this module's own
-#: Python recursion independently of the size probe, which is also what makes
-#: a cyclic input (impossible from ``json.load``, but not from a hand-built
-#: dict) terminate here and raise from the C encoder's own circular-reference
-#: check rather than blowing the stack in this walk. Deliberately well past
-#: where a clang AST keeps anything *large*: the translation unit's top-level
-#: ``inner`` list and the per-declaration subtrees under it are the first few
-#: levels, and the genuinely deep nesting further down (expression trees) is
-#: small by then, so the memory bound below is reached in practice long
-#: before this cap is.
-_JSON_CHUNK_MAX_DEPTH = 40
-
-#: Encoded-fragment bytes buffered before one ``write`` call. Keeps the
-#: structural fragments ("{", "\"inner\": [", ", ") from costing one
-#: buffered-writer call each without ever holding a meaningful amount of the
-#: document.
-_JSON_WRITE_BUFFER = 1 << 18
-
-
-def _subtree_exceeds(obj: object, limit: int, byte_limit: int = -1) -> bool:
-    """Whether *obj* is too big to encode in one piece, either way it can be.
-
-    Two independent bounds, because neither implies the other: more than
-    *limit* JSON nodes, or an estimated encoded size over *byte_limit* (pass a
-    negative value to check node count alone). A handful of nodes carrying very
-    long strings is small by count and large by bytes, and that is the shape
-    that made a node-only bound insufficient.
-
-    The byte figure is a *lower-bound estimate*, not the exact encoding:
-    strings contribute their own length plus quoting (escaping can only make
-    the real output longer, never shorter), everything else a small constant.
-    Under-estimating is the safe direction for a bound used to decide "small
-    enough to encode whole" only when it answers ``False``.
-
-    Stops the moment either answer is known, so the probe costs
-    O(min(size, limit)) regardless of how large the subtree really is -- that
-    bound is what makes it safe to call on the way down
-    :func:`_write_json_chunked`'s descent rather than measuring the whole tree
-    up front.
-    """
-    stack: list[object] = [obj]
-    seen = 0
-    weight = 0
-    check_bytes = byte_limit >= 0
-    while stack:
-        cur = stack.pop()
-        seen += 1
-        if seen > limit:
-            return True
-        if type(cur) is dict:
-            stack.extend(cur.values())
-            if check_bytes:
-                # Keys are encoded too; counted here rather than pushed, since
-                # a key is never itself descended into.
-                for key in cur:
-                    weight += len(key) + 4 if type(key) is str else 8
-        elif type(cur) is list:
-            stack.extend(cur)
-        elif check_bytes:
-            weight += len(cur) + 2 if type(cur) is str else 8
-        if check_bytes and weight > byte_limit:
-            return True
-    return False
-
-
-def _write_json_chunked(obj: object, write: Any, depth: int = 0) -> None:
-    """Write *obj* as JSON through *write*, one bounded chunk at a time.
-
-    Byte-identical to ``json.dump(obj, f)`` -- same default separators
-    (``", "``/``": "``), same ``ensure_ascii`` escaping, same key order --
-    but **much** faster on a large tree, because ``json.dump`` does not use
-    the C encoder at all: ``JSONEncoder.iterencode`` only selects
-    ``c_make_encoder`` under ``_one_shot``, which is ``dumps``' path, not
-    ``dump``'s. A streaming ``json.dump`` therefore encodes the entire
-    document with the pure-Python fallback encoder, a fragment at a time
-    (measured 27x slower than this function on a deep-template AST fixture,
-    1.9x on a real header AST).
-
-    The obvious alternative -- ``_atomic_write(path, json.dumps(obj)
-    .encode())`` -- is what the streaming write was introduced to avoid: it
-    holds the whole encoded document as a second full-size object on top of
-    the tree itself, which is exactly the doubling this cache path cannot
-    afford for a multi-GB DPC++ AST.
-
-    So: descend through the *large* containers with Python (cheap -- there
-    are few of them, and only their punctuation is written here) and hand
-    every subtree that is small enough to the one-shot C encoder whole.
-    "Small enough" is decided by :func:`_subtree_exceeds`, not by depth
-    alone, so a single enormous namespace subtree is still split rather than
-    encoded in one piece -- and by node count *and* estimated encoded bytes,
-    since a few nodes holding very long strings are small by one measure and
-    huge by the other. The peak transient string therefore stays bounded by
-    :data:`_JSON_CHUNK_BYTE_LIMIT` no matter how the tree is shaped.
-
-    One thing no bound here can split is a *single scalar*: a 100 MB string
-    value encodes as one fragment, because JSON has nowhere to break it. That
-    is inherent rather than overlooked -- the shapes this writer is for (an AST
-    of many modest nodes) never contain one, and a caller that did would have
-    the same peak with any encoder.
-
-    Two shapes are deliberately delegated whole rather than descended into,
-    both on the "never re-implement a coercion" principle: a ``dict``/``list``
-    *subclass* (the exact-type tests below), and a ``dict`` with a non-``str``
-    key. Both encode correctly this way -- only the memory bound relaxes, and
-    neither occurs in a tree that came out of ``json.load``, which is the only
-    thing this cache path ever writes.
-
-    A dict with a non-``str`` key is delegated whole rather than split:
-    ``json`` coerces such keys (``1`` -> ``"1"``, ``True`` -> ``"true"``) and
-    re-deriving that coercion here would be a second implementation of it to
-    keep byte-identical. Clang ASTs never contain one, so nothing is lost.
-    """
-    parts: list[str] = []
-    size = 0
-
-    def emit(fragment: str) -> None:
-        nonlocal size
-        parts.append(fragment)
-        size += len(fragment)
-        if size >= _JSON_WRITE_BUFFER:
-            write("".join(parts))
-            parts.clear()
-            size = 0
-
-    def walk(node: object, depth: int) -> None:
-        if depth < _JSON_CHUNK_MAX_DEPTH and _subtree_exceeds(
-            node, _JSON_CHUNK_NODE_LIMIT, _JSON_CHUNK_BYTE_LIMIT
-        ):
-            if type(node) is dict:
-                if all(type(k) is str for k in node):
-                    emit("{")
-                    first = True
-                    for key, value in node.items():
-                        emit(
-                            json.dumps(key) + ": "
-                            if first
-                            else ", " + json.dumps(key) + ": "
-                        )
-                        first = False
-                        walk(value, depth + 1)
-                    emit("}")
-                    return
-            elif type(node) is list:
-                emit("[")
-                first = True
-                for value in node:
-                    if not first:
-                        emit(", ")
-                    first = False
-                    walk(value, depth + 1)
-                emit("]")
-                return
-        emit(json.dumps(node))
-
-    walk(obj, depth)
-    if parts:
-        write("".join(parts))
-
-
-def _atomic_write_json(path: Path, obj: object) -> None:
-    """Serialize *obj* as JSON straight into *path* via a same-directory
-    temp file + ``os.replace``, without ever materializing the fully
-    encoded document as one Python ``str``/``bytes`` object first.
-
-    The encoding itself goes through :func:`_write_json_chunked` rather than
-    ``json.dump`` -- same bytes, same bounded peak memory, without paying
-    ``json.dump``'s pure-Python encoder for the whole document (see that
-    function's own docstring for why ``dump`` never reaches the C encoder).
-    """
-    fd, tmp_name = tempfile.mkstemp(
-        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            _write_json_chunked(obj, f.write)
-        os.replace(tmp_name, path)
     except OSError:
         try:
             os.unlink(tmp_name)
