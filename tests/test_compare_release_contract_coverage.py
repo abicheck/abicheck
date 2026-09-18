@@ -40,6 +40,7 @@ from abicheck.cli_compare_release import (
     _format_release_json,
     _strip_diff_results_and_adjust_verdict,
 )
+from abicheck.workflows.release_snapshot_retention import resolve_snapshot_retention
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -336,9 +337,13 @@ def test_compare_one_library_stashes_old_snapshot_only_when_requested(
     results=True` alone now stashes only the much smaller
     `BundleSignatureEvidence` projection under `_old_bundle_evidence`/
     `_new_bundle_evidence` -- the full `AbiSnapshot` is stashed under
-    `_old_snapshot`/`_new_snapshot` only when `need_full_snapshots=True`
-    too (JUnit/`--bundle-facts-out`), since bundle analysis on its own
+    `_old_snapshot` only when the resolved `SnapshotRetention` keeps that
+    side (JUnit/`--bundle-facts-out`), since bundle analysis on its own
     never needed the full snapshot.
+
+    The memory work made that decision per side: both of those consumers
+    read the OLD snapshot only, so NEW stays compact even for them (see
+    `abicheck.workflows.release_snapshot_retention`).
     """
     from abicheck.checker import DiffResult, Verdict
     from abicheck.service import CompareResult
@@ -408,10 +413,13 @@ def test_compare_one_library_stashes_old_snapshot_only_when_requested(
         "libfoo.so",
         *common,
         collect_diff_results=True,
-        need_full_snapshots=True,
+        retention=resolve_snapshot_retention(junit=True),
     )
     assert junit_entry["_old_snapshot"] is old_snap
     assert "_old_bundle_evidence" not in junit_entry
+    # ... and the NEW side stays compact even then: no consumer reads it.
+    assert "_new_snapshot" not in junit_entry
+    assert isinstance(junit_entry["_new_bundle_evidence"], BundleSignatureEvidence)
 
 
 def test_strip_diff_results_builds_annotations_only_when_requested() -> None:

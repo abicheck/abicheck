@@ -363,13 +363,16 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
                     "Admission control bounds only the *concurrent* half of "
                     "a bundle's peak. The retention half is bounded on the "
                     "default path (a compact `BundleSignatureEvidence` per "
-                    "member) but not under `need_full_snapshots`, which "
-                    "JUnit output and `--bundle-facts-out` both set and "
-                    "which holds every member's full old *and* new snapshot "
-                    "simultaneously -- twelve full L2 surfaces for a "
-                    "six-member bundle, a quantity no worker-count clamp "
-                    "reduces. Spooling those through the existing storage "
-                    "contracts is the structural fix and is not attempted."
+                    "member); the NEW-side half of the old "
+                    "`need_full_snapshots` amplification is closed too -- "
+                    "JUnit and `--bundle-facts-out` read the OLD side only, "
+                    "so `SnapshotRetention` keeps NEW compact for them, "
+                    "halving six full L2 surfaces off a six-member bundle. "
+                    "What remains is the OLD side those two consumers "
+                    "genuinely do read: one full snapshot per member, held "
+                    "until the release folds run. Spooling *those* through "
+                    "the existing storage contracts is the structural fix "
+                    "and is still not attempted."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),
@@ -440,6 +443,170 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
                     "from a helper module is not inspected, so the guard "
                     "bounds the shape this suite actually uses rather than "
                     "every shape a double could take."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="perf.retention_decided_by_one_switch_not_by_consumers",
+        invariant=(
+            "A retention decision taken for several consumers at once must "
+            "be resolved per consumer and per side, not by one boolean that "
+            "any of them can flip for all of them. A shared switch is not "
+            "merely coarse: it is unfalsifiable, because the side nobody "
+            "reads looks exactly like the side everybody reads, and no test "
+            "of the *output* can tell the difference -- the outputs are "
+            "identical either way, which is precisely why the amplification "
+            "survived. So the guard is a consumer inventory with an "
+            "executable claim attached: the resolved retention says which "
+            "side each requested output reads, and a test asserts the "
+            "unread side is genuinely absent from the member entry rather "
+            "than merely unused. `need_full_snapshots` pinned both sides' "
+            "full `AbiSnapshot` for every member whenever JUnit or "
+            "`--bundle-facts-out` was requested, while every consumer of "
+            "either read only the OLD side; the NEW graph was retained for "
+            "the whole release and never opened."
+        ),
+        fixed_by=(),
+        seed_tests=(
+            "tests/test_release_snapshot_retention.py",
+            "tests/test_compare_release_contract_coverage.py",
+        ),
+        public_surfaces=(),
+        axes={
+            "output": ("json", "junit", "bundle-facts-out", "junit+baseline"),
+            "side": ("old", "new"),
+            "member_count": ("one", "several"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The OLD side is still retained in full, per member, "
+                    "for JUnit and `--bundle-facts-out`: those consumers "
+                    "genuinely read it. Bounding *that* means spooling "
+                    "completed members through the storage codec rather "
+                    "than deciding retention, which is a separate change."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+            KnownGap(
+                description=(
+                    "The consumer inventory is asserted against the call "
+                    "sites as they are, not derived from them: a future "
+                    "consumer that starts reading `_new_snapshot` would "
+                    "fail the seed test (the key is absent) rather than be "
+                    "prevented from being written, which is the intended "
+                    "direction but is a test-time signal, not a type-level "
+                    "one."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="cache.bookkeeping_describes_a_different_set_than_it_retains",
+        invariant=(
+            "A cache that reports how much it retains must report on the "
+            "set that actually holds the memory. When a table is bounded "
+            "along one axis and its counters describe only that axis, the "
+            "counters are *correct* and the retention is unbounded, which "
+            "is strictly worse than having no counters: an investigation "
+            "reads them, sees the expected numbers, and looks elsewhere. "
+            "`AstAcquisitionScope` bounded and counted its id-keyed groups "
+            "while its content-keyed entries -- whose `Future` result *is* "
+            "the parsed AST root -- were neither; a measured six-member "
+            "release retained 24 raw roots while reporting eight retained "
+            "groups and sixteen releases. The regression test for this "
+            "class must therefore assert *reclamation of the object* "
+            "through a `weakref`, never a counter, since a fix that only "
+            "decrements a number satisfies every counter assertion and "
+            "frees nothing; and it must assert the complement (a retained "
+            "entry's result stays alive), or the reclamation assertion "
+            "passes against a cache that retains nothing at all."
+        ),
+        fixed_by=(),
+        seed_tests=("tests/test_ast_acquisition_raw_entry_bound.py",),
+        public_surfaces=(),
+        axes={
+            "key_kind": ("content-derived", "id-derived", "both for one object"),
+            "entry_state": ("completed", "in-flight", "failed"),
+            "traffic": ("one shared key", "distinct keys", "randomised mixed"),
+            "payload_size": ("uniform small", "mixed", "uniform large"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The bound is a count, not a byte budget: the scope "
+                    "cannot size a parsed AST cheaply enough to bound "
+                    "bytes, so a run whose header sets differ wildly in "
+                    "size still retains up to MAX_RETAINED_RAW_ENTRIES of "
+                    "the largest ones."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+            KnownGap(
+                description=(
+                    "Eviction is exercised under real threads for the "
+                    "single-flight and in-flight cases, but the released "
+                    "byte total under a genuine concurrent release fan-out "
+                    "is measured by the benchmark harness, not asserted by "
+                    "a test -- a concurrent RSS assertion would be brittle."
+                ),
+                reference="scripts/bench_release_memory.py",
+            ),
+        ),
+    ),
+    BugClass(
+        id="serialization.whole_document_materialised_to_write_it",
+        invariant=(
+            "Writing a multi-member document must not require every "
+            "member, the whole encoded string and its byte encoding to "
+            "exist at once. The three copies sit on top of the member "
+            "graph itself, so the transient peak of *publishing* a "
+            "baseline can exceed the peak of producing it -- and nothing "
+            "in the output reveals it, since the bytes are the same either "
+            "way. That is what makes this a regression class rather than a "
+            "tuning question: the only observable is memory, so the guard "
+            "has to be a reachability probe (how many member documents are "
+            "alive when the next one is built) plus a byte-identity check "
+            "against the eager spelling as the oracle. A golden file "
+            "generated by the new writer would assert nothing about the "
+            "change; the eager encoder is the oracle precisely because it "
+            "is the thing being replaced."
+        ),
+        fixed_by=(),
+        seed_tests=(
+            "tests/test_bundle_facts_streaming_write.py",
+            "tests/test_json_stream_encoder.py",
+        ),
+        public_surfaces=(),
+        axes={
+            "members": ("zero", "one", "two", "six"),
+            "envelope": ("uncompressed", "gzip"),
+            "document": ("generated random", "real BundleFacts"),
+            "indent": ("0", "1", "2", "4"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "A *compressed* write still joins the fragments and "
+                    "delegates to the one-shot codec: both compressors here "
+                    "take and return whole buffers, and their determinism "
+                    "guarantees are stated for that form. The default "
+                    "baseline path is uncompressed, which is the one "
+                    "measured; a streaming compressor is a separate change "
+                    "with its own determinism story."
+                ),
+                reference="abicheck/snapshot_io.py",
+            ),
+            KnownGap(
+                description=(
+                    "Only the *serialisation* transient is bounded. The "
+                    "member snapshots themselves are still all resident, "
+                    "because the release fan-out holds them until its folds "
+                    "run -- bounding that is the completed-member spooling "
+                    "this work did not attempt."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),

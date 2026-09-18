@@ -42,7 +42,6 @@ edge -- ``serialization.py``'s side is what stays dynamic.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -204,6 +203,57 @@ def bundle_facts_to_dict(
         ),
         "manifest": manifest_to_dict(facts.manifest) if facts.manifest else None,
     }
+
+
+def bundle_facts_document_stream(facts: BundleFacts) -> dict[str, Any]:
+    """:func:`bundle_facts_to_dict`, with the member map left unbuilt.
+
+    Identical document, identical key order, identical member order -- the
+    one difference is that ``per_library_snapshots`` is a
+    :class:`~abicheck.storage.json_stream.LazyItems`, so each member's
+    ``snapshot_to_dict()`` conversion happens while that member is being
+    encoded and is dropped before the next one starts. An eager
+    ``bundle_facts_to_dict`` converts and retains every member before a
+    single byte is written, which for a six-member release at header depth
+    is the largest transient in the process.
+
+    Only useful to a streaming encoder: anything that iterates the returned
+    mapping's ``per_library_snapshots`` as an ordinary dict will not find
+    one, and that is on purpose (see ``LazyItems``' own docstring).
+    ``bundle_facts_to_dict`` stays the eager spelling every other caller
+    keeps using.
+    """
+    from ..serialization import snapshot_to_dict
+    from .json_stream import LazyItems
+
+    document = bundle_facts_to_dict(cast("BundleFacts", _FactsWithoutMembers(facts)))
+    document["per_library_snapshots"] = LazyItems(
+        keys=list(facts.per_library_snapshots),
+        produce=lambda name: snapshot_to_dict(facts.per_library_snapshots[name]),
+    )
+    return document
+
+
+class _FactsWithoutMembers:
+    """A read-through view of a ``BundleFacts`` with no member snapshots.
+
+    So the eager builder can be *reused* for every other field rather than
+    having its field list restated here -- a second copy would be one more
+    place for a new key to be forgotten, which is precisely the failure the
+    archive writer's own marker-vs-document drift already demonstrated.
+    """
+
+    __slots__ = ("_facts",)
+
+    def __init__(self, facts: BundleFacts) -> None:
+        self._facts = facts
+
+    @property
+    def per_library_snapshots(self) -> dict[str, Any]:
+        return {}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._facts, name)
 
 
 def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
@@ -424,8 +474,9 @@ def save_bundle_facts(
     (``compression`` is JSON-only; ``"auto"``/``"none"`` no-op for it, only
     ``"gzip"``/``"zstd"`` reject -- Codex)."""
     from ..serialization import snapshot_to_dict
-    from ..snapshot_io import SnapshotCompression, write_snapshot_text
+    from ..snapshot_io import SnapshotCompression, write_snapshot_text_stream
     from .bundle_facts_archive import maybe_write_bundle_facts_archive
+    from .json_stream import iter_json_indented
 
     if format == "archive" and SnapshotCompression(compression) not in (
         SnapshotCompression.AUTO,
@@ -441,8 +492,19 @@ def save_bundle_facts(
     # sort_keys=True (unlike other writers here) would re-sort a manifest
     # entry's own instantiations dict, whose order IS the C++ template
     # argument order -- corrupting a "T, U" contract (Codex review).
-    return write_snapshot_text(
-        json.dumps(bundle_facts_to_dict(facts), indent=2),
+    #
+    # Streamed rather than `json.dumps(bundle_facts_to_dict(facts))`: that
+    # spelling held three full-size copies at once -- every member's
+    # snapshot dict, the whole indent=2 string, and its UTF-8 encoding --
+    # on top of the member graph itself. `bundle_facts_document_stream`
+    # produces one member dict at a time and `write_snapshot_text_stream`
+    # writes fragments, so only the member currently being encoded is
+    # resident. The bytes are identical: the streaming encoder is
+    # differentially tested against `json.dumps(..., indent=2)` itself
+    # (`tests/test_json_stream_encoder.py`), and the document's key order
+    # and member order are unchanged.
+    return write_snapshot_text_stream(
+        iter_json_indented(bundle_facts_document_stream(facts)),
         path,
         compression=SnapshotCompression(compression),
     )

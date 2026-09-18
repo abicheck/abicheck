@@ -38,6 +38,7 @@ import hashlib
 import io
 import os
 import stat
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -736,7 +737,14 @@ def _open_unique_temp(parent: Path, prefix: str, suffix: str) -> tuple[int, Path
 
 
 def _atomic_write_bytes(data: bytes, path: Path) -> None:
-    """Write *data* to *path* atomically: temp file in the same directory,
+    """Write *data* to *path* atomically. See :func:`_atomic_write_chunks`,
+    which this is the single-buffer spelling of."""
+
+    _atomic_write_chunks((data,), path)
+
+
+def _atomic_write_chunks(chunks: Iterable[bytes], path: Path) -> None:
+    """Write *chunks*, in order, to *path* atomically: temp file in the same directory,
     flush, best-effort fsync, then os.replace(), then best-effort fsync the
     parent directory. Never leaves a partial file at *path* on failure, and
     cleans up its own temp file either way.
@@ -787,6 +795,16 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
     to the real target first so an atomic write behaves the same way: the
     symlink survives, and what actually gets atomically replaced is the
     file it points to.
+
+    Taking an *iterable* of chunks rather than one ``bytes`` is what lets a
+    large document be written without ever existing as a single object:
+    every guarantee documented here (atomic replace, mode/ownership
+    preservation, symlink and hard-link handling, fsync semantics) is
+    unchanged and is deliberately **not** duplicated in a second streaming
+    writer. The one thing a caller gives up is that *chunks* is consumed
+    exactly once, so it may be a generator -- and a generator that raises
+    part-way leaves the temp file to the same cleanup path as any other
+    failure, with the existing destination untouched.
 
     Non-regular destinations (Codex review): an existing FIFO, character/
     block device, or socket at *path* (e.g. ``/dev/stdout``, a named pipe
@@ -853,7 +871,8 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
         # open() itself follows a symlink to reach the real FIFO/device/
         # socket, so no path resolution is needed here at all.
         with open(path, "wb") as f:
-            f.write(data)
+            for chunk in chunks:
+                f.write(chunk)
             f.flush()
             try:
                 os.fsync(f.fileno())
@@ -883,7 +902,8 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
     fd, tmp_path = _open_unique_temp(parent, f".{target.name}.", ".tmp")
     try:
         with os.fdopen(fd, "wb") as f:
-            f.write(data)
+            for chunk in chunks:
+                f.write(chunk)
             f.flush()
             try:
                 os.fsync(f.fileno())
@@ -1036,4 +1056,59 @@ def write_snapshot_text(
 ) -> SnapshotWriteResult:
     return write_snapshot_bytes(
         text.encode("utf-8"), path, compression=compression, zstd_level=zstd_level
+    )
+
+
+def write_snapshot_text_stream(
+    chunks: Iterable[str],
+    path: str | Path,
+    *,
+    compression: SnapshotCompression = SnapshotCompression.AUTO,
+    zstd_level: int | None = None,
+) -> SnapshotWriteResult:
+    """Write a fragment stream through the same chokepoint, without joining.
+
+    Same envelope, same atomicity, same :class:`SnapshotWriteResult`
+    (including ``stored_sha256``, computed over the bytes actually written)
+    as :func:`write_snapshot_text` -- the difference is only that an
+    *uncompressed* write never materialises the whole document as one
+    ``str`` and then again as one ``bytes``. For a multi-member baseline
+    those two copies sit on top of the member graph itself, so removing
+    them removes a real peak, not a bookkeeping one.
+
+    A **compressed** write joins and delegates, deliberately and visibly:
+    both codecs here are one-shot (``_compress_gzip``/``_compress_zstd``
+    take and return whole buffers, and the deterministic-output guarantees
+    documented on them are stated for that form), so streaming into them
+    would mean a second compression path with its own determinism story to
+    keep in step. That is a real remaining gap rather than a hidden one --
+    the *default* baseline path is uncompressed, which is the one measured.
+    """
+    p = Path(path)
+    resolved = resolve_write_compression(p, compression)
+    if resolved is not SnapshotCompression.NONE:
+        return write_snapshot_text(
+            "".join(chunks), p, compression=compression, zstd_level=zstd_level
+        )
+
+    digest = hashlib.sha256()
+    written = 0
+
+    def _counted() -> Iterator[bytes]:
+        nonlocal written
+        for chunk in chunks:
+            encoded = chunk.encode("utf-8")
+            digest.update(encoded)
+            written += len(encoded)
+            yield encoded
+
+    _atomic_write_chunks(_counted(), p)
+    return SnapshotWriteResult(
+        path=p,
+        compression=resolved,
+        # Uncompressed: stored bytes *are* the decoded bytes, which is what
+        # makes one running digest sufficient for both figures.
+        decoded_size_bytes=written,
+        stored_size_bytes=written,
+        stored_sha256=digest.hexdigest(),
     )

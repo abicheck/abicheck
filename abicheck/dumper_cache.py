@@ -80,6 +80,40 @@ _T = TypeVar("_T")
 #: sets from growing without limit, not to keep the resident set small.
 MAX_RETAINED_CONTEXT_GROUPS = 8
 
+#: How many *ungrouped* completed acquisition results a request keeps
+#: resident at once.
+#:
+#: The group bound above covers only entries created with a ``group=``,
+#: i.e. keys derived from ``id()`` of a context object. The other kind --
+#: a content-derived effective-AST-cache key, which is how ``dumper.py``
+#: acquires the raw parsed root itself -- was never bounded at all: its
+#: ``Future`` holds the parsed root as its *result*, so every distinct
+#: header set a release fan-out touched kept one full raw AST alive in
+#: ``_entries`` for the life of the request, however long ago its last
+#: consumer finished.
+#:
+#: That is not a small residual. A measured six-member release retained 24
+#: raw roots this way while ``group_stats()`` reported the expected eight
+#: retained groups and sixteen releases -- the bookkeeping was correct and
+#: described the wrong half of the table. Evicting the completed ungrouped
+#: entries took the live root count to eight.
+#:
+#: Releasing one is safe for the same reason releasing a group is: every
+#: entry here is a pure cache, and a later consumer re-runs the producer
+#: for an equal result. It is safe *in particular* against the id-reuse
+#: hazard :meth:`AstAcquisitionScope.retain` exists to prevent, because a
+#: group holds its own strong reference to the object it is keyed on --
+#: dropping a content-keyed entry that happens to hold the same object
+#: cannot free it while any id-keyed entry still mentions it.
+#:
+#: Bounded rather than flushed. Flushing between members was measured and
+#: rejected: it reparsed (18 legacy model constructions became 28) without
+#: reducing the peak, because the peak is one member's own working set, not
+#: the accumulation. An LRU keeps the shared-header case -- every member
+#: parsing the *same* header set -- at exactly one resident root, while a
+#: fan-out over genuinely distinct header sets stops accumulating.
+MAX_RETAINED_RAW_ENTRIES = 4
+
 
 class AstAcquisitionScope:
     """Request-owned, per-key coordination for expensive header acquisition.
@@ -117,7 +151,11 @@ class AstAcquisitionScope:
         #: id -> (object, keys created under it). Insertion order is the LRU
         #: order; a group is refreshed on every use.
         self._groups: dict[int, tuple[Any, set[tuple[str, str]]]] = {}
+        #: Keys with no owning group, in least-recently-used order. Bounded
+        #: separately by MAX_RETAINED_RAW_ENTRIES -- see that constant.
+        self._ungrouped: dict[tuple[str, str], None] = {}
         self.released_groups = 0
+        self.released_entries = 0
 
     def retain(self, value: Any) -> None:
         """Keep an identity-keyed context object alive for this request.
@@ -208,8 +246,57 @@ class AstAcquisitionScope:
         del self._groups[token]
         for key in keys:
             self._entries.pop(key, None)
+            self._ungrouped.pop(key, None)
         self.released_groups += 1
         return True
+
+    def _touch_ungrouped_locked(self, lookup: tuple[str, str]) -> None:
+        """Mark *lookup* as ungrouped and most-recently-used."""
+        self._ungrouped.pop(lookup, None)
+        self._ungrouped[lookup] = None
+
+    def _grouped_keys_locked(self) -> set[tuple[str, str]]:
+        keys: set[tuple[str, str]] = set()
+        for _obj, group_keys in self._groups.values():
+            keys |= group_keys
+        return keys
+
+    def _evict_ungrouped_locked(self, protect: tuple[str, str] | None = None) -> None:
+        """Drop least-recently-used *completed* ungrouped entries.
+
+        Three things are never evicted, and each is load-bearing:
+
+        * an entry a producer is still running (``not future.done()``) -- a
+          waiter is blocked on that exact ``Future`` object and would wait
+          for a result nobody would set;
+        * *protect*, the caller's own entry, which is about to be published
+          and whose eviction would make this call's single-flight
+          guarantee vacuous for a concurrent sibling;
+        * a key some group also owns. A key is never in both tables today,
+          but if one ever were, the group's release is what keeps the
+          id-keyed invariant, and quietly removing the entry from under it
+          would strand the group's bookkeeping.
+
+        Unlike a group release this drops only the entry, never an object:
+        an ungrouped key is content-derived, so nothing is keyed on the
+        result's identity and there is nothing to keep alive. The result
+        becomes collectable once its real consumers let go, which is the
+        whole point.
+        """
+        if len(self._ungrouped) <= MAX_RETAINED_RAW_ENTRIES:
+            return
+        grouped = self._grouped_keys_locked()
+        for key in list(self._ungrouped):
+            if len(self._ungrouped) <= MAX_RETAINED_RAW_ENTRIES:
+                return
+            if key == protect or key in grouped:
+                continue
+            future = self._entries.get(key)
+            if future is not None and not future.done():
+                continue
+            self._entries.pop(key, None)
+            del self._ungrouped[key]
+            self.released_entries += 1
 
     def group_stats(self) -> dict[str, int]:
         """Counts for a memory trace: retained groups, entries, releases.
@@ -224,6 +311,8 @@ class AstAcquisitionScope:
                 "retained_groups": len(self._groups),
                 "entries": len(self._entries),
                 "released_groups": self.released_groups,
+                "retained_raw_entries": len(self._ungrouped),
+                "released_raw_entries": self.released_entries,
             }
 
     def run(
@@ -236,6 +325,10 @@ class AstAcquisitionScope:
                 # release can never see a key it does not know the owner of.
                 token = self._touch_group_locked(group)
                 self._groups[token][1].add(lookup)
+                # The group owns this key now; it must not also sit in the
+                # ungrouped LRU, whose eviction knows nothing about the
+                # object identity this key is derived from.
+                self._ungrouped.pop(lookup, None)
                 # Evict here too, not only in `retain`: an id-keyed entry
                 # can be the *first* thing a group is created by, so
                 # bounding only the `retain` path left `run`-created groups
@@ -249,6 +342,12 @@ class AstAcquisitionScope:
                 owns_production = True
             else:
                 owns_production = False
+            if group is None:
+                # A content-keyed entry: refresh its LRU position (so a
+                # header set every member shares is never the one evicted)
+                # and bound the ungrouped half of the table.
+                self._touch_ungrouped_locked(lookup)
+                self._evict_ungrouped_locked(protect=lookup)
         if not owns_production:
             deadline.check()
             left = deadline.remaining()
@@ -276,9 +375,11 @@ class AstAcquisitionScope:
             with self._lock:
                 if self._entries.get(lookup) is future:
                     del self._entries[lookup]
+                self._ungrouped.pop(lookup, None)
                 # A settled producer can make its group releasable, so retry
                 # the bound here -- see `set_result` below for why.
                 self._evict_groups_locked()
+                self._evict_ungrouped_locked()
             raise
         future.set_result(result)
         with self._lock:
@@ -294,6 +395,13 @@ class AstAcquisitionScope:
             # this group's entry is already published, so it is an ordinary
             # eviction candidate like any other.
             self._evict_groups_locked()
+            # Same argument for the ungrouped half, and it matters more
+            # there: a fan-out admits many members at once, so at admission
+            # time every older candidate can still be in flight and nothing
+            # is releasable. Without this retry the raw roots stayed
+            # resident for the whole request -- exactly the accumulation
+            # MAX_RETAINED_RAW_ENTRIES exists to stop.
+            self._evict_ungrouped_locked()
         return result
 
 
@@ -381,6 +489,21 @@ def ast_acquisition_active() -> bool:
     """Whether the current execution context shares request acquisition."""
 
     return _ast_acquisition_scope.get() is not None
+
+
+def ast_acquisition_stats() -> dict[str, int] | None:
+    """This request's acquisition-table counts, or ``None`` outside a scope.
+
+    The attribution half of the memory work: a release peak has to be
+    ascribed either to *shared raw ASTs* (this table) or to per-member
+    evidence and output buffers, and nothing else can tell the two apart.
+    Both halves of the table are reported -- the grouped, id-keyed one and
+    the content-keyed one -- because reporting only the first is exactly how
+    24 resident raw roots hid behind eight retained groups.
+    """
+
+    scope = _ast_acquisition_scope.get()
+    return None if scope is None else scope.group_stats()
 
 
 def retain_ast_context_object(value: Any) -> None:
