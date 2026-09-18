@@ -28,6 +28,8 @@ and that file reached the 1200-line test maximum).
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from abicheck.model.release_surface import (
@@ -217,3 +219,197 @@ class TestTheArchiveContainerCarriesTheContractToo:
         path = tmp_path / "facts.zip"
         save_bundle_facts(self._facts(None), path, format="archive")
         assert load_bundle_facts(path).public_surface is None
+
+
+class TestTheManifestDoesNotGrowWithTheContract:
+    """The archive's `manifest.json` is capped (`DEFAULT_MAX_MANIFEST_BYTES`,
+    64 MiB) and the writer raises rather than producing an archive that
+    exceeds it. The public surface grows with the *product* -- one record per
+    obligation plus every declared symbol and type name -- so writing it
+    inline made a large release unable to write a bundle-facts archive at
+    all, which is precisely the scale this block exists to serve.
+
+    Asserted as a *ratio*, not against the real 64 MiB ceiling: a fixture
+    large enough to breach that cap would be a 64 MiB test. The invariant is
+    stronger than the threshold anyway -- the manifest must be O(1) in the
+    surface's size, so no surface of any size can breach it.
+    """
+
+    def _facts(self, surface):
+        from abicheck.model.bundle_facts import BundleFacts
+
+        return BundleFacts(per_library_snapshots={}, public_surface=surface)
+
+    def _manifest(self, tmp_path, surface, name: str):
+        import json
+        import zipfile
+
+        from abicheck.serialization import save_bundle_facts
+
+        path = tmp_path / name
+        save_bundle_facts(self._facts(surface), path, format="archive")
+        with zipfile.ZipFile(path) as zf:
+            return json.loads(zf.read("manifest.json")), path
+
+    def _big(self, count: int):
+        symbols = tuple(f"api_{i:06d}" for i in range(count))
+        return ReleasePublicSurface(
+            acquisition_key="key",
+            side="new",
+            obligations=tuple(
+                PublicObligation(symbol=s, name=s, entity="function") for s in symbols
+            ),
+            declared_symbols=frozenset(symbols),
+            type_names=tuple(f"Type_{i:06d}" for i in range(count)),
+            resolvable=True,
+        )
+
+    def test_the_manifest_stays_flat_as_the_surface_grows(self, tmp_path) -> None:
+        import json
+
+        small, _ = self._manifest(tmp_path, self._big(10), "small.zip")
+        large, _ = self._manifest(tmp_path, self._big(4000), "large.zip")
+        small_bytes = len(json.dumps(small))
+        large_bytes = len(json.dumps(large))
+        # 400x the surface. Inline, the manifest grew with it; by hash it
+        # does not grow at all beyond the fixed-width digest.
+        assert large_bytes - small_bytes < 64, (small_bytes, large_bytes)
+
+    def test_the_manifest_carries_a_hash_not_the_payload(self, tmp_path) -> None:
+        """The structural half: a reviewer reading the manifest must not
+        find the contract's contents there, whatever its size."""
+        manifest, _ = self._manifest(tmp_path, self._big(50), "m.zip")
+        assert "public_surface" not in manifest
+        blob = manifest["public_surface_blob"]
+        assert isinstance(blob, str) and blob
+        assert "api_000001" not in json.dumps(manifest)
+
+    def test_a_large_surface_still_round_trips(self, tmp_path) -> None:
+        """The vacuity guard on both assertions above: a writer that simply
+        dropped the surface would pass them and lose the contract."""
+        from abicheck.serialization import load_bundle_facts, save_bundle_facts
+
+        surface = self._big(4000)
+        path = tmp_path / "rt.zip"
+        save_bundle_facts(self._facts(surface), path, format="archive")
+        back = load_bundle_facts(path).public_surface
+        assert back is not None
+        assert len(back.obligations) == 4000
+        assert back.declared_symbols == surface.declared_symbols
+        assert back.type_names == surface.type_names
+
+    def test_an_archive_with_no_surface_names_no_blob(self, tmp_path) -> None:
+        manifest, _ = self._manifest(tmp_path, None, "none.zip")
+        assert "public_surface_blob" not in manifest
+        assert "public_surface" not in manifest
+
+    @pytest.mark.parametrize("bad", [17, ["a"], {"h": 1}])
+    def test_a_non_string_blob_marker_is_refused(self, tmp_path, bad) -> None:
+        """An unvalidated non-string reaches the hash-keyed blob cache and
+        raises a raw `TypeError` instead of this module's own error."""
+        import json
+        import zipfile
+
+        from abicheck.serialization import load_bundle_facts, save_bundle_facts
+
+        path = tmp_path / "bad.zip"
+        save_bundle_facts(self._facts(self._big(3)), path, format="archive")
+        with zipfile.ZipFile(path) as zf:
+            members = {n: zf.read(n) for n in zf.namelist()}
+        manifest = json.loads(members["manifest.json"])
+        manifest["public_surface_blob"] = bad
+        members["manifest.json"] = json.dumps(manifest).encode()
+        with zipfile.ZipFile(path, "w") as zf:
+            for name, payload in members.items():
+                zf.writestr(name, payload)
+        with pytest.raises((ValueError, Exception)) as excinfo:
+            load_bundle_facts(path)
+        assert "public_surface_blob" in str(excinfo.value)
+
+
+class TestNoReaderDiscardsTheContractSilently:
+    """A default standing in for missing evidence is what these gates
+    refuse (`storage/AGENTS.md`). The declared-version refusal only catches
+    a document that *says* v4; one omitting `schema_version` defaults to the
+    reader's own current version and slips past -- and the import adapter has
+    no composition section for the block, so the contract would be dropped
+    and the import would still succeed.
+    """
+
+    def _document(self, *, with_version: bool):
+        doc = {
+            "artifact_type": "abicheck.bundle-facts",
+            "variant_fingerprint": "default",
+            "per_library_snapshots": {},
+            "public_surface": _surface("api_a", side="old").to_dict(),
+        }
+        if with_version:
+            doc["schema_version"] = 4
+        return doc
+
+    def _import(self, doc, tmp_path):
+        from abicheck.serialization import SCHEMA_VERSION
+        from abicheck.storage import InMemoryObjectStore
+        from abicheck.storage.import_bundle_facts import import_bundle_facts
+
+        return import_bundle_facts(
+            doc,
+            store=InMemoryObjectStore(),
+            max_known_schema_version=SCHEMA_VERSION,
+        )
+
+    def test_a_schema_less_document_carrying_a_contract_is_refused(
+        self, tmp_path
+    ) -> None:
+        with pytest.raises((ValueError, Exception)) as excinfo:
+            self._import(self._document(with_version=False), tmp_path)
+        assert "public_surface" in str(excinfo.value)
+
+    def test_a_declared_v4_document_is_refused_too(self, tmp_path) -> None:
+        """The pre-existing path, asserted beside it: both spellings of the
+        same document reach a refusal, not one of them."""
+        with pytest.raises((ValueError, Exception)):
+            self._import(self._document(with_version=True), tmp_path)
+
+    def test_a_document_with_no_contract_still_imports(self, tmp_path) -> None:
+        """The vacuity guard: the gate must refuse the block, not the
+        document shape -- otherwise every ordinary import breaks."""
+        doc = self._document(with_version=False)
+        del doc["public_surface"]
+        assert self._import(doc, tmp_path) is not None
+
+
+class TestACaptureStampsTheVersionItsContentsNeed:
+    """Each block names the version it needs. One "current" constant stamped
+    4 on a degraded-only capture (`degraded_members` needs only 3) and left
+    2 on a capture that really does carry a public surface.
+    """
+
+    def _capture(self, **kwargs):
+        from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
+
+        return capture_bundle_facts(per_library_snapshots={}, **kwargs)
+
+    def test_a_plain_capture_stays_at_the_base_version(self) -> None:
+        assert self._capture().schema_version == 2
+
+    def test_a_public_surface_capture_declares_four(self) -> None:
+        facts = self._capture(public_surface=_surface("api_a"))
+        assert facts.schema_version == 4
+
+    def test_a_surface_capture_declares_four_with_degraded_members_too(self) -> None:
+        """The higher of the two, not whichever branch is checked first."""
+        facts = self._capture(public_surface=_surface("api_a"), degraded_members={})
+        assert facts.schema_version == 4
+
+    def test_the_in_memory_version_matches_what_is_persisted(self, tmp_path) -> None:
+        """The invariant behind all three: the object a caller holds and the
+        document written from it declare the same version, so a reader and
+        an in-process consumer cannot disagree about what it carries."""
+        from abicheck.model.bundle_facts import document_schema_version
+
+        for facts in (
+            self._capture(),
+            self._capture(public_surface=_surface("api_a")),
+        ):
+            assert facts.schema_version == document_schema_version(facts)

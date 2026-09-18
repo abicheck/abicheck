@@ -64,9 +64,8 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from ..errors import IncompatibleSnapshotSchemaError
-from ..model.bundle_facts import require_degraded_members_known
 from .bundle_facts_validation import (
-    require_degraded_marker_version,
+    require_document_markers,
     validated_inventory_complete,
 )
 from .dto import (
@@ -490,15 +489,16 @@ def import_bundle_facts(
     degraded_members = _validated_library_filenames(  # ADR-065 D8, same shape
         bundle_facts_document.get("degraded_members", _ABSENT), "degraded_members"
     )
-    require_degraded_marker_version(  # an absent key is a v1 document, not the default
+    require_document_markers(  # an absent `schema_version` is a v1 document
+        bundle_facts_document,
         degraded_members,
-        raw_container_schema_version
-        if "schema_version" in bundle_facts_document
-        else 1,
+        raw_snapshots,
+        declared_schema_version=(
+            raw_container_schema_version
+            if "schema_version" in bundle_facts_document
+            else 1
+        ),
         what="bundle_facts_document",
-    )
-    require_degraded_members_known(
-        degraded_members, raw_snapshots, what="bundle_facts_document"
     )
 
     artifact_refs = []

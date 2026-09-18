@@ -629,3 +629,156 @@ class TestTheCompatCommandReallyFoldsIt:
         assert "api_c" in report
         # Exactly once, not once per member -- the cardinality law itself.
         assert report.count("public_not_exported") == 1
+
+
+class TestTheResolvedPolicyDocumentReachesReleaseScoring:
+    """A `--policy` document moves a member's finding and the release-level
+    finding that replaced it, or it has moved a check's meaning by moving
+    its owner -- the one thing the ownership move may never do.
+    """
+
+    class _Stage:
+        def __init__(self, findings) -> None:
+            self.findings = tuple(findings)
+
+    class _PolicyFile:
+        def __init__(self, overrides) -> None:
+            self.overrides = overrides
+
+    def _stage(self):
+        from abicheck.checker_types import Change
+
+        return self._Stage(
+            [
+                Change(
+                    kind=ChangeKind.PUBLIC_NOT_EXPORTED,
+                    symbol="api_c",
+                    description="missing",
+                )
+            ]
+        )
+
+    def test_an_override_moves_the_release_verdict(self) -> None:
+        from abicheck.checker import Verdict
+        from abicheck.workflows.release_public_surface import release_surface_verdict
+
+        stage = self._stage()
+        baseline = release_surface_verdict(stage)
+        pinned = release_surface_verdict(
+            stage,
+            policy_file=self._PolicyFile(
+                {ChangeKind.PUBLIC_NOT_EXPORTED: Verdict.BREAKING}
+            ),
+        )
+        assert pinned == "BREAKING"
+        # The vacuity guard: the override must have *changed* something, or
+        # this passes against a function that ignores it entirely.
+        assert baseline != "BREAKING"
+
+    def test_the_override_can_lower_it_too(self) -> None:
+        """Not only "pins to BREAKING": the document decides, in both
+        directions, exactly as it does for a member."""
+        from abicheck.checker import Verdict
+        from abicheck.workflows.release_public_surface import release_surface_verdict
+
+        assert (
+            release_surface_verdict(
+                self._stage(),
+                policy_file=self._PolicyFile(
+                    {ChangeKind.PUBLIC_NOT_EXPORTED: Verdict.COMPATIBLE}
+                ),
+            )
+            == "COMPATIBLE"
+        )
+
+    def test_no_document_is_unchanged(self) -> None:
+        from abicheck.workflows.release_public_surface import release_surface_verdict
+
+        stage = self._stage()
+        assert release_surface_verdict(stage) == release_surface_verdict(
+            stage, policy_file=None
+        )
+
+    def test_the_severity_exit_takes_the_same_document(self) -> None:
+        """`release_surface_severity_exit` already accepted `policy_file`;
+        the defect was the call site never passing one. Stated here so the
+        parameter cannot quietly stop being forwarded."""
+        import inspect
+
+        from abicheck import cli_compare_release
+        from abicheck.workflows.release_public_surface import (
+            release_surface_severity_exit,
+        )
+
+        assert (
+            "policy_file" in inspect.signature(release_surface_severity_exit).parameters
+        )
+        source = inspect.getsource(cli_compare_release)
+        # Both release-level scoring paths read one resolved object.
+        assert source.count("_release_policy_file") >= 3
+
+
+class TestTheOutputDirectorySummaryCarriesTheContract:
+    """`--output-dir`'s `summary.json` is what a CI consumer collects when
+    the directory is the artifact, so a block present only in the primary
+    report is a block that consumer never sees -- the same drift the
+    `comparison_scope`/`analysis_assurance` blocks are threaded through
+    this writer to avoid.
+    """
+
+    def _terms(self, *, missing: bool):
+        from abicheck.report.release_public_surface import (
+            compute_release_public_surface,
+        )
+
+        new = (
+            {
+                name: _snapshot(name, declares=_PRODUCT_API, exports=exports)
+                for name, exports in (("liba.so", ("api_a",)), ("libb.so", ("api_b",)))
+            }
+            if missing
+            else _members(count=2)
+        )
+        from abicheck.workflows.release_surface_acquisition import (
+            surface_from_snapshots,
+        )
+
+        reconciliation = reconcile_member_sets(
+            new_members=new,
+            new_surface=surface_from_snapshots(new, acquisition_key="k", side="new"),
+        )
+        return compute_release_public_surface(
+            reconciliation, acquisition={}, shared_findings=()
+        )
+
+    def _summary(self, tmp_path, terms):
+        import json
+
+        from abicheck.frontends.cli.release_summary import _write_release_summary_file
+
+        _write_release_summary_file(
+            tmp_path,
+            "NO_CHANGE",
+            [],
+            [],
+            [],
+            {},
+            {},
+            public_surface=terms,
+        )
+        return json.loads((tmp_path / "summary.json").read_text())
+
+    def test_the_sidecar_states_the_missing_export(self, tmp_path) -> None:
+        doc = self._summary(tmp_path, self._terms(missing=True))
+        block = doc["public_surface_reconciliation"]
+        assert [f["symbol"] for f in block["missing_exports"]] == ["api_c"]
+
+    def test_a_satisfied_contract_names_no_missing_export(self, tmp_path) -> None:
+        """The vacuity guard: the same writer over a satisfied contract must
+        report none, or the assertion above holds for a writer that echoes
+        every obligation."""
+        doc = self._summary(tmp_path, self._terms(missing=False))
+        assert doc["public_surface_reconciliation"]["missing_exports"] == []
+
+    def test_a_release_with_no_contract_omits_the_block(self, tmp_path) -> None:
+        assert "public_surface_reconciliation" not in self._summary(tmp_path, None)

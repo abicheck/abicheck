@@ -420,7 +420,10 @@ def reconcile_release_public_surface(
 
 
 def release_surface_verdict(
-    stage: ReleaseSurfaceStage, *, policy: str = "strict_abi"
+    stage: ReleaseSurfaceStage,
+    *,
+    policy: str = "strict_abi",
+    policy_file: Any = None,
 ) -> str:
     """The verdict the release-level findings alone imply.
 
@@ -435,6 +438,7 @@ def release_surface_verdict(
     replaces did: moving a check's *owner* must not change what it gates.
     """
     from ..policy.classification import (
+        apply_policy_file_overrides,
         compute_verdict,
         excluded_from_verdict_as_persistent_hygiene,
         policy_kind_sets,
@@ -444,14 +448,17 @@ def release_surface_verdict(
     findings = stage.findings
     if not findings:
         return "NO_CHANGE"
-    sets = policy_kind_sets(policy)
+    sets = apply_policy_file_overrides(
+        policy_kind_sets(policy),
+        policy_file.overrides if policy_file is not None else None,
+    )
     scored = [
         change
         for change in findings
         if not is_cross_source_resolved(change)
         and not excluded_from_verdict_as_persistent_hygiene(change, *sets)
     ]
-    return compute_verdict(scored, policy=policy).value
+    return compute_verdict(scored, policy=policy, kind_sets=sets).value
 
 
 def release_surface_severity_exit(

@@ -95,3 +95,32 @@
   `public_surface_reconciliation` block (and Markdown section); the
   `compat` path, which has no release envelope, folds its release-level
   findings into the merged result.
+
+- Review-round fixes to the above (CodeRabbit, PR #1328), each a real
+  defect with its own regression test:
+  - A release's resolved `PolicyFile` (a `--policy` document, plus pack and
+    project overrides) now reaches the release-level verdict and severity
+    exit. It reached only the member comparisons, so a document pinning a
+    kind's verdict moved a member's finding and not the release-level
+    finding that replaced it — moving a check's owner changed what it
+    gates, the one thing that move may never do.
+  - A bundle-facts **archive** stores the public surface as a
+    content-addressed blob instead of inline in `manifest.json`. That
+    manifest is capped at 64 MiB and the writer raises rather than
+    producing an archive that exceeds it, while the surface grows with the
+    whole product — so a large release could fail to write a baseline at
+    all, at exactly the scale the block exists to serve.
+  - `--output-dir`'s `summary.json` carries
+    `public_surface_reconciliation` too. A CI consumer collecting the
+    directory as its artifact reads that file rather than the primary
+    report, so the product's contract was invisible to it.
+  - The `ProjectSnapshot` import adapter refuses a document carrying a
+    `public_surface` block it cannot represent even when that document
+    omits `schema_version` entirely. The refusal keyed off the *declared*
+    version, and an absent key defaulted to one below the block's, so such
+    a document imported with its recorded contract silently discarded.
+  - A capture stamps the schema version its own contents need (4 with a
+    public surface, 3 for degraded members alone, 2 otherwise) rather than
+    one "current" constant, which had left the returned in-memory
+    `BundleFacts` declaring a version its contents contradict. Persisted
+    documents were already correct.

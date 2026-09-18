@@ -915,6 +915,21 @@ def compare_release_cmd(
             # `--bundle-facts-out` write below so the stored baseline
             # records the very surface this run reconciled against, rather
             # than a second, separately-acquired one.
+            # Resolved once, and the one object every release-level
+            # scoring path reads: the release-surface verdict, its severity
+            # exit, and the bundle comparison below. Resolving it only for
+            # the bundle left the two release-surface paths scoring against
+            # the bare `policy` profile, so a `--policy` document (or a
+            # pack/project override folded into it) moved a member's
+            # finding and not the release-level finding that replaced it
+            # (CodeRabbit review).
+            _release_policy_file = resolve_bundle_policy_file(
+                suppress,
+                policy,
+                policy_file_path,
+                pack_application,
+                project_policy_overrides,
+            )
             release_surface_stage = reconcile_release_public_surface(
                 library_results,
                 # The DSOs this release expected to compare -- `library_results`
@@ -942,7 +957,9 @@ def compare_release_cmd(
             # matrix, a removed library) uses, so a release-level contract
             # finding can never rank differently from a bundle one.
             _surface_verdict = release_surface_verdict(
-                release_surface_stage, policy=policy
+                release_surface_stage,
+                policy=policy,
+                policy_file=_release_policy_file,
             )
             if _RELEASE_VERDICT_ORDER.get(
                 _surface_verdict, 0
@@ -1174,13 +1191,7 @@ def compare_release_cmd(
                 ),
                 bundle_cohorts=bundle_cohorts,
                 policy=policy,
-                policy_file=resolve_bundle_policy_file(
-                    suppress,
-                    policy,
-                    policy_file_path,
-                    pack_application,
-                    project_policy_overrides,
-                ),
+                policy_file=_release_policy_file,
                 old_root=old_dir,
                 new_root=new_dir,
                 old_variant=old_variant,
@@ -1252,7 +1263,10 @@ def compare_release_cmd(
                 severity_exit_code = max(
                     severity_exit_code,
                     release_surface_severity_exit(
-                        release_surface_stage, gate.severity, policy=policy
+                        release_surface_stage,
+                        gate.severity,
+                        policy=policy,
+                        policy_file=_release_policy_file,
                     ),
                 )
 

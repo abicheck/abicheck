@@ -439,3 +439,41 @@ def require_public_surface_marker_version(
             f"schema_version {schema_version}, which a reader that cannot "
             "honor the block would still accept"
         )
+
+
+def require_document_markers(
+    document: Mapping[str, object],
+    degraded_members: Mapping[str, str],
+    known_members: Mapping[str, object],
+    *,
+    declared_schema_version: int,
+    what: str = "bundle facts",
+) -> None:
+    """Apply every version-marker and membership gate one document owes.
+
+    One call so a reader cannot pick up some of the gates and forget the
+    rest -- which is how a schema-less document carrying a ``public_surface``
+    block came to import with its recorded contract silently discarded
+    (CodeRabbit review). *declared_schema_version* is what the document
+    itself declares; a reader that defaults an absent ``schema_version``
+    passes the legacy version that absence means (1), never its own default,
+    since a default standing in for missing evidence is exactly what these
+    gates exist to refuse (`storage/AGENTS.md`).
+
+    That legacy-version rule is currently *indistinguishable* from passing
+    a reader's own default, because every reader's default already sits
+    below the version ``public_surface`` needs -- so both spellings refuse
+    the same documents and no test can tell them apart. It becomes
+    load-bearing the moment a reader's default reaches that version, which
+    is precisely when a silently-dropped contract would ship. Don't
+    simplify a caller's ``else 1`` away on the strength of today's tests.
+    """
+    require_degraded_marker_version(
+        degraded_members, declared_schema_version, what=what
+    )
+    require_public_surface_marker_version(
+        document.get("public_surface"), declared_schema_version, what=what
+    )
+    from ..model.bundle_facts import require_degraded_members_known
+
+    require_degraded_members_known(degraded_members, known_members, what=what)

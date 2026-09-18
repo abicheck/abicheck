@@ -83,7 +83,8 @@ def capture_bundle_facts(
     from ..bundle_soname import filesystem_alias_basenames, resolved_basename
     from ..model.bundle_facts import (
         BUNDLE_FACTS_BASE_SCHEMA_VERSION,
-        BUNDLE_FACTS_SCHEMA_VERSION,
+        DEGRADED_MEMBERS_SCHEMA_VERSION,
+        PUBLIC_SURFACE_SCHEMA_VERSION,
     )
 
     filesystem_aliases: dict[str, tuple[str, ...]] = {}
@@ -104,8 +105,19 @@ def capture_bundle_facts(
             if stored_aliases:
                 filesystem_aliases[name] = stored_aliases
     return BundleFacts(
+        # Each block names the version it needs, rather than one "current"
+        # constant: `BUNDLE_FACTS_SCHEMA_VERSION` became 4 when
+        # `public_surface` landed, which stamped 4 on a degraded-only
+        # capture (`degraded_members` needs only 3) and left 2 on a capture
+        # that really does carry a public surface. The persisted document
+        # was right either way -- the serializers call
+        # `document_schema_version(facts)` -- but the returned in-memory
+        # object exposed a version its own contents contradict (CodeRabbit
+        # review).
         schema_version=(
-            BUNDLE_FACTS_SCHEMA_VERSION
+            PUBLIC_SURFACE_SCHEMA_VERSION
+            if public_surface is not None
+            else DEGRADED_MEMBERS_SCHEMA_VERSION
             if degraded_members
             else BUNDLE_FACTS_BASE_SCHEMA_VERSION
         ),

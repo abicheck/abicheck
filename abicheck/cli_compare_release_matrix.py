@@ -323,6 +323,7 @@ def _finalize_release_output(
             env_matrix_source_sha256=env_matrix_source_sha256,
             require_complete_analysis=require_complete_analysis,
             excluded_header_patterns=excluded_header_patterns,
+            public_surface=public_surface,
         )
 
     # ADR-065 D6/D7, the completeness axis's own stderr notice -- the same
