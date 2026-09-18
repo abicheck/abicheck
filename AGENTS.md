@@ -733,9 +733,10 @@ Core pipeline (in order of data flow):
      field/base spelling naming nothing the snapshot carries — resolved
      through `type_reachability.py`'s namespace-suffix and stdlib-stripping
      machinery, so a bare `string` for `std::string` still resolves)
-5b. **Release product model (one contract, many providers)** — a
-   directory/package comparison judges **one** public contract backed by
-   **several** binary providers, not the Cartesian product of the two.
+5b. **Release product model (one contract, many providers)** — **every**
+   comparison whose candidate is a set of artifacts judges **one** public
+   contract backed by **several** binary providers, not the Cartesian
+   product of the two.
    `model/release_surface.py` owns the acquisition identity
    (`SurfaceAcquisitionIdentity`: every input that can change the header
    AST, folded into one key) and the acquired surface itself
@@ -755,6 +756,23 @@ Core pipeline (in order of data flow):
    evolution-stated finding set. `workflows/release_public_surface.py`
    orchestrates the stage; `report/release_public_surface.py` owns the
    report section and the shared-finding fold.
+   **Four drivers, one model.** `workflows/release_public_surface.py`'s
+   `reconcile_member_sets` is the driver-agnostic core and
+   `member_pass_scope` the one place the ">1 member" rule lives, so a new
+   multi-member driver wires to those rather than restating either: the
+   live directory/package fan-out (`cli_compare_release*.py`), a stored
+   `BundleFacts` baseline against a live release
+   (`stored_old_live_new_reconciliation`), two stored documents
+   (`workflows/bundle_stored_pair_compare.py`), and a multi-library ABICC
+   descriptor (`compat/multi_library_run.py`). Only the live path
+   *acquires* a surface; a stored side uses the contract its capture
+   recorded (`BundleFacts.public_surface`, bundle-facts schema 4), falling
+   back to one derived from its member snapshots for a pre-v4 document. A
+   side with no header evidence records **no contract** and never borrows
+   the other side's — doing so asserts that NEW still promises everything
+   OLD did, which turns every deliberately retired declaration into a
+   missing export.
+
    **Two rules not to relearn:** only `public_not_exported` moves off the
    member pass (`workflows/crosscheck_ownership.py`'s run-scoped
    ownership) — `exported_not_public` stays per member because the
