@@ -53,7 +53,7 @@ from .frontends.cli.release_member_errors import member_error_entry
 from .frontends.cli.runtime import _safe_write_output
 from .model import AbiSnapshot
 from .reporter import disposition_ledger_blocks, to_json
-from .workflows.bundle_symbol_status import build_bundle_signature_evidence
+from .workflows import memory_trace, release_snapshot_retention
 from .workflows.contracts import CompareResult
 from .workflows.crosscheck_ownership import (
     release_level_checks,
@@ -121,8 +121,8 @@ _CompareReleaseCommonArgs = tuple[
     bool,  # require_complete_analysis (ADR-071)
     "SeverityConfig | None",
     "PackApplication | None",
-    bool,
-    bool,
+    bool,  # collect_diff_results
+    "release_snapshot_retention.SnapshotRetention | None",
     "CompileContext | None",
     "str | None",
     "str | None",
@@ -315,7 +315,7 @@ def _compare_one_library(
     severity_config: SeverityConfig | None = None,
     pack_application: PackApplication | None = None,
     collect_diff_results: bool = False,
-    need_full_snapshots: bool = False,
+    retention: release_snapshot_retention.SnapshotRetention | None = None,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
     show_only: str | None = None,
@@ -330,12 +330,9 @@ def _compare_one_library(
 
     The full :class:`DiffResult` is stashed under ``"_diff_result"``;
     callers needing it (bundle layer, JUnit) pop it before JSON-serialising.
-    *collect_diff_results* additionally stashes ``"_bundle_key"`` plus
-    either ``"_old_snapshot"``/``"_new_snapshot"`` (when
-    *need_full_snapshots* -- JUnit/``--bundle-facts-out``) or the much
-    smaller ``"_old_bundle_evidence"``/``"_new_bundle_evidence"`` (G38
-    Phase 9's memory fix; see :class:`~abicheck.bundle_models.
-    BundleSignatureEvidence`).
+    *collect_diff_results* additionally stashes ``"_bundle_key"`` plus each
+    side's bundle evidence, full or compact per *retention* -- owned, with
+    its reasoning, by :mod:`abicheck.workflows.release_snapshot_retention`.
 
     *severity_config* is forwarded to the ``--output-dir`` JSON write below
     (Codex review): without it, that write always used the legacy
@@ -468,17 +465,13 @@ def _compare_one_library(
         if collect_diff_results:
             # See this function's own docstring (CodeRabbit review #798;
             # full- vs. compact-evidence split, G38 Phase 9).
-            entry["_bundle_key"] = key
-            if need_full_snapshots:
-                entry["_old_snapshot"] = compare_result.old_snapshot
-                entry["_new_snapshot"] = compare_result.new_snapshot
-            else:
-                entry["_old_bundle_evidence"] = build_bundle_signature_evidence(
-                    compare_result.old_snapshot
-                )
-                entry["_new_bundle_evidence"] = build_bundle_signature_evidence(
-                    compare_result.new_snapshot
-                )
+            release_snapshot_retention.stash_member_evidence(
+                entry,
+                key,
+                compare_result.old_snapshot,
+                compare_result.new_snapshot,
+                retention,
+            )
         # ADR-064's evidence-contract axis (exit 7), per member. `compare`'s
         # depth-shortfall contract is this axis -- recorded by
         # `service_compare_pipeline.classify_compare_pair`, never raised --
@@ -753,7 +746,7 @@ def _compare_release_libraries(
     output_dir: Path | None,
     collect_diff_results: bool = False,
     *,
-    need_full_snapshots: bool = False,
+    retention: release_snapshot_retention.SnapshotRetention | None = None,
     jobs: int = 1,
     scope_to_public_surface: bool = True,
     include_dependencies: bool = True,
@@ -773,9 +766,9 @@ def _compare_release_libraries(
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
-    When *collect_diff_results* and *need_full_snapshots* are both True,
-    ``(DiffResult, old_snapshot)`` pairs are collected and returned as the
-    third element of the tuple (used by the JUnit output format).
+    When *collect_diff_results* is True and *retention* keeps the full OLD
+    side, ``(DiffResult, old_snapshot)`` pairs are returned third -- what
+    JUnit and ``--bundle-facts-out`` read.
 
     When *jobs* > 1, comparisons are dispatched in parallel via
     :func:`_compare_one_library` using a :class:`ThreadPoolExecutor` -- not
@@ -839,7 +832,7 @@ def _compare_release_libraries(
         severity_config,
         pack_application,
         collect_diff_results,
-        need_full_snapshots,
+        retention,
         compile_context,
         depth,
         show_only,
@@ -1012,7 +1005,11 @@ def _compare_release_parallel(
         # directly) so it stays checkable by mypy: `Context.run`'s own
         # ParamSpec-generic signature otherwise defeats `submit`'s overload
         # resolution against `_compare_one_library`'s real params.
-        return ctx.run(_compare_one_library, key, *common_args)
+        # Phase boundary for the memory trace, at the dispatch site so it
+        # covers `_compare_one_library`'s own `except` paths; free when
+        # tracing is off (the default).
+        with memory_trace.phase("release.member", key=key):
+            return ctx.run(_compare_one_library, key, *common_args)
 
     results_by_key: dict[str, dict[str, object]] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -1041,4 +1038,7 @@ def _compare_release_sequential(
     common_args: _CompareReleaseCommonArgs,
 ) -> list[dict[str, object]]:
     """Run per-library release comparisons sequentially."""
-    return [_compare_one_library(key, *common_args) for key in matched_keys]
+    return [
+        _compare_one_library(key, *common_args)
+        for key in memory_trace.phase_each("release.member", matched_keys)
+    ]

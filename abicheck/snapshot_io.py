@@ -38,6 +38,7 @@ import hashlib
 import io
 import os
 import stat
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -735,8 +736,14 @@ def _open_unique_temp(parent: Path, prefix: str, suffix: str) -> tuple[int, Path
     raise SnapshotError(f"Could not create a unique temp file in {parent}")
 
 
-def _atomic_write_bytes(data: bytes, path: Path) -> None:
-    """Write *data* to *path* atomically: temp file in the same directory,
+#: One buffer or many, as an iterable. A ``bytes`` is itself iterable (over
+#: ints), so the single-buffer case must be wrapped, never passed through.
+def _as_chunks(data: bytes | Iterable[bytes]) -> Iterable[bytes]:
+    return (data,) if isinstance(data, (bytes, bytearray)) else data
+
+
+def _atomic_write_bytes(data: bytes | Iterable[bytes], path: Path) -> None:
+    """Write *data* -- one buffer, or an iterable of them -- atomically: temp file in the same directory,
     flush, best-effort fsync, then os.replace(), then best-effort fsync the
     parent directory. Never leaves a partial file at *path* on failure, and
     cleans up its own temp file either way.
@@ -787,6 +794,10 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
     to the real target first so an atomic write behaves the same way: the
     symlink survives, and what actually gets atomically replaced is the
     file it points to.
+
+    Accepting an iterable is what lets a large document be written without
+    ever existing as one object, under every guarantee below and without a
+    second streaming writer. It is consumed once, so it may be a generator.
 
     Non-regular destinations (Codex review): an existing FIFO, character/
     block device, or socket at *path* (e.g. ``/dev/stdout``, a named pipe
@@ -853,7 +864,8 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
         # open() itself follows a symlink to reach the real FIFO/device/
         # socket, so no path resolution is needed here at all.
         with open(path, "wb") as f:
-            f.write(data)
+            for chunk in _as_chunks(data):
+                f.write(chunk)
             f.flush()
             try:
                 os.fsync(f.fileno())
@@ -883,7 +895,8 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
     fd, tmp_path = _open_unique_temp(parent, f".{target.name}.", ".tmp")
     try:
         with os.fdopen(fd, "wb") as f:
-            f.write(data)
+            for chunk in _as_chunks(data):
+                f.write(chunk)
             f.flush()
             try:
                 os.fsync(f.fileno())

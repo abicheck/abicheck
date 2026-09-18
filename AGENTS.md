@@ -773,6 +773,17 @@ Core pipeline (in order of data flow):
    OLD did, which turns every deliberately retired declaration into a
    missing export.
 
+   **What each side retains** is a separate, per-consumer question owned by
+   `workflows/release_snapshot_retention.py`: a release fan-out holds every
+   matched member's result until its folds run, so whatever a member entry
+   keeps is multiplied by the member count. JUnit and `--bundle-facts-out`
+   read the **OLD** side only, so `SnapshotRetention` keeps the full
+   `AbiSnapshot` there and the compact `BundleSignatureEvidence` on NEW —
+   never one shared "some output needs snapshots" switch, which is what
+   pinned a NEW graph nobody opened. Adding a consumer means naming it
+   there; `tests/test_release_snapshot_retention.py` re-derives the
+   inventory from the real call sites so the claim cannot go stale.
+
    **Two rules not to relearn:** only `public_not_exported` moves off the
    member pass (`workflows/crosscheck_ownership.py`'s run-scoped
    ownership) — `exported_not_public` stays per member because the
@@ -819,6 +830,33 @@ Core pipeline (in order of data flow):
      between the storage codec's `decode_snapshot`/`finalize_snapshot`,
      neither of which a `storage`-classified module (`may_import: [model]`
      only) may call
+   - `workflows/memory_trace.py` — optional, attributable memory instrumentation
+     (`ABICHECK_MEMORY_TRACE=<path>`): parent RSS, process-tree RSS *and*
+     PSS, cgroup `memory.current`/`peak`, and structural retention counts,
+     each recorded as its **own** field per phase, with an unavailable probe
+     recorded as `null` rather than `0`. Python allocation totals are a
+     separate opt-in (`ABICHECK_MEMORY_TRACE_TRACEMALLOC`) because
+     tracemalloc perturbs the time and RSS it would otherwise sit beside.
+     A dependency-free leaf (only `process_resources.py`, for the cgroup
+     walk), so any layer can sample; one boolean test per call site when
+     off, which is the default. The four figures are four *different*
+     numbers — conflating them is how a memory investigation reaches the
+     wrong owner — and `docs/contribute/memory.md` is the reader's page.
+     `scripts/bench_release_memory.py` is the benchmark harness that
+     consumes it, deliberately runnable at a pre-instrumentation revision
+     so a before/after pair is one harness over one fixture
+   - `storage/json_stream.py` — fragment-at-a-time `json.dumps(obj,
+     indent=2)` with `LazyItems`, a member map whose values are produced
+     while being encoded and dropped immediately after. What
+     `--bundle-facts-out`'s JSON path writes through
+     (`snapshot_io.write_snapshot_text_stream`, which streams an
+     *uncompressed* write through the same atomic writer — generalised to
+     take chunks, not duplicated — and joins-and-delegates a compressed
+     one). Byte-identical to the eager spelling, tested differentially
+     against `json.dumps` itself; a subtree below
+     `_DELEGATE_NODE_LIMIT` is handed to the C encoder whole, because the
+     memory saving comes from the *member* boundary and descending small
+     objects in Python is pure time
    - `snapshot_io.py` — ADR-059's canonical snapshot *storage envelope* I/O:
      plain/gzip/zstd detection (magic bytes), atomic + deterministic
      compressed writes, decompression-bomb limits. A dependency-free leaf

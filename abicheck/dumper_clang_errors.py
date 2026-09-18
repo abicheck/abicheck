@@ -38,13 +38,13 @@ from typing import Any
 from . import deadline
 from .dumper_cache import (
     _atomic_copy,
-    _atomic_write_json,
     ast_acquisition_active,
     ast_memoize_active,
 )
 from .dumper_clang_streaming import load_pruned_clang_ast, streaming_prune_suppressed
 from .errors import SnapshotError
 from .extract.env_flags import env_flag
+from .storage.json_chunked_write import _atomic_write_json
 from .sycl_context import decode_and_select_frontend_context_from_path
 
 log = logging.getLogger(__name__)

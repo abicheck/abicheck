@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Contract tests for ``dumper_cache._write_json_chunked``.
+"""Contract tests for ``storage.json_chunked_write._write_json_chunked``.
 
 The function replaces ``json.dump`` on the DPC++ AST cache-write path purely
 for speed, so its entire contract is **"same bytes as ``json.dump``, bounded
@@ -43,7 +43,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.dumper_cache import (
+from abicheck.storage.json_chunked_write import (
     _JSON_CHUNK_BYTE_LIMIT,
     _JSON_CHUNK_MAX_DEPTH,
     _JSON_CHUNK_NODE_LIMIT,
@@ -231,7 +231,7 @@ def test_depth_cap_delegates_instead_of_recursing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Past the cap a large subtree is delegated whole rather than descended."""
-    monkeypatch.setattr("abicheck.dumper_cache._JSON_CHUNK_MAX_DEPTH", 2)
+    monkeypatch.setattr("abicheck.storage.json_chunked_write._JSON_CHUNK_MAX_DEPTH", 2)
     document = {"a": {"b": {"c": _wide_ast(1_000)}}}
     fragments: list[str] = []
     _write_json_chunked(document, fragments.append)
