@@ -85,6 +85,11 @@ class TestTheResolvedCompileContextReachesTheParse:
         "gcc_prefix": "aarch64-linux-gnu-",
         "gcc_options": "-DFEATURE",
         "gcc_option_tokens": ("-DFEATURE", "-I/extra"),
+        # ADR-074's -D/--define. Its parse effect normally travels as a
+        # rendered `-D` token above, but the field is keyed on its own so a
+        # context carrying definitions that were never folded into the token
+        # tail cannot hash the same as one with no macros.
+        "defines": ("FEATURE", "MODE=2"),
         "sysroot": Path("/sysroots/target"),
         "nostdinc": True,
         "frontend": "clang",

@@ -1359,6 +1359,14 @@ def merge_compile_config(
         gcc_prefix=gcc_prefix,
         gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
+        # Carried through, not dropped (CodeRabbit review): the rendered `-D`
+        # tokens above are what the frontend consumes, but the field is what
+        # the resolved request and provenance report as *asked for*. Emptying
+        # it here left a context whose tokens said `-DA` and whose `defines`
+        # said nothing -- and, since `release_public_surface._compile_options`
+        # now keys on it, a context that had been folded and one that had not
+        # would have hashed alike.
+        defines=cli_ctx.defines,
         sysroot=sysroot,
         nostdinc=nostdinc,
         frontend=frontend,

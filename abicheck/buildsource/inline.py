@@ -999,8 +999,8 @@ def _run_inline_source_abi(
                 status="skipped",
                 detail=(
                     "L4 source-ABI replay has no dual-backend hybrid extractor "
-                    "(unlike the L2 header-AST snapshot); pass "
-                    "--ast-frontend castxml or --ast-frontend clang for a "
+                    "(unlike the L2 header-AST snapshot); set compile.frontend: "
+                    "castxml or compile.frontend: clang in .abicheck.yml for a "
                     "--sources/--build-info dump"
                 ),
             )

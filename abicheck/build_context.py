@@ -1380,7 +1380,7 @@ def _pick_target_sysroot(
     sysroot: Path | None = None
     if len(sysroots) > 1:
         _logger.warning(
-            "Conflicting sysroots: %s; use --sysroot to override",
+            "Conflicting sysroots: %s; pin one in .abicheck.yml compile.sysroot",
             ", ".join(sorted(sysroots)),
         )
     elif sysroots:

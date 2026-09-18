@@ -715,8 +715,8 @@ def _parse_clang_ast_result(
                     "which happens when a compiler flag makes clang run multiple "
                     "-cc1 passes for one compile (e.g. a bare '-fsycl' without "
                     "'-fsycl-host-only'/'-fsycl-device-only', or an OpenMP/CUDA "
-                    "offload target flag); pin a single compilation pass or use "
-                    "--ast-frontend castxml"
+                    "offload target flag); pin a single compilation pass or set "
+                    "compile.frontend: castxml in .abicheck.yml"
                 )
             raise SnapshotError(
                 f"clang AST output was not valid JSON: {exc}{hint}"

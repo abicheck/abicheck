@@ -129,6 +129,16 @@ def _compile_options(
     tokens = getattr(compile_context, "gcc_option_tokens", ())
     if tokens:
         pairs.append(("gcc_option_tokens", "\x00".join(str(t) for t in tokens)))
+    # ADR-074's `-D/--define`. Normally redundant with `gcc_option_tokens`,
+    # since `cli_options.merge_compile_config` renders every definition into
+    # that tail -- but only a context that went through the fold has them
+    # rendered. One built directly with `defines=` and handed straight to the
+    # fan-out would otherwise key identically to one with no macros at all,
+    # which is exactly the "two genuinely different acquisitions share one
+    # surface" failure this key exists to prevent.
+    defines = getattr(compile_context, "defines", ())
+    if defines:
+        pairs.append(("defines", "\x00".join(str(d) for d in defines)))
     return tuple(sorted(pairs))
 
 

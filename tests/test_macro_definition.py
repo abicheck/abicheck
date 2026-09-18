@@ -22,6 +22,7 @@ from abicheck.model.macro_definition import (
     MacroDefinition,
     MacroDefinitionError,
     define_spellings_from_tokens,
+    defines_receipt_line,
     macro_definition_tokens,
     merge_macro_definitions,
     parse_macro_definition,
@@ -326,6 +327,29 @@ class TestDefineSpellingsFromTokens:
         assert list(
             define_spellings_from_tokens(macro_definition_tokens(defs, style))
         ) == [d.spelling for d in defs]
+
+
+class TestDefinesReceiptLine:
+    """The one renderer both `dump`'s and `compare`'s --dry-run receipts use.
+
+    Unit-tested directly rather than only through the integration lane: that
+    lane is excluded from the coverage gate, so a shared renderer exercised
+    only there reads as untested -- and, more to the point, a formatting
+    change would be caught only by a test that needs a real compiler.
+    """
+
+    def test_none_when_nothing_is_defined(self) -> None:
+        """The receipt must read exactly as it did before ADR-074 for a run
+        with no macros -- an empty `defines:` line would be new noise on
+        every existing invocation."""
+        assert defines_receipt_line([]) is None
+        assert defines_receipt_line(["-std=gnu11", "-I", "/inc"]) is None
+
+    def test_renders_the_effective_set_in_one_line(self) -> None:
+        assert defines_receipt_line(["-std=gnu11", "-DA", "-DB=2"]) == "defines: A, B=2"
+
+    def test_renders_the_collapsed_value_not_every_token(self) -> None:
+        assert defines_receipt_line(["-DA=9", "-DA=2"]) == "defines: A=2"
 
 
 def test_every_ascii_identifier_character_class_is_covered() -> None:
