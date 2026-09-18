@@ -53,6 +53,8 @@ from ....cli_options import (
     LANG_DEFAULT,
     apply_compile_config_env_toggles,
     build_source_dump_options,
+    define_option,
+    dump_header_input_options,
     exclude_header_option,
     include_dependencies_option,
     snapshot_compression_option,
@@ -153,29 +155,15 @@ def _resolve_and_check_dump_debug_format(
 @main.command("dump")
 @cli_help.dump_help_options  # curated --help + full --help-all (G21.8 collapse M2)
 @click.argument("so_path", type=click.Path(exists=True, path_type=Path), required=False)
-@click.option(
-    "-H",
-    "--header",
-    "headers",
-    multiple=True,
-    type=click.Path(exists=True, path_type=Path),
-    help="Public header file or directory (repeat for multiple).",
-)
+@dump_header_input_options
 @exclude_header_option
-@click.option(
-    "-I",
-    "--include",
-    "includes",
-    multiple=True,
-    type=click.Path(path_type=Path),
-    help="Extra include directory for castxml.",
-)
-# Declaration provenance (ADR-015) comes from -H/--header itself: a file
-# entry tags that header public, a directory entry tags everything under it
-# (split by header_utils.split_public_header_inputs, the same partition
-# `compare` has always applied to its own -H list). The separate
-# --public-header/--public-header-dir pair said the same thing a second way.
+# Declaration provenance (ADR-015) comes from -H/--header itself: a file entry
+# tags that header public, a directory entry tags everything under it (split by
+# header_utils.split_public_header_inputs, the same partition `compare` applies
+# to its own -H list). The --public-header/--public-header-dir pair said the
+# same thing a second way.
 @include_dependencies_option
+@define_option
 @click.option(
     "--version",
     "version",
@@ -268,6 +256,7 @@ def dump_cmd(
     exclude_headers: tuple[str, ...],
     includes: tuple[Path, ...],
     include_dependencies: bool,
+    defines: tuple[str, ...],
     version: str,
     output: Path | None,
     snapshot_compression: str,
@@ -283,10 +272,10 @@ def dump_cmd(
     sources: Path | None = None,
     build_config: Path | None = None,
     depth: str | None = None,
-    # --gcc-options removed as a CLI flag (CLI audit PR 5/5); this
-    # defaulted-None parameter stays only so the internal composition
-    # below (_merge_gcc_options et al.) doesn't need to change --
-    # it's never populated from the CLI anymore, only ever None here.
+    # --gcc-options was removed as a CLI flag (CLI audit PR 5/5); this
+    # defaulted-None parameter survives only for the internal composition below
+    # and is never populated from the CLI. ADR-074's -D/--define is NOT this: it
+    # is a typed macro list (`defines` above), folded by name in the resolver.
     gcc_options: str | None = None,
     _resolved_compile_context: CompileContext | None = None,
     _resolved_collect_mode: str | None = None,
@@ -306,11 +295,10 @@ def dump_cmd(
     """
     # Imported here, not at module level: the snapshot write path lives in
     # `cli_buildsource`, which reaches back into this module, so a static
-    # top-level import would be the very edge the lazy `__getattr__` shim at
-    # the tail of this file exists to avoid (AGENTS.md, "Moving helpers out of
-    # a module that re-exports them"). That shim only serves *attribute*
-    # access on the module (`cli._write_snapshot_output`); a bare name inside
-    # this module needs a real import.
+    # top-level import would be the very edge the lazy `__getattr__` shim at the
+    # tail of this file exists to avoid (AGENTS.md, "Moving helpers out of a
+    # module that re-exports them"). That shim serves only *attribute* access on
+    # the module; a bare name inside this module needs a real import.
     from ....cli_buildsource import (
         _write_snapshot_output as _write_snapshot_output_fn,
         resolve_dump_request_for_cli,
@@ -477,16 +465,16 @@ def dump_cmd(
         raise click.UsageError(_filter_scope_error)
 
     # Fold the project's .abicheck.yml compile: block into the L2 compile context
-    # (compare↔dump↔scan parity, ADR-037 D3): the same shared resolver scan uses,
-    # so a dump honors `compile.std`/`defines`/`sysroot`/`frontend`/`include_dirs`
-    # for its header AST the way scan does. CLI > config; an explicit --config or
-    # the .abicheck.yml auto-discovered at the --sources root. Resolved before the
+    # (compare<->dump parity, ADR-037 D3), so a dump honors `compile.std`/
+    # `defines`/`sysroot`/`frontend`/`include_dirs` for its header AST. CLI >
+    # config (ADR-074's -D merges with `compile.defines` by macro name); an
+    # explicit --config or the .abicheck.yml auto-discovered at the --sources
+    # root. Resolved before the
     # so_path-is-None dispatch (Codex review) -- resolve_dump_compile_context has
     # no so_path/binary_fmt dependency, and dump_source_only needs the
     # config-resolved frontend too: it drives the L4 source-ABI extractor (the
     # same --ast-frontend knob as the L2 header AST, ADR-037 D8), so a
-    # .abicheck.yml `compile.frontend` must reach the source-only path exactly
-    # like it already does the binary-dump path, not just this validation check.
+    # .abicheck.yml `compile.frontend` must reach the source-only path too.
     # Phase 7: every argument below is now a fixed "nothing explicit" input
     # (compile: config only, no escape hatch, ADR-068 D5 guard #2).
     _cc, includes = resolve_dump_compile_context(
@@ -502,6 +490,7 @@ def dump_cmd(
         compiler_path=None,
         compiler_prefix=None,
         compiler_option_tokens=(),
+        defines=defines,
     )
     gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
     _gcc_option_tokens = _cc.gcc_option_tokens  # sysroot/nostdinc read off `_cc` itself

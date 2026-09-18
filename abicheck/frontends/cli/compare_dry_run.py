@@ -87,6 +87,26 @@ def add_compare_cost_preview_section(
     )
 
 
+def effective_compare_defines(
+    resolve_compile_context: Any, **kwargs: Any
+) -> tuple[str, ...]:
+    """The EFFECTIVE macro set a ``compare --dry-run`` receipt must state
+    (ADR-074): ``.abicheck.yml``'s ``compile.defines`` folded with the CLI's
+    own ``-D``, by macro name -- not the raw ``--define`` values.
+
+    Takes the resolver itself rather than importing it, so this
+    ``frontends``-classified module does not reach back into
+    ``cli_options``. The caller passes the *same* keyword arguments the real
+    run's own ``resolve_compile_context`` call uses, and a dry run returns
+    before that call, so this runs instead of it and the receipt cannot
+    disagree with the run it describes.
+    """
+    from ...model.macro_definition import define_spellings_from_tokens
+
+    context, _includes = resolve_compile_context(**kwargs)
+    return define_spellings_from_tokens(context.gcc_option_tokens)
+
+
 def build_compare_dry_run_result(
     *,
     old_input: Path,
@@ -114,6 +134,7 @@ def build_compare_dry_run_result(
     select: tuple[str, ...] = (),
     select_required: tuple[str, ...] = (),
     exclude_headers: tuple[str, ...] = (),
+    defines: tuple[str, ...] = (),
 ) -> Any:
     """Build the ``compare --dry-run`` report (ADR-043 D4): resolve, never diff.
 
@@ -192,6 +213,11 @@ def build_compare_dry_run_result(
     result.add(
         "Headers and compile context",
         f"ast-frontend: {header_backend}",
+        # ADR-074: already the EFFECTIVE set (config compile.defines folded
+        # with the CLI's own -D) -- the caller resolves it through the same
+        # `resolve_compile_context` the real run uses. Stated once for the
+        # pair, never per side: -D/--define has no old=/new= form by design.
+        f"defines: {', '.join(defines)}" if defines else None,
         *header_lines,
         f"exclude-header: {exclusion_identity}" if exclusion_identity else None,
     )

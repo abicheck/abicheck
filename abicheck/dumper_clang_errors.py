@@ -151,7 +151,7 @@ _MISSING_INCLUDE_RE = re.compile(
 #: must be defined``). The graceful-exclusion path
 #: (:func:`retry_excluding_error_headers`) only drops *direct-inclusion guards*;
 #: a config ``#error`` like this surfaces as a hard failure, so a hint pointing
-#: at ``--compiler-option -D…`` is what unblocks it. ``#error`` is a literal C
+#: at ``-D…`` (ADR-074) is what unblocks it. ``#error`` is a literal C
 #: preprocessor directive (always lowercase), so this is *not* IGNORECASE.
 _ERROR_LINE_RE = re.compile(r"#\s*error\b[^\n]*")
 #: A "must be defined / set" requirement phrased in the ``#error`` text. The
@@ -301,10 +301,14 @@ def diagnose_header_compile_failure(stderr: str) -> str | None:
     if name:
         return (
             f"\n\nHint: a header requires the macro '{name}' to be defined before "
-            f"inclusion. Pass it via --compiler-option (e.g. --compiler-option "
-            f'"-D{name}=...", such as -DPCRE2_CODE_UNIT_WIDTH=8 for pcre2), or point '
-            "-H at the library's umbrella header that defines it rather than an "
-            "individual sub-header."
+            f"inclusion. Pass it for this run with -D{name} (or -D{name}=<value>, "
+            "such as -DPCRE2_CODE_UNIT_WIDTH=8 for pcre2), or record it as the "
+            "project's stable contract in .abicheck.yml:\n"
+            "    compile:\n"
+            "      defines:\n"
+            f"        - {name}\n"
+            "Alternatively, point -H at the library's umbrella header that "
+            "defines it rather than an individual sub-header."
         )
 
     miss = _MISSING_INCLUDE_RE.search(stderr)
@@ -647,7 +651,9 @@ def _parse_clang_ast_result(
         raise SnapshotError(
             f"clang failed to parse the header(s) (exit {result.returncode}). The "
             "header may be malformed or need build flags it was not given (try "
-            f"--compiler-option / -p, or --ast-frontend castxml):\n"
+            "-D/--define for a required feature macro, .abicheck.yml's "
+            "compile: block for compiler flags, -p for a compile database, or "
+            "compile.frontend: castxml):\n"
             f"{result.stderr[:1000].strip()}"
             f"{diagnose_header_compile_failure(result.stderr) or ''}"
         )

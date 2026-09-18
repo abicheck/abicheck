@@ -22,6 +22,7 @@ Stacked-decorator helpers that bundle related ``compare`` options so the large
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
@@ -44,6 +45,12 @@ from .frontends.cli.options.params import (
     SIDED_PATH_PARAM,
     SIDED_STR_PARAM,
     SidedChoiceParam,
+)
+from .model.macro_definition import (
+    MacroDefinition,
+    macro_definition_tokens,
+    merge_macro_definitions,
+    parse_macro_definitions,
 )
 
 if TYPE_CHECKING:
@@ -581,6 +588,103 @@ def include_dependencies_option(func: F) -> F:
     return func
 
 
+def _define_callback(
+    ctx: click.Context, param: click.Parameter, value: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Validate every ``-D/--define`` operand eagerly, at parse time, and
+    return the canonical ``NAME``/``NAME=VALUE`` spellings.
+
+    Validation lives in :mod:`abicheck.macro_definition` (the one parser),
+    not here: this callback only translates its
+    :class:`~abicheck.macro_definition.MacroDefinitionError` into the usage
+    error Click reports (exit 64, per AGENTS.md's exit-code table), so a
+    malformed definition fails before any compiler is invoked and reports
+    the same text whichever command was run.
+    """
+    from .model.macro_definition import MacroDefinitionError, parse_macro_definition
+
+    spellings: list[str] = []
+    for raw in value or ():
+        try:
+            spellings.append(parse_macro_definition(raw).spelling)
+        except MacroDefinitionError as exc:
+            raise click.UsageError(str(exc)) from exc
+    return tuple(spellings)
+
+
+def dump_header_input_options(func: F) -> F:
+    """``dump``'s ``-H/--header`` and ``-I/--include`` operand pair.
+
+    Declared here with every other shared CLI flag rather than inline in
+    ``frontends/cli/commands/dump.py`` (ADR-061: move responsibility to its
+    owner instead of growing a capped command module). Decorators apply
+    bottom-up, so ``--include`` is listed first to display after ``--header``.
+    """
+    func = click.option(
+        "-I",
+        "--include",
+        "includes",
+        multiple=True,
+        type=click.Path(path_type=Path),
+        help="Extra include directory for castxml.",
+    )(func)
+    func = click.option(
+        "-H",
+        "--header",
+        "headers",
+        multiple=True,
+        type=click.Path(exists=True, path_type=Path),
+        help="Public header file or directory (repeat for multiple).",
+    )(func)
+    return func
+
+
+def define_option(func: F) -> F:
+    """``-D/--define NAME[=VALUE]`` -- ADR-074's narrow, per-invocation
+    preprocessor definition for the L2 header parse. Shared verbatim by
+    ``dump`` and ``compare`` so the two cannot drift (ADR-037 D3 parity).
+
+    This is deliberately **not** a reopening of the retired
+    ``--compiler-option``/``--gcc-options`` family (ADR-068 plan §4.2, "CLI
+    cleanup phase two" 7b): the operand is a *logical macro definition*,
+    parsed and revalidated into exactly one ``-D``-prefixed argv token, and
+    can never become a second compiler option. General compiler flags remain
+    config-only, under ``.abicheck.yml``'s ``compile.options``.
+
+    Why it earns a CLI spelling at all when ``compile.compiler``/
+    ``compile.std``/``compile.options`` did not: those name *toolchain
+    identity*, which is stable per project and belongs in reviewed
+    configuration. A feature macro that gates an opt-in public surface
+    (PVXS's ``PVXS_ENABLE_EXPERT_API``, pcre2's ``PCRE2_CODE_UNIT_WIDTH``)
+    selects *which surface is being analysed* -- the same question ``-H``
+    and ``-I`` answer, and both of those kept their CLI spelling for exactly
+    that reason.
+
+    On ``compare`` the definitions apply to **both** sides identically:
+    there is deliberately no ``old=``/``new=`` form, since two sides parsed
+    under different macro contexts are two different public surfaces and
+    every finding between them would be an artifact of the flags, not of the
+    change (ADR-074 D1).
+    """
+    func = click.option(
+        "-D",
+        "--define",
+        "defines",
+        multiple=True,
+        metavar="NAME[=VALUE]",
+        callback=_define_callback,
+        help="Define a preprocessor macro for the header parse (repeatable). "
+        "A one-off override for headers whose public surface is gated behind "
+        "a feature macro, e.g. -DPVXS_ENABLE_EXPERT_API or "
+        "-DPCRE2_CODE_UNIT_WIDTH=8. Applies to both sides of a compare. For "
+        "a stable project/CI contract prefer .abicheck.yml's "
+        "compile.defines:, which this overrides per macro name. Takes a "
+        "macro definition only -- general compiler flags stay in "
+        "compile.options.",
+    )(func)
+    return func
+
+
 def scope_options(func: F) -> F:
     """Public-surface scoping (`--scope-public-headers/--no-`).
 
@@ -983,6 +1087,55 @@ def merge_compile_std_fields(
     return {"options": _tokens(sources_blk) + _tokens(checkout_blk)}
 
 
+def _config_define_name(entry: str) -> str:
+    """The macro name a ``.abicheck.yml`` ``compile.defines`` entry defines.
+
+    Config entries are validated as single argv atoms but are *not* run
+    through :func:`~abicheck.macro_definition.parse_macro_definition` -- a
+    pre-existing project config may legitimately hold a spelling the
+    stricter CLI grammar rejects, and ADR-074 does not retroactively
+    invalidate one. Only the name is needed here (to decide whether a CLI
+    ``-D`` overrides this entry), so it is taken the same way: everything
+    before the first ``=``.
+    """
+    return entry.partition("=")[0]
+
+
+def _parse_context_defines(cli_ctx: CompileContext) -> tuple[MacroDefinition, ...]:
+    """The already-validated ``CompileContext.defines`` spellings, re-parsed
+    into value objects. Re-parsing is cheap and keeps :mod:`macro_definition`
+    the single grammar: the Click callback validated them at parse time, and
+    a non-CLI caller that set the field by hand gets the identical check.
+
+    Within-tier duplicates are collapsed here (last-wins, ADR-074 D3) so the
+    "exactly one -D per macro name" invariant holds for ``-DA=1 -DA=2`` on one
+    command line too, not only across the config/CLI tiers."""
+    return merge_macro_definitions((), parse_macro_definitions(cli_ctx.defines))
+
+
+def apply_cli_defines(
+    cli_ctx: CompileContext, config_defines: Sequence[str]
+) -> CompileContext:
+    """Append the CLI ``-D/--define`` tokens to *cli_ctx*'s pass-through
+    tokens, for the paths that have no ``compile:`` block to fold against
+    (no config found, or an auto-discovered config that failed to parse).
+
+    *config_defines* exists so the signature is the same shape as the real
+    fold; it is empty on every current call site, and a non-empty value
+    would mean the caller had a config after all.
+    """
+    definitions = merge_macro_definitions(
+        parse_macro_definitions(config_defines), _parse_context_defines(cli_ctx)
+    )
+    if not definitions:
+        return cli_ctx
+    return dataclasses.replace(
+        cli_ctx,
+        gcc_option_tokens=cli_ctx.gcc_option_tokens
+        + tuple(macro_definition_tokens(definitions)),
+    )
+
+
 def merge_compile_config(
     cli_ctx: CompileContext,
     cli_includes: tuple[Path, ...],
@@ -1057,7 +1210,11 @@ def merge_compile_config(
     explicit_config = build_config is not None
     cfg = build_config if explicit_config else discover_build_config(sources)
     if cfg is None:
-        return cli_ctx, cli_includes
+        # ADR-074: the CLI's own -D/--define definitions still have to reach the
+        # frontend when there is no config at all -- fold against an empty
+        # config-defines list rather than returning the raw context, which would
+        # silently drop every -D on a project with no .abicheck.yml.
+        return apply_cli_defines(cli_ctx, ()), cli_includes
     # Only the `compile.compiler` trust gate below is overridable via
     # `config_explicit` -- parse-error loudness above stays tied to
     # `explicit_config` unconditionally, matching every pre-existing
@@ -1088,7 +1245,7 @@ def merge_compile_config(
             f"context only ({exc}).",
             err=True,
         )
-        return cli_ctx, cli_includes
+        return apply_cli_defines(cli_ctx, ()), cli_includes
     # The project root a relative `compile.include_dirs` entry resolves
     # against — cfg.parent for a root-level .abicheck.yml (unchanged), but
     # the directory containing .github/ for a config discovered there
@@ -1109,6 +1266,12 @@ def merge_compile_config(
     gcc_option_tokens = cli_ctx.gcc_option_tokens
     if cli_ctx.gcc_options is not None:
         gcc_options = cli_ctx.gcc_options
+        # The internal-composition escape hatch still has to carry the CLI's
+        # own -D (ADR-074): there is no config-defines synthesis on this
+        # branch to fold them into, so they are appended directly.
+        gcc_option_tokens = gcc_option_tokens + tuple(
+            macro_definition_tokens(_parse_context_defines(cli_ctx))
+        )
     else:
         # Config fields are structured metadata, not a shell-like option string.
         # Keep each synthesized flag as one literal argv entry so whitespace inside
@@ -1119,9 +1282,20 @@ def merge_compile_config(
         # --compiler-option tokens (scan only, since compare/dump no longer
         # have the flag), same "config first, CLI wins a repeated flag"
         # precedence as std/defines above.
+        # ADR-074 D3: a macro the CLI defined is dropped from the config's own
+        # position and re-emitted last (see `apply_cli_defines`), so exactly one
+        # -D per macro reaches the frontend and the CLI value wins even against
+        # a raw -DNAME smuggled through `compile.options`. Config defines for
+        # every *other* macro keep their exact position and behavior, so a run
+        # with no -D is byte-identical to before.
+        cli_definitions = _parse_context_defines(cli_ctx)
+        cli_named = {d.name for d in cli_definitions}
         config_tokens = compile_config_argv_tokens(
-            bc.compile_std, bc.compile_defines, bc.compile_options
+            bc.compile_std,
+            [d for d in bc.compile_defines if _config_define_name(d) not in cli_named],
+            bc.compile_options,
         )
+        config_tokens += macro_definition_tokens(cli_definitions)
         gcc_options = None
         # CLI > config (same precedence every other field in this function
         # follows): config-synthesized tokens go *first* so an explicit CLI
@@ -1288,6 +1462,10 @@ def resolve_compile_context(
     compiler_path: str | None = None,
     compiler_prefix: str | None = None,
     compiler_option_tokens: tuple[str, ...] = (),
+    # ADR-074: the canonical `NAME`/`NAME=VALUE` spellings from -D/--define,
+    # already validated by the option's own callback. Folded by macro name
+    # against `compile.defines` in `merge_compile_config`.
+    defines: tuple[str, ...] = (),
     # --gcc-options removed as a CLI flag (CLI audit PR 5/5); kept as an
     # internal-only, defaulted-None parameter so callers that still compose
     # an effective_gcc_options string from other sources (build-context
@@ -1332,6 +1510,7 @@ def resolve_compile_context(
         gcc_prefix=compiler_prefix,
         gcc_options=gcc_options,
         gcc_option_tokens=tuple(compiler_option_tokens),
+        defines=tuple(defines),
         sysroot=sysroot,
         nostdinc=nostdinc,
         frontend=header_backend,

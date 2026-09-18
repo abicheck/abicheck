@@ -54,10 +54,62 @@ If castxml runs but reports parse errors or an empty surface, the inputs usually
 don't match the build environment of the analyzed `.so`:
 
 - Pass the same include dirs the library was built with: `-I include/ -I deps/include/`.
-- Pass the same preprocessor macros: `--compiler-option -DFEATURE_X=1 --compiler-option -DNDEBUG`.
+- Pass the same preprocessor macros with `-D/--define` (repeatable, and applied
+  to both sides of a `compare`): `-DFEATURE_X=1 -DNDEBUG`. For a stable
+  project/CI contract, record them in `.abicheck.yml` instead — see
+  [Headers that require a macro](#headers-that-require-a-macro-before-inclusion).
 - Best option: feed the real build flags from `compile_commands.json` with `-p build/`
   (see [CLI Usage → Build-context capture](cli-usage.md)).
-- For pure C libraries, add `--lang c` (the default is `c++`).
+- For pure C libraries, set `compile.lang: c` in `.abicheck.yml` (the default is
+  `c++`).
+
+### Headers that require a macro before inclusion
+
+Some libraries gate an opt-in public surface — or refuse to compile at all —
+behind a feature macro:
+
+```c
+#ifndef PVXS_ENABLE_EXPERT_API
+#error Define PVXS_ENABLE_EXPERT_API before including this header
+#endif
+```
+
+Without the macro those declarations are **absent**, not merely undetailed, so a
+signature break inside that surface reads as `compatible`. Two supported ways to
+supply it, for two different situations:
+
+```bash
+# One-off run, experiment, or an integration that builds the compile context
+# at invocation time (ADR-074). Repeatable; applies to both sides of a compare.
+abicheck dump libpvxs.so -H include/ -DPVXS_ENABLE_EXPERT_API -o pvxs.json
+abicheck dump libpcre2.so -H include/ -DPCRE2_CODE_UNIT_WIDTH=8 -o pcre2.json
+```
+
+```yaml
+# .abicheck.yml -- preferred for stable CI and baseline generation: the macro
+# set is part of the project's reviewed contract, not a per-run choice.
+compile:
+  defines:
+    - PVXS_ENABLE_EXPERT_API
+    - PCRE2_CODE_UNIT_WIDTH=8
+```
+
+The two compose: a CLI `-D` overrides the config entry **for that macro name
+only**, leaving every other `compile.defines` entry in force.
+
+`-D/--define` takes a *macro definition* (`NAME` or `NAME=VALUE`), not a
+compiler flag. A value containing whitespace, a function-like definition
+(`F(x)=...`), and anything that is not a bare macro name are rejected with a
+message naming `compile.options`, which is where general compiler flags live.
+Quoting is the shell's job and abicheck never re-splits the operand, so a
+string value is written `-DNAME=\"text\"` (the quotes reach the compiler); a
+value with a *space* in it has no portable spelling and belongs in
+`compile.options`.
+
+Because the macro set changes what was extracted, it is part of extraction
+identity: comparing a snapshot dumped without the macro against one dumped with
+it is refused as `profile_mismatch`, not silently diffed. Re-dump both sides
+under the same macro context.
 
 ### castxml aborts in system headers (`_Float32`, `__assume__`)
 

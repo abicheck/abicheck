@@ -50,6 +50,16 @@ class CompileContext:
     gcc_prefix: str | None = None
     gcc_options: str | None = None
     gcc_option_tokens: tuple[str, ...] = ()
+    #: ADR-074: the logical ``-D/--define`` macro definitions this invocation
+    #: supplied, in CLI order, as canonical ``NAME``/``NAME=VALUE`` spellings.
+    #: **Not** pre-rendered argv: these are folded by macro *name* against
+    #: ``.abicheck.yml``'s ``compile.defines`` in ``cli_options.
+    #: merge_compile_config`` -- the one canonical layer -- which is what
+    #: appends the resulting ``-D`` tokens to :attr:`gcc_option_tokens`. The
+    #: field is kept alongside the rendered tokens so the resolved request,
+    #: the ``--dry-run`` receipt and the snapshot provenance can report what
+    #: the *user asked for* rather than re-parsing argv.
+    defines: tuple[str, ...] = ()
     sysroot: Path | None = None
     nostdinc: bool = False
     frontend: str = "auto"  # --ast-frontend (auto/castxml/clang)

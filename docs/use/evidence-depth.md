@@ -396,10 +396,13 @@ in the `compile:` block:
 | `nostdinc` | do not search system includes (and disable the auto-probe below) |
 | `frontend_context`, `ast_frontend_fallback`, `allow_unsupported_castxml` | frontend-selection escape hatches |
 
-Legacy `scan` still exposes the same axis as CLI flags
+These are config-only: the general compiler/frontend CLI family
 (`--ast-frontend`, `--compiler-option`, `--compiler`/`--compiler-prefix`,
-`--sysroot`, `--nostdinc`, `--lang`); those spellings retire with the
-command. The full key reference is
+`--sysroot`, `--nostdinc`, `--lang`) was removed, and the retired `scan`
+command took the last of those spellings with it. The one exception is
+`defines`, which also has a per-invocation `-D/--define NAME[=VALUE]` on
+`dump`/`compare` (ADR-074), merged with this key by macro name. The full key
+reference is
 [Config Keys](../reference/config-keys-reference.md); the `compile:` block's
 own semantics are in [Config File](../reference/config-file.md).
 

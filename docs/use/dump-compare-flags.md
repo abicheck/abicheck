@@ -63,7 +63,9 @@ cross-toolchain in `.abicheck.yml`'s `compile:` block. Phase 7
 off `dump`/`compare`'s CLI entirely — a stable project/toolchain property,
 not a per-run choice — so there is **no `--compiler`/`--compiler-prefix`/
 `--compiler-option`/`--sysroot`/`--nostdinc`/`--ast-frontend`/`--lang` flag
-left on any command at all:
+left on any command at all — with one deliberate, narrow exception,
+`-D/--define` (ADR-074), covered under [Preprocessor
+macros](#preprocessor-macros-d-define) below:
 
 ```yaml
 # .abicheck.yml
@@ -75,7 +77,8 @@ compile:
                                     # --compiler-prefix pair into one key)
   options: [-march=armv8-a]  # was the repeatable --compiler-option
   std: c++20                 # synthesizes -std=c++20
-  defines: [FOO=1, NDEBUG]   # synthesizes -DFOO=1 -DNDEBUG
+  defines: [FOO=1, NDEBUG]   # synthesizes -DFOO=1 -DNDEBUG; the one compile:
+                             # field that also has a CLI override, -D/--define
   include_dirs: [include, third_party/inc]   # appended after -I roots
   sysroot: /opt/sysroots/aarch64
   nostdinc: false
@@ -122,6 +125,62 @@ command, and no per-side spelling: the sided `--ast-frontend old=`/`new=`
 override is gone too, since there is no CLI spelling left to be sided. A
 script still passing one of these flags exits `64` — see
 [Upgrading from 0.5 to 0.6 → compiler/frontend](../start/upgrading-to-0.6.md#c1-compiler-frontend).
+
+## Preprocessor macros: `-D` / `--define`
+
+The one L2 compile-context setting that kept a CLI spelling (ADR-074). It takes
+a **logical macro definition**, `NAME` or `NAME=VALUE`, never a compiler flag,
+and is repeatable on both `dump` and `compare`:
+
+```bash
+# One-off experiment: an opt-in public surface that only exists under a macro.
+abicheck dump libfoo.so -H include/ -DFEATURE_API=1 -o foo.json
+
+# Both sides of a compare are parsed under the same macro context -- always.
+abicheck compare old/libfoo.so new/libfoo.so -H include/ -DFEATURE_API
+```
+
+```yaml
+# .abicheck.yml -- preferred for a stable CI/project contract.
+compile:
+  defines:
+    - FEATURE_API=1
+```
+
+Why this one and not `--compiler`/`--sysroot`/`--compiler-option`: those name
+*toolchain identity*, which is stable per project and belongs in reviewed
+configuration. A feature macro selects *which public surface is being analysed*
+— the same question `-H` and `-I` answer, which is why those kept their CLI
+spelling too. General compiler-option pass-through stays config-only under
+`compile.options`.
+
+**Precedence.** A CLI `-D` merges with `compile.defines` **by macro name**: the
+macro you name on the command line wins, every other config define stays in
+force, and exactly one `-D` per macro reaches the frontend. `--dry-run` prints
+the resulting effective set.
+
+**Both sides, never one.** There is deliberately no `-D old=`/`new=` form,
+unlike `-H`/`-I`/`--version`: two sides parsed under different macro contexts
+are two different public surfaces, so every finding between them would be an
+artifact of the flags. (`-Dold=FOO` therefore defines a macro literally named
+`old` — it is not a side selector.)
+
+**Extraction identity.** The macro set is recorded in the snapshot and in its
+extraction contract, so a snapshot dumped without a macro and one dumped with it
+are refused as `profile_mismatch` rather than silently diffed.
+
+**Accepted and rejected.**
+
+| Spelling | Result |
+|---|---|
+| `-DNAME`, `-D NAME`, `--define NAME`, `--define=NAME` | accepted |
+| `-DNAME=VALUE`, `--define=NAME=A=B` (split on the first `=` only) | accepted |
+| `-DNAME=` (defined to an empty token sequence) | accepted, and distinct from `-DNAME` |
+| `-DNAME="text"` (shell quoting; abicheck never re-splits the operand) | accepted |
+| `-D"NAME=a b"` (whitespace in the value) | rejected — no portable GNU/MSVC spelling; use `compile.options` |
+| `-DF(x)=x+1` (function-like) | rejected — same reason |
+| `--define=-DFOO`, `--define=-Xclang`, `--define=@resp.txt` | rejected with a targeted hint |
+| `-U`/undefine | no CLI spelling; remove the entry from `compile.defines` |
 
 ## Build-context capture (`compile_commands.json`) — evidence layer L3
 

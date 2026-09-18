@@ -825,6 +825,7 @@ def render_dump_dry_run(
     """
     from .cli_helpers_compare import discover_project_config
     from .dry_run import DryRunResult, tool_status
+    from .model.macro_definition import defines_receipt_line
 
     side = resolved.request.input
     so_path, sources, build_info = side.path, side.sources, side.build_info
@@ -852,6 +853,8 @@ def render_dump_dry_run(
     result.add(
         "Headers and compile context",
         f"ast-frontend: {resolved.effective_header_backend}",
+        # ADR-074: the EFFECTIVE macro set, off the resolved context's argv tail.
+        defines_receipt_line(side.compile.gcc_option_tokens if side.compile else ()),
     )
     result.add(
         "Build/source inputs",
@@ -930,13 +933,14 @@ def resolve_dump_compile_context(
     compiler_path: str | None = None,
     compiler_prefix: str | None = None,
     compiler_option_tokens: tuple[str, ...] = (),
+    defines: tuple[str, ...] = (),
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Resolve the L2 compile context for a dump, folding the config compile: block.
 
     Returns ``(compile_context, includes)``. When the caller (compare's inline
     source-tree embed) already resolved the context it is used verbatim; do NOT
-    re-discover/re-merge the tree's .abicheck.yml here.
-    """
+    re-discover/re-merge the tree's .abicheck.yml here. *defines* is ADR-074's
+    ``-D/--define``, folded with ``compile.defines`` by macro name downstream."""
     if resolved_compile_context is not None:
         # Caller (compare's inline source-tree embed) already resolved the compile
         # context with CLI-over-config explicitness honored; use it verbatim and do
@@ -960,4 +964,5 @@ def resolve_dump_compile_context(
         compiler_path=compiler_path,
         compiler_prefix=compiler_prefix,
         compiler_option_tokens=compiler_option_tokens,
+        defines=defines,
     )

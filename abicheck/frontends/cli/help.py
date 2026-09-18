@@ -86,7 +86,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         # --sysroot/--nostdinc) are gone from compare's CLI entirely --
         # .abicheck.yml's compile: block is their only source now, so
         # there is nothing left here to group.
-        {"name": "Inputs", "options": ["--header", "--include"]},
+        {"name": "Inputs", "options": ["--header", "--include", "--define"]},
         {
             "name": "Output & reporting",
             "options": [
@@ -177,6 +177,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": [
                 "--header",
                 "--include",
+                "--define",
                 "--version",
             ],
         },
@@ -316,6 +317,10 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         # Inputs
         "header",
         "include",
+        # ADR-074's -D/--define: an opt-in public surface that only exists
+        # under a feature macro is unreachable without it, so it belongs
+        # with -H/-I rather than behind --help-all.
+        "defines",
         # --lang has no Click dest here any more (Phase 7: compile.lang
         # config-only, one-comparison-product.md §4.1).
         # Output & reporting -- one dest ("exports") for the whole export
@@ -497,6 +502,8 @@ DUMP_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         "headers",
         "includes",
         "version",
+        # ADR-074's -D/--define -- see the note in COMPARE_COMMON_OPTION_NAMES.
+        "defines",
         # Build & source evidence (--depth build/source)
         "depth",
         "sources",

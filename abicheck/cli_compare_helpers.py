@@ -1166,6 +1166,11 @@ def run_compare(
     compiler_path: str | None = None,
     compiler_prefix: str | None = None,
     compiler_option_tokens: tuple[str, ...] = (),
+    # ADR-074's -D/--define: one both-sides macro set (never per-side -- two
+    # sides parsed under different macro contexts are two different public
+    # surfaces), folded by macro name against .abicheck.yml compile.defines
+    # inside the shared resolve_compile_context below.
+    defines: tuple[str, ...] = (),
     old_header_backend: str | None = None,
     new_header_backend: str | None = None,
     old_headers_only: tuple[Path, ...],
@@ -1506,9 +1511,31 @@ def run_compare(
     )
     if _exclusion_warning is not None:
         click.echo(_exclusion_warning, err=True)
+    # What the ONE shared L2 compile-context resolution resolves from (ADR-037
+    # D3; ADR-074's by-macro-name defines fold), bound once so the --dry-run
+    # receipt and the real resolution below cannot drift. `cfg_path` is `config`
+    # or the cwd-upward auto-discovered .abicheck.yml (PR #1154, as above).
+    _compile_context_kwargs: dict[str, Any] = dict(
+        ctx=ctx,
+        gcc_options=gcc_options,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        header_backend=header_backend,
+        includes=includes,
+        build_config=cfg_path,
+        frontend_context=frontend_context,
+        compiler_path=compiler_path,
+        compiler_prefix=compiler_prefix,
+        compiler_option_tokens=compiler_option_tokens,
+        defines=defines,
+        config_explicit=(config is not None),
+    )
     if dry_run:
         from .dry_run import emit_dry_run
-        from .frontends.cli.compare_dry_run import build_compare_dry_run_result
+        from .frontends.cli.compare_dry_run import (
+            build_compare_dry_run_result,
+            effective_compare_defines,
+        )
 
         # ADR-043 D4's dry-run report must reflect the *effective* depth, not
         # just echo `--depth` back -- the same resolution `_render_compare_
@@ -1526,6 +1553,11 @@ def run_compare(
         )
         emit_dry_run(
             build_compare_dry_run_result(
+                # ADR-074: the effective macro set, resolved through the very
+                # same call the real run makes below (see that helper).
+                defines=effective_compare_defines(
+                    resolve_compile_context, **_compile_context_kwargs
+                ),
                 old_input=old_input,
                 new_input=new_input,
                 old_kind=old_kind,
@@ -1558,25 +1590,14 @@ def run_compare(
         # Both-sides L2 compile context for the release fan-out -- see
         # resolve_directory_compile_context's own docstring.
         directory_compile_context, directory_includes = (
-            resolve_directory_compile_context(
-                ctx,
-                gcc_options=gcc_options,
-                sysroot=sysroot,
-                nostdinc=nostdinc,
-                header_backend=header_backend,
-                includes=includes,
-                build_config=cfg_path,
-                frontend_context=frontend_context,
-                compiler_path=compiler_path,
-                compiler_prefix=compiler_prefix,
-                compiler_option_tokens=compiler_option_tokens,
-                # `cfg_path` is explicit --config OR an auto-discovered
-                # .abicheck.yml, not the raw CLI value merge_compile_config's
-                # `build_config is not None` inference expects -- without this
-                # an auto-discovered `compile.compiler` bypasses the untrusted-
-                # executable-selection gate (Codex review, PR #1154).
-                config_explicit=(config is not None),
-            )
+            # The identical resolution the single-pair path performs, from the
+            # identical inputs (see the kwargs dict bound above the --dry-run
+            # branch) -- including `config_explicit`, without which an
+            # auto-discovered `compile.compiler` would bypass the untrusted-
+            # executable-selection gate (Codex review, PR #1154), and ADR-074's
+            # `defines`, without which a release fan-out would silently drop
+            # every -D the single-pair path honors.
+            resolve_directory_compile_context(**_compile_context_kwargs)
         )
         # Dirs the config appended past the CLI -I roots (mirrors the single-pair
         # `config_includes` split below): must survive a per-library-pair
@@ -1709,32 +1730,11 @@ def run_compare(
     )
     collect_mode = _enrich.localize_collect_mode(collect_mode)
 
-    # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
-    # shared resolver folds the project's .abicheck.yml compile: block into the CLI
-    # cross-toolchain/frontend flags (CLI > config) and appends config include_dirs
-    # after the -I roots. It applies to both sides; a per-side --ast-frontend old=/new=
-    # overrides still win for the frontend (threaded separately below). cfg_path is
-    # the same config compare resolves everything else from (explicit --config or the
-    # .abicheck.yml auto-discovered from cwd).
+    # Applies to both sides; a per-side --ast-frontend old=/new= still wins.
     import dataclasses
 
     compile_context, merged_includes = resolve_compile_context(
-        ctx,
-        gcc_options=gcc_options,
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        header_backend=header_backend,
-        includes=includes,
-        build_config=cfg_path,
-        frontend_context=frontend_context,
-        compiler_path=compiler_path,
-        compiler_prefix=compiler_prefix,
-        compiler_option_tokens=compiler_option_tokens,
-        # `cfg_path` is `config` (explicit --config) OR the cwd-upward
-        # auto-discovered .abicheck.yml -- see the identical note on the
-        # directory/package `resolve_directory_compile_context` call above
-        # (Codex review, fresh evidence -- real finding on PR #1154).
-        config_explicit=(config is not None),
+        **_compile_context_kwargs
     )
     # The dirs the config appended past the CLI -I roots. These are documented as
     # applying to *both* sides, so they must survive a per-side --old/new-include

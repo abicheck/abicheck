@@ -52,6 +52,7 @@ from ....cli_options import (
     changed_path_options,
     contract_options,
     debug_resolution_options,
+    define_option,
     evidence_options,
     export_options,
     include_dependencies_option,
@@ -643,6 +644,7 @@ def _embed_inline_source_side(
     "bindings, and include a dependency-change section in the report. ELF only.",
 )
 @include_dependencies_option
+@define_option
 @click.option(
     "--search-path",
     "search_paths",

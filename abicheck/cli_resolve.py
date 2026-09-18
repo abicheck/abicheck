@@ -694,17 +694,15 @@ def _resolve_compare_snapshots(
 # would be silently dropped on a directory/package compare, so they are
 # rejected loudly instead (Codex review). Kept here (not in cli.py) so cli.py
 # stays under the file-size hard cap.
-#
-# The both-sides L2 compile context (--ast-frontend/--compiler/
-# --compiler-prefix/--compiler-option/--sysroot/--nostdinc/--frontend-context)
-# *is* now threaded through the fan-out (cli_compare_helpers.run_compare
-# resolves one CompileContext for the whole release, the same way a
+##
+# The both-sides L2 compile context (.abicheck.yml's compile: block, plus
+# ADR-074's -D/--define) *is* threaded through the fan-out
+# (cli_compare_helpers.run_compare resolves one CompileContext for the whole release, the same way a
 # single-pair compare resolves its own, and forwards it to every library pair
 # — see cli_compare_release._run_compare_pair's compile_context parameter).
 # Only the *sided* --ast-frontend old=/new= override has no home here: it
-# means "parse the old library's headers with a different frontend than the
-# new one", which has no per-library-pair-within-a-release equivalent to
-# mirror (a release fan-out already compares each library's own old vs. new
+# means "parse the old headers with a different frontend than the new ones",
+# which has no per-library-pair-within-a-release equivalent to mirror (a release fan-out already compares each library's own old vs. new
 # under one shared context) — so it stays rejected below.
 
 
@@ -810,6 +808,7 @@ def resolve_directory_compile_context(
     compiler_path: str | None,
     compiler_prefix: str | None,
     compiler_option_tokens: tuple[str, ...],
+    defines: tuple[str, ...] = (),
     config_explicit: bool | None = None,
 ) -> Any:
     """Resolve the both-sides L2 compile context for a directory/package
@@ -836,5 +835,6 @@ def resolve_directory_compile_context(
         compiler_path=compiler_path,
         compiler_prefix=compiler_prefix,
         compiler_option_tokens=compiler_option_tokens,
+        defines=defines,
         config_explicit=config_explicit,
     )

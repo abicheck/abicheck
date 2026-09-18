@@ -268,7 +268,12 @@ for the flag→key mapping.
   case-insensitive — `hybrid` runs castxml and clang together and merges
   them). Was `--ast-frontend` on compare/dump.
 - `std:` — C/C++ standard, e.g. `c++17`.
-- `include_dirs:`/`defines:` — lists.
+- `include_dirs:`/`defines:` — lists. `defines:` is the **stable** half of a
+  pair: `dump`/`compare` also accept a per-invocation `-D/--define NAME[=VALUE]`
+  (ADR-074), which merges with this list **by macro name** — the CLI value wins
+  for the macro it names and every other entry here stays in force. Prefer this
+  key for CI and baseline generation; use `-D` for one-off runs and
+  experiments. It is the only `compile:` field with a CLI counterpart.
 - `sysroot:` — was `--sysroot` on compare/dump.
 - `nostdinc:` — boolean; was `--nostdinc`/`--no-nostdinc` on compare/dump.
 - `compiler:` — path to the compiler binary, **or** a cross-toolchain

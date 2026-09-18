@@ -69,12 +69,14 @@ abicheck compare old/lib/libfoo.so.2.3.0 new/lib/libfoo.so.2.4.0 \
 - `--include old=`/`--include new=` (`-I` for both) are the include roots.
 - On a clang-only host (`castxml` is the default), set `compile.frontend:
   clang` in a [`.abicheck.yml` `compile:` block](#4-configure-once-abicheckyml)
-  — abicheck auto-detects the host libstdc++. (`scan` alone still has a
-  `--ast-frontend` flag for this; `compare`/`dump` take it only via config.)
-- Need a specific `-std`/`-D` to parse the headers? Set `compile.std: c++20`/
-  `compile.defines: [FOO=1]` in that same `.abicheck.yml` — `compare` and
-  `dump` read the `compile:` block only from config now, while `scan` also
-  keeps its own `--compiler-option` CLI flag for a one-off override.
+  — abicheck auto-detects the host libstdc++. (There is no `--ast-frontend`
+  flag; `compare`/`dump` take it only via config.)
+- Need a specific `-std` to parse the headers? Set `compile.std: c++20` in that
+  same `.abicheck.yml` — the compile context is config-only, with one
+  exception: **preprocessor macros** also have a CLI spelling,
+  `-D/--define NAME[=VALUE]` on both `compare` and `dump` (ADR-074), for a
+  one-off run. `compile.defines: [FOO=1]` stays the right answer for CI; a CLI
+  `-D` overrides it for that macro name only.
 
 See [CLI Usage](../use/cli-usage.md) for every flag.
 
@@ -125,10 +127,10 @@ Auto-discovery differs by command: `compare` finds the nearest `.abicheck.yml`
 from the working directory upward, while `dump`/`scan` pick it up automatically
 only from the `--sources` tree root — so give a header-only `dump`/`scan` (no
 `--sources`) an explicit `--config`, or its `compile:` settings are silently
-skipped. On `scan`, an explicit CLI flag (`--compiler-option`/`-I`/
-`--ast-frontend`) always overrides the config per run; `dump` and `compare`
-have no such CLI flags at all any more (Phase 7 CLI cleanup) — `.abicheck.yml`
-is their only source for the compile context.
+skipped. `dump` and `compare` have no general compiler-flag CLI options at all
+(Phase 7 CLI cleanup) — `.abicheck.yml` is their only source for the compile
+context, except for `-I/--include` and `-D/--define`, which override the
+config's `include_dirs`/`defines` per run.
 
 ```yaml
 # .abicheck.yml
