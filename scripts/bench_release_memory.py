@@ -207,12 +207,25 @@ class _Sampler(threading.Thread):
         self.pid = pid
         self.interval = interval
         self.stop = threading.Event()
-        self.parent_peak = 0
-        self.tree_rss_peak = 0
-        self.tree_pss_peak = 0
-        self.cgroup_peak = 0
+        # `None` until something is actually read. A peak of 0 is a legal
+        # measurement ("this used no memory"), so initialising to 0 would
+        # report an *unreadable* figure as a real one -- the same
+        # unavailable-is-not-zero rule `abicheck.workflows.memory_trace`
+        # states for its own probes, which this harness was quietly
+        # contradicting (CodeRabbit, PR #1332).
+        self.parent_peak: int | None = None
+        self.tree_rss_peak: int | None = None
+        self.tree_pss_peak: int | None = None
+        self.cgroup_peak: int | None = None
         self.max_processes = 0
         self.samples = 0
+
+    @staticmethod
+    def _peak(current: int | None, reading: int | None) -> int | None:
+        """Fold one reading into a running peak, keeping `None` for absent."""
+        if reading is None:
+            return current
+        return reading if current is None else max(current, reading)
 
     def _tree(self) -> list[int]:
         seen: list[int] = []
@@ -238,6 +251,7 @@ class _Sampler(threading.Thread):
             pids = self._tree()
             self.max_processes = max(self.max_processes, len(pids))
             rss_total = pss_total = 0
+            any_read = False
             for pid in pids:
                 rss = pss = 0
                 try:
@@ -251,14 +265,15 @@ class _Sampler(threading.Thread):
                     continue
                 rss_total += rss
                 pss_total += pss
+                any_read = True
                 if pid == self.pid:
-                    self.parent_peak = max(self.parent_peak, rss)
-            self.tree_rss_peak = max(self.tree_rss_peak, rss_total)
-            self.tree_pss_peak = max(self.tree_pss_peak, pss_total)
+                    self.parent_peak = self._peak(self.parent_peak, rss)
+            if any_read:
+                self.tree_rss_peak = self._peak(self.tree_rss_peak, rss_total)
+                self.tree_pss_peak = self._peak(self.tree_pss_peak, pss_total)
             cg_current, cg_peak = _cgroup_memory()
             for value in (cg_current, cg_peak):
-                if value is not None:
-                    self.cgroup_peak = max(self.cgroup_peak, value)
+                self.cgroup_peak = self._peak(self.cgroup_peak, value)
             self.samples += 1
             self.stop.wait(self.interval)
 
@@ -425,6 +440,13 @@ def _require_a_measured_comparison(row: dict[str, object]) -> None:
             "not BREAKING. Not recording a measurement of a run that did not "
             "detect the injected break."
         )
+    for field in ("parent_peak_rss_bytes", "tree_peak_pss_bytes"):
+        if not isinstance(row[field], int):
+            raise SystemExit(
+                f"{row['variant']}: {field} was never read (the process may "
+                "have exited before the first sample). Not recording a "
+                "memory measurement with no memory in it."
+            )
     findings = row["findings"]
     if not isinstance(findings, int) or findings <= 0:
         raise SystemExit(
@@ -489,6 +511,12 @@ def _summarize(
     perturbs both time and RSS, so such a run publishes no timing at all
     rather than a number a reader might compare against an ordinary one.
     """
+    if not results:
+        raise SystemExit(
+            "no runs were measured, so there is nothing to report. A receipt "
+            "written here would say 'success' while containing no "
+            "measurements at all -- check --repeat and --variants."
+        )
     by_variant: dict[str, object] = {}
     for name in {str(r["variant"]) for r in results}:
         rows = [r for r in results if r["variant"] == name]
