@@ -31,11 +31,27 @@ Two contracts, and the second is the one that keeps the first acceptable:
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
 
 from abicheck.workflows import memory_trace
+
+#: ``/proc`` is Linux-only, and so is everything read out of it. Absent on
+#: macOS and Windows is an *absent capability* for a probe of it, which is a
+#: skip -- not a failure, and not a silently-passing assertion either: the
+#: cross-platform half of the contract (every probe answers ``None`` rather
+#: than raising) is asserted separately, on every platform, in
+#: ``TestTheProbesDegradeEverywhere``.
+requires_proc = pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="/proc is Linux-only; the probes answer None elsewhere by design",
+)
+requires_sysconf = pytest.mark.skipif(
+    not hasattr(os, "sysconf"), reason="os.sysconf is POSIX-only"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -225,10 +241,9 @@ class TestTheProbesThemselves:
     rather than against itself.
     """
 
+    @requires_sysconf
     def test_the_page_size_is_the_kernel_s_not_a_constant(self) -> None:
         """The bug a hard-coded 4096 is: correct on x86_64, wrong elsewhere."""
-        import os
-
         assert memory_trace._page_size() == os.sysconf("SC_PAGE_SIZE")
         # ... and the module actually uses the probed value.
         assert memory_trace._PAGE_SIZE == os.sysconf("SC_PAGE_SIZE")
@@ -237,14 +252,16 @@ class TestTheProbesThemselves:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A platform without the constant must still produce a number."""
-        import os
 
         def _no_such(_name: str) -> int:
             raise ValueError("unrecognised configuration name")
 
-        monkeypatch.setattr(os, "sysconf", _no_such)
+        # raising=False so this also covers Windows, where the attribute
+        # does not exist and the fallback is the *only* path.
+        monkeypatch.setattr(os, "sysconf", _no_such, raising=False)
         assert memory_trace._page_size() == 4096
 
+    @requires_proc
     def test_self_rss_agrees_with_an_independent_reading(self) -> None:
         """``statm`` against ``status``'s VmRSS -- two different files.
 
@@ -253,8 +270,6 @@ class TestTheProbesThemselves:
         this rules out is the class the page-size bug belongs to, an answer
         off by a whole multiple.
         """
-        from pathlib import Path
-
         got = memory_trace._self_rss_bytes()
         assert got is not None and got > 0
         vm_rss = None
@@ -280,11 +295,10 @@ class TestTheProbesThemselves:
         monkeypatch.setattr(builtins, "open", _fail)
         assert memory_trace._self_rss_bytes() is None
 
+    @requires_proc
     def test_the_tree_walk_finds_a_real_child(self) -> None:
         """A live child must appear, or a concurrency change looks free."""
-        import os
         import subprocess
-        import sys
 
         proc = subprocess.Popen(
             [sys.executable, "-c", "import sys; sys.stdin.read()"],
@@ -397,3 +411,49 @@ class TestRecordReleaseMember:
         )
         memory_trace.record_release_member("libx.so", {"old_full": True})
         assert called["n"] == 0
+
+
+class TestTheProbesDegradeEverywhere:
+    """Off Linux the probes answer ``None``; they never raise, never guess.
+
+    This is the half a `/proc` skip would otherwise leave unasserted, and it
+    is the half that matters for a macOS or Windows run: instrumentation
+    must not be able to break analysis on a platform it cannot measure, and
+    an unavailable figure must read as unavailable rather than as zero.
+    Runs on every platform, including Linux, where it additionally pins that
+    a *readable* probe returns an ``int`` rather than an accidental string.
+    """
+
+    def test_no_probe_raises_on_any_platform(self) -> None:
+        rss = memory_trace._self_rss_bytes()
+        assert rss is None or isinstance(rss, int)
+        tree_rss, tree_pss, count = memory_trace._tree_memory()
+        assert tree_rss is None or isinstance(tree_rss, int)
+        assert tree_pss is None or isinstance(tree_pss, int)
+        assert isinstance(count, int) and count >= 1
+        current, peak = memory_trace._cgroup_memory()
+        assert current is None or isinstance(current, int)
+        assert peak is None or isinstance(peak, int)
+        assert isinstance(memory_trace._page_size(), int)
+
+    def test_a_sample_is_still_written_where_nothing_can_be_probed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A host with no readable probe still gets phase boundaries.
+
+        Simulated rather than skipped, so Linux covers the non-Linux shape:
+        the record must still be written, with each unavailable figure
+        `null`, because the phase labels alone are what make a trace from
+        such a host worth anything.
+        """
+        out = tmp_path / "trace.jsonl"
+        _enable(monkeypatch, out)
+        monkeypatch.setattr(memory_trace, "_self_rss_bytes", lambda: None)
+        monkeypatch.setattr(memory_trace, "_tree_memory", lambda: (None, None, 1))
+        monkeypatch.setattr(memory_trace, "_cgroup_memory", lambda: (None, None))
+        with memory_trace.phase("member", library="libx.so"):
+            pass
+        records = memory_trace.read_samples(out)
+        assert [r["event"] for r in records] == ["member:enter", "member:exit"]
+        assert all(r["parent_rss_bytes"] is None for r in records)
+        assert all(r["attrs"] == {"library": "libx.so"} for r in records)
