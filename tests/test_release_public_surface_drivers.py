@@ -782,3 +782,69 @@ class TestTheOutputDirectorySummaryCarriesTheContract:
 
     def test_a_release_with_no_contract_omits_the_block(self, tmp_path) -> None:
         assert "public_surface_reconciliation" not in self._summary(tmp_path, None)
+
+
+class TestTheStoredEnvelopesGateBearingKeys:
+    """`assurance_sections` moved into the sections module when the
+    already-capped dispatch file could not absorb another section's
+    assembly. It carries ADR-071 D9's *gate-bearing* scalar
+    (`analysis_assurance_exit_contribution`), whose omission the module
+    itself records as a real bypass rather than a cosmetic gap -- so it is
+    stated here directly rather than left to whichever caller happens to
+    exercise it.
+    """
+
+    def _decision(self, *, require_complete: bool, contribution: int = 1):
+        from abicheck.policy.release_assurance import ReleaseAssuranceDecision
+
+        return ReleaseAssuranceDecision(
+            members=(),
+            require_complete=require_complete,
+            status="incomplete" if contribution else "complete",
+            exit_contribution=contribution,
+        )
+
+    def test_the_gate_bearing_scalar_is_emitted_under_the_setting(self) -> None:
+        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+            assurance_sections,
+        )
+
+        block = assurance_sections(self._decision(require_complete=True))
+        assert block["analysis_assurance_exit_contribution"] == 1
+        assert "analysis_assurance" in block
+
+    def test_a_clean_fold_still_states_its_zero(self) -> None:
+        """Present-and-zero, not absent: a consumer reading the gate must be
+        able to tell "the axis ran and found nothing" from "the axis did not
+        run", which is the whole reason this key is a plain scalar."""
+        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+            assurance_sections,
+        )
+
+        block = assurance_sections(
+            self._decision(require_complete=True, contribution=0)
+        )
+        assert block["analysis_assurance_exit_contribution"] == 0
+
+    @pytest.mark.parametrize("decision", ["none", "not-required"])
+    def test_without_the_setting_nothing_is_emitted(self, decision: str) -> None:
+        """D4: present only under the setting, so every run that never asked
+        for the axis is byte-identical to before it existed."""
+        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+            assurance_sections,
+        )
+
+        given = None if decision == "none" else self._decision(require_complete=False)
+        assert assurance_sections(given) == {}
+
+    def test_an_unevaluated_surface_renders_no_markdown_lines(self) -> None:
+        """The empty-render branch: a reconciliation that states nothing
+        contributes no lines rather than a bare heading."""
+        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+            public_surface_markdown_lines,
+        )
+
+        class _Result:
+            public_surface_reconciliation = None
+
+        assert public_surface_markdown_lines(_Result()) == []
