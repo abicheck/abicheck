@@ -177,7 +177,13 @@ def compute_release_public_surface(
 
 def render_release_public_surface_markdown(terms: ReleasePublicSurfaceTerms) -> str:
     """Format *terms*. Decides nothing -- every number comes from the struct."""
-    if not terms.evaluated and not terms.shared_findings:
+    # Deliberately *not* gated on `evaluated`: a side whose surface could not
+    # be acquired is unevaluated by definition, and returning "" for it would
+    # render a failed extractor as silence -- the inversion this whole model
+    # refuses (the JSON already carries `surface_resolvable: false` and the
+    # reason; a Markdown reader must not be the one consumer who sees
+    # nothing). Empty only when there is genuinely nothing to state.
+    if not terms.sides and not terms.shared_findings:
         return ""
     lines: list[str] = ["", "## Release public surface", ""]
     for name in ("old", "new"):

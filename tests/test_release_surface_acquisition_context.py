@@ -247,3 +247,286 @@ class TestTheResolvedCompileContextReachesTheParse:
         _, stage = self._acquire_with(monkeypatch, self._context(), tmp_path)
         assert stage.new_surface is not None
         assert stage.new_surface.resolvable is False
+
+
+def _decl(name: str, *, mangled: str = "", public: bool = True, **kw):
+    """A header-declared function, as the projection sees one."""
+    from abicheck.model.declarations import Function
+    from abicheck.model.vocabulary import AccessLevel, ScopeOrigin
+
+    return Function(
+        name=name,
+        mangled=mangled or name,
+        return_type="int",
+        params=[],
+        access=AccessLevel.PUBLIC,
+        origin=ScopeOrigin.PUBLIC_HEADER if public else ScopeOrigin.UNKNOWN,
+        is_extern_c=True,
+        **kw,
+    )
+
+
+def _header_snapshot(*decls, variables=(), types=(), enums=()):
+    from abicheck.model import AbiSnapshot
+
+    return AbiSnapshot(
+        library="headers",
+        version="1",
+        functions=list(decls),
+        variables=list(variables),
+        types=list(types),
+        enums=list(enums),
+        from_headers=True,
+        header_only=True,
+    )
+
+
+class TestWhatCountsAsAnObligation:
+    """`surface_from_snapshot` decides what the product *promises*.
+
+    Exercised directly here, against hand-built snapshots, rather than only
+    through a real castxml parse: the projection is what every downstream
+    number rests on (how many declarations owe an export, which symbols
+    count as documented), and the toolchain-driven path only runs in the
+    `integration` lane -- which the coverage lane does not run, so this was
+    the largest untested surface in the change.
+    """
+
+    def _surface(self, snapshot):
+        from abicheck.workflows.release_surface_acquisition import (
+            surface_from_snapshot,
+        )
+
+        return surface_from_snapshot(snapshot, acquisition_key="k", side="new")
+
+    def test_a_public_declaration_owes_an_export(self) -> None:
+        surface = self._surface(_header_snapshot(_decl("api_a")))
+        assert [o.symbol for o in surface.obligations] == ["api_a"]
+        assert surface.obligations[0].entity == "function"
+        assert surface.resolvable is True
+
+    def test_an_unresolvable_origin_is_not_an_empty_surface(self) -> None:
+        """With no public-header provenance nothing can be classified, and
+        reporting zero obligations would read as "this product promises
+        nothing" -- the inversion the whole model refuses."""
+        surface = self._surface(_header_snapshot(_decl("api_a", public=False)))
+        assert surface.resolvable is False
+        assert surface.obligations == ()
+        assert "provenance" in (surface.unresolved_reason or "")
+
+    def test_an_inline_declaration_owes_nothing(self) -> None:
+        """The obligation predicate is the single-artifact check's own, so a
+        declaration that legitimately emits no symbol is not demanded."""
+        surface = self._surface(
+            _header_snapshot(_decl("api_a"), _decl("helper", is_inline=True))
+        )
+        assert [o.symbol for o in surface.obligations] == ["api_a"]
+
+    def test_a_declared_symbol_is_documented_even_without_an_obligation(self) -> None:
+        """Documented surface and owed surface are different questions: an
+        inline declaration documents its symbol without promising it."""
+        surface = self._surface(
+            _header_snapshot(_decl("api_a"), _decl("helper", is_inline=True))
+        )
+        assert surface.declared_symbols == frozenset({"api_a", "helper"})
+
+    def test_extern_data_owes_an_export_too(self) -> None:
+        from abicheck.model.declarations import Variable
+        from abicheck.model.vocabulary import AccessLevel, ScopeOrigin
+
+        surface = self._surface(
+            _header_snapshot(
+                variables=[
+                    Variable(
+                        name="api_table",
+                        mangled="api_table",
+                        type="int",
+                        access=AccessLevel.PUBLIC,
+                        origin=ScopeOrigin.PUBLIC_HEADER,
+                    )
+                ]
+            )
+        )
+        assert [(o.symbol, o.entity) for o in surface.obligations] == [
+            ("api_table", "variable")
+        ]
+
+    def test_a_const_header_constant_owes_nothing(self) -> None:
+        from abicheck.model.declarations import Variable
+        from abicheck.model.vocabulary import AccessLevel, ScopeOrigin
+
+        surface = self._surface(
+            _header_snapshot(
+                _decl("api_a"),
+                variables=[
+                    Variable(
+                        name="kLimit",
+                        mangled="kLimit",
+                        type="int",
+                        access=AccessLevel.PUBLIC,
+                        origin=ScopeOrigin.PUBLIC_HEADER,
+                        is_const=True,
+                    )
+                ],
+            )
+        )
+        assert [o.symbol for o in surface.obligations] == ["api_a"]
+
+    def test_obligations_are_ordered_deterministically(self) -> None:
+        surface = self._surface(
+            _header_snapshot(_decl("zeta"), _decl("alpha"), _decl("mid"))
+        )
+        assert [o.symbol for o in surface.obligations] == ["alpha", "mid", "zeta"]
+
+    def test_the_declaring_headers_are_counted_not_the_declarations(self) -> None:
+        """`header_count` answers "how many headers did this parse", so two
+        declarations from one header count once."""
+        surface = self._surface(
+            _header_snapshot(
+                _decl("api_a", source_location="/inc/product.h:3"),
+                _decl("api_b", source_location="/inc/product.h:4"),
+                _decl("api_c", source_location="/inc/extra.h:1"),
+            )
+        )
+        assert surface.header_count == 2
+
+    def test_a_declaration_with_no_location_is_not_counted_as_a_header(self) -> None:
+        surface = self._surface(_header_snapshot(_decl("api_a")))
+        assert surface.header_count == 0
+
+    def test_public_type_names_ride_the_surface(self) -> None:
+        from abicheck.model import RecordType
+        from abicheck.model.vocabulary import ScopeOrigin
+
+        surface = self._surface(
+            _header_snapshot(
+                _decl("api_a"),
+                types=[
+                    RecordType(
+                        name="Cfg", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER
+                    ),
+                    RecordType(
+                        name="Hidden", kind="struct", origin=ScopeOrigin.UNKNOWN
+                    ),
+                ],
+            )
+        )
+        assert surface.type_names == ("Cfg",)
+
+    def test_the_source_location_rides_the_obligation(self) -> None:
+        surface = self._surface(
+            _header_snapshot(_decl("api_a", source_location="/inc/product.h:7"))
+        )
+        assert surface.obligations[0].source_location == "/inc/product.h:7"
+
+
+class TestAcquisitionFailureIsAFact:
+    """An extractor failure is an explicit `FAILED` fact, never an empty
+    surface -- so a release cannot read a broken parse as "promises
+    nothing"."""
+
+    def _acquire(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, producer):
+        import abicheck.header_only_dump as header_only_dump
+        from abicheck.model.release_surface import SurfaceAcquisitionIdentity
+        from abicheck.workflows.release_surface_acquisition import (
+            SurfaceAcquisitionLedger,
+            acquire_release_surface,
+        )
+
+        monkeypatch.setattr(header_only_dump, "build_header_only_snapshot", producer)
+        header = tmp_path / "product.h"
+        header.write_text("int api_a(int);\n", encoding="utf-8")
+        return acquire_release_surface(
+            SurfaceAcquisitionIdentity(header_files=(str(header),)),
+            "new",
+            ledger=SurfaceAcquisitionLedger(),
+            headers=[header],
+            includes=[],
+            public_headers=[header],
+            public_header_dirs=[],
+        )
+
+    def test_a_parse_exception_becomes_an_unresolved_surface(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        def _boom(**_: object):
+            raise RuntimeError("castxml exploded")
+
+        surface = self._acquire(monkeypatch, tmp_path, _boom)
+        assert surface.resolvable is False
+        assert "castxml exploded" in (surface.unresolved_reason or "")
+
+    def test_no_header_inputs_is_its_own_stated_reason(self) -> None:
+        from abicheck.model.release_surface import SurfaceAcquisitionIdentity
+        from abicheck.workflows.release_surface_acquisition import (
+            SurfaceAcquisitionLedger,
+            acquire_release_surface,
+        )
+
+        surface = acquire_release_surface(
+            SurfaceAcquisitionIdentity(),
+            "new",
+            ledger=SurfaceAcquisitionLedger(),
+            headers=[],
+            includes=[],
+            public_headers=[],
+            public_header_dirs=[],
+        )
+        assert surface.resolvable is False
+        assert "no public header inputs" in (surface.unresolved_reason or "")
+
+    def test_a_successful_parse_is_projected(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The declaration carries a real `source_location` under the public
+        header: `acquire_release_surface` runs provenance before projecting,
+        and provenance classifies origin from that location -- so a
+        location-less declaration would legitimately come out UNKNOWN (which
+        is what the unresolved-surface test above asserts)."""
+        header = tmp_path / "product.h"
+        snapshot = _header_snapshot(_decl("api_a", source_location=f"{header}:1"))
+
+        def _ok(**_: object):
+            return snapshot
+
+        surface = self._acquire(monkeypatch, tmp_path, _ok)
+        assert surface.resolvable is True
+        assert [o.symbol for o in surface.obligations] == ["api_a"]
+
+
+class TestTheLedgerRecord:
+    """The acquisition ledger is the instrumentation the one-per-side claim
+    rests on, so its own record is asserted rather than assumed."""
+
+    def test_it_reports_each_key_once_with_its_reuses(self) -> None:
+        from abicheck.model.release_surface import (
+            ReleasePublicSurface,
+            SurfaceAcquisitionIdentity,
+        )
+        from abicheck.workflows.release_surface_acquisition import (
+            SurfaceAcquisitionLedger,
+        )
+
+        ledger = SurfaceAcquisitionLedger()
+        identity = SurfaceAcquisitionIdentity(header_dirs=("/inc",))
+        made = ReleasePublicSurface(acquisition_key=identity.key(), side="old")
+        ledger.acquire(identity, "old", lambda: made)
+        ledger.acquire(identity, "new", lambda: made)
+        record = ledger.to_dict()
+        assert record["acquisitions"] == 1
+        assert record["reuses"] == 1
+        assert record["keys"] == [
+            {"key": identity.key(), "acquisitions": 1, "reuses": 1}
+        ]
+        assert ledger.get(identity) is made
+        assert ledger.acquisitions_by_key() == {identity.key(): 1}
+
+    def test_an_unacquired_identity_is_absent_not_zero(self) -> None:
+        from abicheck.model.release_surface import SurfaceAcquisitionIdentity
+        from abicheck.workflows.release_surface_acquisition import (
+            SurfaceAcquisitionLedger,
+        )
+
+        ledger = SurfaceAcquisitionLedger()
+        assert ledger.get(SurfaceAcquisitionIdentity(header_dirs=("/inc",))) is None
+        assert ledger.to_dict()["keys"] == []

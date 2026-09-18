@@ -143,7 +143,16 @@ class BundleExportIndex:
             return None
         parts: list[str] = []
         if self.failed_members:
-            named = ", ".join(sorted(self.failed_members))
+            # Each member *with its own reason*: `failed_members` keeps the
+            # reason verbatim precisely so a report can explain the gap
+            # rather than merely flag it, and this string is what the
+            # Markdown coverage warning is built from -- naming only the
+            # library left a human reader with "coverage is incomplete" and
+            # no way to tell a failed dump from an unreadable file.
+            named = "; ".join(
+                f"{member}: {reason}"
+                for member, reason in sorted(self.failed_members.items())
+            )
             parts.append(
                 f"{len(self.failed_members)} member(s) failed acquisition ({named})"
             )
