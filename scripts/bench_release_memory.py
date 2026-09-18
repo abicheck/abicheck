@@ -65,7 +65,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 try:
-    from abicheck import memory_trace  # noqa: E402
+    from abicheck.workflows import memory_trace  # noqa: E402
 except ImportError:  # pragma: no cover - running against a pre-instrumentation SHA
     # This harness is deliberately runnable at a *base* revision too, so a
     # before/after pair is measured by one script over one fixture rather

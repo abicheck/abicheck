@@ -57,6 +57,10 @@ what is kept in memory after the member's comparison has finished.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..model import AbiSnapshot
 
 __all__ = ["SnapshotRetention", "resolve_snapshot_retention"]
 
@@ -117,4 +121,42 @@ def resolve_snapshot_retention(
         new_full=False,
         old_consumers=tuple(old_consumers),
         new_consumers=(),
+    )
+
+
+def stash_member_evidence(
+    entry: dict[str, object],
+    key: str,
+    old_snapshot: AbiSnapshot,
+    new_snapshot: AbiSnapshot,
+    retention: SnapshotRetention | None,
+) -> None:
+    """Attach one finished member's bundle evidence under *retention*.
+
+    Each side gets the full :class:`~abicheck.model.AbiSnapshot` when a
+    consumer reads it and the compact
+    :class:`~abicheck.bundle_models.BundleSignatureEvidence` otherwise --
+    never both, so the reader (``_collect_bundle_result``) sees exactly one
+    shape per side. ``None`` retention means compact on both sides.
+
+    Lives beside the decision rather than at the release fan-out's call
+    site: *what evidence a member leaves behind* is not a front end's
+    choice, and the projection it applies is a workflows-owned one.
+    """
+    from .bundle_symbol_status import build_bundle_signature_evidence
+    from .memory_trace import record_release_member
+
+    keep = retention or SnapshotRetention()
+    entry["_bundle_key"] = key
+    if keep.old_full:
+        entry["_old_snapshot"] = old_snapshot
+    else:
+        entry["_old_bundle_evidence"] = build_bundle_signature_evidence(old_snapshot)
+    if keep.new_full:
+        entry["_new_snapshot"] = new_snapshot
+    else:
+        entry["_new_bundle_evidence"] = build_bundle_signature_evidence(new_snapshot)
+    library = entry.get("library")
+    record_release_member(
+        library if isinstance(library, str) else key, keep.as_counts()
     )

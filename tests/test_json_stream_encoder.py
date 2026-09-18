@@ -118,7 +118,8 @@ class TestDifferentialAgainstJsonDumps:
         for doc in (
             {"sub": MyDict({"a": [1, 2]})},
             {"sub": MyList([1, {"b": 2}])},
-            {"outer": {1: "int key", True: "bool key"}},
+            {"outer": {1: "int key", 2.5: "float key"}},
+            {"outer": {True: "bool key"}},
             {"a": {"b": {2: [1, 2, 3]}}},
         ):
             assert join_json_indented(doc) == json.dumps(doc, indent=2)

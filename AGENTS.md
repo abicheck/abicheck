@@ -830,7 +830,7 @@ Core pipeline (in order of data flow):
      between the storage codec's `decode_snapshot`/`finalize_snapshot`,
      neither of which a `storage`-classified module (`may_import: [model]`
      only) may call
-   - `memory_trace.py` — optional, attributable memory instrumentation
+   - `workflows/memory_trace.py` — optional, attributable memory instrumentation
      (`ABICHECK_MEMORY_TRACE=<path>`): parent RSS, process-tree RSS *and*
      PSS, cgroup `memory.current`/`peak`, and structural retention counts,
      each recorded as its **own** field per phase, with an unavailable probe

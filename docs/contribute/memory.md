@@ -24,7 +24,7 @@ excludes every byte a child process holds. It is genuinely useful for
 attributing Python-side retention, and it perturbs both wall time and RSS —
 so it belongs in a separate profiling run, never alongside a timing claim.
 
-`abicheck.memory_trace` records all of these separately, and records a
+`abicheck.workflows.memory_trace` records all of these separately, and records a
 missing probe as `null` rather than `0`: a host without `smaps_rollup` or a
 cgroup must look *unmeasured*, not idle.
 
@@ -64,7 +64,7 @@ python scripts/bench_release_memory.py --members 6 --apis 1800 --records 120 \
 
 Three properties make a before/after pair honest:
 
-* **One harness, both revisions.** Its `abicheck.memory_trace` import is
+* **One harness, both revisions.** Its `abicheck.workflows.memory_trace` import is
   optional, so the same script runs at a pre-instrumentation SHA. Two
   scripts could sample differently and the difference would be
   indistinguishable from the change.

@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import memory_trace
+from abicheck.workflows import memory_trace
 
 
 @pytest.fixture(autouse=True)
@@ -206,6 +206,9 @@ class TestPhasesAndCounts:
         """Observation must not be able to break analysis."""
         blocked = tmp_path / "nope"
         blocked.write_text("not a directory", encoding="utf-8")
-        _enable(monkeypatch, blocked / "sub" / "trace.jsonl")
+        target = blocked / "sub" / "trace.jsonl"
+        _enable(monkeypatch, target)
         memory_trace.sample("phase")
         memory_trace.counts("c", a=1)
+        # Both calls returned; nothing was written, and no exception escaped.
+        assert not target.exists()

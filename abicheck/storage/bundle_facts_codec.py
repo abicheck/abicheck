@@ -474,9 +474,10 @@ def save_bundle_facts(
     (``compression`` is JSON-only; ``"auto"``/``"none"`` no-op for it, only
     ``"gzip"``/``"zstd"`` reject -- Codex)."""
     from ..serialization import snapshot_to_dict
-    from ..snapshot_io import SnapshotCompression, write_snapshot_text_stream
+    from ..snapshot_io import SnapshotCompression
     from .bundle_facts_archive import maybe_write_bundle_facts_archive
     from .json_stream import iter_json_indented
+    from .snapshot_stream_write import write_snapshot_text_stream
 
     if format == "archive" and SnapshotCompression(compression) not in (
         SnapshotCompression.AUTO,

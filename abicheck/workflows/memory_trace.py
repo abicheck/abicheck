@@ -57,7 +57,7 @@ import json
 import os
 import threading
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -238,10 +238,15 @@ def _cgroup_files() -> tuple[str | None, str | None]:
     rather than re-deriving the path, so the bytes billed here and the
     headroom the worker sizing reads come from the same cgroup.
     """
-    from . import process_resources as pr
+    from ..process_resources import (
+        _CGROUP_V1_ROOT,
+        _CGROUP_V2_ROOT,
+        _cgroup_chain,
+        _cgroup_rel_paths,
+    )
 
-    v2_rel, v1_rel = pr._cgroup_rel_paths()
-    for path in pr._cgroup_chain(pr._CGROUP_V2_ROOT, v2_rel):
+    v2_rel, v1_rel = _cgroup_rel_paths()
+    for path in _cgroup_chain(_CGROUP_V2_ROOT, v2_rel):
         current = path / "memory.current"
         if current.exists():
             peak = path / "memory.peak"
@@ -249,7 +254,7 @@ def _cgroup_files() -> tuple[str | None, str | None]:
     # cgroup v1 spells the same two numbers differently. A v1-only host is
     # not exotic (plenty of CI images still are), and reporting "no cgroup
     # accounting" there would drop the one figure an OOM is decided on.
-    for path in pr._cgroup_chain(pr._CGROUP_V1_ROOT, v1_rel):
+    for path in _cgroup_chain(_CGROUP_V1_ROOT, v1_rel):
         current = path / "memory.usage_in_bytes"
         if current.exists():
             peak = path / "memory.max_usage_in_bytes"
@@ -378,6 +383,17 @@ def phase(name: str, /, **attrs: Any) -> Iterator[None]:
         sample(f"{name}:exit", **attrs)
 
 
+def phase_each(name: str, keys: Iterable[str], /) -> Iterator[str]:
+    """Yield each of *keys* from inside its own :func:`phase`.
+
+    For a sequential fan-out, so bracketing each item costs one expression
+    at the call site instead of rewriting the loop around a ``with``.
+    """
+    for key in keys:
+        with phase(name, key=key):
+            yield key
+
+
 def read_samples(path: str | os.PathLike[str]) -> list[Mapping[str, Any]]:
     """Parse a trace file. Malformed trailing lines are skipped.
 
@@ -396,3 +412,29 @@ def read_samples(path: str | os.PathLike[str]) -> list[Mapping[str, Any]]:
             except ValueError:
                 continue
     return out
+
+
+def record_release_member(library: str, retention: Mapping[str, Any]) -> None:
+    """Record what one finished release member left resident, and how much.
+
+    Three records together, because none of them is attributable alone: the
+    per-side retention decision (*retention*, from
+    ``release_snapshot_retention.SnapshotRetention.as_counts``), a fully
+    probed memory sample taken at that same moment, and the acquisition
+    table's own counts -- both halves of it, the bounded id-keyed groups and
+    the content-keyed raw entries.
+
+    Lives here rather than at the release call site for two reasons: the
+    fan-out is a *frontend*, and reaching into the acquisition table from
+    there would be a `frontends -> storage` edge ADR-061 forbids; and this
+    is instrumentation, which is this module's job and not the fan-out's.
+    """
+    if not memory_trace_enabled():
+        return
+    counts("release.member.retained", library=library, **dict(retention))
+    sample("release.member.retained", library=library)
+    from ..dumper_cache import ast_acquisition_stats
+
+    stats = ast_acquisition_stats()
+    if stats is not None:
+        counts("release.ast_scope", library=library, **stats)

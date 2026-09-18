@@ -146,7 +146,7 @@ class TestActualReclamation:
         scope = AstAcquisitionScope()
         first = _Root("evict-me")
         ref = weakref.ref(first)
-        scope.run("castxml", "victim", lambda: first)
+        scope.run("castxml", "victim", lambda f=first: f)
         del first
         # Push it out with enough distinct, newer keys.
         for i in range(MAX_RETAINED_RAW_ENTRIES + 2):
@@ -165,7 +165,7 @@ class TestActualReclamation:
         scope = AstAcquisitionScope()
         kept = _Root("keep-me")
         ref = weakref.ref(kept)
-        scope.run("castxml", "kept", lambda: kept)
+        scope.run("castxml", "kept", lambda k=kept: k)
         del kept
         gc.collect()
         assert ref() is not None
@@ -265,7 +265,7 @@ class TestTheTwoHalvesTogether:
         scope = AstAcquisitionScope()
         root = _Root("both")
         ref = weakref.ref(root)
-        scope.run("castxml", "content", lambda: root)
+        scope.run("castxml", "content", lambda r=root: r)
         scope.run("clang", repr(id(root)), lambda: "derived", group=root)
         del root
         for i in range(MAX_RETAINED_RAW_ENTRIES + 2):

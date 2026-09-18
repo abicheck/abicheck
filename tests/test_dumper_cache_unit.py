@@ -17,12 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.dumper_cache import (
-    _atomic_copy,
-    _atomic_write,
-    _atomic_write_json,
-    _cache_path,
-)
+from abicheck.dumper_cache import _atomic_copy, _atomic_write, _cache_path
+from abicheck.storage.json_chunked_write import _atomic_write_json
 
 
 def test_posix_uses_xdg_cache_home(monkeypatch, tmp_path) -> None:

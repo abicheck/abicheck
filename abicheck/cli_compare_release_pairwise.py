@@ -45,7 +45,6 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from . import memory_trace
 from .checker import DiffResult
 from .cli_compare_receipt import record_release_resolved_config
 from .cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
@@ -54,13 +53,12 @@ from .frontends.cli.release_member_errors import member_error_entry
 from .frontends.cli.runtime import _safe_write_output
 from .model import AbiSnapshot
 from .reporter import disposition_ledger_blocks, to_json
-from .workflows.bundle_symbol_status import build_bundle_signature_evidence
+from .workflows import memory_trace, release_snapshot_retention
 from .workflows.contracts import CompareResult
 from .workflows.crosscheck_ownership import (
     release_level_checks,
     release_owned_checks_scope,
 )
-from .workflows.release_snapshot_retention import SnapshotRetention
 
 if TYPE_CHECKING:
     from .compile_context import CompileContext
@@ -124,7 +122,7 @@ _CompareReleaseCommonArgs = tuple[
     "SeverityConfig | None",
     "PackApplication | None",
     bool,  # collect_diff_results
-    "SnapshotRetention | None",  # per-side full-snapshot retention
+    "release_snapshot_retention.SnapshotRetention | None",
     "CompileContext | None",
     "str | None",
     "str | None",
@@ -317,7 +315,7 @@ def _compare_one_library(
     severity_config: SeverityConfig | None = None,
     pack_application: PackApplication | None = None,
     collect_diff_results: bool = False,
-    retention: SnapshotRetention | None = None,
+    retention: release_snapshot_retention.SnapshotRetention | None = None,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
     show_only: str | None = None,
@@ -332,17 +330,9 @@ def _compare_one_library(
 
     The full :class:`DiffResult` is stashed under ``"_diff_result"``;
     callers needing it (bundle layer, JUnit) pop it before JSON-serialising.
-    *collect_diff_results* additionally stashes ``"_bundle_key"`` plus,
-    **per side**, either the full ``"_old_snapshot"``/``"_new_snapshot"``
-    or the much smaller ``"_old_bundle_evidence"``/``"_new_bundle_evidence"``
-    (G38 Phase 9's memory fix; see :class:`~abicheck.bundle_models.
-    BundleSignatureEvidence`). *retention* is that per-side decision
-    (:class:`~abicheck.workflows.release_snapshot_retention.
-    SnapshotRetention`), resolved from what the run's outputs actually read
-    rather than from one shared "JUnit or a baseline was asked for" switch:
-    both of those consumers read the OLD side only, so the NEW side keeps
-    compact evidence even for them. ``None`` means "retain nothing full",
-    the compact-only default.
+    *collect_diff_results* additionally stashes ``"_bundle_key"`` plus each
+    side's bundle evidence, full or compact per *retention* -- owned, with
+    its reasoning, by :mod:`abicheck.workflows.release_snapshot_retention`.
 
     *severity_config* is forwarded to the ``--output-dir`` JSON write below
     (Codex review): without it, that write always used the legacy
@@ -371,95 +361,6 @@ def _compare_one_library(
     """
     old_path = old_map[key]
     new_path = new_map[key]
-    # Phase boundary for the memory trace (off unless ABICHECK_MEMORY_TRACE
-    # names a path; one boolean test otherwise). A release peak is inside
-    # the fan-out, and attributing it needs to know which member was
-    # resident when the sample was taken.
-    with memory_trace.phase("release.member", library=old_path.name, key=key):
-        return _compare_one_library_inner(
-            key,
-            old_path,
-            new_path,
-            old_map,
-            new_map,
-            old_debug_dir,
-            new_debug_dir,
-            resolve_debug_info,
-            old_h,
-            new_h,
-            old_inc,
-            new_inc,
-            old_version,
-            new_version,
-            lang,
-            suppress,
-            policy,
-            policy_file_path,
-            output_dir,
-            scope_to_public_surface,
-            include_dependencies,
-            contract_evaluation,
-            contract_mode,
-            require_complete_analysis,
-            severity_config,
-            pack_application,
-            collect_diff_results,
-            retention,
-            compile_context,
-            depth,
-            show_only,
-            public_header_dirs,
-            collapse_versioned_symbols,
-            project_policy_overrides,
-            env_matrix,
-            exclude_headers,
-        )
-
-
-def _compare_one_library_inner(
-    key: str,
-    old_path: Path,
-    new_path: Path,
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
-    old_debug_dir: Path | None,
-    new_debug_dir: Path | None,
-    resolve_debug_info: Callable[[Path, Path], Path | None],
-    old_h: list[Path],
-    new_h: list[Path],
-    old_inc: list[Path],
-    new_inc: list[Path],
-    old_version: str,
-    new_version: str,
-    lang: str,
-    suppress: Path | None,
-    policy: str,
-    policy_file_path: Path | None,
-    output_dir: Path | None,
-    scope_to_public_surface: bool,
-    include_dependencies: bool,
-    contract_evaluation: bool,
-    contract_mode: str | None,
-    require_complete_analysis: bool,
-    severity_config: SeverityConfig | None,
-    pack_application: PackApplication | None,
-    collect_diff_results: bool,
-    retention: SnapshotRetention | None,
-    compile_context: CompileContext | None,
-    depth: str | None,
-    show_only: str | None,
-    public_header_dirs: list[Path] | None,
-    collapse_versioned_symbols: bool,
-    project_policy_overrides: dict[Any, Any] | None,
-    env_matrix: EnvironmentMatrix | None,
-    exclude_headers: tuple[str, ...],
-) -> dict[str, object]:
-    """One member's comparison. See :func:`_compare_one_library`.
-
-    Split out only so the trace phase brackets the whole body including its
-    ``except`` paths -- a member that *fails* is exactly when knowing what
-    was resident matters, so the phase must not end at the first raise.
-    """
     try:
         old_dbg = resolve_debug_info(old_path, old_debug_dir) if old_debug_dir else None
         new_dbg = resolve_debug_info(new_path, new_debug_dir) if new_debug_dir else None
@@ -564,35 +465,13 @@ def _compare_one_library_inner(
         if collect_diff_results:
             # See this function's own docstring (CodeRabbit review #798;
             # full- vs. compact-evidence split, G38 Phase 9).
-            entry["_bundle_key"] = key
-            keep = retention or SnapshotRetention()
-            if keep.old_full:
-                entry["_old_snapshot"] = compare_result.old_snapshot
-            else:
-                entry["_old_bundle_evidence"] = build_bundle_signature_evidence(
-                    compare_result.old_snapshot
-                )
-            if keep.new_full:
-                entry["_new_snapshot"] = compare_result.new_snapshot
-            else:
-                entry["_new_bundle_evidence"] = build_bundle_signature_evidence(
-                    compare_result.new_snapshot
-                )
-            # What this member leaves resident, recorded next to the memory
-            # sample that follows it: a peak is only attributable if the
-            # trace says what was being held when it was taken.
-            memory_trace.counts(
-                "release.member.retained",
-                library=old_path.name,
-                **keep.as_counts(),
+            release_snapshot_retention.stash_member_evidence(
+                entry,
+                key,
+                compare_result.old_snapshot,
+                compare_result.new_snapshot,
+                retention,
             )
-            memory_trace.sample("release.member.retained", library=old_path.name)
-        if memory_trace.memory_trace_enabled():
-            from .dumper_cache import ast_acquisition_stats
-
-            stats = ast_acquisition_stats()
-            if stats is not None:
-                memory_trace.counts("release.ast_scope", library=old_path.name, **stats)
         # ADR-064's evidence-contract axis (exit 7), per member. `compare`'s
         # depth-shortfall contract is this axis -- recorded by
         # `service_compare_pipeline.classify_compare_pair`, never raised --
@@ -867,7 +746,7 @@ def _compare_release_libraries(
     output_dir: Path | None,
     collect_diff_results: bool = False,
     *,
-    retention: SnapshotRetention | None = None,
+    retention: release_snapshot_retention.SnapshotRetention | None = None,
     jobs: int = 1,
     scope_to_public_surface: bool = True,
     include_dependencies: bool = True,
@@ -888,10 +767,8 @@ def _compare_release_libraries(
     """Compare each matched library pair and collect results.
 
     When *collect_diff_results* is True and *retention* keeps the full OLD
-    side, ``(DiffResult, old_snapshot)`` pairs are collected and returned as
-    the third element of the tuple (used by the JUnit output format and by
-    ``--bundle-facts-out``). Both of those consumers read the OLD snapshot
-    only -- see :mod:`abicheck.workflows.release_snapshot_retention`.
+    side, ``(DiffResult, old_snapshot)`` pairs are returned third -- what
+    JUnit and ``--bundle-facts-out`` read.
 
     When *jobs* > 1, comparisons are dispatched in parallel via
     :func:`_compare_one_library` using a :class:`ThreadPoolExecutor` -- not
@@ -1128,7 +1005,11 @@ def _compare_release_parallel(
         # directly) so it stays checkable by mypy: `Context.run`'s own
         # ParamSpec-generic signature otherwise defeats `submit`'s overload
         # resolution against `_compare_one_library`'s real params.
-        return ctx.run(_compare_one_library, key, *common_args)
+        # Phase boundary for the memory trace, at the dispatch site so it
+        # covers `_compare_one_library`'s own `except` paths; free when
+        # tracing is off (the default).
+        with memory_trace.phase("release.member", key=key):
+            return ctx.run(_compare_one_library, key, *common_args)
 
     results_by_key: dict[str, dict[str, object]] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -1157,4 +1038,7 @@ def _compare_release_sequential(
     common_args: _CompareReleaseCommonArgs,
 ) -> list[dict[str, object]]:
     """Run per-library release comparisons sequentially."""
-    return [_compare_one_library(key, *common_args) for key in matched_keys]
+    return [
+        _compare_one_library(key, *common_args)
+        for key in memory_trace.phase_each("release.member", matched_keys)
+    ]
