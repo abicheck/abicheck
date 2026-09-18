@@ -183,7 +183,18 @@ def build_side_identity(
         header_files=files,
         header_dirs=dirs,
         exclude_headers=tuple(exclude_headers),
-        includes=tuple(sorted(str(Path(i).resolve()) for i in includes)),
+        # **Order-preserving, deliberately not sorted.** ``includes`` becomes
+        # the compiler's ``-I`` search path, where order decides which of two
+        # same-named headers wins: with ``a/choice.h`` declaring
+        # ``int api(void)`` and ``b/choice.h`` declaring ``long api(void)``,
+        # ``-I a -I b`` and ``-I b -I a`` produce genuinely different ASTs.
+        # Sorting collapsed both onto one key, so one acquisition could be
+        # reused for a request the parse would have answered differently.
+        # Duplicates are kept for the same reason -- a repeated path shifts
+        # every later entry's precedence. Sorting is still right for the
+        # membership-only inputs above (header files/dirs, public header
+        # dirs), which name a set, not a search order.
+        includes=tuple(str(Path(i).resolve()) for i in includes),
         public_header_dirs=tuple(
             sorted(str(Path(p).resolve()) for p in (public_header_dirs or ()))
         ),

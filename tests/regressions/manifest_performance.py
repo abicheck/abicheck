@@ -363,16 +363,13 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
                     "Admission control bounds only the *concurrent* half of "
                     "a bundle's peak. The retention half is bounded on the "
                     "default path (a compact `BundleSignatureEvidence` per "
-                    "member); the NEW-side half of the old "
-                    "`need_full_snapshots` amplification is closed too -- "
-                    "JUnit and `--bundle-facts-out` read the OLD side only, "
-                    "so `SnapshotRetention` keeps NEW compact for them, "
-                    "halving six full L2 surfaces off a six-member bundle. "
-                    "What remains is the OLD side those two consumers "
-                    "genuinely do read: one full snapshot per member, held "
-                    "until the release folds run. Spooling *those* through "
-                    "the existing storage contracts is the structural fix "
-                    "and is still not attempted."
+                    "member) but not under `need_full_snapshots`, which "
+                    "JUnit output and `--bundle-facts-out` both set and "
+                    "which holds every member's full old *and* new snapshot "
+                    "simultaneously -- twelve full L2 surfaces for a "
+                    "six-member bundle, a quantity no worker-count clamp "
+                    "reduces. Spooling those through the existing storage "
+                    "contracts is the structural fix and is not attempted."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),
@@ -443,6 +440,223 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
                     "from a helper module is not inspected, so the guard "
                     "bounds the shape this suite actually uses rather than "
                     "every shape a double could take."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="perf.optimization_wired_to_one_of_several_equivalent_paths",
+        invariant=(
+            "When an optimization replaces an expensive primitive, EVERY "
+            "path in the tree that performs that same expensive work "
+            "routes through it -- not merely the one path whose profile "
+            "motivated the change. The failure is silent and specifically "
+            "misleading: the helper exists, is tested, is documented as "
+            "landed, and the reported hotspot still pays the original "
+            "cost, so the optimization reads as complete while the "
+            "measurement that prompted it does not move. A reviewer "
+            "checking 'is the buffer implemented?' gets yes; the "
+            "answerable question is 'does every caller that resolves a "
+            "name use it?'. Establishing coverage means enumerating the "
+            "callers of the underlying slow operation, not re-reading the "
+            "optimized one."
+        ),
+        # #1331: `extract/elf_string_table.buffered_string_table` was wired
+        # to `elf_metadata`'s dynamic-symbol walk only, while
+        # `dumper_elf_symbols._pyelftools_exported_symbols` -- which builds
+        # its own `ELFFile` and walks BOTH `.dynsym` and `.symtab` -- kept
+        # resolving every `Symbol.name` with one seek-and-read per name.
+        fixed_by=(1331,),
+        seed_tests=("tests/test_dumper_elf_symbols_buffering.py",),
+        public_surfaces=("python-api",),
+        axes={
+            "symbol_table": (".dynsym", ".symtab"),
+            "symbol_shape": (
+                "exported",
+                "hidden-visibility",
+                "static-only",
+                "many",
+                "long-named",
+            ),
+            "input_health": ("well-formed", "truncated"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "There is no gate enumerating the callers of a "
+                    "just-optimized primitive, so the next instance of "
+                    "this class is still found by reading, not by CI. "
+                    "The seed test observes engagement for the two "
+                    "sections THIS path walks; a third ELF-reading path "
+                    "added later would not be noticed by it."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="perf.reuse_key_normalizes_an_ordered_input",
+        invariant=(
+            "A cache/reuse key canonicalizes only inputs that are "
+            "genuinely order-INsensitive. Sorting or de-duplicating an "
+            "ordered input makes two requests with different meanings key "
+            "identically, so one request is served the other's result -- a "
+            "wrong answer produced quickly, which is strictly worse than "
+            "the cache miss the normalization was meant to avoid. The "
+            "test that isolates this must permute a fixed input set: "
+            "substituting one member for another also changes the set, so "
+            "it passes against the sorting implementation and proves "
+            "nothing. Scoped both ways -- a membership-only input must "
+            "still key order-independently, or the fix trades a "
+            "correctness bug for lost reuse."
+        ),
+        # #1331: `workflows.release_public_surface.build_side_identity`
+        # sorted `includes`, which becomes the compiler's `-I` search
+        # order; `-I a -I b` and `-I b -I a` resolve a same-named header
+        # to different declarations but produced one
+        # `SurfaceAcquisitionIdentity.key()`.
+        fixed_by=(1331,),
+        seed_tests=("tests/test_surface_acquisition_include_order.py",),
+        public_surfaces=("python-api",),
+        axes={
+            "input_kind": ("ordered", "membership-only"),
+            "sequence_shape": ("permuted", "duplicate-bearing", "equal"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Asserted at the key level against a native-clang "
+                    "counterexample reproduced by hand, not as a "
+                    "completed end-to-end abicheck failure: no test "
+                    "drives two differently-ordered include paths through "
+                    "a real release comparison and observes the differing "
+                    "contract. The other order-sensitive inputs folded "
+                    "into this and neighbouring keys (compile option "
+                    "tokens, `-D` define order) have no equivalent guard."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="perf.bounded_cache_budget_omits_what_it_retains",
+        invariant=(
+            "A cache that publishes a retained-size budget counts every "
+            "object it keeps alive, including ones it retains only "
+            "indirectly -- a keepalive reference, an interned key, a "
+            "closure. An omitted object is unbounded by construction: "
+            "eviction is driven by the figure, so what the figure does "
+            "not see is never the reason anything is evicted, and the "
+            "omission is typically the LARGEST thing retained (a compiled "
+            "pattern dwarfs the entry bookkeeping around it). The "
+            "companion rule: a guarantee a cache advertises about shared "
+            "results -- immutability above all -- is enforced, not "
+            "documented, because a shared result mutated by one reader is "
+            "observed changed by the next. `__slots__` bounds which "
+            "attributes exist; it does not make them read-only. The "
+            "accounting test needs a round-trip oracle (retain, then "
+            "release everything, and return to the starting figure): a "
+            "one-directional 'it grows' assertion passes against an "
+            "implementation that adds cost and never subtracts it."
+        ),
+        # #1331: a `_MatchCache` entry keeps its compiled pattern alive via
+        # `_keepalive`, outliving the 64-entry `_VocabularyCache` that
+        # compiled it, while `retained_bytes` counted only entry
+        # bookkeeping, subject strings and results. Separately,
+        # `SpellingMatch` was slotted and documented immutable but
+        # accepted `match._text = ...`.
+        fixed_by=(1331,),
+        seed_tests=("tests/test_spelling_match_cache_retention.py",),
+        public_surfaces=("python-api",),
+        axes={
+            "pattern_population": ("single", "shared", "distinct", "oversized"),
+            "budget_direction": ("retain", "release", "round-trip"),
+            "mutation_operation": ("set", "delete", "new-attribute"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The per-pattern cost is an estimate "
+                    "(`_PATTERN_BYTES_PER_CHAR`), on the same terms as "
+                    "the existing per-entry/per-match constants, and is "
+                    "not validated against measured RSS -- the budget "
+                    "bounds growth rather than reporting real bytes. The "
+                    "vocabulary cache is still bounded by entry COUNT (64) "
+                    "rather than by vocabulary bytes, and its own keys "
+                    "(the frozensets of spellings) are outside every "
+                    "budget; the review's request for one coordinated "
+                    "budget across vocabulary keys, compiled matchers and "
+                    "results is only partly answered here."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="perf.fixed_layout_fast_path_field_decoding",
+        invariant=(
+            "A fast path that replaces a third-party parser for a "
+            "fixed-layout record must agree with that parser on EVERY "
+            "field value and EVERY layout variant it claims to support, "
+            "and must refuse -- returning a distinguishable 'unsupported', "
+            "never an empty result -- for the ones it does not. Two "
+            "properties make this class dangerous: the failures are "
+            "silent (a mis-masked field yields a plausible wrong value, "
+            "not a crash) and the tempting oracle is the fast path's own "
+            "format string, which is a tautology. The oracle must be the "
+            "displaced parser itself, exercised over the variants the "
+            "development host does not produce -- a test limited to what "
+            "the local compiler emits leaves other word sizes and "
+            "endiannesses, whose record ORDER may differ, wholly "
+            "unexercised. Refusal tests must also reach the condition "
+            "they name: an earlier guard that rejects the input first "
+            "makes the later guard's test pass with that guard deleted."
+        ),
+        # #1331: `extract/elf_symbol_fastpath.py` replaced pyelftools'
+        # per-symbol `construct` parse (11.9s of a profiled 13.58s on
+        # oneDAL's libonedal_core.so.3) with one bulk `struct.iter_unpack`.
+        # Its first draft masked `st_other` with 0x3, per the generic
+        # ABI's two-bit visibility field; pyelftools uses three bits, so
+        # `STV_SINGLETON` (5) decoded as `STV_INTERNAL` (1) and the export
+        # filter silently dropped the symbol. Caught before wiring by the
+        # exhaustive binding-by-visibility grid. Two refusal tests were
+        # separately found, by mutation, to be masked by the short-read
+        # guard and to pass with their own check deleted.
+        fixed_by=(1331,),
+        seed_tests=("tests/test_elf_symbol_fastpath.py",),
+        public_surfaces=("python-api",),
+        axes={
+            "elf_class": ("32", "64"),
+            "endianness": ("little", "big"),
+            "field": ("st_name", "binding", "visibility", "st_shndx"),
+            "refusal": (
+                "entry-size",
+                "elf-class",
+                "partial-record",
+                "short-read",
+                "oversize",
+                "malformed-header",
+                "stream-error",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The fast path yields raw integers for the four "
+                    "fields a filtering caller needs; `st_value`/"
+                    "`st_size`/`st_type` are decoded only far enough to "
+                    "prove they do not shift the others, and no caller "
+                    "consumes them through this route yet. Symbol "
+                    "VERSION decoding (GNU default/non-default) is "
+                    "untouched by this change and still goes through "
+                    "`elf_metadata`'s ordinary reader, so the version "
+                    "half of the original review's acceptance list is "
+                    "not covered by these tests. Equivalence on real "
+                    "binaries was established on x86-64 little-endian "
+                    "objects only -- the big-endian and ELF32 evidence "
+                    "is synthetic, built by pyelftools itself, because "
+                    "no such toolchain was available."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),
