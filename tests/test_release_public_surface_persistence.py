@@ -417,3 +417,71 @@ class TestACaptureStampsTheVersionItsContentsNeed:
             self._capture(public_surface=_surface("api_a")),
         ):
             assert facts.schema_version == document_schema_version(facts)
+
+
+class TestTheSurfaceBlobIsReadExactlyOnce:
+    """Why the surface blob's *second-materialization* charge is not
+    covered, stated as a fact rather than left as an unexplained gap.
+
+    A blob served from cache still builds a second object graph, so its
+    bytes are charged again -- the object-count amplification guard the
+    manifest blob already carried and the surface copied. Through the
+    public loader that branch is currently unreachable: every other slot
+    that could share the surface's hash decodes it under a different shape
+    first (the instantiation manifest demands a top-level ``provides:``
+    list, a library slot demands a snapshot), so a shared hash fails before
+    the surface is ever reached. The guard stays because it is cheap and
+    becomes load-bearing the moment slot ordering or a shape check changes;
+    this test pins the property that makes it dormant, so that change
+    cannot happen silently.
+    """
+
+    def test_no_other_slot_can_share_the_surface_blob_today(self, tmp_path) -> None:
+        import json
+        import zipfile
+
+        from abicheck.model.bundle_facts import BundleFacts
+        from abicheck.serialization import load_bundle_facts, save_bundle_facts
+
+        path = tmp_path / "shared.zip"
+        save_bundle_facts(
+            BundleFacts(
+                per_library_snapshots={},
+                public_surface=_surface("api_a", side="old"),
+            ),
+            path,
+            format="archive",
+        )
+        with zipfile.ZipFile(path) as zf:
+            members = {n: zf.read(n) for n in zf.namelist()}
+        manifest = json.loads(members["manifest.json"])
+        manifest["manifest_blob"] = manifest["public_surface_blob"]
+        members["manifest.json"] = json.dumps(manifest).encode()
+        with zipfile.ZipFile(path, "w") as zf:
+            for name, payload in members.items():
+                zf.writestr(name, payload)
+        # Refused by the *manifest* shape check, before the surface slot --
+        # which is exactly why the surface's cached-read branch is dead
+        # today. If this ever stops raising, that branch is live and needs
+        # its own budget test.
+        with pytest.raises(ValueError, match="provides"):
+            load_bundle_facts(path)
+
+    def test_an_unshared_surface_blob_loads_normally(self, tmp_path) -> None:
+        """The vacuity guard: the refusal above is about the *sharing*, not
+        about archives carrying a surface at all."""
+        from abicheck.model.bundle_facts import BundleFacts
+        from abicheck.serialization import load_bundle_facts, save_bundle_facts
+
+        path = tmp_path / "plain.zip"
+        save_bundle_facts(
+            BundleFacts(
+                per_library_snapshots={},
+                public_surface=_surface("api_a", side="old"),
+            ),
+            path,
+            format="archive",
+        )
+        facts = load_bundle_facts(path)
+        assert facts.public_surface is not None
+        assert [o.symbol for o in facts.public_surface.obligations] == ["api_a"]

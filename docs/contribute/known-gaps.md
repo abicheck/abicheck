@@ -8376,6 +8376,24 @@ added, so `tests/test_release_public_surface_drivers.py` is a hand-maintained
 list (recorded in `tests/regressions/manifest_classification.py`'s
 `release.cartesian_product_contract` known gaps).
 
+**Known dormant branch (2026-09-18).** `storage/bundle_facts_archive.py`'s
+public-surface blob carries the same second-materialization byte charge
+`manifest_blob` does (a blob served from cache still builds a second object
+graph, so its bytes are charged again -- the object-count amplification the
+aggregate budget bounds). Through the public loader that branch is
+currently **unreachable**: every other slot that could share the surface's
+hash decodes it under a different shape first (the instantiation manifest
+demands a top-level `provides:` list, a library slot demands a snapshot),
+so a shared hash is refused before the surface slot runs. The guard is kept
+because it is cheap and becomes load-bearing the moment slot ordering or a
+shape check changes;
+`tests/test_release_public_surface_persistence.py::TestTheSurfaceBlobIsReadExactlyOnce`
+pins the property that makes it dormant, so that change cannot happen
+silently. It is also why that file's own patch coverage will not reach
+100% -- the uncovered lines are this guard, and covering them would mean
+reaching past the public entry point, which this repo's own
+third-party-boundary rule refuses.
+
 The original entry follows, unchanged.
 
 
