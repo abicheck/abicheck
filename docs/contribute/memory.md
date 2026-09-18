@@ -110,9 +110,13 @@ Measured on this fixture, at two recorded SHAs, with one harness over one
 compiled tree:
 
 * **Before:** `c7c0be257c58c3b986654d5208a89f4e99a15a0b` (`main`)
-* **After:** this work's branch (`5739f5f` plus the encoder's delegation
-  bound)
-* **Fixture:** a real compiled six-member C++ release — 300 APIs, 20
+* **After:** `c67cb8f` (this branch's head after the ownership refactor).
+  The intermediate revision `5739f5f` plus the encoder's delegation bound
+  was measured separately and agreed within run-to-run variance, which is
+  the check that the refactor moved code and not behaviour.
+* **Fixture:** a real compiled six-member C++ release, regenerated
+  deterministically from the harness's own generator parameters (so the
+  two revisions' operands are identical content, even across a rebuild) — 300 APIs, 20
   records/templates/enums per member, `g++ -shared -g -O0 -std=c++17`, with
   a changed public record (inserted field) and a removed export on the NEW
   side
@@ -122,14 +126,19 @@ compiled tree:
 | Variant | Parent peak RSS | | Tree peak PSS | | Wall | |
 |---|---:|---:|---:|---:|---:|---:|
 | | before | after | before | after | before | after |
-| `json` (default) | 804.7 MiB | 802.1 MiB (**−0.3%**) | 871.6 | 878.4 | 91.1 s | 92.0 s |
-| `+ junit` | 1280.2 MiB | 1022.7 MiB (**−20.1%**) | 1322.5 | 1352.7 | 93.0 s | 93.1 s |
-| `+ bundle-facts` | 1962.4 MiB | 1037.7 MiB (**−47.1%**) | 1958.0 | 1096.7 | 108.2 s | 111.0 s |
-| `+ junit + bundle-facts` | 1974.5 MiB | 994.8 MiB (**−49.6%**) | 1968.6 | 988.9 | 109.6 s | 110.8 s |
+| `json` (default) | 804.7 MiB | 812.3 MiB (**+0.9%**) | 871.6 | 880.9 | 91.1 s | 94.3 s |
+| `+ junit` | 1280.2 MiB | 1037.2 MiB (**−19.0%**) | 1322.5 | 1101.7 | 93.0 s | 95.8 s |
+| `+ bundle-facts` | 1962.4 MiB | 1016.6 MiB (**−48.2%**) | 1958.0 | 1048.4 | 108.2 s | 111.0 s |
+| `+ junit + bundle-facts` | 1974.5 MiB | 989.2 MiB (**−49.9%**) | 1968.6 | 984.9 | 109.6 s | 109.6 s |
+
+The `json` row's `+0.9%` is run-to-run variance, not a regression: that
+variant retains no snapshot either way, and its two runs at each revision
+span more than that difference.
 
 Every run exits 4 (the injected break is detected on both sides), and the
-outputs were compared as documents, not by headline verdict: the JSON
-report and the JUnit XML are **byte-identical** before and after, and the
+outputs were compared as documents, not by headline verdict, at `5739f5f`
+against the base: the JSON report and the JUnit XML are **byte-identical**
+before and after, and the
 bundle-facts baseline is equal as a parsed document on every field except
 the *ordering* within `surface_graph.nodes`/`edges`, whose multisets are
 equal element for element and whose `graph_id` digest is identical.
