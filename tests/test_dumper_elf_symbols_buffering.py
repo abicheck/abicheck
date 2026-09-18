@@ -52,7 +52,7 @@ from abicheck.errors import SnapshotError
 _ELF_MAGIC = b"\x7fELF"
 
 
-def _build_so(tmp_path, names, *, hidden=(), static_only=()):
+def _build_so(tmp_path, names, *, hidden=(), static_only=(), weak=(), absolute=()):
     """A real **ELF** shared object exporting *names*, or ``None``.
 
     ``None`` covers two genuinely absent capabilities -- no compiler, and a
@@ -74,6 +74,20 @@ def _build_so(tmp_path, names, *, hidden=(), static_only=()):
         body.append(
             f'__attribute__((visibility("hidden"))) int {n}(int a){{return a;}}'
         )
+    for n in weak:
+        # A *weak* global export. Without one, a mutation that drops
+        # `STB_WEAK` from the binding filter changes no result and the
+        # differential below cannot see it -- which mutation testing
+        # showed was the case before these were added.
+        body.append(f"__attribute__((weak)) int {n}(int a){{return a*2;}}")
+    for n in absolute:
+        # A *global* absolute symbol. The reserved-index filter is only
+        # observable through one: the `SHN_ABS` entries gcc emits on its
+        # own (`crtstuff.c`, the file symbols) are all `STB_LOCAL`, so the
+        # binding filter excludes them first and a mutation deleting
+        # `SHN_ABS` from the skip set changes nothing. Mutation testing
+        # showed exactly that before this was added.
+        body.append(f'__asm__(".globl {n}\\n.set {n}, 0x1234\\n");')
     for n in static_only:
         body.append(f"static int {n}(int a){{return a;}}")
         # Keep the static alive so it reaches .symtab.
@@ -97,6 +111,26 @@ def _build_so(tmp_path, names, *, hidden=(), static_only=()):
             # absent capability for a test about ELF symbol tables.
             return None
     return so
+
+
+@contextlib.contextmanager
+def _fast_path_disabled(monkeypatch):
+    """Control configuration: the bulk decoder present but always declining.
+
+    This is how the *legacy* `iter_symbols` loop is reached at all. Once
+    the fast path handles every well-formed table on this host, nothing
+    else executes that loop -- and it is the fallback the whole
+    "unsupported tables keep pyelftools' behaviour" argument rests on, so
+    leaving it unexecuted would mean the safety net is never tested.
+    """
+
+    def declines(_section, _elffile):
+        return None
+
+    monkeypatch.setattr(
+        "abicheck.extract.elf_symbol_fastpath.iter_symbol_fields", declines
+    )
+    yield
 
 
 @contextlib.contextmanager
@@ -225,6 +259,146 @@ class TestExtractSymbolsUsesTheBuffer:
 
         assert buffered_exc == unbuffered_exc
         assert buffered_result == unbuffered_result
+
+
+class TestTheLegacyLoopStillAgrees:
+    """The fallback must produce the same answer as the fast path.
+
+    **Bug class.** A fast path is added with a fallback for what it
+    cannot decode; the fast path then handles every input the tests use,
+    so the fallback -- the thing that makes the change safe -- silently
+    stops being executed at all. A defect in it is then invisible until
+    a user hits an ELF variant the fast path declines, which is by
+    construction the unusual, hard-to-debug case.
+
+    **General invariant**: for every fixture shape, the result with the
+    bulk decoder engaged equals the result with it declining, so the two
+    implementations of the same filter cannot drift apart. Asserted as a
+    differential against a *control configuration*, and paired with an
+    observation that each configuration really ran -- otherwise this is
+    the vacuous comparison AGENTS.md warns about.
+
+    Each filter needs an input that makes it observable, which mutation
+    testing (not review) established: a weak export for the binding
+    filter, and a *global* absolute symbol for the reserved-index filter,
+    since gcc's own `SHN_ABS` entries are all `STB_LOCAL` and the binding
+    filter excludes them first. Both mutations survived before those
+    fixtures existed.
+
+    **One filter is deliberately not covered here.** The visibility check
+    (`vis not in _HIDDEN_VIS`) cannot be reached through a gcc-built
+    shared object at all: the linker localizes hidden symbols, which is
+    what hidden visibility means for a `.so`, so no `STB_GLOBAL` or
+    `STB_WEAK` symbol in such a file ever carries `STV_HIDDEN` -- probed
+    directly, including via a `.hidden` assembler directive on a pure-asm
+    global, which the linker still converted to `STB_LOCAL`. The fast
+    path's own visibility handling is exercised exhaustively against
+    pyelftools in `tests/test_elf_symbol_fastpath.py` (every binding by
+    every visibility), so the decoding is covered; what is uncovered is
+    the *legacy loop's* redundant copy of the same predicate, on
+    pre-existing code this change did not touch.
+    """
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"names": ["alpha", "beta"]},
+            {"names": ["a", "bb", "ccc"], "hidden": ["secret_fn"]},
+            {"names": ["pub"], "static_only": ["priv_a"]},
+            {"names": [f"sym_{i:03d}" for i in range(120)]},
+            # The two shapes that make the binding/visibility filters
+            # observable at all. Without them a legacy loop that dropped
+            # every weak symbol, or kept every hidden one, agreed with the
+            # fast path on every fixture and the mutation survived.
+            {"names": ["strong"], "weak": ["weak_fn", "weak_two"]},
+            {"names": ["pub"], "absolute": ["abs_marker"]},
+            {
+                "names": ["pub"],
+                "weak": ["weak_fn"],
+                "hidden": ["secret_fn"],
+                "static_only": ["priv_a"],
+                "absolute": ["abs_marker"],
+            },
+        ],
+        ids=["pair", "hidden", "static", "many", "weak", "absolute", "mixed"],
+    )
+    def test_the_two_decoders_agree(self, tmp_path, monkeypatch, kwargs) -> None:
+        so = _build_so(tmp_path, **kwargs)
+        if so is None:
+            pytest.skip("no compiler producing an ELF shared object on this host")
+
+        fast = _pyelftools_exported_symbols(so)
+        with _fast_path_disabled(monkeypatch):
+            legacy = _pyelftools_exported_symbols(so)
+
+        assert fast == legacy
+        assert fast[0], "fixture exported nothing; the equality proves nothing"
+        for hidden_name in kwargs.get("hidden", ()):
+            assert hidden_name not in legacy[0]
+        # Vacuity guard with teeth: a weak export must actually be present
+        # in what both decoders returned, or "they agree" says nothing
+        # about the binding filter. `.symtab` is checked too, since that is
+        # where a hidden or local symbol reaches the walk at all.
+        for abs_name in kwargs.get("absolute", ()):
+            assert abs_name not in fast[0] and abs_name not in legacy[0], (
+                f"{abs_name} is SHN_ABS and must be skipped by both decoders"
+            )
+        for weak_name in kwargs.get("weak", ()):
+            assert weak_name in fast[0], (
+                f"{weak_name} absent from the dynamic set; this fixture does not "
+                "exercise the weak-binding filter and the comparison is vacuous"
+            )
+            assert weak_name in legacy[0]
+
+    def test_each_configuration_really_ran(self, tmp_path, monkeypatch) -> None:
+        """Observe the mechanism, not just the agreeing output.
+
+        Without this, a fast path that had silently stopped engaging
+        would make every comparison above compare the legacy loop with
+        itself.
+        """
+        so = _build_so(tmp_path, ["alpha", "beta"])
+        if so is None:
+            pytest.skip("no compiler producing an ELF shared object on this host")
+        import abicheck.extract.elf_symbol_fastpath as fastpath
+
+        calls = {"n": 0, "declined": 0}
+        real = fastpath.iter_symbol_fields
+
+        def counting(section, elffile):
+            calls["n"] += 1
+            result = real(section, elffile)
+            if result is None:
+                calls["declined"] += 1
+            return result
+
+        monkeypatch.setattr(fastpath, "iter_symbol_fields", counting)
+        _pyelftools_exported_symbols(so)
+        assert calls["n"] == 2, "the bulk decoder was not consulted for both tables"
+        assert calls["declined"] == 0, "it declined a table it should have decoded"
+
+    def test_a_string_table_without_an_accessor_falls_back(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """No `get_string` to resolve names with -> the legacy loop.
+
+        Distinct from the decoder declining: the entries decode fine, but
+        there is no way to turn `st_name` into a name, so the fast path
+        must hand back rather than invent one.
+        """
+        so = _build_so(tmp_path, ["alpha", "beta"])
+        if so is None:
+            pytest.skip("no compiler producing an ELF shared object on this host")
+
+        import abicheck.extract.elf_string_table as helper
+
+        def no_table(_section):
+            return None
+
+        monkeypatch.setattr(helper, "string_table_of", no_table)
+        # Names still resolve through pyelftools' own accessor in the
+        # legacy loop, so the result is unchanged.
+        assert _pyelftools_exported_symbols(so)[0] >= {"alpha", "beta"}
 
 
 class TestTheFixtureGuardItself:
