@@ -44,9 +44,11 @@ from .descriptor import CompatDescriptor
 from .multi_library import pair_libraries
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping, Sequence
     from pathlib import Path
 
-    from ..checker_types import DiffResult
+    from ..checker import Verdict
+    from ..checker_types import Change, DiffResult
     from ..model.snapshot import AbiSnapshot
 
 
@@ -302,3 +304,129 @@ def _assurance_marked_partial(
             f"covers less than the descriptor selected.",
         ),
     )
+
+
+def _member_pass_pairs(
+    pairs: Sequence[tuple[Path | None, Path | None]],
+) -> Iterator[tuple[int, tuple[Path | None, Path | None]]]:
+    """Enumerate a descriptor's library pairs inside the release-level
+    ownership scope (`workflows.crosscheck_ownership`).
+
+    One product contract, many providers: a descriptor naming several
+    libraries is a multi-library product, so the whole-product cross-source
+    check is answered once at release level rather than per member against
+    the complete product header surface. A single-library descriptor keeps
+    the per-member answer, unchanged.
+
+    A generator wrapping ``enumerate`` so the scope spans every iteration
+    without re-indenting the loop body around a ``with``; the ">1 member"
+    rule itself lives in ``member_pass_scope``, shared with every other
+    multi-library driver.
+    """
+    from ..workflows.release_public_surface import member_pass_scope
+
+    names = [str(old or new or index) for index, (old, new) in enumerate(pairs)]
+    with member_pass_scope(names):
+        yield from enumerate(pairs)
+
+
+def _release_contract_findings(
+    old_snapshots: Mapping[str, AbiSnapshot], new_snapshots: Mapping[str, AbiSnapshot]
+) -> list[Change]:
+    """The release-level contract findings for a multi-library descriptor.
+
+    Empty when neither side's snapshots carry public-header provenance --
+    an ABICC descriptor without headers records no contract, and inventing
+    an empty one would turn every export into undocumented surface.
+    """
+    from ..workflows.release_public_surface import reconcile_member_sets
+    from ..workflows.release_surface_acquisition import surface_from_snapshots
+
+    old_surface = surface_from_snapshots(
+        dict(old_snapshots), acquisition_key="compat-descriptor", side="old"
+    )
+    new_surface = surface_from_snapshots(
+        dict(new_snapshots), acquisition_key="compat-descriptor", side="new"
+    )
+    if not old_surface.resolvable and not new_surface.resolvable:
+        return []
+    reconciliation = reconcile_member_sets(
+        new_members=dict(new_snapshots),
+        new_surface=new_surface,
+        old_members=dict(old_snapshots),
+        old_surface=old_surface,
+    )
+    return list(reconciliation.findings)
+
+
+@dataclasses.dataclass
+class _MemberSnapshots:
+    """The descriptor's per-library snapshots, keyed by one member name.
+
+    One name across both sides: the reconciliation's per-member attribution
+    joins OLD and NEW by it, and a descriptor that renames a library between
+    versions would otherwise present one member as two.
+    """
+
+    old: dict[str, AbiSnapshot] = dataclasses.field(default_factory=dict)
+    new: dict[str, AbiSnapshot] = dataclasses.field(default_factory=dict)
+
+    def record(
+        self,
+        index: int,
+        old_lib: Path | None,
+        new_lib: Path | None,
+        old_snap: AbiSnapshot,
+        new_snap: AbiSnapshot,
+    ) -> None:
+        name = str(new_lib or old_lib or f"member{index}")
+        self.old[name] = old_snap
+        self.new[name] = new_snap
+
+    def fold_into(self, result: DiffResult, *, policy: str) -> DiffResult:
+        """Add the release-level findings to *result* **and re-score it**.
+
+        The whole-product cross-source check taken off the member pass is
+        answered once here, against the union of the descriptor's own
+        libraries. Extending `changes` alone is not enough and was a real
+        bypass: `merge_results` aggregates the member verdicts *before*
+        this runs, so the report named a missing export while the verdict
+        -- and therefore the exit code -- stayed clean (CodeRabbit review;
+        reproduced at exit 0 with `public_not_exported` in the report).
+
+        The fold is monotonic and uses the same
+        `release_findings_verdict` rule every other driver scores release
+        findings by, so moving this check's owner cannot change what it
+        gates.
+        """
+        from ..workflows.release_public_surface import release_findings_verdict
+
+        findings = _release_contract_findings(self.old, self.new)
+        if not findings:
+            return result
+        result.changes.extend(findings)
+        return dataclasses.replace(
+            result,
+            verdict=_worst_verdict(
+                result.verdict,
+                release_findings_verdict(findings, policy=policy),
+            ),
+        )
+
+
+def _worst_verdict(current: Verdict, release: str) -> Verdict:
+    """The worse of a merged member verdict and a release-level one.
+
+    Ranked by `multi_library._WORST_SCALES["verdict"]`, the same ordinal the
+    member merge itself folds by -- so one scale decides both halves and a
+    release finding can raise a verdict but never lower one. An unknown
+    release spelling ranks below everything rather than silently winning.
+    """
+    from .multi_library import _WORST_SCALES
+
+    ranks = {name: index for index, name in enumerate(_WORST_SCALES["verdict"])}
+    if ranks.get(release, -1) > ranks.get(current.value, -1):
+        from ..checker import Verdict as _Verdict
+
+        return _Verdict(release)
+    return current

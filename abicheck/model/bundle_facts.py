@@ -37,6 +37,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 from ..bundle_manifest import InstantiationManifest
+from .release_surface import ReleasePublicSurface
 from .snapshot import AbiSnapshot
 
 #: Schema version for the persisted `BundleFacts` container itself --
@@ -44,22 +45,43 @@ from .snapshot import AbiSnapshot
 #: already carries its own), since the container's own shape (what fields
 #: `BundleFacts` has) can evolve on its own timeline. Bumped to 2 for the
 #: `BUNDLE_FACTS_ARTIFACT_TYPE` marker below; to 3 (ADR-065 D8) for the
-#: decision-bearing `degraded_members` marker. This is the *reader's* max;
-#: `document_schema_version` below chooses what a writer declares.
-BUNDLE_FACTS_SCHEMA_VERSION = 3
+#: decision-bearing `degraded_members` marker; to 4 for the equally
+#: decision-bearing `public_surface` block (the release's one public
+#: contract and the acquisition identity it was acquired under). This is the
+#: *reader's* max; `document_schema_version` below chooses what a writer
+#: declares.
+BUNDLE_FACTS_SCHEMA_VERSION = 4
 #: What a document with no degraded member declares (a pre-S2 reader still
 #: opens it); one *with* degraded members declares 3, so a reader that cannot
 #: honor the marker rejects it instead of misreading an ELF-only stand-in.
 BUNDLE_FACTS_BASE_SCHEMA_VERSION = 2
 
 
+#: The version a document carrying a ``public_surface`` block declares, so
+#: a reader that cannot honor it refuses the document instead of dropping
+#: the release's recorded public contract. Dropping it is not neutral: the
+#: members would then be reconciled against no contract at all, which is
+#: how the per-member Cartesian-product findings this block exists to
+#: remove would come back on a *stored* baseline.
+PUBLIC_SURFACE_SCHEMA_VERSION = 4
+#: The version a decision-bearing ``degraded_members`` marker declares
+#: (ADR-065 D8), kept as its own name now that it is no longer the maximum.
+DEGRADED_MEMBERS_SCHEMA_VERSION = 3
+
+
 def document_schema_version(facts: BundleFacts) -> int:
-    """The ``schema_version`` a writer declares for *facts* (see above)."""
-    return (
-        BUNDLE_FACTS_SCHEMA_VERSION
-        if facts.degraded_members
-        else BUNDLE_FACTS_BASE_SCHEMA_VERSION
-    )
+    """The ``schema_version`` a writer declares for *facts* (see above).
+
+    The highest version any block *actually present* requires -- never the
+    reader's maximum: a document with neither block still declares 2 and
+    still opens in every older reader, which is what keeps the bump
+    additive for every existing baseline.
+    """
+    if facts.public_surface is not None:
+        return PUBLIC_SURFACE_SCHEMA_VERSION
+    if facts.degraded_members:
+        return DEGRADED_MEMBERS_SCHEMA_VERSION
+    return BUNDLE_FACTS_BASE_SCHEMA_VERSION
 
 
 #: Self-describing document-type marker; see `storage.bundle_facts_codec.
@@ -140,6 +162,28 @@ class BundleFacts:
     #: ADR-065 D2: the capture's own assertion that ``per_library_snapshots`` is
     #: the whole release; ``False`` (every pre-field document) proves nothing.
     inventory_complete: bool = False
+    #: The release's **one** public contract, and the acquisition identity
+    #: it was acquired under (:class:`~abicheck.model.release_surface.
+    #: ReleasePublicSurface`). A multi-library product has one public
+    #: surface backed by many binary providers, so it is stored once here
+    #: rather than being re-derived per member -- which is also what lets a
+    #: stored baseline be reconciled against the union of its members'
+    #: exports instead of demanding the whole product surface from each of
+    #: them. ``None`` for every pre-v4 document and for a capture with no
+    #: header inputs at all: absent means "this capture recorded no product
+    #: contract", never "the product promises nothing".
+    #:
+    #: Note what this does *not* yet deduplicate: each entry in
+    #: ``per_library_snapshots`` still carries its own copy of the header
+    #: evidence its dump parsed. Removing that duplication is a change to
+    #: snapshot persistence itself, recorded as follow-up work rather than
+    #: pretended here.
+    #:
+    #: **Appended**, after every pre-existing field: inserting it mid-list
+    #: would rebind every positional ``BundleFacts(...)`` caller one slot
+    #: to the left, silently and without a type error (this repository's own
+    #: ``api.positional_slot_rebinding`` bug class).
+    public_surface: ReleasePublicSurface | None = None
     artifact_type: str = field(default=BUNDLE_FACTS_ARTIFACT_TYPE, init=False)
 
 

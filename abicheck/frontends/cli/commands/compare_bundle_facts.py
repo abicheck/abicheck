@@ -77,6 +77,11 @@ from .compare_bundle_facts_scope import (
     markdown_scope_lines,
     scope_terms_for,
 )
+from .compare_bundle_facts_sections import (
+    assurance_sections,
+    public_surface_markdown_lines,
+    public_surface_terms,
+)
 
 
 def _resolve_new_side_headers_includes(
@@ -967,22 +972,9 @@ def _render_json(
         ],
         "analysis_errors": list(result.analysis_errors),
     }
-    # ADR-071 D9, present only under the setting (D4): the canonical top-level
-    # `analysis_assurance_exit_contribution` (what `aggregate.gate.
-    # _analysis_assurance_exit` and the deferred gate read) plus the fold
-    # section. The gate-bearing key is a plain scalar needing no `exit` block,
-    # which is why omitting it was a real bypass rather than a cosmetic gap
-    # (Codex review, P1). This document still has no `exit` block of its own --
-    # a separate gap, recorded in known-gaps.md.
-    if assurance_decision is not None and assurance_decision.require_complete:
-        from ....report.release_assurance import release_assurance_terms
-
-        summary["analysis_assurance_exit_contribution"] = (
-            assurance_decision.exit_contribution
-        )
-        summary["analysis_assurance"] = release_assurance_terms(
-            assurance_decision
-        ).section
+    summary.update(assurance_sections(assurance_decision))
+    if (_surface := public_surface_terms(result)) is not None:
+        summary["public_surface_reconciliation"] = _surface.to_dict()
     # Mirrors the two-sided compare report's env_matrix_source_sha256.
     if result.env_matrix_source_sha256 is not None:
         summary["env_matrix_source_sha256"] = result.env_matrix_source_sha256
@@ -1028,6 +1020,7 @@ def _render_markdown(
     for diff in result.per_library:
         lines.append(f"| {diff.library} | `{diff.verdict.value}` |")
     lines.append("")
+    lines += public_surface_markdown_lines(result)
     lines.append("## Bundle findings")
     lines.append("")
     bundle_lines = render_bundle_findings_markdown(result.bundle_findings)

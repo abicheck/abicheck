@@ -50,9 +50,14 @@ from .errors import SnapshotError
 from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
 from .frontends.cli.release_exit import _exit_compare_release as _exit_compare_release
 from .model import AbiSnapshot
+from .model.release_surface import ReleasePublicSurface
 from .report import release_change_inventory as _inventory
 from .report.comparison_scope import ComparisonScopeTerms, comparison_scope_terms
 from .report.release_assurance import ReleaseAssuranceTerms, release_assurance_terms
+from .report.release_public_surface import (
+    ReleasePublicSurfaceTerms,
+    render_release_public_surface_markdown,
+)
 from .report.render_release_markdown import (  # re-exported, moved (ADR-065 S2)
     _release_md_bundle_findings as _release_md_bundle_findings,
     _release_md_changed_libraries as _release_md_changed_libraries,
@@ -502,6 +507,7 @@ def write_bundle_facts_out(
     inherited_degraded: Mapping[str, str] | None = None,
     resolved_manifest: InstantiationManifest | None = None,
     inventory_complete: bool = False,
+    public_surface: ReleasePublicSurface | None = None,
 ) -> None:
     """Persist the OLD side's per-library snapshots (plus manifest, if any)
     to *bundle_facts_out* as a :class:`~abicheck.model.bundle_facts.BundleFacts`
@@ -638,6 +644,10 @@ def write_bundle_facts_out(
             library_paths=dict(old_map),
             degraded_members=degraded_members,
             inventory_complete=inventory_complete,
+            # The OLD side's own acquired public contract, stored once for
+            # the whole document (schema_version 4); `None` keeps the
+            # document at its previous version.
+            public_surface=public_surface,
         )
         save_bundle_facts(facts, bundle_facts_out)
     except (OSError, ValueError, SnapshotError) as exc:
@@ -949,8 +959,13 @@ def _format_release_summary(
     env_matrix_source_sha256: str | None = None,
     require_complete_analysis: bool = False,
     excluded_header_patterns: str = "",
+    public_surface: ReleasePublicSurfaceTerms | None = None,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML.
+
+    *public_surface* is the one release-level public-surface/reconciliation
+    struct (``report.release_public_surface``): JSON emits its ``to_dict()``,
+    Markdown its renderer's text, so neither can state a different number.
 
     *env_matrix_source_sha256* (Codex review, P2 follow-up) is the release-
     wide deployment-floor digest computed once, at release scope, by the
@@ -1043,6 +1058,9 @@ def _format_release_summary(
             env_matrix_source_sha256=env_matrix_source_sha256,
             require_complete_analysis=require_complete_analysis,
             excluded_header_patterns=excluded_header_patterns,
+            public_surface=(
+                None if public_surface is None else public_surface.to_dict()
+            ),
         )
     md = _format_release_markdown(
         worst_verdict,
@@ -1059,6 +1077,11 @@ def _format_release_summary(
         severity_config=severity_config,
         show_only=show_only,
         env_matrix_source_sha256=env_matrix_source_sha256,
+        public_surface_markdown=(
+            ""
+            if public_surface is None
+            else render_release_public_surface_markdown(public_surface)
+        ),
     )
     if demangle:
         from .demangle import demangle_text
@@ -1291,6 +1314,7 @@ def _format_release_json(
     env_matrix_source_sha256: str | None = None,
     require_complete_analysis: bool = False,
     excluded_header_patterns: str = "",
+    public_surface: dict[str, object] | None = None,
 ) -> str:
     """Render the release summary as a JSON document (``release_schema_
     version``: :data:`~abicheck.schemas.RELEASE_SCHEMA_VERSION`).
@@ -1491,6 +1515,11 @@ def _format_release_json(
     # other "present only when active" key in this function.
     if env_matrix_source_sha256 is not None:
         summary["env_matrix_source_sha256"] = env_matrix_source_sha256
+    # One product contract, many providers (`report.release_public_surface`).
+    # Same additive "present only when it states something" convention as
+    # every key around it.
+    if public_surface is not None:
+        summary["public_surface_reconciliation"] = public_surface
     # Release-level public-surface scoping rollup (ADR-024, issue #235).
     # Present only when --scope-public-headers was active (per-library
     # entries then carry a "scope_resolved" key).
@@ -1637,6 +1666,7 @@ def _format_release_markdown(
     severity_config: SeverityConfig | None = None,
     show_only: str | None = None,
     env_matrix_source_sha256: str | None = None,
+    public_surface_markdown: str = "",
 ) -> str:
     """Render the release summary as a Markdown document.
 
@@ -1800,6 +1830,10 @@ def _format_release_markdown(
     )
     lines += _release_md_bundle_findings(bundle_result, display_bundle_findings)
     lines += _release_md_matrix_findings(matrix_result, display_matrix_changes)
+    # Already rendered by its owning `report`-classified renderer; this call
+    # site only places it, per `report/AGENTS.md`'s renderer contract.
+    if public_surface_markdown:
+        lines.append(public_surface_markdown)
     lines += render_disposition_audit_section(
         DispositionAudit.from_dict(
             release_disposition_audit_block(

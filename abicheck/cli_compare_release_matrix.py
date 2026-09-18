@@ -83,6 +83,7 @@ from .frontends.cli.runtime import _safe_write_output, _write_or_echo  # noqa: F
 from .model import AbiSnapshot
 from .report.comparison_scope import ComparisonScopeTerms
 from .report.release_assurance import ReleaseAssuranceTerms
+from .report.release_public_surface import ReleasePublicSurfaceTerms
 from .workflows.extraction import package_component_inventory  # noqa: F401
 from .workflows.gate import incomplete_scope_diagnostic
 
@@ -238,6 +239,7 @@ def _finalize_release_output(
     env_matrix_source_sha256: str | None = None,
     require_complete_analysis: bool = False,
     excluded_header_patterns: str = "",
+    public_surface: ReleasePublicSurfaceTerms | None = None,
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit.
 
@@ -284,6 +286,7 @@ def _finalize_release_output(
         env_matrix_source_sha256=env_matrix_source_sha256,
         require_complete_analysis=require_complete_analysis,
         excluded_header_patterns=excluded_header_patterns,
+        public_surface=public_surface,
     )
     _write_or_echo(output, text)
 
@@ -320,6 +323,7 @@ def _finalize_release_output(
             env_matrix_source_sha256=env_matrix_source_sha256,
             require_complete_analysis=require_complete_analysis,
             excluded_header_patterns=excluded_header_patterns,
+            public_surface=public_surface,
         )
 
     # ADR-065 D6/D7, the completeness axis's own stderr notice -- the same

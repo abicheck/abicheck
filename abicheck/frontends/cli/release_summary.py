@@ -38,6 +38,7 @@ from ...report.release_assurance import ReleaseAssuranceTerms
 from .options.params import DEFAULT_POLICY_PROFILE
 
 if TYPE_CHECKING:
+    from ...report.release_public_surface import ReleasePublicSurfaceTerms
     from ...workflows.gate import SeverityConfig
 
 __all__ = ["_write_release_summary_file"]
@@ -68,6 +69,7 @@ def _write_release_summary_file(
     env_matrix_source_sha256: str | None = None,
     require_complete_analysis: bool = False,
     excluded_header_patterns: str = "",
+    public_surface: ReleasePublicSurfaceTerms | None = None,
 ) -> None:
     """Write per-library summary JSON to output directory.
 
@@ -193,6 +195,21 @@ def _write_release_summary_file(
     }
     if env_matrix_source_sha256 is not None:
         summary_data["env_matrix_source_sha256"] = env_matrix_source_sha256
+    # The same release contract the primary report states. A consumer
+    # collecting `--output-dir` as the artifact reads this file instead of
+    # that one, so omitting the product's own contract here left exactly
+    # the per-member reading the block exists to replace (CodeRabbit
+    # review) -- the same drift the `comparison_scope`/`analysis_assurance`
+    # blocks below are threaded through for.
+    # Emitted whenever a reconciliation exists, *including* an unevaluated
+    # one: `evaluated` goes false exactly when neither side's surface
+    # resolved, and that is a stated fact (the section carries the reason),
+    # not an absence. Gating on it left a `--output-dir` consumer unable to
+    # tell an unresolved product contract from no product contract -- the
+    # same "a failed extractor read as silence" inversion the Markdown
+    # renderer deliberately refuses (CodeRabbit review).
+    if public_surface is not None:
+        summary_data["public_surface_reconciliation"] = public_surface.to_dict()
     if terms.section is not None:
         summary_data["comparison_scope"] = terms.section
     # ADR-071 D6: the same fold section and the same canonical top-level

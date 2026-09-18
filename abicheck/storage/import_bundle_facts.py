@@ -64,9 +64,8 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from ..errors import IncompatibleSnapshotSchemaError
-from ..model.bundle_facts import require_degraded_members_known
 from .bundle_facts_validation import (
-    require_degraded_marker_version,
+    require_document_markers,
     validated_inventory_complete,
 )
 from .dto import (
@@ -104,7 +103,7 @@ BUNDLE_FACTS_ARTIFACT_TYPE = "abicheck.bundle-facts"
 
 #: `abicheck.model.bundle_facts.BUNDLE_FACTS_SCHEMA_VERSION`/`..._BASE_SCHEMA_VERSION`, duplicated as
 #: `BUNDLE_FACTS_ARTIFACT_TYPE` is. `export_bundle_facts` applies `bundle_facts_to_dict()`'s
-#: writer rule (base, or 3 once `degraded_members` is non-empty -- ADR-065 D8).
+#: writer rule (base, or 3 once `degraded_members` is non-empty -- ADR-065 D8). Still 3 while the canonical reader is at 4: a v4 document's `public_surface` contract has no composition section here, so the gate below refuses such a document rather than importing one whose contract it discarded (`docs/contribute/known-gaps.md`).
 _BUNDLE_FACTS_SCHEMA_VERSION = 3
 _BUNDLE_FACTS_BASE_SCHEMA_VERSION = 2
 
@@ -490,15 +489,16 @@ def import_bundle_facts(
     degraded_members = _validated_library_filenames(  # ADR-065 D8, same shape
         bundle_facts_document.get("degraded_members", _ABSENT), "degraded_members"
     )
-    require_degraded_marker_version(  # an absent key is a v1 document, not the default
+    require_document_markers(  # an absent `schema_version` is a v1 document
+        bundle_facts_document,
         degraded_members,
-        raw_container_schema_version
-        if "schema_version" in bundle_facts_document
-        else 1,
+        raw_snapshots,
+        declared_schema_version=(
+            raw_container_schema_version
+            if "schema_version" in bundle_facts_document
+            else 1
+        ),
         what="bundle_facts_document",
-    )
-    require_degraded_members_known(
-        degraded_members, raw_snapshots, what="bundle_facts_document"
     )
 
     artifact_refs = []

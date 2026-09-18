@@ -941,10 +941,21 @@ class TestPrComment:
 
 
 class TestDegradedPersistenceVersioning:
-    def test_only_a_degraded_document_declares_the_reader_max(self) -> None:
+    def test_only_a_degraded_document_declares_the_marker_version(self) -> None:
+        """A clean document stays at the base version; a degraded one
+        declares exactly the version its marker requires.
+
+        Asserted against ``DEGRADED_MEMBERS_SCHEMA_VERSION`` rather than the
+        reader maximum: the two coincided while ``degraded_members`` was the
+        newest block, and stopped coinciding when ``public_surface`` took
+        version 4. The rule was always "the highest version a block actually
+        present requires", never "the reader max" -- pinning the max was what
+        made this test read as a stricter claim than the writer makes.
+        """
         from abicheck.model.bundle_facts import (
             BUNDLE_FACTS_BASE_SCHEMA_VERSION,
             BUNDLE_FACTS_SCHEMA_VERSION,
+            DEGRADED_MEMBERS_SCHEMA_VERSION,
         )
         from abicheck.storage.bundle_facts_codec import (
             bundle_facts_from_dict,
@@ -965,9 +976,10 @@ class TestDegradedPersistenceVersioning:
         )
         assert (
             bundle_facts_to_dict(degraded)["schema_version"]
-            == BUNDLE_FACTS_SCHEMA_VERSION
+            == DEGRADED_MEMBERS_SCHEMA_VERSION
         )
-        assert BUNDLE_FACTS_SCHEMA_VERSION > BUNDLE_FACTS_BASE_SCHEMA_VERSION
+        assert DEGRADED_MEMBERS_SCHEMA_VERSION > BUNDLE_FACTS_BASE_SCHEMA_VERSION
+        assert BUNDLE_FACTS_SCHEMA_VERSION >= DEGRADED_MEMBERS_SCHEMA_VERSION
         # A pre-S2 reader (max 2) rejects the degraded document outright;
         # modelled by the rejection this reader applies one version up.
         d = bundle_facts_to_dict(degraded)
