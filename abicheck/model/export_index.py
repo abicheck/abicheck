@@ -89,8 +89,27 @@ __all__ = [
 #: Which platform table a :class:`RawExportIndex` was read from.
 Platform = Literal["elf", "pe", "macho"]
 
+# Both types below are ``slots=True`` because they are materialized **once
+# per exported symbol** of a real binary, and every current consumer
+# immediately projects the index down to a set of names
+# (``all_export_names``, ``default_versioned_names``,
+# ``callable_export_names``) and drops it -- so the entries are a transient
+# allocation spike proportional to the export table, not retained state.
+#
+# Measured: an unslotted instance costs 48 B for the object plus 296 B for
+# its ``__dict__`` (344 B); slotted it is 80 B, a saving of 264 B per entry.
+# Across a real oneDAL release's six members that is 43,864 ``.dynsym``
+# entries per side, 87,728 for both -- about 22 MiB at peak if they are all
+# live at once.
+#
+# Stated at its real size rather than sold as a memory fix: against a
+# measured ~2.3 GiB peak for the same six-member comparison that is under
+# 1%. It is here because it is free and safe (no consumer touches
+# ``__dict__``, takes a ``weakref``, or calls ``asdict`` on these), not
+# because it solves the memory problem.
 
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, slots=True)
 class RawExportEntry:
     """One raw platform export-table row — no filtering, no normalization.
 
@@ -120,7 +139,7 @@ class RawExportEntry:
     visibility: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RawExportIndex:
     """A snapshot's (or a raw platform-metadata object's) unfiltered export table."""
 
