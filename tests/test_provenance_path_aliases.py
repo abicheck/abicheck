@@ -440,3 +440,55 @@ def test_resolution_failure_does_not_fail_extraction(
     clear_path_alias_caches()
     assert canonical_spelling(str(loop)) is None
     assert _classify(str(loop / "api.h"), dirs=[str(loop)]) is ScopeOrigin.PUBLIC_HEADER
+
+
+@pytest.mark.parametrize(
+    ("exc", "why"),
+    [
+        (ValueError, "a name the platform rejects outright"),
+        (RuntimeError, "a resolver-level failure (historically a symlink loop)"),
+    ],
+)
+def test_resolution_error_degrades_to_lexical_matching(
+    exc: type[Exception], why: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A raising resolver yields no alias, never an extraction failure.
+
+    The sibling below reaches this handler with a genuine OS error; these
+    two cover the exception types this platform will not produce on demand.
+    Mocked at ``Path.resolve`` -- the call the handler actually guards --
+    rather than at the module's own function, so the test would still fail
+    if the ``try`` stopped wrapping it.
+    """
+    root = tmp_path / "inc"
+    root.mkdir()
+    (root / "pub.h").write_text("int foo(void);\n")
+
+    def _raise(self: Path, *a: object, **k: object) -> Path:
+        raise exc(why)
+
+    monkeypatch.setattr(Path, "resolve", _raise)
+    clear_path_alias_caches()
+
+    assert canonical_spelling(str(root)) is None
+    assert path_alias_spellings(str(root)) == (str(root),)
+    # Extraction continues, and the lexical spelling still classifies.
+    assert _classify(str(root / "pub.h"), dirs=[str(root)]) is ScopeOrigin.PUBLIC_HEADER
+
+
+def test_os_error_during_resolution_degrades_to_lexical_matching() -> None:
+    """The same guarantee, reached without mocking anything.
+
+    A path component past ``NAME_MAX`` makes the filesystem itself refuse
+    the query (``ENAMETOOLONG``), which is a real instance of the class the
+    handler exists for -- so this pins the behaviour against the OS rather
+    than against a patched callable.
+    """
+    too_long = "/" + ("a" * 5000)
+    with pytest.raises(OSError):
+        Path(too_long).exists()
+
+    clear_path_alias_caches()
+    assert canonical_spelling(too_long) is None
+    assert path_alias_spellings(too_long) == (too_long,)
+    assert _segments(too_long) in public_root_alias_segments(too_long)
