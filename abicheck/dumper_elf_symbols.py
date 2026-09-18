@@ -170,6 +170,45 @@ def _pyelftools_exported_symbols(so_path: Path) -> tuple[set[str], set[str]]:
     from elftools.elf.sections import SymbolTableSection
 
     from .extract.elf_string_table import buffered_string_table, string_table_of
+    from .extract.elf_symbol_fastpath import (
+        SHN_ABS,
+        SHN_UNDEF,
+        STB_GLOBAL,
+        STB_WEAK,
+        STV_HIDDEN,
+        STV_INTERNAL,
+        iter_symbol_fields,
+    )
+
+    _SKIP_SHNDX = frozenset({SHN_UNDEF, SHN_ABS})
+    _KEEP_BIND = frozenset({STB_GLOBAL, STB_WEAK})
+    _SKIP_VIS = frozenset({STV_HIDDEN, STV_INTERNAL})
+
+    def _extract_fast(section: Any, strtab: Any) -> set[str] | None:
+        """The same filter over bulk-decoded entries, or ``None`` to fall back.
+
+        Mirrors the predicate below exactly -- reserved section index,
+        binding, visibility, then name and ABI relevance -- on integers
+        rather than on pyelftools' string enums. It resolves names
+        straight from the buffered string-table bytes, so neither the
+        per-symbol ``Container`` nor the per-name accessor call is built.
+        """
+        fields = iter_symbol_fields(section, elf)
+        if fields is None:
+            return None
+        get_string = getattr(strtab, "get_string", None)
+        if get_string is None:
+            return None
+        syms: set[str] = set()
+        for st_name, bind, visibility, st_shndx in fields:
+            if st_shndx in _SKIP_SHNDX:
+                continue
+            if bind not in _KEEP_BIND or visibility in _SKIP_VIS:
+                continue
+            name = get_string(st_name)
+            if name and _is_abi_relevant_symbol(name):
+                syms.add(name)
+        return syms
 
     def _extract_symbols(elf: Any, section_name: str) -> set[str]:
         syms: set[str] = set()
@@ -187,7 +226,16 @@ def _pyelftools_exported_symbols(so_path: Path) -> tuple[set[str], set[str]]:
         # fall-through-to-pyelftools behaviour for an oversized, malformed
         # or truncated table, so export filtering and malformed-input
         # results are unchanged.
-        with buffered_string_table(string_table_of(section)):
+        strtab = string_table_of(section)
+        with buffered_string_table(strtab):
+            # Fixed-layout bulk decode where the table's class/endianness/
+            # entry size are ones this build has been shown to decode
+            # identically; the ordinary `iter_symbols` walk otherwise, so
+            # an unsupported or malformed table keeps pyelftools' exact
+            # behaviour rather than a reimplementation of it.
+            fast = _extract_fast(section, strtab)
+            if fast is not None:
+                return fast
             for sym in section.iter_symbols():
                 shndx = sym.entry.st_shndx
                 if shndx in ("SHN_UNDEF", "SHN_ABS"):

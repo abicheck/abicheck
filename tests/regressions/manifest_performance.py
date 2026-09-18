@@ -593,4 +593,73 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="perf.fixed_layout_fast_path_field_decoding",
+        invariant=(
+            "A fast path that replaces a third-party parser for a "
+            "fixed-layout record must agree with that parser on EVERY "
+            "field value and EVERY layout variant it claims to support, "
+            "and must refuse -- returning a distinguishable 'unsupported', "
+            "never an empty result -- for the ones it does not. Two "
+            "properties make this class dangerous: the failures are "
+            "silent (a mis-masked field yields a plausible wrong value, "
+            "not a crash) and the tempting oracle is the fast path's own "
+            "format string, which is a tautology. The oracle must be the "
+            "displaced parser itself, exercised over the variants the "
+            "development host does not produce -- a test limited to what "
+            "the local compiler emits leaves other word sizes and "
+            "endiannesses, whose record ORDER may differ, wholly "
+            "unexercised. Refusal tests must also reach the condition "
+            "they name: an earlier guard that rejects the input first "
+            "makes the later guard's test pass with that guard deleted."
+        ),
+        # #1331: `extract/elf_symbol_fastpath.py` replaced pyelftools'
+        # per-symbol `construct` parse (11.9s of a profiled 13.58s on
+        # oneDAL's libonedal_core.so.3) with one bulk `struct.iter_unpack`.
+        # Its first draft masked `st_other` with 0x3, per the generic
+        # ABI's two-bit visibility field; pyelftools uses three bits, so
+        # `STV_SINGLETON` (5) decoded as `STV_INTERNAL` (1) and the export
+        # filter silently dropped the symbol. Caught before wiring by the
+        # exhaustive binding-by-visibility grid. Two refusal tests were
+        # separately found, by mutation, to be masked by the short-read
+        # guard and to pass with their own check deleted.
+        fixed_by=(1331,),
+        seed_tests=("tests/test_elf_symbol_fastpath.py",),
+        public_surfaces=("python-api",),
+        axes={
+            "elf_class": ("32", "64"),
+            "endianness": ("little", "big"),
+            "field": ("st_name", "binding", "visibility", "st_shndx"),
+            "refusal": (
+                "entry-size",
+                "elf-class",
+                "partial-record",
+                "short-read",
+                "oversize",
+                "malformed-header",
+                "stream-error",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The fast path yields raw integers for the four "
+                    "fields a filtering caller needs; `st_value`/"
+                    "`st_size`/`st_type` are decoded only far enough to "
+                    "prove they do not shift the others, and no caller "
+                    "consumes them through this route yet. Symbol "
+                    "VERSION decoding (GNU default/non-default) is "
+                    "untouched by this change and still goes through "
+                    "`elf_metadata`'s ordinary reader, so the version "
+                    "half of the original review's acceptance list is "
+                    "not covered by these tests. Equivalence on real "
+                    "binaries was established on x86-64 little-endian "
+                    "objects only -- the big-endian and ELF32 evidence "
+                    "is synthetic, built by pyelftools itself, because "
+                    "no such toolchain was available."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )
