@@ -45,6 +45,7 @@ that happened to be probed.
 from __future__ import annotations
 
 import re
+import sys
 
 import pytest
 
@@ -228,3 +229,60 @@ class TestSpellingMatchIsGenuinelyImmutable:
         assert match.end() == 15
         assert match == SpellingMatch("std::vector", 4, 15)
         assert hash(match) == hash(SpellingMatch("std::vector", 4, 15))
+
+
+class TestThePatternEstimatorTracksRealPatterns:
+    """The per-pattern cost is calibrated, and must not silently drift back.
+
+    **Bug class.** A budget constant reasoned from first principles ("a
+    str plus about twice the text") rather than measured, guarding a
+    resource the program is already short of. Erring low is the failure
+    that matters: the budget's whole job is to bound growth, so an
+    estimate under the truth lets the cache retain more than it is
+    allowed to while reporting that it did not. The original 6 undercount
+    the six real vocabularies a oneDAL comparison compiles by a stable
+    1.46-1.51x.
+
+    **General invariant**: for boundary-anchored alternations built the
+    way production builds them, across vocabulary sizes spanning three
+    orders of magnitude, the estimate is at least the measured retention
+    and within a small factor of it. The oracle is `sys.getsizeof` of the
+    real compiled pattern and its source text -- not the estimator's own
+    arithmetic, and not a recorded number from one vocabulary.
+    """
+
+    @pytest.mark.parametrize("n_spellings", [8, 64, 512, 4096, 16384])
+    def test_the_estimate_is_not_below_measured_retention(self, n_spellings) -> None:
+        """Across three orders of magnitude of vocabulary size."""
+        from abicheck.compare.spelling_match_cache import _pattern_bytes
+        from abicheck.compare.spelling_pattern import compile_spelling_pattern
+
+        # Spellings shaped like the real ones: qualified, varied length.
+        spellings = [
+            f"ns{i % 7}::detail::v1::Type{i:06d}" + ("<int>" if i % 3 else "")
+            for i in range(n_spellings)
+        ]
+        pattern = compile_spelling_pattern(spellings)
+        assert pattern is not None
+        measured = sys.getsizeof(pattern) + sys.getsizeof(pattern.pattern)
+        estimate = _pattern_bytes(pattern)
+        assert estimate >= measured, (
+            f"{n_spellings} spellings: estimate {estimate:,} is BELOW measured "
+            f"{measured:,}; the budget would under-count what it retains"
+        )
+
+    def test_the_estimate_is_not_wildly_above_measured_either(self) -> None:
+        """Vacuity guard: an absurdly large constant would pass the test above.
+
+        Setting `_PATTERN_BYTES_PER_CHAR` to a million satisfies "not
+        below measured" for every input while making the budget refuse to
+        cache anything, so the lower bound alone does not pin the value.
+        """
+        from abicheck.compare.spelling_match_cache import _pattern_bytes
+        from abicheck.compare.spelling_pattern import compile_spelling_pattern
+
+        spellings = [f"ns::Type{i:06d}" for i in range(4096)]
+        pattern = compile_spelling_pattern(spellings)
+        assert pattern is not None
+        measured = sys.getsizeof(pattern) + sys.getsizeof(pattern.pattern)
+        assert _pattern_bytes(pattern) <= measured * 4

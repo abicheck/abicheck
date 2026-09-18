@@ -80,16 +80,33 @@ MAX_CACHED_VOCABULARIES = 64
 _BYTES_PER_ENTRY = 224
 _BYTES_PER_MATCH = 96
 
-# Rough retained cost of one compiled pattern the match cache keeps alive
-# through ``_keepalive``, as a multiple of its pattern text's length: the
-# ``str`` itself, plus the compiled program, which measures at roughly twice
-# the text again for a large literal alternation. An estimate on the same
-# terms as the two constants above -- the budget's job is to bound growth,
-# not to report exact RSS -- but a *stated* one, because leaving it out of
-# the accounting was the real gap: a match entry outlives its vocabulary-
-# cache entry, so an evicted vocabulary's pattern stays retained here while
-# ``retained_bytes`` reported only the entry bookkeeping around it.
-_PATTERN_BYTES_PER_CHAR = 6
+# Retained cost of one compiled pattern the match cache keeps alive through
+# ``_keepalive``, as a multiple of its pattern text's length: the ``str``
+# itself plus the compiled program. Leaving it out of the accounting was the
+# real gap -- a match entry outlives its vocabulary-cache entry, so an
+# evicted vocabulary's pattern stays retained here while ``retained_bytes``
+# reported only the entry bookkeeping around it.
+#
+# **Calibrated, not guessed.** An initial 6 was reasoned from "the str plus
+# roughly twice the text again"; measured against the six real vocabularies a
+# oneDAL comparison actually compiles, it undercounts by a strikingly stable
+# 1.46-1.51x across patterns spanning 8,657 to 3,336,273 characters:
+#
+#     vocabulary   pattern chars   est @6   measured
+#     vocab_001        3,336,273   19.09MB   27.94MB
+#     vocab_002        3,141,454   17.98MB   26.27MB
+#     vocab_005          859,583    4.92MB    7.20MB
+#     vocab_004           55,338    0.32MB    0.48MB
+#     vocab_003            9,092    0.05MB    0.08MB
+#     vocab_006            8,657    0.05MB    0.07MB
+#
+# 9 tracks that (~8.8 bytes/char measured). It remains a *lower* bound:
+# ``sys.getsizeof`` on a compiled pattern does not reach the internal
+# allocations of its compiled program, so the real retention is higher
+# still. Erring low is the wrong direction for a budget whose job is to
+# bound growth, which is why this is corrected rather than left as a
+# "close enough" estimate.
+_PATTERN_BYTES_PER_CHAR = 9
 
 
 class SpellingMatch:
