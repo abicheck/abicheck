@@ -10217,3 +10217,102 @@ JSON and Markdown renders but not there. The gate is unaffected — a
 release-level contract finding folds into `worst_verdict` and the exit code
 before any format renders — so this is a traceability gap in one format, not
 a missed finding.
+
+## Multi-library `compare` memory: the owners left after the three retention fixes (PR #1332)
+
+Three retention defects were measured and closed — per-side/per-consumer
+member retention, the unbounded content-keyed half of the AST acquisition
+table, and the baseline write's three simultaneous full-size copies (see
+[`docs/contribute/memory.md`](memory.md) for the numbers and the harness).
+This entry records, deliberately, what is **not** closed, so the next
+attempt starts from the measurement rather than from the same three places.
+
+**The OLD side is still retained in full, per member.** JUnit and
+`--bundle-facts-out` genuinely read it, so the per-consumer resolution
+cannot remove it. Bounding it means *spooling completed members* — writing
+each member's OLD snapshot to the storage codec as its comparison finishes
+and reading it back when the folds run — rather than deciding retention.
+Two things make that a real change and not a tweak: the JUnit pass wants
+`(DiffResult, old_snapshot)` pairs after every member has finished, and
+`--bundle-facts-out` additionally resolves *stranded* libraries that never
+produced a pair. The archive writer (`storage/bundle_facts_archive.py`)
+already spools encoded blobs and is the mechanism to reuse; what is missing
+is a bounded, lazy per-member handle the two consumers can take instead of
+a live object.
+
+**A compressed baseline write still joins.** `write_snapshot_text_stream`
+streams an uncompressed write and joins-and-delegates a compressed one,
+because both compressors here are one-shot and their deterministic-output
+guarantees are stated for whole buffers. The default `--bundle-facts-out`
+path is uncompressed, which is the one measured; a streaming compressor
+needs its own determinism story (fixed frame parameters, no mtime, stable
+level) before it can claim the same bytes.
+
+**Scalar `Fact` pooling was measured and deliberately not shipped.**
+Pooling immutable scalar `Fact` values on `Function`/`Param` after
+construction reduced a whole six-member scan's parent peak by **4.4%**
+(127.1 MiB against 132.9 MiB on a small fixture) — a poor return for a
+change that must preserve the `UNKNOWN`/`ABSENT`/`PARTIAL`/`FAILED`/
+`PRESENT` distinctions exactly and must never share a mutable list/dict
+payload. In a *narrower* controlled experiment (twelve 5,000-function
+models, 116.37 MiB of Python allocations) the same pooling reached 57.77
+MiB, which is the reason not to drop the idea: the gap between the two says
+the win is real in the model objects and is being swamped by everything
+else resident during a real scan. The right next step is therefore **not**
+to pool after construction but to avoid the duplicate construction — and
+per `AGENTS.md`'s own guidance, the larger follow-on (shared immutable
+header declarations plus per-member bindings; two shared surfaces plus
+member overlays measured 22.89 MiB in the same experiment) requires an
+inventory of every mutation of a `Function` after construction and an
+explicit ownership boundary first. Sharing today's mutable `Function`
+objects by reference is not that work and must not be presented as it.
+
+**Concurrency was not re-tuned.** The per-worker memory clamp
+(`workflows/release_jobs.py`) sizes off a budget described as "each holding
+up to two full snapshots resident". That description is still accurate:
+retention now keeps at most one full snapshot per member *after* a
+comparison, but both sides are live *during* one, which is what the clamp
+budgets. Changing the constant without measuring a real fan-out's
+co-resident set would repeat the gap that constant already carries (see
+`perf.release_admission_ignores_co_resident_set`'s own known gaps). A
+process pool is separately ruled out on evidence: four processes on a fixed
+Python-heavy workload took process-tree PSS from ~57 MiB to ~226 MiB.
+
+**The matcher work is a CPU change, not a memory one, and is out of scope
+here.** Token-indexed and trie prototypes preserved nesting, ordering and
+range semantics and cut synthetic scanning time substantially, but a Python
+trie *retained* 6.91 MiB against a regex's 1.39 MiB. If it is taken up, it
+needs adversarial common-prefix and randomized differential tests against
+the current matcher as oracle, and it must not be justified as a memory
+fix. `id()`-keyed match caching was measured and rejected: warm production
+lookups are ~0.60 µs, stable string keys already benefit from cached
+hashes, and interning inside each lookup was worse.
+
+**No oneDAL operand was available.** `/mnt/cached_oses/napetrov/tmp-abi/l2b6/`
+does not exist in this workspace, so the 35:47.83 / 17.82 GiB six-library
+figures could not be reproduced, the exact command/frontend/cache state
+behind them could not be established, and **none of the reductions recorded
+here is a measured oneDAL reduction**. The fixture used is a real compiled
+six-member C++ release, which is the right *shape* and a far smaller
+*scale*. Whether the whole job fits a nominal-16-GB runner is therefore
+untested; the next experiment is to run
+`scripts/bench_release_memory.py --keep` against the real oneDAL tree with
+`--trace`, and read `release.ast_scope` and `release.member.retained`
+against the sampled cgroup peak to see which of the two remaining owners
+(OLD-side member retention, or one member's own working set) dominates
+there.
+
+**Unverified: `surface_graph` member ordering across runs.** The
+before/after baseline documents in the measurement above were equal on
+every field except the ordering within `surface_graph.nodes`/`edges` (equal
+multisets, identical `graph_id`). Nothing on that branch touches
+surface-graph construction and the streaming encoder is byte-identical to
+the eager one over a fixed document, so pre-existing run-to-run
+nondeterminism is the likely cause — but the check that settles it (run the
+*unchanged* base revision twice, diff the two baselines) was started and
+lost when the workspace's `/tmp` was cleared, and is therefore **not**
+claimed. Anyone touching baseline determinism should run it first:
+`python scripts/bench_release_memory.py --members 3 --apis 120 --records 10
+--variants bundle-facts --repeat 2` and `cmp` the two `baseline.json`
+files. If they differ, the ordering is genuinely unstable and that is its
+own (pre-existing) gap, not a property of the streaming write.

@@ -468,7 +468,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "either read only the OLD side; the NEW graph was retained for "
             "the whole release and never opened."
         ),
-        fixed_by=(),
+        fixed_by=(1332,),
         seed_tests=(
             "tests/test_release_snapshot_retention.py",
             "tests/test_compare_release_contract_coverage.py",
@@ -525,7 +525,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "entry's result stays alive), or the reclamation assertion "
             "passes against a cache that retains nothing at all."
         ),
-        fixed_by=(),
+        fixed_by=(1332,),
         seed_tests=("tests/test_ast_acquisition_raw_entry_bound.py",),
         public_surfaces=(),
         axes={
@@ -575,7 +575,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "change; the eager encoder is the oracle precisely because it "
             "is the thing being replaced."
         ),
-        fixed_by=(),
+        fixed_by=(1332,),
         seed_tests=(
             "tests/test_bundle_facts_streaming_write.py",
             "tests/test_json_stream_encoder.py",
