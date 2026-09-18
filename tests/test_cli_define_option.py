@@ -253,3 +253,184 @@ class TestHelpSurface:
         else:
             assert result.exit_code != 0
             assert "not a C identifier" in result.output
+
+
+class TestDryRunReceiptsWithoutAToolchain:
+    """The `--dry-run` receipts and the `--no-baseline` compile resolution,
+    exercised as *unit* tests.
+
+    These paths were reachable only from `test_define_option_integration.py`,
+    which carries `pytest.mark.integration` and is therefore excluded from the
+    coverage lane -- so a receipt regression would have been invisible to the
+    gate and would have needed a real compiler to catch. None of them parses a
+    header: `--dry-run` resolves and reports, and the no-baseline case is
+    stopped at resolution, so a plain file stands in for the artifact.
+    """
+
+    @staticmethod
+    def _artifact(tmp_path: Path) -> Path:
+        """A path that exists. Dry-run classifies inputs; it never parses."""
+        so = tmp_path / "libx.so"
+        so.write_bytes(b"\x7fELF" + b"\0" * 64)
+        return so
+
+    @staticmethod
+    def _headers(tmp_path: Path) -> Path:
+        inc = tmp_path / "include"
+        inc.mkdir(exist_ok=True)
+        (inc / "x.h").write_text("int x(void);\n")
+        return inc
+
+    def test_dump_dry_run_reports_the_effective_defines(self, tmp_path: Path) -> None:
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump",
+                str(self._artifact(tmp_path)),
+                "-H",
+                str(self._headers(tmp_path)),
+                "-DFEATURE_API",
+                "-DMODE=2",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "defines: FEATURE_API, MODE=2" in result.output
+
+    def test_dump_dry_run_omits_the_line_when_nothing_is_defined(
+        self, tmp_path: Path
+    ) -> None:
+        """No `defines:` line at all for a run without macros -- the receipt
+        reads exactly as it did before ADR-074."""
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump",
+                str(self._artifact(tmp_path)),
+                "-H",
+                str(self._headers(tmp_path)),
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "defines:" not in result.output
+
+    def test_dump_dry_run_folds_config_and_cli_by_macro_name(
+        self, tmp_path: Path
+    ) -> None:
+        cfg = _write_config(
+            tmp_path, "compile:\n  defines:\n    - FEATURE_API\n    - MODE=1\n"
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump",
+                str(self._artifact(tmp_path)),
+                "-H",
+                str(self._headers(tmp_path)),
+                "--config",
+                str(cfg),
+                "-DMODE=2",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        # MODE overridden in place, FEATURE_API kept, exactly one entry each.
+        assert "defines: FEATURE_API, MODE=2" in result.output
+
+    def test_compare_dry_run_states_the_pair_wide_defines_once(
+        self, tmp_path: Path
+    ) -> None:
+        """Stated once for the pair, never per side -- `-D` has no old=/new=
+        form, so a per-side rendering would misrepresent the contract."""
+        artifact = self._artifact(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(artifact),
+                str(artifact),
+                "-H",
+                str(self._headers(tmp_path)),
+                "-DFEATURE_API",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert result.output.count("defines: FEATURE_API") == 1
+
+    def test_no_baseline_resolves_a_compile_context_carrying_the_defines(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The `--no-baseline` wiring, without a compiler: stop at the
+        candidate resolution and inspect the context it was handed."""
+        from abicheck.frontends.cli.commands import compare_no_baseline as nb
+
+        seen: dict[str, object] = {}
+
+        def _spy(path: Path, **kwargs: object):
+            seen.update(kwargs)
+            raise RuntimeError("resolution reached; no parse in this test")
+
+        monkeypatch.setattr(nb, "resolve_no_baseline_candidate", _spy)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(self._artifact(tmp_path)),
+                "--no-baseline",
+                "-H",
+                str(self._headers(tmp_path)),
+                "-DFEATURE_API",
+                "-DMODE=2",
+            ],
+        )
+        assert result.exit_code != 0  # the spy aborts the run by design
+        context = seen.get("compile")
+        assert context is not None, f"no compile context was passed: {sorted(seen)}"
+        assert define_spellings_from_tokens(context.gcc_option_tokens) == (  # type: ignore[union-attr]
+            "FEATURE_API",
+            "MODE=2",
+        )
+
+
+class TestDefinesSurviveTheFoldsOtherBranches:
+    """`merge_compile_config` has three exits, and a CLI `-D` has to come out
+    of all of them. The two below are the ones no CLI invocation reaches by
+    the ordinary route, so they are exercised against the resolver directly."""
+
+    @staticmethod
+    def _merged(cli_ctx, *, build_config=None, **kwargs):
+        from abicheck.cli_options import merge_compile_config
+
+        context, _includes = merge_compile_config(cli_ctx, (), build_config, **kwargs)
+        return define_spellings_from_tokens(context.gcc_option_tokens)
+
+    def test_a_malformed_auto_discovered_config_still_honours_the_cli_defines(
+        self, tmp_path: Path
+    ) -> None:
+        """An auto-discovered `.abicheck.yml` that fails to parse is
+        warn-and-continue, deliberately: the user did not ask to bind to it.
+        But "continue" must not mean dropping what they *did* type."""
+        from abicheck.compile_context import CompileContext
+
+        (tmp_path / ".abicheck.yml").write_text("compile: [this is not a mapping\n")
+        assert self._merged(
+            CompileContext(defines=("FEATURE_API", "MODE=2")), sources=tmp_path
+        ) == ("FEATURE_API", "MODE=2")
+
+    def test_the_internal_composition_hatch_still_carries_the_cli_defines(
+        self, tmp_path: Path
+    ) -> None:
+        """`gcc_options` is an internal-composition-only escape hatch with no
+        CLI spelling. It suppresses the config-defines synthesis, so ADR-074's
+        own definitions have to be appended on that branch too rather than
+        riding along with a synthesis that never happens."""
+        from abicheck.compile_context import CompileContext
+
+        cfg = _write_config(tmp_path, "compile:\n  defines:\n    - FROM_CONFIG\n")
+        spellings = self._merged(
+            CompileContext(gcc_options="-O2", defines=("FEATURE_API",)),
+            build_config=cfg,
+        )
+        assert "FEATURE_API" in spellings
