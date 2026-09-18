@@ -359,6 +359,68 @@ class TestDryRunReceiptsWithoutAToolchain:
         assert result.exit_code == 0, result.output
         assert result.output.count("defines: FEATURE_API") == 1
 
+    def test_no_baseline_dry_run_reports_the_cli_defines(self, tmp_path: Path) -> None:
+        """The third dry-run receipt. It previews a run that really does parse
+        headers, so omitting the macro set left the one receipt that could not
+        tell you why a declaration would or would not appear."""
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(self._artifact(tmp_path)),
+                "--no-baseline",
+                "-H",
+                str(self._headers(tmp_path)),
+                "-DFEATURE_API",
+                "-DMODE=2",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "defines: FEATURE_API, MODE=2" in result.output
+
+    def test_no_baseline_dry_run_reports_config_defines_too(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Read off the resolved context, not the raw --define values, so a
+        macro the project configured shows up even with no CLI flag at all."""
+        headers = self._headers(tmp_path)
+        artifact = self._artifact(tmp_path)
+        (tmp_path / ".abicheck.yml").write_text(
+            "compile:\n  defines:\n    - FROM_CONFIG\n"
+        )
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(artifact),
+                "--no-baseline",
+                "-H",
+                str(headers),
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "defines: FROM_CONFIG" in result.output
+
+    def test_no_baseline_dry_run_omits_the_line_without_macros(
+        self, tmp_path: Path
+    ) -> None:
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(self._artifact(tmp_path)),
+                "--no-baseline",
+                "-H",
+                str(self._headers(tmp_path)),
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "defines:" not in result.output
+
     def test_no_baseline_resolves_a_compile_context_carrying_the_defines(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

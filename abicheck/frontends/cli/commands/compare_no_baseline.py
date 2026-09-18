@@ -543,6 +543,7 @@ def _run_no_baseline_compare_cmd(
 
     if inv.output.dry_run:
         from ....dry_run import emit_dry_run
+        from ....model.macro_definition import define_spellings_from_tokens
         from ..no_baseline_dry_run import build_no_baseline_dry_run_result
 
         # Load the read-only policy documents *before* previewing. `--dry-run`
@@ -562,6 +563,14 @@ def _run_no_baseline_compare_cmd(
         )
         emit_dry_run(
             build_no_baseline_dry_run_result(
+                # Read off the resolved context, not the raw --define values,
+                # so config-supplied macros are reported too and the receipt
+                # cannot drift from the run it previews.
+                defines=define_spellings_from_tokens(
+                    inv.compile.context.gcc_option_tokens
+                    if inv.compile.context is not None
+                    else ()
+                ),
                 candidate=candidate,
                 depth=inv.evidence.depth,
                 headers=tuple(inv.headers.headers),
