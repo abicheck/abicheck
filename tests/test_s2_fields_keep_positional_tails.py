@@ -47,6 +47,13 @@ _S2_BUNDLE_FIELDS = (
     # written before this field existed keeps binding the older tail rather
     # than silently feeding it into this one.
     "env_matrix_source_sha256",
+    # The release product model's own reconciliation: appended after the S2
+    # fields for the identical reason. An earlier revision of this field
+    # went in *above* `policy_file` and rebound that slot from 6 to 7, so a
+    # positional caller passed a `PolicyFile` straight into this field --
+    # which is the failure the sibling assertion below names, caught here
+    # rather than in production.
+    "public_surface_reconciliation",
 )
 _S2_TARGET_FIELDS = (
     "scope_completeness_exit",

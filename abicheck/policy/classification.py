@@ -494,7 +494,16 @@ def excluded_from_verdict_as_persistent_hygiene(
 
 
 def compute_verdict(
-    changes: Sequence[HasKind], *, policy: str = "strict_abi"
+    changes: Sequence[HasKind],
+    *,
+    policy: str = "strict_abi",
+    kind_sets: tuple[
+        frozenset[ChangeKind],
+        frozenset[ChangeKind],
+        frozenset[ChangeKind],
+        frozenset[ChangeKind],
+    ]
+    | None = None,
 ) -> Verdict:
     """Compute verdict from a list of changes, honoring the given policy profile.
 
@@ -512,7 +521,13 @@ def compute_verdict(
     if not changes:
         return Verdict.NO_CHANGE
 
-    sets = policy_kind_sets(policy)
+    # *kind_sets*, when given, is already-resolved -- typically
+    # `policy_kind_sets(policy)` with a `PolicyFile`'s own overrides folded
+    # in (`apply_policy_file_overrides`), which is what a caller holding a
+    # resolved policy document must pass so its overrides reach the verdict
+    # rather than being silently dropped here. Deriving them from *policy*
+    # alone stays the default, so every existing call is unchanged.
+    sets = kind_sets if kind_sets is not None else policy_kind_sets(policy)
     # Per-finding effective category (ADR-025 D4.1): a finding's own
     # ``effective_verdict`` override wins over its kind's category; the overall
     # verdict is the worst contributed category. With no overrides this is

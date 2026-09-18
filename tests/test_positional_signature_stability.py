@@ -88,6 +88,26 @@ EXPECTED_POLICY_FILE_POSITIONAL = (
 )
 
 
+#: Positional fields of ``BundleFacts``, in order. Pinned for the same
+#: reason: it is a long-lived persisted value type whose fields all carry
+#: defaults, so inserting one mid-list rebinds every positional caller
+#: silently. ``public_surface`` was appended here (before the ``init=False``
+#: ``artifact_type``, which is not a positional slot at all) rather than
+#: placed next to the other decision-bearing marker it resembles.
+EXPECTED_BUNDLE_FACTS_POSITIONAL = (
+    "schema_version",
+    "variant_fingerprint",
+    "per_library_snapshots",
+    "manifest",
+    "filesystem_aliases",
+    "library_filenames",
+    "degraded_members",
+    "inventory_complete",
+    "public_surface",
+    "artifact_type",
+)
+
+
 def _positional_parameters(func: object) -> tuple[str, ...]:
     return tuple(
         name
@@ -111,11 +131,17 @@ class TestPositionalOrderIsAppendOnly:
     def test_policy_file_fields(self) -> None:
         assert _positional_fields(PolicyFile) == EXPECTED_POLICY_FILE_POSITIONAL
 
+    def test_bundle_facts_fields(self) -> None:
+        from abicheck.model.bundle_facts import BundleFacts
+
+        assert _positional_fields(BundleFacts) == EXPECTED_BUNDLE_FACTS_POSITIONAL
+
     @pytest.mark.parametrize(
         ("actual", "expected"),
         [
             ("pipeline", EXPECTED_PIPELINE_RUN_POSITIONAL),
             ("policy_file", EXPECTED_POLICY_FILE_POSITIONAL),
+            ("bundle_facts", EXPECTED_BUNDLE_FACTS_POSITIONAL),
         ],
     )
     def test_expected_orders_have_no_duplicates(

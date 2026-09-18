@@ -12,6 +12,11 @@ depends_on:
   - abicheck/bundle.py
   - abicheck/bundle_manifest.py
   - abicheck/model/bundle_facts.py
+  - abicheck/model/release_surface.py
+  - abicheck/compare/bundle_export_index.py
+  - abicheck/policy/release_contract_reconciliation.py
+  - abicheck/workflows/release_public_surface.py
+  - abicheck/report/release_public_surface.py
   - abicheck/cli_aggregate.py
 lifecycle: active
 generated: false
@@ -146,6 +151,93 @@ individual libraries their own header root or compile context through
 `--bundle-facts-library-manifest`
 ([Multi-binary § Comparing against a stored bundle baseline](../use/multi-binary.md#comparing-against-a-stored-bundle-baseline-g38-phase-2)).
 
+## One public surface, many providers
+
+A product's installed headers are one public contract; its DSOs are several
+*providers* of that contract. That distinction has to be made explicitly,
+because the natural implementation gets it wrong: compare the complete
+product header surface against each library in turn and every declaration
+some *other* library provides looks missing from this one. On a 28-library
+Intel MKL release that produced 787,833 `public_not_exported` findings and
+a 1.6 GB report — a ScaLAPACK declaration such as `BDLAAPP` demanded from
+`libmkl_rt` although a sibling MKL library exports it — with no real
+compatibility signal anywhere in it.
+
+So a directory or package comparison splits the two questions:
+
+| Question | Answered | Why there |
+|---|---|---|
+| Did this binary's ABI change? | per matching library | its exports, layouts and symbols are its own |
+| Does the product export what its headers promise? | once, at release level | satisfied by *any* member, so no single member can answer it |
+| Is an export undocumented? | per exporting library | the exporting member *is* the attribution |
+| Did the public headers change? | once, at release level | one surface, so one set of findings |
+
+The report gains a `public_surface_reconciliation` section (JSON) and a
+**Release public surface** section (Markdown) stating, per side: how many
+public declarations carry an export obligation, how many the bundle's
+exports satisfy, which are missing, the export totals and the
+documented/undocumented split, the per-member undocumented-export counts,
+and how many times the header surface was acquired — one acquisition per
+side for an ordinary comparison, however many members it has.
+
+Three properties are worth knowing because they are what keep the answer
+honest rather than merely smaller:
+
+- **A declaration absent from the whole bundle is still a finding**, once,
+  at release level, carrying the declaring header — and deliberately *no*
+  owning library, because a symbol nothing exports has no provider to
+  attribute it to.
+- **An unread member narrows the conclusion instead of inventing one.** If
+  a member's acquisition failed, a declaration nobody else exports might
+  simply live in the library nobody read: it is reported as *unresolved*
+  under incomplete coverage, with the coverage gap named, and no
+  high-confidence missing-export finding rests on evidence that was never
+  read.
+- **Nothing is filtered to shrink the report.** A change several libraries
+  report identically — a changed public type is the usual case — is one
+  product-level fact, so it is rendered once, naming every affected
+  library, and each member entry records how many of its findings were
+  folded there (`product_level_findings`). Per-library counts, verdicts and
+  the exit code are unchanged by that fold.
+
+You do not maintain a header-to-library mapping for any of this. There is
+no configuration: the union of the members' exports is the evidence, and
+`--exclude-header` and the compile context apply to the one shared
+acquisition exactly as they already applied per member.
+
+### Every multi-library comparison, not just a release directory
+
+The same model answers the same question on every path that compares more
+than one library at once, so which command you reached it through cannot
+change whether a sibling's declaration counts:
+
+| How you compare | Where the product contract comes from |
+|---|---|
+| `compare OLD_DIR NEW_DIR` (directory or package) | acquired once per side from the run's own headers |
+| `compare old-bundle-facts.json NEW_DIR` | recorded in the stored document for OLD; acquired from the live NEW dump |
+| `compare old-bundle-facts.json new-bundle-facts.json` | recorded in each stored document |
+| `compat check` with a multi-library descriptor | the union of the descriptor's own libraries' header evidence |
+
+Two consequences are worth stating, because they are what stop the shared
+model from over-reaching:
+
+- **A stored baseline's contract is the one it recorded**, not a
+  re-derivation from this build's defaults — which is what keeps a stored
+  comparison's answer identical to the live run that produced the
+  baseline. A baseline captured before `BundleFacts.public_surface`
+  existed has one derived from its members instead, so it still
+  reconciles rather than silently losing its contract.
+- **A side with no header evidence records no contract** — it does not
+  borrow the other side's. A NEW release dumped at binary depth promises
+  nothing this tool can see, and asserting that it still promises whatever
+  OLD did would turn every deliberately retired declaration into a missing
+  export. On the `compat` path a descriptor that declares no headers
+  likewise yields no release-level finding at all.
+
+The `compat` path has no release JSON envelope of its own, so its
+release-level findings are folded into the merged ABICC-shaped result
+rather than a separate section.
+
 ## Fan-out and fan-in
 
 In CI a product runs one check per target and folds the reports into one
@@ -187,6 +279,15 @@ topology schema by the
 - **Binary depth in the declarative topology.** A bundle check in
   `.abicheck.yml` runs at binary depth; header and source evidence are per
   member, through the member's own check (S14, above).
+- **Per-member header evidence is still stored per member.** The release's
+  public surface is acquired and reconciled once, and a stored bundle
+  baseline records it once (`BundleFacts.public_surface`, schema 4) — but
+  each member snapshot still carries its own copy of the header evidence
+  its dump parsed, so a stored product baseline is larger than the product
+  contract needs it to be.
+- **JUnit carries no release-level contract section.** The release-level
+  public-surface reconciliation is in the JSON and Markdown renders; the
+  JUnit projection still reports per-member test cases only.
 
 ---
 

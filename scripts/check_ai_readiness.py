@@ -2841,9 +2841,9 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # `checker.compare` the multi-library comparison loop shares across
         # every paired library (kept a *single* call site deliberately --
         # see that loop's own comment).
-        "abicheck/compat/cli.py:372:19:dumper.dump",
-        "abicheck/compat/cli.py:1085:16:checker.compare",
-        "abicheck/compat/cli.py:1228:15:dumper.dump",
+        "abicheck/compat/cli.py:374:19:dumper.dump",
+        "abicheck/compat/cli.py:1090:16:checker.compare",
+        "abicheck/compat/cli.py:1235:15:dumper.dump",
     }
 )
 
