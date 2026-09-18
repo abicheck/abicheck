@@ -267,6 +267,27 @@ class TestDryRunReceiptsWithoutAToolchain:
     stopped at resolution, so a plain file stands in for the artifact.
     """
 
+    @pytest.fixture(autouse=True)
+    def _pinned_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Run every test in this class from its own `tmp_path`.
+
+        `CliRunner.invoke` does not enter an isolated filesystem, so the
+        process working directory is whatever pytest was launched from --
+        and `compare`/`--no-baseline` resolve their project config by
+        walking *upward* from it (`discover_project_config`). A developer
+        with an `.abicheck.yml` anywhere above their checkout would see
+        these receipts gain macros the test never asked for, and the
+        "omits the line without macros" test fail outright.
+
+        Verified rather than assumed: with a parent config declaring
+        `compile.defines: [AMBIENT_LEAK]`, three tests in this class failed
+        before this fixture existed (CodeRabbit review named two; the
+        `compare --dry-run` one has the identical exposure). Autouse and
+        class-scoped by intent -- a per-test `monkeypatch.chdir` would leave
+        the next test added here exposed again.
+        """
+        monkeypatch.chdir(tmp_path)
+
     @staticmethod
     def _artifact(tmp_path: Path) -> Path:
         """A path that exists. Dry-run classifies inputs; it never parses."""
@@ -420,7 +441,7 @@ class TestDryRunReceiptsWithoutAToolchain:
         assert "defines: FEATURE_API, MODE=2" in result.output
 
     def test_no_baseline_dry_run_reports_config_defines_too(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path
     ) -> None:
         """Read off the resolved context, not the raw --define values, so a
         macro the project configured shows up even with no CLI flag at all."""
@@ -429,7 +450,6 @@ class TestDryRunReceiptsWithoutAToolchain:
         (tmp_path / ".abicheck.yml").write_text(
             "compile:\n  defines:\n    - FROM_CONFIG\n"
         )
-        monkeypatch.chdir(tmp_path)
         result = CliRunner().invoke(
             main,
             [
