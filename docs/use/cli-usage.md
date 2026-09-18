@@ -206,6 +206,44 @@ and worked examples, and the
 [ABICC Flag Reference](../reference/abicc-flags.md) for the exhaustive flag
 list.
 
+## Writing a snapshot: `-o/--output` versus shell redirection
+
+Both work, and they are for different things.
+
+Use **`-o/--output`** whenever a file is the deliverable — a CI step, a
+baseline, anything a later step reads back:
+
+```bash
+abicheck dump libfoo.so -H include/ -o build/foo.abi.json
+```
+
+It is abicheck-owned output, which buys four things the shell cannot give you:
+
+- **Atomic replacement.** The destination is written via a temporary file and
+  `os.replace()`, so a serialization or write failure leaves the previous file
+  intact and never a truncated one. `> foo.json` truncates the destination
+  *before* abicheck starts, so a failed run leaves an empty file that the next
+  step happily reads as a snapshot.
+- **A real diagnostic and a stable exit code.** An unwritable destination
+  reports `Cannot write to <path>: …` and exits 1; a missing parent directory is
+  created rather than failing.
+- **Native compression.** `.json.gz`/`.json.zst` suffixes (or an explicit
+  `--compression`) select the storage envelope. Compression *requires* an output
+  file: stdout is always plain JSON, and asking for a compressed stdout is a
+  usage error rather than a corrupt pipe.
+- **A clean separation of streams** that survives either way: machine-readable
+  output on stdout, diagnostics on stderr.
+
+Use **redirection or a pipe** when a stream really is the point — composing with
+another process, not producing a file:
+
+```bash
+abicheck dump libfoo.so -H include/ | jq '.sections.functions | length'
+```
+
+Plain stdout is a supported, clean-JSON transport and is tested as such; it is
+simply not the right tool for "write this file for the next CI step".
+
 ## Change classification and detection coverage
 
 What each verdict (`BREAKING`/`API_BREAK`/`COMPATIBLE`/`COMPATIBLE_WITH_RISK`/`NO_CHANGE`)

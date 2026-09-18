@@ -60,6 +60,7 @@ def build_no_baseline_dry_run_result(
     fmt: str,
     contract_mode: str | None,
     candidate_is_live: bool = True,
+    defines: tuple[str, ...] = (),
 ) -> Any:
     """Build the ``compare --no-baseline --dry-run`` report (ADR-068 D2).
 
@@ -110,6 +111,13 @@ def build_no_baseline_dry_run_result(
     )
     result.add(
         "Headers and compile context",
+        # ADR-074: the EFFECTIVE macro set (`.abicheck.yml`'s compile.defines
+        # folded with the CLI's own -D by macro name), stated here for the same
+        # reason `dump --dry-run` and `compare --dry-run` state it -- a macro
+        # that changes which declarations exist is exactly what a preflight is
+        # for. This audit runs a real header parse, so leaving it out made the
+        # one receipt that omitted it (CodeRabbit review).
+        f"defines: {', '.join(defines)}" if defines else None,
         f"headers: {', '.join(str(h) for h in headers)}" if headers else None,
         f"includes: {', '.join(str(i) for i in includes)}" if includes else None,
         f"public header dirs: {', '.join(str(d) for d in public_header_dirs)}"

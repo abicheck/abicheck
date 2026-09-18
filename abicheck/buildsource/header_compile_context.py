@@ -1743,9 +1743,8 @@ def _ambiguity_message(
         "-std=/target/defines/include-search-order/sysroot/compiler-driver/"
         "forced-includes/ABI-relevant flags); abicheck cannot pick one "
         "context over another without guessing. Narrow the input "
-        "(--compile-db-filter / a project compile: block / "
-        "--gcc-options/--gcc-path/--compiler-option pinning the ambiguous "
-        "field(s)) or compare a header per contract at a time. Conflicting "
+        "(build.compile_db_filter / a project compile: block pinning the "
+        "ambiguous field(s) / -D for a differing macro) or compare a header per contract at a time. Conflicting "
         "translation units:",
     ]
     # Only shown when some signature actually has one, so the common

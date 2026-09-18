@@ -130,6 +130,28 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "simply not observed, and the evidence layers report that as "
         "reduced assurance rather than as a clean result."
     ),
+    "--define": _keep(
+        "ADR-074. A *per-run operand*, not a toolchain setting: a feature "
+        "macro that gates an opt-in public surface selects WHICH SURFACE is "
+        "being analysed, which is the same question --header and --include "
+        "answer and the reason both kept their CLI spelling in Phase 7b. "
+        "Without it a library whose expert API lives behind "
+        "-DPVXS_ENABLE_EXPERT_API cannot be analysed from the command line "
+        "at all, and its breaks read as `compatible` because the "
+        "declarations are simply absent. Not a second spelling of "
+        "`compile.defines`: the two compose by macro name, config carrying "
+        "the project's stable contract and this overriding one macro of it "
+        "for one run -- the same config-plus-per-run-override relationship "
+        "--include has with `compile.include_dirs`. Emphatically NOT a "
+        "reopening of `compile.options` (the demoted --compiler-option): "
+        "the operand is a logical macro definition that renders to exactly "
+        "one -D-prefixed argv token and whose name must be a bare C "
+        "identifier, so it cannot express a general compiler flag at all. "
+        "And not an analysis-disabling hatch: it changes what is *parsed*, "
+        "never what is *reported*, and the resulting macro set is part of "
+        "extraction identity -- two sides parsed under different macro "
+        "contexts are refused as not comparable rather than diffed."
+    ),
     "--include": _keep(
         "The include search path the -H headers parse under. Travels with "
         "--header (a checkout's include dirs move with its headers), so it "
@@ -495,6 +517,11 @@ DUMP_OPTION_RULINGS: dict[str, OptionRuling] = {
         "Same ruling as `compare --exclude-header`: names paths within this "
         "run's own -H operand, so it is per-run for exactly the reason -H "
         "is. Shared family, ruled identically (ADR-037 D8.1)."
+    ),
+    "--define": _keep(
+        "Same ruling as `compare --define`: a per-run selector for which "
+        "public surface is parsed, not a toolchain setting. Shared family, "
+        "ruled identically (ADR-037 D8.1)."
     ),
     "--include": _keep("Same ruling as `compare --include`: travels with -H, per-run."),
     "--sources": _keep(

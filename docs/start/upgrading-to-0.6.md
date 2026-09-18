@@ -225,7 +225,7 @@ supported spelling of anything; it is two stray operands.
 | `--allow-ast-frontend-fallback` | `compile.ast_frontend_fallback: true` |
 | `--allow-unsupported-castxml` | `compile.allow_unsupported_castxml: true` |
 | `--gcc-path` / `--gcc-prefix` (`--compiler`/`--compiler-prefix`) | `compile.compiler:` — one merged key; a trailing `-` is a toolchain prefix, anything else a compiler path |
-| `--gcc-option` / `--compiler-option` (repeatable) | `compile.options:` (a YAML list) |
+| `--gcc-option` / `--compiler-option` (repeatable) | `compile.options:` (a YAML list). A `-D` among them has a better home: `compile.defines:`, or the per-invocation `-D/--define NAME[=VALUE]` that `dump`/`compare` regained in ADR-074 — the one member of this family with a CLI spelling again. |
 | `--sysroot` | `compile.sysroot:` |
 | `--nostdinc` | `compile.nostdinc: true` |
 | `--lang c` | `compile.lang: c` |

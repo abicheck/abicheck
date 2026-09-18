@@ -337,13 +337,12 @@ def _resolve_side_snapshot_impl(
     # Phase 1 (dedup-and-convergence plan) Milestone A follow-up: the third
     # and (per the plan doc's own Phase 1 item list) last known hand-rolled
     # `pending_cleanups: list[...] = []` + manual drain-in-finally pattern,
-    # after `perform_elf_dump` and `handle_non_elf_dump`. Same primitive,
-    # same behavior: `_seeded_includes_and_compile_context` still *returns*
-    # its own cleanups list (its return contract is unchanged, and shared
-    # with other reasoning in its docstring) -- only what the caller does
-    # with that list changes, from a bare local to
-    # `_artifact_plan.pending_cleanups`, drained once via `run_cleanups()`
-    # at the identical point the old code called `_run_cleanups()`.
+    # after `perform_elf_dump` and `handle_non_elf_dump`. Same primitive, same
+    # behavior: `_seeded_includes_and_compile_context` still *returns* its own
+    # cleanups list (its return contract is unchanged) -- only what the caller
+    # does with that list changes, from a bare local to
+    # `_artifact_plan.pending_cleanups`, drained once via `run_cleanups()` at
+    # the identical point the old code called `_run_cleanups()`.
     _artifact_plan = ResolvedArtifactPlan()
     try:
         includes, compile_ctx, context_applied, _seed_cleanups = (

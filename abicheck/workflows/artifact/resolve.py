@@ -356,6 +356,36 @@ def _fold_legacy_compile_db_tokens(
     return dataclasses.replace(ctx, gcc_options=None, gcc_option_tokens=combined)
 
 
+def _with_rendered_defines(ctx: CompileContext | None) -> CompileContext | None:
+    """*ctx* with its logical ``defines`` rendered into ``gcc_option_tokens``.
+
+    ADR-074's bridge between the two halves of a compile context, applied at
+    the one engine-layer point every front end reaches (``execute.
+    resolve_side_snapshot``) rather than only in ``cli_options.
+    merge_compile_config``. That fold is a CLI function, so a typed-API
+    caller constructing ``InputSpec(compile=CompileContext(defines=(...)))``
+    had its macros silently dropped: the guarded declarations simply did not
+    appear and ``ast_compile_args`` came back empty, with no error anywhere
+    -- the same "an option the front end accepts is discarded at a dispatch
+    branch" shape ``tests/regressions/manifest.py``'s
+    ``config.option_dropped_at_a_dispatch_branch`` names.
+
+    Idempotent, which is what lets one rule serve both front ends: it
+    appends only macros the tail does not already define, so a context the
+    CLI already folded is returned unchanged and the CLI's own ordering --
+    which is what lets a ``-D`` beat a raw ``-DNAME`` in ``compile.options``
+    -- is preserved exactly. ``None``, and a context with no definitions,
+    pass through untouched, so this is a no-op for every pre-ADR-074 caller.
+    """
+    if ctx is None or not ctx.defines:
+        return ctx
+    from ...model.macro_definition import tokens_with_defines
+
+    return dataclasses.replace(
+        ctx, gcc_option_tokens=tokens_with_defines(ctx.gcc_option_tokens, ctx.defines)
+    )
+
+
 def _legacy_compile_db_achieved(matched: bool, tokens: tuple[str, ...]) -> bool:
     """Whether the legacy ``-p``/``--compile-db`` auto-match should count as
     having achieved real build context (Codex review, fresh evidence on
@@ -549,7 +579,11 @@ def _seeded_includes_and_compile_context(
     if not (side.sources or side.build_info) or not evidence.headers:
         return (
             list(side.includes),
-            _fold_legacy_compile_db_tokens(evidence.compile, legacy_compile_db_tokens),
+            _with_rendered_defines(
+                _fold_legacy_compile_db_tokens(
+                    evidence.compile, legacy_compile_db_tokens
+                )
+            ),
             _legacy_compile_db_achieved(
                 legacy_compile_db_matched, legacy_compile_db_tokens
             ),
@@ -635,4 +669,6 @@ def _seeded_includes_and_compile_context(
         applied = _legacy_compile_db_achieved(
             legacy_compile_db_matched, legacy_compile_db_tokens
         )
-    return includes, effective_ctx, applied, cleanups
+    # ADR-074: both exits return a *fully normalized* context, so no caller
+    # has to remember to render the logical defines itself.
+    return includes, _with_rendered_defines(effective_ctx), applied, cleanups

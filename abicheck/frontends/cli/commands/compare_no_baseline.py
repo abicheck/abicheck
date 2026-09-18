@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any
 import click
 
 if TYPE_CHECKING:
+    from ....compile_context import CompileContext
     from ....environment_matrix import EnvironmentMatrix
 
 from ....model.sided_inputs import compose_sided_paths
@@ -136,6 +137,12 @@ class _CompileChoices:
     #: ``--include new=label:path``'s own per-path labels, which
     #: `normalize_sided_options` splits out and this path used to drop.
     include_labels: dict[Path, str] | None
+    #: The L2 header compile context, resolved through the same
+    #: `cli_options.resolve_compile_context` every other command routes
+    #: through -- so ADR-074's `-D/--define` reaches this audit's own header
+    #: parse, and, with it, the `.abicheck.yml` `compile:` block this path
+    #: passed as `compile=None` and therefore ignored entirely.
+    context: CompileContext | None
 
 
 @dataclass(frozen=True)
@@ -317,6 +324,35 @@ def _resolve_no_baseline_invocation(
         kwargs.get("includes") or (), kwargs.get("new_includes_only") or ()
     )
     exclude_headers = tuple(kwargs.get("exclude_headers") or ())
+    # The one shared L2 compile-context resolution (ADR-037 D3), folding the
+    # project `compile:` block and ADR-074's own `-D/--define` by macro name.
+    # `--no-baseline` previously built no context at all and passed
+    # `compile=None`, so neither reached the candidate's header parse.
+    #
+    # `build_config` must be the *discovered* path, not the raw `--config`
+    # kwarg: `merge_compile_config`'s own fallback is
+    # `discover_build_config(sources)`, which is anchored to a `--sources`
+    # tree and returns None without one -- so passing the bare kwarg would
+    # apply `compile:` only when `--config` was typed, and silently ignore
+    # the cwd-upward `.abicheck.yml` that every other `compare` shape honors
+    # (CodeRabbit review). `config_explicit` stays tied to the raw kwarg, so
+    # a discovered config still does not clear the `compile.compiler`
+    # untrusted-executable gate.
+    from ....cli_helpers_compare import discover_project_config
+    from ....cli_options import resolve_compile_context
+
+    _discovered_config = kwargs.get("config") or discover_project_config()
+    compile_context, merged_includes = resolve_compile_context(
+        ctx,
+        sysroot=None,
+        nostdinc=False,
+        header_backend="auto",
+        includes=tuple(includes),
+        build_config=_discovered_config,
+        defines=tuple(kwargs.get("defines") or ()),
+        config_explicit=kwargs.get("config") is not None,
+    )
+    includes = list(merged_includes)
     public_headers, public_header_dirs = public_header_sets_for_candidate(
         headers,
         list(kwargs.get("public_headers") or ()),
@@ -404,6 +440,7 @@ def _resolve_no_baseline_invocation(
             debug_roots=list(kwargs.get("debug_roots") or ())
             + list(kwargs.get("debug_roots_new") or ()),
             include_labels=kwargs.get("include_labels") or None,
+            context=compile_context,
         ),
         scope=scope,
         contract=_ContractChoices(
@@ -485,6 +522,7 @@ def _resolve_candidate_or_fail(candidate: Path, inv: _ResolvedInvocation) -> Any
             debug_roots=inv.compile.debug_roots,
             include_labels=inv.compile.include_labels,
             include_dependencies=inv.compile.include_dependencies,
+            compile=inv.compile.context,
         )
     except ValidationError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -505,6 +543,7 @@ def _run_no_baseline_compare_cmd(
 
     if inv.output.dry_run:
         from ....dry_run import emit_dry_run
+        from ....model.macro_definition import define_spellings_from_tokens
         from ..no_baseline_dry_run import build_no_baseline_dry_run_result
 
         # Load the read-only policy documents *before* previewing. `--dry-run`
@@ -524,6 +563,14 @@ def _run_no_baseline_compare_cmd(
         )
         emit_dry_run(
             build_no_baseline_dry_run_result(
+                # Read off the resolved context, not the raw --define values,
+                # so config-supplied macros are reported too and the receipt
+                # cannot drift from the run it previews.
+                defines=define_spellings_from_tokens(
+                    inv.compile.context.gcc_option_tokens
+                    if inv.compile.context is not None
+                    else ()
+                ),
                 candidate=candidate,
                 depth=inv.evidence.depth,
                 headers=tuple(inv.headers.headers),

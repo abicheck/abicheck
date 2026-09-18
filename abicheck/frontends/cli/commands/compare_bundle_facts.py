@@ -143,11 +143,9 @@ def resolve_dispatch_compile_context(
     )
 
     _headers, _includes = _resolve_new_side_headers_includes(kwargs)
-    # Phase 7: none of these kwargs keys are populated by Click any more
-    # (--ast-frontend/--sysroot/--nostdinc/--compiler* are gone from
-    # compare's CLI) -- every `.get()` below resolves to its "nothing
-    # explicit" default, which `resolve_compile_context` already treats as
-    # "defer to .abicheck.yml's compile: block".
+    # Phase 7: the --ast-frontend/--sysroot/--nostdinc/--compiler* kwargs below
+    # are gone from compare's CLI, so each `.get()` resolves to its "nothing
+    # explicit" default -- i.e. "defer to .abicheck.yml's compile: block".
     header_backend = (
         kwargs.get("new_header_backend") or kwargs.get("header_backend") or "auto"
     )
@@ -162,6 +160,8 @@ def resolve_dispatch_compile_context(
         compiler_path=kwargs.get("compiler_path"),
         compiler_prefix=kwargs.get("compiler_prefix"),
         compiler_option_tokens=tuple(kwargs.get("compiler_option_tokens") or ()),
+        # ADR-074's -D/--define -- Click really does populate this one.
+        defines=tuple(kwargs.get("defines") or ()),
         # kwargs["config"] may be the cwd-upward auto-discovered path above
         # -- use the real `_config_explicit` so the compile.compiler trust
         # gate isn't fooled (PR #1154).

@@ -379,9 +379,12 @@ removals get reported as BREAKING.
 not a flag** — the toolchain a project's headers parse under is a stable
 property of the project, not a per-run decision
 ([ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-D5). The only per-run compile-context input either command takes on the CLI
-is `-I/--include DIR` (an include root, repeatable). Everything else lives
-in the `compile:` block:
+D5). Both commands take exactly two per-run compile-context inputs on the
+CLI: `-I/--include DIR` (an include root, repeatable — searched before the
+configured `include_dirs`) and `-D/--define NAME[=VALUE]` (a preprocessor
+macro, repeatable — merged with `defines` by macro name, the CLI value
+winning; [ADR-074](../contribute/adr/074-logical-macro-definitions-on-the-cli.md)).
+Everything else lives in the `compile:` block:
 
 | `compile:` key | Purpose |
 |---|---|
@@ -396,10 +399,13 @@ in the `compile:` block:
 | `nostdinc` | do not search system includes (and disable the auto-probe below) |
 | `frontend_context`, `ast_frontend_fallback`, `allow_unsupported_castxml` | frontend-selection escape hatches |
 
-Legacy `scan` still exposes the same axis as CLI flags
+These are config-only: the general compiler/frontend CLI family
 (`--ast-frontend`, `--compiler-option`, `--compiler`/`--compiler-prefix`,
-`--sysroot`, `--nostdinc`, `--lang`); those spellings retire with the
-command. The full key reference is
+`--sysroot`, `--nostdinc`, `--lang`) was removed, and the retired `scan`
+command took the last of those spellings with it. The one exception is
+`defines`, which also has a per-invocation `-D/--define NAME[=VALUE]` on
+`dump`/`compare` (ADR-074), merged with this key by macro name. The full key
+reference is
 [Config Keys](../reference/config-keys-reference.md); the `compile:` block's
 own semantics are in [Config File](../reference/config-file.md).
 
