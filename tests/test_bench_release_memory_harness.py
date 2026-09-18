@@ -99,9 +99,48 @@ class TestImportIsFree:
         assert sys.path == before
 
 
+class TestUsageErrorsFailBeforeTheFixtureIsBuilt:
+    """A bad flag must not cost a fixture build first.
+
+    `_summarize`'s refusal is the invariant backstop; this is the usage
+    error, and the difference is minutes of compilation.
+    """
+
+    @pytest.mark.parametrize("repeat", [0, -1])
+    def test_a_non_positive_repeat_is_rejected_at_parse_time(
+        self, repeat: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        built: list[Any] = []
+        monkeypatch.setattr(bench, "_prepare_fixture", lambda a: built.append(a))
+        with pytest.raises(SystemExit) as excinfo:
+            bench.main(["--root", str(tmp_path), "--repeat", str(repeat)])
+        # argparse's own usage-error exit, not a bare message.
+        assert excinfo.value.code == 2
+        assert built == [], "the fixture was built before the flag was rejected"
+
+    def test_a_repeat_of_one_is_accepted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-vacuity: the boundary value must pass the guard.
+
+        Stopped immediately after the guard by a sentinel, so this asserts
+        the parse-time check alone and runs no benchmark.
+        """
+
+        class _Stop(Exception):
+            pass
+
+        def _boom(_args: Any) -> None:
+            raise _Stop
+
+        monkeypatch.setattr(bench, "_prepare_fixture", _boom)
+        with pytest.raises(_Stop):
+            bench.main(["--root", str(tmp_path), "--repeat", "1"])
+
+
 class TestAReceiptAlwaysContainsMeasurements:
     def test_no_runs_is_refused_rather_than_summarised(self) -> None:
-        """``--repeat 0`` used to write a cheerful, empty receipt."""
+        """The invariant backstop, independent of which flag emptied it."""
         with pytest.raises(SystemExit) as excinfo:
             bench._summarize(_args(), [])
         assert "no runs were measured" in str(excinfo.value)

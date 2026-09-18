@@ -545,7 +545,17 @@ def _summarize(
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    # Usage errors are rejected here, before `_prepare_fixture` spends
+    # minutes compiling a fixture the run will not use. `_summarize`'s own
+    # "no runs were measured" refusal stays as the *invariant* backstop --
+    # it catches an empty result set however it arose, not just this flag --
+    # but a user who typed `--repeat 0` should hear about it now, not after
+    # a build.
+    if args.repeat < 1:
+        parser.error(f"--repeat must be at least 1, got {args.repeat}")
 
     if args.tracemalloc and args.trace is None:
         raise SystemExit(
