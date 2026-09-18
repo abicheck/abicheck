@@ -438,7 +438,7 @@ def _mib(value: object) -> float | None:
     return round(int(value) / (1024 * 1024), 1) if isinstance(value, int) else None
 
 
-def main(argv: list[str] | None = None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", type=Path, default=Path("/tmp/abicheck-bench-fixture"))
     ap.add_argument("--members", type=int, default=6)
@@ -460,7 +460,64 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--keep", action="store_true", help="reuse an existing fixture")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--label", default="")
-    args = ap.parse_args(argv)
+    return ap
+
+
+def _prepare_fixture(args: argparse.Namespace) -> None:
+    """Build or validate-and-reuse the compiled fixture under ``--root``."""
+    wanted = {"members": args.members, "apis": args.apis, "records": args.records}
+    if args.keep and _fixture_matches(args.root, wanted):
+        print(f"reusing fixture at {args.root}", file=sys.stderr)
+        return
+    if args.root.exists():
+        shutil.rmtree(args.root)
+    print(
+        f"building fixture: {args.members} members x {args.apis} APIs "
+        f"x {args.records} records ...",
+        file=sys.stderr,
+    )
+    build_fixture(args.root, args.members, args.apis, args.records)
+    (args.root / FIXTURE_MANIFEST).write_text(json.dumps(wanted), encoding="utf-8")
+
+
+def _summarize(
+    args: argparse.Namespace, results: list[dict[str, object]]
+) -> dict[str, object]:
+    """Fold the per-run rows into the receipt.
+
+    ``median_seconds`` is ``None`` for a ``--tracemalloc`` run: tracemalloc
+    perturbs both time and RSS, so such a run publishes no timing at all
+    rather than a number a reader might compare against an ordinary one.
+    """
+    by_variant: dict[str, object] = {}
+    for name in {str(r["variant"]) for r in results}:
+        rows = [r for r in results if r["variant"] == name]
+        by_variant[name] = {
+            "median_seconds": None
+            if args.tracemalloc
+            else statistics.median(float(r["seconds"]) for r in rows),
+            "median_parent_peak_mib": statistics.median(
+                float(r["parent_peak_rss_bytes"]) / (1024 * 1024) for r in rows
+            ),
+            "median_tree_pss_peak_mib": statistics.median(
+                float(r["tree_peak_pss_bytes"]) / (1024 * 1024) for r in rows
+            ),
+            "exit_codes": sorted({int(r["exit_code"]) for r in rows}),  # type: ignore[arg-type]
+        }
+    return {
+        "label": args.label,
+        "python": sys.version.split()[0],
+        "members": args.members,
+        "apis": args.apis,
+        "records": args.records,
+        "cold": bool(args.cold),
+        "runs": results,
+        "by_variant": by_variant,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
 
     if args.tracemalloc and args.trace is None:
         raise SystemExit(
@@ -470,19 +527,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     root: Path = args.root
-    wanted = {"members": args.members, "apis": args.apis, "records": args.records}
-    if args.keep and _fixture_matches(root, wanted):
-        print(f"reusing fixture at {root}", file=sys.stderr)
-    else:
-        if root.exists():
-            shutil.rmtree(root)
-        print(
-            f"building fixture: {args.members} members x {args.apis} APIs "
-            f"x {args.records} records ...",
-            file=sys.stderr,
-        )
-        build_fixture(root, args.members, args.apis, args.records)
-        (root / FIXTURE_MANIFEST).write_text(json.dumps(wanted), encoding="utf-8")
+    _prepare_fixture(args)
 
     cache_dir = root / "cache"
     results: list[dict[str, object]] = []
@@ -523,35 +568,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
 
-    summary: dict[str, object] = {
-        "label": args.label,
-        "python": sys.version.split()[0],
-        "members": args.members,
-        "apis": args.apis,
-        "records": args.records,
-        "cold": bool(args.cold),
-        "runs": results,
-    }
-    by_variant: dict[str, object] = {}
-    for name in {str(r["variant"]) for r in results}:
-        rows = [r for r in results if r["variant"] == name]
-        by_variant[name] = {
-            # A tracemalloc run perturbs both time and RSS, so it publishes
-            # no timing at all rather than a number a reader might compare
-            # against an ordinary run's.
-            "median_seconds": None
-            if args.tracemalloc
-            else statistics.median(float(r["seconds"]) for r in rows),
-            "median_parent_peak_mib": statistics.median(
-                float(r["parent_peak_rss_bytes"]) / (1024 * 1024) for r in rows
-            ),
-            "median_tree_pss_peak_mib": statistics.median(
-                float(r["tree_peak_pss_bytes"]) / (1024 * 1024) for r in rows
-            ),
-            "exit_codes": sorted({int(r["exit_code"]) for r in rows}),  # type: ignore[arg-type]
-        }
-    summary["by_variant"] = by_variant
-    text = json.dumps(summary, indent=2)
+    text = json.dumps(_summarize(args, results), indent=2)
     if args.out:
         args.out.write_text(text + "\n", encoding="utf-8")
         print(f"wrote {args.out}", file=sys.stderr)
