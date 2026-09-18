@@ -322,7 +322,7 @@ class TestTheManifestDoesNotGrowWithTheContract:
         with zipfile.ZipFile(path, "w") as zf:
             for name, payload in members.items():
                 zf.writestr(name, payload)
-        with pytest.raises((ValueError, Exception)) as excinfo:
+        with pytest.raises(ValueError) as excinfo:
             load_bundle_facts(path)
         assert "public_surface_blob" in str(excinfo.value)
 
@@ -361,14 +361,18 @@ class TestNoReaderDiscardsTheContractSilently:
     def test_a_schema_less_document_carrying_a_contract_is_refused(
         self, tmp_path
     ) -> None:
-        with pytest.raises((ValueError, Exception)) as excinfo:
+        with pytest.raises(ValueError) as excinfo:
             self._import(self._document(with_version=False), tmp_path)
         assert "public_surface" in str(excinfo.value)
 
     def test_a_declared_v4_document_is_refused_too(self, tmp_path) -> None:
         """The pre-existing path, asserted beside it: both spellings of the
-        same document reach a refusal, not one of them."""
-        with pytest.raises((ValueError, Exception)):
+        same document reach a refusal, not one of them -- by *different*
+        declared error types, each named rather than caught as `Exception`,
+        since the point is which mechanism refused."""
+        from abicheck.errors import IncompatibleSnapshotSchemaError
+
+        with pytest.raises(IncompatibleSnapshotSchemaError):
             self._import(self._document(with_version=True), tmp_path)
 
     def test_a_document_with_no_contract_still_imports(self, tmp_path) -> None:

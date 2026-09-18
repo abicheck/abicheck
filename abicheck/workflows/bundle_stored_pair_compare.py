@@ -100,10 +100,20 @@ def _stored_pair_public_surface(
         return None
     old_snapshots = getattr(old_facts, "per_library_snapshots", None) or {}
     new_snapshots = getattr(new_facts, "per_library_snapshots", None) or {}
+    # Each side's *whole* stored inventory, deliberately not narrowed to
+    # the matched keys: the surfaces above are each document's full recorded
+    # contract, so pairing a full contract with a filtered provider set
+    # makes an obligation that only an unmatched member provides read as
+    # missing (CodeRabbit review). Both stored documents are complete
+    # inventories of their own side, and each side's contract-versus-exports
+    # question is answered entirely within that side; a member present in
+    # one and absent from the other is a removed/added library, which the
+    # scope-completeness axis owns rather than this one. Same rule as
+    # `stored_old_live_new_reconciliation`'s own OLD side.
     return reconcile_member_sets(
-        new_members={k: v for k, v in new_snapshots.items() if k in keys},
+        new_members=dict(new_snapshots),
         new_surface=new_surface,
-        old_members={k: v for k, v in old_snapshots.items() if k in keys},
+        old_members=dict(old_snapshots),
         old_surface=old_surface,
     )
 

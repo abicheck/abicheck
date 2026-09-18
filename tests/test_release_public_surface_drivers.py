@@ -139,7 +139,7 @@ class TestTheUnionIsTakenOnEveryDriver:
             for name, snap in new.items()
         }
         reconciliation = stored_old_live_new_reconciliation(
-            _Facts(_members()), new, surfaces, failed={}, unsupported={}
+            _Facts(_members()), new, surfaces, unavailable={}
         )
         assert reconciliation is not None
         assert _missing_symbols(reconciliation) == []
@@ -182,7 +182,7 @@ class TestARealRemovalIsStillReportedOnce:
             for name, snap in new.items()
         }
         reconciliation = stored_old_live_new_reconciliation(
-            _Facts(_members(count=2)), new, surfaces, failed={}, unsupported={}
+            _Facts(_members(count=2)), new, surfaces, unavailable={}
         )
         assert _missing_symbols(reconciliation) == ["api_c"]
 
@@ -385,7 +385,7 @@ class TestABorrowedContractIsNeverAsserted:
             for name, snap in new.items()
         }
         reconciliation = stored_old_live_new_reconciliation(
-            _Facts(_members(count=2)), new, surfaces, failed={}, unsupported={}
+            _Facts(_members(count=2)), new, surfaces, unavailable={}
         )
         assert _missing_symbols(reconciliation) == []
 
@@ -405,7 +405,7 @@ class TestABorrowedContractIsNeverAsserted:
             for name, snap in new.items()
         }
         reconciliation = stored_old_live_new_reconciliation(
-            _Facts(_members(count=2)), new, surfaces, failed={}, unsupported={}
+            _Facts(_members(count=2)), new, surfaces, unavailable={}
         )
         assert reconciliation is not None
         assert reconciliation.new.surface_resolvable is False
@@ -428,8 +428,7 @@ class TestIncompleteCoverageNarrowsEveryDriver:
             _Facts(_members(count=2)),
             new,
             surfaces,
-            failed={"libb.so": "extraction failed"},
-            unsupported={},
+            unavailable={"libb.so": "extraction failed"},
         )
         assert reconciliation is not None
         assert reconciliation.new.coverage_complete is False
@@ -848,3 +847,250 @@ class TestTheStoredEnvelopesGateBearingKeys:
             public_surface_reconciliation = None
 
         assert public_surface_markdown_lines(_Result()) == []
+
+
+class TestAReleaseFindingReachesTheVerdict:
+    """A finding in the report that never reached the verdict is a gate
+    bypass, not a cosmetic gap. The ABICC path merges its member verdicts
+    *before* the release-level findings exist, so the fold has to re-score.
+    """
+
+    def _merged(self, verdict_name: str):
+        from abicheck.checker import Verdict
+        from abicheck.checker_types import DiffResult
+
+        return DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="product",
+            verdict=Verdict(verdict_name),
+            changes=[],
+        )
+
+    def _members_holder(self, *, missing: bool):
+        from abicheck.compat.multi_library_run import _MemberSnapshots
+
+        holder = _MemberSnapshots()
+        new = (
+            {
+                name: _snapshot(name, declares=_PRODUCT_API, exports=exports)
+                for name, exports in (("liba.so", ("api_a",)), ("libb.so", ("api_b",)))
+            }
+            if missing
+            else _members(count=2)
+        )
+        old = _members(count=2)
+        for index, name in enumerate(sorted(new)):
+            holder.record(index, None, None, old[sorted(old)[index]], new[name])
+        # `record` keys off the member name it is given; re-key to the real
+        # names so both sides line up the way the command's own loop does.
+        holder.old = dict(zip(sorted(new), old.values(), strict=True))
+        holder.new = new
+        return holder
+
+    def test_the_merged_verdict_is_raised_by_a_release_finding(self) -> None:
+        result = self._members_holder(missing=True).fold_into(
+            self._merged("NO_CHANGE"), policy="strict_abi"
+        )
+        assert [c.kind for c in result.changes] == [ChangeKind.PUBLIC_NOT_EXPORTED]
+        assert result.verdict.value == "COMPATIBLE_WITH_RISK"
+
+    def test_a_satisfied_contract_leaves_the_verdict_alone(self) -> None:
+        """The vacuity guard: the fold must be driven by the finding, not
+        applied unconditionally."""
+        result = self._members_holder(missing=False).fold_into(
+            self._merged("NO_CHANGE"), policy="strict_abi"
+        )
+        assert result.changes == []
+        assert result.verdict.value == "NO_CHANGE"
+
+    @pytest.mark.parametrize("worse", ["API_BREAK", "BREAKING"])
+    def test_the_fold_never_lowers_a_members_verdict(self, worse: str) -> None:
+        """Monotonic: a member's real break outranks a release-level risk
+        finding, and the fold may never trade one for the other."""
+        result = self._members_holder(missing=True).fold_into(
+            self._merged(worse), policy="strict_abi"
+        )
+        assert result.verdict.value == worse
+
+
+class TestTheWorstVerdictFoldIsOrdinal:
+    """`_worst_verdict`'s own contract, decoupled from the descriptor path.
+
+    A reusable max-by-rank primitive, so it gets the property treatment the
+    repo asks for rather than only its caller's example.
+    """
+
+    _ORDER = (
+        "NO_CHANGE",
+        "COMPATIBLE",
+        "COMPATIBLE_WITH_RISK",
+        "API_BREAK",
+        "BREAKING",
+    )
+
+    def _fold(self, current: str, release: str):
+        from abicheck.checker import Verdict
+        from abicheck.compat.multi_library_run import _worst_verdict
+
+        return _worst_verdict(Verdict(current), release).value
+
+    def test_every_pair_yields_the_worse_of_the_two(self) -> None:
+        """Exhaustive over the whole 5x5 domain, against an oracle derived
+        from the ordinal itself rather than from the function's own body."""
+        disagreements = [
+            (a, b, self._fold(a, b), expected)
+            for a in self._ORDER
+            for b in self._ORDER
+            if (expected := max(a, b, key=self._ORDER.index)) != self._fold(a, b)
+        ]
+        assert disagreements == []
+
+    def test_it_is_never_lowered(self) -> None:
+        for a in self._ORDER:
+            for b in self._ORDER:
+                assert self._ORDER.index(self._fold(a, b)) >= self._ORDER.index(a)
+
+    def test_an_unknown_release_spelling_never_wins(self) -> None:
+        """Fail-safe rather than fail-open: a spelling this scale does not
+        know must not outrank a real verdict by accident."""
+        for a in self._ORDER:
+            assert self._fold(a, "NOT_A_VERDICT") == a
+
+
+class TestStoredInventoriesAreNotNarrowed:
+    """Each stored document is a complete inventory of its own side, so its
+    contract is reconciled against all of it. Pairing a full recorded
+    contract with a key-filtered provider set makes an obligation only an
+    unmatched member provides read as a missing export.
+    """
+
+    def test_an_unmatched_provider_still_satisfies_the_contract(self) -> None:
+        from abicheck.workflows.bundle_stored_pair_compare import (
+            _stored_pair_public_surface,
+        )
+
+        both = _members(count=3)
+        # Only two of the three members matched between the documents --
+        # the third still exports what it always did.
+        matched = sorted(both)[:2]
+        reconciliation = _stored_pair_public_surface(
+            _Facts(both), _Facts(both), matched
+        )
+        assert reconciliation is not None
+        assert _missing_symbols(reconciliation) == []
+
+    def test_a_genuinely_absent_obligation_is_still_reported(self) -> None:
+        """The vacuity guard: widening the inventory must not silence a real
+        break, only stop inventing one."""
+        from abicheck.workflows.bundle_stored_pair_compare import (
+            _stored_pair_public_surface,
+        )
+
+        dropped = {
+            name: _snapshot(name, declares=_PRODUCT_API, exports=exports)
+            for name, exports in (("liba.so", ("api_a",)), ("libb.so", ("api_b",)))
+        }
+        reconciliation = _stored_pair_public_surface(
+            _Facts(_members(count=2)), _Facts(dropped), sorted(dropped)
+        )
+        assert _missing_symbols(reconciliation) == ["api_c"]
+
+
+class TestEveryUnavailableMemberNarrowsCoverage:
+    """`failed` and `unsupported` fail loudly; `degraded` and
+    `not_comparable` simply never reach the evidence. All four mean the same
+    thing to the export index -- this member was not read -- so all four
+    must reach it, or an obligation only that member provides is reported
+    missing on evidence nobody gathered.
+    """
+
+    def _run(self, unavailable):
+        new = {
+            "liba.so": _snapshot("liba.so", declares=_PRODUCT_API, exports=("api_a",))
+        }
+        surfaces = {
+            "liba.so": surface_from_snapshot(
+                new["liba.so"], acquisition_key="k", side="new"
+            )
+        }
+        return stored_old_live_new_reconciliation(
+            _Facts(_members(count=2)), new, surfaces, unavailable=unavailable
+        )
+
+    @pytest.mark.parametrize(
+        "reason",
+        [
+            "extraction failed",
+            "unsupported artifact",
+            "OLD captured degraded",
+            "extraction contracts disagree",
+        ],
+    )
+    def test_any_unread_reason_narrows_the_conclusion(self, reason: str) -> None:
+        reconciliation = self._run({"libb.so": reason})
+        assert reconciliation is not None
+        assert reconciliation.new.coverage_complete is False
+        assert _missing_symbols(reconciliation) == []
+
+    def test_with_every_member_read_the_finding_is_reported(self) -> None:
+        """The vacuity guard on all four: the identical inputs with nothing
+        unavailable do produce the finding."""
+        reconciliation = self._run({})
+        assert reconciliation is not None
+        assert reconciliation.new.coverage_complete is True
+        assert _missing_symbols(reconciliation) == ["api_b", "api_c"]
+
+
+class TestAnUnresolvedContractIsStatedNotOmitted:
+    """`evaluated` goes false exactly when neither side's surface resolved.
+    That is a stated fact carrying its own reason, not an absence -- the
+    same "a failed extractor read as silence" inversion the Markdown
+    renderer already refuses. Omitting it left a `--output-dir` consumer
+    unable to tell an unresolved contract from no contract at all.
+    """
+
+    def _unresolved_terms(self):
+        from abicheck.report.release_public_surface import (
+            compute_release_public_surface,
+        )
+
+        binary_only = {
+            name: AbiSnapshot(
+                library=name,
+                version="1.0",
+                elf=ElfMetadata(symbols=[ElfSymbol(name="sym")]),
+            )
+            for name in ("liba.so", "libb.so")
+        }
+        reconciliation = reconcile_member_sets(
+            new_members=binary_only,
+            new_surface=surface_from_snapshots(
+                binary_only, acquisition_key="k", side="new"
+            ),
+        )
+        return compute_release_public_surface(
+            reconciliation, acquisition={}, shared_findings=()
+        )
+
+    def _summary(self, tmp_path, terms):
+        import json
+
+        from abicheck.frontends.cli.release_summary import _write_release_summary_file
+
+        _write_release_summary_file(
+            tmp_path, "NO_CHANGE", [], [], [], {}, {}, public_surface=terms
+        )
+        return json.loads((tmp_path / "summary.json").read_text())
+
+    def test_an_unresolved_surface_is_still_emitted(self, tmp_path) -> None:
+        terms = self._unresolved_terms()
+        assert terms.evaluated is False
+        block = self._summary(tmp_path, terms)["public_surface_reconciliation"]
+        assert block["sides"]["new"]["surface_resolvable"] is False
+        assert block["sides"]["new"]["coverage_reason"]
+
+    def test_no_reconciliation_at_all_still_omits_it(self, tmp_path) -> None:
+        """The distinction the previous test rests on: "unresolved" and
+        "absent" must stay two different documents."""
+        assert "public_surface_reconciliation" not in self._summary(tmp_path, None)

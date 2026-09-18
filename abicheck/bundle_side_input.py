@@ -707,8 +707,19 @@ def compare_release_against_bundle_facts(
         old_facts,
         new_signature_evidence,
         new_member_surfaces,
-        failed=failed,
-        unsupported=unsupported,
+        # *Every* category that produced no NEW export evidence, not only
+        # the two that fail loudly: a `degraded` member is skipped before
+        # evidence is stored and a `not_comparable` one never reaches it
+        # either, so leaving them out let the export index call coverage
+        # complete and report an obligation only that member provides as a
+        # missing export (CodeRabbit review). An unread member narrows the
+        # conclusion; it never manufactures one.
+        unavailable={
+            **failed,
+            **unsupported,
+            **degraded,
+            **{key: msg for key, (_kind, msg) in not_comparable.items()},
+        },
     )
     result.analysis_errors.extend(
         f"{key}: OLD side was captured degraded ({reason}); per-library "

@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
     from pathlib import Path
 
+    from ..checker import Verdict
     from ..checker_types import Change, DiffResult
     from ..model.snapshot import AbiSnapshot
 
@@ -382,11 +383,50 @@ class _MemberSnapshots:
         self.old[name] = old_snap
         self.new[name] = new_snap
 
-    def release_contract_findings(self) -> list[Change]:
-        """The release-level half of the product-model move.
+    def fold_into(self, result: DiffResult, *, policy: str) -> DiffResult:
+        """Add the release-level findings to *result* **and re-score it**.
 
         The whole-product cross-source check taken off the member pass is
         answered once here, against the union of the descriptor's own
-        libraries.
+        libraries. Extending `changes` alone is not enough and was a real
+        bypass: `merge_results` aggregates the member verdicts *before*
+        this runs, so the report named a missing export while the verdict
+        -- and therefore the exit code -- stayed clean (CodeRabbit review;
+        reproduced at exit 0 with `public_not_exported` in the report).
+
+        The fold is monotonic and uses the same
+        `release_findings_verdict` rule every other driver scores release
+        findings by, so moving this check's owner cannot change what it
+        gates.
         """
-        return _release_contract_findings(self.old, self.new)
+        from ..workflows.release_public_surface import release_findings_verdict
+
+        findings = _release_contract_findings(self.old, self.new)
+        if not findings:
+            return result
+        result.changes.extend(findings)
+        return dataclasses.replace(
+            result,
+            verdict=_worst_verdict(
+                result.verdict,
+                release_findings_verdict(findings, policy=policy),
+            ),
+        )
+
+
+def _worst_verdict(current: Verdict, release: str) -> Verdict:
+    """The worse of a merged member verdict and a release-level one.
+
+    Ranked by `multi_library._WORST_SCALES["verdict"]`, the same ordinal the
+    member merge itself folds by -- so one scale decides both halves and a
+    release finding can raise a verdict but never lower one. An unknown
+    release spelling ranks below everything rather than silently winning.
+    """
+    from .multi_library import _WORST_SCALES
+
+    ranks = {name: index for index, name in enumerate(_WORST_SCALES["verdict"])}
+    if ranks.get(release, -1) > ranks.get(current.value, -1):
+        from ..checker import Verdict as _Verdict
+
+        return _Verdict(release)
+    return current

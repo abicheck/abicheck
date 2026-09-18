@@ -1096,8 +1096,8 @@ def compat_check_cmd(  # noqa: PLR0913
                 f"Compared {len(_results)} libraries from the descriptor pair.", quiet
             )
             result = merge_results(_results, label=f"{len(_results)} libraries")
-            # Folded into the merged changes: no release JSON envelope here.
-            result.changes.extend(_members.release_contract_findings())
+            # Changes *and* verdict -- see `fold_into`.
+            result = _members.fold_into(result, policy="strict_abi")
         else:
             result = _results[0]
         result = _record_unpaired_libraries(result, _unpaired_old, _unpaired_new, quiet)

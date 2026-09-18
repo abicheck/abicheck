@@ -437,6 +437,24 @@ def release_surface_verdict(
     release-level finding gating exactly as the per-member finding it
     replaces did: moving a check's *owner* must not change what it gates.
     """
+    return release_findings_verdict(
+        stage.findings, policy=policy, policy_file=policy_file
+    )
+
+
+def release_findings_verdict(
+    findings: Sequence[Any],
+    *,
+    policy: str = "strict_abi",
+    policy_file: Any = None,
+) -> str:
+    """The verdict a bare set of release-level findings implies.
+
+    :func:`release_surface_verdict`'s core, taken over findings rather than
+    a stage so a driver that holds only the findings (the ABICC descriptor
+    path, which folds them into one merged result) scores them by the same
+    rule instead of a second one.
+    """
     from ..policy.classification import (
         apply_policy_file_overrides,
         compute_verdict,
@@ -445,7 +463,6 @@ def release_surface_verdict(
     )
     from ..policy.evidence_status import is_cross_source_resolved
 
-    findings = stage.findings
     if not findings:
         return "NO_CHANGE"
     sets = apply_policy_file_overrides(
@@ -498,8 +515,7 @@ def stored_old_live_new_reconciliation(
     new_members: Mapping[str, object],
     new_surfaces: Mapping[str, object],
     *,
-    failed: Mapping[str, str],
-    unsupported: Mapping[str, str],
+    unavailable: Mapping[str, str],
 ) -> object | None:
     """The release-level reconciliation for a stored-OLD/live-NEW comparison.
 
@@ -548,5 +564,9 @@ def stored_old_live_new_reconciliation(
         # the scope/completeness axis owns, not this one.
         old_members=dict(old_snapshots),
         old_surface=old_surface,
-        new_failed={**failed, **unsupported},
+        # Every NEW member that produced no export evidence, whatever the
+        # reason (failed, unsupported, degraded, not-comparable): the export
+        # index must know it was unread, or an obligation only that member
+        # provides reads as missing from the product.
+        new_failed=dict(unavailable),
     )

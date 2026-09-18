@@ -201,7 +201,14 @@ def _write_release_summary_file(
     # the per-member reading the block exists to replace (CodeRabbit
     # review) -- the same drift the `comparison_scope`/`analysis_assurance`
     # blocks below are threaded through for.
-    if public_surface is not None and public_surface.evaluated:
+    # Emitted whenever a reconciliation exists, *including* an unevaluated
+    # one: `evaluated` goes false exactly when neither side's surface
+    # resolved, and that is a stated fact (the section carries the reason),
+    # not an absence. Gating on it left a `--output-dir` consumer unable to
+    # tell an unresolved product contract from no product contract -- the
+    # same "a failed extractor read as silence" inversion the Markdown
+    # renderer deliberately refuses (CodeRabbit review).
+    if public_surface is not None:
         summary_data["public_surface_reconciliation"] = public_surface.to_dict()
     if terms.section is not None:
         summary_data["comparison_scope"] = terms.section

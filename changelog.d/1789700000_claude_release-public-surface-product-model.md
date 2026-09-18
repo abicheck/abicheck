@@ -124,3 +124,31 @@
     one "current" constant, which had left the returned in-memory
     `BundleFacts` declaring a version its contents contradict. Persisted
     documents were already correct.
+
+- A second review round (CodeRabbit, PR #1328) found four more, each fixed
+  with its own regression test:
+  - A multi-library `compat check` merged its member verdicts *before* the
+    release-level findings existed, so the report named a missing export
+    while the verdict — and the exit code — stayed as the members left it.
+    The fold now re-scores the merged result through the same
+    `release_findings_verdict` rule every other driver uses, monotonically:
+    a release finding can raise a verdict, never lower one.
+  - A stored/stored comparison paired each document's *whole* recorded
+    contract with a provider set filtered to the matched members, so an
+    obligation only an unmatched member provides read as missing. Each
+    side's contract is now reconciled against that side's whole stored
+    inventory; a member present in one document and absent from the other
+    is a removed or added library, which the scope-completeness axis owns.
+  - A stored-baseline-versus-live-release comparison passed only `failed`
+    and `unsupported` members as unread. A `degraded` member is skipped
+    before its evidence is stored and a `not_comparable` one never reaches
+    it either, so coverage could read complete while two categories of
+    member went unread — and an obligation only such a member provides was
+    reported missing on evidence nobody gathered. All four categories now
+    reach the export index.
+  - `--output-dir`'s `summary.json` states an *unresolved* contract instead
+    of omitting it. `evaluated` is false exactly when neither side's
+    surface resolved, which is a fact carrying its own reason rather than
+    an absence; omitting it left a consumer unable to tell an unresolved
+    contract from no contract — the same "a failed extractor read as
+    silence" inversion the Markdown renderer already refuses.
