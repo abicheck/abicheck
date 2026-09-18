@@ -400,4 +400,64 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="classification.one_spelling_of_a_path_treated_as_its_identity",
+        invariant=(
+            "A filesystem path is a *spelling*, not an identity. Two "
+            "spellings of one local tree -- a symlink and its real path -- "
+            "must reach the same ownership answer whichever side names "
+            "which, so a declared root and a parser-reported source "
+            "location are matched over the set of spellings each may "
+            "legitimately carry, in both directions. The safety half is "
+            "equally an invariant and is what rules out the obvious fix of "
+            "resolving everything: the lexical spelling is persistent "
+            "evidence (it is what a stored snapshot carries and what a "
+            "configuration digest is computed over) and is never replaced, "
+            "a canonical spelling is an optional local matching alias and "
+            "is taken only when the path is rooted in the *running* "
+            "platform's own syntax and resolves without error -- so a "
+            "POSIX-rooted string on Windows is never drive-anchored, a "
+            "drive/UNC spelling on POSIX is never reinterpreted, a "
+            "cross-machine stored path is never required to exist, and a "
+            "resolution failure degrades to lexical matching rather than "
+            "failing extraction. Aliasing only ever *adds* spellings, so "
+            "it can widen no root beyond the tree actually declared and "
+            "can make nothing match that did not match before."
+        ),
+        fixed_by=(1330,),
+        seed_tests=(
+            "tests/test_provenance_path_aliases.py",
+            "tests/test_provenance_symlink_fixture.py",
+        ),
+        axes={
+            "root_shape": ("file", "directory", "relative", "absolute"),
+            "path_syntax": ("posix", "windows-drive", "unc"),
+            "locality": ("local-resolvable", "missing", "cross-machine"),
+            "direction": ("symlinked-root", "symlinked-declaration"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The real-symlink filesystem cases skip on Windows, "
+                    "where creating a symlink needs a privilege CI may not "
+                    "hold; only the pure path-alias rules (including both "
+                    "platforms' syntax rules, via a mocked `os.name`) run "
+                    "there."
+                ),
+                reference="tests/test_provenance_path_aliases.py",
+            ),
+            KnownGap(
+                description=(
+                    "Alias equivalence is established for local trees "
+                    "reachable through a symlink. Two spellings that are "
+                    "the same tree only via a bind mount, a hardlinked "
+                    "directory tree, or a case-insensitive filesystem are "
+                    "not recognized -- `realpath` does not relate them "
+                    "either, so they still require the declared and "
+                    "reported spellings to agree lexically."
+                ),
+                reference="abicheck/provenance.py",
+            ),
+        ),
+    ),
 )
