@@ -299,3 +299,149 @@ class TestTheFoldSeesTheSameEvidence:
         new_map = captured["new_snapshots"]
         assert isinstance(new_map, dict)
         assert isinstance(new_map["libx.so"], BundleSignatureEvidence)
+
+
+class TestStashMemberEvidence:
+    """``stash_member_evidence`` must leave exactly one shape per side.
+
+    The invariant is stated over the **whole** ``(old_full, new_full)``
+    domain rather than the two combinations the shipped resolver happens to
+    produce today. That is deliberate: ``resolve_snapshot_retention`` is
+    free to gain a consumer that turns ``new_full`` on (the module's own
+    docstring says adding a consumer means naming it there), and the failure
+    this guards against -- a member entry carrying *both* a full snapshot
+    and its compact stand-in, or *neither* -- is invisible in every report,
+    exactly like the three retention defects this work started from. An
+    exhaustive four-case enumeration is the whole domain here, so it is a
+    proof rather than a sample.
+
+    The oracle is ``SnapshotRetention``'s own two booleans read directly,
+    not ``as_counts()`` and not the resolver -- asserting the writer agrees
+    with the same helper it is implemented in terms of would be the
+    tautology ``AGENTS.md``'s matrix-test rule names.
+    """
+
+    _OLD_FULL_KEY = "_old_snapshot"
+    _OLD_COMPACT_KEY = "_old_bundle_evidence"
+    _NEW_FULL_KEY = "_new_snapshot"
+    _NEW_COMPACT_KEY = "_new_bundle_evidence"
+
+    def _snapshot(self, library: str):
+        from abicheck.model import AbiSnapshot, Function, Visibility
+
+        return AbiSnapshot(
+            library=library,
+            version="1.0",
+            functions=[
+                Function(
+                    name="f",
+                    mangled="_Z1fv",
+                    return_type="void",
+                    params=[],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+
+    @pytest.mark.parametrize("old_full", [False, True])
+    @pytest.mark.parametrize("new_full", [False, True])
+    def test_exactly_one_shape_per_side_for_every_retention(self, old_full, new_full):
+        from abicheck.bundle_models import BundleSignatureEvidence
+        from abicheck.workflows.release_snapshot_retention import (
+            stash_member_evidence,
+        )
+
+        old = self._snapshot("libold.so")
+        new = self._snapshot("libnew.so")
+        entry: dict = {"library": "libx.so"}
+
+        stash_member_evidence(
+            entry,
+            "libx.so",
+            old,
+            new,
+            SnapshotRetention(old_full=old_full, new_full=new_full),
+        )
+
+        assert entry["_bundle_key"] == "libx.so"
+        for full_key, compact_key, keep, snapshot in (
+            (self._OLD_FULL_KEY, self._OLD_COMPACT_KEY, old_full, old),
+            (self._NEW_FULL_KEY, self._NEW_COMPACT_KEY, new_full, new),
+        ):
+            present = [k for k in (full_key, compact_key) if k in entry]
+            assert present == [full_key if keep else compact_key], (
+                f"retention old_full={old_full} new_full={new_full} left "
+                f"{present} for {full_key}/{compact_key}; exactly one is required"
+            )
+            if keep:
+                assert entry[full_key] is snapshot
+            else:
+                assert isinstance(entry[compact_key], BundleSignatureEvidence)
+
+    def test_absent_retention_keeps_neither_side_in_full(self):
+        """``None`` is the compact default, not an unset that keeps everything.
+
+        A missing argument reaching the permissive branch is how the
+        all-or-nothing switch this replaced used to behave, so it is worth
+        one case of its own rather than inferring it from the matrix above.
+        """
+        from abicheck.bundle_models import BundleSignatureEvidence
+        from abicheck.workflows.release_snapshot_retention import (
+            stash_member_evidence,
+        )
+
+        entry: dict = {"library": "libx.so"}
+        stash_member_evidence(
+            entry, "libx.so", self._snapshot("a"), self._snapshot("b"), None
+        )
+
+        assert self._OLD_FULL_KEY not in entry
+        assert self._NEW_FULL_KEY not in entry
+        assert isinstance(entry[self._OLD_COMPACT_KEY], BundleSignatureEvidence)
+        assert isinstance(entry[self._NEW_COMPACT_KEY], BundleSignatureEvidence)
+
+    def test_a_member_without_a_library_name_is_recorded_under_its_key(self, tmp_path):
+        """The trace attribution falls back to the bundle key, not to ``None``.
+
+        ``record_release_member``'s first argument is what a memory trace is
+        read by member on; an entry whose ``library`` is missing or non-string
+        (a shape the fan-out can produce before a member resolves) must still
+        attribute to something, or the retention counts in a trace become
+        unreadable exactly when a member misbehaved.
+        """
+        from abicheck.workflows import memory_trace
+        from abicheck.workflows.release_snapshot_retention import (
+            stash_member_evidence,
+        )
+
+        trace = tmp_path / "trace.jsonl"
+        memory_trace.reset_for_testing()
+        try:
+            import os
+
+            os.environ[memory_trace.ENV_TRACE_PATH] = str(trace)
+            memory_trace.reset_for_testing()
+            stash_member_evidence(
+                {}, "fallback-key", self._snapshot("a"), self._snapshot("b"), None
+            )
+        finally:
+            os.environ.pop(memory_trace.ENV_TRACE_PATH, None)
+            memory_trace.reset_for_testing()
+
+        members = [
+            s
+            for s in memory_trace.read_samples(trace)
+            if s.get("event") == "release.member.retained"
+        ]
+        # Two records by design, and the pairing is the point: the counts
+        # record carries the retention decision, the sample record carries
+        # the memory reading taken at that same moment. Reading the name out
+        # of each one separately is what proves a trace can be grouped by
+        # member at all -- a name on only one of them would silently orphan
+        # the other. Their two different nestings are the module's own
+        # (``counts`` under "counts", ``sample`` under "attrs"), so this
+        # also pins that a caller's keyword does not land at top level.
+        by_kind = {s.get("kind", "sample"): s for s in members}
+        assert sorted(by_kind) == ["counts", "sample"], members
+        assert by_kind["counts"]["counts"]["library"] == "fallback-key"
+        assert by_kind["sample"]["attrs"]["library"] == "fallback-key"
