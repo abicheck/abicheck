@@ -342,6 +342,19 @@ class TestRefusesWhatItCannotDecode:
         section.header.sh_entsize = "not-a-number"
         assert iter_symbol_fields(section, elffile) is None
 
+    def test_a_section_with_no_stream_at_all_falls_back(self) -> None:
+        """Neither the section nor the file offers a stream to read from.
+
+        Distinct from a stream that raises: there is nothing to call, so
+        the refusal has to be a `None` check rather than an exception
+        handler. A pyelftools that stopped exposing `.stream` would land
+        here, and must degrade to the ordinary reader rather than crash.
+        """
+        elffile, section = _table(64, True, [_entry()])
+        elffile.stream = None
+        section.stream = None
+        assert iter_symbol_fields(section, elffile) is None
+
     def test_a_stream_that_raises_falls_back(self) -> None:
         class Exploding:
             def seek(self, *_a, **_k):
