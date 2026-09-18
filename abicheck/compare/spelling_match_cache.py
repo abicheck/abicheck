@@ -80,6 +80,17 @@ MAX_CACHED_VOCABULARIES = 64
 _BYTES_PER_ENTRY = 224
 _BYTES_PER_MATCH = 96
 
+# Rough retained cost of one compiled pattern the match cache keeps alive
+# through ``_keepalive``, as a multiple of its pattern text's length: the
+# ``str`` itself, plus the compiled program, which measures at roughly twice
+# the text again for a large literal alternation. An estimate on the same
+# terms as the two constants above -- the budget's job is to bound growth,
+# not to report exact RSS -- but a *stated* one, because leaving it out of
+# the accounting was the real gap: a match entry outlives its vocabulary-
+# cache entry, so an evicted vocabulary's pattern stays retained here while
+# ``retained_bytes`` reported only the entry bookkeeping around it.
+_PATTERN_BYTES_PER_CHAR = 6
+
 
 class SpellingMatch:
     """One matched spelling: its text and its span in the subject string.
@@ -89,14 +100,42 @@ class SpellingMatch:
     on purpose. Immutable and slotted, so a cached result cannot be mutated
     by one reader and observed changed by the next, and retains no
     reference to the subject string or the compiled pattern.
+
+    The immutability is **enforced**, not merely advertised. ``__slots__``
+    alone only bounds *which* attributes exist; it does not stop
+    ``match._text = ...``, and because a cached result tuple is handed to
+    every subsequent reader of the same key, one such assignment silently
+    changes what the next consumer sees. That is the sharing invariant this
+    module's own docstring promises, so it is closed here rather than left
+    to convention.
     """
 
     __slots__ = ("_end", "_start", "_text")
 
+    # Bare annotations, not assignments: they declare the slots' types for
+    # mypy (which cannot see through the ``object.__setattr__`` the
+    # read-only ``__setattr__`` below forces ``__init__`` to use) without
+    # creating class attributes that would collide with ``__slots__``.
+    _text: str
+    _start: int
+    _end: int
+
     def __init__(self, text: str, start: int, end: int) -> None:
-        self._text = text
-        self._start = start
-        self._end = end
+        object.__setattr__(self, "_text", text)
+        object.__setattr__(self, "_start", start)
+        object.__setattr__(self, "_end", end)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError(
+            f"SpellingMatch is immutable; cannot set {name!r}. "
+            "Results are shared between every reader of a cached key."
+        )
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(
+            f"SpellingMatch is immutable; cannot delete {name!r}. "
+            "Results are shared between every reader of a cached key."
+        )
 
     def group(self, index: int = 0) -> str:
         if index != 0:
@@ -127,6 +166,11 @@ class SpellingMatch:
 
     def __repr__(self) -> str:
         return f"SpellingMatch({self._text!r}, {self._start}, {self._end})"
+
+
+def _pattern_bytes(pattern: re.Pattern[str]) -> int:
+    """Estimated bytes retained by holding *pattern* alive."""
+    return len(pattern.pattern) * _PATTERN_BYTES_PER_CHAR
 
 
 def _entry_bytes(text: str, matches: tuple[SpellingMatch, ...]) -> int:
@@ -177,8 +221,14 @@ class _MatchCache:
 
     def _retain(self, token: int, pattern: re.Pattern[str]) -> None:
         held = self._keepalive.get(token)
-        refs = held[1] if held is not None else 0
-        self._keepalive[token] = (pattern, refs + 1)
+        if held is None:
+            # First entry to name this pattern is the one that starts
+            # retaining it, so its cost joins the budget here -- and only
+            # here, however many entries go on to share it.
+            self._bytes += _pattern_bytes(pattern)
+            self._keepalive[token] = (pattern, 1)
+            return
+        self._keepalive[token] = (held[0], held[1] + 1)
 
     def _release(self, token: int) -> None:
         held = self._keepalive.get(token)
@@ -186,6 +236,9 @@ class _MatchCache:
             return
         pattern, refs = held
         if refs <= 1:
+            # Last entry naming it: the pattern is no longer retained by
+            # this cache, so its cost leaves the budget with it.
+            self._bytes -= _pattern_bytes(pattern)
             del self._keepalive[token]
         else:
             self._keepalive[token] = (pattern, refs - 1)
@@ -225,6 +278,18 @@ class _MatchCache:
             return
         if key in self._entries:
             return
+        # A pattern whose own retained cost cannot fit the whole budget is
+        # not cached against: admitting it would evict every other entry on
+        # the next ``put`` and then be evicted itself, so the cache would
+        # thrash while retaining more than it is allowed to. Only applies
+        # when this entry would be the one to start retaining it -- an
+        # already-retained pattern is a sunk cost its other entries own.
+        if (
+            self._keepalive.get(key[0]) is None
+            and _pattern_bytes(pattern) > MAX_RETAINED_BYTES
+        ):
+            self.bypasses += 1
+            return
         self._entries[key] = matches
         self._bytes += _entry_bytes(text, matches)
         self._retain(key[0], pattern)
@@ -245,6 +310,13 @@ class _MatchCache:
 
     @property
     def retained_bytes(self) -> int:
+        """Estimated bytes this cache retains, patterns included.
+
+        Covers entry bookkeeping, subject strings and match results **and**
+        the compiled patterns held alive through ``_keepalive`` -- which a
+        vocabulary-cache eviction does not release, since a match entry
+        outlives the vocabulary entry that compiled its pattern.
+        """
         return self._bytes
 
     def __len__(self) -> int:

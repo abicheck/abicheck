@@ -169,21 +169,35 @@ def _pyelftools_exported_symbols(so_path: Path) -> tuple[set[str], set[str]]:
     from elftools.elf.elffile import ELFFile
     from elftools.elf.sections import SymbolTableSection
 
+    from .extract.elf_string_table import buffered_string_table, string_table_of
+
     def _extract_symbols(elf: Any, section_name: str) -> set[str]:
         syms: set[str] = set()
         section = elf.get_section_by_name(section_name)
         if section is None or not isinstance(section, SymbolTableSection):
             return syms
-        for sym in section.iter_symbols():
-            shndx = sym.entry.st_shndx
-            if shndx in ("SHN_UNDEF", "SHN_ABS"):
-                continue
-            bind = sym.entry.st_info.bind
-            vis = sym.entry.st_other.visibility
-            if bind in ("STB_GLOBAL", "STB_WEAK") and vis not in _HIDDEN_VIS:
-                name = sym.name
-                if name and _is_abi_relevant_symbol(name):
-                    syms.add(name)
+        # One buffered read of *this* section's own associated string table
+        # (``.dynstr`` for ``.dynsym``, ``.strtab`` for ``.symtab`` -- taken
+        # from the section rather than by name, so the pairing is whatever
+        # ``sh_link`` actually says). ``iter_symbols`` resolves every
+        # ``Symbol.name`` through that table, one seek-and-read per name;
+        # this was the remaining unbuffered name-resolution path after the
+        # ``elf_metadata`` one was covered. No second string-table reader is
+        # introduced: it is the same bounded helper, with the same
+        # fall-through-to-pyelftools behaviour for an oversized, malformed
+        # or truncated table, so export filtering and malformed-input
+        # results are unchanged.
+        with buffered_string_table(string_table_of(section)):
+            for sym in section.iter_symbols():
+                shndx = sym.entry.st_shndx
+                if shndx in ("SHN_UNDEF", "SHN_ABS"):
+                    continue
+                bind = sym.entry.st_info.bind
+                vis = sym.entry.st_other.visibility
+                if bind in ("STB_GLOBAL", "STB_WEAK") and vis not in _HIDDEN_VIS:
+                    name = sym.name
+                    if name and _is_abi_relevant_symbol(name):
+                        syms.add(name)
         return syms
 
     try:
