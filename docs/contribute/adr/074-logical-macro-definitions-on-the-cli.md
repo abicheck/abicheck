@@ -71,6 +71,19 @@ compiler argument. General compiler-option injection stays config-only;
 - With `--dump-manifest`, the manifest's own profiles keep owning their
   per-TU context; `-D` folds into the same pass-through token tail as
   today's `compile.defines`.
+- **Every front end, not just the CLI.** The definitions are carried on
+  `CompileContext.defines` and rendered into the frontend argv tail by
+  `workflows/artifact/resolve.py`'s `_with_rendered_defines`, at the one
+  engine-layer point `dump`, `compare`, the release fan-out and the typed
+  `DumpRequest`/`CompareRequest` API all pass through. Rendering only in the
+  CLI fold (`cli_options.merge_compile_config`) would make
+  `InputSpec(compile=CompileContext(defines=(...)))` silently ignore its
+  macros -- the same CLI-versus-typed-API asymmetry AGENTS.md records for
+  `include_dependencies`, and the same shape as this repository's
+  `config.option_dropped_at_a_dispatch_branch` bug class. The bridge is
+  idempotent (it appends only macros the tail does not already define), so
+  the CLI fold's own ordering, which is what lets a `-D` beat a raw
+  `-DNAME` in `compile.options`, is preserved exactly.
 - **No matching Action input.** The root Action's `compile:` overlay already
   carries `defines`, and ADR-070 forbids the Action layer re-encoding CLI
   semantics. A CI workflow is exactly the stable-contract case

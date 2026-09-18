@@ -15,6 +15,11 @@
   course accepted); general compiler flags remain config-only under
   `compile.options`.
 
+  The definitions are honored by every front end that can run an L2 header
+  parse -- `dump`, `compare` (including `--no-baseline` and the
+  directory/package release fan-out), and the typed
+  `DumpRequest`/`CompareRequest` API via `CompileContext.defines`.
+
 ### Changed
 
 - The "a header requires macro X" diagnostic now recommends `-DX` and

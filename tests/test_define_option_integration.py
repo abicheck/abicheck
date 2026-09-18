@@ -409,3 +409,83 @@ class TestNoBaselineAudit:
         out = self._audit(so, include)
         assert "guarded_expert" in out
         assert "exported_not_public" in out
+
+
+@pytest.mark.skipif(not (_HAVE_GCC and _HAVE_CASTXML), reason="needs gcc + castxml")
+class TestTypedApiParity:
+    """ADR-074 through the *typed Python API*, not only the CLI.
+
+    AGENTS.md requires a change to be proven through every public workflow,
+    and this one was not: `cli_options.merge_compile_config` renders the
+    logical `defines` into the frontend argv tail, and that is a CLI
+    function. A caller constructing
+    `InputSpec(compile=CompileContext(defines=(...)))` therefore had its
+    macros silently dropped -- no error, no warning, just the guarded
+    declarations missing and `ast_compile_args` empty. That is the same
+    failure the repo already records as
+    `config.option_dropped_at_a_dispatch_branch`, and the same CLI-vs-API
+    asymmetry AGENTS.md documents for `include_dependencies`.
+    """
+
+    @staticmethod
+    def _dump(tmp_path: Path, **compile_kwargs):
+        from abicheck.compile_context import CompileContext
+        from abicheck.service import DumpRequest, InputSpec, run_dump_request
+
+        so, include = _build(tmp_path)
+        return run_dump_request(
+            DumpRequest(
+                input=InputSpec(
+                    path=so,
+                    headers=(include,),
+                    compile=CompileContext(**compile_kwargs),
+                )
+            )
+        )
+
+    def test_a_typed_request_honours_its_defines(self, tmp_path: Path) -> None:
+        snap = self._dump(tmp_path, defines=("FEATURE_API",))
+        names = {f.name for f in snap.functions}
+        assert "guarded_expert" in names
+        assert "-DFEATURE_API" in snap.ast_compile_args
+
+    def test_control_a_typed_request_without_them_does_not(
+        self, tmp_path: Path
+    ) -> None:
+        """The negative half: absence must still mean absence, so the test
+        above cannot pass for an unrelated reason."""
+        snap = self._dump(tmp_path)
+        assert "guarded_expert" not in {f.name for f in snap.functions}
+
+    def test_a_value_carrying_define_selects_the_right_declaration(
+        self, tmp_path: Path
+    ) -> None:
+        names = {f.name for f in self._dump(tmp_path, defines=("MODE=2",)).functions}
+        assert "guarded_mode_two" in names
+        assert "guarded_mode_other" not in names
+
+    def test_rendering_is_idempotent_against_an_already_rendered_tail(
+        self, tmp_path: Path
+    ) -> None:
+        """The CLI folds definitions into the token tail itself, so the
+        engine-layer bridge must append only what is missing -- otherwise
+        every CLI run would carry each macro twice, changing the extraction
+        contract for no reason."""
+        snap = self._dump(
+            tmp_path,
+            defines=("FEATURE_API",),
+            gcc_option_tokens=("-DFEATURE_API",),
+        )
+        assert list(snap.ast_compile_args).count("-DFEATURE_API") == 1
+
+    def test_the_typed_api_and_the_cli_agree(self, tmp_path: Path) -> None:
+        """The parity that matters: the same macro set through either front
+        end yields the same public surface."""
+        api = self._dump(tmp_path, defines=("FEATURE_API", "MODE=2"))
+        cli_root = tmp_path / "cli"
+        so, include = _build(cli_root)
+        out = cli_root / "cli.json"
+        _dump(cli_root, so, include, "-DFEATURE_API", "-DMODE=2", out=out)
+        assert {f.name for f in api.functions if f.name.startswith("guarded_")} == (
+            _guarded_names(out)
+        )

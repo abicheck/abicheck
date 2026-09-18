@@ -291,3 +291,34 @@ def defines_receipt_line(tokens: Iterable[str]) -> str | None:
     """
     spellings = define_spellings_from_tokens(tokens)
     return f"defines: {', '.join(spellings)}" if spellings else None
+
+
+def tokens_with_defines(
+    tokens: Iterable[str], defines: Iterable[str], style: str = "gnu"
+) -> tuple[str, ...]:
+    """*tokens* plus a rendered entry for every definition not already
+    defined in them, by macro name.
+
+    The bridge between :attr:`CompileContext.defines` (a *logical* list) and
+    :attr:`CompileContext.gcc_option_tokens` (the frontend's argv tail), and
+    deliberately **idempotent**: applying it to a context the CLI already
+    folded is a no-op, because that fold rendered the same macros into the
+    tail already.
+
+    That idempotence is what lets one rule serve both front ends. The CLI
+    folds ``compile.defines`` and ``-D`` together in
+    ``cli_options.merge_compile_config`` and renders them there, at a
+    position chosen so a CLI definition wins against a raw ``-DNAME`` in
+    ``compile.options``. A typed-API caller constructing
+    ``CompileContext(defines=...)`` by hand never goes near that function --
+    and before this existed, such a context reached the frontend with the
+    macros silently dropped: the declarations behind them simply did not
+    appear, and ``ast_compile_args`` came back empty. Appending only what is
+    *missing* closes that without disturbing the CLI's own ordering.
+    """
+    rendered = list(tokens)
+    already = {s.partition("=")[0] for s in define_spellings_from_tokens(rendered)}
+    for definition in merge_macro_definitions((), parse_macro_definitions(defines)):
+        if definition.name not in already:
+            rendered.append(definition.token(style))
+    return tuple(rendered)

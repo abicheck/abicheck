@@ -359,6 +359,33 @@ class TestDryRunReceiptsWithoutAToolchain:
         assert result.exit_code == 0, result.output
         assert result.output.count("defines: FEATURE_API") == 1
 
+    def test_a_dump_manifest_run_still_reports_the_defines(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-074 D1: a manifest's own profiles keep owning their per-TU
+        context, and `-D` folds into the same pass-through tail as
+        `compile.defines` -- it is not rejected, and not silently ignored."""
+        inc = self._headers(tmp_path)
+        manifest = tmp_path / "m.yaml"
+        manifest.write_text(
+            f"roots: [{inc}]\ntranslation_units:\n  - name: tu1\n"
+            f"    includes: [{inc}]\n"
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump",
+                str(self._artifact(tmp_path)),
+                "--dump-manifest",
+                str(manifest),
+                "-DFEATURE_API",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "defines: FEATURE_API" in result.output
+        assert "Multi-TU manifest" in result.output
+
     def test_no_baseline_dry_run_reports_the_cli_defines(self, tmp_path: Path) -> None:
         """The third dry-run receipt. It previews a run that really does parse
         headers, so omitting the macro set left the one receipt that could not
