@@ -35,10 +35,11 @@ section is assembled afterwards, from the returned stage, by
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ..compare.bundle_export_index import (
     build_bundle_export_index,
@@ -53,6 +54,10 @@ from ..policy.release_contract_reconciliation import (
     ReleaseReconciliation,
     reconcile_release,
     undocumented_exports_by_member,
+)
+from .crosscheck_ownership import (
+    release_level_checks,
+    release_owned_checks_scope,
 )
 from .release_surface_acquisition import (
     SurfaceAcquisitionLedger,
@@ -224,6 +229,78 @@ def _member_evidence(
     return evidence, failed
 
 
+def reconcile_member_sets(
+    *,
+    new_members: Mapping[str, Any],
+    new_surface: ReleasePublicSurface,
+    old_members: Mapping[str, Any] | None = None,
+    old_surface: ReleasePublicSurface | None = None,
+    new_failed: Mapping[str, str] | None = None,
+    old_failed: Mapping[str, str] | None = None,
+) -> ReleaseReconciliation:
+    """Reconcile one product contract against its members -- driver-agnostic.
+
+    The core every multi-library comparison shares, given only the two
+    things any of them can produce: the side's members (each a snapshot or
+    the compact export evidence) and its acquired-or-recorded public
+    surface. It builds each side's export index, computes the per-member
+    undocumented-export accounting, and folds OLD/NEW into one
+    evolution-stated result.
+
+    Deliberately takes *surfaces*, not header inputs: a live directory
+    comparison acquires one by parsing, while a stored-baseline comparison
+    reads one off the document it was recorded on (or derives it from the
+    stored member snapshots). Keeping acquisition out of this function is
+    what lets all four drivers -- live, stored-versus-live, stored-versus-
+    stored, and the ABICC-compatible multi-library path -- share one
+    implementation of the reconciliation itself rather than three copies of
+    it that could drift.
+    """
+    new_index = build_bundle_export_index("new", new_members, failed_members=new_failed)
+    old_index = (
+        build_bundle_export_index("old", old_members or {}, failed_members=old_failed)
+        if old_surface is not None
+        else None
+    )
+    per_member_exports = {
+        name: names
+        for name, names in (
+            (name, member_export_names(member)) for name, member in new_members.items()
+        )
+        if names is not None
+    }
+    return reconcile_release(
+        new_surface,
+        new_index,
+        old_surface=old_surface,
+        old_index=old_index,
+        undocumented_exports_by_member=undocumented_exports_by_member(
+            new_surface, new_index, per_member_exports
+        ),
+    )
+
+
+@contextmanager
+def member_pass_scope(expected_members: Collection[str]) -> Iterator[None]:
+    """Declare the release level's owned checks for a member pass.
+
+    The one place the "more than one member" rule lives, so every driver
+    applies it identically. A one-member set is deliberately excluded:
+    there is no union to take and no sibling provider to resolve against,
+    so the per-member answer is already exactly right -- which is what keeps
+    a one-member package and the scalar file-to-file path yielding the same
+    applicable findings.
+
+    Entered around a driver's *member loop*, in the thread that runs it: a
+    copy of that thread's ``contextvars.Context`` is what reaches a parallel
+    worker (see ``cli_compare_release_pairwise._compare_release_parallel``),
+    so entering it inside a worker would not propagate.
+    """
+    owned = release_level_checks() if len(set(expected_members)) > 1 else frozenset()
+    with release_owned_checks_scope(owned):
+        yield
+
+
 def reconcile_release_public_surface(
     library_results: Sequence[Mapping[str, Any]],
     *,
@@ -331,29 +408,13 @@ def reconcile_release_public_surface(
     if has_baseline and old_headers:
         _, old_surface = _acquire("old", old_headers, old_includes)
 
-    new_index = build_bundle_export_index(
-        "new", new_evidence, failed_members=new_failed
-    )
-    old_index = (
-        build_bundle_export_index("old", old_evidence, failed_members=old_failed)
-        if old_surface is not None
-        else None
-    )
-    per_member_exports = {
-        name: names
-        for name, names in (
-            (name, member_export_names(member)) for name, member in new_evidence.items()
-        )
-        if names is not None
-    }
-    reconciliation = reconcile_release(
-        new_surface,
-        new_index,
+    reconciliation = reconcile_member_sets(
+        new_members=new_evidence,
+        new_surface=new_surface,
+        old_members=old_evidence,
         old_surface=old_surface,
-        old_index=old_index,
-        undocumented_exports_by_member=undocumented_exports_by_member(
-            new_surface, new_index, per_member_exports
-        ),
+        new_failed=new_failed,
+        old_failed=old_failed,
     )
     return ReleaseSurfaceStage(reconciliation, ledger, old_surface, new_surface)
 
@@ -422,4 +483,63 @@ def release_surface_severity_exit(
             policy=policy,
             policy_file=policy_file,
         )
+    )
+
+
+def stored_old_live_new_reconciliation(
+    old_facts: object,
+    new_members: Mapping[str, object],
+    new_surfaces: Mapping[str, object],
+    *,
+    failed: Mapping[str, str],
+    unsupported: Mapping[str, str],
+) -> object | None:
+    """The release-level reconciliation for a stored-OLD/live-NEW comparison.
+
+    Returns the ``policy``-owned reconciliation, not a rendered report
+    section: ``workflows -> report`` is a forbidden edge, and the split is
+    the right one regardless -- the result carries the *finding*, the
+    renderer decides how it reads.
+
+    ``None`` below two members (no union to take, so the per-member answer
+    already stands) or when neither side records a contract. The NEW surface
+    is derived from the *live* NEW snapshots this run just dumped against
+    the run's own header inputs, while OLD's comes off the stored document.
+    Deriving NEW's from the stored OLD snapshots instead would assert that
+    NEW still promises everything OLD did, turning every deliberately
+    retired declaration into a missing export -- the release-level form of
+    "absent is not removed". A NEW side dumped at binary depth carries no
+    header provenance and so resolves to no contract, which is the honest
+    answer rather than a borrowed one.
+    """
+    from .release_surface_acquisition import surface_from_bundle_facts, union_surfaces
+
+    old_snapshots = getattr(old_facts, "per_library_snapshots", None) or {}
+    if len(set(old_snapshots) | set(new_members)) < 2:
+        return None
+    new_surface = union_surfaces(
+        cast(
+            "Iterable[ReleasePublicSurface]",
+            [surface for name, surface in new_surfaces.items() if name in new_members],
+        ),
+        acquisition_key="stored-old-live-new",
+        side="new",
+    )
+    old_surface = surface_from_bundle_facts(old_facts, side="old")
+    if not new_surface.resolvable and not old_surface.resolvable:
+        return None
+    return reconcile_member_sets(
+        new_members=dict(new_members),
+        new_surface=new_surface,
+        # OLD's *whole* stored inventory, deliberately not narrowed to the
+        # members NEW resolved: OLD's own contract-versus-exports question
+        # is answered entirely within OLD, and dropping the members NEW
+        # happened not to reach would make OLD look short of exactly the
+        # exports those members provide -- manufacturing an OLD-side
+        # history for a symbol that was satisfied all along. A member
+        # present in OLD and absent from NEW is a removed library, which
+        # the scope/completeness axis owns, not this one.
+        old_members=dict(old_snapshots),
+        old_surface=old_surface,
+        new_failed={**failed, **unsupported},
     )

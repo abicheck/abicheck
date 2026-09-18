@@ -79,3 +79,19 @@
   through the same canonical `model.export_index` projection), appended so no
   positional caller rebinds. Caught by this change's own `integration-tests`
   matrix on `macos-latest`/`windows-latest`.
+
+- The product model now applies to **every** multi-library comparison, not
+  only a live directory/package `compare`: a stored `BundleFacts` baseline
+  against a live release, two stored documents compared to each other, and
+  a multi-library `compat check` descriptor each reconcile one product
+  contract against the union of their members' exports, and each enters the
+  same release-level check ownership for their member pass. Previously
+  those three paths still asked every member for every sibling's
+  declaration. A stored side uses the contract its capture recorded
+  (falling back to one derived from its member snapshots for a pre-schema-4
+  document); a side with no header evidence records no contract rather than
+  borrowing the other side's, so a deliberately retired declaration is not
+  read as a missing export. The stored-comparison document gains the same
+  `public_surface_reconciliation` block (and Markdown section); the
+  `compat` path, which has no release envelope, folds its release-level
+  findings into the merged result.

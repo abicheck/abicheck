@@ -205,6 +205,39 @@ no configuration: the union of the members' exports is the evidence, and
 `--exclude-header` and the compile context apply to the one shared
 acquisition exactly as they already applied per member.
 
+### Every multi-library comparison, not just a release directory
+
+The same model answers the same question on every path that compares more
+than one library at once, so which command you reached it through cannot
+change whether a sibling's declaration counts:
+
+| How you compare | Where the product contract comes from |
+|---|---|
+| `compare OLD_DIR NEW_DIR` (directory or package) | acquired once per side from the run's own headers |
+| `compare old-bundle-facts.json NEW_DIR` | recorded in the stored document for OLD; acquired from the live NEW dump |
+| `compare old-bundle-facts.json new-bundle-facts.json` | recorded in each stored document |
+| `compat check` with a multi-library descriptor | the union of the descriptor's own libraries' header evidence |
+
+Two consequences are worth stating, because they are what stop the shared
+model from over-reaching:
+
+- **A stored baseline's contract is the one it recorded**, not a
+  re-derivation from this build's defaults — which is what keeps a stored
+  comparison's answer identical to the live run that produced the
+  baseline. A baseline captured before `BundleFacts.public_surface`
+  existed has one derived from its members instead, so it still
+  reconciles rather than silently losing its contract.
+- **A side with no header evidence records no contract** — it does not
+  borrow the other side's. A NEW release dumped at binary depth promises
+  nothing this tool can see, and asserting that it still promises whatever
+  OLD did would turn every deliberately retired declaration into a missing
+  export. On the `compat` path a descriptor that declares no headers
+  likewise yields no release-level finding at all.
+
+The `compat` path has no release JSON envelope of its own, so its
+release-level findings are folded into the merged ABICC-shaped result
+rather than a separate section.
+
 ## Fan-out and fan-in
 
 In CI a product runs one check per target and folds the reports into one

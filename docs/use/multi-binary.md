@@ -597,6 +597,24 @@ Four things to read it by:
   acquisition per side for an ordinary comparison, however many members the
   release has; two sides passing the identical header request share one.
 
+The same block appears in a **stored** bundle-facts comparison's document
+(`compare old-bundle-facts.json NEW_DIR` and
+`compare old-bundle-facts.json new-bundle-facts.json`), with two
+differences that follow from there being nothing to acquire: `acquisition`
+is empty rather than fabricated, and `shared_findings` is empty because
+those documents already report one product-level finding rather than
+repeating it per member. A stored side's contract is the one its capture
+recorded (`BundleFacts.public_surface`, bundle-facts schema 4); a baseline
+captured before that field existed has one derived from its stored member
+snapshots, so it still reconciles. A side carrying no header evidence at
+all records *no contract* and the block is omitted — it never borrows the
+other side's, which would make every deliberately retired declaration read
+as a missing export.
+
+A multi-library `compat check` descriptor is reconciled the same way, but
+that path has no release JSON envelope, so its release-level findings are
+folded into the merged ABICC-shaped result instead of this block.
+
 `undocumented_exports_by_member` is deliberately counts, not a symbol-keyed
 map: a real product can carry hundreds of thousands of undocumented exports,
 and the symbols themselves stay where they are already attributed — each

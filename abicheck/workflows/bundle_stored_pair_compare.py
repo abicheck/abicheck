@@ -38,9 +38,12 @@ workflow in workflows" -- the same reasoning that already moved
 
 from __future__ import annotations
 
+from collections.abc import Container, Iterable, Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from .release_public_surface import member_pass_scope
 
 if TYPE_CHECKING:
     from ..bundle_models import BundleDiffResult
@@ -56,6 +59,53 @@ from .release_scope import (
     restrict_bundle_facts,
     scope_manifest_to_members,
 )
+
+
+def _member_pass(
+    matched_keys: Iterable[str], degraded_keys: Container[str]
+) -> Iterator[str]:
+    """The comparable members, iterated inside the release-level ownership
+    scope.
+
+    A stored/stored pair is still one product contract backed by many
+    providers, so the whole-product cross-source check is answered once at
+    release level rather than per member against the complete product
+    header surface (`workflows.crosscheck_ownership`). Expressed as a
+    generator wrapping the loop so the scope spans every iteration without
+    re-indenting the loop body around a `with`.
+    """
+    keys = [key for key in matched_keys if key not in degraded_keys]
+    with member_pass_scope(keys):
+        yield from keys
+
+
+def _stored_pair_public_surface(
+    old_facts: object, new_facts: object, matched_keys: Iterable[str]
+) -> object | None:
+    """The release-level reconciliation for a stored/stored pair.
+
+    ``None`` below two matched members, or when neither stored document
+    records a contract -- a binary-depth bundle baseline legitimately has
+    none, and saying so beats reconciling against an invented empty one.
+    """
+    from .release_public_surface import reconcile_member_sets
+    from .release_surface_acquisition import surface_from_bundle_facts
+
+    keys = set(matched_keys)
+    if len(keys) < 2:
+        return None
+    old_surface = surface_from_bundle_facts(old_facts, side="old")
+    new_surface = surface_from_bundle_facts(new_facts, side="new")
+    if not old_surface.resolvable and not new_surface.resolvable:
+        return None
+    old_snapshots = getattr(old_facts, "per_library_snapshots", None) or {}
+    new_snapshots = getattr(new_facts, "per_library_snapshots", None) or {}
+    return reconcile_member_sets(
+        new_members={k: v for k, v in new_snapshots.items() if k in keys},
+        new_surface=new_surface,
+        old_members={k: v for k, v in old_snapshots.items() if k in keys},
+        old_surface=old_surface,
+    )
 
 
 def compare_stored_bundle_facts_pair(
@@ -278,9 +328,7 @@ def compare_stored_bundle_facts_pair(
         if key in old_facts.degraded_members or key in new_facts.degraded_members
     }
     not_comparable: dict[str, tuple[str, str]] = {}
-    for key in matched_keys:
-        if key in degraded_keys:
-            continue
+    for key in _member_pass(matched_keys, degraded_keys):
         raw_old = old_facts.per_library_snapshots[key]
         raw_new = new_facts.per_library_snapshots[key]
         # Codex review, PR #1060, round 6: the floor half of the same
@@ -422,6 +470,12 @@ def compare_stored_bundle_facts_pair(
     new_bundle_snapshot = bundle_snapshot_from_facts(
         restrict_bundle_facts(new_facts, scope_record)
     )
+    # One product contract, many providers -- both sides stored. Each side's
+    # surface is the one its capture recorded where it has one, else derived
+    # from its own member snapshots, so a pre-v4 baseline still reconciles.
+    public_surface_reconciliation = _stored_pair_public_surface(
+        old_facts, new_facts, matched_keys
+    )
     result = compare_bundle_from_facts(
         # The scoped effective manifest even when None (fully withheld), so
         # the fallback to `old_facts.manifest` cannot re-enforce a stored
@@ -464,4 +518,5 @@ def compare_stored_bundle_facts_pair(
     from .comparison_input_receipt import env_matrix_content_digest
 
     result.env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
+    result.public_surface_reconciliation = public_surface_reconciliation
     return result

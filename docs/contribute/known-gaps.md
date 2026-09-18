@@ -8357,6 +8357,25 @@ entry proposes below:
   established" reading step 1 asks for, not the attribution step 3 would give.
   Over-reporting attribution, not duplication, is what is left.
 
+**Update (2026-09-18).** The model is no longer scoped to the live
+directory/package fan-out. The other three drivers that compare several
+libraries at once — a stored `BundleFacts` baseline against a live release
+(`workflows.release_public_surface.stored_old_live_new_reconciliation`), two
+stored documents (`workflows.bundle_stored_pair_compare`), and a
+multi-library ABICC descriptor (`compat.multi_library_run`) — each reconcile
+one product contract through the same
+`workflows.release_public_surface.reconcile_member_sets` and enter the same
+`member_pass_scope` ownership for their member pass. What remains scoped to
+the live path: only that path acquires a surface (the other three read a
+recorded or projected one), so the acquisition ledger's instrumentation is
+empty on a stored comparison, and only that path performs the
+`shared_findings` fold — the stored documents already emit one product-level
+finding rather than repeating it per member. The driver inventory is not
+mechanically enforced: nothing fails when a fifth multi-member driver is
+added, so `tests/test_release_public_surface_drivers.py` is a hand-maintained
+list (recorded in `tests/regressions/manifest_classification.py`'s
+`release.cartesian_product_contract` known gaps).
+
 The original entry follows, unchanged.
 
 

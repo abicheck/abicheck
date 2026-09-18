@@ -709,6 +709,8 @@ class BundleDiffResult:
     #: coverage ledger (mirroring `policy/coverage_ledger.py`) would add
     #: beyond this.
     analysis_errors: list[str] = field(default_factory=list)
+    #: The release-level public-surface reconciliation this comparison produced (`policy.release_contract_reconciliation.ReleaseReconciliation`), or `None` when it recorded no product contract; the report layer projects it for rendering. Typed `object` because `model` may import no other layer. **Appended**: inserting a field mid-list rebinds every positional caller (`api.positional_slot_rebinding`).
+    public_surface_reconciliation: object | None = None
     #: Optional :class:`~abicheck.policy_file.PolicyFile`, applied on top of
     #: *policy* when scoring ``bundle_verdict`` -- previously bundle-level
     #: findings were always scored under the bare *policy* name alone, even

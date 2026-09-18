@@ -47,8 +47,9 @@ handed to member code; only the projection is.
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
+from typing import cast
 
 from ..model import AbiSnapshot
 from ..model.declarations import Function, Variable
@@ -310,3 +311,94 @@ def acquire_release_surface(
     # directory comparison pass the identical header request -- see
     # `ReleasePublicSurface.for_side`.
     return ledger.acquire(identity, side, _produce).for_side(side)
+
+
+def surface_from_snapshots(
+    snapshots: Mapping[str, AbiSnapshot], *, acquisition_key: str, side: str
+) -> ReleasePublicSurface:
+    """The product contract carried by a set of member snapshots.
+
+    A stored baseline has nothing to acquire: its members were dumped long
+    ago and each carries whatever header evidence that dump captured. This
+    recovers the one product surface from them by *union* -- every member of
+    an ordinary release was dumped against the same header set, so the union
+    equals any one member's view, and where members genuinely differ the
+    union is the product's contract rather than an arbitrary member's slice.
+
+    Unresolvable when no member carries public-header provenance, which is
+    the ordinary case for a binary-depth bundle baseline: such a document
+    records no contract, and saying so is the honest answer. It is not the
+    same as a product that promises nothing, and the caller must not treat
+    it as one.
+    """
+    return union_surfaces(
+        (
+            surface_from_snapshot(
+                snapshots[name], acquisition_key=acquisition_key, side=side
+            )
+            for name in sorted(snapshots)
+        ),
+        acquisition_key=acquisition_key,
+        side=side,
+    )
+
+
+def union_surfaces(
+    surfaces: Iterable[ReleasePublicSurface], *, acquisition_key: str, side: str
+) -> ReleasePublicSurface:
+    """One product contract from several members' projected surfaces.
+
+    The union half of :func:`surface_from_snapshots`, exposed separately so
+    a driver that must not retain every member's full ``AbiSnapshot`` (the
+    stored-OLD/live-NEW path's memory discipline) can project each member as
+    it is dumped and keep only the projections. Unresolvable members
+    contribute nothing; all of them unresolvable means this side records no
+    contract, which is not the same as promising nothing.
+    """
+    resolved = [surface for surface in surfaces if surface.resolvable]
+    if not resolved:
+        return unresolved_surface(
+            acquisition_key=acquisition_key,
+            side=side,
+            reason=(
+                "no member carries public-header provenance, so this side "
+                "records no public contract to reconcile against"
+            ),
+        )
+    obligations = {o.symbol: o for surface in resolved for o in surface.obligations}
+    declared: set[str] = set()
+    type_names: set[str] = set()
+    for surface in resolved:
+        declared |= surface.declared_symbols
+        type_names |= set(surface.type_names)
+    return ReleasePublicSurface(
+        acquisition_key=acquisition_key,
+        side=side,
+        obligations=tuple(obligations[symbol] for symbol in sorted(obligations)),
+        declared_symbols=frozenset(declared),
+        header_count=max(surface.header_count for surface in resolved),
+        type_names=tuple(sorted(type_names)),
+        resolvable=True,
+    )
+
+
+def surface_from_bundle_facts(facts: object, *, side: str) -> ReleasePublicSurface:
+    """A stored bundle document's public contract.
+
+    Prefers the block the capture *recorded* (``BundleFacts.public_surface``,
+    schema 4): that is the surface those members were actually reconciled
+    against, and reusing it keeps a stored comparison's answer identical to
+    the live run that produced the baseline. Falls back to deriving one from
+    the stored member snapshots, so a pre-v4 document -- every baseline
+    captured before this existed -- still reconciles instead of silently
+    losing its contract.
+    """
+    recorded = getattr(facts, "public_surface", None)
+    if recorded is not None:
+        return cast("ReleasePublicSurface", recorded).for_side(side)
+    snapshots = getattr(facts, "per_library_snapshots", None) or {}
+    return surface_from_snapshots(
+        cast("Mapping[str, AbiSnapshot]", snapshots),
+        acquisition_key=f"derived:{side}",
+        side=side,
+    )

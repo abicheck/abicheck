@@ -85,6 +85,8 @@ from .descriptor_expansion import (  # noqa: F401
 from .multi_library import merge_results
 from .multi_library_run import (
     _descriptor_compile_options,
+    _member_pass_pairs,
+    _MemberSnapshots,
     _no_library_pair_error,
     _plan_library_pairs,
     _record_unpaired_libraries,
@@ -1056,8 +1058,10 @@ def compat_check_cmd(  # noqa: PLR0913
         (None, None)
     ]
     _results: list[DiffResult] = []
+    _members = _MemberSnapshots()
     try:
-        for _index, (_old_lib, _new_lib) in enumerate(_pairs):
+        # One product contract, many providers -- see `_member_pass_pairs`.
+        for _index, (_old_lib, _new_lib) in _member_pass_pairs(_pairs):
             if _index == 0:
                 old_snap, old_version, new_snap, new_version = (
                     _take_snapshots_with_logging(
@@ -1081,6 +1085,7 @@ def compat_check_cmd(  # noqa: PLR0913
                 new_snap, _ = _snapshot_from_compat_input(
                     new_d, vnum2, new_desc, lib_override=_new_lib, **_snapshot_kwargs
                 )
+            _members.record(_index, _old_lib, _new_lib, old_snap, new_snap)
             _results.append(
                 compare(
                     old_snap, new_snap, suppression=suppression, policy="strict_abi"
@@ -1091,6 +1096,8 @@ def compat_check_cmd(  # noqa: PLR0913
                 f"Compared {len(_results)} libraries from the descriptor pair.", quiet
             )
             result = merge_results(_results, label=f"{len(_results)} libraries")
+            # Folded into the merged changes: no release JSON envelope here.
+            result.changes.extend(_members.release_contract_findings())
         else:
             result = _results[0]
         result = _record_unpaired_libraries(result, _unpaired_old, _unpaired_new, quiet)

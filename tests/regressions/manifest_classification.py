@@ -343,9 +343,10 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "concluded as missing from the set, which would rest a "
             "high-confidence conclusion on unread evidence."
         ),
-        fixed_by=(),
+        fixed_by=(1328,),
         seed_tests=(
             "tests/test_release_public_surface.py",
+            "tests/test_release_public_surface_drivers.py",
             "tests/test_release_surface_acquisition_context.py",
             "tests/test_release_public_surface_integration.py",
         ),
@@ -362,11 +363,15 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "The invariant is stated for the one set-shaped "
-                    "comparison that exists (the directory/package release "
-                    "fan-out). No mechanical sweep finds another place where "
-                    "a shared declared contract is judged per member; a "
-                    "second instance would still be found by hand."
+                    "The invariant is stated for every set-shaped "
+                    "comparison this build has: the directory/package "
+                    "release fan-out, a stored BundleFacts baseline against "
+                    "a live release, two stored documents, and a "
+                    "multi-library ABICC descriptor "
+                    "(tests/test_release_public_surface_drivers.py). The "
+                    "driver inventory itself is not mechanically enforced -- "
+                    "no gate fails when a fifth multi-member driver is "
+                    "added, so a new one would still be found by hand."
                 ),
                 reference="docs/learn/products-not-libraries.md",
             ),

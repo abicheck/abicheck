@@ -443,6 +443,7 @@ def compare_release_against_bundle_facts(
     from .workflows.compare_policy import compare_snapshots
     from .workflows.extraction import ast_acquisition_scope, build_match_map
     from .workflows.input_resolution import resolve_input
+    from .workflows.release_public_surface import member_pass_scope
     from .workflows.release_scope import mismatch_kind
 
     old_facts = load_bundle_facts(
@@ -486,6 +487,16 @@ def compare_release_against_bundle_facts(
 
     per_library_results: list[DiffResult] = []
     new_signature_evidence: dict[str, BundleSignatureEvidence] = {}
+    # Each live NEW member's *projected* public surface, for the
+    # release-level reconciliation. A projection, not the snapshot it came
+    # from: the contract is read from header provenance the compact
+    # signature evidence beside it does not carry, while retaining every
+    # member's full `AbiSnapshot` is exactly the O(members) memory this
+    # module's own discipline (and this whole product model) refuses.
+    new_member_surfaces: dict[str, object] = {}
+    from .workflows.release_public_surface import stored_old_live_new_reconciliation
+    from .workflows.release_surface_acquisition import surface_from_snapshot
+
     # ADR-065 D8: a member the capture recorded as degraded (its dump
     # failed; the stored snapshot is an ELF-only stand-in) is *failed*, not
     # evidence -- diffing it would read every real declaration on NEW as an
@@ -519,7 +530,14 @@ def compare_release_against_bundle_facts(
     # and defeat the point. Nested inside an outer scope (the release
     # fan-out's own), `ast_acquisition_scope` yields the existing table by
     # contract, so this never shadows a caller's.
-    with ast_acquisition_scope():
+    # The release level owns the whole-product cross-source check here too
+    # (`workflows.crosscheck_ownership`): a stored baseline is still one
+    # product contract backed by many providers, so answering
+    # `public_not_exported` per member against the complete product header
+    # surface is the same Cartesian product the live fan-out removed.
+    # Entered around the member loop, in this thread, for the same reason
+    # the live fan-out enters it around its dispatch.
+    with ast_acquisition_scope(), member_pass_scope(matched_keys):
         for key, old_snapshot in old_facts.per_library_snapshots.items():
             new_path = new_map.get(key)
             if new_path is None or key in degraded:
@@ -593,6 +611,9 @@ def compare_release_against_bundle_facts(
             compared.append(key)
             per_library_results.append(diff)
             new_signature_evidence[key] = build_bundle_signature_evidence(new_snapshot)
+            new_member_surfaces[key] = surface_from_snapshot(
+                new_snapshot, acquisition_key="stored-old-live-new", side="new"
+            )
 
     # *old_facts* is already loaded in memory (needed above for the
     # per-library matching loop) -- routed straight to
@@ -675,6 +696,19 @@ def compare_release_against_bundle_facts(
         policy=policy,
         policy_file=policy_file,
         new_signature_evidence=dict(new_signature_evidence),
+    )
+    # One product contract, many providers -- on a stored baseline too. The
+    # OLD surface is the one the capture *recorded* where it has one
+    # (`BundleFacts.public_surface`, schema 4), so a stored comparison
+    # reconciles against the very surface the live run that produced the
+    # baseline used; a pre-v4 document falls back to deriving it from the
+    # stored member snapshots rather than losing its contract.
+    result.public_surface_reconciliation = stored_old_live_new_reconciliation(
+        old_facts,
+        new_signature_evidence,
+        new_member_surfaces,
+        failed=failed,
+        unsupported=unsupported,
     )
     result.analysis_errors.extend(
         f"{key}: OLD side was captured degraded ({reason}); per-library "
