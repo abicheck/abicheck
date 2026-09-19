@@ -490,3 +490,106 @@ class TestClearReturnsExactlyTheHandlesItTook:
         assert not registry.is_held(token), "clear did not return its handle"
         cache.clear()
         assert len(registry) == 0
+
+
+class TestTokenAccountingHoldsWhereThereIsNoTokenToAccountFor:
+    """Both caches must survive the states where a token is simply absent.
+
+    **Bug class**, and the one this PR already produced once: acquire and
+    release counted in different units (see
+    ``TestClearReturnsExactlyTheHandlesItTook``). Its two remaining shapes are
+    the *absent* token rather than the miscounted one —
+
+    * releasing a token this cache never retained, and
+    * evicting a vocabulary entry that carries no token at all, which is a
+      genuinely reachable state because ``compile_fn`` may answer ``None``
+      and a ``None`` entry is cached without a handle.
+
+    Neither may touch the registry, because the registry is shared: a spurious
+    release consumes some *other* holder's handle and frees a pattern that
+    holder is still using. Asserted against a second live holder rather than
+    against "it did not crash", since an under-release only becomes visible
+    once someone else is holding the same pattern.
+    """
+
+    def test_releasing_a_token_this_cache_never_retained_is_a_no_op(self) -> None:
+        registry = _PatternRegistry()
+        holder = _MatchCache(registry)
+        stranger = _MatchCache(registry)
+        pattern = _pattern(16)
+        token = holder.token_for(pattern)
+        holder.put((token, "held", 0, 1), _match(), pattern)
+        assert registry.reference_counts()[token] == (0, 1)
+
+        # `stranger` has no entry for this token, so it owes no handle.
+        stranger._release(token)
+
+        assert registry.is_held(token), (
+            "a cache released a handle it never took, freeing another's pattern"
+        )
+        assert registry.reference_counts()[token] == (0, 1)
+        # And the real holder can still return its own handle exactly once.
+        holder.clear()
+        assert not registry.is_held(token)
+
+    @pytest.mark.parametrize("real_every", [1, 2, 5])
+    def test_registry_handles_always_equal_the_tokened_entries_cached(
+        self, real_every
+    ) -> None:
+        """The invariant eviction order cannot perturb.
+
+        A first draft of this test asserted that one specific real entry
+        survived a flood of untokened ones, and failed: eviction is LRU, so
+        the oldest entry goes first and that was the real one — whose handle
+        was then correctly released. That made the *test* wrong, not the
+        code, and pinning "this entry survives" would have been pinning the
+        eviction order rather than the accounting.
+
+        What must hold for any interleaving is the accounting identity: the
+        registry holds exactly one vocabulary handle per cached entry that
+        carries a token, and none for the entries that do not. An untokened
+        entry passing through eviction must move neither number.
+        """
+        from abicheck.compare.spelling_match_cache import (
+            MAX_CACHED_VOCABULARIES,
+            _VocabularyCache,
+        )
+
+        registry = _PatternRegistry()
+        cache = _VocabularyCache(registry)
+
+        for i in range(MAX_CACHED_VOCABULARIES * 2):
+            if i % real_every == 0:
+                # A distinct pattern per entry: `_pattern` is `lru_cache`d,
+                # so reusing it would give every entry one shared token and
+                # collapse the identity below to "1 == 1".
+                cache.get_or_compile(
+                    {f"real{i}"}, lambda _key, n=i: re.compile(f"real{n}" + "a" * 16)
+                )
+            else:
+                assert cache.get_or_compile({f"none{i}"}, lambda _key: None) is None
+
+        assert cache.evictions > 0, (
+            "vacuity guard: no eviction ran, so the untokened branch never "
+            "executed and this test asserts nothing"
+        )
+        tokened = sum(1 for value in cache._entries.values() if value is not None)
+        assert tokened, (
+            "vacuity guard: no tokened entry survived, so the identity below "
+            "reduces to 0 == 0 and would hold against any accounting"
+        )
+        # Token *identity*, not a count. A count-based identity nets out:
+        # a mutation that released some other entry's handle on each
+        # untokened eviction still balanced, because each later real entry
+        # acquired a fresh one. Which tokens are held is what cannot net out.
+        held_vocabulary_tokens = {
+            token
+            for token, (held, _match_held) in registry.reference_counts().items()
+            if held
+        }
+        assert held_vocabulary_tokens == set(cache._tokens.values()), (
+            "the registry's vocabulary handles name a different set of tokens "
+            "than the cache's own token map"
+        )
+        cache.clear()
+        assert len(registry) == 0, "clear did not return every vocabulary handle"
