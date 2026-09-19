@@ -92,7 +92,7 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
         # The cache's own test suite -- equivalence, eviction, accounting,
         # immutability -- passed at that revision, because every one of its
         # tests ran on one thread.
-        fixed_by=(),
+        fixed_by=(1336,),
         seed_tests=(
             "tests/test_spelling_match_cache_concurrency.py",
             "tests/test_compare_release_concurrency_integration.py",
