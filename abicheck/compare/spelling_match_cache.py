@@ -26,14 +26,24 @@ bounded memory plan for a request, and retention is the very axis the
 surrounding performance work is trying to reduce.
 
 **Three owners, three budgets, each cost charged exactly once.**
-:class:`_PatternRegistry` owns compiled patterns: it issues the stable
-generation token both caches key on, holds the one strong reference, and
-charges each pattern's bytes once against :data:`MAX_PATTERN_BYTES`, however
-many callers and entries go on to name it. :class:`_VocabularyCache` and
-:class:`_MatchCache` hold *non-owning*, refcounted references into that
-registry; the match cache's own budget
+:class:`_PatternRegistry` is the single *accounting* owner of compiled
+patterns: it issues the stable generation token both caches key on, holds
+the reference that keeps a pattern reachable from these caches, and charges
+each pattern's bytes once against :data:`MAX_PATTERN_BYTES`, however many
+entries go on to name it. :class:`_VocabularyCache` and :class:`_MatchCache`
+hold refcounted *handles* into that registry rather than the pattern object,
+so neither can charge for it; the match cache's own budget
 (:data:`MAX_RETAINED_BYTES`) covers only what it actually owns -- keys,
 subject strings and result tuples.
+
+Single accounting owner is **not** the same as sole strong-reference owner,
+and this module deliberately does not claim the latter. The matcher's
+callers hold their own ordinary references, on two different lifetimes:
+``type_reachability``'s ``_StdlibReferenceScan`` keeps its stdlib, record
+and typedef patterns in instance attributes for the scanner's whole life,
+while ``dumper_scoping`` binds one in a local for the duration of a single
+call. Those references keep the pattern alive whatever the registry does,
+and they are outside every byte this module reports.
 
 That separation is the fix for a self-defeating bypass. Charging a shared
 pattern's full size as *incremental* ownership in the match cache meant a
@@ -49,10 +59,7 @@ lookups cost 0.02 s when admitted and 41.68 s when bypassed
 (``tests/test_spelling_match_cache_retention.py``).
 
 A budget here bounds *these caches*. It is deliberately **not** a bound on
-the matcher's working set: ``type_reachability``'s scanner and
-``dumper_scoping`` hold their compiled patterns in their own attributes for
-as long as they live, and those references are outside every number this
-module reports.
+the matcher's working set, for the caller-reference reason given above.
 
 **What is cached is strictly lexical.** ``matches_for`` answers "which
 registered spellings occur, as whole type tokens, in this text window" --
@@ -271,11 +278,17 @@ class _PatternRegistry:
     onto a different pattern and can be recorded in a diagnostic or a test
     without depending on an address.
 
-    The registry holds the single strong reference and charges the pattern's
-    bytes **once**, against :data:`MAX_PATTERN_BYTES`, for as long as either
-    cache refers to it. The two caches hold non-owning, refcounted
-    references; a holder is dropped -- and its bytes leave the budget -- when
-    both counts reach zero.
+    The registry charges the pattern's bytes **once**, against
+    :data:`MAX_PATTERN_BYTES`, for as long as either cache refers to it, and
+    holds the reference that keeps it reachable from here. The two caches
+    hold refcounted handles rather than the pattern itself; a holder is
+    dropped -- and its bytes leave the budget -- when both counts reach zero.
+
+    This is the *accounting* owner, not the only object with a reference: a
+    caller that obtained the pattern from :func:`compile_spelling_pattern`
+    keeps its own, and dropping a holder here does not free a pattern that
+    caller is still using. That is deliberate -- eviction is a cost
+    decision, never a correctness one.
 
     The ``id()``-keyed lookup that maps a caller's pattern object back to its
     token is sound because of one invariant, which every mutation here

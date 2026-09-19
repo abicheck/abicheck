@@ -31,6 +31,7 @@ while ``header_utils`` is the stdlib-only path/flag leaf every layer shares.
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 from ..header_utils import CACHE_HEADER_SUFFIXES
@@ -40,6 +41,12 @@ __all__ = [
     "iter_cache_header_files",
     "reset_header_scan_statistics",
 ]
+
+
+#: Guards every read and write of the counters below. One module-level lock,
+#: not one per instance: :func:`reset_header_scan_statistics` reuses the same
+#: object, so a per-instance lock would protect nothing a reset raced with.
+_COUNTERS_LOCK = threading.Lock()
 
 
 class _ScanCounters:
@@ -61,6 +68,16 @@ class _ScanCounters:
     single attribute bump per directory traversed, which is nothing beside
     the traversal itself.
 
+    **Every access goes through :data:`_COUNTERS_LOCK`.** A release fan-out
+    walks include trees from several worker threads at once, and ``+=`` is a
+    read-modify-write, not an atomic operation -- concurrent workers lose
+    updates, so exactly the parallel runs these counters exist to explain
+    would under-report. A statistics read is locked for the same reason: an
+    unlocked reader can combine ``calls`` from one update with
+    ``distinct_directories`` from another and derive a ratio that was never
+    true of any moment. The lock is held only around integer bumps and a set
+    insert, never across the traversal itself.
+
     ``distinct_directories`` is the one that decides the fix. Calls far
     exceeding distinct directories means the same tree is re-walked and a
     run-scoped memo is the answer; calls tracking distinct directories
@@ -77,14 +94,35 @@ class _ScanCounters:
         self._seen: set[str] = set()
 
     def record(self, directory: str, traversed: int, returned: int) -> None:
-        self.calls += 1
-        self.directories_traversed += traversed
-        self.entries_returned += returned
-        self._seen.add(directory)
+        with _COUNTERS_LOCK:
+            self.calls += 1
+            self.directories_traversed += traversed
+            self.entries_returned += returned
+            self._seen.add(directory)
+
+    def snapshot(self) -> dict[str, int]:
+        """One internally-consistent reading of every counter."""
+        with _COUNTERS_LOCK:
+            distinct = len(self._seen)
+            return {
+                "calls": self.calls,
+                "distinct_directories": distinct,
+                "directories_traversed": self.directories_traversed,
+                "entries_returned": self.entries_returned,
+                "repetition_factor": self.calls // distinct if distinct else 0,
+            }
+
+    def reset(self) -> None:
+        with _COUNTERS_LOCK:
+            self.calls = 0
+            self.directories_traversed = 0
+            self.entries_returned = 0
+            self._seen.clear()
 
     @property
     def distinct_directories(self) -> int:
-        return len(self._seen)
+        with _COUNTERS_LOCK:
+            return len(self._seen)
 
 
 _COUNTERS = _ScanCounters()
@@ -98,20 +136,18 @@ def header_scan_statistics() -> dict[str, int]:
     question; a large value means the same tree was walked repeatedly and
     the cost is reuse the process is failing to make.
     """
-    distinct = _COUNTERS.distinct_directories
-    return {
-        "calls": _COUNTERS.calls,
-        "distinct_directories": distinct,
-        "directories_traversed": _COUNTERS.directories_traversed,
-        "entries_returned": _COUNTERS.entries_returned,
-        "repetition_factor": _COUNTERS.calls // distinct if distinct else 0,
-    }
+    return _COUNTERS.snapshot()
 
 
 def reset_header_scan_statistics() -> None:
-    """Start a fresh attribution window (a benchmark phase, a test)."""
-    global _COUNTERS
-    _COUNTERS = _ScanCounters()
+    """Start a fresh attribution window (a benchmark phase, a test).
+
+    Clears the existing object under the lock rather than rebinding a new
+    one: a rebind is not atomic with respect to a worker already inside
+    :meth:`_ScanCounters.record`, which would then bump the *old* object and
+    have its update silently discarded.
+    """
+    _COUNTERS.reset()
 
 
 def _path_suffix(name: str) -> str:

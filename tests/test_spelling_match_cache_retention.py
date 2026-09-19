@@ -65,6 +65,7 @@ from __future__ import annotations
 
 import re
 import sys
+from functools import cache
 
 import pytest
 
@@ -90,8 +91,21 @@ def _cache() -> tuple[_MatchCache, _PatternRegistry]:
     return _MatchCache(registry), registry
 
 
+@cache
 def _pattern(n_spellings: int, width: int = 24) -> re.Pattern[str]:
-    """A compiled literal alternation of *n_spellings* distinct spellings."""
+    """A compiled literal alternation of *n_spellings* distinct spellings.
+
+    Memoized because the 60,000-spelling case is built by both the
+    parametrized admission sweep and its vacuity guard, and that alternation
+    is 1.74M characters costing ~1.4 s to compile -- paid twice on every
+    fast unit run for no added coverage.
+
+    Sharing the compiled pattern is safe here precisely because of what this
+    module tests: ``_cache()`` hands every test its own ``_MatchCache`` and
+    ``_PatternRegistry``, so per-test accounting and eviction state stay
+    isolated. The ``re.Pattern`` itself is immutable and carries no
+    cache state -- the registry keys on it, it does not key on the registry.
+    """
     words = [f"Sym{i:0{width}d}" for i in range(n_spellings)]
     return re.compile("|".join(re.escape(w) for w in words))
 

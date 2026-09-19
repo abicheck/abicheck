@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import statistics
 import subprocess
@@ -353,7 +354,7 @@ def run_variant(
     tracemalloc: bool,
     cache_dir: Path | None,
     env_extra: dict[str, str] | None = None,
-    jobs: int | None = None,
+    job_mem_gib: float | None = None,
 ) -> dict[str, object]:
     out.mkdir(parents=True, exist_ok=True)
     args = [
@@ -368,12 +369,20 @@ def run_variant(
         "-H",
         f"new={root / 'new' / 'include'}",
     ]
-    if jobs is not None:
-        args += ["--jobs", str(jobs)]
     args += VARIANTS[name](out)  # type: ignore[operator]
 
     env = dict(os.environ)
     env.update(env_extra or {})
+    if job_mem_gib is not None:
+        # The worker sweep goes through the per-worker memory budget, which
+        # is the admission path's own documented lever
+        # (`workflows/release_jobs.release_job_mem_budget_gib`). There is no
+        # `compare --jobs`: ADR-068 D5 removed `-j`/`--jobs` outright and the
+        # CLI always passes `jobs=0`, so forwarding one would fail the run
+        # with "No such option" before anything was compared. Driving the
+        # budget instead also exercises the real clamp rather than bypassing
+        # it, which an explicit `jobs` would have done by design.
+        env["ABICHECK_RELEASE_JOB_MEM_GIB"] = str(job_mem_gib)
     if trace is not None:
         env[ENV_TRACE_PATH] = str(trace)
         if tracemalloc:
@@ -414,6 +423,7 @@ def run_variant(
             findings = sum(len(lib.get("findings") or []) for lib in libraries)
         except (ValueError, AttributeError):
             pass
+    stderr_text = stderr.decode("utf-8", "replace")
     return {
         "variant": name,
         "exit_code": proc.returncode,
@@ -428,8 +438,10 @@ def run_variant(
         "max_processes": sampler.max_processes,
         "samples": sampler.samples,
         "tracemalloc": tracemalloc,
-        "stderr_tail": stderr.decode("utf-8", "replace")[-2000:],
+        "stderr_tail": stderr_text[-2000:],
         "stdout_tail": stdout.decode("utf-8", "replace")[-500:],
+        "job_mem_gib": job_mem_gib,
+        "observed_workers": _observed_worker_count(stderr_text),
     }
 
 
@@ -456,6 +468,29 @@ def _fixture_matches(root: Path, wanted: dict[str, int]) -> bool:
         if len(built) != wanted["members"]:
             return False
     return True
+
+
+_WORKER_CLAMP_NOTE = re.compile(
+    r"parallel release workers reduced (\d+) -> (\d+) to fit available memory"
+)
+
+
+def _observed_worker_count(stderr_text: str) -> int | None:
+    """How many workers the run actually admitted, or ``None`` if unclamped.
+
+    Read back from the release fan-out's own stderr note rather than assumed
+    from ``--job-mem-gib``. A sweep that reports the budget it *requested*
+    proves nothing: the budget only reaches a worker count through
+    ``release_jobs_mem_cap``, which also reads available memory, applies a
+    utilization fraction and a reserve, and floors at one. Two different
+    budgets can therefore admit the same number of workers, and a sweep that
+    did not actually vary concurrency would otherwise look like one that did.
+
+    ``None`` means no clamp applied, which is itself informative: the run got
+    the CPU-derived default, so raising the budget further is what changes it.
+    """
+    match = _WORKER_CLAMP_NOTE.search(stderr_text)
+    return int(match.group(2)) if match else None
 
 
 def _require_a_measured_comparison(row: dict[str, object]) -> None:
@@ -517,12 +552,16 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     ap.add_argument(
-        "--jobs",
-        type=int,
+        "--job-mem-gib",
+        type=float,
         default=None,
         help=(
-            "forwarded to `compare --jobs`, for a worker-admission sweep "
-            "(jobs=1,2,3,6) over one unchanged workload."
+            "per-worker memory budget (ABICHECK_RELEASE_JOB_MEM_GIB), the "
+            "release admission path's own lever, for a worker sweep over one "
+            "unchanged workload. A larger budget admits fewer workers. There "
+            "is no `compare --jobs` -- ADR-068 D5 removed it -- so this "
+            "drives the real clamp rather than bypassing it. The receipt "
+            "records the worker count actually observed, not the one implied."
         ),
     )
     ap.add_argument(
@@ -730,11 +769,10 @@ def main(argv: list[str] | None = None) -> int:
                 trace=trace,
                 tracemalloc=args.tracemalloc,
                 cache_dir=cache_dir,
-                jobs=args.jobs,
+                job_mem_gib=args.job_mem_gib,
             )
             row["attempt"] = attempt
             row["cold"] = bool(args.cold)
-            row["jobs"] = args.jobs
             row["vocabulary_scale"] = args.vocabulary_scale
             _require_a_measured_comparison(row)
             _require_the_vocabulary_threshold_was_crossed(
@@ -745,7 +783,8 @@ def main(argv: list[str] | None = None) -> int:
                 f"{name:<20} run {attempt}  exit={row['exit_code']}  "
                 f"{row['seconds']:>7}s  parent={_mib(row['parent_peak_rss_bytes'])} MiB  "
                 f"tree_rss={_mib(row['tree_peak_rss_bytes'])} MiB  "
-                f"tree_pss={_mib(row['tree_peak_pss_bytes'])} MiB",
+                f"tree_pss={_mib(row['tree_peak_pss_bytes'])} MiB  "
+                f"workers={row['observed_workers'] or 'unclamped'}",
                 file=sys.stderr,
             )
 

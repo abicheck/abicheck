@@ -36,10 +36,12 @@
   matching is slow because results are being recomputed, and whether a hot
   directory walk is one expensive traversal or many repeats of a cheap one.
 - `scripts/bench_release_memory.py` gained `--vocabulary-scale` (grow the
-  compiled vocabulary), `--jobs` (a worker-admission sweep over one
-  unchanged workload) and `--require-vocabulary-bytes`, the vacuity guard
-  that fails a run which did not actually cross the admission threshold it
-  claims to measure.
+  compiled vocabulary), `--job-mem-gib` (a worker-admission sweep over one
+  unchanged workload, driven through the release fan-out's own per-worker
+  memory budget since `compare` has no `--jobs` flag) and
+  `--require-vocabulary-bytes`, the vacuity guard that fails a run which did
+  not actually cross the admission threshold it claims to measure. Each row
+  records the worker count actually observed, not the one implied.
 
 ### Documentation
 

@@ -162,13 +162,33 @@ python scripts/bench_release_memory.py \
     --require-vocabulary-bytes 8388608 \
     --out receipt.json
 
-# worker-admission sweep over one unchanged workload
-for j in 1 2 3 6; do
-  python scripts/bench_release_memory.py --keep --jobs "$j" \
-      --root /tmp/abicheck-bench-fixture --variants json \
-      --repeat 3 --out "receipt-jobs-$j.json"
+# worker-admission sweep over one unchanged workload.
+#
+# Driven through the per-worker memory budget, NOT a `--jobs` flag: ADR-068
+# D5 removed `-j`/`--jobs` from `compare` outright, and the CLI always passes
+# `jobs=0` (auto-detect, then memory-clamp). Forwarding a `--jobs` would fail
+# the run with "No such option" before anything was compared. Driving the
+# budget also exercises the real clamp instead of bypassing it, which an
+# explicit worker count does by design.
+#
+# The fixture parameters must match the build above, or `--keep` rebuilds it
+# and the sweep stops comparing one unchanged workload.
+for g in 0.5 1.0 2.0 4.0; do
+  python scripts/bench_release_memory.py --keep \
+      --root /tmp/abicheck-bench-fixture \
+      --members 6 --apis 300 --records 20 --vocabulary-scale 400 \
+      --job-mem-gib "$g" --variants json \
+      --repeat 3 --out "receipt-membudget-$g.json"
 done
 ```
+
+Each row records `observed_workers`, read back from the fan-out's own
+"parallel release workers reduced N -> M" note rather than inferred from the
+budget: the budget only reaches a worker count through `release_jobs_mem_cap`,
+which also reads available memory, applies a utilization fraction and a
+reserve, and floors at one. Two budgets can admit the same count, so a sweep
+that reports only what it requested cannot show that concurrency actually
+varied. Measured on this host, 4.0 GiB admits 1 worker and 0.5 GiB admits 4.
 
 `--require-vocabulary-bytes` is the vacuity guard: it fails a run whose
 compiled patterns never reached the admission threshold the benchmark
