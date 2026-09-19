@@ -150,10 +150,20 @@ class TestRetention:
     """The inventory must not reach back to anything it replaced."""
 
     def test_it_holds_only_strings(self):
+        """Exactly ``str``, not merely ``isinstance`` of it.
+
+        The point of the projection is that nothing which could reach back
+        into a snapshot survives it, and a ``str`` *subclass* could carry
+        arbitrary state and references. ``__class__ is str`` states that
+        exactly; ``isinstance`` would accept the very thing this asserts
+        against, and ``type(n) is str`` says the same but trips pylint's
+        ``unidiomatic-typecheck`` (which cannot tell a deliberate
+        exact-type check from an accidental one).
+        """
         inv = build_symbol_inventory(_snapshot(12))
         for names in (inv.functions, inv.variables, inv.types, inv.enums):
             assert isinstance(names, tuple)
-            assert all(type(n) is str for n in names)
+            assert all(n.__class__ is str for n in names)
 
     def test_no_snapshot_is_reachable_from_the_inventory(self):
         import gc
