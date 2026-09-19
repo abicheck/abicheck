@@ -49,7 +49,10 @@ from .checker import DiffResult
 from .cli_compare_receipt import record_release_resolved_config
 from .cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
 from .cli_resolve import _normalize_binary_input
-from .frontends.cli.release_member_errors import member_error_entry
+from .frontends.cli.release_member_errors import (
+    member_dispatch_failure_entry,
+    member_error_entry,
+)
 from .frontends.cli.runtime import _safe_write_output
 from .model.symbol_inventory import SymbolInventory
 from .reporter import disposition_ledger_blocks, to_json
@@ -1025,12 +1028,9 @@ def _compare_release_parallel(
             try:
                 results_by_key[key] = future.result()
             except Exception as exc:
-                click.echo(f"Error comparing {old_map[key].name}: {exc}", err=True)
-                results_by_key[key] = {
-                    "library": old_map[key].name,
-                    "verdict": "ERROR",
-                    "error": str(exc),
-                }
+                # The outer boundary; `release_member_errors` owns both.
+                name = old_map[key].name
+                results_by_key[key] = member_dispatch_failure_entry(exc, name)
     return [results_by_key[key] for key in matched_keys if key in results_by_key]
 
 

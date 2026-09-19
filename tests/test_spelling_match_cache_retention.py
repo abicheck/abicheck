@@ -125,7 +125,7 @@ class TestRetainedBytesCountsRetainedPatterns:
         cache, registry = _cache()
         pattern = _pattern(n_spellings)
         before = registry.retained_bytes
-        cache.put("t", 0, 1, _match(), pattern)
+        cache.put((cache.token_for(pattern), "t", 0, 1), _match(), pattern)
         after = registry.retained_bytes
 
         # Oracle: derived from the pattern text now held alive, not from
@@ -138,10 +138,10 @@ class TestRetainedBytesCountsRetainedPatterns:
         """Many entries over one pattern must not multiply-count it."""
         cache, registry = _cache()
         pattern = _pattern(256)
-        cache.put("t0", 0, 1, _match(), pattern)
+        cache.put((cache.token_for(pattern), "t0", 0, 1), _match(), pattern)
         after_first = registry.retained_bytes
         for i in range(1, 25):
-            cache.put(f"t{i}", 0, 1, _match(), pattern)
+            cache.put((cache.token_for(pattern), f"t{i}", 0, 1), _match(), pattern)
         assert registry.retained_bytes == after_first, (
             "a shared pattern was charged again per entry"
         )
@@ -162,7 +162,7 @@ class TestRetainedBytesCountsRetainedPatterns:
         pattern = _pattern(256)
         registry.acquire(pattern, holder="vocabulary")
         charged_once = registry.retained_bytes
-        cache.put("t", 0, 1, _match(), pattern)
+        cache.put((cache.token_for(pattern), "t", 0, 1), _match(), pattern)
         assert registry.retained_bytes == charged_once
         assert charged_once >= len(pattern.pattern)
 
@@ -173,7 +173,7 @@ class TestRetainedBytesCountsRetainedPatterns:
         patterns = [re.compile(p.pattern + f"|Tail{i}") for i, p in enumerate(patterns)]
         seen = []
         for i, pattern in enumerate(patterns):
-            cache.put(f"t{i}", 0, 1, _match(), pattern)
+            cache.put((cache.token_for(pattern), f"t{i}", 0, 1), _match(), pattern)
             seen.append(registry.retained_bytes)
         assert seen == sorted(seen), "budget did not grow monotonically"
         assert seen[-1] >= sum(len(p.pattern) for p in patterns)
@@ -181,7 +181,7 @@ class TestRetainedBytesCountsRetainedPatterns:
     def test_releasing_the_last_entry_releases_the_pattern_cost(self) -> None:
         cache, registry = _cache()
         pattern = _pattern(512)
-        cache.put("t", 0, 1, _match(), pattern)
+        cache.put((cache.token_for(pattern), "t", 0, 1), _match(), pattern)
         assert registry.retained_bytes > 0
         cache.clear()
         assert cache.retained_bytes == 0
@@ -201,13 +201,13 @@ class TestRetainedBytesCountsRetainedPatterns:
         cache = _MatchCache(registry)
         pattern = _pattern(256)
         registry.acquire(pattern, holder="vocabulary")
-        cache.put("t", 0, 1, _match(), pattern)
+        cache.put((cache.token_for(pattern), "t", 0, 1), _match(), pattern)
         held = registry.retained_bytes
         cache.clear()
         assert registry.retained_bytes == held, (
             "pattern released while the vocabulary cache still referenced it"
         )
-        registry.release(registry.token_for(pattern), holder="vocabulary")
+        registry.release(id(pattern), holder="vocabulary")
         assert registry.retained_bytes == 0
 
     def test_eviction_returns_the_budget_to_its_starting_point(self) -> None:
@@ -224,13 +224,15 @@ class TestRetainedBytesCountsRetainedPatterns:
         start = registry.retained_bytes
         patterns = [re.compile(f"Alpha{i}|Beta{i}|Gamma{i}") for i in range(12)]
         for i, pattern in enumerate(patterns):
-            cache.put(f"text-{i}", 0, 4, _match(), pattern)
+            cache.put((cache.token_for(pattern), f"text-{i}", 0, 4), _match(), pattern)
         assert registry.retained_bytes > start
         # Force eviction of everything by shrinking the entry cap.
         original = mod.MAX_ENTRIES
         try:
             mod.MAX_ENTRIES = 0
-            cache.put("flush", 0, 1, _match(), patterns[0])
+            cache.put(
+                (cache.token_for(patterns[0]), "flush", 0, 1), _match(), patterns[0]
+            )
         finally:
             mod.MAX_ENTRIES = original
         assert len(cache) == 0
@@ -243,13 +245,12 @@ class TestRetainedBytesCountsRetainedPatterns:
         pattern = _pattern(64)
         other = re.compile("Unrelated")
         for i in range(10):
-            cache.put(f"t{i}", 0, 1, _match(), pattern)
-        cache.put("keep", 0, 1, _match(), other)
-        token = registry.token_for(pattern)
-        assert cache.drop_pattern(token) == 10
+            cache.put((cache.token_for(pattern), f"t{i}", 0, 1), _match(), pattern)
+        cache.put((cache.token_for(other), "keep", 0, 1), _match(), other)
+        assert cache.drop_pattern(id(pattern)) == 10
         assert len(cache) == 1
-        assert registry.token_for(pattern) is None, "pattern outlived its last entry"
-        assert registry.token_for(other) is not None, "unrelated pattern was dropped"
+        assert not registry.is_held(id(pattern)), "pattern outlived its last entry"
+        assert registry.is_held(id(other)), "unrelated pattern was dropped"
 
 
 class TestAdmissionDoesNotDependOnPatternSize:
@@ -273,7 +274,7 @@ class TestAdmissionDoesNotDependOnPatternSize:
         """
         cache, _registry = _cache()
         pattern = _pattern(n_spellings)
-        cache.put("hot-text", 0, 8, _match(), pattern)
+        cache.put((cache.token_for(pattern), "hot-text", 0, 8), _match(), pattern)
         for _ in range(50):
             assert cache.get((cache.token_for(pattern), "hot-text", 0, 8)) is not None
         assert cache.hits == 50
@@ -312,7 +313,9 @@ class TestAdmissionDoesNotDependOnPatternSize:
         cache, _registry = _cache()
         pattern = _pattern(8)
         matches = tuple(SpellingMatch("T", i, i + 1) for i in range(n_matches))
-        cache.put("x" * text_len, 0, text_len, matches, pattern)
+        cache.put(
+            (cache.token_for(pattern), "x" * text_len, 0, text_len), matches, pattern
+        )
         assert len(cache) == 0
         assert cache.bypasses == 1
         assert getattr(cache, counter) == 1
@@ -340,10 +343,8 @@ class TestSpellingMatchIsGenuinelyImmutable:
         """The invariant that actually matters: the next reader sees the same thing."""
         cache, _registry = _cache()
         pattern = _pattern(8)
-        cache.put(
-            "std::vector<int>", 0, 16, (SpellingMatch("std::vector", 0, 11),), pattern
-        )
         key = (cache.token_for(pattern), "std::vector<int>", 0, 16)
+        cache.put(key, (SpellingMatch("std::vector", 0, 11),), pattern)
 
         first = cache.get(key)
         assert first is not None

@@ -617,8 +617,7 @@ class TestPatternReferencesDoNotLeak:
         pattern = _compile_spelling_pattern(["Foo"])
         assert pattern is not None
         spelling_matches(pattern, "Foo")
-        token = PATTERN_REGISTRY.token_for(pattern)
-        assert token is not None
+        token = id(pattern)
         assert MATCH_CACHE._entries_per_token == {token: 1}
         assert PATTERN_REGISTRY.pattern_for(token) is pattern
 
@@ -645,39 +644,52 @@ class TestCacheBookkeepingEdges:
         pattern = _compile_spelling_pattern(["Foo"])
         assert pattern is not None
         matches = (SpellingMatch("Foo", 0, 3),)
-        MATCH_CACHE.put("Foo", 0, 3, matches, pattern)
         token = MATCH_CACHE.token_for(pattern)
-        assert token is not None
+        MATCH_CACHE.put((token, "Foo", 0, 3), matches, pattern)
         bytes_after_first = MATCH_CACHE.retained_bytes
         registry_after_first = PATTERN_REGISTRY.retained_bytes
         refs_after_first = MATCH_CACHE._entries_per_token[token]
-        MATCH_CACHE.put("Foo", 0, 3, matches, pattern)
+        MATCH_CACHE.put((token, "Foo", 0, 3), matches, pattern)
         assert len(MATCH_CACHE) == 1
         assert MATCH_CACHE.retained_bytes == bytes_after_first
         assert PATTERN_REGISTRY.retained_bytes == registry_after_first
         assert MATCH_CACHE._entries_per_token[token] == refs_after_first
 
     def test_a_pattern_with_two_entries_survives_losing_one(self) -> None:
-        """Eviction releases one reference, not the whole pattern.
+        """Losing one of two entries must not free the shared pattern.
 
-        The refcount exists because several entries share one pattern: a
-        release that dropped the registry holder outright would free a
-        pattern that other live entries still key on, and its ``id()`` could
-        then be reused by a different pattern while those entries remained —
-        the one way the ``id()``-keyed token lookup can go wrong.
+        A release that dropped the registry holder as soon as *any* entry
+        went would free a pattern other live entries still key on, and its
+        ``id()`` could then be recycled onto a different pattern while those
+        entries remained — the one way the ``id()``-keyed token can go
+        wrong.
+
+        Note where the counting lives after the ownership split: the match
+        cache keeps the per-entry count and holds exactly **one** registry
+        handle for the token, taken on the first entry and returned on the
+        last. So the registry's own count is 1 throughout, and it is the
+        cache's ``_entries_per_token`` that goes 2 -> 1 -> 0.
         """
+        from abicheck.compare.spelling_match_cache import (
+            _MatchCache,
+            _PatternRegistry,
+        )
+
+        registry = _PatternRegistry()
+        cache = _MatchCache(registry)
         pattern = _build_spelling_pattern(["Foo"])
         assert pattern is not None
-        spelling_matches(pattern, "Foo a")
-        spelling_matches(pattern, "Foo b")
-        token = MATCH_CACHE.token_for(pattern)
-        assert token is not None
-        assert MATCH_CACHE._entries_per_token[token] == 2
-        PATTERN_REGISTRY.release(token, holder="match")
-        assert PATTERN_REGISTRY.pattern_for(token) is pattern
-        PATTERN_REGISTRY.release(token, holder="match")
-        assert PATTERN_REGISTRY.pattern_for(token) is None
-        assert PATTERN_REGISTRY.token_for(pattern) is None
+        token = cache.token_for(pattern)
+        cache.put((token, "Foo a", 0, 5), (SpellingMatch("Foo", 0, 3),), pattern)
+        cache.put((token, "Foo b", 0, 5), (SpellingMatch("Foo", 0, 3),), pattern)
+        assert cache._entries_per_token[token] == 2
+        assert registry.reference_counts()[token] == (0, 1)
+
+        cache.drop_pattern(token)
+        assert cache._entries_per_token == {}
+        assert not registry.is_held(token), (
+            "the pattern outlived the last entry naming it"
+        )
 
     def test_releasing_an_unheld_token_is_a_no_op(self) -> None:
         """Release must be idempotent against an already-cleared registry.
@@ -699,32 +711,39 @@ class TestCacheBookkeepingEdges:
         """
         pattern = _build_spelling_pattern(["Foo"])
         assert pattern is not None
-        assert MATCH_CACHE.token_for(pattern) is None
-        assert MATCH_CACHE.token_for(pattern) is None
+        assert MATCH_CACHE.token_for(pattern) == id(pattern)
         assert len(MATCH_CACHE) == 0
         assert len(PATTERN_REGISTRY) == 0
         assert PATTERN_REGISTRY.retained_bytes == 0
 
-    def test_a_token_is_stable_and_never_recycled(self) -> None:
-        """Generation tokens, not addresses.
+    def test_a_stored_token_always_names_a_live_pattern(self) -> None:
+        """What makes an ``id()``-derived token sound.
 
-        ``id()`` is reused the moment an object is freed; a monotonic token
-        is not. Asserted by releasing a pattern and registering many more —
-        an ``id()``-derived token would very plausibly collide, a generation
-        token cannot.
+        A token is a bare ``id()`` (PR #1336's scheme, kept deliberately),
+        so it *would* be recycled once its pattern is freed. The invariant
+        that makes that safe is the registry's: a token is only ever stored
+        while the registry holds a strong reference to the pattern it names,
+        so a live reference means the address cannot have been reused.
+
+        Asserted by registering and releasing many patterns and checking
+        both directions at each step — held implies resolvable to *this*
+        pattern, released implies not held — rather than by assuming a token
+        space that cannot collide.
         """
-        seen: set[int] = set()
         for i in range(200):
             pattern = _build_spelling_pattern([f"Type{i}"])
             assert pattern is not None
             token = PATTERN_REGISTRY.acquire(pattern, holder="match")
-            assert PATTERN_REGISTRY.token_for(pattern) == token
-            assert token not in seen, "a token was reused for a second pattern"
-            seen.add(token)
-            # Drop it, so the next iteration may well reuse the address.
+            assert token == id(pattern)
+            assert PATTERN_REGISTRY.is_held(token)
+            assert PATTERN_REGISTRY.pattern_for(token) is pattern
             PATTERN_REGISTRY.release(token, holder="match")
+            assert not PATTERN_REGISTRY.is_held(token), (
+                "a released pattern stayed registered, so its id could be "
+                "recycled onto another pattern while still resolving here"
+            )
             del pattern
-        assert len(seen) == 200
+        assert len(PATTERN_REGISTRY) == 0
 
 
 class TestNestedSearchLosesASameStartShorterSpelling:
@@ -828,8 +847,9 @@ class TestTwoWorkersCompilingOneVocabulary:
         def compile_and_race(key):
             # Simulate the other worker finishing first, while we were
             # compiling outside the lock.
-            cache._entries[key] = winner
-            cache._tokens[key] = registry.acquire(winner, holder="vocabulary")
+            with cache._lock:
+                cache._entries[key] = winner
+                cache._tokens[key] = registry.acquire(winner, holder="vocabulary")
             return _build_spelling_pattern(["Loser"])
 
         got = cache.get_or_compile(["Winner"], compile_and_race)
@@ -849,11 +869,12 @@ class TestTwoWorkersCompilingOneVocabulary:
         assert winner is not None and loser is not None
 
         def compile_and_race(key):
-            cache._entries[key] = winner
-            cache._tokens[key] = registry.acquire(winner, holder="vocabulary")
+            with cache._lock:
+                cache._entries[key] = winner
+                cache._tokens[key] = registry.acquire(winner, holder="vocabulary")
             return loser
 
         cache.get_or_compile(["Winner"], compile_and_race)
         assert len(registry) == 1, "both patterns were registered"
-        assert registry.token_for(loser) is None, "the loser stayed registered"
-        assert registry.token_for(winner) is not None
+        assert not registry.is_held(id(loser)), "the loser stayed registered"
+        assert registry.is_held(id(winner))

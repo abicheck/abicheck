@@ -23,43 +23,9 @@ owner with an *aggregate* byte budget. An unbounded ``@lru_cache`` per
 pattern -- or a per-pattern maxsize multiplied by however many patterns a
 run compiles and however many workers a release fan-out admits -- is not a
 bounded memory plan for a request, and retention is the very axis the
-surrounding performance work is trying to reduce.
-
-**Three owners, three budgets, each cost charged exactly once.**
-:class:`_PatternRegistry` is the single *accounting* owner of compiled
-patterns: it issues the stable generation token both caches key on, holds
-the reference that keeps a pattern reachable from these caches, and charges
-each pattern's bytes once against :data:`MAX_PATTERN_BYTES`, however many
-entries go on to name it. :class:`_VocabularyCache` and :class:`_MatchCache`
-hold refcounted *handles* into that registry rather than the pattern object,
-so neither can charge for it; the match cache's own budget
-(:data:`MAX_RETAINED_BYTES`) covers only what it actually owns -- keys,
-subject strings and result tuples.
-
-Single accounting owner is **not** the same as sole strong-reference owner,
-and this module deliberately does not claim the latter. The matcher's
-callers hold their own ordinary references, on two different lifetimes:
-``type_reachability``'s ``_StdlibReferenceScan`` keeps its stdlib, record
-and typedef patterns in instance attributes for the scanner's whole life,
-while ``dumper_scoping`` binds one in a local for the duration of a single
-call. Those references keep the pattern alive whatever the registry does,
-and they are outside every byte this module reports.
-
-That separation is the fix for a self-defeating bypass. Charging a shared
-pattern's full size as *incremental* ownership in the match cache meant a
-pattern larger than the whole match budget could never have a single entry
-admitted, so every lookup against it recomputed -- while the vocabulary
-cache kept that very pattern alive regardless, so the bypass released
-nothing. On a real oneDAL release comparison four of seven vocabularies
-crossed that line (1.12M, 1.12M, 2.87M and 3.96M pattern characters against
-an 8 MiB match budget at ~9 bytes/char), taking the match cache from 98.99%
-to 63.6% hits with 411,232 bypasses and tripling matching time from 19.99 s
-to 58.93 s. Reproduced in isolation at that scale: the same 40,000 hot
-lookups cost 0.02 s when admitted and 41.68 s when bypassed
-(``tests/test_spelling_match_cache_retention.py``).
-
-A budget here bounds *these caches*. It is deliberately **not** a bound on
-the matcher's working set, for the caller-reference reason given above.
+surrounding performance work is trying to reduce. Everything here is
+therefore capped three ways: per-input size, per-result size, and a total
+retained-bytes budget across every pattern.
 
 **What is cached is strictly lexical.** ``matches_for`` answers "which
 registered spellings occur, as whole type tokens, in this text window" --
@@ -78,15 +44,106 @@ string and the compiled pattern) and never a mutable list a caller could
 edit in place and so corrupt for the next reader. Keys hold only a
 pattern-identity token, the text, and the window -- never a snapshot,
 declaration, or bound scanner instance.
+
+Concurrency contract
+--------------------
+
+Both caches are process-wide module globals read and written by every
+worker of a directory/package ``compare``'s release fan-out (real threads,
+one process -- see ``cli_compare_release_pairwise``). They are therefore
+**thread-safe**, under one narrow lock each, with these invariants:
+
+* *Every* multi-step state transition is atomic: lookup-plus-recency-
+  update, admission-plus-accounting-plus-eviction, pattern reference
+  counting, and vocabulary publication. ``OrderedDict`` operations are
+  individually atomic under the GIL, which is exactly why this was not
+  obvious and not caught: the defect was never a torn dict, it was a
+  *compound* operation. ``get`` read a value, another worker's ``put``
+  evicted that key, and ``get``'s own ``move_to_end`` then raised
+  ``KeyError((token, text, start, end))`` -- observed in a real six-member
+  oneDAL release comparison, which reported three members as failed
+  extractions on one run and completed cleanly on the next.
+* **Expensive work never runs under a lock.** Regex compilation
+  (``_VocabularyCache.get_or_compile``'s ``compile_fn``) and matching
+  (``matches_for``'s ``compute``) happen outside it, and publication is
+  rechecked afterwards. Two workers that miss on the same key
+  simultaneously **may both compute it**; that duplicate work is accepted
+  deliberately, because the alternative -- one global lock spanning the
+  compile -- serializes the very member comparisons the fan-out exists to
+  run concurrently. Whichever publication lands first wins, and since a
+  result is a pure function of its key, which one wins is unobservable.
+* ``clear()`` is safe to call concurrently, but it is a **lifecycle
+  reset, not a barrier**. It advances a generation counter; a computation
+  already in flight still completes and its caller still receives a
+  correct result, but that result is not published into the new epoch. So
+  pre-clear state can never reappear afterwards, and no entry, byte count
+  or pattern reference outlives the clear that dropped it. ``clear()``
+  does *not* wait for in-flight work, and nothing here promises it does.
+* Pattern identity stays safe: a token is a bare ``id()``, and it is only
+  ever *stored* while :class:`_PatternRegistry` holds a strong reference to
+  the pattern it names, so a recycled id can never resolve to another
+  pattern's results. Locking changes none of that -- it only makes the
+  store and the reference count one transition.
+
+No lock is held across a caller-supplied callback, so a callback cannot
+deadlock or re-enter a held lock, and the two caches' locks are never held
+at the same time. :class:`_PatternRegistry` has a third lock which is
+always **innermost**: each cache takes it while holding its own, the
+registry never calls back into either cache, and the caches never call each
+other -- so the order is total and no cycle exists.
+
+Pattern ownership: one accounting owner
+---------------------------------------
+
+:class:`_PatternRegistry` is the single *accounting* owner of compiled
+patterns. It holds the reference that keeps a pattern reachable from these
+caches and charges its bytes **once**, against :data:`MAX_PATTERN_BYTES`,
+however many entries and vocabularies name it. Both caches hold refcounted
+*handles* into it rather than the pattern object, so neither can charge for
+it, and :data:`MAX_RETAINED_BYTES` bounds strictly what the match cache
+owns -- keys, subject strings and result tuples.
+
+That separation is the fix for a self-defeating bypass. Charging a shared
+pattern's full size as *incremental* ownership in the match cache meant a
+pattern larger than the whole match budget could never have a single entry
+admitted, so every lookup against it recomputed -- while the vocabulary
+cache kept that very pattern alive regardless, so the bypass released
+nothing. On a real oneDAL release comparison four of seven vocabularies
+crossed that line (1.12M, 1.12M, 2.87M and 3.96M pattern characters against
+an 8 MiB match budget at ~9 bytes/char), taking the match cache from 98.99%
+to 63.6% hits with 411,232 bypasses and tripling matching time from 19.99 s
+to 58.93 s. Reproduced in isolation at that scale: the same 40,000 hot
+lookups cost 0.02 s when admitted and 41.68 s when bypassed.
+
+Single accounting owner is **not** the same as sole strong-reference
+owner, and this module does not claim the latter. The matcher's callers
+hold their own ordinary references, on two different lifetimes:
+``type_reachability``'s ``_StdlibReferenceScan`` keeps its stdlib, record
+and typedef patterns in instance attributes for the scanner's whole life,
+while ``dumper_scoping`` binds one in a local for the duration of a single
+call. Those references keep the pattern alive whatever the registry does,
+and they are outside every byte this module reports.
 """
 
 from __future__ import annotations
 
-import itertools
 import re
 import threading
 from collections import OrderedDict
 from collections.abc import Callable, Collection, Iterable
+
+from .spelling_pattern_registry import (
+    MAX_PATTERN_BYTES as MAX_PATTERN_BYTES,
+    PATTERN_REGISTRY as PATTERN_REGISTRY,
+    _pattern_bytes as _pattern_bytes,
+    _PatternRegistry as _PatternRegistry,
+)
+
+# Re-exported by value, not incidentally: ``_pattern_bytes``, the registry
+# type and its budget were defined here before pattern ownership moved to
+# its own module, and both this package's tests and PR #1336's concurrency
+# suite reach for them through this module. Keeping the names resolvable
+# here is what lets that split be a move rather than a rename.
 
 # A text longer than this is still matched -- just not cached. An enormous
 # instantiated-template spelling is both the least likely to repeat and the
@@ -110,57 +167,12 @@ MAX_ENTRIES = 32_768
 # degrades to recompiling rather than retaining every one of them.
 MAX_CACHED_VOCABULARIES = 64
 
-# The *pattern owner's* budget, and the one an entry count alone could never
-# express: 64 vocabularies is 64 patterns of any size, and the vocabularies a
-# real oneDAL release comparison compiles run to 3.96M characters each -- so
-# the entry cap above admits a worst case in the gigabytes while reporting a
-# tidy "64". This caps what :class:`_PatternRegistry` retains in bytes.
-#
-# Sized against the measured workload rather than picked round: that
-# comparison's seven vocabularies total 9.67M pattern characters, ~87 MiB at
-# the calibrated ~9 bytes/char below, and recompiling one costs seconds
-# (23.42 s for those seven). 256 MiB holds that working set, and several
-# members' worth of it, while still bounding the per-declaration-vocabulary
-# pathology the entry cap was reaching for. Eviction here is a *cost*
-# decision, never a correctness one -- an evicted pattern is recompiled on
-# the next request, and a caller still holding one keeps using it.
-MAX_PATTERN_BYTES = 256 * 1024 * 1024
 
 # Rough per-entry bookkeeping overhead (key tuple, dict slot, result tuple,
 # and one SpellingMatch object per match). Deliberately an estimate: the
 # budget's job is to bound growth, not to report exact RSS.
 _BYTES_PER_ENTRY = 224
 _BYTES_PER_MATCH = 96
-
-# Retained cost of one compiled pattern, as a multiple of its pattern text's
-# length: the ``str`` itself plus the compiled program. Charged once, by
-# :class:`_PatternRegistry`, for as long as either cache refers to it.
-#
-# This number used to be charged by the *match* cache, as incremental
-# ownership per pattern it kept alive -- which double-counted a pattern the
-# vocabulary cache was already holding, and made a pattern bigger than the
-# match budget permanently unadmissible. See the module docstring.
-#
-# **Calibrated, not guessed.** An initial 6 was reasoned from "the str plus
-# roughly twice the text again"; measured against the six real vocabularies a
-# oneDAL comparison actually compiles, it undercounts by a strikingly stable
-# 1.46-1.51x across patterns spanning 8,657 to 3,336,273 characters:
-#
-#     vocabulary   pattern chars   est @6   measured
-#     vocab_001        3,336,273   19.09MB   27.94MB
-#     vocab_002        3,141,454   17.98MB   26.27MB
-#     vocab_005          859,583    4.92MB    7.20MB
-#     vocab_004           55,338    0.32MB    0.48MB
-#     vocab_003            9,092    0.05MB    0.08MB
-#     vocab_006            8,657    0.05MB    0.07MB
-#
-# 9 tracks that (~8.8 bytes/char measured). It remains a *lower* bound:
-# ``sys.getsizeof`` on a compiled pattern does not reach the internal
-# allocations of its compiled program, so the real retention is higher
-# still. Erring low is the wrong direction for a budget whose job is to
-# bound growth, which is why this is corrected rather than left as a
-# "close enough" estimate.
-_PATTERN_BYTES_PER_CHAR = 9
 
 
 class SpellingMatch:
@@ -239,11 +251,6 @@ class SpellingMatch:
         return f"SpellingMatch({self._text!r}, {self._start}, {self._end})"
 
 
-def _pattern_bytes(pattern: re.Pattern[str]) -> int:
-    """Estimated bytes retained by holding *pattern* alive."""
-    return len(pattern.pattern) * _PATTERN_BYTES_PER_CHAR
-
-
 def _entry_bytes(text: str, matches: tuple[SpellingMatch, ...]) -> int:
     return (
         _BYTES_PER_ENTRY
@@ -252,149 +259,20 @@ def _entry_bytes(text: str, matches: tuple[SpellingMatch, ...]) -> int:
     )
 
 
-#: One lock guarding the registry and both caches. Their refcounts are a
-#: *cross-object* invariant -- an entry admitted to the match cache and the
-#: registry reference it acquires must become visible together, or a
-#: concurrent eviction can release a pattern an entry still names -- so the
-#: coordination cannot be expressed as three independent per-object locks.
-#:
-#: .. note::
-#:    A separate functional workstream owns thread safety for these caches
-#:    (the shared match-cache race that failed three members of a traced
-#:    oneDAL run). That patch was not available on ``main`` when this was
-#:    written, so this lock is the *ownership redesign's own* correctness
-#:    requirement, not a competing fix, and is the designated integration
-#:    point: reconcile the two by keeping this single lock and folding that
-#:    patch's invariants and tests onto it, rather than layering a second
-#:    locking scheme over these objects.
-_CACHE_LOCK = threading.RLock()
-
-
-class _PatternRegistry:
-    """The one owner of compiled patterns: identity, lifetime and bytes.
-
-    Issues the **stable generation token** both caches key on. A token comes
-    from a monotonic counter, never from ``id()``, so it is never recycled
-    onto a different pattern and can be recorded in a diagnostic or a test
-    without depending on an address.
-
-    The registry charges the pattern's bytes **once**, against
-    :data:`MAX_PATTERN_BYTES`, for as long as either cache refers to it, and
-    holds the reference that keeps it reachable from here. The two caches
-    hold refcounted handles rather than the pattern itself; a holder is
-    dropped -- and its bytes leave the budget -- when both counts reach zero.
-
-    This is the *accounting* owner, not the only object with a reference: a
-    caller that obtained the pattern from :func:`compile_spelling_pattern`
-    keeps its own, and dropping a holder here does not free a pattern that
-    caller is still using. That is deliberate -- eviction is a cost
-    decision, never a correctness one.
-
-    The ``id()``-keyed lookup that maps a caller's pattern object back to its
-    token is sound because of one invariant, which every mutation here
-    preserves: ``_by_id`` holds an entry **iff** the registry holds a strong
-    reference to that pattern. A live strong reference means the address
-    cannot have been reused, so a hit is never a different pattern wearing a
-    recycled id. When a holder is dropped, its ``_by_id`` entry goes with it,
-    and a caller still holding that pattern simply re-registers it under a
-    fresh token.
-    """
-
-    def __init__(self) -> None:
-        self._tokens = itertools.count(1)
-        # token -> (pattern, bytes, vocabulary refs, match refs)
-        self._held: dict[int, tuple[re.Pattern[str], int, int, int]] = {}
-        self._by_id: dict[int, int] = {}
-        self._bytes = 0
-        self.compilations_registered = 0
-        self.evictions = 0
-
-    def token_for(self, pattern: re.Pattern[str]) -> int | None:
-        """*pattern*'s token, or ``None`` when it is not registered.
-
-        Deliberately does **not** register: a lookup that will miss, and a
-        result too large to retain, must not leave a holder behind charging
-        for a pattern nothing stores anything against. Registration happens
-        beside the reference that needs it, in :meth:`acquire`.
-        """
-        return self._by_id.get(id(pattern))
-
-    def acquire(self, pattern: re.Pattern[str], *, holder: str) -> int:
-        """Take a *holder* (``"vocabulary"`` or ``"match"``) reference on
-        *pattern*, registering it on first use, and return its token."""
-        token = self._by_id.get(id(pattern))
-        if token is None:
-            token = next(self._tokens)
-            size = _pattern_bytes(pattern)
-            self._held[token] = (pattern, size, 0, 0)
-            self._by_id[id(pattern)] = token
-            self._bytes += size
-            self.compilations_registered += 1
-        held, size, vocab_refs, match_refs = self._held[token]
-        if holder == "vocabulary":
-            vocab_refs += 1
-        else:
-            match_refs += 1
-        self._held[token] = (held, size, vocab_refs, match_refs)
-        return token
-
-    def release(self, token: int, *, holder: str) -> None:
-        """Drop a *holder* reference, freeing the pattern when none remain."""
-        entry = self._held.get(token)
-        if entry is None:
-            return
-        pattern, size, vocab_refs, match_refs = entry
-        if holder == "vocabulary":
-            vocab_refs = max(0, vocab_refs - 1)
-        else:
-            match_refs = max(0, match_refs - 1)
-        if vocab_refs == 0 and match_refs == 0:
-            del self._held[token]
-            self._by_id.pop(id(pattern), None)
-            self._bytes -= size
-            self.evictions += 1
-            return
-        self._held[token] = (pattern, size, vocab_refs, match_refs)
-
-    def over_budget(self) -> bool:
-        return self._bytes > MAX_PATTERN_BYTES
-
-    def pattern_for(self, token: int) -> re.Pattern[str] | None:
-        entry = self._held.get(token)
-        return None if entry is None else entry[0]
-
-    def clear(self) -> None:
-        self._held.clear()
-        self._by_id.clear()
-        self._bytes = 0
-        self.compilations_registered = 0
-        self.evictions = 0
-
-    @property
-    def retained_bytes(self) -> int:
-        """Bytes this registry retains in compiled patterns, counted once each."""
-        return self._bytes
-
-    def __len__(self) -> int:
-        return len(self._held)
-
-
 class _MatchCache:
     """LRU over ``(pattern token, text, start, end) -> matches``.
 
-    The pattern is identified by :class:`_PatternRegistry`'s stable token
-    rather than by its own (very large) pattern text: hashing a 3 MiB
-    alternation on every lookup would hand back a meaningful slice of what
-    the cache saves.
-
-    ``_bytes`` covers **only what this cache owns** -- key tuples, subject
-    strings and result tuples. The compiled pattern behind a token is the
-    registry's, charged there once; this cache takes a refcounted reference
-    to it while it holds any entry naming it, and that reference is what
-    keeps the token's ``id()`` mapping sound.
+    The pattern is identified by a token rather than by its own (very
+    large) pattern text: hashing a 40 KiB alternation on every lookup would
+    hand back a meaningful slice of what the cache saves. A token is only
+    ever issued alongside a strong reference to the pattern it names, so an
+    ``id()``-derived token can never be recycled onto a different pattern
+    while any entry still refers to it.
     """
 
     def __init__(self, registry: _PatternRegistry | None = None) -> None:
+        self._lock = threading.Lock()
+        self._generation = 0
         #: Injected so a test can exercise one cache against its own owner
         #: instead of the process-wide one. Defaults to the shared registry,
         #: which is what every production caller wants.
@@ -403,8 +281,10 @@ class _MatchCache:
             tuple[int, str, int, int], tuple[SpellingMatch, ...]
         ] = OrderedDict()
         self._bytes = 0
-        #: token -> how many live entries name it, so the registry reference
-        #: is taken once on the first and dropped once on the last.
+        #: token -> how many live entries name it, so this cache takes one
+        #: registry reference on the first entry and drops it on the last.
+        #: The pattern itself is the registry's; this is only the count of
+        #: what *this* cache still needs it for.
         self._entries_per_token: dict[int, int] = {}
         self.hits = 0
         self.misses = 0
@@ -413,118 +293,205 @@ class _MatchCache:
         self.bypass_too_many_matches = 0
         self.evictions = 0
 
-    def token_for(self, pattern: re.Pattern[str]) -> int | None:
-        return self._registry.token_for(pattern)
+    @property
+    def generation(self) -> int:
+        """The lifecycle epoch a computation should be published into.
+
+        Read *before* an uncached computation starts and handed back to
+        :meth:`put`; a :meth:`clear` in between advances it and the result
+        is then dropped rather than resurrecting pre-clear state into a
+        cache whose whole contract was just reset. See this module's
+        "Concurrency contract" note.
+        """
+        with self._lock:
+            return self._generation
+
+    def token_for(self, pattern: re.Pattern[str]) -> int:
+        """*pattern*'s cache token -- **without** retaining it.
+
+        Deliberately not where the keepalive reference is taken: a lookup
+        that misses, and a result too large to retain, would otherwise
+        leave a permanent entry holding a compiled pattern the cache stores
+        nothing for, which is an unbounded leak of exactly the thing this
+        module exists to bound. Retention happens in :meth:`put`, beside
+        the entry that needs it.
+
+        Using a bare ``id()`` for the lookup is still sound: a token only
+        ever appears in ``_entries`` while :meth:`put` holds a strong
+        reference to the pattern it names, so a *live* pattern's id cannot
+        equal a retained-but-different pattern's id.
+        """
+        return id(pattern)
+
+    def _retain(self, token: int, pattern: re.Pattern[str]) -> None:
+        """Count one more entry naming *token*, referencing it on the first.
+
+        The pattern's *bytes* are not added here: they are the registry's,
+        charged once however many entries and vocabularies name it. What
+        this cache tracks is only how many of its own entries still need it.
+        Called with this cache's lock held; the registry's lock is innermost.
+        """
+        count = self._entries_per_token.get(token, 0)
+        self._entries_per_token[token] = count + 1
+        if count == 0:
+            self._registry.acquire(pattern, holder="match")
+
+    def _release(self, token: int) -> None:
+        """Drop one entry's claim, returning the reference on the last."""
+        count = self._entries_per_token.get(token, 0)
+        if count <= 1:
+            self._entries_per_token.pop(token, None)
+            if count == 1:
+                self._registry.release(token, holder="match")
+            return
+        self._entries_per_token[token] = count - 1
 
     def get(self, key: tuple[int, str, int, int]) -> tuple[SpellingMatch, ...] | None:
         """The cached matches for *key*, or ``None`` when not yet computed.
 
         ``None`` means *not computed*, never *computed as empty*: an empty
-        result is cached like any other, because "this text names nothing in
-        this vocabulary" is exactly as reusable as a positive answer and is
-        the common case for a large vocabulary.
+        result is cached like any other, because "this text names nothing
+        in this vocabulary" is exactly as reusable as a positive answer and
+        is the common case for a large vocabulary.
         """
-        cached = self._entries.get(key)
-        if cached is None:
+        with self._lock:
+            cached = self._entries.get(key)
+            if cached is not None:
+                # Lookup and recency update are one transition: splitting
+                # them let a concurrent ``put``'s eviction remove this very
+                # key between the two halves, and ``move_to_end`` then
+                # raised ``KeyError`` out of what is supposed to be a pure
+                # cache read, aborting a whole release member comparison.
+                self._entries.move_to_end(key)
+                self.hits += 1
+                return cached
+            # An empty result is cached too -- "this text names nothing in
+            # this vocabulary" is exactly as reusable as a positive answer,
+            # and is the common case for a large vocabulary. So absence
+            # here means *not computed*, never *computed as empty*.
             self.misses += 1
             return None
-        self._entries.move_to_end(key)
-        self.hits += 1
-        return cached
 
     def put(
         self,
-        key_text: str,
-        start: int,
-        end: int,
+        key: tuple[int, str, int, int],
         matches: tuple[SpellingMatch, ...],
         pattern: re.Pattern[str],
+        generation: int | None = None,
     ) -> None:
-        """Retain *matches* for this (pattern, text, window), if admissible.
+        """Admit *matches* for *key*, retaining *pattern* alongside it.
 
-        The two bypasses left are the ones that are genuinely about *this
-        entry's* cost -- an enormous subject string, and a pathological
-        nesting result. The third, "this pattern is bigger than the whole
-        match budget", is gone with the accounting that produced it: a
-        pattern's size is the registry's charge, not this entry's, and
-        refusing every entry for a big vocabulary released nothing while
-        costing every lookup against it a full rescan.
+        Admission, the byte and entry accounting, the pattern reference
+        count and the eviction loop are **one** transition under this
+        cache's lock: each of them reads state the others write, so
+        interleaving any two of them leaves ``retained_bytes``, the entry
+        count and the registry's reference counts disagreeing with the
+        entries that are actually present.
+
+        *generation* is the epoch :attr:`generation` reported before the
+        caller's computation began. A :meth:`clear` since then means this
+        result belongs to a lifetime that has ended, so it is dropped
+        rather than resurrected -- see the "Concurrency contract" note.
         """
-        if len(key_text) > MAX_CACHED_TEXT_CHARS:
-            self.bypasses += 1
-            self.bypass_text_too_long += 1
-            return
-        if len(matches) > MAX_CACHED_RESULT_MATCHES:
-            self.bypasses += 1
-            self.bypass_too_many_matches += 1
-            return
-        token = self._registry.acquire(pattern, holder="match")
-        key = (token, key_text, start, end)
-        if key in self._entries:
-            # Already retained by a concurrent writer: hand the reference
-            # straight back rather than double-counting this token.
-            self._registry.release(token, holder="match")
-            return
-        self._entries[key] = matches
-        self._bytes += _entry_bytes(key_text, matches)
-        self._entries_per_token[token] = self._entries_per_token.get(token, 0) + 1
-        while self._entries and (
-            self._bytes > MAX_RETAINED_BYTES or len(self._entries) > MAX_ENTRIES
-        ):
-            evicted_key, evicted = self._entries.popitem(last=False)
-            self._bytes -= _entry_bytes(evicted_key[1], evicted)
-            self._drop_token_reference(evicted_key[0])
-            self.evictions += 1
-
-    def _drop_token_reference(self, token: int) -> None:
-        remaining = self._entries_per_token.get(token, 0) - 1
-        if remaining <= 0:
-            self._entries_per_token.pop(token, None)
-        else:
-            self._entries_per_token[token] = remaining
-        self._registry.release(token, holder="match")
+        text = key[1]
+        with self._lock:
+            if generation is not None and generation != self._generation:
+                return
+            if len(text) > MAX_CACHED_TEXT_CHARS:
+                self.bypasses += 1
+                self.bypass_text_too_long += 1
+                return
+            if len(matches) > MAX_CACHED_RESULT_MATCHES:
+                self.bypasses += 1
+                self.bypass_too_many_matches += 1
+                return
+            if key in self._entries:
+                # Two workers missed on the same key and both computed it:
+                # the first publication wins and the second is discarded.
+                # The result is a pure function of the key, so which one
+                # wins cannot change what a later reader observes.
+                return
+            # There is deliberately no "this pattern is too big" bypass. A
+            # pattern's size is the registry's charge, not this entry's, so
+            # comparing it against *this* cache's budget was an admission
+            # rule keyed on something this cache does not own -- and it
+            # refused every entry for a large vocabulary while releasing
+            # nothing, since the vocabulary cache held the same pattern
+            # regardless. See the module docstring. The two bypasses left
+            # above are the ones genuinely about this entry's own cost.
+            self._entries[key] = matches
+            self._bytes += _entry_bytes(text, matches)
+            self._retain(key[0], pattern)
+            while self._entries and (
+                self._bytes > MAX_RETAINED_BYTES or len(self._entries) > MAX_ENTRIES
+            ):
+                evicted_key, evicted = self._entries.popitem(last=False)
+                self._bytes -= _entry_bytes(evicted_key[1], evicted)
+                self._release(evicted_key[0])
+                self.evictions += 1
 
     def drop_pattern(self, token: int) -> int:
         """Forget every entry naming *token*; returns how many were dropped.
 
-        The coordinated half of eviction: a caller that knows a vocabulary is
-        finished (end of a member comparison) can release its results without
-        waiting for LRU pressure to reach them.
+        The coordinated half of eviction: a caller that knows a vocabulary
+        is finished can release its results without waiting for LRU pressure
+        to reach them. One transition under this cache's lock, for the same
+        reason :meth:`put` is.
         """
-        doomed = [k for k in self._entries if k[0] == token]
-        for k in doomed:
-            evicted = self._entries.pop(k)
-            self._bytes -= _entry_bytes(k[1], evicted)
-            self._drop_token_reference(k[0])
-            self.evictions += 1
-        return len(doomed)
+        with self._lock:
+            doomed = [k for k in self._entries if k[0] == token]
+            for k in doomed:
+                evicted = self._entries.pop(k)
+                self._bytes -= _entry_bytes(k[1], evicted)
+                self._release(k[0])
+                self.evictions += 1
+            return len(doomed)
 
     def clear(self) -> None:
-        for token, count in list(self._entries_per_token.items()):
-            for _ in range(count):
-                self._registry.release(token, holder="match")
-        self._entries.clear()
-        self._entries_per_token.clear()
-        self._bytes = 0
-        self.hits = 0
-        self.misses = 0
-        self.bypasses = 0
-        self.bypass_text_too_long = 0
-        self.bypass_too_many_matches = 0
-        self.evictions = 0
+        """Reset this cache to its empty state and end the current epoch.
+
+        Safe to call while other threads are computing: advancing the
+        generation is what stops an in-flight computation publishing a
+        pre-clear result afterwards. It is *not* a barrier -- a computation
+        already in flight still finishes and its caller still receives its
+        (correct, just uncached) result.
+        """
+        with self._lock:
+            self._generation += 1
+            # Hand every reference back rather than dropping the map: the
+            # patterns are the registry's, and a cleared cache that simply
+            # forgot its handles would leak them there forever.
+            for token, count in self._entries_per_token.items():
+                for _ in range(count):
+                    self._registry.release(token, holder="match")
+            self._entries_per_token.clear()
+            self._entries.clear()
+            self._bytes = 0
+            self.hits = 0
+            self.misses = 0
+            self.bypasses = 0
+            self.bypass_text_too_long = 0
+            self.bypass_too_many_matches = 0
+            self.evictions = 0
 
     @property
     def retained_bytes(self) -> int:
-        """Estimated bytes **this cache** retains: keys, subject strings and
-        results. Compiled patterns are deliberately excluded -- they are
-        :class:`_PatternRegistry`'s, charged there once however many entries
-        and callers name them. :func:`cache_statistics` reports both, by
-        owner, so the two are never silently summed as if independent.
+        """Estimated bytes this cache retains, patterns included.
+
+        Covers strictly what this cache owns: entry bookkeeping, subject
+        strings and match results. Compiled patterns are deliberately
+        excluded -- they are :class:`_PatternRegistry`'s, charged there once
+        however many entries and vocabularies name them, which is what makes
+        "charged once" checkable at all. :func:`cache_statistics` reports
+        both, by owner, so the two are never silently summed as if
+        independent.
         """
-        return self._bytes
+        with self._lock:
+            return self._bytes
 
     def __len__(self) -> int:
-        return len(self._entries)
+        with self._lock:
+            return len(self._entries)
 
 
 class _VocabularyCache:
@@ -535,22 +502,17 @@ class _VocabularyCache:
     itself a meaningful share of the cost -- and because two calls with the
     same vocabulary in a different iteration order must reuse one pattern,
     not merely compile to one that happens to be equal.
-
-    Bounded two ways, because an entry count is not a byte budget: 64
-    vocabularies of 3.96M pattern characters each is gigabytes reported as
-    "64". Eviction consults :data:`MAX_PATTERN_BYTES` through the registry
-    as well as :data:`MAX_CACHED_VOCABULARIES`, and always leaves at least
-    one entry so a single oversized vocabulary degrades to "retained while
-    in use" rather than to recompiling on every request.
     """
 
     def __init__(self, registry: _PatternRegistry | None = None) -> None:
+        self._lock = threading.Lock()
+        self._generation = 0
         self._registry = registry if registry is not None else PATTERN_REGISTRY
         self._entries: OrderedDict[frozenset[str], re.Pattern[str] | None] = (
             OrderedDict()
         )
-        #: Parallel map of the registry token held for each cached pattern,
-        #: so eviction releases exactly the reference this cache took.
+        #: The registry token held for each cached pattern, so eviction
+        #: returns exactly the reference this cache took.
         self._tokens: dict[frozenset[str], int] = {}
         self.hits = 0
         self.misses = 0
@@ -562,29 +524,46 @@ class _VocabularyCache:
         spellings: Collection[str],
         compile_fn: Callable[[frozenset[str]], re.Pattern[str] | None],
     ) -> re.Pattern[str] | None:
+        """*spellings*' compiled alternation, compiling it at most once per
+        publication.
+
+        ``compile_fn`` runs **outside** the lock. Compiling a multi-megabyte
+        alternation is the single most expensive thing this module does, and
+        holding a shared lock across it would serialize every release member
+        on one worker's compile -- the opposite of what the surrounding
+        parallelism is for. The cost is that two workers missing on the same
+        vocabulary simultaneously may both compile it; that is **allowed and
+        deliberate**. Publication is then rechecked under the lock and the
+        first publisher wins, so every caller still ends up with *one*
+        pattern object per vocabulary -- which is what keeps the sibling
+        match cache from keying two token streams for one vocabulary.
+        """
         key = frozenset(spellings)
-        with _CACHE_LOCK:
+        with self._lock:
             if key in self._entries:
+                # Membership test, recency update and value read are one
+                # transition: a concurrent eviction between them would turn
+                # a cache hit into a ``KeyError``.
                 self._entries.move_to_end(key)
                 self.hits += 1
                 return self._entries[key]
             self.misses += 1
-        # Compiled outside the lock: building a multi-megabyte alternation
-        # takes seconds, and holding the lock across it would serialize every
-        # other worker's cache *hits* behind one compilation. A concurrent
-        # duplicate compilation of the same vocabulary is the accepted cost --
-        # it is wasted work, never a wrong answer, and the loser's pattern is
-        # dropped below rather than retained beside the winner's.
+            generation = self._generation
         compiled = compile_fn(key)
-        with _CACHE_LOCK:
+        with self._lock:
             self.compilations += 1
-            existing = self._entries.get(key)
-            if existing is not None or key in self._entries:
-                # Another worker compiled the same vocabulary while we did.
-                # Return theirs and let ours be collected, so one vocabulary
-                # is never retained twice.
+            if generation != self._generation:
+                # A ``clear`` ended the lifetime this compile belongs to.
+                # The pattern itself is still correct, so the caller gets
+                # it; it is simply not published into the new epoch.
+                return compiled
+            if key in self._entries:
+                # Another worker published first. Return theirs and let ours
+                # be collected, so one vocabulary is never retained twice --
+                # which is also what keeps the registry from being charged
+                # for a duplicate nobody can reach.
                 self._entries.move_to_end(key)
-                return existing
+                return self._entries[key]
             self._entries[key] = compiled
             if compiled is not None:
                 self._tokens[key] = self._registry.acquire(
@@ -594,6 +573,16 @@ class _VocabularyCache:
             return compiled
 
     def _evict_locked(self) -> None:
+        """Bounded two ways, because an entry count is not a byte budget.
+
+        64 vocabularies of 3.96M pattern characters each is gigabytes
+        reported as a tidy "64", so eviction consults the registry's byte
+        budget as well as :data:`MAX_CACHED_VOCABULARIES`. Always leaves at
+        least one entry, so a single oversized vocabulary degrades to
+        "retained while in use" rather than to recompiling on every request.
+
+        Called with this cache's lock held.
+        """
         while len(self._entries) > 1 and (
             len(self._entries) > MAX_CACHED_VOCABULARIES or self._registry.over_budget()
         ):
@@ -604,20 +593,24 @@ class _VocabularyCache:
             self.evictions += 1
 
     def clear(self) -> None:
-        for token in self._tokens.values():
-            self._registry.release(token, holder="vocabulary")
-        self._entries.clear()
-        self._tokens.clear()
-        self.hits = 0
-        self.misses = 0
-        self.compilations = 0
-        self.evictions = 0
+        """Reset this cache and end the current epoch -- see
+        :meth:`_MatchCache.clear`, whose contract this mirrors."""
+        with self._lock:
+            self._generation += 1
+            for token in self._tokens.values():
+                self._registry.release(token, holder="vocabulary")
+            self._tokens.clear()
+            self._entries.clear()
+            self.hits = 0
+            self.misses = 0
+            self.compilations = 0
+            self.evictions = 0
 
     def __len__(self) -> int:
-        return len(self._entries)
+        with self._lock:
+            return len(self._entries)
 
 
-PATTERN_REGISTRY = _PatternRegistry()
 MATCH_CACHE = _MatchCache()
 VOCABULARY_CACHE = _VocabularyCache()
 
@@ -625,44 +618,47 @@ VOCABULARY_CACHE = _VocabularyCache()
 def cache_statistics() -> dict[str, object]:
     """Every counter these caches keep, **grouped by owner**.
 
-    Deliberately reports ``retained_bytes`` per owner and a ``total``, rather
+    Deliberately reports ``retained_bytes`` per owner and a total, rather
     than one merged number: a pattern's cost belongs to the registry, a
     result's to the match cache, and the working set the matcher's callers
     hold in their own attributes belongs to neither. Summing them as if they
     were independent is how the double-charge this module was redesigned to
     remove got introduced in the first place.
+
+    Each owner is read under its own lock, so every group is internally
+    consistent. The groups are not a single instant of the whole module --
+    that would need all three locks at once, which this module never does.
     """
-    with _CACHE_LOCK:
-        match_total = MATCH_CACHE.hits + MATCH_CACHE.misses
-        return {
-            "match": {
-                "entries": len(MATCH_CACHE),
-                "hits": MATCH_CACHE.hits,
-                "misses": MATCH_CACHE.misses,
-                "hit_rate": (MATCH_CACHE.hits / match_total if match_total else None),
-                "bypasses": MATCH_CACHE.bypasses,
-                "bypass_text_too_long": MATCH_CACHE.bypass_text_too_long,
-                "bypass_too_many_matches": MATCH_CACHE.bypass_too_many_matches,
-                "evictions": MATCH_CACHE.evictions,
-                "retained_bytes": MATCH_CACHE.retained_bytes,
-            },
-            "vocabulary": {
-                "entries": len(VOCABULARY_CACHE),
-                "hits": VOCABULARY_CACHE.hits,
-                "misses": VOCABULARY_CACHE.misses,
-                "compilations": VOCABULARY_CACHE.compilations,
-                "evictions": VOCABULARY_CACHE.evictions,
-            },
-            "patterns": {
-                "held": len(PATTERN_REGISTRY),
-                "registered": PATTERN_REGISTRY.compilations_registered,
-                "released": PATTERN_REGISTRY.evictions,
-                "retained_bytes": PATTERN_REGISTRY.retained_bytes,
-            },
-            "retained_bytes_total": (
-                MATCH_CACHE.retained_bytes + PATTERN_REGISTRY.retained_bytes
-            ),
-        }
+    match_total = MATCH_CACHE.hits + MATCH_CACHE.misses
+    return {
+        "match": {
+            "entries": len(MATCH_CACHE),
+            "hits": MATCH_CACHE.hits,
+            "misses": MATCH_CACHE.misses,
+            "hit_rate": (MATCH_CACHE.hits / match_total if match_total else None),
+            "bypasses": MATCH_CACHE.bypasses,
+            "bypass_text_too_long": MATCH_CACHE.bypass_text_too_long,
+            "bypass_too_many_matches": MATCH_CACHE.bypass_too_many_matches,
+            "evictions": MATCH_CACHE.evictions,
+            "retained_bytes": MATCH_CACHE.retained_bytes,
+        },
+        "vocabulary": {
+            "entries": len(VOCABULARY_CACHE),
+            "hits": VOCABULARY_CACHE.hits,
+            "misses": VOCABULARY_CACHE.misses,
+            "compilations": VOCABULARY_CACHE.compilations,
+            "evictions": VOCABULARY_CACHE.evictions,
+        },
+        "patterns": {
+            "held": len(PATTERN_REGISTRY),
+            "registered": PATTERN_REGISTRY.registrations,
+            "released": PATTERN_REGISTRY.releases,
+            "retained_bytes": PATTERN_REGISTRY.retained_bytes,
+        },
+        "retained_bytes_total": (
+            MATCH_CACHE.retained_bytes + PATTERN_REGISTRY.retained_bytes
+        ),
+    }
 
 
 def matches_for(
@@ -678,40 +674,36 @@ def matches_for(
     iterable of objects exposing ``group()``/``start()``/``end()``; its
     result is normalized into immutable :class:`SpellingMatch` objects
     before being retained, so no :class:`re.Match` ever enters the cache.
-
-    *compute* runs **outside** the lock. It is a pure function of its
-    captured pattern, text and window, so two workers racing on the same key
-    produce equal results and :meth:`_MatchCache.put` keeps the first; doing
-    it under the lock would serialize the very scans the cache exists to let
-    run concurrently.
     """
-    with _CACHE_LOCK:
-        token = MATCH_CACHE.token_for(pattern)
-        if token is not None:
-            cached = MATCH_CACHE.get((token, text, start, end))
-            if cached is not None:
-                return cached
-        else:
-            # Not registered, so there is nothing to hit; count the miss the
-            # same way a registered-but-absent key would.
-            MATCH_CACHE.misses += 1
+    token = MATCH_CACHE.token_for(pattern)
+    key = (token, text, start, end)
+    cached = MATCH_CACHE.get(key)
+    if cached is not None:
+        return cached
+    # Read before computing, published with the result: a ``clear`` that
+    # lands while ``compute`` runs must not have this pre-clear result
+    # appear in the post-clear cache. *compute* runs outside every lock --
+    # it is the regex work this cache exists to avoid, and serializing it
+    # would defeat the release fan-out's parallelism entirely.
+    generation = MATCH_CACHE.generation
     normalized = tuple(
         m
         if isinstance(m, SpellingMatch)
         else SpellingMatch(m.group(0), m.start(), m.end())
         for m in compute()
     )
-    with _CACHE_LOCK:
-        MATCH_CACHE.put(text, start, end, normalized, pattern)
+    MATCH_CACHE.put(key, normalized, pattern, generation=generation)
     return normalized
 
 
 def clear_caches() -> None:
-    """Drop everything all three owners retain. For tests and for a caller
-    that wants to release the working set at a known point (end of a member
-    comparison, say) rather than waiting for a byte budget to force it.
+    """Drop everything both caches retain. For tests and for a caller that
+    wants to release the working set at a known point (end of a member
+    comparison, say) rather than waiting for the byte budget to force it.
     """
-    with _CACHE_LOCK:
-        MATCH_CACHE.clear()
-        VOCABULARY_CACHE.clear()
-        PATTERN_REGISTRY.clear()
+    MATCH_CACHE.clear()
+    VOCABULARY_CACHE.clear()
+    # Both caches returned their references above, so the registry should
+    # already be empty; clearing it is belt-and-braces for a caller that
+    # built its own cache against the shared registry and dropped it.
+    PATTERN_REGISTRY.clear()
