@@ -14,23 +14,108 @@ establish. Read the scope section before quoting any number here.
 | Platform | Linux 6.18.44 x86-64, glibc 2.39 |
 | CPUs | 4 |
 | RAM | 15 GiB total, ~13 GiB available; no cgroup memory limit present |
-| oneDAL artifacts | **Not available.** `/mnt/cached_oses/napetrov/tmp-abi/l2b6/` does not exist in this environment, and no equivalent tree was locatable. |
+| oneDAL artifacts | **Obtained.** The supplied tree was absent, so real oneDAL was assembled from PyPI wheels: `daal` 2025.0.0 (OLD) vs 2025.11.0 (NEW) runtime libraries plus the matching `daal-include` headers. Six matched members, ~400 headers per side. See "Header scope" below for the twelve headers that cannot be parsed from the *published* package at all. |
 
-**Real oneDAL acceptance is therefore PENDING, not achieved.** Nothing here
-is a "fixed oneDAL memory" or "fixed oneDAL wall time" claim. The
-six-member release comparison peaks near 19 GiB, which this 15 GiB,
-4-CPU host cannot run at all, so no before/after table for the complete
-`leg`/`DIR` workloads could be produced. The oneDAL figures quoted below
-(hit rates, bypass counts, matching seconds, pattern character counts) are
-the **supplied** measurements from the user's machine, used to identify and
-size the defect; every figure attributed to *this* host is labelled as such
-and is synthetic.
+**Real oneDAL acceptance: measured. Partly met.** A complete six-member
+comparison now runs on this host and was measured at both revisions with the
+identical command, the identical header tree and a cold cache each time.
+
+| | BASE `950efbc64` | HEAD `2228aad` | delta |
+|---|---|---|---|
+| wall | 4974.68 s | 3990.30 s | **-984.4 s, -19.8%** |
+| CPU | 5177.81 s | 4172.34 s | -1005.5 s, -19.4% |
+| parent peak RSS | 7077.8 MiB | 7109.0 MiB | +31.2 MiB, +0.4% |
+| process-tree peak RSS (summed) | 30955.6 MiB | 31078.4 MiB | +122.8 MiB, +0.4% |
+| members completed | 6 of 6 | 6 of 6 | - |
+| raw detections per member | 18715 / 115379 / 118987 / 928 / 1002 / 857 | **identical** | 0 |
+| gating findings per member | 8774 / 76067 / 50189 / 287 / 289 / 248 | **identical** | 0 |
+
+The raw harness output for both runs is committed beside this file as
+`onedal-six-member-receipt.json`, so the numbers above can be checked
+against what was actually recorded rather than retyped.
+
+Read that table with four qualifications, none of which are rounded away:
+
+* **Wall time is -19.8%, which is *under* the >=20% target.** It is not
+  "about 20%" and not "over 20%".
+* **Memory did not improve.** +0.4% is noise in both directions; the <=12 GiB
+  budget is *not* met at either revision. Nothing here is a "fixed oneDAL
+  memory" claim -- that target remains open, and the parent/tree split below
+  is why the two numbers must not be conflated.
+* The tree figure is **summed** RSS across the process tree, which
+  double-counts shared pages and is therefore an upper bound, not the
+  footprint. PSS was not collected on these runs; `memory_trace` is the
+  owner of that distinction and a traced run is the way to get it.
+* **One run per revision.** The wall delta carries unmeasured variance. The
+  one asymmetry present favours the *base*: the HEAD run was measured with
+  py-spy attached for 120 s at 50 Hz and with unrelated benchmark work
+  running concurrently, while the base run had the host nearly to itself.
+  Both inflate HEAD's time, so -19.8% is a conservative reading.
+
+What the table does establish, and what the whole change was for: **the
+findings are identical member for member**, raw and gating alike. No
+evidence depth, member coverage or finding was traded for the time saved.
+
+### Where the remaining time goes
+
+Profiled on the live HEAD run (py-spy, 6628 samples over 120 s at 50 Hz):
+
+| share of CPU | frame |
+|---|---|
+| **69.21%** | `finditer_allow_nested` (`compare/spelling_pattern.py:251`) |
+| 7.54% | `realpath` (`posixpath`) |
+| 2.13% | `_worker` (`concurrent/futures/thread.py`) |
+
+reached through exactly one path:
+
+```
+scope_snapshot_excluding_dependencies   (dumper_scoping.py:1313)
+  _directly_referenced_dependency_names (dumper_scoping.py:878)
+    _referenced_from_haystack           (dumper_scoping.py:657)
+      spelling_matches                  (spelling_pattern.py:173)
+        matches_for                     (spelling_match_cache.py:747)
+          finditer_allow_nested         (spelling_pattern.py:251)
+```
+
+Time spent *inside* `finditer_allow_nested` is by construction a cache
+**miss** -- a hit returns stored results without calling it. So after this
+change the cost is no longer re-doing work the cache refused to keep; it is
+the volume of genuinely distinct lookups multiplied by the per-lookup cost
+of scanning one giant alternation. That is the matcher-scaling question, and
+the indexed-scan prototype measured in this document is the lever for it --
+still declined, for the reason recorded there: its divergences expose a
+pre-existing under-report whose correction changes findings, which is a
+behaviour change that needs its own decision rather than riding a
+performance PR.
+
+Caution for anyone re-profiling this: five *point* samples taken before the
+aggregate pointed at header-graph construction instead, and reading them as
+the answer produced exactly the wrong conclusion. Take the aggregate.
+
+### Header scope
+
+Twelve headers are excluded from both sides. Each is unparseable from the
+*published* oneDAL package by any tool, not merely by this one, and the
+exclusion is symmetric so no deliberately retired declaration is
+manufactured into a missing export:
+
+| class | headers |
+|---|---|
+| External connectors | Arrow, ODBC (x2), kdb (x2), the `data_source/modifiers/sql/` tree and `mysql_feature_manager.h` that depend on them |
+| Needs oneMKL SYCL headers and `icpx` | `services/internal/sycl/**` |
+| Include `daal/src/...` build-tree headers the package does not ship | `cpu_info_x86_impl.hpp`, `detail/dispatcher.hpp`, `detail/singleton.hpp`, `detail/profiler.hpp`, and nine `oneapi/dal/backend/*` dependents |
+| Architecture-guarded, never compiled on x86 | `cpu_info_arm_impl.hpp`, `cpu_info_riscv64_impl.hpp` |
+| Optional MPI dependency | `detail/mpi/communicator.hpp`, `spmd/mpi/communicator.hpp` |
 
 The functional workstream's MATCH_CACHE/VOCABULARY_CACHE thread-safety
-patch was **not available** — remote `main` is identical to the last
-inspected revision and the repository has no open pull requests. The
-integration dependency is stated explicitly in
-`abicheck/compare/spelling_match_cache.py`'s `_CACHE_LOCK`.
+patch has since landed (#1336) and **is integrated**, not stacked
+alongside: this branch was rebuilt on that file as the base and three of
+this work's own earlier decisions — a single global cache lock, monotonic
+tokens, and its own `clear()` semantics — were surrendered in favour of
+#1336's, so there is one locking design rather than two. Its invariants and
+tests are preserved; the per-cache locks, generation counters and lock
+order documented in `spelling_match_cache.py` are that patch's, extended to
+the pattern registry as the innermost lock.
 
 ## The defect
 

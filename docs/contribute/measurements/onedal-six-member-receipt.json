@@ -1,0 +1,47 @@
+{
+  "workload": "oneDAL 2025.0.0 -> 2025.11.0, six matched members, L2 (binary + headers)",
+  "command": "abicheck compare <old>/lib <new>/lib --header old=<old>/include --header new=<new>/include -I ... -o json=...",
+  "cold_cache": true,
+  "runs_per_revision": 1,
+  "findings_identical_across_revisions": true,
+  "raw_detected_per_member": [
+    18715,
+    115379,
+    118987,
+    928,
+    1002,
+    857
+  ],
+  "gating_per_member": [
+    8774,
+    76067,
+    50189,
+    287,
+    289,
+    248
+  ],
+  "caveats": [
+    "tree_peak_rss_mib is SUMMED RSS across the process tree and double-counts shared pages; it is an upper bound, not the footprint. PSS was not collected.",
+    "One run per revision; the wall delta carries unmeasured variance.",
+    "The HEAD run was measured with py-spy attached (120 s at 50 Hz) and unrelated benchmark work running concurrently; the base run had the host nearly to itself. Both inflate HEAD's time, so the wall reduction is a conservative reading.",
+    "Twelve headers are excluded from BOTH sides; each is unparseable from the published oneDAL package by any tool. See spelling-cache-admission.md's 'Header scope'."
+  ],
+  "metrics": {
+    "base_950efbc64": {
+      "label": "BASE-950efbc64",
+      "exit_code": 4,
+      "wall_seconds": 4974.68,
+      "cpu_seconds": 5177.81,
+      "peak_rss_mib": 7077.8,
+      "tree_peak_rss_mib": 30955.6
+    },
+    "head_2228aad": {
+      "label": "HEAD-2228aad",
+      "exit_code": 4,
+      "wall_seconds": 3990.3,
+      "cpu_seconds": 4172.34,
+      "peak_rss_mib": 7109.0,
+      "tree_peak_rss_mib": 31078.4
+    }
+  }
+}
