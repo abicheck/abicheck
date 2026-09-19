@@ -422,3 +422,71 @@ class TestThePatternEstimatorTracksRealPatterns:
         assert pattern is not None
         measured = sys.getsizeof(pattern) + sys.getsizeof(pattern.pattern)
         assert _pattern_bytes(pattern) <= measured * 4
+
+
+class TestClearReturnsExactlyTheHandlesItTook:
+    """One handle per token, so one release per token — not one per entry.
+
+    **Bug class.** Acquire and release counted in different units. ``_retain``
+    takes a single registry handle when a token's *first* entry arrives, while
+    ``_entries_per_token`` counts *entries*; a ``clear`` that released per
+    entry therefore returned handles it never took.
+
+    Invisible on the production path, which has exactly one ``_MatchCache``:
+    the registry floors its counts at zero, so the surplus releases are
+    absorbed. It becomes real corruption the moment two caches share a
+    registry — the surplus consumes the *other* cache's handle and frees a
+    pattern that cache still has entries for. That is also precisely the
+    configuration these tests use, which is why the invariant is asserted
+    here rather than left to the single-cache case that cannot show it.
+
+    **General invariant**: for any distribution of entries over tokens, and
+    for any number of caches sharing one registry, clearing one cache leaves
+    every *other* cache's tokens still held. Swept over entry counts on both
+    sides, since the defect only appears once a cache holds more than one
+    entry for a token.
+    """
+
+    @pytest.mark.parametrize("entries_in_a", [1, 2, 5])
+    @pytest.mark.parametrize("entries_in_b", [1, 3])
+    def test_clearing_one_cache_leaves_another_cache_s_pattern_held(
+        self, entries_in_a, entries_in_b
+    ) -> None:
+        registry = _PatternRegistry()
+        first = _MatchCache(registry)
+        second = _MatchCache(registry)
+        pattern = _pattern(16)
+        token = first.token_for(pattern)
+        for i in range(entries_in_a):
+            first.put((token, f"a{i}", 0, 1), _match(), pattern)
+        for i in range(entries_in_b):
+            second.put((token, f"b{i}", 0, 1), _match(), pattern)
+
+        # One handle each, however many entries each holds.
+        assert registry.reference_counts()[token] == (0, 2)
+
+        first.clear()
+        assert len(second) == entries_in_b, "the other cache lost entries"
+        assert registry.is_held(token), (
+            "clearing one cache freed a pattern the other still has entries for"
+        )
+        assert registry.reference_counts()[token] == (0, 1)
+
+        second.clear()
+        assert not registry.is_held(token), "the last handle was never returned"
+
+    def test_clear_is_idempotent_against_the_registry(self) -> None:
+        """Vacuity guard: a `clear` that released *nothing* would also pass
+        the assertions above, and would leak instead. Clearing twice must
+        return the handles once and then do nothing."""
+        registry = _PatternRegistry()
+        cache = _MatchCache(registry)
+        pattern = _pattern(16)
+        token = cache.token_for(pattern)
+        for i in range(4):
+            cache.put((token, f"t{i}", 0, 1), _match(), pattern)
+        assert registry.is_held(token)
+        cache.clear()
+        assert not registry.is_held(token), "clear did not return its handle"
+        cache.clear()
+        assert len(registry) == 0

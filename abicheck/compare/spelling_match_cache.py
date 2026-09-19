@@ -461,9 +461,15 @@ class _MatchCache:
             # Hand every reference back rather than dropping the map: the
             # patterns are the registry's, and a cleared cache that simply
             # forgot its handles would leak them there forever.
-            for token, count in self._entries_per_token.items():
-                for _ in range(count):
-                    self._registry.release(token, holder="match")
+            #
+            # Exactly **one** release per token, not one per entry: ``_retain``
+            # takes a single handle when a token's first entry arrives, and
+            # ``_entries_per_token`` counts entries, not handles. Releasing per
+            # entry over-returns, and with two caches sharing one registry that
+            # consumes the *other* cache's handle and frees a pattern it still
+            # has entries for.
+            for token in self._entries_per_token:
+                self._registry.release(token, holder="match")
             self._entries_per_token.clear()
             self._entries.clear()
             self._bytes = 0
