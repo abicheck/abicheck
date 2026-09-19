@@ -50,6 +50,7 @@ from abicheck.model.symbol_inventory import build_symbol_inventory
 from abicheck.workflows.release_snapshot_retention import (
     SnapshotRetention,
     release_junit_pairs,
+    release_old_snapshot_pairs,
     resolve_snapshot_retention,
     stash_member_evidence,
 )
@@ -517,3 +518,87 @@ class TestStashMemberEvidence:
         assert sorted(by_kind) == ["counts", "sample"], members
         assert by_kind["counts"]["counts"]["library"] == "fallback-key"
         assert by_kind["sample"]["attrs"]["library"] == "fallback-key"
+
+
+class TestBaselinePairRecovery:
+    """``release_old_snapshot_pairs`` -- the ``--bundle-facts-out`` operand.
+
+    Deliberately a *separate* list from the one JUnit gets: a baseline
+    document cannot be reconstructed from the compact inventory, so the
+    two consumers must never be served from one collection. These state
+    that separation executably, since nothing else in the suite covered
+    this function at all.
+    """
+
+    def _entry(self, library="libfoo.so", **extra):
+        entry: dict[str, object] = {"library": library}
+        entry.update(extra)
+        return entry
+
+    def _pair_parts(self):
+        old = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(name="f", mangled="_Z1fv", return_type="void"),
+            ],
+        )
+        diff = DiffResult(library="libfoo.so", old_version="1.0", new_version="2.0")
+        return diff, old
+
+    def test_it_returns_the_full_snapshot_not_an_inventory(self):
+        diff, old = self._pair_parts()
+        pairs = release_old_snapshot_pairs(
+            [self._entry(_diff_result=diff, _old_snapshot=old)]
+        )
+        assert pairs == [(diff, old)]
+        assert pairs[0][1] is old
+        assert isinstance(pairs[0][1], AbiSnapshot)
+
+    def test_a_member_with_only_an_inventory_contributes_no_pair(self):
+        """The separation, stated: a JUnit-only run retains no snapshot,
+        so the baseline writer gets nothing from it and falls back to
+        ``old_map`` rather than silently persisting a partial baseline."""
+        diff, old = self._pair_parts()
+        entry = self._entry(_diff_result=diff)
+        stash_member_evidence(
+            entry, "libfoo.so", old, old, resolve_snapshot_retention(junit=True)
+        )
+        assert release_old_snapshot_pairs([entry]) == []
+        assert release_junit_pairs([entry]) != []
+
+    def test_a_bundle_facts_run_yields_a_pair_for_every_member(self):
+        diff, old = self._pair_parts()
+        entries = []
+        for i in range(6):
+            entry = self._entry(library=f"lib{i}.so", _diff_result=diff)
+            stash_member_evidence(
+                entry,
+                f"lib{i}.so",
+                old,
+                old,
+                resolve_snapshot_retention(bundle_facts_out=True),
+            )
+            entries.append(entry)
+        assert len(release_old_snapshot_pairs(entries)) == 6
+
+    def test_a_member_whose_comparison_failed_contributes_no_pair(self):
+        _diff, old = self._pair_parts()
+        assert release_old_snapshot_pairs([self._entry(_old_snapshot=old)]) == []
+        assert release_old_snapshot_pairs([self._entry()]) == []
+        assert release_old_snapshot_pairs([]) == []
+
+    def test_both_consumers_can_be_served_from_one_run(self):
+        """JUnit still gets the inventory even when the snapshot is kept,
+        so the two never disagree about which projection JUnit rendered."""
+        diff, old = self._pair_parts()
+        entry = self._entry(_diff_result=diff)
+        stash_member_evidence(
+            entry,
+            "libfoo.so",
+            old,
+            old,
+            resolve_snapshot_retention(junit=True, bundle_facts_out=True),
+        )
+        assert release_old_snapshot_pairs([entry]) == [(diff, old)]
+        assert release_junit_pairs([entry]) == [(diff, build_symbol_inventory(old))]

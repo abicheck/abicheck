@@ -294,3 +294,63 @@ class TestFailureLeavesTheDestinationIntact:
                 decoded_size=999,
             )
         assert not dest.exists()
+
+
+class TestUnsupportedEnvelope:
+    def test_an_unencodable_compression_is_refused(self):
+        """Mirrors ``snapshot_io.encode_snapshot_bytes``'s own refusal.
+
+        Eagerly, at the call: ``encode_chunks`` *returns* a generator but
+        is not itself one, so an unusable envelope is rejected before any
+        fragment is pulled from the producer -- rather than after the
+        caller has already opened a destination file.
+        """
+
+        class _NotACompression:
+            def __repr__(self) -> str:
+                return "<bogus>"
+
+        with pytest.raises(SnapshotError, match="Cannot encode"):
+            encode_chunks(iter([b"x"]), _NotACompression())  # type: ignore[arg-type]
+
+    def test_the_refusal_happens_before_the_producer_is_touched(self):
+        """The fail-fast property stated as its own claim."""
+        pulled = []
+
+        def source():
+            pulled.append(1)
+            yield b"x"
+
+        with pytest.raises(SnapshotError):
+            encode_chunks(source(), "not-a-compression")  # type: ignore[arg-type]
+        assert pulled == []
+
+
+class TestEmptyFragments:
+    """An empty fragment is legal input and must not disturb the frame.
+
+    ``json_stream`` can legitimately yield an empty piece, and a producer
+    that does so must not change a byte of the output or corrupt gzip's
+    CRC/ISIZE trailer -- so the claim is *equality with the same stream
+    minus the empties*, not merely "it did not crash".
+    """
+
+    @pytest.mark.parametrize("algorithm", ALGORITHMS)
+    def test_empty_fragments_change_nothing(self, algorithm):
+        real = [b"alpha", b"beta", b"gamma" * 5000]
+        padded = [b"", real[0], b"", b"", real[1], real[2], b""]
+        kwargs = {"decoded_size": sum(len(c) for c in real)}
+        if algorithm is not SnapshotCompression.ZSTD:
+            kwargs = {}
+        with_empties = b"".join(encode_chunks(iter(padded), algorithm, **kwargs))
+        without = b"".join(encode_chunks(iter(real), algorithm, **kwargs))
+        assert with_empties == without
+
+    @pytest.mark.parametrize("algorithm", ALGORITHMS)
+    def test_an_all_empty_stream_still_produces_a_valid_empty_document(
+        self, tmp_path, algorithm
+    ):
+        dest = tmp_path / f"empty{SUFFIX[algorithm]}"
+        result = write_snapshot_text_stream(["", "", ""], dest, compression=algorithm)
+        assert result.decoded_size_bytes == 0
+        assert read_snapshot_bytes(dest) == b""

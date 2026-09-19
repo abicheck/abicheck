@@ -750,7 +750,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "docstring recording that retention named a *fifth* consumer "
             "(declaration locations) that did not exist."
         ),
-        fixed_by=(),
+        fixed_by=(1334,),
         seed_tests=(
             "tests/test_junit_symbol_inventory.py",
             "tests/test_release_snapshot_retention.py",
@@ -799,7 +799,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "compressed baseline still peaked at the whole document plus "
             "its whole encoded copy."
         ),
-        fixed_by=(),
+        fixed_by=(1334,),
         seed_tests=("tests/test_incremental_compression.py",),
         public_surfaces=("cli", "python-api"),
         axes={

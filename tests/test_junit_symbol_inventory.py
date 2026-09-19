@@ -133,6 +133,15 @@ class TestProjection:
         inv = SymbolInventory(functions=("dup",), types=("dup",))
         assert inv.as_symbol_map() == {"dup": "functions"}
 
+    def test_len_counts_the_distinct_symbol_names(self):
+        """``len`` is the pass-rate denominator's size, so it counts the
+        *map*, not the sum of the four tuples: a name appearing in two
+        categories is one test case, not two."""
+        inv = build_symbol_inventory(_snapshot(12))
+        assert len(inv) == len(inv.as_symbol_map()) == 12 + 6 + 4 + 3
+        assert len(SymbolInventory()) == 0
+        assert len(SymbolInventory(functions=("dup",), types=("dup",))) == 1
+
     def test_an_empty_snapshot_projects_to_an_empty_inventory(self):
         inv = build_symbol_inventory(AbiSnapshot(library="libempty.so", version="1.0"))
         assert inv == SymbolInventory()
@@ -166,20 +175,44 @@ class TestRetention:
             assert all(n.__class__ is str for n in names)
 
     def test_no_snapshot_is_reachable_from_the_inventory(self):
-        import gc
+        """The inventory's payload is strings and containers of strings.
 
-        snap = _snapshot(12)
-        inv = build_symbol_inventory(snap)
-        seen, stack = set(), [inv]
-        while stack:
-            o = stack.pop()
-            if id(o) in seen:
+        Walks the *payload* -- the four field values and any containers
+        inside them -- and never the instance itself, because an earlier
+        version of this test did the latter and was unsound. Transitive
+        ``gc.get_referents`` from a dataclass instance escapes the object
+        almost immediately: the instance refers to its class, a class
+        refers to its methods, and a method refers to its ``__globals__``
+        -- the whole module namespace, and from there effectively the
+        entire heap. It passed locally and failed on CI against a
+        ``RecordType`` named ``Payload`` that *no fixture here creates*,
+        which is the tell: the assertion was reporting on whatever else
+        happened to be resident in the interpreter, not on the inventory.
+        A test whose result depends on unrelated tests is worse than no
+        test, since it fails somewhere far from its cause.
+
+        Bounding the walk to containers states the real claim exactly and
+        makes it deterministic.
+        """
+        inv = build_symbol_inventory(_snapshot(12))
+        pending: list[object] = [inv.functions, inv.variables, inv.types, inv.enums]
+        seen: set[int] = set()
+        leaves: list[object] = []
+        while pending:
+            obj = pending.pop()
+            if id(obj) in seen:
                 continue
-            seen.add(id(o))
-            assert not isinstance(
-                o, (AbiSnapshot, Function, Variable, RecordType, EnumType)
-            )
-            stack.extend(gc.get_referents(o))
+            seen.add(id(obj))
+            if isinstance(obj, (tuple, list, set, frozenset)):
+                pending.extend(obj)
+            elif isinstance(obj, dict):
+                pending.extend(obj.keys())
+                pending.extend(obj.values())
+            else:
+                leaves.append(obj)
+        assert leaves, "nothing was walked -- the guard would be vacuous"
+        offenders = [o for o in leaves if o.__class__ is not str]
+        assert not offenders, f"non-str payload reachable: {offenders[:3]}"
 
     def test_it_is_immutable(self):
         """Frozen, and named exactly: a bare ``Exception`` here would pass

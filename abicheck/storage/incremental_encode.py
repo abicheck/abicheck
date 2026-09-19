@@ -75,13 +75,23 @@ _GZIP_XFL_MAX_COMPRESSION = 2
 _GZIP_OS_UNKNOWN = 0xFF
 
 
-def _gzip_header(level: int) -> bytes:
-    xfl = _GZIP_XFL_MAX_COMPRESSION if level >= 9 else (4 if level == 1 else 0)
-    return struct.pack("<BBBBIBB", 0x1F, 0x8B, 8, 0, 0, xfl, _GZIP_OS_UNKNOWN)
+def _gzip_header() -> bytes:
+    """The 10-byte gzip member header, every field pinned.
+
+    Takes no level: :data:`GZIP_COMPRESSLEVEL` is the only level this
+    module (or :func:`snapshot_io._compress_gzip`) ever uses, so the
+    XFL byte is constant. An earlier revision computed XFL from a
+    ``level`` parameter, which added two branches no caller could reach
+    -- speculative generality that could only ever be covered by a test
+    written to reach dead code.
+    """
+    return struct.pack(
+        "<BBBBIBB", 0x1F, 0x8B, 8, 0, 0, _GZIP_XFL_MAX_COMPRESSION, _GZIP_OS_UNKNOWN
+    )
 
 
 def _gzip_chunks(chunks: Iterable[bytes], *, level: int) -> Iterator[bytes]:
-    yield _gzip_header(level)
+    yield _gzip_header()
     compressor = zlib.compressobj(level, zlib.DEFLATED, -zlib.MAX_WBITS)
     crc = 0
     size = 0
@@ -93,9 +103,10 @@ def _gzip_chunks(chunks: Iterable[bytes], *, level: int) -> Iterator[bytes]:
         out = compressor.compress(chunk)
         if out:
             yield out
-    tail = compressor.flush()
-    if tail:
-        yield tail
+    # No `if tail:` guard: `flush()` always returns the final deflate
+    # block, and an empty buffer would be a harmless no-op for the writer
+    # anyway -- so the guard was an unreachable branch, not a safeguard.
+    yield compressor.flush()
     # ISIZE is the decoded length modulo 2**32 -- the format's own field
     # width, not a truncation this code chose.
     yield struct.pack("<II", crc & 0xFFFFFFFF, size & 0xFFFFFFFF)
