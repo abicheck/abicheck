@@ -602,8 +602,14 @@ class _VocabularyCache:
         "retained while in use" rather than to recompiling on every request.
 
         Called with this cache's lock held. Returns the tokens it retired,
-        for the caller to hand to :meth:`_retire_tokens` *after* releasing
-        the lock -- see there for why the notification cannot happen here.
+        for the caller to hand to :meth:`_retire_tokens` **while still
+        holding that lock** -- retirement has to be atomic with publication,
+        or a recycled ``id()`` lets a stale drop delete a live entry. See
+        :meth:`_retire_tokens` for the full account and the lock order.
+
+        An earlier revision said "after releasing the lock" here and meant
+        it; that wording is what this note replaces, because leaving it
+        would licence a future change straight back into the defect.
         """
         retired: list[int] = []
         while len(self._entries) > 1 and (
