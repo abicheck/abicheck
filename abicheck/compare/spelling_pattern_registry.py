@@ -41,8 +41,15 @@ from __future__ import annotations
 
 import re
 import threading
+from typing import Literal
 
-__all__ = ["MAX_PATTERN_BYTES", "PATTERN_REGISTRY", "_PatternRegistry"]
+__all__ = ["MAX_PATTERN_BYTES", "PATTERN_REGISTRY", "Holder", "_PatternRegistry"]
+
+#: The two kinds of reference a pattern can carry. They are counted
+#: separately -- ``reference_counts()`` reports each, so a leak can be
+#: attributed to the cache that holds it -- so a typo in a *holder* string
+#: would silently decrement nothing rather than raise.
+Holder = Literal["vocabulary", "match"]
 
 # The *pattern owner's* budget, and the one an entry count alone could never
 # express: 64 vocabularies is 64 patterns of any size, and the vocabularies a
@@ -116,7 +123,7 @@ class _PatternRegistry:
         self.registrations = 0
         self.releases = 0
 
-    def acquire(self, pattern: re.Pattern[str], *, holder: str) -> int:
+    def acquire(self, pattern: re.Pattern[str], *, holder: Holder) -> int:
         """Take a *holder* (``"vocabulary"`` or ``"match"``) reference on
         *pattern*, registering it on first use, and return its token."""
         token = id(pattern)
@@ -141,7 +148,7 @@ class _PatternRegistry:
             self._held[token] = (held, size, vocab_refs, match_refs)
             return token
 
-    def release(self, token: int, *, holder: str) -> None:
+    def release(self, token: int, *, holder: Holder) -> None:
         """Drop a *holder* reference, freeing the pattern when none remain."""
         with self._lock:
             entry = self._held.get(token)

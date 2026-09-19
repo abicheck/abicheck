@@ -125,7 +125,9 @@ strength of a synthetic repetition factor.
 
 `workflows/release_jobs.py` already does the right shape of thing: one
 coordinator, probed once at pool-sizing time (never per worker), floored at
-one, and bypassed by an explicit `--jobs`. The supplied `224 -> 94`
+one, and bypassed by an explicit non-zero `jobs` argument — which no CLI
+flag can supply, since ADR-068 D5 removed `--jobs` and the CLI always passes
+`jobs=0`. The supplied `224 -> 94`
 admission was therefore inert for a six-member release — six members is far
 under 94, so all six ran concurrently at a measured ~2.5–3 GiB each.
 
@@ -137,7 +139,7 @@ threads are largely not buying parallelism — but **that is a hypothesis,
 not a measurement**, and calibrating a per-member budget against a guessed
 peak is exactly the "raise the budget until one benchmark passes" failure.
 
-`scripts/bench_release_memory.py --jobs` now runs the sweep over one
+`scripts/bench_release_memory.py --job-mem-gib` now runs the sweep over one
 unchanged workload; the numbers it needs are the real per-member peaks,
 which require the oneDAL inputs.
 

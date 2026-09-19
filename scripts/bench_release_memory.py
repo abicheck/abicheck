@@ -61,6 +61,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 #: Env-var names, spelled here rather than imported. This harness is
@@ -345,6 +346,65 @@ VARIANTS: dict[str, object] = {
 }
 
 
+#: Every environment variable this harness *controls*. A variable named here
+#: is a pure function of `variant_env`'s arguments: if the arguments do not
+#: set it, it is removed rather than inherited from the harness's own
+#: environment. That is the whole rule, and it exists because the receipt
+#: records the arguments -- so an inherited value makes the receipt describe a
+#: run that did not happen. A sweep's unconstrained arm would silently run
+#: under an ambient `ABICHECK_RELEASE_JOB_MEM_GIB`, and every worker count in
+#: the sweep would then be attributed to the wrong setting; an ambient
+#: `ABICHECK_CACHE_DIR` makes a run labelled cold warm. An explicit
+#: `env_extra` entry is the caller stating the value by another route and is
+#: always preserved.
+CONTROLLED_ENV_VARS = (
+    "ABICHECK_RELEASE_JOB_MEM_GIB",
+    "ABICHECK_CACHE_DIR",
+    ENV_TRACE_PATH,
+    ENV_TRACEMALLOC,
+)
+
+
+def variant_env(
+    base: Mapping[str, str],
+    *,
+    env_extra: Mapping[str, str] | None,
+    job_mem_gib: float | None,
+    trace: Path | None,
+    tracemalloc: bool,
+    cache_dir: Path | None,
+) -> dict[str, str]:
+    """Build a variant run's environment from *base* plus the arguments.
+
+    Pure, so the one rule `CONTROLLED_ENV_VARS` states can be checked
+    directly rather than inferred from a subprocess's behaviour.
+    """
+    env = dict(base)
+    env.update(env_extra or {})
+    settings: dict[str, str | None] = {
+        # The worker sweep goes through the per-worker memory budget, which
+        # is the admission path's own documented lever
+        # (`workflows/release_jobs.release_job_mem_budget_gib`). There is no
+        # `compare --jobs`: ADR-068 D5 removed `-j`/`--jobs` outright and the
+        # CLI always passes `jobs=0`, so forwarding one would fail the run
+        # with "No such option" before anything was compared. Driving the
+        # budget instead also exercises the real clamp rather than bypassing
+        # it, which an explicit `jobs` would have done by design.
+        "ABICHECK_RELEASE_JOB_MEM_GIB": (
+            None if job_mem_gib is None else str(job_mem_gib)
+        ),
+        "ABICHECK_CACHE_DIR": None if cache_dir is None else str(cache_dir),
+        ENV_TRACE_PATH: None if trace is None else str(trace),
+        ENV_TRACEMALLOC: "1" if trace is not None and tracemalloc else None,
+    }
+    for key, value in settings.items():
+        if value is not None:
+            env[key] = value
+        elif key not in (env_extra or {}):
+            env.pop(key, None)
+    return env
+
+
 def run_variant(
     root: Path,
     name: str,
@@ -371,27 +431,14 @@ def run_variant(
     ]
     args += VARIANTS[name](out)  # type: ignore[operator]
 
-    env = dict(os.environ)
-    env.update(env_extra or {})
-    if job_mem_gib is not None:
-        # The worker sweep goes through the per-worker memory budget, which
-        # is the admission path's own documented lever
-        # (`workflows/release_jobs.release_job_mem_budget_gib`). There is no
-        # `compare --jobs`: ADR-068 D5 removed `-j`/`--jobs` outright and the
-        # CLI always passes `jobs=0`, so forwarding one would fail the run
-        # with "No such option" before anything was compared. Driving the
-        # budget instead also exercises the real clamp rather than bypassing
-        # it, which an explicit `jobs` would have done by design.
-        env["ABICHECK_RELEASE_JOB_MEM_GIB"] = str(job_mem_gib)
-    if trace is not None:
-        env[ENV_TRACE_PATH] = str(trace)
-        if tracemalloc:
-            env[ENV_TRACEMALLOC] = "1"
-    else:
-        env.pop(ENV_TRACE_PATH, None)
-        env.pop(ENV_TRACEMALLOC, None)
-    if cache_dir is not None:
-        env["ABICHECK_CACHE_DIR"] = str(cache_dir)
+    env = variant_env(
+        os.environ,
+        env_extra=env_extra,
+        job_mem_gib=job_mem_gib,
+        trace=trace,
+        tracemalloc=tracemalloc,
+        cache_dir=cache_dir,
+    )
 
     started = time.monotonic()
     proc = subprocess.Popen(
