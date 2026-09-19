@@ -51,8 +51,10 @@ from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
 from .frontends.cli.release_exit import _exit_compare_release as _exit_compare_release
 from .model import AbiSnapshot
 from .model.release_surface import ReleasePublicSurface
+from .model.symbol_inventory import SymbolInventory
 from .report import release_change_inventory as _inventory
 from .report.comparison_scope import ComparisonScopeTerms, comparison_scope_terms
+from .report.junit_inventory import JunitOldOperand
 from .report.release_assurance import ReleaseAssuranceTerms, release_assurance_terms
 from .report.release_public_surface import (
     ReleasePublicSurfaceTerms,
@@ -513,9 +515,9 @@ def write_bundle_facts_out(
     to *bundle_facts_out* as a :class:`~abicheck.model.bundle_facts.BundleFacts`
     file (G38 Phase 2's ``--bundle-facts-out`` producer).
 
-    *diff_pairs* is ``_compare_release_libraries``'s own
-    ``(DiffResult, old_snapshot)`` collection -- the caller must have
-    passed ``collect_diff_results=True`` for it to be populated.
+    *diff_pairs* is ``release_old_snapshot_pairs(library_results)``, never
+    the ``diff_pairs`` the same fan-out hands JUnit -- that one carries the
+    compact ``SymbolInventory``, which cannot reconstruct a baseline.
     *old_map* is ``_match_release_keys``'s own map: every key is the
     **canonical** release-matching key
     (``_canonical_library_key()`` -- e.g. ``libfoo.so`` for a discovered
@@ -939,7 +941,7 @@ def _format_release_summary(
     old_map: dict[str, Path],
     new_map: dict[str, Path],
     warning_msgs: list[str],
-    diff_pairs: list[tuple[DiffResult, AbiSnapshot]] | None = None,
+    diff_pairs: list[tuple[DiffResult, SymbolInventory]] | None = None,
     bundle_result: BundleDiffResult | None = None,
     matrix_result: DiffResult | None = None,
     severity_config: SeverityConfig | None = None,
@@ -1094,7 +1096,7 @@ def _format_release_summary(
 
 
 def _format_release_junit(
-    diff_pairs: list[tuple[DiffResult, AbiSnapshot]] | None,
+    diff_pairs: list[tuple[DiffResult, SymbolInventory]] | None,
     matrix_result: DiffResult | None,
     library_results: list[dict[str, object]],
     *,
@@ -1174,7 +1176,7 @@ def _format_release_junit(
     """
     from .junit_report import to_junit_xml_multi
 
-    pairs: list[tuple[DiffResult, AbiSnapshot | None]] = list(diff_pairs or [])
+    pairs: list[tuple[DiffResult, JunitOldOperand]] = list(diff_pairs or [])
     # Release-global matrix findings ride in as their own synthetic
     # testsuite so CI dashboards reading the JUnit report see the failure.
     if matrix_result is not None:

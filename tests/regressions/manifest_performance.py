@@ -686,6 +686,11 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_release_snapshot_retention.py",
             "tests/test_compare_release_contract_coverage.py",
+            # The same class, one consumer further: JUnit was resolved as
+            # an OLD-side full-snapshot consumer without anyone checking
+            # what it read, which was four attributes. See
+            # `perf.a_whole_document_retained_for_a_narrow_projection`.
+            "tests/test_junit_symbol_inventory.py",
         ),
         public_surfaces=(),
         axes={
@@ -697,10 +702,13 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             KnownGap(
                 description=(
                     "The OLD side is still retained in full, per member, "
-                    "for JUnit and `--bundle-facts-out`: those consumers "
-                    "genuinely read it. Bounding *that* means spooling "
-                    "completed members through the storage codec rather "
-                    "than deciding retention, which is a separate change."
+                    "for `--bundle-facts-out` -- which genuinely reads the "
+                    "whole document. JUnit no longer does (it takes the "
+                    "compact `SymbolInventory`), so that half of this "
+                    "gap is closed. Bounding the remaining one means "
+                    "spooling completed members through the storage codec "
+                    "rather than deciding retention, which is a separate "
+                    "change."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),
@@ -713,6 +721,103 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
                     "prevented from being written, which is the intended "
                     "direction but is a test-time signal, not a type-level "
                     "one."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="perf.a_whole_document_retained_for_a_narrow_projection",
+        invariant=(
+            "When a consumer is handed a large object and reads a small, "
+            "fixed projection of it, the projection is what must be "
+            "retained -- and *which* projection must be established by "
+            "auditing every attribute the consumer actually reads, not by "
+            "the parameter's declared type or by one function's docstring. "
+            "The guard is therefore twofold, and neither half suffices "
+            "alone: a differential assertion that rendering from the "
+            "projection equals rendering from the whole object (so the "
+            "audit was complete), and a reachability assertion that the "
+            "large object is genuinely unreachable from the projection (so "
+            "the saving is real rather than a wrapper around the same "
+            "graph). An output-equality test alone passes against a "
+            "projection that simply holds the original; a reachability "
+            "test alone passes against a projection that has dropped "
+            "something the consumer needed. JUnit retained every release "
+            "member's full `AbiSnapshot` -- declarations, semantic IR, "
+            "surface graph, build-source pack -- until the release-level "
+            "fold ran, to read four attributes off it, and the module "
+            "docstring recording that retention named a *fifth* consumer "
+            "(declaration locations) that did not exist."
+        ),
+        fixed_by=(1334,),
+        seed_tests=(
+            "tests/test_junit_symbol_inventory.py",
+            "tests/test_release_snapshot_retention.py",
+        ),
+        public_surfaces=("cli", "python-api"),
+        axes={
+            "output": ("junit", "bundle-facts-out", "junit+baseline"),
+            "cardinality": ("single-pair", "release"),
+            "filter": ("none", "show-only"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The audit is a point-in-time reading of "
+                    "`junit_report.py`'s attribute accesses, re-asserted "
+                    "only by the differential render test: a future JUnit "
+                    "feature that starts reading a fifth snapshot "
+                    "attribute fails that test (the inventory cannot "
+                    "supply it) rather than being prevented from doing so."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="perf.streaming_producer_joined_at_the_encoder",
+        invariant=(
+            "A pipeline built to bound memory must be bounded end to end: "
+            "a producer that yields fragments buys nothing if any stage "
+            "downstream joins them, and the joining stage is easy to miss "
+            "precisely because the *output* is correct and the streaming "
+            "half is visibly present upstream. So the guard observes the "
+            "mechanism, not the result: the encoder must emit output "
+            "before its input is exhausted, and no single buffer handed to "
+            "the writer may approach the document's own size -- an "
+            "assertion on the bytes written cannot distinguish a streaming "
+            "encoder from a joining one. Paired with a differential "
+            "byte-identity check against the pre-existing one-shot encoder "
+            "per supported algorithm, since an incremental codec that "
+            "silently changes the stored envelope is a different defect, "
+            "and with destination-integrity checks on a mid-stream "
+            "producer failure, since a streaming write has a failure "
+            "window a one-shot write does not. "
+            "`write_snapshot_text_stream` streamed an uncompressed write "
+            'and did `"".join(chunks)` for a compressed one, so a '
+            "compressed baseline still peaked at the whole document plus "
+            "its whole encoded copy."
+        ),
+        fixed_by=(1334,),
+        seed_tests=("tests/test_incremental_compression.py",),
+        public_surfaces=("cli", "python-api"),
+        axes={
+            "compression": ("none", "gzip", "zstd"),
+            "chunking": ("byte", "small", "whole-document"),
+            "outcome": ("success", "producer-failure"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "A streamed zstd frame omits its declared content size "
+                    "when the caller cannot state the decoded length up "
+                    "front, which is the case for the bundle-facts "
+                    "producer. The frame is legal and round-trips, and the "
+                    "reader already handles `CONTENTSIZE_UNKNOWN`, but it "
+                    "loses the declared-size cross-check that catches a "
+                    "frame truncated mid-header, and its bytes differ from "
+                    "the one-shot encoder's for the same content."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),

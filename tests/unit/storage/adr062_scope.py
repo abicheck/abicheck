@@ -135,6 +135,10 @@ NON_ADR062_MODULES = frozenset(
         "json_stream",
         "json_chunked_write",
         "snapshot_stream_write",
+        # The incremental gzip/zstd encoder `snapshot_stream_write` feeds:
+        # the same snapshot-envelope body of work, not an ADR-062 Phase 0
+        # primitive.
+        "incremental_encode",
     }
 )
 

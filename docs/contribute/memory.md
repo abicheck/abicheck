@@ -89,6 +89,9 @@ for byte), and all three are registered as bug classes in
 | 1 | Release member retention (`cli_compare_release_pairwise`) | `need_full_snapshots` was one switch for two consumers and two sides. JUnit and `--bundle-facts-out` each read only the OLD side, so every member's full NEW `AbiSnapshot` was retained for the whole release and never opened. | `workflows.release_snapshot_retention.SnapshotRetention` resolves it per side and per consumer; NEW keeps the compact `BundleSignatureEvidence` the bundle analysis already consumes duck-typed. |
 | 2 | Raw AST acquisition (`dumper_cache.AstAcquisitionScope`) | Only the `id()`-keyed groups were bounded and counted. The content-keyed entries — whose `Future` **result is the parsed AST root** — were neither, so a measured six-member release retained 24 raw roots while correctly reporting eight retained groups. | `MAX_RETAINED_RAW_ENTRIES` bounds the ungrouped half by LRU, coordinated with in-flight producers, waiters, failures and group ownership. |
 | 3 | Baseline serialization (`storage.bundle_facts_codec`) | `json.dumps(bundle_facts_to_dict(facts), indent=2)` held every member's snapshot dict, the whole string and its UTF-8 encoding at once, on top of the member graph. | `storage.json_stream` streams the document one member at a time; `snapshot_io.write_snapshot_text_stream` writes fragments through the existing atomic writer, generalised to take chunks rather than duplicated. |
+| 4 | Graph facts (`model.graph_facts`) | Every `GraphNode`/`GraphEdge` materialised **three** attrs dictionaries with identical contents -- `facts[0].attrs`, `resolved` and `attrs` -- in the single-producer shape a real graph is almost entirely made of (measured: 10,277 producer facts across 2,771 nodes and 7,506 edges, exactly one each). Two of the three were pure duplication. | `resolve_entity_attrs`'s single-producer fast path returns the fact's own dict and `attrs` aliases it, falling back to the full merge the moment a second fact arrives. Sound only because `attrs`/`resolved` were already *derived* views that `ensure_facts_and_resolve` overwrites on every call. |
+| 5 | JUnit OLD-side retention (`junit_report`) | A release JUnit render pinned every member's full `AbiSnapshot` until the release-level fold, to read **four** attributes off it. The module docstring recording that retention named a *fifth* consumer (declaration locations) that did not exist. | `model.symbol_inventory.SymbolInventory`, projected when the member's comparison finishes. `--bundle-facts-out` is now the only full-document consumer. Rendered JUnit is byte-identical. |
+| 6 | Compressed writes (`storage.snapshot_stream_write`) | `write_snapshot_text_stream` streamed an *uncompressed* write and did `"".join(chunks)` for a compressed one, so a compressed baseline still peaked at the whole document plus its whole encoded copy. | `storage.incremental_encode` compresses fragment by fragment. gzip output is byte-identical to the previous one-shot path for any chunking down to one byte; zstd is byte-identical whenever the decoded size is known. |
 
 Two design notes worth not relearning:
 
@@ -105,6 +108,94 @@ Two design notes worth not relearning:
   `test_a_group_holds_its_object_even_when_the_content_entry_goes`.
 
 ## Results
+
+Two rounds are recorded here. The **first** (PR #1332) closed three
+retention defects; the **second** (PR #1334) closed the structural costs
+that remained, and its table is below.
+
+### Round 2 (PR #1334) -- structural costs
+
+* **Before:** `b4d3780886173741da1bb5c9a571941c09aadedd` (`main`)
+* **After:** this branch, with all three changes
+* **Fixture:** one real compiled six-member C++ release -- **300 public
+  APIs and 20 records/templates/enums per member**, 447-line headers,
+  `g++ -shared -g`, with a changed public record and a removed export on
+  the NEW side. Both revisions ran `--keep` against the *same* compiled
+  tree, so the operands are byte-identical across the comparison.
+* **Host:** CPython 3.13.12, Linux, 4 cores, 15 GB; warm cache;
+  `--repeat 2`; medians reported, spread stated.
+
+```bash
+python scripts/bench_release_memory.py --root FIX --members 6 \
+    --variants json,junit,bundle-facts,junit+bundle-facts --repeat 2 \
+    --out before.json --label before       # at b4d3780
+python scripts/bench_release_memory.py --root FIX --keep \
+    --variants json,junit,bundle-facts,junit+bundle-facts --repeat 2 \
+    --out after.json --label after         # at this branch
+```
+
+| Variant | Parent peak RSS before | after | delta | wall before | after |
+|---|---:|---:|---:|---:|---:|
+| `json` (control) | 703.5 MiB | 703.2 MiB | **-0.0%** | 116.4 s | 112.1 s |
+| `junit` | 918.3 MiB | 705.8 MiB | **-212.6 MiB (-23.1%)** | 117.4 s | 113.5 s |
+| `bundle-facts` | 979.8 MiB | 917.1 MiB | **-62.7 MiB (-6.4%)** | 146.4 s | 134.1 s |
+| `junit` + `bundle-facts` | 984.8 MiB | 914.3 MiB | **-70.5 MiB (-7.2%)** | 143.6 s | 135.3 s |
+
+Run-to-run spread (max-min over the two runs) was 0.1-5.1 MiB except
+`bundle-facts` after, at 13.2 MiB -- so the `json` row's -0.3 MiB is
+noise and the other three are well outside it.
+
+**Read the `json` row first.** It is the control: that variant never
+retained a snapshot, so nothing here should move it, and nothing did.
+That is what makes the other rows attributable rather than a story about
+an unrelated allocator change.
+
+* **`junit` -23.1%** is the OLD-side retention removal. JUnit read four
+  attributes off each member's `AbiSnapshot`; it now takes the compact
+  `model.symbol_inventory.SymbolInventory`, and the snapshot is released
+  when the member's comparison finishes instead of at the release-level
+  fold. The rendered JUnit XML is byte-identical.
+* **`bundle-facts` -6.4%** is the graph-facts compaction alone, since
+  `--bundle-facts-out` still retains every member's OLD document by
+  design. Every `GraphNode`/`GraphEdge` held three attrs dictionaries
+  with equal contents in the single-producer shape a real graph is
+  almost entirely made of; it now holds one.
+* Wall time fell 4-8% across every variant. That was not the goal and is
+  reported as observed rather than explained -- less allocation is the
+  obvious candidate, but nothing here measured allocation directly, so
+  no causal claim is made.
+
+Every run exits 4 with one finding, before and after: the injected break
+is still detected, so none of this was bought with evidence.
+
+**Component-level measurement**, separate from the end-to-end table
+(deep heap census perturbs both time and RSS, so it never shares a run
+with a timing claim): on a release-sized graph of 2,771 nodes and 7,506
+edges with exactly one producer fact each, the single-producer fast path
+took the identity-deduplicated reachable heap from 15.68 MiB to 13.25
+MiB (**-2.43 MiB, -15.5%**) and 123,877 objects to 110,026
+(**-13,851**), with distinct attrs-dictionary identities falling from
+24,132 to 10,277 -- exactly one per entity.
+
+### What this round does *not* establish
+
+* **One fixture, one size, two repeats.** The brief asked for at least
+  two declaration counts to test scaling; only 300 APIs/member was
+  measured, so **nothing here demonstrates how these savings scale with
+  declaration count**. The graph-facts saving is per-entity by
+  construction and the JUnit saving is per-declaration, so both *should*
+  scale -- but that is reasoning, not measurement.
+* **No oneDAL validation.** `/mnt/cached_oses/napetrov/tmp-abi/l2b6/`
+  does not exist in this workspace, so the 17.82 GiB six-library figure
+  could not be reproduced and **none of the reductions above is a
+  measured oneDAL reduction**.
+* **Concurrency was not re-tuned**, and the four-worker-versus-one
+  question was not re-measured this round.
+* **Whole-graph sharing across members was investigated and not
+  shipped** -- see [Known gaps](known-gaps.md) for why one fixture's
+  content-hash coincidence is not a sharing licence.
+
+### Round 1 (PR #1332) -- retention defects
 
 Measured on this fixture, at two recorded SHAs, with one harness over one
 compiled tree:

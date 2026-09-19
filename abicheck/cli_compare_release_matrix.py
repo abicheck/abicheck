@@ -81,6 +81,7 @@ from .frontends.cli.release_variant_operand import (  # noqa: F401
 )
 from .frontends.cli.runtime import _safe_write_output, _write_or_echo  # noqa: F401
 from .model import AbiSnapshot
+from .model.symbol_inventory import SymbolInventory
 from .report.comparison_scope import ComparisonScopeTerms
 from .report.release_assurance import ReleaseAssuranceTerms
 from .report.release_public_surface import ReleasePublicSurfaceTerms
@@ -169,7 +170,6 @@ def _collect_matrix_result(
     if not matrix_changes:
         return None, worst_verdict
 
-    from .model import AbiSnapshot
     from .pack_application import resolve_bundle_policy_file
     from .service import compare_snapshots
 
@@ -212,7 +212,7 @@ def _finalize_release_output(
     old_map: dict[str, Path],
     new_map: dict[str, Path],
     warning_msgs: list[str],
-    diff_pairs: list[tuple[DiffResult, AbiSnapshot]],
+    diff_pairs: list[tuple[DiffResult, SymbolInventory]],
     bundle_result: BundleDiffResult | None,
     output: Path | None,
     output_dir: Path | None,
@@ -730,6 +730,30 @@ def _release_finding_dicts(
     return findings, cut_kinds
 
 
+def strip_internal_keys(entry: dict[str, object]) -> None:
+    """Remove every pass-internal key from one rendered member entry.
+
+    By *prefix*, not by a hand-maintained list of names. The list was the
+    defect: a member entry is serialized straight to JSON, so a stash key
+    nobody remembered to add became ``TypeError: Object of type X is not
+    JSON serializable`` at the very end of a release run -- after every
+    comparison had been paid for. `_old_junit_inventory` did exactly that
+    to a real six-member run, and the same trap was waiting for the next
+    key anyone stashed. A leading underscore is this fan-out's own
+    convention for "internal to the pass, never rendered" (all ten such
+    keys follow it), so the prefix is the rule the list was approximating.
+
+    Its own function rather than a loop inside
+    :func:`_strip_diff_results_and_adjust_verdict`: that function is
+    already rank D, and inlining this pushed it from complexity 21 to 24.
+    Naming the rule keeps it testable on its own
+    (``tests/test_release_entry_internal_key_strip.py``) and leaves the
+    caller no more complex than it was.
+    """
+    for key in [k for k in entry if k.startswith("_")]:
+        del entry[key]
+
+
 def _strip_diff_results_and_adjust_verdict(
     library_results: list[dict[str, object]],
     removed_keys: list[str],
@@ -922,12 +946,7 @@ def _strip_diff_results_and_adjust_verdict(
                 entry["annotations"] = annotation_report_entries(
                     diff, severity_config=severity_config
                 )
-        entry.pop("_diff_result", None)
-        entry.pop("_old_snapshot", None)
-        entry.pop("_new_snapshot", None)
-        entry.pop("_old_bundle_evidence", None)
-        entry.pop("_new_bundle_evidence", None)
-        entry.pop("_bundle_key", None)
+        strip_internal_keys(entry)
     if removed_keys and _RELEASE_VERDICT_ORDER.get(
         worst_verdict, 0
     ) < _RELEASE_VERDICT_ORDER.get("COMPATIBLE_WITH_RISK", 0):

@@ -500,7 +500,11 @@ def save_bundle_facts(
     # on top of the member graph itself. `bundle_facts_document_stream`
     # produces one member dict at a time and `write_snapshot_text_stream`
     # writes fragments, so only the member currently being encoded is
-    # resident. The bytes are identical: the streaming encoder is
+    # resident -- and, since the memory work's incremental-compression
+    # step, that holds for a `gzip`/`zstd` write too: `encode_chunks`
+    # compresses fragment by fragment instead of joining first, so a
+    # compressed baseline no longer peaks at the whole document plus its
+    # whole encoded copy. The bytes are identical: the streaming encoder is
     # differentially tested against `json.dumps(..., indent=2)` itself
     # (`tests/test_json_stream_encoder.py`), and the document's key order
     # and member order are unchanged.

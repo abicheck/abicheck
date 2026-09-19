@@ -44,9 +44,15 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.checker_types import DiffResult
+from abicheck.model import AbiSnapshot, Function
+from abicheck.model.symbol_inventory import build_symbol_inventory
 from abicheck.workflows.release_snapshot_retention import (
     SnapshotRetention,
+    release_junit_pairs,
+    release_old_snapshot_pairs,
     resolve_snapshot_retention,
+    stash_member_evidence,
 )
 
 _ROOT = Path(__file__).resolve().parents[1] / "abicheck"
@@ -57,9 +63,12 @@ class TestResolution:
         ("junit", "baseline", "old_full", "consumers"),
         [
             (False, False, False, ()),
-            (True, False, True, ("junit",)),
+            # JUnit alone no longer retains a full snapshot at all: it reads
+            # the compact `SymbolInventory`, which `stash_member_evidence`
+            # projects when the member's comparison finishes.
+            (True, False, False, ()),
             (False, True, True, ("bundle_facts_out",)),
-            (True, True, True, ("junit", "bundle_facts_out")),
+            (True, True, True, ("bundle_facts_out",)),
         ],
     )
     def test_every_output_combination(
@@ -68,13 +77,17 @@ class TestResolution:
         """All four combinations, with an oracle stated independently.
 
         The expectation is not "whatever the function returns": ``old_full``
-        is derived here from *whether any consumer was requested*, and the
-        consumer tuple is spelled out, so an implementation that returned a
-        constant for either field fails.
+        is derived here from *whether a consumer that genuinely needs the
+        whole document was requested* -- which is now only
+        ``--bundle-facts-out`` -- and the consumer tuple is spelled out, so
+        an implementation that returned a constant for either field fails.
         """
         got = resolve_snapshot_retention(junit=junit, bundle_facts_out=baseline)
         assert got.old_full is old_full
         assert got.old_consumers == consumers
+        # Independent of retention, and tracked separately: whether the run
+        # asked for the compact inventory at all.
+        assert got.junit_inventory is junit
         # The invariant that carries the whole memory saving: no requested
         # output makes the NEW side full, because none reads it.
         assert got.new_full is False
@@ -95,9 +108,10 @@ class TestResolution:
             junit=True, bundle_facts_out=True
         ).as_counts()
         assert counts == {
+            "junit_inventory": True,
             "old_full": True,
             "new_full": False,
-            "old_consumers": ["junit", "bundle_facts_out"],
+            "old_consumers": ["bundle_facts_out"],
             "new_consumers": [],
         }
 
@@ -173,13 +187,72 @@ class TestConsumerInventory:
         assert 'entry.get("_old_snapshot") or entry.get("_old_bundle_evidence")' in src
 
     def test_the_junit_pair_builder_reads_the_old_side_only(self) -> None:
-        """The claim that lets NEW stay compact under ``--format junit``."""
-        src = (_ROOT / "cli_compare_release_pairwise.py").read_text(encoding="utf-8")
-        marker = "if collect_diff_results:\n        for entry in library_results:"
-        assert marker in src
-        block = src.split(marker, 1)[1].split("\n\n", 1)[0]
-        assert "_old_snapshot" in block
-        assert "_new_snapshot" not in block
+        """The claim that lets NEW stay compact under ``--format junit``.
+
+        Executed, not read as source text. The previous version of this
+        test asserted that a particular two-line snippet appeared in
+        ``cli_compare_release_pairwise.py``, which broke the moment the
+        loop moved to its owner and -- more to the point -- proved nothing
+        about what the builder *does*: a snippet can mention
+        ``_old_snapshot`` and still read the NEW side on the next line.
+        That is the same substitute-an-assertion-about-text-for-one-about-
+        behaviour mistake AGENTS.md records as #705 -> #758.
+
+        So: hand it an entry carrying a NEW-side value that would be
+        detectable if it were read, and assert the pair's OLD operand is
+        the OLD inventory and nothing touched NEW.
+        """
+        # Distinguishable contents: two empty snapshots project to two
+        # equal inventories, so the inequality below would hold vacuously.
+        old_snapshot = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="only_in_old",
+                    mangled="_Z11only_in_oldv",
+                    return_type="void",
+                )
+            ],
+        )
+        new_snapshot = AbiSnapshot(
+            library="libfoo.so",
+            version="2.0",
+            functions=[
+                Function(
+                    name="only_in_new",
+                    mangled="_Z11only_in_newv",
+                    return_type="void",
+                )
+            ],
+        )
+        diff = DiffResult(library="libfoo.so", old_version="1.0", new_version="2.0")
+        entry: dict[str, object] = {"library": "libfoo.so", "_diff_result": diff}
+        stash_member_evidence(
+            entry,
+            "libfoo.so",
+            old_snapshot,
+            new_snapshot,
+            resolve_snapshot_retention(junit=True),
+        )
+        pairs = release_junit_pairs([entry])
+        assert len(pairs) == 1
+        got_diff, got_inventory = pairs[0]
+        assert got_diff is diff
+        assert got_inventory == build_symbol_inventory(old_snapshot)
+        assert got_inventory.functions == ("_Z11only_in_oldv",)
+        assert "_Z11only_in_newv" not in got_inventory.as_symbol_map()
+        # Nothing on the NEW side was retained for JUnit to have read.
+        assert "_new_snapshot" not in entry
+
+    def test_the_junit_pair_builder_skips_a_member_with_no_result(self) -> None:
+        """A member whose comparison failed contributes no pair.
+
+        The vacuity guard on the test above: a builder that returned a
+        pair for every entry regardless would satisfy it.
+        """
+        assert release_junit_pairs([{"library": "libfoo.so"}]) == []
+        assert release_junit_pairs([]) == []
 
     def test_the_baseline_writer_reads_the_old_side_only(self) -> None:
         """Same claim for ``--bundle-facts-out``.
@@ -445,3 +518,87 @@ class TestStashMemberEvidence:
         assert sorted(by_kind) == ["counts", "sample"], members
         assert by_kind["counts"]["counts"]["library"] == "fallback-key"
         assert by_kind["sample"]["attrs"]["library"] == "fallback-key"
+
+
+class TestBaselinePairRecovery:
+    """``release_old_snapshot_pairs`` -- the ``--bundle-facts-out`` operand.
+
+    Deliberately a *separate* list from the one JUnit gets: a baseline
+    document cannot be reconstructed from the compact inventory, so the
+    two consumers must never be served from one collection. These state
+    that separation executably, since nothing else in the suite covered
+    this function at all.
+    """
+
+    def _entry(self, library="libfoo.so", **extra):
+        entry: dict[str, object] = {"library": library}
+        entry.update(extra)
+        return entry
+
+    def _pair_parts(self):
+        old = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(name="f", mangled="_Z1fv", return_type="void"),
+            ],
+        )
+        diff = DiffResult(library="libfoo.so", old_version="1.0", new_version="2.0")
+        return diff, old
+
+    def test_it_returns_the_full_snapshot_not_an_inventory(self):
+        diff, old = self._pair_parts()
+        pairs = release_old_snapshot_pairs(
+            [self._entry(_diff_result=diff, _old_snapshot=old)]
+        )
+        assert pairs == [(diff, old)]
+        assert pairs[0][1] is old
+        assert isinstance(pairs[0][1], AbiSnapshot)
+
+    def test_a_member_with_only_an_inventory_contributes_no_pair(self):
+        """The separation, stated: a JUnit-only run retains no snapshot,
+        so the baseline writer gets nothing from it and falls back to
+        ``old_map`` rather than silently persisting a partial baseline."""
+        diff, old = self._pair_parts()
+        entry = self._entry(_diff_result=diff)
+        stash_member_evidence(
+            entry, "libfoo.so", old, old, resolve_snapshot_retention(junit=True)
+        )
+        assert release_old_snapshot_pairs([entry]) == []
+        assert release_junit_pairs([entry]) != []
+
+    def test_a_bundle_facts_run_yields_a_pair_for_every_member(self):
+        diff, old = self._pair_parts()
+        entries = []
+        for i in range(6):
+            entry = self._entry(library=f"lib{i}.so", _diff_result=diff)
+            stash_member_evidence(
+                entry,
+                f"lib{i}.so",
+                old,
+                old,
+                resolve_snapshot_retention(bundle_facts_out=True),
+            )
+            entries.append(entry)
+        assert len(release_old_snapshot_pairs(entries)) == 6
+
+    def test_a_member_whose_comparison_failed_contributes_no_pair(self):
+        _diff, old = self._pair_parts()
+        assert release_old_snapshot_pairs([self._entry(_old_snapshot=old)]) == []
+        assert release_old_snapshot_pairs([self._entry()]) == []
+        assert release_old_snapshot_pairs([]) == []
+
+    def test_both_consumers_can_be_served_from_one_run(self):
+        """JUnit still gets the inventory even when the snapshot is kept,
+        so the two never disagree about which projection JUnit rendered."""
+        diff, old = self._pair_parts()
+        entry = self._entry(_diff_result=diff)
+        stash_member_evidence(
+            entry,
+            "libfoo.so",
+            old,
+            old,
+            resolve_snapshot_retention(junit=True, bundle_facts_out=True),
+        )
+        assert release_old_snapshot_pairs([entry]) == [(diff, old)]
+        assert release_junit_pairs([entry]) == [(diff, build_symbol_inventory(old))]

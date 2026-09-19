@@ -40,6 +40,10 @@ from abicheck.cli_compare_release import (
     _format_release_json,
     _strip_diff_results_and_adjust_verdict,
 )
+from abicheck.model.symbol_inventory import (
+    SymbolInventory,
+    build_symbol_inventory,
+)
 from abicheck.workflows.release_snapshot_retention import resolve_snapshot_retention
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -415,8 +419,15 @@ def test_compare_one_library_stashes_old_snapshot_only_when_requested(
         collect_diff_results=True,
         retention=resolve_snapshot_retention(junit=True),
     )
-    assert junit_entry["_old_snapshot"] is old_snap
-    assert "_old_bundle_evidence" not in junit_entry
+    # JUnit keeps the compact inventory, never the snapshot: the four
+    # attribute reads it performs are all this projection carries, and the
+    # snapshot is released as soon as the member finishes.
+    assert "_old_snapshot" not in junit_entry
+    inventory = junit_entry["_old_junit_inventory"]
+    assert isinstance(inventory, SymbolInventory)
+    assert inventory == build_symbol_inventory(old_snap)
+    assert set(inventory.as_symbol_map()) >= set(old_snap.function_map)
+    assert isinstance(junit_entry["_old_bundle_evidence"], BundleSignatureEvidence)
     # ... and the NEW side stays compact even then: no consumer reads it.
     assert "_new_snapshot" not in junit_entry
     assert isinstance(junit_entry["_new_bundle_evidence"], BundleSignatureEvidence)

@@ -51,7 +51,7 @@ from .cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
 from .cli_resolve import _normalize_binary_input
 from .frontends.cli.release_member_errors import member_error_entry
 from .frontends.cli.runtime import _safe_write_output
-from .model import AbiSnapshot
+from .model.symbol_inventory import SymbolInventory
 from .reporter import disposition_ledger_blocks, to_json
 from .workflows import memory_trace, release_snapshot_retention
 from .workflows.contracts import CompareResult
@@ -59,6 +59,7 @@ from .workflows.crosscheck_ownership import (
     release_level_checks,
     release_owned_checks_scope,
 )
+from .workflows.release_snapshot_retention import release_junit_pairs
 
 if TYPE_CHECKING:
     from .compile_context import CompileContext
@@ -763,7 +764,7 @@ def _compare_release_libraries(
     project_policy_overrides: dict[Any, Any] | None = None,
     env_matrix: EnvironmentMatrix | None = None,
     exclude_headers: tuple[str, ...] = (),
-) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
+) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, SymbolInventory]]]:
     """Compare each matched library pair and collect results.
 
     When *collect_diff_results* is True and *retention* keeps the full OLD
@@ -804,7 +805,7 @@ def _compare_release_libraries(
             err=True,
         )
     library_results: list[dict[str, object]] = []
-    diff_pairs: list[tuple[DiffResult, AbiSnapshot]] = []
+    diff_pairs: list[tuple[DiffResult, SymbolInventory]] = []
     worst_verdict = "NO_CHANGE"
 
     common_args = (
@@ -925,23 +926,22 @@ def _compare_release_libraries(
 
     # collect_diff_results (JUnit / a secondary `-o junit=...` render)
     # used to need an independent re-run (`_collect_release_extras`) purely
-    # to recover the old `AbiSnapshot` alongside each `DiffResult` -- the
-    # primary pass above now stashes both directly in each library's own
-    # `entry["_diff_result"]`/`entry["_old_snapshot"]`, so building the
-    # pairs is a plain read, not a second comparison (CodeRabbit review,
-    # PR #798): the old re-run's own failure handling silently *dropped* a
-    # pair from the secondary report on a rerun error even when the
-    # primary pass had already succeeded for it, which this can no longer
-    # do since there is nothing left to fail. Annotations were fixed the
-    # identical way earlier in this same PR (see `annotation_report_
-    # entries`/`reporter_contract_blocks.add_annotations`); the Action
-    # reads them straight off the JSON report.
+    # to recover the old side alongside each `DiffResult` -- the primary
+    # pass above now stashes both directly on each library's own entry, so
+    # building the pairs is a plain read, not a second comparison
+    # (CodeRabbit review, PR #798): the old re-run's own failure handling
+    # silently *dropped* a pair from the secondary report on a rerun error
+    # even when the primary pass had already succeeded for it, which this
+    # can no longer do since there is nothing left to fail. Annotations
+    # were fixed the identical way earlier in this same PR (see
+    # `annotation_report_entries`/`reporter_contract_blocks.
+    # add_annotations`); the Action reads them straight off the JSON
+    # report. The OLD operand here is the compact `SymbolInventory` a JUnit
+    # render needs, never the full `AbiSnapshot`;
+    # `workflows.release_snapshot_retention.release_old_snapshot_pairs` is
+    # what `--bundle-facts-out` uses to recover the whole document.
     if collect_diff_results:
-        for entry in library_results:
-            diff = entry.get("_diff_result")
-            old_snap = entry.get("_old_snapshot")
-            if isinstance(diff, DiffResult) and isinstance(old_snap, AbiSnapshot):
-                diff_pairs.append((diff, old_snap))
+        diff_pairs.extend(release_junit_pairs(library_results))
 
     return library_results, worst_verdict, diff_pairs
 
