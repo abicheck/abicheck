@@ -184,12 +184,15 @@ class _PatternRegistry:
         with self._lock:
             return self._bytes > MAX_PATTERN_BYTES
 
-    def clear(self) -> None:
-        with self._lock:
-            self._held.clear()
-            self._bytes = 0
-            self.registrations = 0
-            self.releases = 0
+    # There is deliberately no ``clear()``. One existed, for
+    # ``clear_caches()`` to call as belt-and-braces after both caches had
+    # already returned their handles -- but this registry is the *sole*
+    # strong-reference owner of every compiled pattern and a token is an
+    # ``id()``, so dropping its references while any cache entry still names
+    # one makes that pattern collectable, its address reusable, and the cache
+    # answers a lookup for one vocabulary with another's matches. Releasing
+    # a handle you took is the only supported way to give a pattern back;
+    # leaving no bulk escape hatch is what keeps that true.
 
     @property
     def retained_bytes(self) -> int:

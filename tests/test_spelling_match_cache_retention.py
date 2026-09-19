@@ -711,3 +711,46 @@ class TestARetiredVocabularyTakesItsMatchResultsWithIt:
         )
 
         assert VOCABULARY_CACHE._match_cache is MATCH_CACHE
+
+
+class TestTheRegistryCountsTheTwoHolderKindsSymmetrically:
+    """A primitive-level test of the registry's own contract.
+
+    `reference_counts()` reports the two holder kinds separately precisely so
+    a leak can be attributed to the cache that caused it, which only works if
+    each kind is counted independently and identically. The repeat-acquire
+    path is the one place that could silently diverge — it is written as an
+    if/else on the holder string, so a typo or a copied line would credit the
+    wrong kind — and the vocabulary half of it had no test, because
+    production has a single vocabulary cache and so never takes a second
+    vocabulary handle on one pattern.
+
+    Stated over both kinds and both orders rather than the one uncovered
+    branch, since "the two are symmetric" is the actual contract.
+    """
+
+    @pytest.mark.parametrize("first", ["vocabulary", "match"])
+    @pytest.mark.parametrize("second", ["vocabulary", "match"])
+    def test_two_handles_are_counted_under_the_kinds_that_took_them(
+        self, first, second
+    ) -> None:
+        registry = _PatternRegistry()
+        pattern = _pattern(16)
+
+        token = registry.acquire(pattern, holder=first)
+        assert registry.acquire(pattern, holder=second) == token, (
+            "one pattern must keep one token however many handles it carries"
+        )
+
+        expected = (
+            [first, second].count("vocabulary"),
+            [first, second].count("match"),
+        )
+        assert registry.reference_counts()[token] == expected
+        assert len(registry) == 1, "a second handle registered a second pattern"
+
+        # And each kind gives back exactly what it took.
+        registry.release(token, holder=first)
+        assert registry.is_held(token), "the pattern was freed with a handle live"
+        registry.release(token, holder=second)
+        assert not registry.is_held(token), "the last handle was not returned"
