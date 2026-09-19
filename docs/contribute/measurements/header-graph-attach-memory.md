@@ -104,9 +104,12 @@ costing that alone in the release path; or the once-per-side acquired
 `ReleasePublicSurface` held for the whole run.
 
 The per-worker admission budget
-(`workflows/release_jobs.py`'s `_RELEASE_JOB_MEM_BUDGET_GIB_BY_DEPTH`, 4.0 GiB
-at `headers` depth) is a constant derived from a different bundle
-(~3.4 GiB/member) while one oneDAL pair measures 5.7 GiB through the CLI. On
+(`workflows/release_jobs.py`'s `_RELEASE_JOB_MEM_BUDGET_GIB_BY_DEPTH`) defaults
+to 4.0 GiB at `headers` depth, derived from a different bundle
+(~3.4 GiB/member), while a single oneDAL library pair measures 5.7 GiB through
+the CLI. It is a default, not a fixed value: `ABICHECK_RELEASE_JOB_MEM_GIB`
+overrides it at every depth (`release_job_mem_budget_gib`), which is how the
+worker counts in these measurements were forced. On
 this host the default admits **1 worker out of 4 cores**. Since concurrency
 does not drive the peak, the budget's practical effect today is idle cores
 rather than overcommit.
