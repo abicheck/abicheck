@@ -241,17 +241,21 @@ def _attach_header_graph(
     #
     # Be precise about what this buys, because the obvious claim is wrong
     # and was measured (`docs/contribute/measurements/
-    # header-graph-attach-memory.md`, the 2026-09-19 follow-up): on the real
-    # reference library it does NOT lower the member's peak (2215.4 ->
-    # 2215.2 MiB) and does NOT lower what the attach retains once it returns
-    # (1287.6 vs 1291.5 MiB, within noise). The peak lives inside
+    # header-graph-attach-memory.md`, the 2026-09-19 follow-up). On the real
+    # reference library, three runs per side: it does NOT lower the member's
+    # peak (2216.3 -> 2215.3 MiB), and steady-state retention once the
+    # attach returns is ~8-12 MiB *higher*, not lower. The peak lives inside
     # `json.load`, where the whole document is held as one str while the
     # tree is built from it -- `document + tree`, never `tree + graph`.
-    # What this does buy is the graph build's own residency cost, +147 MiB
-    # -> +25 MiB, because the graph now lands in arenas the parse already
-    # freed instead of taking fresh ones; and it is what makes a future
-    # prune of the tree expressible, since the projection is exactly the
-    # statement of what such a prune would have to preserve.
+    #
+    # What it does buy is residency *during* the attach: the graph build
+    # goes from +147 MiB to -27 MiB against the AST-parse level, ~175 MiB
+    # lower at that point, because the graph lands in arenas the parse
+    # already freed. And it makes a future prune of the tree expressible at
+    # all -- the projection is exactly the statement of what such a prune
+    # would have to preserve, and that prune has a measured 62%-of-tree
+    # ceiling where this has none left. Do not cite this as having reduced
+    # oneDAL's memory; it did not.
     #
     # Evidence is untouched: the same four pure readers run over the same
     # tree in the same order (`project_header_graph_ast`),

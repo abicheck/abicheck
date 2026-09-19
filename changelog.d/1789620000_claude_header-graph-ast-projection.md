@@ -9,12 +9,12 @@
   real reference library (oneDAL 2024.7 `libonedal_core.so.2`, three fresh
   processes per side): the graph build's own residency cost falls from
   ~147 MiB to ~24 MiB, with wall time, every finding, the verdict and the
-  exit code unchanged through the real `compare` CLI. It does **not** reduce
-  the per-member *peak* (2216.3 → 2215.3 MiB), which is the JSON document
-  plus the tree it is parsed into — see
+  exit code unchanged through the real `compare` CLI. Stated plainly because
+  the obvious claim is wrong: it does **not** reduce the per-member *peak*
+  (2216.3 → 2215.3 MiB, which is the JSON document plus the tree it is
+  parsed into), and steady-state retention comes out ~8-12 MiB *higher*. See
   `docs/contribute/measurements/header-graph-attach-memory.md` for the
-  reattribution, the measured ceiling of the one lever that remains, and why
-  the first version of this change briefly made the retained figure worse.
+  reattribution and the measured ceiling of the one lever that remains.
 
 ### Added
 

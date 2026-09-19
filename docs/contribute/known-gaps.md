@@ -10531,14 +10531,27 @@ already freed instead of taking fresh ones. The projection itself is
 before, 2215.2 / 2215.3 / 2215.3 after — 0.05%.** The graph/AST overlap was
 simply never where the peak was.
 
-**The first version also made the retained figure slightly worse**, which
-only showed up because three runs per side were taken: every *after* run
-(1291.5 / 1294.1 / 1289.1) sat above every *before* run (1287.6 / 1286.1 /
-1275.9). The projection is a local, so holding it to function exit kept its
-indexes and edge lists alive past the graph build — their only consumer.
-Freed at the build's end in the shipped version. Worth remembering as a
-method point, not just a bug: a single run per side would have read that
-~8 MiB regression as noise and shipped it.
+**The retained figure also comes out slightly worse, and stayed that way.**
+Only three runs per side made it visible: every *after* run sat above every
+*before* run. One cause was a real bug in the change — the projection is a
+local, so holding it to function exit kept its indexes alive past the graph
+build, their only consumer; freeing it at the build's end moves the graph
+build from *adding* ~24 MiB to *subtracting* ~27 (1302.5 / 1306.9 against a
+1332.5 AST-parse level). But the steady-state figure survives that fix at
+**~8-12 MiB above baseline** (1289.8 / 1295.2 vs 1275.9 / 1286.1 / 1287.6),
+most likely the inverse of the pinning effect above: freeing the AST early
+returns its arenas, and the graph then faults in fresh pages rather than
+reusing ones the parse had dirtied.
+
+**So on this library the change improves neither number a release fan-out's
+per-member budget is sized from** — the peak is unchanged and steady-state
+retention is marginally worse. It is kept for the mid-attach residency
+(~175 MiB lower at the graph-build point) and because the projection is the
+executable statement of what a pruned tree would have to preserve, not
+because it reduced oneDAL's memory. It did not. Two method points worth
+keeping: a single run per side would have read the regression as noise, and
+"free it earlier" is not automatically "hold less" once the allocator is in
+the picture.
 
 **Where the peak actually is.** The attach's high-water mark occurs *inside*
 `json.load`, before the graph exists: `dump.header_graph.clang_ast` ends at

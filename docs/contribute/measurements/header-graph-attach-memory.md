@@ -143,16 +143,40 @@ arenas the AST parse freed — and the projection is cheap (23.6 MiB against a
 premise — that the member's peak was the AST and the graph held at the same
 time — is wrong.
 
-**And the first version of this change made the retained figure slightly
-*worse*,** which three runs per side made visible and one run per side would
-not have: every *after* run (1291.5 / 1294.1 / 1289.1) sat above every
-*before* run (1287.6 / 1286.1 / 1275.9), a consistent ~+8 MiB. Cause: the
-projection is a local of `_attach_header_graph`, so holding it to function
-exit kept its indexes and edge lists — the same 23.6 MiB — alive past the
-graph build, their only consumer. Releasing it at the build's end
-(`projection = None`) is in the shipped version. A reordering whose whole
-claim is "nothing is held longer than it needs to be" does not get to exempt
-its own intermediate.
+**And the retained figure comes out slightly *worse*, not better** — which
+three runs per side made visible and one run per side would have read as
+noise. Every *after* run sat above every *before* run.
+
+The first cause was a real bug in the change: the projection is a local of
+`_attach_header_graph`, so holding it to function exit kept its indexes and
+edge lists — the same 23.6 MiB — alive past the graph build, their only
+consumer. Releasing it at the build's end (`projection = None`) is in the
+shipped version, and it moves the graph build from *adding* ~24 MiB to
+*subtracting* ~27:
+
+| with the projection released | run 4 | run 5 |
+|---|---|---|
+| clang AST parsed | 1332.5 | 1332.5 |
+| graph built | **1306.9** | **1302.5** |
+| graph build's own cost | **−25.6** | **−30.0** |
+| attach peak (`VmHWM`) | 2215.2 | 2214.9 |
+| retained after attach | 1295.2 | 1289.8 |
+
+So *during* the attach the change is a clear, reproducible win — residency
+at the graph-build point is ~175 MiB lower (1302–1307 vs 1475–1483). **But
+the steady-state figure, once the attach returns, stays ~8–12 MiB higher
+than baseline** (1289.8 / 1295.2 against 1275.9 / 1286.1 / 1287.6), and that
+survived the fix. The likely mechanism is the inverse of the pinning effect
+the original measurement identified: freeing the AST early lets its arenas
+go back to the allocator, and the graph then faults in fresh pages instead
+of reusing ones the parse had already dirtied.
+
+**State that plainly rather than rounding it away: on this library the
+change does not improve either number a release fan-out's per-member budget
+is sized from.** The peak is unchanged and the steady-state retention is
+marginally worse. What it does buy is a lower mid-attach residency and — the
+reason it is worth keeping — an executable statement of exactly what the
+graph needs from the AST, which is the precondition for the prune below.
 
 ## Where the peak really is
 

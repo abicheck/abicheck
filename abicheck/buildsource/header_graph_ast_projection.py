@@ -44,16 +44,16 @@ and the graph's own long-lived objects land in arenas the AST parse has
 already released rather than pinning them.
 
 What that is and is not worth, measured on that same library (the
-2026-09-19 follow-up in the doc above) rather than argued: the graph
-build's own residency cost falls from **+147 MiB to +25 MiB**, and the
-projection costs 23.6 MiB against a 1044 MiB tree. It does **not** lower
-the member's peak (2215.4 -> 2215.2 MiB) or what the attach retains once it
-returns (1287.6 vs 1291.5 MiB, within noise) -- the peak is inside
-``json.load``, where the document is held as one ``str`` while the tree is
-built from it, so it is ``document + tree`` and never ``tree + graph``.
-Don't cite this module as having fixed that; the open lever is pruning the
-tree, and this projection is the statement of what such a prune would have
-to preserve.
+2026-09-19 follow-up in the doc above, three runs per side) rather than
+argued: the graph build's own residency cost goes from **+147 MiB to
+-27 MiB** against the AST-parse level, and the projection costs 23.6 MiB
+against a 1044 MiB tree. It does **not** lower the member's peak
+(2216.3 -> 2215.3 MiB), and steady-state retention once the attach returns
+is ~8-12 MiB *higher* -- the peak is inside ``json.load``, where the
+document is held as one ``str`` while the tree is built from it, so it is
+``document + tree`` and never ``tree + graph``. Don't cite this module as
+having fixed that; it did not. The open lever is pruning the tree, and this
+projection is the statement of what such a prune would have to preserve.
 
 This is a *memory-ordering* change only. The same four functions run, over
 the same tree, in the same order, and their results are handed to the same
