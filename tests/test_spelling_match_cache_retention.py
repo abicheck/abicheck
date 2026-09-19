@@ -63,6 +63,8 @@ that happened to be probed.
 
 from __future__ import annotations
 
+import ast
+import pathlib
 import re
 import sys
 from functools import cache
@@ -754,3 +756,98 @@ class TestTheRegistryCountsTheTwoHolderKindsSymmetrically:
         assert registry.is_held(token), "the pattern was freed with a handle live"
         registry.release(token, holder=second)
         assert not registry.is_held(token), "the last handle was not returned"
+
+
+class TestRetirementIsAtomicWithPublication:
+    """Retiring a vocabulary must not be able to delete a *live* entry.
+
+    **Bug class**: a deferred cleanup keyed on an identifier that can be
+    recycled. A token here is an ``id()``. Releasing a vocabulary's registry
+    handle can drop the last reference, whereupon the pattern is collectable
+    and its address is free to be reused — so a `get_or_compile` publishing
+    in the window between "decided to retire T" and "dropped T's match
+    entries" can be handed that same token, and the deferred drop then
+    deletes *its* entries. The cost is a recomputation rather than a wrong
+    answer, which is precisely the recomputation this change exists to stop.
+
+    The first implementation deferred retirement until after the lock was
+    released and justified it with "a retired token is retired for good".
+    That claim was false for the reason above, which is why the invariant is
+    asserted here rather than left to a docstring.
+
+    Both tests are structural. The race needs a GC and an allocator to
+    cooperate inside a microsecond window, so a behavioural test for it
+    would be the vacuous kind this repository documents at length — it
+    would pass against the broken version and prove nothing.
+    """
+
+    @staticmethod
+    def _vocabulary_cache_ast() -> ast.ClassDef:
+        import abicheck.compare.spelling_match_cache as smc
+
+        tree = ast.parse(pathlib.Path(smc.__file__).read_text())
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name == "_VocabularyCache":
+                return node
+        raise AssertionError("_VocabularyCache not found")
+
+    def test_every_retirement_happens_under_the_lock(self) -> None:
+        cls = self._vocabulary_cache_ast()
+        calls_outside: list[str] = []
+        calls_inside = 0
+        for fn in [f for f in cls.body if isinstance(f, ast.FunctionDef)]:
+            guarded: set[int] = set()
+            for node in ast.walk(fn):
+                if isinstance(node, ast.With):
+                    for inner in ast.walk(node):
+                        guarded.add(id(inner))
+            for node in ast.walk(fn):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "_retire_tokens"
+                ):
+                    if id(node) in guarded:
+                        calls_inside += 1
+                    else:
+                        calls_outside.append(fn.name)
+        assert calls_inside >= 2, (
+            "vacuity guard: fewer than the two known retirement call sites "
+            f"({calls_inside}) were found under a lock, so this test may be "
+            "matching nothing"
+        )
+        assert not calls_outside, (
+            "_retire_tokens is reached outside the cache's lock in "
+            f"{calls_outside} — retirement would not be atomic with "
+            "publication, and a recycled id() could delete a live entry"
+        )
+
+    def test_no_match_cache_method_reaches_the_vocabulary_cache(self) -> None:
+        """The precondition the vocabulary -> match lock order rests on.
+
+        Holding the vocabulary lock while taking the match lock is only safe
+        while no path runs the other way. Nothing enforces that but this.
+        """
+        import abicheck.compare.spelling_match_cache as smc
+
+        tree = ast.parse(pathlib.Path(smc.__file__).read_text())
+        match_cls = next(
+            n
+            for n in tree.body
+            if isinstance(n, ast.ClassDef) and n.name == "_MatchCache"
+        )
+        offenders = []
+        for fn in [f for f in match_cls.body if isinstance(f, ast.FunctionDef)]:
+            for node in ast.walk(fn):
+                name = None
+                if isinstance(node, ast.Name):
+                    name = node.id
+                elif isinstance(node, ast.Attribute):
+                    name = node.attr
+                if name and ("vocabular" in name.lower() or "VOCABULARY" in name):
+                    offenders.append(f"{fn.name}: {name}")
+        assert not offenders, (
+            "a _MatchCache method reaches the vocabulary cache "
+            f"({offenders}) — that closes the lock-order cycle and can "
+            "deadlock against _retire_tokens"
+        )

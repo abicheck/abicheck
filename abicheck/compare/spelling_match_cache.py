@@ -589,7 +589,7 @@ class _VocabularyCache:
                     compiled, holder="vocabulary"
                 )
             retired = self._evict_locked()
-        self._retire_tokens(retired)
+            self._retire_tokens(retired)
         return compiled
 
     def _evict_locked(self) -> list[int]:
@@ -620,14 +620,26 @@ class _VocabularyCache:
     def _retire_tokens(self, tokens: Iterable[int]) -> None:
         """Drop the match cache's entries for vocabularies that are gone.
 
-        **Called with this cache's lock released**, deliberately. It takes
-        the match cache's lock, and doing that under this one would add a
-        vocabulary-then-match lock edge to a module whose stated order is
-        "cache locks outer, registry innermost, and no cache calls another
-        while holding its own". Collecting under the lock and notifying
-        after it keeps that true, and is safe because a retired token is
-        retired for good: this cache has already dropped it, so nothing can
-        resurrect those entries in the window.
+        **Called with this cache's lock HELD**, and that is the whole point.
+
+        The first version deferred this until after the lock was released,
+        to avoid a vocabulary-then-match lock edge, and justified it with
+        "a retired token is retired for good". That reasoning was wrong: a
+        token is an ``id()``. Releasing the vocabulary handle can drop the
+        registry's last reference, whereupon the pattern is collectable and
+        **its address is free to be reused** -- so a concurrent
+        ``get_or_compile`` publishing in that window can be handed the same
+        token, and the deferred drop then deletes *its* freshly published
+        entries. Losing them costs a recomputation rather than a wrong
+        answer, but it is exactly the recomputation this change exists to
+        stop.
+
+        Holding the lock makes retirement atomic with publication, which
+        closes it. The lock order is therefore stated as **vocabulary cache
+        -> match cache -> registry**, and it is acyclic because no
+        ``_MatchCache`` method reaches the vocabulary cache at all --
+        pinned by a test, since that is the precondition this ordering
+        rests on.
 
         Why it must happen at all: the match cache is bounded by its
         *result* bytes, which are tiny next to a compiled alternation's. A
@@ -656,7 +668,7 @@ class _VocabularyCache:
             self.misses = 0
             self.compilations = 0
             self.evictions = 0
-        self._retire_tokens(retired)
+            self._retire_tokens(retired)
 
     def __len__(self) -> int:
         with self._lock:

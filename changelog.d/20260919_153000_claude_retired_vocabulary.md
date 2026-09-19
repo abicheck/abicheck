@@ -16,3 +16,11 @@
   pattern collectable and its address reusable — answering a lookup for one
   vocabulary with another's matches. Both cache clears already return every
   handle they took.
+- **Vocabulary retirement is now atomic with publication.** Retirement was
+  deferred until after the cache's lock was released, on the reasoning that
+  "a retired token is retired for good". That was wrong: a token is an
+  `id()`, so releasing the vocabulary's registry handle can drop the last
+  reference, free the pattern, and let its address be reused by a pattern
+  published in that window — whereupon the deferred drop deleted the new
+  entries. Retirement now happens under the lock, and the lock order is
+  stated as vocabulary cache -> match cache -> registry.
