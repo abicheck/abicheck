@@ -1,6 +1,95 @@
 {
-  "workload": "oneDAL 2025.0.0 -> 2025.11.0, six matched members, L2 (binary + headers)",
-  "command": "abicheck compare <old>/lib <new>/lib --header old=<old>/include --header new=<new>/include -I ... -o json=...",
+  "workload": "oneDAL, six matched members, L2 (binary + public headers)",
+  "operands": {
+    "old": {
+      "version": "2025.0.0",
+      "source": "PyPI wheels daal + daal-include 2025.0.0 (manylinux_2_28_x86_64)",
+      "include_files_shipped": 707,
+      "include_files_compared": 679
+    },
+    "new": {
+      "version": "2025.11.0",
+      "source": "PyPI wheels daal + daal-include 2025.11.0 (manylinux_2_28_x86_64)",
+      "include_files_shipped": 726,
+      "include_files_compared": 695,
+      "note": "Confirmed by sha256 of the extracted trees against the 2025.11.0 wheels. 2026.1.0 wheels were also downloaded but are NOT the operand; the library's own version macros read __INTEL_DAAL__ 2025 / MINOR 11."
+    },
+    "members": [
+      "libonedal.so.3",
+      "libonedal_core.so.3",
+      "libonedal_dpc.so.3",
+      "libonedal_parameters.so.3",
+      "libonedal_parameters_dpc.so.3",
+      "libonedal_thread.so.3"
+    ]
+  },
+  "input_digests_sha256": {
+    "old/daal-2025.0.0-py2.py3-none-manylinux_2_28_x86_64.whl": "f005480d73e2113b5002d9ec24f812ef895e4aa1f87b3797499b09eaa4335c9e",
+    "old/daal_include-2025.0.0-py2.py3-none-manylinux_2_28_x86_64.whl": "1d92a1cd4d6646b5edac86bb3021e51b21ba0deb81020d089aef3e7e72109628",
+    "new/daal-2025.11.0-py2.py3-none-manylinux_2_28_x86_64.whl": "0d9d0c0e3daee02ae9cfadfe469c4b453e706f3f9bf208f8c4519b59a997a41a",
+    "new/daal_include-2025.11.0-py2.py3-none-manylinux_2_28_x86_64.whl": "a9a1ffec1ab8d44d90761f029a4e83354629626aa4e9654ebe6113f5e10ca95c"
+  },
+  "argv": [
+    "python",
+    "-m",
+    "abicheck",
+    "compare",
+    "<root>/old/lib",
+    "<root>/new/lib",
+    "--header",
+    "old=<root>/old/include",
+    "--header",
+    "new=<root>/new/include",
+    "-I",
+    "old=<root>/old/include",
+    "-I",
+    "old=<root>/old/include/dal",
+    "-I",
+    "new=<root>/new/include",
+    "-I",
+    "new=<root>/new/include/dal",
+    "-o",
+    "json=<out>.json"
+  ],
+  "argv_note": "<root> is the directory holding the two extracted side trees and <out> the report path; every other token is verbatim. Both runs used the identical argv, differing only in ABICHECK_CACHE_DIR (a distinct empty directory each, so both are cold) and the checkout measured.",
+  "excluded_headers": {
+    "count": 32,
+    "rule": "Unparseable from the published package by any tool. Removed from BOTH sides even where only one side's copy fails, so no retired declaration is manufactured into a missing export.",
+    "paths": [
+      "dal/data_management/data/arrow_numeric_table.h",
+      "dal/data_management/data_source/internal/sql_feature_utils.h",
+      "dal/data_management/data_source/kdb_data_source.h",
+      "dal/data_management/data_source/kdb_feature_manager.h",
+      "dal/data_management/data_source/modifiers/sql/internal/default_modifiers.h",
+      "dal/data_management/data_source/modifiers/sql/internal/engine.h",
+      "dal/data_management/data_source/modifiers/sql/modifier.h",
+      "dal/data_management/data_source/modifiers/sql/shortcuts.h",
+      "dal/data_management/data_source/mysql_feature_manager.h",
+      "dal/data_management/data_source/odbc_data_source.h",
+      "dal/services/internal/sycl/math/mkl.hpp",
+      "oneapi/dal/algo/covariance/parameters/cpu/compute_parameters.hpp",
+      "oneapi/dal/algo/covariance/parameters/gpu/compute_parameters.hpp",
+      "oneapi/dal/algo/decision_forest/parameters/cpu/infer_parameters.hpp",
+      "oneapi/dal/algo/decision_forest/parameters/cpu/train_parameters.hpp",
+      "oneapi/dal/algo/decision_forest/parameters/gpu/infer_parameters.hpp",
+      "oneapi/dal/algo/decision_forest/parameters/gpu/train_parameters.hpp",
+      "oneapi/dal/algo/kmeans/detail/train_init_centroids.hpp",
+      "oneapi/dal/algo/linear_regression/parameters/cpu/train_parameters.hpp",
+      "oneapi/dal/algo/linear_regression/parameters/gpu/train_parameters.hpp",
+      "oneapi/dal/algo/logistic_regression/parameters/cpu/train_parameters.hpp",
+      "oneapi/dal/algo/logistic_regression/parameters/gpu/train_parameters.hpp",
+      "oneapi/dal/algo/pca/parameters/cpu/train_parameters.hpp",
+      "oneapi/dal/algo/pca/parameters/gpu/train_parameters.hpp",
+      "oneapi/dal/detail/cpu_info_arm_impl.hpp",
+      "oneapi/dal/detail/cpu_info_riscv64_impl.hpp",
+      "oneapi/dal/detail/cpu_info_x86_impl.hpp",
+      "oneapi/dal/detail/dispatcher.hpp",
+      "oneapi/dal/detail/mpi/communicator.hpp",
+      "oneapi/dal/detail/profiler.hpp",
+      "oneapi/dal/detail/singleton.hpp",
+      "oneapi/dal/spmd/mpi/communicator.hpp"
+    ]
+  },
   "cold_cache": true,
   "runs_per_revision": 1,
   "findings_identical_across_revisions": true,
@@ -24,7 +113,7 @@
     "tree_peak_rss_mib is SUMMED RSS across the process tree and double-counts shared pages; it is an upper bound, not the footprint. PSS was not collected.",
     "One run per revision; the wall delta carries unmeasured variance.",
     "The HEAD run was measured with py-spy attached (120 s at 50 Hz) and unrelated benchmark work running concurrently; the base run had the host nearly to itself. Both inflate HEAD's time, so the wall reduction is a conservative reading.",
-    "Twelve headers are excluded from BOTH sides; each is unparseable from the published oneDAL package by any tool. See spelling-cache-admission.md's 'Header scope'."
+    "wall -19.8% is UNDER the >=20% target, and memory did not improve; the <=12 GiB budget is met at neither revision."
   ],
   "metrics": {
     "base_950efbc64": {

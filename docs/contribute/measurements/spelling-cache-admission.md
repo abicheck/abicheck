@@ -94,18 +94,27 @@ the answer produced exactly the wrong conclusion. Take the aggregate.
 
 ### Header scope
 
-Twelve headers are excluded from both sides. Each is unparseable from the
-*published* oneDAL package by any tool, not merely by this one, and the
-exclusion is symmetric so no deliberately retired declaration is
-manufactured into a missing export:
+**32 header files** are excluded, counted by re-deriving the two trees
+against their source wheels rather than by counting the *groups* below -- an
+earlier revision of this section said "twelve", which was the group count and
+was wrong. Per side: OLD 707 files -> 679 (28 excluded), NEW 726 -> 695 (31
+excluded); the union is 32 because each side ships a slightly different set.
 
-| class | headers |
-|---|---|
-| External connectors | Arrow, ODBC (x2), kdb (x2), the `data_source/modifiers/sql/` tree and `mysql_feature_manager.h` that depend on them |
-| Needs oneMKL SYCL headers and `icpx` | `services/internal/sycl/**` |
-| Include `daal/src/...` build-tree headers the package does not ship | `cpu_info_x86_impl.hpp`, `detail/dispatcher.hpp`, `detail/singleton.hpp`, `detail/profiler.hpp`, and nine `oneapi/dal/backend/*` dependents |
-| Architecture-guarded, never compiled on x86 | `cpu_info_arm_impl.hpp`, `cpu_info_riscv64_impl.hpp` |
-| Optional MPI dependency | `detail/mpi/communicator.hpp`, `spmd/mpi/communicator.hpp` |
+Every one is unparseable from the *published* package by any tool, not merely
+by this one. Exclusion is symmetric -- a file removed on one side is removed
+on the other even where only one side's copy fails -- so no deliberately
+retired declaration is manufactured into a missing export:
+
+| class | files | what they are |
+|---|---:|---|
+| Include `daal/src/...` build-tree headers the package does not ship | 17 | `cpu_info_x86_impl.hpp`, `detail/dispatcher.hpp`, `detail/singleton.hpp`, `detail/profiler.hpp`, and the `algo/*/parameters/{cpu,gpu}/*` + `kmeans/detail/train_init_centroids.hpp` set that reaches `oneapi/dal/backend/*` |
+| External connectors | 10 | Arrow, ODBC, kdb, the `data_source/modifiers/sql/` tree, `sql_feature_utils.h` and `mysql_feature_manager.h` |
+| Optional MPI dependency | 2 | `detail/mpi/communicator.hpp`, `spmd/mpi/communicator.hpp` |
+| Architecture-guarded, never compiled on x86 | 2 | `cpu_info_arm_impl.hpp`, `cpu_info_riscv64_impl.hpp` |
+| Needs oneMKL SYCL headers and `icpx` | 1 | `services/internal/sycl/math/mkl.hpp` |
+
+The exact list is in `onedal-six-member-receipt.json`, so the count and the
+enumeration cannot drift apart.
 
 The functional workstream's MATCH_CACHE/VOCABULARY_CACHE thread-safety
 patch has since landed (#1336) and **is integrated**, not stacked
