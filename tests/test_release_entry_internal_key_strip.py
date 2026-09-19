@@ -38,7 +38,10 @@ import json
 
 import pytest
 
-from abicheck.cli_compare_release_matrix import _strip_diff_results_and_adjust_verdict
+from abicheck.cli_compare_release_matrix import (
+    _strip_diff_results_and_adjust_verdict,
+    strip_internal_keys,
+)
 
 
 class _NotSerializable:
@@ -124,3 +127,44 @@ class TestInternalKeysAreStripped:
         entries = [_entry()]
         _strip_diff_results_and_adjust_verdict(entries, [], "compatible")
         assert entries[0] == {"library": "libfoo.so", "verdict": "compatible"}
+
+
+class TestTheRuleOnItsOwn:
+    """``strip_internal_keys`` is the rule; the release pass is one caller.
+
+    Tested directly as well as through that caller, per AGENTS.md's
+    primitive-level guidance: a reusable predicate-shaped helper should
+    state its own contract, not inherit it from whichever caller happens
+    to exercise it today.
+    """
+
+    @pytest.mark.parametrize("key", INTERNAL_KEYS)
+    def test_it_removes_any_underscore_prefixed_key(self, key):
+        entry = {key: _NotSerializable(), "kept": 1}
+        strip_internal_keys(entry)
+        assert entry == {"kept": 1}
+
+    @pytest.mark.parametrize(
+        "key", ["library", "verdict", "findings", "a_b", "x_", "no_leading"]
+    )
+    def test_it_keeps_any_key_without_the_prefix(self, key):
+        """Including keys that merely *contain* an underscore."""
+        entry = {key: "value"}
+        strip_internal_keys(entry)
+        assert entry == {key: "value"}
+
+    def test_it_is_idempotent(self):
+        entry = {"_x": 1, "keep": 2}
+        strip_internal_keys(entry)
+        strip_internal_keys(entry)
+        assert entry == {"keep": 2}
+
+    def test_it_mutates_in_place_and_returns_nothing(self):
+        entry = {"_x": 1}
+        assert strip_internal_keys(entry) is None
+        assert entry == {}
+
+    def test_an_empty_entry_is_left_alone(self):
+        entry: dict[str, object] = {}
+        strip_internal_keys(entry)
+        assert entry == {}

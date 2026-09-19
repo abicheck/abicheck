@@ -730,6 +730,30 @@ def _release_finding_dicts(
     return findings, cut_kinds
 
 
+def strip_internal_keys(entry: dict[str, object]) -> None:
+    """Remove every pass-internal key from one rendered member entry.
+
+    By *prefix*, not by a hand-maintained list of names. The list was the
+    defect: a member entry is serialized straight to JSON, so a stash key
+    nobody remembered to add became ``TypeError: Object of type X is not
+    JSON serializable`` at the very end of a release run -- after every
+    comparison had been paid for. `_old_junit_inventory` did exactly that
+    to a real six-member run, and the same trap was waiting for the next
+    key anyone stashed. A leading underscore is this fan-out's own
+    convention for "internal to the pass, never rendered" (all ten such
+    keys follow it), so the prefix is the rule the list was approximating.
+
+    Its own function rather than a loop inside
+    :func:`_strip_diff_results_and_adjust_verdict`: that function is
+    already rank D, and inlining this pushed it from complexity 21 to 24.
+    Naming the rule keeps it testable on its own
+    (``tests/test_release_entry_internal_key_strip.py``) and leaves the
+    caller no more complex than it was.
+    """
+    for key in [k for k in entry if k.startswith("_")]:
+        del entry[key]
+
+
 def _strip_diff_results_and_adjust_verdict(
     library_results: list[dict[str, object]],
     removed_keys: list[str],
@@ -922,18 +946,7 @@ def _strip_diff_results_and_adjust_verdict(
                 entry["annotations"] = annotation_report_entries(
                     diff, severity_config=severity_config
                 )
-        # Strip every internal key by *prefix*, not by a hand-maintained
-        # list of six. The list was the defect: a member entry is rendered
-        # straight to JSON, so a stash key nobody remembered to add here is
-        # a `TypeError: Object of type X is not JSON serializable` at the
-        # very end of a release run -- after every comparison has been
-        # paid for. That is exactly how `_old_junit_inventory` broke a real
-        # six-member run, and the same trap was waiting for the next key
-        # anyone stashed. `_`-prefixed is this fan-out's own convention for
-        # "internal to the pass, never rendered" (all ten such keys today),
-        # so the prefix is the rule the list was approximating.
-        for key in [k for k in entry if k.startswith("_")]:
-            del entry[key]
+        strip_internal_keys(entry)
     if removed_keys and _RELEASE_VERDICT_ORDER.get(
         worst_verdict, 0
     ) < _RELEASE_VERDICT_ORDER.get("COMPATIBLE_WITH_RISK", 0):
