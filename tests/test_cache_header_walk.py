@@ -33,6 +33,7 @@ suffix-named directories, dotfiles, case folding, unicode names.
 
 from __future__ import annotations
 
+import ast
 import itertools
 import os
 import random
@@ -264,3 +265,118 @@ def test_a_leading_dot_header_is_still_a_cache_key_entry(tmp_path: Path) -> None
     walked = iter_cache_header_files(tmp_path)
     assert walked == _oracle(tmp_path)
     assert {p.name for p in walked} == {"..h", "...hpp", "plain.h"}
+
+
+class TestScanCountersAreConcurrencySafe:
+    """The counters explain *parallel* runs, so they must survive parallelism.
+
+    **Bug class.** Diagnostic state shared across worker threads, mutated
+    with a read-modify-write (``+=``) and read without a lock. A
+    particularly self-defeating shape: these counters exist to attribute
+    cost in a release fan-out, which is precisely the parallel case, so
+    single-threaded runs report correctly and the runs the instrumentation
+    was *built for* silently under-count. Nothing fails; a number is just
+    quietly wrong, and it is a number someone will use to decide where to
+    optimize.
+
+    **Why this is asserted structurally, not behaviourally.** The obvious
+    test -- record from N threads, check the total -- was written first and
+    **passed identically with the lock removed**, at 16 threads, 320,000
+    increments and a 1 microsecond switch interval. So did a reader-side
+    test looking for a snapshot that mixed two updates. Under CPython's GIL
+    the interleaving window for this shape is real but not reliably
+    reachable, so such a test asserts nothing while appearing to guard
+    something, which is the vacuous-test failure this repository documents
+    at length. Rather than ship it, the invariant is pinned where it is
+    actually decidable: in the source.
+
+    The lock is still correct and still required. The GIL is an
+    implementation detail, not a language guarantee, and it is exactly the
+    guarantee a free-threaded build removes -- this project's CI already
+    runs a 3.14 lane, where the race becomes ordinary rather than exotic.
+
+    **General invariant**: every statement that mutates or reads counter
+    state does so inside a ``with _COUNTERS_LOCK`` block. Checked over the
+    real module AST, so it covers methods added later, not just the four
+    that exist today.
+    """
+
+    @staticmethod
+    def _counter_methods() -> list[ast.FunctionDef]:
+        import abicheck.extract.cache_header_scan as mod
+
+        tree = ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
+        cls = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef) and node.name == "_ScanCounters"
+        )
+        return [n for n in cls.body if isinstance(n, ast.FunctionDef)]
+
+    def test_every_counter_method_takes_the_lock(self) -> None:
+        """Vacuity guard included: there must BE methods to check."""
+        methods = self._counter_methods()
+        checked = [m for m in methods if m.name != "__init__"]
+        assert len(checked) >= 3, (
+            "expected the counter class to still have record/snapshot/reset; "
+            f"found {[m.name for m in methods]}"
+        )
+        for method in checked:
+            guards = [
+                item
+                for node in ast.walk(method)
+                if isinstance(node, ast.With)
+                for item in node.items
+                if isinstance(item.context_expr, ast.Name)
+                and item.context_expr.id == "_COUNTERS_LOCK"
+            ]
+            assert guards, (
+                f"_ScanCounters.{method.name} touches shared counter state "
+                "without taking _COUNTERS_LOCK. Under a free-threaded build "
+                "that is a lost update, and the counters under-report exactly "
+                "the parallel runs they exist to explain."
+            )
+
+    def test_no_counter_field_is_mutated_outside_the_class(self) -> None:
+        """The lock only helps if nothing bypasses the class to bump a field."""
+        import abicheck.extract.cache_header_scan as mod
+
+        tree = ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
+        fields = {"calls", "directories_traversed", "entries_returned"}
+        inside = {
+            id(n)
+            for cls in ast.walk(tree)
+            if isinstance(cls, ast.ClassDef) and cls.name == "_ScanCounters"
+            for n in ast.walk(cls)
+        }
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Assign, ast.AugAssign)):
+                continue
+            if id(node) in inside:
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                assert not (
+                    isinstance(target, ast.Attribute) and target.attr in fields
+                ), (
+                    f"{target.attr} is mutated outside _ScanCounters, so it "
+                    "bypasses _COUNTERS_LOCK"
+                )
+
+    def test_reset_clears_in_place_rather_than_rebinding(self) -> None:
+        """A rebind would discard a concurrent worker's in-flight update.
+
+        Non-vacuous, unlike the throughput tests above: it fails immediately
+        against the original ``global _COUNTERS; _COUNTERS = _ScanCounters()``
+        implementation. The module-level object must survive a reset, so a
+        worker already inside ``record`` bumps the same counters the next
+        reader sees rather than an orphaned one.
+        """
+        import abicheck.extract.cache_header_scan as mod
+
+        before = mod._COUNTERS
+        mod._COUNTERS.record("/x", 1, 1)
+        assert mod.header_scan_statistics()["calls"] >= 1
+        mod.reset_header_scan_statistics()
+        assert mod._COUNTERS is before, "reset rebound the counter object"
+        assert mod.header_scan_statistics()["calls"] == 0

@@ -69,8 +69,42 @@ def compile_spelling_pattern(spellings: Collection[str]) -> re.Pattern[str] | No
     1,000 unreferenced stdlib records took over a second in a single
     ``directly_referenced_stdlib_types`` call, and nine independent
     ``diff_types.py`` call sites each repeated it) — building one pattern
-    once turns the scan from O(candidates × declarations) into
-    O(declarations), independent of candidate count. Longest-first ordering
+    once collapses ``candidates × declarations`` *scans* into one scan per
+    declaration.
+
+    **It does not make the scan independent of candidate count, and this
+    docstring used to claim that it did.** One ``re`` pass over an
+    alternation of *n* literals is not O(1) in *n*: CPython's ``sre`` tries
+    the branches at each position, and only factors out a *shared literal
+    prefix*. Measured here, microseconds per lookup on a 34-character
+    subject, against vocabularies of 1,000 / 5,000 / 20,000 / 60,000
+    spellings:
+
+    ===========================  =====  =====  ======  ======
+    vocabulary shape             1,000  5,000  20,000  60,000
+    ===========================  =====  =====  ======  ======
+    one shared prefix, late miss   0.7    0.7     0.7     0.7
+    diverse spellings, miss        5.3   24.0   204.3   917.6
+    diverse spellings, easy miss   0.4    0.4     0.5     0.5
+    ===========================  =====  =====  ======  ======
+
+    So the cost is flat only when the vocabulary factors to a common
+    prefix or the subject fails on its first character. For the shape a
+    real C++ vocabulary actually has -- many unrelated namespace roots --
+    a miss is **linear in the vocabulary**, 173x across a 60x size range.
+    Compilation scales too: 1.44 s to build the 60,000-spelling
+    alternation (1.74M pattern characters).
+
+    This is why :mod:`abicheck.compare.spelling_match_cache` matters as
+    much as the pattern does: on a real oneDAL comparison 98.99% of
+    lookups repeat, so the alternation's per-query cost is paid ~11,000
+    times rather than ~1.1 million. It is also why a vocabulary-independent
+    indexed literal scan is the standing proposal for the cold path -- a
+    prototype measured 1.7-2.0 us flat across that same size range (465x
+    faster at 60,000) and built in 0.024 s. That replacement is **not**
+    made here, for a reason recorded in :func:`finditer_allow_nested`.
+
+    Longest-first ordering
     doesn't change *whether* something matches (every alternative is
     anchored to the same boundary, so a shorter spelling can't "shadow" a
     longer one the way it could in an unanchored first-match scan) but keeps
@@ -156,6 +190,43 @@ def finditer_allow_nested(
     patterns (an earlier fix) only solved *cross*-index masking — two
     candidates from the *same* index (both stdlib, or both non-stdlib
     records) can still mask each other this way.
+
+    .. warning::
+
+       **This function under-reports, and the replacement that fixes it is
+       a behaviour change, not an optimization.** Each match is followed up
+       by searching ``(m.start() + 1, m.end())`` -- a window that by
+       construction excludes ``m.start()`` itself -- so a *shorter*
+       registered spelling beginning at the **same offset** as a longer
+       match is never reported. With both ``Foo`` and ``Foo<int>`` in one
+       vocabulary, the text ``"Foo<int>"`` yields only ``Foo<int>``;
+       ``Foo`` is a boundary-valid occurrence at offset 0 and is lost.
+       Confirmed on realistic spellings: ``dal::Table`` inside
+       ``dal::Table<float>``, ``std::vector`` inside ``std::vector<int>``,
+       ``Node`` inside ``Node*``, ``A`` inside ``A&&``. This is reachable
+       in production, because ``type_reachability`` registers record
+       spellings and typedef targets in one vocabulary, so a class
+       template and its instantiation routinely co-occur.
+
+       The obvious in-place repair -- re-searching a *narrowed* window to
+       find the shorter alternative -- is unsound: ``re``'s ``endpos``
+       looks like end-of-string to the right-boundary lookahead, so
+       ``Foo`` would be accepted inside ``Foobar``. A correct fix scans
+       each boundary-valid start position and tests the candidates there,
+       which is the indexed matcher described in
+       :func:`compile_spelling_pattern`. A differential run of that
+       prototype against this function over 2,400 randomized
+       vocabulary/text pairs found 70 divergences, **every one of them a
+       strict superset** -- it never missed anything this function finds.
+
+       It is deliberately not adopted in the same change as the
+       match-cache ownership fix. Adding those occurrences adds
+       reachability edges, which can change findings and obligation
+       counts, so it needs its own isolated change and its own rebaseline
+       -- bundling it would make a performance patch silently alter
+       results, and would invalidate the semantic-equivalence check any
+       performance claim rests on. Tracked in
+       ``docs/contribute/known-gaps.md``.
 
     Uses an explicit stack rather than recursing into ``text[m.start() + 1 :
     m.end()]`` for every match found (Codex review, fresh evidence): a

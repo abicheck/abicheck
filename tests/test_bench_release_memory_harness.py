@@ -260,3 +260,247 @@ class TestFixtureIdentity:
         assert bench._fixture_matches(tmp_path, wanted) is False
         (tmp_path / bench.FIXTURE_MANIFEST).write_text("{not json", encoding="utf-8")
         assert bench._fixture_matches(tmp_path, wanted) is False
+
+
+class TestTheVocabularyThresholdGuard:
+    """A benchmark that claims to cross a threshold must prove it did.
+
+    **Bug class.** A performance fixture whose whole purpose is to exercise
+    a size-dependent path, with nothing checking that the path was reached.
+    If the fixture drifts below the threshold -- a knob defaulted back, a
+    header trimmed, a cheaper compiler inlining differently -- the benchmark
+    keeps running, keeps reporting numbers, and quietly measures the happy
+    path instead. It would then pass identically against the very defect it
+    exists to catch, which is the same failure shape as a matrix test with
+    no oracle.
+
+    **General invariant**: the guard is a *decision* over the run's own
+    reported figure, so it must move in both directions -- pass when the
+    figure clears the requirement, fail when it does not, and refuse to
+    answer at all when it has no figure to read. Asserted in all three
+    directions plus the disabled case, rather than only the passing one; a
+    guard that always passes and a guard that always fails each satisfy a
+    single-direction test.
+
+    The first version of this guard read the counters from the trace
+    record's top level, but ``memory_trace.counts`` nests them under
+    ``"counts"``. It therefore found nothing, reported 0 bytes and would
+    have failed *every* run -- caught only by exercising the passing
+    direction, which is why that direction is tested here too.
+    """
+
+    @staticmethod
+    def _trace(tmp_path: Path, retained: int) -> Path:
+        path = tmp_path / "trace.jsonl"
+        path.write_text(
+            json.dumps(
+                {
+                    "event": "release.spelling_cache",
+                    "kind": "counts",
+                    "counts": {
+                        "match": {"hits": 90, "misses": 10, "bypasses": 0},
+                        "patterns": {"retained_bytes": retained},
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_it_passes_when_the_threshold_is_cleared(self, tmp_path) -> None:
+        bench._require_the_vocabulary_threshold_was_crossed(
+            self._trace(tmp_path, 9_000_000), 8 * 1024 * 1024
+        )
+
+    def test_it_fails_when_the_threshold_is_not_cleared(self, tmp_path) -> None:
+        with pytest.raises(SystemExit) as excinfo:
+            bench._require_the_vocabulary_threshold_was_crossed(
+                self._trace(tmp_path, 3_590_595), 8 * 1024 * 1024
+            )
+        message = str(excinfo.value)
+        assert "3,590,595" in message, "the guard must report what it measured"
+        assert "did NOT cross" in message
+
+    def test_it_refuses_to_answer_without_a_trace(self) -> None:
+        """No figure to read is not the same as a figure that passed."""
+        with pytest.raises(SystemExit):
+            bench._require_the_vocabulary_threshold_was_crossed(None, 1)
+
+    def test_it_is_disabled_at_zero(self) -> None:
+        """Opt-in: a run that makes no threshold claim needs no trace."""
+        bench._require_the_vocabulary_threshold_was_crossed(None, 0)
+
+    def test_a_trace_with_no_cache_counters_does_not_pass(self, tmp_path) -> None:
+        """Absent counters must read as 'not proven', never as 'fine'.
+
+        The exact shape the nesting bug produced: nothing found, so the
+        figure is 0. That must fail a non-zero requirement rather than being
+        treated as an unmeasured-and-therefore-acceptable run.
+        """
+        path = tmp_path / "trace.jsonl"
+        path.write_text(
+            json.dumps({"event": "release.member", "kind": "phase"}) + "\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(SystemExit):
+            bench._require_the_vocabulary_threshold_was_crossed(path, 1)
+
+
+class TestTheFixtureManifestCoversEveryShapeKnob:
+    """``--keep`` must not reuse a tree built to a different shape.
+
+    ``vocabulary_scale`` changes the compiled headers. If it were left out
+    of the manifest, a ``--keep`` run would silently reuse a tree built at a
+    different vocabulary size -- and then report a threshold-crossing
+    measurement taken on a fixture that never crossed it, which is the
+    guard above defeated by the layer beneath it.
+    """
+
+    def test_vocabulary_scale_is_part_of_the_reuse_key(self, tmp_path) -> None:
+        for side in ("old", "new"):
+            (tmp_path / side / "lib").mkdir(parents=True)
+            (tmp_path / side / "lib" / "libmember0.so").write_bytes(b"")
+        wanted = {
+            "members": 1,
+            "apis": 2,
+            "records": 1,
+            "vocabulary_scale": 400,
+        }
+        (tmp_path / bench.FIXTURE_MANIFEST).write_text(
+            json.dumps(wanted), encoding="utf-8"
+        )
+        assert bench._fixture_matches(tmp_path, wanted) is True
+        assert bench._fixture_matches(tmp_path, {**wanted, "vocabulary_scale": 0}) is (
+            False
+        ), "a differently-scaled vocabulary was accepted as a matching fixture"
+
+
+class TestControlledEnvironmentIsAFunctionOfTheArguments:
+    """A variant's environment may not depend on what the harness inherited.
+
+    The bug class, not the one reported input: the receipt records the
+    *arguments*, so any variable the harness controls that could instead come
+    from the ambient environment makes the receipt describe a run that did not
+    happen. Reported as an inherited ``ABICHECK_RELEASE_JOB_MEM_GIB`` silently
+    driving a sweep's unconstrained arm (every worker count in the sweep then
+    attributed to the wrong setting); the identical mechanism makes an
+    ambient ``ABICHECK_CACHE_DIR`` turn a run labelled cold into a warm one,
+    and an ambient trace path attach a tracing cost to an untraced timing.
+
+    So the invariant is stated over *every* controlled variable and the whole
+    small argument domain, not over the one variable and the one call that
+    was reported, with the expectation derived independently of the
+    implementation's own mapping.
+    """
+
+    #: Ambient values for every controlled variable, so each case starts
+    #: already polluted -- an implementation that merely fails to *set* a
+    #: variable would pass against an empty base.
+    AMBIENT = {name: f"ambient-{name}" for name in bench.CONTROLLED_ENV_VARS}
+
+    def _expected(
+        self,
+        *,
+        env_extra: dict[str, str] | None,
+        job_mem_gib: float | None,
+        trace: Path | None,
+        tracemalloc: bool,
+        cache_dir: Path | None,
+    ) -> dict[str, str | None]:
+        """What each controlled variable must be, derived from the arguments.
+
+        Deliberately a second statement of the rule rather than a call into
+        the helper's own ``settings`` mapping: an oracle that folds through
+        the code under test cannot catch that code choosing the wrong source.
+        """
+        stated: dict[str, str | None] = {name: None for name in self.AMBIENT}
+        if job_mem_gib is not None:
+            stated["ABICHECK_RELEASE_JOB_MEM_GIB"] = str(job_mem_gib)
+        if cache_dir is not None:
+            stated["ABICHECK_CACHE_DIR"] = str(cache_dir)
+        if trace is not None:
+            stated[bench.ENV_TRACE_PATH] = str(trace)
+            if tracemalloc:
+                stated[bench.ENV_TRACEMALLOC] = "1"
+        for name, value in (env_extra or {}).items():
+            if stated.get(name) is None:
+                stated[name] = value
+        return stated
+
+    def _cases(self) -> list[dict[str, Any]]:
+        cases: list[dict[str, Any]] = []
+        for job_mem_gib in (None, 2.0):
+            for cache_dir in (None, Path("/tmp/cold")):
+                for trace in (None, Path("/tmp/t.jsonl")):
+                    for tracemalloc in (False, True):
+                        for env_extra in (
+                            None,
+                            {},
+                            {"ABICHECK_RELEASE_JOB_MEM_GIB": "7"},
+                            {"ABICHECK_CACHE_DIR": "/stated"},
+                            {bench.ENV_TRACE_PATH: "/stated.jsonl"},
+                            {"UNRELATED_TO_THIS_HARNESS": "kept"},
+                        ):
+                            cases.append(
+                                {
+                                    "job_mem_gib": job_mem_gib,
+                                    "cache_dir": cache_dir,
+                                    "trace": trace,
+                                    "tracemalloc": tracemalloc,
+                                    "env_extra": env_extra,
+                                }
+                            )
+        return cases
+
+    def test_the_domain_is_not_vacuous(self) -> None:
+        """Guard the oracle itself: the cases must disagree with each other.
+
+        An oracle accidentally reduced to a constant -- or a case list that
+        never varies a controlled variable -- would make the sweep below pass
+        while asserting nothing.
+        """
+        cases = self._cases()
+        assert len(cases) == 2 * 2 * 2 * 2 * 6
+        distinct = {tuple(sorted(self._expected(**case).items())) for case in cases}
+        assert len(distinct) > 1
+        # Every controlled variable must be both set and unset somewhere in
+        # the domain, or its own rule is untested.
+        for name in bench.CONTROLLED_ENV_VARS:
+            values = {self._expected(**case)[name] for case in cases}
+            assert None in values, name
+            assert values - {None}, name
+
+    def test_no_controlled_variable_is_ever_inherited(self) -> None:
+        disagreements = []
+        for case in self._cases():
+            env = bench.variant_env(dict(self.AMBIENT), **case)
+            expected = self._expected(**case)
+            for name, want in expected.items():
+                got = env.get(name)
+                if got != want:
+                    disagreements.append((case, name, want, got))
+        assert not disagreements, disagreements
+
+    def test_an_uncontrolled_variable_is_inherited_untouched(self) -> None:
+        """The rule is scoped, not a blanket wipe: the child still needs PATH."""
+        base = dict(self.AMBIENT)
+        base["PATH"] = "/usr/bin"
+        for case in self._cases():
+            env = bench.variant_env(base, **case)
+            assert env["PATH"] == "/usr/bin"
+            if (case["env_extra"] or {}).get("UNRELATED_TO_THIS_HARNESS"):
+                assert env["UNRELATED_TO_THIS_HARNESS"] == "kept"
+
+    def test_the_callers_mapping_is_not_mutated(self) -> None:
+        base = dict(self.AMBIENT)
+        before = dict(base)
+        bench.variant_env(
+            base,
+            env_extra={"ABICHECK_CACHE_DIR": "/x"},
+            job_mem_gib=1.0,
+            trace=None,
+            tracemalloc=False,
+            cache_dir=None,
+        )
+        assert base == before

@@ -132,7 +132,7 @@ class TestForcedGetEvictRace:
         # the public ``put`` -- never through ``_entries`` directly -- so
         # the cache's own synchronization is what is under test.
         monkeypatch.setattr(smc, "MAX_ENTRIES", 1)
-        cache = smc._MatchCache()
+        cache = smc._MatchCache(smc._PatternRegistry())
         pattern = _pattern("dense")
         text = "const dense&"
         key = (cache.token_for(pattern), text, 0, len(text))
@@ -189,7 +189,7 @@ class TestForcedGetEvictRace:
         # The forbidden "fix": swallowing the KeyError and answering (). An
         # empty tuple is a *legitimate cached answer* for a text naming
         # nothing, so the two must stay distinguishable at the API.
-        cache = smc._MatchCache()
+        cache = smc._MatchCache(smc._PatternRegistry())
         pattern = _pattern("dense")
         absent = (cache.token_for(pattern), "nothing_here", 0, 12)
         assert cache.get(absent) is None
@@ -208,7 +208,7 @@ class TestForcedVocabularyRace:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(smc, "MAX_CACHED_VOCABULARIES", 1)
-        cache = smc._VocabularyCache()
+        cache = smc._VocabularyCache(smc._PatternRegistry())
         spellings = frozenset({"dense"})
         compiled = cache.get_or_compile(spellings, _build_spelling_pattern)
 
@@ -271,7 +271,7 @@ class TestForcedVocabularyRace:
         pattern object, or the match cache would key two token streams for
         one vocabulary.
         """
-        cache = smc._VocabularyCache()
+        cache = smc._VocabularyCache(smc._PatternRegistry())
         spellings = frozenset({"dense", "table", "numeric_table"})
         at_compile = threading.Barrier(2, timeout=_INTERLEAVE_TIMEOUT * 10)
         compiles = 0
@@ -310,7 +310,7 @@ class TestForcedVocabularyRace:
         assert len(cache) == 1
 
     def test_a_failing_compilation_leaves_no_stuck_lock_or_poisoned_entry(self) -> None:
-        cache = smc._VocabularyCache()
+        cache = smc._VocabularyCache(smc._PatternRegistry())
         spellings = frozenset({"dense"})
 
         def boom(_key: frozenset[str]) -> re.Pattern[str] | None:
@@ -340,7 +340,7 @@ class TestClearLifecycle:
     """``clear`` is a lifecycle reset, and it is not a barrier."""
 
     def test_a_computation_in_flight_across_clear_is_not_resurrected(self) -> None:
-        cache = smc._MatchCache()
+        cache = smc._MatchCache(smc._PatternRegistry())
         pattern = _pattern("dense")
         text = "const dense&"
         key = (cache.token_for(pattern), text, 0, len(text))
@@ -355,7 +355,7 @@ class TestClearLifecycle:
         cache.put(key, _uncached(pattern, text), pattern, generation=generation)
         assert len(cache) == 0
         assert cache.retained_bytes == 0
-        assert cache._keepalive == {}
+        assert cache._entries_per_token == {}
 
         # A *post*-clear computation publishes normally.
         cache.put(key, _uncached(pattern, text), pattern, generation=cache.generation)
@@ -370,7 +370,7 @@ class TestClearLifecycle:
         caller must still receive a *correct* pattern -- a clear invalidates
         the cache, not the work in flight -- while the new epoch stays empty.
         """
-        cache = smc._VocabularyCache()
+        cache = smc._VocabularyCache(smc._PatternRegistry())
         spellings = frozenset({"dense", "table"})
         entered = threading.Event()
         cleared = threading.Event()
@@ -406,7 +406,7 @@ class TestClearLifecycle:
         assert len(cache) == 1
 
     def test_clear_under_concurrent_readers_leaves_consistent_accounting(self) -> None:
-        cache = smc._MatchCache()
+        cache = smc._MatchCache(smc._PatternRegistry())
         pattern = _pattern("dense", "table")
         stop = threading.Event()
         errors: list[BaseException] = []
@@ -450,18 +450,42 @@ class TestClearLifecycle:
 
 def _assert_accounting_consistent(cache: smc._MatchCache) -> None:
     """Re-derive the cache's bookkeeping from its entries, independently of
-    the incremental arithmetic that maintained it."""
+    the incremental arithmetic that maintained it.
+
+    The invariant is unchanged from when this was written; only its *owner*
+    moved. A compiled pattern is now charged once by
+    ``smc._PatternRegistry``, however many entries and vocabularies name it,
+    so the per-entry reference count is asserted against the registry's
+    match-side count and the byte figures are checked per owner. Summing
+    them into one number would re-create exactly the double-charge that
+    split them.
+    """
     entries = dict(cache._entries)
     expected_refs: dict[int, int] = {}
     for token, _text, _start, _end in entries:
         expected_refs[token] = expected_refs.get(token, 0) + 1
-    assert {t: r for t, (_p, r) in cache._keepalive.items()} == expected_refs, (
-        "pattern reference counts disagree with the entries naming them"
+
+    # This cache's own per-token entry counts must match the entries...
+    assert dict(cache._entries_per_token) == expected_refs, (
+        "entry reference counts disagree with the entries naming them"
     )
-    expected_bytes = sum(
+    # ...and it must hold exactly one registry reference per named token,
+    # which is what keeps the pattern alive while any entry needs it.
+    registry_match_refs = {
+        token: match_refs
+        for token, (_vocab, match_refs) in cache._registry.reference_counts().items()
+        if match_refs
+    }
+    assert registry_match_refs == dict.fromkeys(expected_refs, 1), (
+        "the registry's match references do not correspond one-for-one with "
+        "the tokens this cache's entries name"
+    )
+
+    # Entry bytes are this cache's; pattern bytes are the registry's.
+    expected_entry_bytes = sum(
         smc._entry_bytes(key[1], value) for key, value in entries.items()
-    ) + sum(smc._pattern_bytes(p) for p, _r in cache._keepalive.values())
-    assert cache.retained_bytes == expected_bytes
+    )
+    assert cache.retained_bytes == expected_entry_bytes
     assert len(entries) <= MAX_ENTRIES
     assert cache.retained_bytes <= MAX_RETAINED_BYTES or not entries
 
@@ -473,7 +497,7 @@ class TestBoundedContention:
     def test_concurrent_workers_agree_with_the_uncached_matcher(
         self, workers: int
     ) -> None:
-        cache = smc._MatchCache()
+        cache = smc._MatchCache(smc._PatternRegistry())
         # Several distinct patterns, so pattern reference counting is
         # exercised by eviction rather than assumed.
         patterns = [
@@ -540,7 +564,7 @@ class TestBoundedContention:
         # A tiny entry cap turns every admission into an eviction, so the
         # admit/account/retain/evict transition is what is under contention.
         monkeypatch.setattr(smc, "MAX_ENTRIES", 16)
-        cache = smc._MatchCache()
+        cache = smc._MatchCache(smc._PatternRegistry())
         patterns = [_pattern("dense"), _pattern("table"), _pattern("dense", "table")]
         errors: list[BaseException] = []
 
