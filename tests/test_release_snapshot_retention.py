@@ -57,9 +57,12 @@ class TestResolution:
         ("junit", "baseline", "old_full", "consumers"),
         [
             (False, False, False, ()),
-            (True, False, True, ("junit",)),
+            # JUnit alone no longer retains a full snapshot at all: it reads
+            # the compact `SymbolInventory`, which `stash_member_evidence`
+            # projects when the member's comparison finishes.
+            (True, False, False, ()),
             (False, True, True, ("bundle_facts_out",)),
-            (True, True, True, ("junit", "bundle_facts_out")),
+            (True, True, True, ("bundle_facts_out",)),
         ],
     )
     def test_every_output_combination(
@@ -68,13 +71,17 @@ class TestResolution:
         """All four combinations, with an oracle stated independently.
 
         The expectation is not "whatever the function returns": ``old_full``
-        is derived here from *whether any consumer was requested*, and the
-        consumer tuple is spelled out, so an implementation that returned a
-        constant for either field fails.
+        is derived here from *whether a consumer that genuinely needs the
+        whole document was requested* -- which is now only
+        ``--bundle-facts-out`` -- and the consumer tuple is spelled out, so
+        an implementation that returned a constant for either field fails.
         """
         got = resolve_snapshot_retention(junit=junit, bundle_facts_out=baseline)
         assert got.old_full is old_full
         assert got.old_consumers == consumers
+        # Independent of retention, and tracked separately: whether the run
+        # asked for the compact inventory at all.
+        assert got.junit_inventory is junit
         # The invariant that carries the whole memory saving: no requested
         # output makes the NEW side full, because none reads it.
         assert got.new_full is False
@@ -95,9 +102,10 @@ class TestResolution:
             junit=True, bundle_facts_out=True
         ).as_counts()
         assert counts == {
+            "junit_inventory": True,
             "old_full": True,
             "new_full": False,
-            "old_consumers": ["junit", "bundle_facts_out"],
+            "old_consumers": ["bundle_facts_out"],
             "new_consumers": [],
         }
 

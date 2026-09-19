@@ -28,12 +28,13 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from ..snapshot_io import (
+    ZSTD_LEVEL_BASELINE,
     SnapshotCompression,
     SnapshotWriteResult,
     _atomic_write_bytes,
     resolve_write_compression,
-    write_snapshot_text,
 )
+from .incremental_encode import encode_chunks
 
 __all__ = ["write_snapshot_text_stream"]
 
@@ -44,6 +45,7 @@ def write_snapshot_text_stream(
     *,
     compression: SnapshotCompression = SnapshotCompression.AUTO,
     zstd_level: int | None = None,
+    decoded_size: int | None = None,
 ) -> SnapshotWriteResult:
     """Write a fragment stream through the same chokepoint, without joining.
 
@@ -55,39 +57,48 @@ def write_snapshot_text_stream(
     those two copies sit on top of the member graph itself, so removing
     them removes a real peak, not a bookkeeping one.
 
-    A **compressed** write joins and delegates, deliberately and visibly:
-    both codecs here are one-shot (``_compress_gzip``/``_compress_zstd``
-    take and return whole buffers, and the deterministic-output guarantees
-    documented on them are stated for that form), so streaming into them
-    would mean a second compression path with its own determinism story to
-    keep in step. That is a real remaining gap rather than a hidden one --
-    the *default* baseline path is uncompressed, which is the one measured.
+    A **compressed** write no longer joins: it streams through
+    :func:`~abicheck.storage.incremental_encode.encode_chunks`, so neither
+    the whole JSON document nor a whole encoded copy is ever materialised.
+    gzip output is byte-identical to the one-shot ``_compress_gzip``; zstd
+    output is byte-identical when *decoded_size* is supplied and otherwise
+    omits the frame's declared content size (a legal frame the reader
+    already handles -- see that module's docstring for the tradeoff).
+
+    The two size figures are counted independently now that they can
+    differ: *decoded* bytes are summed as fragments are encoded, *stored*
+    bytes as buffers are handed to the writer, and ``stored_sha256`` is
+    taken over the stored side, matching :func:`write_snapshot_text`.
     """
     p = Path(path)
     resolved = resolve_write_compression(p, compression)
-    if resolved is not SnapshotCompression.NONE:
-        return write_snapshot_text(
-            "".join(chunks), p, compression=compression, zstd_level=zstd_level
-        )
+    level = zstd_level if zstd_level is not None else ZSTD_LEVEL_BASELINE
 
     digest = hashlib.sha256()
-    written = 0
+    decoded = 0
+    stored = 0
+
+    def _encoded() -> Iterator[bytes]:
+        nonlocal decoded
+        for chunk in chunks:
+            raw = chunk.encode("utf-8")
+            decoded += len(raw)
+            yield raw
 
     def _counted() -> Iterator[bytes]:
-        nonlocal written
-        for chunk in chunks:
-            encoded = chunk.encode("utf-8")
-            digest.update(encoded)
-            written += len(encoded)
-            yield encoded
+        nonlocal stored
+        for buf in encode_chunks(
+            _encoded(), resolved, zstd_level=level, decoded_size=decoded_size
+        ):
+            digest.update(buf)
+            stored += len(buf)
+            yield buf
 
     _atomic_write_bytes(_counted(), p)
     return SnapshotWriteResult(
         path=p,
         compression=resolved,
-        # Uncompressed: stored bytes *are* the decoded bytes, which is what
-        # makes one running digest sufficient for both figures.
-        decoded_size_bytes=written,
-        stored_size_bytes=written,
+        decoded_size_bytes=decoded,
+        stored_size_bytes=stored,
         stored_sha256=digest.hexdigest(),
     )

@@ -81,6 +81,7 @@ from .frontends.cli.release_variant_operand import (  # noqa: F401
 )
 from .frontends.cli.runtime import _safe_write_output, _write_or_echo  # noqa: F401
 from .model import AbiSnapshot
+from .model.symbol_inventory import SymbolInventory
 from .report.comparison_scope import ComparisonScopeTerms
 from .report.release_assurance import ReleaseAssuranceTerms
 from .report.release_public_surface import ReleasePublicSurfaceTerms
@@ -169,7 +170,6 @@ def _collect_matrix_result(
     if not matrix_changes:
         return None, worst_verdict
 
-    from .model import AbiSnapshot
     from .pack_application import resolve_bundle_policy_file
     from .service import compare_snapshots
 
@@ -212,7 +212,7 @@ def _finalize_release_output(
     old_map: dict[str, Path],
     new_map: dict[str, Path],
     warning_msgs: list[str],
-    diff_pairs: list[tuple[DiffResult, AbiSnapshot]],
+    diff_pairs: list[tuple[DiffResult, SymbolInventory]],
     bundle_result: BundleDiffResult | None,
     output: Path | None,
     output_dir: Path | None,

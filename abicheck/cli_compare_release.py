@@ -126,7 +126,10 @@ from .workflows.release_scope import (
     resolve_release_scope_result,
     scoped_bundle_maps,
 )
-from .workflows.release_snapshot_retention import resolve_snapshot_retention
+from .workflows.release_snapshot_retention import (
+    release_old_snapshot_pairs,
+    resolve_snapshot_retention,
+)
 from .workflows.release_stored_inventory import stored_side_degraded_members
 from .workflows.release_support_promise import support_promise_results
 
@@ -1077,7 +1080,12 @@ def compare_release_cmd(
 
                 write_bundle_facts_out(
                     bundle_facts_out,
-                    diff_pairs,
+                    # Not `diff_pairs` -- that carries the compact JUnit
+                    # inventory. A baseline document needs the whole OLD
+                    # snapshot, which `old_full` retention kept on the
+                    # member entries (still present here: the strip runs
+                    # further below).
+                    release_old_snapshot_pairs(library_results),
                     manifest_path,
                     old_map,
                     resolve_stranded_library=_resolve_stranded_library,

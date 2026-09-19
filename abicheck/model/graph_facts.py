@@ -188,6 +188,54 @@ def merge_graph_facts(
     return resolved, conflicts
 
 
+
+def resolve_entity_attrs(
+    facts: list[GraphFact],
+) -> tuple[dict[str, Any], list[FactConflict]]:
+    """:func:`merge_graph_facts` with a single-producer fast path.
+
+    The overwhelmingly common shape of a real graph is *one* fact per
+    node/edge: a measured six-library C++ release carried 10,277 producer
+    facts across 2,771 nodes and 7,506 edges -- exactly one per entity. For
+    that shape the merge is a pure copy: ``merge_graph_facts([f])`` returns
+    ``dict(f.attrs)`` and no conflicts, and
+    :func:`ensure_facts_and_resolve` then copied it a second time into
+    ``attrs``. Every entity therefore held **three** dictionaries with
+    identical contents -- ``facts[0].attrs``, ``resolved`` and ``attrs`` --
+    of which two were pure duplication (~2.97 MiB of shallow container
+    storage per graph on that fixture, multiplied by the member count for a
+    release fan-out).
+
+    This returns ``facts[0].attrs`` *itself* for the single-fact case, and
+    ``ensure_facts_and_resolve`` then aliases ``attrs`` to the same object,
+    so a single-producer entity holds one dict instead of three. Contents,
+    conflicts, ordering and serialization are unchanged by construction:
+    with one fact there is nothing to merge and nothing to disagree with.
+
+    Aliasing is sound because ``attrs``/``resolved`` are already *derived*
+    views, not owned state: ``ensure_facts_and_resolve`` overwrites both
+    from ``facts`` on every call, so a direct ``entity.attrs[k] = v``
+    mutation was already documented as silently dropped (see
+    ``buildsource/source_graph_build_source_abi.py`` and
+    ``buildsource/type_graph.py``, which both route backfills through
+    :func:`register_fact` for exactly that reason) and no production call
+    site performs one. As soon as a second fact arrives -- via
+    :func:`register_fact` or :func:`merge_entity_facts`, the only two ways
+    an entity ever gains one -- this falls back to the full merge, which
+    builds a fresh dict, so the alias never outlives the single-producer
+    case it is valid for.
+
+    Note the synthesized-fact path in :func:`ensure_facts_and_resolve`
+    still *copies* the caller's ``attrs`` into the new ``GraphFact``: a
+    producer may reuse one attrs dict across several entities, so the fact
+    must own its own. The saving here is the two copies made *after* that
+    point, not that one.
+    """
+    if len(facts) == 1:
+        return facts[0].attrs, []
+    return merge_graph_facts(facts)
+
+
 @dataclass
 class GraphNode:
     """A single ABI/API-relevant graph node (ADR-031 D2).
@@ -394,8 +442,8 @@ def ensure_facts_and_resolve(entity: GraphNode | GraphEdge) -> None:
         # already follow, extended to the per-producer evidence trail too.
         for fact in entity.facts:
             _normalize_identity_attrs(fact.attrs)
-    entity.resolved, entity.conflicts = merge_graph_facts(entity.facts)
-    entity.attrs = dict(entity.resolved)
+    entity.resolved, entity.conflicts = resolve_entity_attrs(entity.facts)
+    entity.attrs = entity.resolved
     top = min(entity.facts, key=_precedence_key)
     entity.confidence = top.confidence
     entity.provenance = top.producer

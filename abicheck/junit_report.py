@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING
 
 from .checker_types import Change, DiffResult
 from .junit_coverage_warnings import append_coverage_warnings_suite
+from .model.symbol_inventory import SymbolInventory
 from .policy.classification import Verdict
 from .policy.contract_finding_relevance import is_evaluated
 from .report.envelope import resolved_document as _resolved_document
@@ -55,6 +56,7 @@ from .report.junit_disposition import (
     # so every existing caller and test resolves unchanged).
     add_disposition_audit_properties as _add_disposition_audit_properties,
 )
+from .report.junit_inventory import coerce_junit_inventory
 from .report.junit_properties import (
     add_contract_properties,
     add_demangled_symbol_property,
@@ -374,26 +376,27 @@ def _partition_changes(
 
 
 def _collect_all_symbols(
-    old_snapshot: AbiSnapshot | None,
+    old_inventory: SymbolInventory | None,
     show_only: str | None,
     change_by_symbol: dict[str, Change],
 ) -> dict[str, str]:
     """Build a symbol_name → classname map covering changed and unchanged symbols.
 
-    When *old_snapshot* is provided and *show_only* is **not** active,
+    When *old_inventory* is provided and *show_only* is **not** active,
     unchanged symbols are included so the pass-rate is meaningful.  When
     *show_only* is active, only filtered changes should appear.
+
+    Takes the compact :class:`~abicheck.model.symbol_inventory.
+    SymbolInventory` rather than the whole ``AbiSnapshot`` it used to:
+    the four attribute reads this function performed were the entire
+    OLD-side JUnit retention contract, and holding a full snapshot per
+    member until the release-level fold ran was the cost of them (see that
+    module's docstring). ``as_symbol_map`` reproduces the same four folds in
+    the same order, so the emitted document is unchanged.
     """
     all_symbols: dict[str, str] = {}
-    if old_snapshot is not None and not show_only:
-        for f in old_snapshot.functions:
-            all_symbols[f.mangled] = "functions"
-        for v in old_snapshot.variables:
-            all_symbols[v.mangled] = "variables"
-        for t in old_snapshot.types:
-            all_symbols[t.name] = "types"
-        for e in old_snapshot.enums:
-            all_symbols[e.name] = "enums"
+    if old_inventory is not None and not show_only:
+        all_symbols = old_inventory.as_symbol_map()
     # Add changed symbols that might not be in old_snapshot (e.g. additions)
     for sym, c in change_by_symbol.items():
         if sym not in all_symbols:
@@ -563,7 +566,7 @@ def _add_correlation_property_if_testcase_found(ts: ET.Element, change: Change) 
 
 def _build_testsuite(
     result: DiffResult,
-    old_snapshot: AbiSnapshot | None = None,
+    old_snapshot: AbiSnapshot | SymbolInventory | None = None,
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
@@ -605,7 +608,9 @@ def _build_testsuite(
         changes = _suppress_dangling_correlation_notes(changes)
 
     change_by_symbol, extra_changes = _partition_changes(changes)
-    all_symbols = _collect_all_symbols(old_snapshot, show_only, change_by_symbol)
+    all_symbols = _collect_all_symbols(
+        coerce_junit_inventory(old_snapshot), show_only, change_by_symbol
+    )
 
     # ADR-061 Phase 2 item 4b / gap C: every verdict/category is resolved
     # once per render -- read off *envelope* when this render is a projection
@@ -950,7 +955,7 @@ def _build_error_testsuite(library: str, error_msg: str) -> ET.Element:
 
 def to_junit_xml(
     result: DiffResult,
-    old_snapshot: AbiSnapshot | None = None,
+    old_snapshot: AbiSnapshot | SymbolInventory | None = None,
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
@@ -1079,7 +1084,7 @@ def _append_coverage_suite(root: ET.Element, result: DiffResult) -> int:
 
 
 def to_junit_xml_multi(
-    results: list[tuple[DiffResult, AbiSnapshot | None]],
+    results: list[tuple[DiffResult, AbiSnapshot | SymbolInventory | None]],
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
