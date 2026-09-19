@@ -56,7 +56,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # step: any "free it earlier" change can silently narrow evidence,
         # and the narrowing shows up as a smaller result, never as a raised
         # exception.
-        fixed_by=(1335,),
+        fixed_by=(1335, 1338),
         seed_tests=("tests/test_header_graph_ast_projection.py",),
         public_surfaces=("cli", "python-api"),
         axes={
