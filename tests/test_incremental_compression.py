@@ -173,22 +173,50 @@ class TestIncrementality:
     the output: the encoder must emit before it has consumed the input, and
     must never pull the whole stream into a list of its own."""
 
-    def test_output_starts_before_the_input_is_exhausted(self):
-        consumed = []
+    @pytest.mark.parametrize(
+        "algorithm", [SnapshotCompression.GZIP, SnapshotCompression.ZSTD]
+    )
+    def test_a_payload_buffer_arrives_before_the_input_is_exhausted(self, algorithm):
+        """Compressed *payload* must appear while the source is still live.
+
+        The first version of this test asserted only that ``next(stream)``
+        returned something with the source unconsumed -- which every
+        encoder satisfies, streaming or not, because both codecs emit a
+        frame *header* before pulling a single input item (gzip's is 10
+        bytes; measured ``consumed == []`` at that point). It therefore
+        passed against an encoder that then drained the whole input, which
+        is precisely the defect it exists to catch. Caught in review; kept
+        as a worked example of why "it emitted something early" is not the
+        claim.
+
+        So: skip past the header by requiring output *beyond* it, and
+        assert the source is still unconsumed at that moment.
+        """
+        total = 200
+        consumed: list[int] = []
 
         def source():
-            for i in range(200):
-                block = (f"{i:06d}" * 4000).encode("utf-8")
+            rng = random.Random(99)
+            for i in range(total):
+                # Low-redundancy: a highly compressible stream lets deflate
+                # hold everything in its window and emit nothing until
+                # flush, which would make this unfalsifiable again.
                 consumed.append(i)
-                yield block
+                yield bytes(rng.getrandbits(8) for _ in range(20_000))
 
-        stream = encode_chunks(source(), SnapshotCompression.GZIP)
-        first = next(stream)
-        assert first  # a real buffer, not an empty priming yield
-        assert len(consumed) < 200, "the encoder drained its whole input first"
-        for _ in stream:
-            pass
-        assert len(consumed) == 200
+        emitted = 0
+        consumed_at_first_payload = None
+        for buf in encode_chunks(source(), algorithm):
+            emitted += len(buf)
+            # 18 bytes clears gzip's 10-byte header and zstd's frame header.
+            if consumed_at_first_payload is None and emitted > 18:
+                consumed_at_first_payload = len(consumed)
+        assert consumed_at_first_payload is not None, "no payload was produced"
+        assert consumed_at_first_payload < total, (
+            f"the encoder drained all {total} source items "
+            f"({consumed_at_first_payload} consumed) before emitting payload"
+        )
+        assert len(consumed) == total
 
     def test_the_writer_consumes_buffers_one_at_a_time(self, tmp_path, monkeypatch):
         import abicheck.snapshot_io as sio

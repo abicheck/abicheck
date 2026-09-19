@@ -10,7 +10,7 @@
 - Memory: a JUnit release render no longer retains every member's full
   `AbiSnapshot`. `junit_report` read exactly four attributes off it, to
   build a symbol-name to classname map; it now receives that map as a
-  compact `report.junit_inventory.JunitSymbolInventory`, projected when the
+  compact `model.symbol_inventory.SymbolInventory`, projected when the
   member's comparison finishes. `--bundle-facts-out` is now the only
   consumer that keeps the whole document. Rendered JUnit documents are
   byte-identical.
