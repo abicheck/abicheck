@@ -510,10 +510,23 @@ class _VocabularyCache:
     not merely compile to one that happens to be equal.
     """
 
-    def __init__(self, registry: _PatternRegistry | None = None) -> None:
+    def __init__(
+        self,
+        registry: _PatternRegistry | None = None,
+        match_cache: _MatchCache | None = None,
+    ) -> None:
         self._lock = threading.Lock()
         self._generation = 0
         self._registry = registry if registry is not None else PATTERN_REGISTRY
+        #: Where to send a *retired* vocabulary's token. Retiring a
+        #: vocabulary makes the sibling match cache's entries for it
+        #: unreachable -- their key is a token only this cache hands out --
+        #: so without this they pin the pattern's bytes forever. Explicit
+        #: rather than defaulted to the process-wide cache: an isolated
+        #: instance must not reach into the production one. The production
+        #: wiring is asserted by a test, so "forgot to wire it" cannot be
+        #: silent.
+        self._match_cache = match_cache
         self._entries: OrderedDict[frozenset[str], re.Pattern[str] | None] = (
             OrderedDict()
         )
@@ -575,10 +588,11 @@ class _VocabularyCache:
                 self._tokens[key] = self._registry.acquire(
                     compiled, holder="vocabulary"
                 )
-            self._evict_locked()
-            return compiled
+            retired = self._evict_locked()
+        self._retire_tokens(retired)
+        return compiled
 
-    def _evict_locked(self) -> None:
+    def _evict_locked(self) -> list[int]:
         """Bounded two ways, because an entry count is not a byte budget.
 
         64 vocabularies of 3.96M pattern characters each is gigabytes
@@ -587,8 +601,11 @@ class _VocabularyCache:
         least one entry, so a single oversized vocabulary degrades to
         "retained while in use" rather than to recompiling on every request.
 
-        Called with this cache's lock held.
+        Called with this cache's lock held. Returns the tokens it retired,
+        for the caller to hand to :meth:`_retire_tokens` *after* releasing
+        the lock -- see there for why the notification cannot happen here.
         """
+        retired: list[int] = []
         while len(self._entries) > 1 and (
             len(self._entries) > MAX_CACHED_VOCABULARIES or self._registry.over_budget()
         ):
@@ -596,14 +613,42 @@ class _VocabularyCache:
             token = self._tokens.pop(evicted_key, None)
             if token is not None:
                 self._registry.release(token, holder="vocabulary")
+                retired.append(token)
             self.evictions += 1
+        return retired
+
+    def _retire_tokens(self, tokens: Iterable[int]) -> None:
+        """Drop the match cache's entries for vocabularies that are gone.
+
+        **Called with this cache's lock released**, deliberately. It takes
+        the match cache's lock, and doing that under this one would add a
+        vocabulary-then-match lock edge to a module whose stated order is
+        "cache locks outer, registry innermost, and no cache calls another
+        while holding its own". Collecting under the lock and notifying
+        after it keeps that true, and is safe because a retired token is
+        retired for good: this cache has already dropped it, so nothing can
+        resurrect those entries in the window.
+
+        Why it must happen at all: the match cache is bounded by its
+        *result* bytes, which are tiny next to a compiled alternation's. A
+        324-byte result entry keeps a 7 MiB pattern alive, so forty retired
+        members pinned 287 MiB behind 13 KB of results -- past the
+        registry's 256 MiB budget, which then evicted live vocabularies
+        looking for space it could never recover, collapsing the cache to
+        one entry and recompiling every member's vocabulary from scratch.
+        """
+        if self._match_cache is None:
+            return
+        for token in tokens:
+            self._match_cache.drop_pattern(token)
 
     def clear(self) -> None:
         """Reset this cache and end the current epoch -- see
         :meth:`_MatchCache.clear`, whose contract this mirrors."""
         with self._lock:
             self._generation += 1
-            for token in self._tokens.values():
+            retired = list(self._tokens.values())
+            for token in retired:
                 self._registry.release(token, holder="vocabulary")
             self._tokens.clear()
             self._entries.clear()
@@ -611,6 +656,7 @@ class _VocabularyCache:
             self.misses = 0
             self.compilations = 0
             self.evictions = 0
+        self._retire_tokens(retired)
 
     def __len__(self) -> int:
         with self._lock:
@@ -618,7 +664,9 @@ class _VocabularyCache:
 
 
 MATCH_CACHE = _MatchCache()
-VOCABULARY_CACHE = _VocabularyCache()
+#: Wired to the match cache so a retired vocabulary takes its now-unreachable
+#: match results with it -- see `_VocabularyCache._retire_tokens`.
+VOCABULARY_CACHE = _VocabularyCache(match_cache=MATCH_CACHE)
 
 
 def cache_statistics() -> dict[str, object]:
@@ -709,7 +757,20 @@ def clear_caches() -> None:
     """
     MATCH_CACHE.clear()
     VOCABULARY_CACHE.clear()
-    # Both caches returned their references above, so the registry should
-    # already be empty; clearing it is belt-and-braces for a caller that
-    # built its own cache against the shared registry and dropped it.
-    PATTERN_REGISTRY.clear()
+    # Deliberately **no** ``PATTERN_REGISTRY.clear()`` here. It used to be
+    # belt-and-braces for a caller that built its own cache against the
+    # shared registry and dropped it -- but wiping shared state to cover
+    # someone else's leak is what turns a leak into corruption. The registry
+    # is the *sole* strong-reference owner of every compiled pattern (a
+    # match-cache entry stores a token, never the pattern object), and a
+    # token is an ``id()``. Drop the registry's reference while any entry
+    # still names that token and the pattern becomes collectable, its
+    # address is reused by the next one, and the cache answers a lookup for
+    # one vocabulary with another vocabulary's matches.
+    #
+    # Reachable because these three calls are not one transition: a worker
+    # publishing into the new epoch between the first clear and the third
+    # would have had its handle wiped underneath it. Both cache clears
+    # return every handle they took -- asserted directly -- so the registry
+    # is empty here whenever the caches were its only holders, which is the
+    # only case the old line actually covered.

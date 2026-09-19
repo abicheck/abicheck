@@ -593,3 +593,121 @@ class TestTokenAccountingHoldsWhereThereIsNoTokenToAccountFor:
         )
         cache.clear()
         assert len(registry) == 0, "clear did not return every vocabulary handle"
+
+
+class TestARetiredVocabularyTakesItsMatchResultsWithIt:
+    """A dead reference must not pin a live pattern's bytes.
+
+    **Bug class**: a budget enforced on one quantity while a *different*,
+    much larger quantity is what the retained object actually costs — the
+    same shape as the admission defect this PR exists to fix, in a second
+    place. The match cache is bounded by its *result* bytes; a compiled
+    alternation is orders of magnitude larger than any result keyed on it.
+    So an entry that can never be looked up again — its key names a token
+    only the vocabulary cache hands out, and that vocabulary is gone —
+    keeps the whole pattern charged to the registry.
+
+    Measured before the fix: forty retired members left 13 KB of results
+    pinning **287 MiB** of patterns, past the registry's 256 MiB budget,
+    whereupon vocabulary eviction began discarding *live* vocabularies
+    hunting for space it could never recover and collapsed the cache to a
+    single entry — recompiling every member's vocabulary from scratch,
+    which is precisely the regression this branch set out to remove.
+
+    **General invariant**: for any number of retired vocabularies, the
+    registry retains only what the *live* ones need. Stated over a sweep of
+    member counts rather than the forty that reproduced it, and asserted as
+    a bound derived from the live set rather than a pinned constant.
+    """
+
+    @staticmethod
+    def _vocabulary(index: int) -> re.Pattern[str]:
+        """One member's vocabulary: distinct per member, so each takes its
+        own registry token rather than sharing one."""
+        return re.compile("|".join(f"s{index}_{i}_{'x' * 40}" for i in range(50)))
+
+    @pytest.fixture
+    def tight_budget(self, monkeypatch) -> None:
+        """Apply the budget pressure at a scale the test can afford.
+
+        The defect is about *pressure*, not about absolute megabytes:
+        reproducing it with real 7 MiB alternations meant compiling forty
+        of them, which is slow enough to discourage sweeping. Lowering the
+        budget instead reaches the identical eviction path — and the
+        production-scale reproduction is recorded in this class's own
+        docstring, so the real numbers are not lost by testing it cheaply.
+        """
+        monkeypatch.setattr(
+            "abicheck.compare.spelling_pattern_registry.MAX_PATTERN_BYTES", 40_000
+        )
+
+    @pytest.mark.parametrize("members", [2, 8, 30])
+    @pytest.mark.usefixtures("tight_budget")
+    def test_retiring_a_vocabulary_frees_what_only_it_was_holding(
+        self, members
+    ) -> None:
+        from abicheck.compare.spelling_match_cache import _VocabularyCache
+
+        registry = _PatternRegistry()
+        matches = _MatchCache(registry)
+        vocabularies = _VocabularyCache(registry, matches)
+
+        for n in range(members):
+            pattern = self._vocabulary(n)
+            vocabularies.get_or_compile({f"member{n}"}, lambda _key, p=pattern: p)
+            # One tiny result per member: the match cache's own budget
+            # barely moves, which is the whole point.
+            matches.put(
+                (matches.token_for(pattern), f"text{n}", 0, 1),
+                (SpellingMatch("a", 0, 1),),
+                pattern,
+            )
+
+        live_tokens = set(vocabularies._tokens.values())
+        held_tokens = set(registry.reference_counts())
+        assert held_tokens == live_tokens, (
+            "the registry is holding patterns no live vocabulary needs — "
+            f"{len(held_tokens - live_tokens)} retired one(s) still pinned"
+        )
+        assert not registry.over_budget(), (
+            "retired vocabularies pushed the registry over its byte budget"
+        )
+
+    @pytest.mark.usefixtures("tight_budget")
+    def test_the_sweep_actually_retires_something(self) -> None:
+        """Vacuity guard. With no eviction, nothing is retired and the
+        assertions above hold trivially against a broken implementation."""
+        from abicheck.compare.spelling_match_cache import _VocabularyCache
+
+        registry = _PatternRegistry()
+        matches = _MatchCache(registry)
+        vocabularies = _VocabularyCache(registry, matches)
+        for n in range(30):
+            pattern = self._vocabulary(n)
+            vocabularies.get_or_compile({f"member{n}"}, lambda _key, p=pattern: p)
+            matches.put(
+                (matches.token_for(pattern), f"text{n}", 0, 1),
+                (SpellingMatch("a", 0, 1),),
+                pattern,
+            )
+        assert vocabularies.evictions > 0, "no vocabulary was ever retired"
+        assert matches.evictions > 0, (
+            "no match entry was dropped, so the retirement path never ran"
+        )
+
+    def test_the_shared_caches_are_wired_together(self) -> None:
+        """The fix is a wiring, so the wiring is the thing that can rot.
+
+        An isolated `_VocabularyCache` deliberately defaults to *no* sink —
+        a test instance must not reach into the production match cache — so
+        the default is the unfixed behaviour and only the module's own
+        singletons carry the fix. That makes "someone constructed
+        VOCABULARY_CACHE without its match cache" a silent regression
+        unless it is asserted here.
+        """
+        from abicheck.compare.spelling_match_cache import (
+            MATCH_CACHE,
+            VOCABULARY_CACHE,
+        )
+
+        assert VOCABULARY_CACHE._match_cache is MATCH_CACHE
