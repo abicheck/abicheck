@@ -794,3 +794,66 @@ class TestNestedSearchLosesASameStartShorterSpelling:
         )
         assert start == 0 or text[start - 1] not in boundary
         assert after >= len(text) or text[after] not in boundary
+
+
+class TestTwoWorkersCompilingOneVocabulary:
+    """Compilation runs outside the lock, so a duplicate is possible.
+
+    That is a deliberate trade: building a multi-megabyte alternation takes
+    seconds, and holding the lock across it would serialize every other
+    worker's cache *hits* behind one compilation. The duplicate is wasted
+    work, never a wrong answer — but only if the loser's pattern is
+    discarded rather than retained beside the winner's, which would charge
+    the registry twice for one vocabulary and quietly double the very
+    retention this module bounds.
+
+    Exercised deterministically rather than with threads: the compile
+    callback itself installs a competing entry, which is exactly the state
+    a losing worker returns into. A thread-based version would be
+    timing-dependent and, on the evidence of this PR's other concurrency
+    tests, most likely vacuous.
+    """
+
+    def test_the_loser_returns_the_winners_pattern(self) -> None:
+        from abicheck.compare.spelling_match_cache import (
+            _PatternRegistry,
+            _VocabularyCache,
+        )
+
+        registry = _PatternRegistry()
+        cache = _VocabularyCache(registry)
+        winner = _build_spelling_pattern(["Winner"])
+        assert winner is not None
+
+        def compile_and_race(key):
+            # Simulate the other worker finishing first, while we were
+            # compiling outside the lock.
+            cache._entries[key] = winner
+            cache._tokens[key] = registry.acquire(winner, holder="vocabulary")
+            return _build_spelling_pattern(["Loser"])
+
+        got = cache.get_or_compile(["Winner"], compile_and_race)
+        assert got is winner, "the loser's own pattern was returned"
+
+    def test_the_losers_pattern_is_not_retained(self) -> None:
+        """The accounting half: one vocabulary must cost one pattern."""
+        from abicheck.compare.spelling_match_cache import (
+            _PatternRegistry,
+            _VocabularyCache,
+        )
+
+        registry = _PatternRegistry()
+        cache = _VocabularyCache(registry)
+        winner = _build_spelling_pattern(["Winner"])
+        loser = _build_spelling_pattern(["Loser"])
+        assert winner is not None and loser is not None
+
+        def compile_and_race(key):
+            cache._entries[key] = winner
+            cache._tokens[key] = registry.acquire(winner, holder="vocabulary")
+            return loser
+
+        cache.get_or_compile(["Winner"], compile_and_race)
+        assert len(registry) == 1, "both patterns were registered"
+        assert registry.token_for(loser) is None, "the loser stayed registered"
+        assert registry.token_for(winner) is not None

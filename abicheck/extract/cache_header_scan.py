@@ -119,11 +119,6 @@ class _ScanCounters:
             self.entries_returned = 0
             self._seen.clear()
 
-    @property
-    def distinct_directories(self) -> int:
-        with _COUNTERS_LOCK:
-            return len(self._seen)
-
 
 _COUNTERS = _ScanCounters()
 
