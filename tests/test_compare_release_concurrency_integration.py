@@ -420,6 +420,44 @@ class TestMemberFailureIsReportedNotLaundered:
         assert unsupported["verdict"] == "unsupported"
         assert not [r for r in caplog.records if r.name == "abicheck.release"]
 
+    def test_the_outer_dispatch_boundary_reports_the_same_way(
+        self, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The fan-out's *second* boundary owes the same account.
+
+        `_compare_one_library` classifies anything raised inside its own
+        body; a failure reaching the executor loop escaped that -- in the
+        dispatch, the context copy, or the classification itself. It is
+        still an internal failure, so it must not degrade to a bare
+        `str(exc)`, and it must still echo to stderr, which is what a user
+        watching a long release run actually sees.
+        """
+        import logging  # noqa: PLC0415
+
+        from abicheck.frontends.cli.release_member_errors import (  # noqa: PLC0415
+            member_dispatch_failure_entry,
+        )
+
+        exc = KeyError((138821602538640, "const dense&", 0, 12))
+        with caplog.at_level(logging.ERROR, logger="abicheck.release"):
+            entry = member_dispatch_failure_entry(exc, "libmock_core.so")
+
+        assert entry["library"] == "libmock_core.so"
+        assert entry["verdict"] == "ERROR"
+        assert entry["error_type"] == "KeyError"
+        assert "const dense&" in str(entry["error"])
+
+        records = [r for r in caplog.records if r.name == "abicheck.release"]
+        assert records, "no diagnostic was emitted at the dispatch boundary"
+        assert records[0].exc_info is not None, "the traceback was dropped"
+
+        # The stderr line names the exception class too -- the original
+        # report's `Error comparing <lib>: (<tuple>)` named neither the
+        # class nor the subsystem, which is why it was undiagnosable.
+        stderr = capsys.readouterr().err
+        assert "libmock_core.so" in stderr
+        assert "KeyError" in stderr
+
     def test_a_failed_member_cannot_produce_a_clean_release_exit(self) -> None:
         """The aggregation contract, stated directly.
 
@@ -445,3 +483,76 @@ class TestMemberFailureIsReportedNotLaundered:
             fold_gate_and_operational(clean_gate, OperationalStatus.EXTRACTION_ERROR)
             >= 1
         )
+
+
+class TestFanOutExceptionBoundaryInSitu:
+    """The outer boundary as the fan-out itself reaches it.
+
+    The sibling test above calls `member_dispatch_failure_entry` directly.
+    This one drives `_compare_release_parallel`, so the `except` arm in the
+    executor loop -- the exact path the reported oneDAL failure took, and
+    the one place a worker's exception becomes a member result -- is
+    executed rather than assumed. It also states the release-level contract
+    that matters most: one member's internal failure must not take its
+    successful siblings with it.
+    """
+
+    def _common_args(self, tmp_path: Path, keys: tuple[str, ...]) -> tuple:
+        old_map = {k: tmp_path / f"{k}.so" for k in keys}
+        return (
+            old_map,
+            {k: tmp_path / f"{k}_new.so" for k in keys},
+            None,
+            None,
+            lambda _o, _n: None,
+            [],
+            [],
+            [],
+            [],
+            "1.0",
+            "2.0",
+            "c++",
+            None,
+            "strict_abi",
+            None,
+            True,
+            True,
+            False,
+            None,
+        )
+
+    def test_one_worker_failure_does_not_lose_its_siblings(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.cli_compare_release_pairwise import (  # noqa: PLC0415
+            _compare_release_parallel,
+        )
+
+        # The reported shape: a match-cache key escaping as a bare KeyError
+        # from inside one member's comparison.
+        def fake_compare_one_library(key: str, *_args: object) -> dict[str, object]:
+            if key == "b":
+                raise KeyError((138821602538640, "const dense&", 0, 12))
+            return {"library": f"{key}.so", "verdict": "NO_CHANGE"}
+
+        monkeypatch.setattr(
+            "abicheck.cli_compare_release_pairwise._compare_one_library",
+            fake_compare_one_library,
+        )
+
+        keys = ("a", "b", "c")
+        common_args = self._common_args(tmp_path, keys)
+        results = _compare_release_parallel(list(keys), common_args, common_args[0], 3)
+
+        by_library = {str(entry["library"]): entry for entry in results}
+        # Every selected member is still accounted for -- a failure must not
+        # silently drop the member from the release's coverage.
+        assert set(by_library) == {"a.so", "b.so", "c.so"}
+        # The successful siblings stayed reviewable.
+        assert by_library["a.so"]["verdict"] == "NO_CHANGE"
+        assert by_library["c.so"]["verdict"] == "NO_CHANGE"
+        # And the failure kept its identity rather than becoming a bare tuple.
+        failed = by_library["b.so"]
+        assert failed["verdict"] == "ERROR"
+        assert failed["error_type"] == "KeyError"
+        assert "const dense&" in str(failed["error"])

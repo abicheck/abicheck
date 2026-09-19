@@ -361,6 +361,50 @@ class TestClearLifecycle:
         cache.put(key, _uncached(pattern, text), pattern, generation=cache.generation)
         assert len(cache) == 1
 
+    def test_a_vocabulary_compile_in_flight_across_clear_is_not_published(self) -> None:
+        """The vocabulary cache's half of the same lifecycle rule.
+
+        The match cache's version is asserted above; this one was claimed by
+        the module's own contract but never executed, which is the whole
+        point of stating an invariant as a test rather than a comment. The
+        caller must still receive a *correct* pattern -- a clear invalidates
+        the cache, not the work in flight -- while the new epoch stays empty.
+        """
+        cache = smc._VocabularyCache()
+        spellings = frozenset({"dense", "table"})
+        entered = threading.Event()
+        cleared = threading.Event()
+
+        def compile_after_clear(key: frozenset[str]) -> re.Pattern[str] | None:
+            entered.set()
+            # The clear lands strictly between this compile starting and its
+            # publication -- forced, not raced for.
+            assert cleared.wait(_INTERLEAVE_TIMEOUT * 5)
+            return _build_spelling_pattern(key)
+
+        result: list[object] = []
+        worker = threading.Thread(
+            target=lambda: result.append(
+                cache.get_or_compile(spellings, compile_after_clear)
+            )
+        )
+        worker.start()
+        assert entered.wait(_INTERLEAVE_TIMEOUT * 5)
+        cache.clear()
+        cleared.set()
+        worker.join(timeout=_INTERLEAVE_TIMEOUT * 10)
+        assert not worker.is_alive()
+
+        # The caller got a real, usable pattern ...
+        assert result and isinstance(result[0], re.Pattern)
+        # ... and the post-clear cache did not inherit it.
+        assert len(cache) == 0
+        # A fresh request after the clear publishes normally, so the cache
+        # is not left permanently poisoned by the dropped publication.
+        republished = cache.get_or_compile(spellings, _build_spelling_pattern)
+        assert republished is not None
+        assert len(cache) == 1
+
     def test_clear_under_concurrent_readers_leaves_consistent_accounting(self) -> None:
         cache = smc._MatchCache()
         pattern = _pattern("dense", "table")
