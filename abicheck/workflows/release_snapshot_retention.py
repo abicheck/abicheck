@@ -65,14 +65,10 @@ what is kept in memory after the member's comparison has finished.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from ..checker_types import DiffResult
 from ..model import AbiSnapshot
 from ..model.symbol_inventory import SymbolInventory, build_symbol_inventory
-
-if TYPE_CHECKING:
-    pass
 
 __all__ = [
     "SnapshotRetention",
@@ -171,7 +167,6 @@ def stash_member_evidence(
     site: *what evidence a member leaves behind* is not a front end's
     choice, and the projection it applies is a workflows-owned one.
     """
-    from ..model.symbol_inventory import build_symbol_inventory
     from .bundle_symbol_status import build_bundle_signature_evidence
     from .memory_trace import record_release_member
 
