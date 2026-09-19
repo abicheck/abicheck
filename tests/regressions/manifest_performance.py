@@ -469,7 +469,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # resolving every `Symbol.name` with one seek-and-read per name.
         fixed_by=(1331,),
         seed_tests=("tests/test_dumper_elf_symbols_buffering.py",),
-        public_surfaces=("python-api",),
+        public_surfaces=(),
         axes={
             "symbol_table": (".dynsym", ".symtab"),
             "symbol_shape": (
@@ -518,7 +518,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # `SurfaceAcquisitionIdentity.key()`.
         fixed_by=(1331,),
         seed_tests=("tests/test_surface_acquisition_include_order.py",),
-        public_surfaces=("python-api",),
+        public_surfaces=(),
         axes={
             "input_kind": ("ordered", "membership-only"),
             "sequence_shape": ("permuted", "duplicate-bearing", "equal"),
@@ -568,7 +568,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # accepted `match._text = ...`.
         fixed_by=(1331,),
         seed_tests=("tests/test_spelling_match_cache_retention.py",),
-        public_surfaces=("python-api",),
+        public_surfaces=(),
         axes={
             "pattern_population": ("single", "shared", "distinct", "oversized"),
             "budget_direction": ("retain", "release", "round-trip"),
@@ -625,7 +625,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # guard and to pass with their own check deleted.
         fixed_by=(1331,),
         seed_tests=("tests/test_elf_symbol_fastpath.py",),
-        public_surfaces=("python-api",),
+        public_surfaces=(),
         axes={
             "elf_class": ("32", "64"),
             "endianness": ("little", "big"),
@@ -825,5 +825,125 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
                 reference="docs/contribute/known-gaps.md",
             ),
         ),
+    ),
+    BugClass(
+        id="perf.per_symbol_dto_carries_a_per_instance_dict",
+        invariant=(
+            "A small frozen dataclass materialized once per row of a real "
+            "input -- an export table, a symbol table, a relocation list -- "
+            "carries no per-instance `__dict__`. The cost is invisible at "
+            "the definition site and proportional to the input, so no test "
+            "of behaviour can see it and no profile attributes it to a "
+            "line: it shows up only as allocation pressure. The "
+            "measurement that matters is the ratio, not the absolute "
+            "number -- a dict six times the size of the data it wraps is "
+            "the signal, and it is worth fixing only where the type is "
+            "built per input row rather than once per run. The structural "
+            "test must inspect a CONSTRUCTED instance for `__dict__` "
+            "rather than read the decorator's keyword, since `slots=True` "
+            "is one of several routes to the property, and must carry a "
+            "vacuity guard, because a module sweep whose discovery "
+            "predicate stops matching passes while asserting nothing."
+        ),
+        # #1333: `RawExportEntry` was frozen but unslotted -- 48 B of object
+        # plus 296 B of `__dict__` per row, against 43,864 `.dynsym` entries
+        # per side of a real oneDAL release (87,728 both sides, ~22 MiB at
+        # peak). All three consumers project the index straight to a name
+        # set and drop it, so the entries are a transient spike, not
+        # retained state.
+        #
+        # Sibling to `perf.retention_decided_by_one_switch_not_by_consumers`
+        # (#1332) above, and deliberately a separate class: that one is
+        # about *which* objects are kept alive and for how long, this one
+        # about what each object costs while it is. A release can be fixed
+        # for one and still lose to the other.
+        fixed_by=(1333,),
+        seed_tests=("tests/test_export_index_allocation.py",),
+        public_surfaces=(),
+        axes={
+            "dto": ("RawExportEntry", "RawExportIndex"),
+            "operation": (
+                "construct",
+                "compare",
+                "hash",
+                "set-membership",
+                "field-read",
+                "default",
+                "field-assign",
+                "undeclared-assign",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Scoped to `model/export_index.py`; there is no "
+                    "repo-wide sweep for other per-row DTOs, so the next "
+                    "instance is found by reading rather than by CI. "
+                    "Deliberately so: the same rule applied to a type "
+                    "built once per run would be cargo-culting, and "
+                    "`slots=True` on a frozen dataclass carries a real "
+                    "CPython wart (an undeclared attribute assignment "
+                    "raises `TypeError: super(type, obj)...` instead of "
+                    "`FrozenInstanceError`, because slots builds a new "
+                    "class while the frozen `__setattr__` closed over the "
+                    "original) that is only acceptable where the "
+                    "allocation saving is real."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="perf.enumerable_value_space_allocated_per_occurrence",
+        invariant=(
+            "A value type whose inhabitants are enumerable -- a frozen "
+            "record of a few booleans or a small enum -- is materialized "
+            "once per distinct VALUE, not once per occurrence, wherever it "
+            "is produced per row of a real input. The bound is the point: "
+            "the number of distinct objects a producer yields must not "
+            "grow with its input size. Two things make the sharing sound "
+            "rather than merely smaller, and both must be asserted, not "
+            "argued: the type is frozen (a shared object no caller can "
+            "write to), and no reader distinguishes two equal values by "
+            "identity. Three test obligations follow, each closing a "
+            "mutation the others miss. (1) The bound must be counted "
+            "through the REAL producer, not the factory: a correct "
+            "factory whose one call site still calls the constructor "
+            "passes every factory-only test and saves nothing. (2) The "
+            "fixture must span several distinct values, or a cache that "
+            "ignores its key entirely -- collapsing every answer onto one "
+            "-- satisfies the bound while corrupting results. (3) A "
+            "normalizing factory must be tested with an input that can "
+            "DETECT the normalization: `int` inputs are hash-equal to "
+            "`bool` and resolve through a dict key either way, so they "
+            "prove nothing about a `bool(...)` coercion."
+        ),
+        # #1333 follow-up: `SymbolSignatureStatus` is frozen, slotted, and
+        # holds two booleans -- four inhabitants -- yet
+        # `symbol_signature_statuses` allocated one per symbol. 48 B against
+        # 87,728 symbols is 4.02 MiB for one real oneDAL library, and the
+        # release fan-out retains a mapping per matched member (~24 MiB
+        # across six). About 1% of a measured ~2.3 GiB peak: taken because
+        # it is free and provably safe, NOT as a memory fix -- the
+        # member-concurrency measurement owns that question.
+        #
+        # Obligation (3) is here because it was violated in this very PR:
+        # the first version of the seed test exercised only `int(True)`,
+        # and a mutation deleting the `bool(...)` coercion passed all 24
+        # tests. The real coercion only bites on a truthy value that is not
+        # hash-equal to `True` (a string, `2`, an unhashable list), which
+        # the sweep now covers -- the same "an untested key is not an
+        # unnecessary key" lesson AGENTS.md records for the memoization
+        # cache key.
+        fixed_by=(1333,),
+        seed_tests=("tests/test_symbol_signature_status_interning.py",),
+        # Internal-module construction and a direct `symbol_signature_
+        # statuses` call -- no route through `abicheck.service`, no CLI, no
+        # Action, so this stays `()` per the schema's own rule.
+        public_surfaces=(),
+        axes={
+            "detection": ("value-equivalence", "allocation-bound"),
+            "input_size": ("16", "256", "2048"),
+        },
     ),
 )

@@ -358,8 +358,47 @@ class TestTheProbeAnchorsExactlyWhatTheSharedPredicateSays:
     )
 
     @staticmethod
-    def _probe_argv(spelling: str, *, on_windows: bool, workdir: Path) -> str:
-        """The path the probe subprocess is actually handed."""
+    def _names_an_existing_directory(spelling: str, *, workdir: Path) -> bool:
+        """Does bash itself see *spelling* as a directory from *workdir*?
+
+        Asked of bash rather than of `pathlib`, for the same reason the
+        predicate oracle below is: the question that matters is the one
+        `_is_release_style_operand` actually asks (`[[ -d "$path" ]]`),
+        evaluated by the same shell, from the same directory, on the same
+        string. A Python restatement would disagree with it on exactly the
+        Windows spellings this sweep exists to cover -- drive-relative
+        `C:pkg`, root-relative `\\pkg`, UNC `\\\\server\\share` -- which is the
+        `copied_option_table_went_stale` shape this file's own docstring
+        warns about.
+        """
+        require_bash()
+        completed = subprocess.run(  # noqa: S603
+            [bash_executable(), "-c", '[[ -d "$1" ]]', "bash", spelling],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=str(workdir),
+        )
+        return completed.returncode == 0
+
+    @staticmethod
+    def _probe_argv(spelling: str, *, on_windows: bool, workdir: Path) -> str | None:
+        """The path the probe is handed, or ``None`` when it never ran.
+
+        ``None`` is a real answer, not a failure. `_is_release_style_operand`
+        opens with ``[[ -d "$path" ]] && return 0`` and never consults the
+        probe for an operand that already names a directory. On a POSIX
+        runner none of the swept spellings names one, so the case never
+        arose; on Windows a spelling such as ``C:\\pkg`` or ``\\pkg`` can
+        resolve to a real directory and the early return fires.
+
+        This is why the windows-latest lane died with a bare
+        ``FileNotFoundError: ...\\recorded``: the subprocess result was
+        discarded and the recorder read unconditionally, so a *legitimate*
+        early return and a *genuinely broken* probe produced the same
+        opaque error, naming a temp path and nothing else. Both are now
+        distinguished, and the second reports what bash actually said.
+        """
         require_bash()
         recorder = workdir / "recorded"
         stub = workdir / "py-stub"
@@ -379,14 +418,32 @@ class TestTheProbeAnchorsExactlyWhatTheSharedPredicateSays:
                 '_is_release_style_operand "$1"',
             )
         )
-        subprocess.run(  # noqa: S603
+        completed = subprocess.run(  # noqa: S603
             [bash_executable(), "-c", script, "bash", spelling],
             capture_output=True,
             text=True,
             check=False,
             cwd=str(workdir),
         )
-        return recorder.read_text(encoding="utf-8")
+        if recorder.exists():
+            return recorder.read_text(encoding="utf-8")
+        if TestTheProbeAnchorsExactlyWhatTheSharedPredicateSays._names_an_existing_directory(
+            spelling, workdir=workdir
+        ):
+            # The documented early return: the function answered "package"
+            # from the directory test alone and never reached the probe.
+            return None
+        raise AssertionError(
+            "the probe never wrote its recorder, and the operand is not a "
+            "directory -- so this is a real failure, not the documented "
+            f"early return.\n  spelling: {spelling!r}\n"
+            f"  on_windows: {on_windows}\n"
+            f"  returncode: {completed.returncode}\n"
+            f"  stub exists: {stub.exists()} executable: "
+            f"{os.access(stub, os.X_OK)}\n"
+            f"  workdir: {workdir}\n"
+            f"  stdout: {completed.stdout!r}\n  stderr: {completed.stderr!r}"
+        )
 
     @staticmethod
     def _predicate(spelling: str, *, on_windows: bool) -> bool:
@@ -413,15 +470,33 @@ class TestTheProbeAnchorsExactlyWhatTheSharedPredicateSays:
         self, tmp_path: Path, on_windows: bool
     ) -> None:
         disagreements = {}
-        for spelling in self.SPELLINGS:
-            workdir = tmp_path / f"w{len(disagreements)}-{abs(hash(spelling))}"
+        skipped: list[str] = []
+        for index, spelling in enumerate(self.SPELLINGS):
+            # Indexed by position, not by `len(disagreements)`: that counter
+            # only moves when a disagreement is recorded, so every clean
+            # spelling shared the prefix `w0-` and the directories were kept
+            # apart only by a hash -- which `PYTHONHASHSEED` randomizes per
+            # xdist worker. Distinct by construction is cheaper than
+            # distinct by luck.
+            workdir = tmp_path / f"w{index}"
             workdir.mkdir()
             qualified = self._predicate(spelling, on_windows=on_windows)
             argv = self._probe_argv(spelling, on_windows=on_windows, workdir=workdir)
+            if argv is None:
+                # The operand names a real directory on this runner, so the
+                # function answered before the probe. Nothing to compare.
+                skipped.append(spelling)
+                continue
             anchored = argv != spelling
             if anchored is qualified:
                 disagreements[spelling] = (qualified, argv)
         assert not disagreements, disagreements
+        # Vacuity guard: a runner where every spelling happened to name a
+        # directory would skip the whole sweep and pass while asserting
+        # nothing.
+        assert len(skipped) < len(self.SPELLINGS), (
+            f"every spelling was skipped as an existing directory: {skipped}"
+        )
 
     def test_the_sweep_covers_both_answers_on_each_platform(self) -> None:
         """Vacuity guard: a sweep that is all-qualified or all-unqualified

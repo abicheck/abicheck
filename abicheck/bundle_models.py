@@ -35,6 +35,15 @@ from .checker_types import Change, DiffResult
 from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import ElfMetadata, SymbolBinding
 from .model.scope_acquisition import ScopeAcquisitionRecord
+
+# Re-exported: this type lived here until it outgrew the file's 800-line
+# production ceiling and moved to its ADR-061 owner. The old import path
+# stays valid, and this module is a real consumer of the type, not a
+# delegation-only facade.
+from .model.symbol_signature_status import (
+    SymbolSignatureStatus as SymbolSignatureStatus,
+    symbol_signature_status as symbol_signature_status,
+)
 from .policy.classification import Verdict, compute_verdict, effective_category
 from .policy.contract_finding_relevance import is_evaluated
 
@@ -528,30 +537,6 @@ def diff_change_is_breaking(
     if diff.policy_file is not None:
         return diff.policy_file.compute_verdict([change]) == Verdict.BREAKING
     return effective_category(change, *policy_sets) == Verdict.BREAKING
-
-
-@dataclass(frozen=True, slots=True)
-class SymbolSignatureStatus:
-    """The two answers a bundle signature check asks about one symbol.
-
-    Both are plain booleans deliberately: every tri-state and
-    legacy/unknown distinction the underlying predicates draw
-    (``Fact``-backed export evidence versus a pre-split snapshot's
-    conflated ``Visibility``, an uncaptured ``is_variadic`` or
-    ``contract_attributes``, an unresolved type spelling) is resolved
-    *while the full snapshot is alive*, by those predicates, into the same
-    yes/no the consumer would have got from the snapshot itself. Storing
-    them unresolved would mean keeping the declarations that carry them,
-    which is the retention this type exists to remove.
-
-    A symbol absent from the mapping is one that was in neither
-    ``function_map`` nor ``variable_map``: both predicates answer ``False``
-    for that case, so absence and ``(False, False)`` are the same answer,
-    and the mapping holds only symbols the snapshot actually declared.
-    """
-
-    exported: bool
-    evidence_sufficient: bool
 
 
 @dataclass(frozen=True)
