@@ -54,12 +54,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import statistics
 import subprocess
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 #: Env-var names, spelled here rather than imported. This harness is
@@ -101,8 +103,35 @@ _PAGE = 4096
 # ---------------------------------------------------------------------------
 
 
+def _vocabulary_padding(ns: str, records: int, scale: int) -> list[str]:
+    """Distinct public type spellings, to grow the *compiled vocabulary*.
+
+    ``--apis``/``--records`` grow the number of declarations; they do not
+    grow the alternation those declarations are matched against nearly as
+    fast, because most of them reuse a handful of type spellings. This adds
+    genuinely distinct, qualified, template-instantiated spellings -- the
+    shape a real C++ release contributes -- so a benchmark fixture can be
+    driven across the match cache's real admission threshold.
+
+    That threshold is the point of the knob. The defect this guards against
+    only appears once a vocabulary's compiled pattern is large enough to
+    have been refused admission wholesale; a fixture whose vocabulary stays
+    small exercises the happy path and would pass identically against the
+    bug. ``--require-vocabulary-bytes`` is the paired vacuity guard that
+    makes the crossing a checked fact rather than an assumption.
+    """
+    if scale <= 0:
+        return []
+    out: list[str] = []
+    for i in range(scale):
+        rec = i % max(records, 1)
+        out.append(f"using Alias{i} = Box{rec}<Rec{(i + 1) % max(records, 1)}>;")
+        out.append(f"struct Tag{i} {{ Box{rec}<Rec{rec}> boxed; }};")
+    return out
+
+
 def _member_sources(
-    index: int, apis: int, records: int, *, new: bool
+    index: int, apis: int, records: int, *, new: bool, vocabulary_scale: int = 0
 ) -> tuple[str, str]:
     """Header and translation unit for one member.
 
@@ -138,6 +167,7 @@ def _member_sources(
             # The removed export: declared and defined on OLD only.
             continue
         h.append(f"int api_{a}(const Rec{a % max(records, 1)}& r, int x);")
+    h.extend(_vocabulary_padding(ns, records, vocabulary_scale))
     h.append("std::string describe(const std::vector<int>& v);")
     h.append("}")
     header = "\n".join(h) + "\n"
@@ -158,7 +188,9 @@ def _member_sources(
     return header, "\n".join(c) + "\n"
 
 
-def build_fixture(root: Path, members: int, apis: int, records: int) -> None:
+def build_fixture(
+    root: Path, members: int, apis: int, records: int, vocabulary_scale: int = 0
+) -> None:
     """Compile a two-sided, many-member C++ release under *root*."""
     for side in ("old", "new"):
         src = root / side / "src"
@@ -167,7 +199,13 @@ def build_fixture(root: Path, members: int, apis: int, records: int) -> None:
         for d in (src, inc, lib):
             d.mkdir(parents=True, exist_ok=True)
         for i in range(members):
-            header, unit = _member_sources(i, apis, records, new=(side == "new"))
+            header, unit = _member_sources(
+                i,
+                apis,
+                records,
+                new=(side == "new"),
+                vocabulary_scale=vocabulary_scale,
+            )
             (inc / f"lib{i}.hpp").write_text(header, encoding="utf-8")
             (src / f"lib{i}.cpp").write_text(unit, encoding="utf-8")
             cmd = [
@@ -308,6 +346,65 @@ VARIANTS: dict[str, object] = {
 }
 
 
+#: Every environment variable this harness *controls*. A variable named here
+#: is a pure function of `variant_env`'s arguments: if the arguments do not
+#: set it, it is removed rather than inherited from the harness's own
+#: environment. That is the whole rule, and it exists because the receipt
+#: records the arguments -- so an inherited value makes the receipt describe a
+#: run that did not happen. A sweep's unconstrained arm would silently run
+#: under an ambient `ABICHECK_RELEASE_JOB_MEM_GIB`, and every worker count in
+#: the sweep would then be attributed to the wrong setting; an ambient
+#: `ABICHECK_CACHE_DIR` makes a run labelled cold warm. An explicit
+#: `env_extra` entry is the caller stating the value by another route and is
+#: always preserved.
+CONTROLLED_ENV_VARS = (
+    "ABICHECK_RELEASE_JOB_MEM_GIB",
+    "ABICHECK_CACHE_DIR",
+    ENV_TRACE_PATH,
+    ENV_TRACEMALLOC,
+)
+
+
+def variant_env(
+    base: Mapping[str, str],
+    *,
+    env_extra: Mapping[str, str] | None,
+    job_mem_gib: float | None,
+    trace: Path | None,
+    tracemalloc: bool,
+    cache_dir: Path | None,
+) -> dict[str, str]:
+    """Build a variant run's environment from *base* plus the arguments.
+
+    Pure, so the one rule `CONTROLLED_ENV_VARS` states can be checked
+    directly rather than inferred from a subprocess's behaviour.
+    """
+    env = dict(base)
+    env.update(env_extra or {})
+    settings: dict[str, str | None] = {
+        # The worker sweep goes through the per-worker memory budget, which
+        # is the admission path's own documented lever
+        # (`workflows/release_jobs.release_job_mem_budget_gib`). There is no
+        # `compare --jobs`: ADR-068 D5 removed `-j`/`--jobs` outright and the
+        # CLI always passes `jobs=0`, so forwarding one would fail the run
+        # with "No such option" before anything was compared. Driving the
+        # budget instead also exercises the real clamp rather than bypassing
+        # it, which an explicit `jobs` would have done by design.
+        "ABICHECK_RELEASE_JOB_MEM_GIB": (
+            None if job_mem_gib is None else str(job_mem_gib)
+        ),
+        "ABICHECK_CACHE_DIR": None if cache_dir is None else str(cache_dir),
+        ENV_TRACE_PATH: None if trace is None else str(trace),
+        ENV_TRACEMALLOC: "1" if trace is not None and tracemalloc else None,
+    }
+    for key, value in settings.items():
+        if value is not None:
+            env[key] = value
+        elif key not in (env_extra or {}):
+            env.pop(key, None)
+    return env
+
+
 def run_variant(
     root: Path,
     name: str,
@@ -317,6 +414,7 @@ def run_variant(
     tracemalloc: bool,
     cache_dir: Path | None,
     env_extra: dict[str, str] | None = None,
+    job_mem_gib: float | None = None,
 ) -> dict[str, object]:
     out.mkdir(parents=True, exist_ok=True)
     args = [
@@ -333,17 +431,14 @@ def run_variant(
     ]
     args += VARIANTS[name](out)  # type: ignore[operator]
 
-    env = dict(os.environ)
-    env.update(env_extra or {})
-    if trace is not None:
-        env[ENV_TRACE_PATH] = str(trace)
-        if tracemalloc:
-            env[ENV_TRACEMALLOC] = "1"
-    else:
-        env.pop(ENV_TRACE_PATH, None)
-        env.pop(ENV_TRACEMALLOC, None)
-    if cache_dir is not None:
-        env["ABICHECK_CACHE_DIR"] = str(cache_dir)
+    env = variant_env(
+        os.environ,
+        env_extra=env_extra,
+        job_mem_gib=job_mem_gib,
+        trace=trace,
+        tracemalloc=tracemalloc,
+        cache_dir=cache_dir,
+    )
 
     started = time.monotonic()
     proc = subprocess.Popen(
@@ -375,6 +470,7 @@ def run_variant(
             findings = sum(len(lib.get("findings") or []) for lib in libraries)
         except (ValueError, AttributeError):
             pass
+    stderr_text = stderr.decode("utf-8", "replace")
     return {
         "variant": name,
         "exit_code": proc.returncode,
@@ -389,8 +485,10 @@ def run_variant(
         "max_processes": sampler.max_processes,
         "samples": sampler.samples,
         "tracemalloc": tracemalloc,
-        "stderr_tail": stderr.decode("utf-8", "replace")[-2000:],
+        "stderr_tail": stderr_text[-2000:],
         "stdout_tail": stdout.decode("utf-8", "replace")[-500:],
+        "job_mem_gib": job_mem_gib,
+        "observed_workers": _observed_worker_count(stderr_text),
     }
 
 
@@ -417,6 +515,29 @@ def _fixture_matches(root: Path, wanted: dict[str, int]) -> bool:
         if len(built) != wanted["members"]:
             return False
     return True
+
+
+_WORKER_CLAMP_NOTE = re.compile(
+    r"parallel release workers reduced (\d+) -> (\d+) to fit available memory"
+)
+
+
+def _observed_worker_count(stderr_text: str) -> int | None:
+    """How many workers the run actually admitted, or ``None`` if unclamped.
+
+    Read back from the release fan-out's own stderr note rather than assumed
+    from ``--job-mem-gib``. A sweep that reports the budget it *requested*
+    proves nothing: the budget only reaches a worker count through
+    ``release_jobs_mem_cap``, which also reads available memory, applies a
+    utilization fraction and a reserve, and floors at one. Two different
+    budgets can therefore admit the same number of workers, and a sweep that
+    did not actually vary concurrency would otherwise look like one that did.
+
+    ``None`` means no clamp applied, which is itself informative: the run got
+    the CPU-derived default, so raising the budget further is what changes it.
+    """
+    match = _WORKER_CLAMP_NOTE.search(stderr_text)
+    return int(match.group(2)) if match else None
 
 
 def _require_a_measured_comparison(row: dict[str, object]) -> None:
@@ -466,6 +587,42 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--members", type=int, default=6)
     ap.add_argument("--apis", type=int, default=300)
     ap.add_argument("--records", type=int, default=20)
+    ap.add_argument(
+        "--vocabulary-scale",
+        type=int,
+        default=0,
+        help=(
+            "distinct public template/typedef spellings per member, to grow "
+            "the compiled matcher vocabulary. Use with "
+            "--require-vocabulary-bytes to drive the fixture across the "
+            "match cache's real admission threshold."
+        ),
+    )
+    ap.add_argument(
+        "--job-mem-gib",
+        type=float,
+        default=None,
+        help=(
+            "per-worker memory budget (ABICHECK_RELEASE_JOB_MEM_GIB), the "
+            "release admission path's own lever, for a worker sweep over one "
+            "unchanged workload. A larger budget admits fewer workers. There "
+            "is no `compare --jobs` -- ADR-068 D5 removed it -- so this "
+            "drives the real clamp rather than bypassing it. The receipt "
+            "records the worker count actually observed, not the one implied."
+        ),
+    )
+    ap.add_argument(
+        "--require-vocabulary-bytes",
+        type=int,
+        default=0,
+        help=(
+            "fail unless the run's compiled patterns retained at least this "
+            "many bytes. The vacuity guard for --vocabulary-scale: without "
+            "it a 'crosses the admission threshold' benchmark that quietly "
+            "stopped crossing it would keep passing while measuring the "
+            "happy path. Requires --trace."
+        ),
+    )
     ap.add_argument("--variants", default="json,junit,bundle-facts")
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument(
@@ -487,7 +644,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _prepare_fixture(args: argparse.Namespace) -> None:
     """Build or validate-and-reuse the compiled fixture under ``--root``."""
-    wanted = {"members": args.members, "apis": args.apis, "records": args.records}
+    # `vocabulary_scale` joins the manifest, not just the build call: it
+    # changes the compiled headers, so a `--keep` run that omitted it would
+    # silently reuse a tree built at a different vocabulary size and report
+    # a threshold-crossing measurement taken on a fixture that never
+    # crossed it.
+    wanted = {
+        "members": args.members,
+        "apis": args.apis,
+        "records": args.records,
+        "vocabulary_scale": args.vocabulary_scale,
+    }
     if args.keep and _fixture_matches(args.root, wanted):
         print(f"reusing fixture at {args.root}", file=sys.stderr)
         return
@@ -495,11 +662,67 @@ def _prepare_fixture(args: argparse.Namespace) -> None:
         shutil.rmtree(args.root)
     print(
         f"building fixture: {args.members} members x {args.apis} APIs "
-        f"x {args.records} records ...",
+        f"x {args.records} records x {args.vocabulary_scale} vocabulary ...",
         file=sys.stderr,
     )
-    build_fixture(args.root, args.members, args.apis, args.records)
+    build_fixture(
+        args.root, args.members, args.apis, args.records, args.vocabulary_scale
+    )
     (args.root / FIXTURE_MANIFEST).write_text(json.dumps(wanted), encoding="utf-8")
+
+
+def _require_the_vocabulary_threshold_was_crossed(
+    trace: Path | None, required_bytes: int
+) -> None:
+    """Fail unless the run's compiled patterns really got that large.
+
+    The vacuity guard for ``--vocabulary-scale``. A benchmark whose stated
+    purpose is "crosses the match cache's admission threshold" asserts
+    nothing if the fixture drifted below that threshold -- it would then
+    measure the happy path and pass identically against the defect it
+    exists to catch. This reads the figure the run itself reported
+    (``release.spelling_cache``'s ``patterns.retained_bytes``, emitted by
+    ``workflows.cache_counters``) rather than re-deriving it from the
+    fixture parameters, which would be the same arithmetic the fixture
+    builder already used.
+    """
+    if required_bytes <= 0:
+        return
+    if trace is None:
+        raise SystemExit("--require-vocabulary-bytes needs --trace")
+    from abicheck.workflows.memory_trace import read_samples
+
+    retained = 0
+    hits = misses = bypasses = 0
+    for record in read_samples(trace):
+        if record.get("event") != "release.spelling_cache":
+            continue
+        # `memory_trace.counts` nests its values under a "counts" key; reading
+        # the record's top level instead silently found nothing and reported
+        # 0 bytes, which would have failed every run rather than guarding it.
+        payload = record.get("counts") or {}
+        patterns = payload.get("patterns") or {}
+        match = payload.get("match") or {}
+        retained = max(retained, int(patterns.get("retained_bytes") or 0))
+        hits = max(hits, int(match.get("hits") or 0))
+        misses = max(misses, int(match.get("misses") or 0))
+        bypasses = max(bypasses, int(match.get("bypasses") or 0))
+    if retained < required_bytes:
+        raise SystemExit(
+            f"compiled patterns retained {retained:,} bytes, below the "
+            f"required {required_bytes:,}. This run did NOT cross the "
+            "admission threshold it claims to measure -- raise "
+            "--vocabulary-scale rather than lowering the requirement."
+        )
+    total = hits + misses
+    print(
+        f"vocabulary threshold crossed: {retained:,} pattern bytes; "
+        f"match cache {hits:,} hits / {misses:,} misses / {bypasses:,} "
+        f"bypasses ({100 * hits / total:.2f}% hit rate)"
+        if total
+        else f"vocabulary threshold crossed: {retained:,} pattern bytes",
+        file=sys.stderr,
+    )
 
 
 def _summarize(
@@ -593,16 +816,22 @@ def main(argv: list[str] | None = None) -> int:
                 trace=trace,
                 tracemalloc=args.tracemalloc,
                 cache_dir=cache_dir,
+                job_mem_gib=args.job_mem_gib,
             )
             row["attempt"] = attempt
             row["cold"] = bool(args.cold)
+            row["vocabulary_scale"] = args.vocabulary_scale
             _require_a_measured_comparison(row)
+            _require_the_vocabulary_threshold_was_crossed(
+                trace, args.require_vocabulary_bytes
+            )
             results.append(row)
             print(
                 f"{name:<20} run {attempt}  exit={row['exit_code']}  "
                 f"{row['seconds']:>7}s  parent={_mib(row['parent_peak_rss_bytes'])} MiB  "
                 f"tree_rss={_mib(row['tree_peak_rss_bytes'])} MiB  "
-                f"tree_pss={_mib(row['tree_peak_pss_bytes'])} MiB",
+                f"tree_pss={_mib(row['tree_peak_pss_bytes'])} MiB  "
+                f"workers={row['observed_workers'] or 'unclamped'}",
                 file=sys.stderr,
             )
 

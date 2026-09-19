@@ -50,6 +50,7 @@ from .header_utils import (
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
+from .workflows import memory_trace
 
 
 def _attach_header_graph(
@@ -107,6 +108,13 @@ def _attach_header_graph(
     agree with the flat snapshot instead of independently reclassifying
     the same header ``private_header`` (Codex review, fresh evidence).
     """
+    # Boundary, not a stage of this function: everything the primary dump did
+    # (binary + debug + the castxml/clang header parse + metadata attach) is
+    # closed here, so its peak is attributed to `dump.primary:done` and the
+    # stages below start from a fresh window. It lives at the top of this
+    # function rather than at the `_dump_elf` call site because `dumper.py`
+    # and `service_dump_native.py` are both at their debt-ledger line caps.
+    memory_trace.mark("dump.primary:done")
     if not header_graph or not headers:
         return snap
     from .buildsource.header_graph import (
@@ -197,7 +205,10 @@ def _attach_header_graph(
         # parse case (a memo-hit is separately covered by
         # `_streaming_prune_enabled()`'s own `ast_memoize_active()` check,
         # which applies to the *primary* pass this memo entry came from).
-        with suppress_streaming_prune():
+        with (
+            suppress_streaming_prune(),
+            memory_trace.phase("dump.header_graph.clang_ast"),
+        ):
             ast_root, _resolved_kind, _resolved_force_cpp = _clang_header_dump(
                 resolved_headers,
                 eff_includes,
@@ -233,6 +244,7 @@ def _attach_header_graph(
         # docstring and dumper_hybrid.merge_snapshots' "visibility" stamp.
         fact_provenance=snap.fact_provenance,
     )
+    memory_trace.mark("dump.header_graph.build:done")
     if header_graph_includes and resolved_headers and cc.frontend_context == "host":
         # `ClangHeaderIncludeExtractor` drives a plain `clang -M` per header
         # with no `-fsycl`/host-vs-device concept at all (unlike the AST pass
@@ -300,6 +312,7 @@ def _attach_header_graph(
         else:
             graph.extractor_passes[HEADER_INCLUDE_GRAPH_PASS] = True
         graph.finalize()
+    memory_trace.mark("dump.header_graph.include_pass:done")
     pack = BuildSourcePack(root=Path(""), source_graph=graph)
     # Populate the manifest coverage row the normal collect/embed path always
     # sets (inline.build_inline_coverage's L5 row) — otherwise the pack's

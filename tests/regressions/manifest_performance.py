@@ -559,13 +559,49 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "release everything, and return to the starting figure): a "
             "one-directional 'it grows' assertion passes against an "
             "implementation that adds cost and never subtracts it."
+            " "
+            "The second half of the class, and the one that bites "
+            "hardest: a cost SHARED between several caches is charged "
+            "once, to the one owner that holds it, never as incremental "
+            "ownership in each holder. Charging per-holder over-reports "
+            "retention, so eviction fires early and the budget bounds a "
+            "number rather than the memory. Worse, when that shared cost "
+            "is compared against a holder's own budget as an ADMISSION "
+            "rule, a resource larger than that budget becomes "
+            "permanently unadmissible: every lookup against it recomputes "
+            "forever, while the other holder keeps the exact same "
+            "resource alive -- so the refusal frees nothing and buys "
+            "nothing, and the cache degrades to no cache at all for "
+            "precisely the largest, most expensive inputs it was built "
+            "for. The signature to watch for is an admission test whose "
+            "left-hand side is a property of something this cache does "
+            "not own. Two consequences for tests: a hit-rate assertion "
+            "must sweep input sizes that CROSS every byte budget in the "
+            "module (a sweep entirely under the threshold passes against "
+            "the defect), and it needs a vacuity guard pinning that the "
+            "largest case really does cross it."
         ),
-        # #1331: a `_MatchCache` entry keeps its compiled pattern alive via
-        # `_keepalive`, outliving the 64-entry `_VocabularyCache` that
-        # compiled it, while `retained_bytes` counted only entry
-        # bookkeeping, subject strings and results. Separately,
-        # `SpellingMatch` was slotted and documented immutable but
-        # accepted `match._text = ...`.
+        # #1331: a `_MatchCache` entry keeps its compiled pattern alive,
+        # outliving the 64-entry `_VocabularyCache` that compiled it, while
+        # `retained_bytes` counted only entry bookkeeping, subject strings
+        # and results. Separately, `SpellingMatch` was slotted and
+        # documented immutable but accepted `match._text = ...`.
+        #
+        # The ownership redesign moved the answer to `_PatternRegistry`,
+        # which holds the one strong reference and charges each pattern
+        # once; the invariant is unchanged, the owner is not.
+        #
+        # #1331 also INTRODUCED the second half of this class, which is
+        # why both live here. Charging the shared pattern as the match
+        # cache's own incremental cost made it an admission rule: four of
+        # the seven vocabularies a real oneDAL release comparison compiles
+        # (1.12M, 1.12M, 2.87M and 3.96M pattern characters) exceeded the
+        # 8 MiB match budget at ~9 bytes/char, so EVERY entry for them was
+        # bypassed -- 98.99% -> 63.6% hit rate, 411,232 bypasses, matching
+        # 19.99 s -> 58.93 s -- while the vocabulary cache held all seven
+        # regardless, so nothing was released. Reproduced in isolation at
+        # that scale: 40,000 hot lookups, 0.02 s admitted vs 41.68 s
+        # bypassed.
         fixed_by=(1331,),
         seed_tests=("tests/test_spelling_match_cache_retention.py",),
         public_surfaces=(),
@@ -573,6 +609,8 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "pattern_population": ("single", "shared", "distinct", "oversized"),
             "budget_direction": ("retain", "release", "round-trip"),
             "mutation_operation": ("set", "delete", "new-attribute"),
+            "resource_size": ("under-budget", "at-budget", "over-budget"),
+            "holder": ("owner", "non-owning reference", "caller attribute"),
         },
         known_gaps=(
             KnownGap(
@@ -581,13 +619,31 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
                     "(`_PATTERN_BYTES_PER_CHAR`), on the same terms as "
                     "the existing per-entry/per-match constants, and is "
                     "not validated against measured RSS -- the budget "
-                    "bounds growth rather than reporting real bytes. The "
-                    "vocabulary cache is still bounded by entry COUNT (64) "
-                    "rather than by vocabulary bytes, and its own keys "
-                    "(the frozensets of spellings) are outside every "
-                    "budget; the review's request for one coordinated "
-                    "budget across vocabulary keys, compiled matchers and "
-                    "results is only partly answered here."
+                    "bounds growth rather than reporting real bytes. "
+                    "Compiled matchers are now bounded in BYTES by "
+                    "`_PatternRegistry` (`MAX_PATTERN_BYTES`) rather than "
+                    "by the vocabulary cache's entry COUNT alone, which "
+                    "closes the larger half of the review's request for "
+                    "one coordinated budget. Still open: the vocabulary "
+                    "cache's own keys (the frozensets of spellings) are "
+                    "outside every budget, and no budget here bounds the "
+                    "matcher's real working set -- `type_reachability` and "
+                    "`dumper_scoping` hold their compiled patterns in "
+                    "their own attributes, outside all three owners."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+            KnownGap(
+                description=(
+                    "The admission half is validated at oneDAL pattern "
+                    "SCALE but not against the real oneDAL workload: the "
+                    "six-member release comparison needs artifacts and a "
+                    "memory budget the development environment does not "
+                    "have, so the end-to-end wall/RSS claim is pending. "
+                    "The isolated measurement (0.02 s vs 41.68 s for "
+                    "40,000 hot lookups at 2.69M pattern characters) is "
+                    "synthetic evidence for the mechanism, not a workload "
+                    "result."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),

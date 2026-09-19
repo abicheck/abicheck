@@ -50,6 +50,7 @@ from abicheck.compare.spelling_match_cache import (
     MAX_CACHED_TEXT_CHARS,
     MAX_ENTRIES,
     MAX_RETAINED_BYTES,
+    PATTERN_REGISTRY,
     VOCABULARY_CACHE,
     SpellingMatch,
     clear_caches,
@@ -441,7 +442,14 @@ class TestRetentionBounds:
         finally:
             cache_mod.MAX_ENTRIES = original
 
-    def test_pattern_keepalive_is_released_with_its_last_entry(self) -> None:
+    def test_a_pattern_reference_is_released_with_its_last_entry(self) -> None:
+        """Eviction returns the match cache's reference to the pattern owner.
+
+        Stated against ``_entries_per_token`` -- the match cache's own
+        bookkeeping -- rather than against the registry, because the
+        vocabulary cache also holds a reference to both patterns here, so
+        the registry legitimately still holds them.
+        """
         import abicheck.compare.spelling_match_cache as cache_mod
 
         original = cache_mod.MAX_ENTRIES
@@ -452,9 +460,9 @@ class TestRetentionBounds:
             assert first is not None and second is not None
             spelling_matches(first, "Alpha")
             spelling_matches(second, "Beta")
-            # One entry survives, so exactly one pattern stays held: an
-            # id()-keyed token may only be reused once nothing refers to it.
-            assert len(MATCH_CACHE._keepalive) == 1
+            # One entry survives, so the match cache references exactly one
+            # pattern: the evicted entry gave its reference back.
+            assert len(MATCH_CACHE._entries_per_token) == 1
         finally:
             cache_mod.MAX_ENTRIES = original
 
@@ -574,11 +582,11 @@ class TestBoundarySemanticsAgree:
         assert bool(finditer_allow_nested(narrow, "_std::string"))
 
 
-class TestKeepaliveDoesNotLeak:
-    """A pattern is held only while an entry actually needs it.
+class TestPatternReferencesDoNotLeak:
+    """A pattern is referenced only while an entry actually needs it.
 
     The retention this module exists to bound includes its own bookkeeping:
-    an implementation that took the keepalive reference at *lookup* time
+    an implementation that took the registry reference at *lookup* time
     would hold every compiled pattern it was ever asked about forever --
     including ones whose every result was too large to cache, so the cache
     stored nothing and retained the pattern anyway.
@@ -590,89 +598,283 @@ class TestKeepaliveDoesNotLeak:
         oversized = "x" * (MAX_CACHED_TEXT_CHARS + 1) + " Foo"
         spelling_matches(pattern, oversized)
         assert len(MATCH_CACHE) == 0
-        assert MATCH_CACHE._keepalive == {}
+        assert MATCH_CACHE._entries_per_token == {}
 
     def test_many_bypassed_patterns_do_not_accumulate(self) -> None:
+        """Built outside the vocabulary cache, so nothing else holds them."""
         oversized = "y" * (MAX_CACHED_TEXT_CHARS + 1)
         for i in range(50):
             pattern = _build_spelling_pattern([f"Type{i}"])
             assert pattern is not None
             spelling_matches(pattern, oversized)
-        assert MATCH_CACHE._keepalive == {}
+        assert MATCH_CACHE._entries_per_token == {}
+        assert len(PATTERN_REGISTRY) == 0, (
+            "a pattern nothing stored a result for stayed registered"
+        )
+        assert PATTERN_REGISTRY.retained_bytes == 0
 
     def test_a_stored_entry_does_retain_its_pattern(self) -> None:
         pattern = _compile_spelling_pattern(["Foo"])
         assert pattern is not None
         spelling_matches(pattern, "Foo")
-        assert list(MATCH_CACHE._keepalive.values()) == [(pattern, 1)]
+        token = id(pattern)
+        assert MATCH_CACHE._entries_per_token == {token: 1}
+        assert PATTERN_REGISTRY.pattern_for(token) is pattern
 
 
 class TestCacheBookkeepingEdges:
     """The bookkeeping paths a single-threaded lookup never reaches.
 
-    ``put`` and ``_release`` are the cache class's own API, and both carry a
-    guard that the ``matches_for`` path cannot exercise (it checks ``get``
-    before ``put``, and evicts one entry per pattern in these tests). They
-    are not dead code — each prevents a specific corruption of the byte
-    budget or the keepalive refcount — so they are stated here against the
-    class directly rather than left as unexercised lines.
+    ``put`` and ``_PatternRegistry.release`` are the classes' own API, and
+    both carry a guard that the ``matches_for`` path cannot exercise (it
+    checks ``get`` before ``put``, and evicts one entry per pattern in these
+    tests). They are not dead code — each prevents a specific corruption of
+    the byte budget or the pattern refcount — so they are stated here
+    against the classes directly rather than left as unexercised lines.
     """
 
     def test_putting_one_key_twice_does_not_double_count(self) -> None:
         """Re-inserting a key must not charge its bytes or its pattern twice.
 
         Without the guard, the aggregate budget would drift upward by one
-        entry's size on every repeat and the keepalive refcount would never
+        entry's size on every repeat and the pattern refcount would never
         reach zero, so the pattern would be retained after its last entry
         was evicted — a slow leak of exactly what the budget bounds.
         """
         pattern = _compile_spelling_pattern(["Foo"])
         assert pattern is not None
-        key = (MATCH_CACHE.token_for(pattern), "Foo", 0, 3)
         matches = (SpellingMatch("Foo", 0, 3),)
-        MATCH_CACHE.put(key, matches, pattern)
+        token = MATCH_CACHE.token_for(pattern)
+        MATCH_CACHE.put((token, "Foo", 0, 3), matches, pattern)
         bytes_after_first = MATCH_CACHE.retained_bytes
-        refs_after_first = MATCH_CACHE._keepalive[key[0]][1]
-        MATCH_CACHE.put(key, matches, pattern)
+        registry_after_first = PATTERN_REGISTRY.retained_bytes
+        refs_after_first = MATCH_CACHE._entries_per_token[token]
+        MATCH_CACHE.put((token, "Foo", 0, 3), matches, pattern)
         assert len(MATCH_CACHE) == 1
         assert MATCH_CACHE.retained_bytes == bytes_after_first
-        assert MATCH_CACHE._keepalive[key[0]][1] == refs_after_first
+        assert PATTERN_REGISTRY.retained_bytes == registry_after_first
+        assert MATCH_CACHE._entries_per_token[token] == refs_after_first
 
     def test_a_pattern_with_two_entries_survives_losing_one(self) -> None:
-        """Eviction releases one reference, not the whole pattern.
+        """Losing one of two entries must not free the shared pattern.
 
-        The refcount exists because several entries share one pattern: a
-        release that deleted the keepalive outright would drop a pattern
-        that other live entries still key on, and its ``id()`` could then be
-        reused by a different pattern while those entries remained — the
-        one way an ``id()``-derived token can go wrong.
+        A release that dropped the registry holder as soon as *any* entry
+        went would free a pattern other live entries still key on, and its
+        ``id()`` could then be recycled onto a different pattern while those
+        entries remained — the one way the ``id()``-keyed token can go
+        wrong.
+
+        Note where the counting lives after the ownership split: the match
+        cache keeps the per-entry count and holds exactly **one** registry
+        handle for the token, taken on the first entry and returned on the
+        last. So the registry's own count is 1 throughout, and it is the
+        cache's ``_entries_per_token`` that goes 2 -> 1 -> 0.
         """
-        pattern = _compile_spelling_pattern(["Foo"])
+        from abicheck.compare.spelling_match_cache import (
+            _MatchCache,
+            _PatternRegistry,
+        )
+
+        registry = _PatternRegistry()
+        cache = _MatchCache(registry)
+        pattern = _build_spelling_pattern(["Foo"])
         assert pattern is not None
-        spelling_matches(pattern, "Foo a")
-        spelling_matches(pattern, "Foo b")
-        token = MATCH_CACHE.token_for(pattern)
-        assert MATCH_CACHE._keepalive[token][1] == 2
-        MATCH_CACHE._release(token)
-        assert MATCH_CACHE._keepalive[token] == (pattern, 1)
-        MATCH_CACHE._release(token)
-        assert token not in MATCH_CACHE._keepalive
+        token = cache.token_for(pattern)
+        cache.put((token, "Foo a", 0, 5), (SpellingMatch("Foo", 0, 3),), pattern)
+        cache.put((token, "Foo b", 0, 5), (SpellingMatch("Foo", 0, 3),), pattern)
+        assert cache._entries_per_token[token] == 2
+        assert registry.reference_counts()[token] == (0, 1)
+
+        cache.drop_pattern(token)
+        assert cache._entries_per_token == {}
+        assert not registry.is_held(token), (
+            "the pattern outlived the last entry naming it"
+        )
 
     def test_releasing_an_unheld_token_is_a_no_op(self) -> None:
-        """Eviction must be idempotent against an already-cleared keepalive.
+        """Release must be idempotent against an already-cleared registry.
 
-        ``clear()`` drops the keepalive wholesale while eviction releases
-        per entry, so a release can legitimately arrive for a token nothing
+        ``clear()`` drops every holder wholesale while eviction releases per
+        entry, so a release can legitimately arrive for a token nothing
         holds; it must not raise.
         """
-        MATCH_CACHE._release(123456789)
-        assert MATCH_CACHE._keepalive == {}
+        PATTERN_REGISTRY.release(123456789, holder="match")
+        PATTERN_REGISTRY.release(123456789, holder="vocabulary")
+        assert len(PATTERN_REGISTRY) == 0
 
-    def test_token_for_does_not_mutate_the_cache(self) -> None:
-        pattern = _compile_spelling_pattern(["Foo"])
+    def test_token_for_does_not_register_or_mutate(self) -> None:
+        """Looking a pattern up must not start charging for it.
+
+        A ``token_for`` that registered would leave a holder behind for
+        every pattern ever *asked about*, including ones nothing stores a
+        result for — the leak the lookup/store split exists to prevent.
+        """
+        pattern = _build_spelling_pattern(["Foo"])
         assert pattern is not None
-        first = MATCH_CACHE.token_for(pattern)
-        second = MATCH_CACHE.token_for(pattern)
-        assert first == second
+        assert MATCH_CACHE.token_for(pattern) == id(pattern)
         assert len(MATCH_CACHE) == 0
-        assert MATCH_CACHE._keepalive == {}
+        assert len(PATTERN_REGISTRY) == 0
+        assert PATTERN_REGISTRY.retained_bytes == 0
+
+    def test_a_stored_token_always_names_a_live_pattern(self) -> None:
+        """What makes an ``id()``-derived token sound.
+
+        A token is a bare ``id()`` (PR #1336's scheme, kept deliberately),
+        so it *would* be recycled once its pattern is freed. The invariant
+        that makes that safe is the registry's: a token is only ever stored
+        while the registry holds a strong reference to the pattern it names,
+        so a live reference means the address cannot have been reused.
+
+        Asserted by registering and releasing many patterns and checking
+        both directions at each step — held implies resolvable to *this*
+        pattern, released implies not held — rather than by assuming a token
+        space that cannot collide.
+        """
+        for i in range(200):
+            pattern = _build_spelling_pattern([f"Type{i}"])
+            assert pattern is not None
+            token = PATTERN_REGISTRY.acquire(pattern, holder="match")
+            assert token == id(pattern)
+            assert PATTERN_REGISTRY.is_held(token)
+            assert PATTERN_REGISTRY.pattern_for(token) is pattern
+            PATTERN_REGISTRY.release(token, holder="match")
+            assert not PATTERN_REGISTRY.is_held(token), (
+                "a released pattern stayed registered, so its id could be "
+                "recycled onto another pattern while still resolving here"
+            )
+            del pattern
+        assert len(PATTERN_REGISTRY) == 0
+
+
+class TestNestedSearchLosesASameStartShorterSpelling:
+    """An executable pin on a *documented limitation*, not a passing feature.
+
+    ``finditer_allow_nested`` re-searches ``(m.start() + 1, m.end())`` after
+    each match, a window that excludes ``m.start()``. So a shorter registered
+    spelling beginning at the same offset as a longer match is never
+    reported. These assertions state what the matcher does **today** so the
+    next reader finds the limitation instead of rediscovering it, and so the
+    change that fixes it fails here loudly rather than silently altering
+    findings inside some other patch.
+
+    Fixing it is a behaviour change -- it adds reachability edges, which can
+    change findings and release obligation counts -- so it is tracked in
+    ``docs/contribute/known-gaps.md`` and must land isolated, with its own
+    rebaseline. When it does, replace these with the superset expectation.
+    """
+
+    @pytest.mark.parametrize(
+        ("vocabulary", "text", "reported", "lost"),
+        [
+            (["Foo", "Foo<int>"], "Foo<int>", "Foo<int>", "Foo"),
+            (
+                ["dal::Table", "dal::Table<float>"],
+                "const dal::Table<float>& x",
+                "dal::Table<float>",
+                "dal::Table",
+            ),
+            (
+                ["std::vector", "std::vector<int>"],
+                "std::vector<int>",
+                "std::vector<int>",
+                "std::vector",
+            ),
+            (["Node", "Node*"], "Node* next", "Node*", "Node"),
+            (["A", "A&&"], "A&& r", "A&&", "A"),
+        ],
+    )
+    def test_the_shorter_same_start_spelling_is_not_reported(
+        self, vocabulary, text, reported, lost
+    ) -> None:
+        """Realistic C++ spellings, not randomized atoms.
+
+        Each case is a class template and an instantiation of it -- the
+        shape ``type_reachability`` actually produces, since it registers
+        record spellings and typedef targets into one vocabulary.
+        """
+        pattern = _compile_spelling_pattern(vocabulary)
+        assert pattern is not None
+        found = {m.group(0) for m in _finditer_allow_nested(pattern, text)}
+        assert reported in found
+        assert lost not in found, (
+            f"{lost!r} is now reported in {text!r} -- the known gap in "
+            "docs/contribute/known-gaps.md appears to be fixed. That change "
+            "adds reachability edges and needs a rebaseline; update this "
+            "test to the superset expectation rather than deleting it."
+        )
+        # The lost spelling really is a boundary-valid occurrence, so this
+        # is an under-report and not merely a boundary rule doing its job.
+        # Without this the test would pass for a vocabulary whose shorter
+        # entry was never legitimately present at all.
+        start = text.index(lost)
+        after = start + len(lost)
+        boundary = set(
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_:"
+        )
+        assert start == 0 or text[start - 1] not in boundary
+        assert after >= len(text) or text[after] not in boundary
+
+
+class TestTwoWorkersCompilingOneVocabulary:
+    """Compilation runs outside the lock, so a duplicate is possible.
+
+    That is a deliberate trade: building a multi-megabyte alternation takes
+    seconds, and holding the lock across it would serialize every other
+    worker's cache *hits* behind one compilation. The duplicate is wasted
+    work, never a wrong answer — but only if the loser's pattern is
+    discarded rather than retained beside the winner's, which would charge
+    the registry twice for one vocabulary and quietly double the very
+    retention this module bounds.
+
+    Exercised deterministically rather than with threads: the compile
+    callback itself installs a competing entry, which is exactly the state
+    a losing worker returns into. A thread-based version would be
+    timing-dependent and, on the evidence of this PR's other concurrency
+    tests, most likely vacuous.
+    """
+
+    def test_the_loser_returns_the_winners_pattern(self) -> None:
+        from abicheck.compare.spelling_match_cache import (
+            _PatternRegistry,
+            _VocabularyCache,
+        )
+
+        registry = _PatternRegistry()
+        cache = _VocabularyCache(registry)
+        winner = _build_spelling_pattern(["Winner"])
+        assert winner is not None
+
+        def compile_and_race(key):
+            # Simulate the other worker finishing first, while we were
+            # compiling outside the lock.
+            with cache._lock:
+                cache._entries[key] = winner
+                cache._tokens[key] = registry.acquire(winner, holder="vocabulary")
+            return _build_spelling_pattern(["Loser"])
+
+        got = cache.get_or_compile(["Winner"], compile_and_race)
+        assert got is winner, "the loser's own pattern was returned"
+
+    def test_the_losers_pattern_is_not_retained(self) -> None:
+        """The accounting half: one vocabulary must cost one pattern."""
+        from abicheck.compare.spelling_match_cache import (
+            _PatternRegistry,
+            _VocabularyCache,
+        )
+
+        registry = _PatternRegistry()
+        cache = _VocabularyCache(registry)
+        winner = _build_spelling_pattern(["Winner"])
+        loser = _build_spelling_pattern(["Loser"])
+        assert winner is not None and loser is not None
+
+        def compile_and_race(key):
+            with cache._lock:
+                cache._entries[key] = winner
+                cache._tokens[key] = registry.acquire(winner, holder="vocabulary")
+            return loser
+
+        cache.get_or_compile(["Winner"], compile_and_race)
+        assert len(registry) == 1, "both patterns were registered"
+        assert not registry.is_held(id(loser)), "the loser stayed registered"
+        assert registry.is_held(id(winner))

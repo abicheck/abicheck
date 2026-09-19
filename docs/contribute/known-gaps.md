@@ -10362,3 +10362,149 @@ claimed. Anyone touching baseline determinism should run it first:
 --variants bundle-facts --repeat 2` and `cmp` the two `baseline.json`
 files. If they differ, the ordering is genuinely unstable and that is its
 own (pre-existing) gap, not a property of the streaming write.
+
+### `finditer_allow_nested` loses a shorter spelling that starts where a longer match does
+
+**Status: found and characterized, deliberately not fixed in the same change
+as the match-cache ownership work.** Present at `950efbc64`.
+
+`compare/spelling_pattern.py`'s `finditer_allow_nested` finds nested matches
+by re-searching the window `(m.start() + 1, m.end())` after each match. That
+window excludes `m.start()` by construction, so a **shorter registered
+spelling beginning at the same offset as a longer match is never reported**.
+The alternation is ordered longest-first, so the longer one always wins the
+position and the shorter one has no second chance.
+
+Reproduced on entirely realistic spellings (not randomized inputs) — in each
+case the second vocabulary entry is the only match returned, and the first is
+a boundary-valid occurrence that is lost:
+
+| vocabulary | text | reported | lost |
+|---|---|---|---|
+| `Foo`, `Foo<int>` | `Foo<int>` | `Foo<int>` | `Foo` |
+| `dal::Table`, `dal::Table<float>` | `const dal::Table<float>& x` | `dal::Table<float>` | `dal::Table` |
+| `std::vector`, `std::vector<int>` | `std::vector<int>` | `std::vector<int>` | `std::vector` |
+| `Node`, `Node*` | `Node* next` | `Node*` | `Node` |
+| `A`, `A&&` | `A&& r` | `A&&` | `A` |
+
+This is reachable in production rather than theoretical: `type_reachability`
+registers record spellings and typedef targets into one vocabulary, so a class
+template and an instantiation of it routinely co-occur there. The consequence
+is a lost reachability edge, which can mean a lost finding.
+
+**The obvious in-place repair is unsound.** Re-searching a *narrowed* window
+to find the shorter alternative makes `re`'s `endpos` look like
+end-of-string to the right-boundary lookahead, so `Foo` would be accepted
+inside `Foobar` — trading an under-report for an over-report.
+
+A correct fix scans each boundary-valid start position and tests the
+candidates registered there. A prototype of exactly that (bucket spellings by
+a fixed-length prefix; scan positions whose left neighbour is not a boundary
+character) was differentially tested against `finditer_allow_nested` over
+2,400 randomized vocabulary/text pairs: **70 divergences, every one a strict
+superset** — 0 subsets, 0 incomparable. It never missed anything the current
+matcher finds.
+
+**Why it is not landed here.** Adding those occurrences adds reachability
+edges, which can change findings and the release obligation counts. It
+therefore needs its own isolated change and its own transparent rebaseline.
+Bundling it into a performance patch would make that patch silently alter
+results and would invalidate the semantic-equivalence check the performance
+claim rests on — see `AGENTS.md`'s "Validate the user-facing result" and the
+instruction to isolate a correctness change rather than ship it as an
+optimization.
+
+The same prototype is also the standing answer to the *scaling* half of this
+area, measured on this host (microseconds per lookup, 34-character subject):
+
+| vocabulary | 1,000 | 5,000 | 20,000 | 60,000 |
+|---|---|---|---|---|
+| alternation, diverse spellings | 5.7 | 25.0 | 204.3 | 917.6 |
+| indexed scan, same inputs | 1.7 | 1.8 | 1.8 | 1.7 |
+
+Build cost at 60,000 spellings: 1.44 s for the alternation (1.74M pattern
+characters) against 0.024 s for the index. The alternation is flat only when
+the vocabulary factors to a shared literal prefix or the subject fails on its
+first character; for the diverse-namespace shape a real C++ vocabulary has,
+a miss is linear in the vocabulary. `compile_spelling_pattern`'s docstring
+claimed the scan was "independent of candidate count" and has been corrected.
+
+Full measurements, the environment they were taken in, and an explicit
+statement of what they do *not* establish are in
+[`measurements/spelling-cache-admission.md`](measurements/spelling-cache-admission.md).
+Real oneDAL acceptance is no longer pending: it was measured on six matched
+members assembled from published wheels — −19.8% wall (under the ≥20% target)
+with bit-identical findings, and **no memory improvement**.
+
+## A snapshot is not byte-reproducible across processes
+
+**What was observed.** Dumping the *same* library twice, with the *same*
+code, in two separate processes produces snapshots whose
+`surface_graph.nodes` differ in order: 9 positions out of 108,142 on oneDAL's
+`libonedal_parameters`. The node *sets* are identical (0 added, 0 removed),
+so no ABI conclusion moves; only the ordering does.
+
+**Why it matters anyway.** It defeats comparing two snapshots by digest, and
+any content-addressed caching or reproducibility claim built on one. It is
+also a trap for anyone measuring a change by hashing output: a cross-process
+A/B will report a difference that the change did not cause. The
+haystack-deduplication measurement hit exactly that and had to be re-checked
+in one process (where the snapshot *is* byte-identical) before the "findings
+unchanged" claim could be made honestly.
+
+**Not investigated further here.** The shape — a small number of adjacent
+positions permuted, stable within a process — points at set/dict iteration
+over values whose hashes vary with `PYTHONHASHSEED`, but the specific
+producer was not identified, and this is not a defect the surrounding
+performance work introduced: it reproduces with that work reverted.
+
+## A member's peak memory is the clang JSON AST, not the header graph (2026-09-19)
+
+Full measurement, with the per-point RSS table and the method:
+[`measurements/header-graph-attach-memory.md`](measurements/header-graph-attach-memory.md).
+Recorded here because it refutes two plausible fixes that were each tried and
+reverted, and because the obvious reading of the numbers is wrong.
+
+On `libonedal_core.so.3` (default `castxml` backend), one `run_dump` reaches
+**1968 MiB before the header graph is built at all** — the clang AST parse
+alone is ~1.4-1.5 GiB, and the graph build adds 271 MiB on top. The attach
+disables the streaming pruner on purpose (`suppress_streaming_prune()` in
+`service_header_graph_attach`, because `parse_clang_ast_calls` walks the raw
+AST for `DECL_CALLS_DECL` edges, Codex review PR #840), so the whole tree is
+materialised; the cached document for these headers is 1.3 GiB of JSON.
+
+**Do not read "dropping the graph frees 1.2 GiB" as "the graph costs
+1.2 GiB".** The graph's own objects are 251.7 MiB across 2,830,703 objects by
+a full `gc.get_referents` walk. Dropping the *AST* returns only 222 MiB; the
+rest comes back only when the graph is dropped, because the graph's
+long-lived objects sit in pymalloc arenas the AST parse dirtied and an arena
+cannot be returned while anything in it is live. The graph pins that memory,
+it does not spend it.
+
+**Attempted and reverted: making the graph's objects cheaper.** The graph
+allocates 959,016 lists of which ~958,000 are empty (711,436 `conflicts`
+lists hold **6** `FactConflict` objects in total; node `attrs` averages 0.0
+entries). Defaulting the empty ones to the singleton empty tuple removed
+603,290 objects — 21% of the graph's entire object count — and saved
+**40 MiB**. The prediction had been ~240 MiB, from dividing RSS by object
+count and applying that average as a marginal cost; empty lists are among the
+cheapest objects in the population, and 603,290 x ~64 B is exactly the 40 MiB
+observed. Reverted: not worth changing a model field's type and seven test
+expectations for 3.7% of the graph's retention. The same average-as-marginal
+error is what produced the withdrawn "empty-result prefilter" estimate
+recorded earlier in this file — check a marginal cost against the specific
+population being removed, never against a population-wide average.
+
+**Also ruled out, each by its own measurement:** the allocator is not holding
+it (`malloc_trim(0)` returns 96 MiB of 2138), it is not file-backed or shared
+(99.4% of RSS at peak is anonymous private-dirty), there are no garbage cycles
+(`gc.collect()` frees exactly zero), the attrs mapping is not duplicated
+(clearing `facts` and `resolved` frees zero — `attrs`/`resolved`/
+`facts[0].attrs` are one object), and the `BuildSourcePack` holds nothing
+besides the graph (35 objects, 0.0 MiB).
+
+**Still open.** Reducing a member's peak means not materialising the AST as a
+Python dict tree — either building the graph from a streaming parse, or
+pruning the AST to what the graph needs first. Neither is attempted here, and
+the existing `check_header_graph_perf.py` gate measures the attach's *time*
+only, so this dimension is currently ungated.

@@ -64,6 +64,7 @@ from typing import Any
 
 __all__ = [
     "counts",
+    "mark",
     "memory_trace_enabled",
     "memory_trace_path",
     "phase",
@@ -102,6 +103,18 @@ _state_lock = threading.Lock()
 _resolved = False
 _path: Path | None = None
 _tracemalloc = False
+#: Cumulative ``tracemalloc`` peak high-water, maintained by this module.
+#:
+#: :func:`phase` calls ``tracemalloc.reset_peak()`` on entry so each phase
+#: reports *its own* peak rather than one inherited from an earlier phase --
+#: without that, every phase after the biggest one reports the biggest one's
+#: number and attribution is impossible. But ``reset_peak()`` destroys the
+#: interpreter's cumulative peak, and ``tracemalloc_peak_bytes`` is an
+#: already-published field that means the run's peak. So the cumulative value
+#: is carried here instead of being read back from ``tracemalloc``, and both
+#: are reported: the old field keeps its old meaning, and the per-phase number
+#: is a new one beside it.
+_peak_high_water = 0
 
 
 def _truthy(value: str | None) -> bool:
@@ -132,11 +145,12 @@ def _resolve() -> None:
 
 def reset_for_testing() -> None:
     """Re-read the environment. Tests only -- never called from a run."""
-    global _resolved, _path, _tracemalloc
+    global _resolved, _path, _tracemalloc, _peak_high_water
     with _state_lock:
         _resolved = False
         _path = None
         _tracemalloc = False
+        _peak_high_water = 0
 
 
 def memory_trace_enabled() -> bool:
@@ -353,9 +367,18 @@ def sample(event: str, /, **attrs: Any) -> None:
     if _tracemalloc:
         import tracemalloc
 
+        global _peak_high_water
         current, peak = tracemalloc.get_traced_memory()
+        with _state_lock:
+            if peak > _peak_high_water:
+                _peak_high_water = peak
+            cumulative = _peak_high_water
         record["tracemalloc_current_bytes"] = current
-        record["tracemalloc_peak_bytes"] = peak
+        # Unchanged meaning: the run's peak so far. See _peak_high_water.
+        record["tracemalloc_peak_bytes"] = cumulative
+        # New: the peak since the innermost enclosing phase began, which is
+        # the number that attributes a peak to a stage.
+        record["tracemalloc_phase_peak_bytes"] = peak
     if attrs:
         record["attrs"] = attrs
     _write(record)
@@ -383,6 +406,38 @@ def counts(event: str, /, **values: Any) -> None:
     )
 
 
+def mark(name: str, /, **attrs: Any) -> None:
+    """Record a stage boundary in a linear pipeline.
+
+    The sibling of :func:`phase` for code that runs stages in sequence
+    rather than nesting them: each mark's sample reports the memory state at
+    that boundary, and its ``tracemalloc_phase_peak_bytes`` is the peak since
+    the *previous* mark -- so a stage is attributed by the mark that closes
+    it. Use this where bracketing a stage in a ``with`` would mean
+    re-indenting a large call expression for no gain in what is recorded.
+
+    Off by default and one boolean test when off, like everything else here.
+    """
+    if not memory_trace_enabled():
+        return
+    sample(name, **attrs)
+    _reset_tracemalloc_peak()
+
+
+def _reset_tracemalloc_peak() -> None:
+    """Start a fresh per-phase peak window.
+
+    The cumulative peak is preserved in :data:`_peak_high_water` by
+    :func:`sample`, which is called immediately before every reset, so the
+    value being discarded here has already been folded in.
+    """
+    if not _tracemalloc:
+        return
+    import tracemalloc
+
+    tracemalloc.reset_peak()
+
+
 @contextmanager
 def phase(name: str, /, **attrs: Any) -> Iterator[None]:
     """Bracket a phase with an enter and an exit sample.
@@ -394,10 +449,18 @@ def phase(name: str, /, **attrs: Any) -> Iterator[None]:
         yield
         return
     sample(f"{name}:enter", **attrs)
+    _reset_tracemalloc_peak()
     try:
         yield
     finally:
         sample(f"{name}:exit", **attrs)
+        # A nested phase's own reset means the enclosing phase's remaining
+        # span is measured from here, not from its own entry. That is
+        # deliberate: the run's peak is the max over phases either way (the
+        # cumulative field above carries it), and the alternative -- no reset
+        # at all -- makes every phase after the largest one report the
+        # largest one's number, which is the failure this exists to avoid.
+        _reset_tracemalloc_peak()
 
 
 def phase_each(name: str, keys: Iterable[str], /) -> Iterator[str]:

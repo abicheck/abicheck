@@ -457,3 +457,132 @@ class TestTheProbesDegradeEverywhere:
         assert [r["event"] for r in records] == ["member:enter", "member:exit"]
         assert all(r["parent_rss_bytes"] is None for r in records)
         assert all(r["attrs"] == {"library": "libx.so"} for r in records)
+
+
+class TestAPhasePeakIsThePhasesOwn:
+    """The per-phase peak window (E1 instrumentation).
+
+    A phase's ``tracemalloc_phase_peak_bytes`` must describe *that phase*.
+    Without the reset, every phase after the largest one inherits the
+    largest one's number and attribution becomes impossible -- which is the
+    whole reason the field exists, so the tests below state it as an
+    invariant over generated phase sizes rather than one hand-picked pair.
+    """
+
+    @staticmethod
+    def _run(out: Path, sizes: list[int]) -> list[dict]:
+        held: list[bytearray] = []
+        for i, size in enumerate(sizes):
+            with memory_trace.phase(f"p{i}"):
+                block = bytearray(size)
+                held.append(block)
+                held.pop()
+                del block
+        return [
+            r for r in memory_trace.read_samples(out) if r["event"].endswith(":exit")
+        ]
+
+    @pytest.mark.parametrize(
+        "sizes",
+        [
+            [8_000_000, 1_000_000],
+            [1_000_000, 8_000_000],
+            [8_000_000, 1_000_000, 4_000_000, 500_000],
+            [2_000_000] * 5,
+            [500_000, 8_000_000, 500_000],
+        ],
+    )
+    def test_each_phase_peak_tracks_its_own_allocation_not_an_earlier_one(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sizes: list[int]
+    ) -> None:
+        out = tmp_path / "trace.jsonl"
+        _enable(monkeypatch, out, tracemalloc=True)
+        exits = self._run(out, sizes)
+        assert len(exits) == len(sizes)
+        for size, record in zip(sizes, exits, strict=True):
+            phase_peak = record["tracemalloc_phase_peak_bytes"]
+            # The oracle is the allocation this phase actually made, derived
+            # from the input rather than from the implementation: the phase
+            # must account for its own block, and must not be inflated to a
+            # bigger sibling's size. The upper bound carries the real claim
+            # -- it is what an omitted reset_peak() fails.
+            assert phase_peak >= size
+            assert phase_peak < size + max(sizes)
+
+    def test_the_cumulative_peak_is_the_max_over_phases(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """``tracemalloc_peak_bytes`` keeps its published meaning.
+
+        Independent oracle: the largest phase peak anywhere in the trace.
+        The resets must not be allowed to lose the run's high-water.
+        """
+        out = tmp_path / "trace.jsonl"
+        _enable(monkeypatch, out, tracemalloc=True)
+        sizes = [1_000_000, 9_000_000, 1_000_000, 3_000_000]
+        exits = self._run(out, sizes)
+        cumulative = [r["tracemalloc_peak_bytes"] for r in exits]
+        assert cumulative == sorted(cumulative), "cumulative peak went down"
+        assert cumulative[-1] >= max(r["tracemalloc_phase_peak_bytes"] for r in exits)
+        assert cumulative[-1] >= max(sizes)
+
+    def test_the_two_peaks_are_genuinely_different_numbers(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Vacuity guard.
+
+        An implementation that reported the cumulative value in both fields
+        would pass every bound above whose upper limit is generous. This
+        pins that the per-phase field is actually narrower somewhere.
+        """
+        out = tmp_path / "trace.jsonl"
+        _enable(monkeypatch, out, tracemalloc=True)
+        exits = self._run(out, [9_000_000, 1_000_000])
+        last = exits[-1]
+        assert last["tracemalloc_phase_peak_bytes"] < last["tracemalloc_peak_bytes"]
+
+
+class TestMarkIsAPhaseBoundary:
+    def test_a_mark_records_one_sample_named_exactly_as_given(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "trace.jsonl"
+        _enable(monkeypatch, out)
+        memory_trace.mark("stage:done", library="a")
+        (record,) = memory_trace.read_samples(out)
+        assert record["event"] == "stage:done"
+        assert record["attrs"] == {"library": "a"}
+
+    def test_consecutive_marks_partition_the_peak_between_them(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A mark closes the window the previous mark opened.
+
+        Same invariant as a phase, stated for the flat form: the second
+        stage's peak must reflect the second stage's allocation, not the
+        first stage's larger one.
+        """
+        out = tmp_path / "trace.jsonl"
+        _enable(monkeypatch, out, tracemalloc=True)
+        # Freed *before* the boundary that closes its window: a peak counts
+        # still-live blocks too, so holding the big block across the second
+        # mark would make the second window legitimately 9 MB and the test
+        # would be asserting the wrong thing.
+        big = bytearray(9_000_000)
+        del big
+        memory_trace.mark("first:done")
+        small = bytearray(1_000_000)
+        del small
+        memory_trace.mark("second:done")
+        first, second = memory_trace.read_samples(out)
+        assert first["tracemalloc_phase_peak_bytes"] >= 9_000_000
+        assert second["tracemalloc_phase_peak_bytes"] < 9_000_000
+
+    def test_a_mark_is_a_no_op_when_tracing_is_off(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "trace.jsonl"
+        monkeypatch.delenv(memory_trace.ENV_TRACE_PATH, raising=False)
+        memory_trace.reset_for_testing()
+        memory_trace.mark("stage:done")
+        assert not out.exists()
