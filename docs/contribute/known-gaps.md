@@ -10227,26 +10227,72 @@ table, and the baseline write's three simultaneous full-size copies (see
 This entry records, deliberately, what is **not** closed, so the next
 attempt starts from the measurement rather than from the same three places.
 
-**The OLD side is still retained in full, per member.** JUnit and
-`--bundle-facts-out` genuinely read it, so the per-consumer resolution
-cannot remove it. Bounding it means *spooling completed members* — writing
-each member's OLD snapshot to the storage codec as its comparison finishes
-and reading it back when the folds run — rather than deciding retention.
-Two things make that a real change and not a tweak: the JUnit pass wants
-`(DiffResult, old_snapshot)` pairs after every member has finished, and
-`--bundle-facts-out` additionally resolves *stranded* libraries that never
-produced a pair. The archive writer (`storage/bundle_facts_archive.py`)
-already spools encoded blobs and is the mechanism to reuse; what is missing
-is a bounded, lazy per-member handle the two consumers can take instead of
-a live object.
+**The OLD side is still retained in full, per member — but only for
+`--bundle-facts-out` now.** *Half of this is closed:* JUnit was the second
+consumer and turned out to read four attributes off the snapshot, so it now
+takes the compact `model.symbol_inventory.SymbolInventory`
+and the snapshot is released when the member's comparison finishes.
+`--bundle-facts-out` genuinely needs the whole document and still pins it.
+Bounding *that* means *spooling completed members* — writing each member's
+OLD snapshot to the storage codec as its comparison finishes and reading it
+back when the folds run — rather than deciding retention. What makes it a
+real change and not a tweak: `--bundle-facts-out` additionally resolves
+*stranded* libraries that never produced a pair. The archive writer
+(`storage/bundle_facts_archive.py`) already spools encoded blobs and is the
+mechanism to reuse; what is missing is a bounded, lazy per-member handle
+that consumer can take instead of a live object.
 
-**A compressed baseline write still joins.** `write_snapshot_text_stream`
-streams an uncompressed write and joins-and-delegates a compressed one,
-because both compressors here are one-shot and their deterministic-output
-guarantees are stated for whole buffers. The default `--bundle-facts-out`
-path is uncompressed, which is the one measured; a streaming compressor
-needs its own determinism story (fixed frame parameters, no mtime, stable
-level) before it can claim the same bytes.
+**A compressed baseline write no longer joins.** *Closed.*
+`storage/incremental_encode.py` compresses the same fragment stream chunk
+by chunk, and the determinism story the previous note asked for was
+supplied rather than assumed: gzip's frame is assembled here with `mtime=0`
+and `OS=0xFF` pinned explicitly and a raw-deflate payload from one
+`zlib.compressobj`, which is **byte-identical** to the previous
+`gzip.compress` output for every chunking down to one byte; zstd is
+byte-identical whenever the decoded size is known up front. One residual:
+the bundle-facts producer cannot state that size (it is streaming), so its
+zstd frames omit the declared content size. The frame is legal, round-trips,
+and `validate_zstd_frame_completeness` already handles `CONTENTSIZE_UNKNOWN`
+— but it loses the declared-size cross-check that catches a frame truncated
+mid-header, and its bytes differ from the one-shot encoder's for the same
+content. A caller that *can* cheaply state the total should pass
+`decoded_size=`.
+
+**Three attrs dictionaries per graph entity: closed, and worth reading for
+the shape of the next one.** Every `GraphNode`/`GraphEdge` held
+`facts[0].attrs`, `resolved` and `attrs` with equal contents in the
+single-producer shape a real graph is almost entirely made of (a measured
+six-library release: 10,277 producer facts across 2,771 nodes and 7,506
+edges, exactly one fact each). `model.graph_facts.resolve_entity_attrs`
+returns the fact's own dict for that case and `ensure_facts_and_resolve`
+aliases `attrs` to it — measured at −2.43 MiB and −13,851 objects on a
+graph of that shape, and multiplied by the member count while
+`--bundle-facts-out` retention holds. The aliasing is sound only because
+`attrs`/`resolved` were *already* derived views that
+`ensure_facts_and_resolve` overwrites on every call, which is why a direct
+`entity.attrs[k] = v` was already documented as silently dropped and no
+production call site performs one. **Do not extend the aliasing to the
+multi-fact case**: that dict is a genuine merge result and sharing it would
+make one producer's backfill rewrite another's evidence.
+
+**Whole-graph sharing across release members was investigated and not
+shipped.** The audit's observation — that all 10,277 serialized node/edge
+payloads matched by content hash across six OLD-side member graphs — is a
+statement about *that fixture's* shared headers, not a licence to share the
+objects. `build_header_only_graph(snap, ast_root, ...)` takes the member's
+own snapshot, so a correct sharing key would have to cover every
+declaration that snapshot contributes, not just the header/compiler/macro/
+target context the brief lists; and the graph is *mutated* after
+construction (`augment_graph_with_includes`, `degraded_passes`,
+`extractor_passes`, `finalize()`), so a shared instance would need a
+copy-on-write or freeze boundary that does not exist today. The raw AST
+*is* already shared (`dumper_cache`'s in-process memo plus the disk cache),
+so what would be saved is construction time and per-member graph storage,
+not re-parsing. Reducing the per-entity storage was the sound half and is
+what shipped; sharing the graph itself needs the same
+inventory-of-every-mutation work the shared-header-declaration item below
+already calls for, and must not be justified by one fixture's content-hash
+coincidence.
 
 **Scalar `Fact` pooling was measured and deliberately not shipped.**
 Pooling immutable scalar `Fact` values on `Function`/`Param` after
