@@ -101,8 +101,35 @@ _PAGE = 4096
 # ---------------------------------------------------------------------------
 
 
+def _vocabulary_padding(ns: str, records: int, scale: int) -> list[str]:
+    """Distinct public type spellings, to grow the *compiled vocabulary*.
+
+    ``--apis``/``--records`` grow the number of declarations; they do not
+    grow the alternation those declarations are matched against nearly as
+    fast, because most of them reuse a handful of type spellings. This adds
+    genuinely distinct, qualified, template-instantiated spellings -- the
+    shape a real C++ release contributes -- so a benchmark fixture can be
+    driven across the match cache's real admission threshold.
+
+    That threshold is the point of the knob. The defect this guards against
+    only appears once a vocabulary's compiled pattern is large enough to
+    have been refused admission wholesale; a fixture whose vocabulary stays
+    small exercises the happy path and would pass identically against the
+    bug. ``--require-vocabulary-bytes`` is the paired vacuity guard that
+    makes the crossing a checked fact rather than an assumption.
+    """
+    if scale <= 0:
+        return []
+    out: list[str] = []
+    for i in range(scale):
+        rec = i % max(records, 1)
+        out.append(f"using Alias{i} = Box{rec}<Rec{(i + 1) % max(records, 1)}>;")
+        out.append(f"struct Tag{i} {{ Box{rec}<Rec{rec}> boxed; }};")
+    return out
+
+
 def _member_sources(
-    index: int, apis: int, records: int, *, new: bool
+    index: int, apis: int, records: int, *, new: bool, vocabulary_scale: int = 0
 ) -> tuple[str, str]:
     """Header and translation unit for one member.
 
@@ -138,6 +165,7 @@ def _member_sources(
             # The removed export: declared and defined on OLD only.
             continue
         h.append(f"int api_{a}(const Rec{a % max(records, 1)}& r, int x);")
+    h.extend(_vocabulary_padding(ns, records, vocabulary_scale))
     h.append("std::string describe(const std::vector<int>& v);")
     h.append("}")
     header = "\n".join(h) + "\n"
@@ -158,7 +186,9 @@ def _member_sources(
     return header, "\n".join(c) + "\n"
 
 
-def build_fixture(root: Path, members: int, apis: int, records: int) -> None:
+def build_fixture(
+    root: Path, members: int, apis: int, records: int, vocabulary_scale: int = 0
+) -> None:
     """Compile a two-sided, many-member C++ release under *root*."""
     for side in ("old", "new"):
         src = root / side / "src"
@@ -167,7 +197,13 @@ def build_fixture(root: Path, members: int, apis: int, records: int) -> None:
         for d in (src, inc, lib):
             d.mkdir(parents=True, exist_ok=True)
         for i in range(members):
-            header, unit = _member_sources(i, apis, records, new=(side == "new"))
+            header, unit = _member_sources(
+                i,
+                apis,
+                records,
+                new=(side == "new"),
+                vocabulary_scale=vocabulary_scale,
+            )
             (inc / f"lib{i}.hpp").write_text(header, encoding="utf-8")
             (src / f"lib{i}.cpp").write_text(unit, encoding="utf-8")
             cmd = [
@@ -317,6 +353,7 @@ def run_variant(
     tracemalloc: bool,
     cache_dir: Path | None,
     env_extra: dict[str, str] | None = None,
+    jobs: int | None = None,
 ) -> dict[str, object]:
     out.mkdir(parents=True, exist_ok=True)
     args = [
@@ -331,6 +368,8 @@ def run_variant(
         "-H",
         f"new={root / 'new' / 'include'}",
     ]
+    if jobs is not None:
+        args += ["--jobs", str(jobs)]
     args += VARIANTS[name](out)  # type: ignore[operator]
 
     env = dict(os.environ)
@@ -466,6 +505,38 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--members", type=int, default=6)
     ap.add_argument("--apis", type=int, default=300)
     ap.add_argument("--records", type=int, default=20)
+    ap.add_argument(
+        "--vocabulary-scale",
+        type=int,
+        default=0,
+        help=(
+            "distinct public template/typedef spellings per member, to grow "
+            "the compiled matcher vocabulary. Use with "
+            "--require-vocabulary-bytes to drive the fixture across the "
+            "match cache's real admission threshold."
+        ),
+    )
+    ap.add_argument(
+        "--jobs",
+        type=int,
+        default=None,
+        help=(
+            "forwarded to `compare --jobs`, for a worker-admission sweep "
+            "(jobs=1,2,3,6) over one unchanged workload."
+        ),
+    )
+    ap.add_argument(
+        "--require-vocabulary-bytes",
+        type=int,
+        default=0,
+        help=(
+            "fail unless the run's compiled patterns retained at least this "
+            "many bytes. The vacuity guard for --vocabulary-scale: without "
+            "it a 'crosses the admission threshold' benchmark that quietly "
+            "stopped crossing it would keep passing while measuring the "
+            "happy path. Requires --trace."
+        ),
+    )
     ap.add_argument("--variants", default="json,junit,bundle-facts")
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument(
@@ -487,7 +558,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _prepare_fixture(args: argparse.Namespace) -> None:
     """Build or validate-and-reuse the compiled fixture under ``--root``."""
-    wanted = {"members": args.members, "apis": args.apis, "records": args.records}
+    # `vocabulary_scale` joins the manifest, not just the build call: it
+    # changes the compiled headers, so a `--keep` run that omitted it would
+    # silently reuse a tree built at a different vocabulary size and report
+    # a threshold-crossing measurement taken on a fixture that never
+    # crossed it.
+    wanted = {
+        "members": args.members,
+        "apis": args.apis,
+        "records": args.records,
+        "vocabulary_scale": args.vocabulary_scale,
+    }
     if args.keep and _fixture_matches(args.root, wanted):
         print(f"reusing fixture at {args.root}", file=sys.stderr)
         return
@@ -495,11 +576,67 @@ def _prepare_fixture(args: argparse.Namespace) -> None:
         shutil.rmtree(args.root)
     print(
         f"building fixture: {args.members} members x {args.apis} APIs "
-        f"x {args.records} records ...",
+        f"x {args.records} records x {args.vocabulary_scale} vocabulary ...",
         file=sys.stderr,
     )
-    build_fixture(args.root, args.members, args.apis, args.records)
+    build_fixture(
+        args.root, args.members, args.apis, args.records, args.vocabulary_scale
+    )
     (args.root / FIXTURE_MANIFEST).write_text(json.dumps(wanted), encoding="utf-8")
+
+
+def _require_the_vocabulary_threshold_was_crossed(
+    trace: Path | None, required_bytes: int
+) -> None:
+    """Fail unless the run's compiled patterns really got that large.
+
+    The vacuity guard for ``--vocabulary-scale``. A benchmark whose stated
+    purpose is "crosses the match cache's admission threshold" asserts
+    nothing if the fixture drifted below that threshold -- it would then
+    measure the happy path and pass identically against the defect it
+    exists to catch. This reads the figure the run itself reported
+    (``release.spelling_cache``'s ``patterns.retained_bytes``, emitted by
+    ``workflows.cache_counters``) rather than re-deriving it from the
+    fixture parameters, which would be the same arithmetic the fixture
+    builder already used.
+    """
+    if required_bytes <= 0:
+        return
+    if trace is None:
+        raise SystemExit("--require-vocabulary-bytes needs --trace")
+    from abicheck.workflows.memory_trace import read_samples
+
+    retained = 0
+    hits = misses = bypasses = 0
+    for record in read_samples(trace):
+        if record.get("event") != "release.spelling_cache":
+            continue
+        # `memory_trace.counts` nests its values under a "counts" key; reading
+        # the record's top level instead silently found nothing and reported
+        # 0 bytes, which would have failed every run rather than guarding it.
+        payload = record.get("counts") or {}
+        patterns = payload.get("patterns") or {}
+        match = payload.get("match") or {}
+        retained = max(retained, int(patterns.get("retained_bytes") or 0))
+        hits = max(hits, int(match.get("hits") or 0))
+        misses = max(misses, int(match.get("misses") or 0))
+        bypasses = max(bypasses, int(match.get("bypasses") or 0))
+    if retained < required_bytes:
+        raise SystemExit(
+            f"compiled patterns retained {retained:,} bytes, below the "
+            f"required {required_bytes:,}. This run did NOT cross the "
+            "admission threshold it claims to measure -- raise "
+            "--vocabulary-scale rather than lowering the requirement."
+        )
+    total = hits + misses
+    print(
+        f"vocabulary threshold crossed: {retained:,} pattern bytes; "
+        f"match cache {hits:,} hits / {misses:,} misses / {bypasses:,} "
+        f"bypasses ({100 * hits / total:.2f}% hit rate)"
+        if total
+        else f"vocabulary threshold crossed: {retained:,} pattern bytes",
+        file=sys.stderr,
+    )
 
 
 def _summarize(
@@ -593,10 +730,16 @@ def main(argv: list[str] | None = None) -> int:
                 trace=trace,
                 tracemalloc=args.tracemalloc,
                 cache_dir=cache_dir,
+                jobs=args.jobs,
             )
             row["attempt"] = attempt
             row["cold"] = bool(args.cold)
+            row["jobs"] = args.jobs
+            row["vocabulary_scale"] = args.vocabulary_scale
             _require_a_measured_comparison(row)
+            _require_the_vocabulary_threshold_was_crossed(
+                trace, args.require_vocabulary_bytes
+            )
             results.append(row)
             print(
                 f"{name:<20} run {attempt}  exit={row['exit_code']}  "

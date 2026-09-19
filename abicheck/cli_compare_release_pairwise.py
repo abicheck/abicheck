@@ -53,7 +53,7 @@ from .frontends.cli.release_member_errors import member_error_entry
 from .frontends.cli.runtime import _safe_write_output
 from .model.symbol_inventory import SymbolInventory
 from .reporter import disposition_ledger_blocks, to_json
-from .workflows import memory_trace, release_snapshot_retention
+from .workflows import cache_counters, memory_trace, release_snapshot_retention
 from .workflows.contracts import CompareResult
 from .workflows.crosscheck_ownership import (
     release_level_checks,
@@ -863,6 +863,7 @@ def _compare_release_libraries(
             library_results.extend(
                 _compare_release_sequential(matched_keys, common_args),
             )
+    cache_counters.record_shared_cache_counters()
 
     # Post-process all results: compute worst verdict, collect annotations,
     # and optionally collect diff_pairs (for JUnit).

@@ -260,3 +260,117 @@ class TestFixtureIdentity:
         assert bench._fixture_matches(tmp_path, wanted) is False
         (tmp_path / bench.FIXTURE_MANIFEST).write_text("{not json", encoding="utf-8")
         assert bench._fixture_matches(tmp_path, wanted) is False
+
+
+class TestTheVocabularyThresholdGuard:
+    """A benchmark that claims to cross a threshold must prove it did.
+
+    **Bug class.** A performance fixture whose whole purpose is to exercise
+    a size-dependent path, with nothing checking that the path was reached.
+    If the fixture drifts below the threshold -- a knob defaulted back, a
+    header trimmed, a cheaper compiler inlining differently -- the benchmark
+    keeps running, keeps reporting numbers, and quietly measures the happy
+    path instead. It would then pass identically against the very defect it
+    exists to catch, which is the same failure shape as a matrix test with
+    no oracle.
+
+    **General invariant**: the guard is a *decision* over the run's own
+    reported figure, so it must move in both directions -- pass when the
+    figure clears the requirement, fail when it does not, and refuse to
+    answer at all when it has no figure to read. Asserted in all three
+    directions plus the disabled case, rather than only the passing one; a
+    guard that always passes and a guard that always fails each satisfy a
+    single-direction test.
+
+    The first version of this guard read the counters from the trace
+    record's top level, but ``memory_trace.counts`` nests them under
+    ``"counts"``. It therefore found nothing, reported 0 bytes and would
+    have failed *every* run -- caught only by exercising the passing
+    direction, which is why that direction is tested here too.
+    """
+
+    @staticmethod
+    def _trace(tmp_path: Path, retained: int) -> Path:
+        path = tmp_path / "trace.jsonl"
+        path.write_text(
+            json.dumps(
+                {
+                    "event": "release.spelling_cache",
+                    "kind": "counts",
+                    "counts": {
+                        "match": {"hits": 90, "misses": 10, "bypasses": 0},
+                        "patterns": {"retained_bytes": retained},
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_it_passes_when_the_threshold_is_cleared(self, tmp_path) -> None:
+        bench._require_the_vocabulary_threshold_was_crossed(
+            self._trace(tmp_path, 9_000_000), 8 * 1024 * 1024
+        )
+
+    def test_it_fails_when_the_threshold_is_not_cleared(self, tmp_path) -> None:
+        with pytest.raises(SystemExit) as excinfo:
+            bench._require_the_vocabulary_threshold_was_crossed(
+                self._trace(tmp_path, 3_590_595), 8 * 1024 * 1024
+            )
+        message = str(excinfo.value)
+        assert "3,590,595" in message, "the guard must report what it measured"
+        assert "did NOT cross" in message
+
+    def test_it_refuses_to_answer_without_a_trace(self) -> None:
+        """No figure to read is not the same as a figure that passed."""
+        with pytest.raises(SystemExit):
+            bench._require_the_vocabulary_threshold_was_crossed(None, 1)
+
+    def test_it_is_disabled_at_zero(self) -> None:
+        """Opt-in: a run that makes no threshold claim needs no trace."""
+        bench._require_the_vocabulary_threshold_was_crossed(None, 0)
+
+    def test_a_trace_with_no_cache_counters_does_not_pass(self, tmp_path) -> None:
+        """Absent counters must read as 'not proven', never as 'fine'.
+
+        The exact shape the nesting bug produced: nothing found, so the
+        figure is 0. That must fail a non-zero requirement rather than being
+        treated as an unmeasured-and-therefore-acceptable run.
+        """
+        path = tmp_path / "trace.jsonl"
+        path.write_text(
+            json.dumps({"event": "release.member", "kind": "phase"}) + "\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(SystemExit):
+            bench._require_the_vocabulary_threshold_was_crossed(path, 1)
+
+
+class TestTheFixtureManifestCoversEveryShapeKnob:
+    """``--keep`` must not reuse a tree built to a different shape.
+
+    ``vocabulary_scale`` changes the compiled headers. If it were left out
+    of the manifest, a ``--keep`` run would silently reuse a tree built at a
+    different vocabulary size -- and then report a threshold-crossing
+    measurement taken on a fixture that never crossed it, which is the
+    guard above defeated by the layer beneath it.
+    """
+
+    def test_vocabulary_scale_is_part_of_the_reuse_key(self, tmp_path) -> None:
+        for side in ("old", "new"):
+            (tmp_path / side / "lib").mkdir(parents=True)
+            (tmp_path / side / "lib" / "libmember0.so").write_bytes(b"")
+        wanted = {
+            "members": 1,
+            "apis": 2,
+            "records": 1,
+            "vocabulary_scale": 400,
+        }
+        (tmp_path / bench.FIXTURE_MANIFEST).write_text(
+            json.dumps(wanted), encoding="utf-8"
+        )
+        assert bench._fixture_matches(tmp_path, wanted) is True
+        assert bench._fixture_matches(tmp_path, {**wanted, "vocabulary_scale": 0}) is (
+            False
+        ), "a differently-scaled vocabulary was accepted as a matching fixture"
