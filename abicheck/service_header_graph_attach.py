@@ -283,6 +283,15 @@ def _attach_header_graph(
         # docstring and dumper_hybrid.merge_snapshots' "visibility" stamp.
         fact_provenance=snap.fact_provenance,
     )
+    # The graph build is the projection's only consumer, so let it go here
+    # rather than at function exit. Measured, not tidiness: holding it to
+    # the end left this attach retaining ~5 MiB MORE than the code it
+    # replaced (three runs above both baseline runs on oneDAL), because the
+    # projection's own indexes and edge lists -- 23.6 MiB there -- outlived
+    # the only thing that reads them. A reordering whose whole claim is
+    # "nothing is held longer than it is needed" has to hold that for its
+    # own intermediate too.
+    projection = None
     memory_trace.mark("dump.header_graph.build:done")
     if header_graph_includes and resolved_headers and cc.frontend_context == "host":
         # `ClangHeaderIncludeExtractor` drives a plain `clang -M` per header

@@ -122,26 +122,37 @@ inherited. No `tracemalloc` in any run quoted here.
 
 ## Result
 
-| point | before | after |
+Three fresh processes per side, each with its own empty cache directory.
+Every figure MiB.
+
+| point | before (3 runs) | after (3 runs) |
 |---|---|---|
-| primary dump done | 288.7 | 288.4 |
-| clang AST parsed | 1332.7 | 1332.5 |
-| projection taken | — | 1356.1 |
-| AST released | — | 1336.1 |
-| graph built | 1480.1 | **1361.3** |
-| include pass done | 1481.8 | 1361.6 |
-| **attach peak (`VmHWM`)** | **2215.4** | **2215.2** |
-| retained after attach (post-`gc`) | 1287.6 | 1291.5 |
+| clang AST parsed | 1332.7 / 1335.5 / 1332.7 | 1332.5 / 1332.5 / 1332.7 |
+| graph built | 1480.1 / 1483.0 / 1475.4 | **1361.3 / 1363.6 / 1366.4** |
+| **graph build's own cost** | **+147.4 / +147.5 / +142.7** | **+25.2 / +20.5 / +25.2** |
+| **attach peak (`VmHWM`)** | **2215.4 / 2218.0 / 2215.4** | **2215.2 / 2215.3 / 2215.3** |
+| retained after attach (post-`gc`) | 1287.6 / 1286.1 / 1275.9 | 1291.5 / 1294.1 / 1289.1 |
 | graph nodes / edges | 49481 / 98330 | 49481 / 98330 |
 
 The reordering does what it was built to do — the graph build's own
-residency cost drops from **+147.4 MiB to +25.2 MiB**, since it now reuses
+residency cost drops from **~147 MiB to ~24 MiB**, since it now reuses
 arenas the AST parse freed — and the projection is cheap (23.6 MiB against a
 1044 MiB tree, 2.3%).
 
-**But the peak is unchanged, and so is the retained figure.** The premise —
-that the member's peak was the AST and the graph held at the same time — is
-wrong.
+**But the peak is unchanged: 2216.3 mean before, 2215.3 after — 0.05%.** The
+premise — that the member's peak was the AST and the graph held at the same
+time — is wrong.
+
+**And the first version of this change made the retained figure slightly
+*worse*,** which three runs per side made visible and one run per side would
+not have: every *after* run (1291.5 / 1294.1 / 1289.1) sat above every
+*before* run (1287.6 / 1286.1 / 1275.9), a consistent ~+8 MiB. Cause: the
+projection is a local of `_attach_header_graph`, so holding it to function
+exit kept its indexes and edge lists — the same 23.6 MiB — alive past the
+graph build, their only consumer. Releasing it at the build's end
+(`projection = None`) is in the shipped version. A reordering whose whole
+claim is "nothing is held longer than it needs to be" does not get to exempt
+its own intermediate.
 
 ## Where the peak really is
 

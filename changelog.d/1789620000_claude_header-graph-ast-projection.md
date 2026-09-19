@@ -5,14 +5,16 @@
   the four compact projections `build_header_only_graph` actually reads
   (`abicheck/buildsource/header_graph_ast_projection.py`) and releases the
   tree before allocating the graph, so the graph's long-lived objects land in
-  arenas the parse has already freed instead of pinning them. Measured on an
-  STL-bearing fixture: the attach's retained memory drops from 424 MiB to
-  396 MiB (-7%), with wall time, every finding, the verdict and the exit code
-  unchanged through the real `compare` CLI. This does **not** reduce the
-  per-member *peak*, which is the JSON document plus the tree it is parsed
-  into and is unchanged at 573 MiB — see
+  arenas the parse has already freed instead of pinning them. Measured on the
+  real reference library (oneDAL 2024.7 `libonedal_core.so.2`, three fresh
+  processes per side): the graph build's own residency cost falls from
+  ~147 MiB to ~24 MiB, with wall time, every finding, the verdict and the
+  exit code unchanged through the real `compare` CLI. It does **not** reduce
+  the per-member *peak* (2216.3 → 2215.3 MiB), which is the JSON document
+  plus the tree it is parsed into — see
   `docs/contribute/measurements/header-graph-attach-memory.md` for the
-  reattribution and what is left.
+  reattribution, the measured ceiling of the one lever that remains, and why
+  the first version of this change briefly made the retained figure worse.
 
 ### Added
 

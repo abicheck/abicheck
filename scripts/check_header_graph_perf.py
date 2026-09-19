@@ -981,7 +981,8 @@ def check_regressions(
                 failures.append(
                     f"size={size} backend={backend}: {metric} {current:.1f} > "
                     f"baseline {base:.1f} + {allowed_delta:.1f} allowed ({pct:+.0f}%) "
-                    f"[tolerance={threshold.tolerance} min_delta_ms={threshold.min_delta} "
+                    f"[tolerance={threshold.tolerance} "
+                    f"min_delta_{_metric_unit(metric)}={threshold.min_delta} "
                     f"source={threshold.source}]"
                 )
     return failures
@@ -1035,6 +1036,19 @@ _positive_int = positive_int_arg
 #: module's own historical name since tests/test_header_graph_perf_gate.py
 #: references it directly.
 _finite_nonnegative_float = finite_nonnegative_float_arg
+
+
+def _metric_unit(metric: str) -> str:
+    """A metric's unit, for labelling the absolute floor in human output.
+
+    The floor is stated in whatever unit the metric is measured in, so
+    printing ``min_delta_ms=32.0`` beside a MiB metric -- which is what a
+    single hard-coded label did -- tells the reader the wrong thing about
+    the number that gated them. The *flag* keeps its historical ``-ms-``
+    spelling (renaming it would break a CI job's existing arguments); only
+    the printed label follows the metric.
+    """
+    return "mib" if metric in MEMORY_METRICS else "ms"
 
 
 def _metric_flag(metric: str) -> str:
@@ -1278,7 +1292,8 @@ def _report_and_gate(
     for metric, threshold in thresholds.items():
         print(
             f"  {metric}: tolerance={threshold.tolerance} "
-            f"min_delta_ms={threshold.min_delta} source={threshold.source}"
+            f"min_delta_{_metric_unit(metric)}={threshold.min_delta} "
+            f"source={threshold.source}"
         )
 
     if baseline is None:

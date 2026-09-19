@@ -10521,16 +10521,24 @@ one level further down.
 the graph is allocated, so the two are never resident together. That part
 works exactly as intended. On the real reference library — oneDAL 2024.7
 `libonedal_core.so.2`, conda-forge `dal`/`dal-devel`, default `castxml`
-backend, cold AST cache, one `daal.h` — the graph build's own residency cost
-falls from **+147 MiB to +25 MiB**, because the graph now lands in arenas the
-AST parse has already freed instead of taking fresh ones. The projection
-itself is 23.6 MiB against a 1044 MiB tree (2.3%).
+backend, cold AST cache, one `daal.h`, three fresh processes per side — the
+graph build's own residency cost falls from **+147/+148/+143 MiB to
++25/+21/+25 MiB**, because the graph now lands in arenas the AST parse has
+already freed instead of taking fresh ones. The projection itself is
+23.6 MiB against a 1044 MiB tree (2.3%).
 
-**And the member's peak does not move at all: 2215.4 MiB before, 2215.2 MiB
-after.** Nor does the memory retained once the attach returns (1287.6 vs
-1291.5 MiB — the two are within each other's noise, and the *after* figure is
-nominally the larger one). The graph/AST overlap was simply never where the
-peak was.
+**And the member's peak does not move at all: 2215.4 / 2218.0 / 2215.4 MiB
+before, 2215.2 / 2215.3 / 2215.3 after — 0.05%.** The graph/AST overlap was
+simply never where the peak was.
+
+**The first version also made the retained figure slightly worse**, which
+only showed up because three runs per side were taken: every *after* run
+(1291.5 / 1294.1 / 1289.1) sat above every *before* run (1287.6 / 1286.1 /
+1275.9). The projection is a local, so holding it to function exit kept its
+indexes and edge lists alive past the graph build — their only consumer.
+Freed at the build's end in the shipped version. Worth remembering as a
+method point, not just a bug: a single run per side would have read that
+~8 MiB regression as noise and shipped it.
 
 **Where the peak actually is.** The attach's high-water mark occurs *inside*
 `json.load`, before the graph exists: `dump.header_graph.clang_ast` ends at
