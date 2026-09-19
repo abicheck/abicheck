@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``report/junit_inventory.py`` -- JUnit's compact OLD-side projection.
+"""``model/symbol_inventory.py`` -- JUnit's compact OLD-side projection.
 
 The governing claim is an *equivalence*: rendering from the inventory must
 produce exactly what rendering from the snapshot produced, so the
@@ -24,6 +24,7 @@ reachable from a JUnit-only run) is asserted structurally.
 
 from __future__ import annotations
 
+import dataclasses
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -32,11 +33,8 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change, DiffResult
 from abicheck.junit_report import to_junit_xml, to_junit_xml_multi
 from abicheck.model import AbiSnapshot, EnumType, Function, RecordType, Variable
-from abicheck.model.symbol_inventory import (
-    SymbolInventory,
-    build_symbol_inventory,
-    coerce_junit_inventory,
-)
+from abicheck.model.symbol_inventory import SymbolInventory, build_symbol_inventory
+from abicheck.report.junit_inventory import coerce_junit_inventory
 
 
 def _snapshot(n: int = 12) -> AbiSnapshot:
@@ -47,8 +45,10 @@ def _snapshot(n: int = 12) -> AbiSnapshot:
             Function(name=f"ns::f{i}", mangled=f"_ZN2ns2f{i}Ev", return_type="void")
             for i in range(n)
         ],
-        variables=[Variable(name=f"ns::v{i}", mangled=f"_ZN2ns2v{i}E", type="int")
-                   for i in range(n // 2)],
+        variables=[
+            Variable(name=f"ns::v{i}", mangled=f"_ZN2ns2v{i}E", type="int")
+            for i in range(n // 2)
+        ],
         types=[RecordType(name=f"ns::S{i}", kind="struct") for i in range(n // 3)],
         enums=[EnumType(name=f"ns::E{i}") for i in range(n // 4)],
     )
@@ -86,9 +86,7 @@ class TestEquivalenceWithTheFullSnapshot:
     def test_multi_pair_release_render_is_identical(self):
         snaps = [_snapshot(9), _snapshot(15)]
         pairs_snap = [(_result(s), s) for s in snaps]
-        pairs_inv = [
-            (r, build_symbol_inventory(s)) for (r, s) in pairs_snap
-        ]
+        pairs_inv = [(r, build_symbol_inventory(s)) for (r, s) in pairs_snap]
         assert to_junit_xml_multi(pairs_inv) == to_junit_xml_multi(pairs_snap)
 
     def test_unchanged_cases_and_the_pass_rate_denominator_survive(self):
@@ -123,7 +121,10 @@ class TestProjection:
         assert inv.enums == tuple(e.name for e in snap.enums)
         mapping = inv.as_symbol_map()
         assert list(mapping) == (
-            list(inv.functions) + list(inv.variables) + list(inv.types) + list(inv.enums)
+            list(inv.functions)
+            + list(inv.variables)
+            + list(inv.types)
+            + list(inv.enums)
         )
         assert set(mapping.values()) == {"functions", "variables", "types", "enums"}
 
@@ -165,10 +166,18 @@ class TestRetention:
             if id(o) in seen:
                 continue
             seen.add(id(o))
-            assert not isinstance(o, (AbiSnapshot, Function, Variable, RecordType, EnumType))
+            assert not isinstance(
+                o, (AbiSnapshot, Function, Variable, RecordType, EnumType)
+            )
             stack.extend(gc.get_referents(o))
 
     def test_it_is_immutable(self):
+        """Frozen, and named exactly: a bare ``Exception`` here would pass
+        against an attribute error, a typo in the field name, or any other
+        incidental failure, which is not the claim.
+        """
         inv = build_symbol_inventory(_snapshot(5))
-        with pytest.raises(Exception):
+        before = inv.functions
+        with pytest.raises(dataclasses.FrozenInstanceError):
             inv.functions = ()  # type: ignore[misc]
+        assert inv.functions is before

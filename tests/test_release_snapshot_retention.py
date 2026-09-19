@@ -44,9 +44,14 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.checker_types import DiffResult
+from abicheck.model import AbiSnapshot, Function
+from abicheck.model.symbol_inventory import build_symbol_inventory
 from abicheck.workflows.release_snapshot_retention import (
     SnapshotRetention,
+    release_junit_pairs,
     resolve_snapshot_retention,
+    stash_member_evidence,
 )
 
 _ROOT = Path(__file__).resolve().parents[1] / "abicheck"
@@ -181,13 +186,72 @@ class TestConsumerInventory:
         assert 'entry.get("_old_snapshot") or entry.get("_old_bundle_evidence")' in src
 
     def test_the_junit_pair_builder_reads_the_old_side_only(self) -> None:
-        """The claim that lets NEW stay compact under ``--format junit``."""
-        src = (_ROOT / "cli_compare_release_pairwise.py").read_text(encoding="utf-8")
-        marker = "if collect_diff_results:\n        for entry in library_results:"
-        assert marker in src
-        block = src.split(marker, 1)[1].split("\n\n", 1)[0]
-        assert "_old_snapshot" in block
-        assert "_new_snapshot" not in block
+        """The claim that lets NEW stay compact under ``--format junit``.
+
+        Executed, not read as source text. The previous version of this
+        test asserted that a particular two-line snippet appeared in
+        ``cli_compare_release_pairwise.py``, which broke the moment the
+        loop moved to its owner and -- more to the point -- proved nothing
+        about what the builder *does*: a snippet can mention
+        ``_old_snapshot`` and still read the NEW side on the next line.
+        That is the same substitute-an-assertion-about-text-for-one-about-
+        behaviour mistake AGENTS.md records as #705 -> #758.
+
+        So: hand it an entry carrying a NEW-side value that would be
+        detectable if it were read, and assert the pair's OLD operand is
+        the OLD inventory and nothing touched NEW.
+        """
+        # Distinguishable contents: two empty snapshots project to two
+        # equal inventories, so the inequality below would hold vacuously.
+        old_snapshot = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="only_in_old",
+                    mangled="_Z11only_in_oldv",
+                    return_type="void",
+                )
+            ],
+        )
+        new_snapshot = AbiSnapshot(
+            library="libfoo.so",
+            version="2.0",
+            functions=[
+                Function(
+                    name="only_in_new",
+                    mangled="_Z11only_in_newv",
+                    return_type="void",
+                )
+            ],
+        )
+        diff = DiffResult(library="libfoo.so", old_version="1.0", new_version="2.0")
+        entry: dict[str, object] = {"library": "libfoo.so", "_diff_result": diff}
+        stash_member_evidence(
+            entry,
+            "libfoo.so",
+            old_snapshot,
+            new_snapshot,
+            resolve_snapshot_retention(junit=True),
+        )
+        pairs = release_junit_pairs([entry])
+        assert len(pairs) == 1
+        got_diff, got_inventory = pairs[0]
+        assert got_diff is diff
+        assert got_inventory == build_symbol_inventory(old_snapshot)
+        assert got_inventory.functions == ("_Z11only_in_oldv",)
+        assert "_Z11only_in_newv" not in got_inventory.as_symbol_map()
+        # Nothing on the NEW side was retained for JUnit to have read.
+        assert "_new_snapshot" not in entry
+
+    def test_the_junit_pair_builder_skips_a_member_with_no_result(self) -> None:
+        """A member whose comparison failed contributes no pair.
+
+        The vacuity guard on the test above: a builder that returned a
+        pair for every entry regardless would satisfy it.
+        """
+        assert release_junit_pairs([{"library": "libfoo.so"}]) == []
+        assert release_junit_pairs([]) == []
 
     def test_the_baseline_writer_reads_the_old_side_only(self) -> None:
         """Same claim for ``--bundle-facts-out``.

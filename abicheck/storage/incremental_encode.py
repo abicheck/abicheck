@@ -77,9 +77,7 @@ _GZIP_OS_UNKNOWN = 0xFF
 
 def _gzip_header(level: int) -> bytes:
     xfl = _GZIP_XFL_MAX_COMPRESSION if level >= 9 else (4 if level == 1 else 0)
-    return struct.pack(
-        "<BBBBIBB", 0x1F, 0x8B, 8, 0, 0, xfl, _GZIP_OS_UNKNOWN
-    )
+    return struct.pack("<BBBBIBB", 0x1F, 0x8B, 8, 0, 0, xfl, _GZIP_OS_UNKNOWN)
 
 
 def _gzip_chunks(chunks: Iterable[bytes], *, level: int) -> Iterator[bytes]:
@@ -112,7 +110,9 @@ def _zstd_chunks(
         write_checksum=False,
         write_content_size=True,
     )
-    chunker = cctx.chunker() if decoded_size is None else cctx.chunker(size=decoded_size)
+    chunker = (
+        cctx.chunker() if decoded_size is None else cctx.chunker(size=decoded_size)
+    )
     produced = 0
     for chunk in chunks:
         if not chunk:

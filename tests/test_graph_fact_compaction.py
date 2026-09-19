@@ -63,7 +63,9 @@ class TestSingleProducerAliasing:
 
     @pytest.mark.parametrize("make", [_node, _edge])
     def test_all_three_views_are_one_object(self, make):
-        e = make(provenance="header_graph", confidence=CONF_HIGH, attrs={"role": "param"})
+        e = make(
+            provenance="header_graph", confidence=CONF_HIGH, attrs={"role": "param"}
+        )
         ensure_facts_and_resolve(e)
         assert len(e.facts) == 1
         assert e.attrs is e.resolved
@@ -123,24 +125,31 @@ class TestFastPathEqualsTheFullMerge:
             for conf in self.CONFS:
                 for key in self.KEYS:
                     for val in self.VALUES:
-                        yield GraphFact(producer=producer, confidence=conf, attrs={key: val})
+                        yield GraphFact(
+                            producer=producer, confidence=conf, attrs={key: val}
+                        )
 
     def test_exhaustive_small_domain_enumeration(self):
         """Every 0-, 1- and 2-fact combination over a small generated domain."""
         space = list(self._fact_space())
         assert len(space) > 50  # vacuity guard on the generator itself
         cases = [[]] + [[f] for f in space]
-        cases += [list(p) for p in itertools.islice(itertools.combinations(space, 2), 0, None, 7)]
+        cases += [
+            list(p)
+            for p in itertools.islice(itertools.combinations(space, 2), 0, None, 7)
+        ]
         assert len(cases) > 200  # vacuity guard on the case set
         disagreeing = []
         for facts in cases:
             got_resolved, got_conflicts = resolve_entity_attrs(list(facts))
             want_resolved, want_conflicts = merge_graph_facts(list(facts))
-            if got_resolved != want_resolved or [c.to_dict() for c in got_conflicts] != [
-                c.to_dict() for c in want_conflicts
-            ]:
+            if got_resolved != want_resolved or [
+                c.to_dict() for c in got_conflicts
+            ] != [c.to_dict() for c in want_conflicts]:
                 disagreeing.append(facts)
-        assert not disagreeing, f"{len(disagreeing)} fact sets disagree, e.g. {disagreeing[:3]}"
+        assert not disagreeing, (
+            f"{len(disagreeing)} fact sets disagree, e.g. {disagreeing[:3]}"
+        )
 
     def test_single_fact_result_is_the_facts_own_dict(self):
         f = GraphFact(producer="p", confidence=CONF_HIGH, attrs={"role": "param"})
@@ -171,7 +180,9 @@ class TestPreservedSemantics:
 
     @pytest.mark.parametrize("make,loader", [(_node, GraphNode), (_edge, GraphEdge)])
     def test_round_trip_preserves_every_view(self, make, loader):
-        e = make(provenance="header_graph", confidence=CONF_HIGH, attrs={"role": "return"})
+        e = make(
+            provenance="header_graph", confidence=CONF_HIGH, attrs={"role": "return"}
+        )
         ensure_facts_and_resolve(e)
         register_fact(e, "other", CONF_REDUCED, {"resolution": "exact"})
         back = loader.from_dict(e.to_dict())
@@ -185,7 +196,9 @@ class TestPreservedSemantics:
         """A producer that observed *nothing* still leaves a fact behind."""
         e = _node(provenance="header_graph", confidence=CONF_HIGH, attrs={})
         ensure_facts_and_resolve(e)
-        assert e.facts == [GraphFact(producer="header_graph", confidence=CONF_HIGH, attrs={})]
+        assert e.facts == [
+            GraphFact(producer="header_graph", confidence=CONF_HIGH, attrs={})
+        ]
         assert e.attrs == {}
         back = GraphNode.from_dict(e.to_dict())
         assert back.facts[0].producer == "header_graph"

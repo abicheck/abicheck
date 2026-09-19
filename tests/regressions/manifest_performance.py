@@ -795,7 +795,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "producer failure, since a streaming write has a failure "
             "window a one-shot write does not. "
             "`write_snapshot_text_stream` streamed an uncompressed write "
-            "and did `\"\".join(chunks)` for a compressed one, so a "
+            'and did `"".join(chunks)` for a compressed one, so a '
             "compressed baseline still peaked at the whole document plus "
             "its whole encoded copy."
         ),

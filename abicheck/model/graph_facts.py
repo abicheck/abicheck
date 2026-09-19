@@ -188,7 +188,6 @@ def merge_graph_facts(
     return resolved, conflicts
 
 
-
 def resolve_entity_attrs(
     facts: list[GraphFact],
 ) -> tuple[dict[str, Any], list[FactConflict]]:

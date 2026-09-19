@@ -82,7 +82,11 @@ def _fragments(text: str, size: int) -> list[str]:
     return [text[i : i + size] for i in range(0, len(text), size)]
 
 
-ALGORITHMS = [SnapshotCompression.NONE, SnapshotCompression.GZIP, SnapshotCompression.ZSTD]
+ALGORITHMS = [
+    SnapshotCompression.NONE,
+    SnapshotCompression.GZIP,
+    SnapshotCompression.ZSTD,
+]
 SUFFIX = {
     SnapshotCompression.NONE: ".json",
     SnapshotCompression.GZIP: ".json.gz",
@@ -151,6 +155,7 @@ class TestByteIdentityWithTheOneShotEncoder:
     @pytest.mark.parametrize("algorithm", ALGORITHMS)
     def test_output_is_deterministic_across_runs_and_chunkings(self, algorithm):
         raw = _document(members=60).encode("utf-8")
+
         def run(chunk):
             return b"".join(
                 encode_chunks(
@@ -159,6 +164,7 @@ class TestByteIdentityWithTheOneShotEncoder:
                     decoded_size=len(raw),
                 )
             )
+
         assert run(512) == run(512) == run(1 << 20)
 
 

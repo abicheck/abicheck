@@ -922,12 +922,18 @@ def _strip_diff_results_and_adjust_verdict(
                 entry["annotations"] = annotation_report_entries(
                     diff, severity_config=severity_config
                 )
-        entry.pop("_diff_result", None)
-        entry.pop("_old_snapshot", None)
-        entry.pop("_new_snapshot", None)
-        entry.pop("_old_bundle_evidence", None)
-        entry.pop("_new_bundle_evidence", None)
-        entry.pop("_bundle_key", None)
+        # Strip every internal key by *prefix*, not by a hand-maintained
+        # list of six. The list was the defect: a member entry is rendered
+        # straight to JSON, so a stash key nobody remembered to add here is
+        # a `TypeError: Object of type X is not JSON serializable` at the
+        # very end of a release run -- after every comparison has been
+        # paid for. That is exactly how `_old_junit_inventory` broke a real
+        # six-member run, and the same trap was waiting for the next key
+        # anyone stashed. `_`-prefixed is this fan-out's own convention for
+        # "internal to the pass, never rendered" (all ten such keys today),
+        # so the prefix is the rule the list was approximating.
+        for key in [k for k in entry if k.startswith("_")]:
+            del entry[key]
     if removed_keys and _RELEASE_VERDICT_ORDER.get(
         worst_verdict, 0
     ) < _RELEASE_VERDICT_ORDER.get("COMPATIBLE_WITH_RISK", 0):

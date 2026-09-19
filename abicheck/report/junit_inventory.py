@@ -24,9 +24,21 @@ already-built inventory and never materialises the snapshot at all.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Union
+
 from ..model.symbol_inventory import SymbolInventory, build_symbol_inventory
 
-__all__ = ["SymbolInventory", "coerce_junit_inventory"]
+if TYPE_CHECKING:
+    from ..model import AbiSnapshot
+
+#: What a JUnit render accepts as a pair's OLD operand: the compact
+#: projection the release fan-out passes, the full snapshot a single-pair or
+#: third-party caller passes, or nothing (only the changed symbols are
+#: emitted). Named here, beside :func:`coerce_junit_inventory`, which is the
+#: one place all three are reduced to one shape.
+JunitOldOperand = Union["AbiSnapshot", SymbolInventory, None]
+
+__all__ = ["JunitOldOperand", "SymbolInventory", "coerce_junit_inventory"]
 
 
 def coerce_junit_inventory(old: object) -> SymbolInventory | None:
