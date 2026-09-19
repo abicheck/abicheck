@@ -87,6 +87,30 @@ verdict: **the verdict and the exit code are the same either way**. This is
 not an argument for turning the graph off — it is why its cost is worth
 attacking rather than its output.
 
+## The six-member release peak is not driven by concurrency
+
+Measured after the above, on the same host: the full six-member oneDAL
+release comparison at **one** admitted worker peaks at **7080.6 MiB** tree
+PSS (wall 3168.9 s, exit 4). Earlier runs of the same comparison measured
+7077.8 and 7109.0 MiB.
+
+This refutes a model stated during the prior work -- that the release peak is
+`admitted workers x per-member peak`. The arithmetic had coincided (2 workers
+x 5.7 GiB per pair plus the parent is also ~7 GiB), but with the members run
+one at a time the peak is unchanged, so concurrency is not what produces it.
+What does is not established here. Three candidates, none checked:
+accumulation across members; one large member (`libonedal_dpc.so.3`, 260 MB)
+costing that alone in the release path; or the once-per-side acquired
+`ReleasePublicSurface` held for the whole run.
+
+The per-worker admission budget
+(`workflows/release_jobs.py`'s `_RELEASE_JOB_MEM_BUDGET_GIB_BY_DEPTH`, 4.0 GiB
+at `headers` depth) is a constant derived from a different bundle
+(~3.4 GiB/member) while one oneDAL pair measures 5.7 GiB through the CLI. On
+this host the default admits **1 worker out of 4 cores**. Since concurrency
+does not drive the peak, the budget's practical effect today is idle cores
+rather than overcommit.
+
 ## Caveats
 
 * Warm AST cache (~4 GiB under `~/.cache/abi_check/clang`). Wall-clock

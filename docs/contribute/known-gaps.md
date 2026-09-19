@@ -10503,6 +10503,15 @@ it (`malloc_trim(0)` returns 96 MiB of 2138), it is not file-backed or shared
 `facts[0].attrs` are one object), and the `BuildSourcePack` holds nothing
 besides the graph (35 objects, 0.0 MiB).
 
+**A model stated and refuted.** The six-member release peak was explained
+during this work as `admitted workers x per-member peak`; the arithmetic fit
+(2 x 5.7 GiB plus the parent is ~7 GiB, against 7077.8 MiB measured). Running
+the same comparison at **one** worker peaks at **7080.6 MiB** -- unchanged, so
+concurrency is not what produces it. Whether it is accumulation across
+members, one large member costing it alone, or the once-per-side acquired
+public surface held for the run is not established. A fitting arithmetic is
+not a mechanism.
+
 **Still open.** Reducing a member's peak means not materialising the AST as a
 Python dict tree — either building the graph from a streaming parse, or
 pruning the AST to what the graph needs first. Neither is attempted here, and
