@@ -885,6 +885,97 @@ class TestFiniteNonnegativeFloat:
         assert gate(0.5) != []
 
 
+class TestCrossVersionPackageImports:
+    """This harness must import from an abicheck it did not ship with.
+
+    `performance.yml`'s PR-vs-base job deliberately runs **head's** copy of
+    `check_header_graph_perf.py` against **base's** installed package -- one
+    harness measuring two products is the only way the two numbers are
+    comparable. That makes every `abicheck` import in this script a
+    cross-version compatibility surface, not an ordinary import.
+
+    The bug class, stated as the invariant these tests check: *an
+    `abicheck` symbol this harness reads must resolve against a package
+    that predates the PR moving it.* Not hypothetical -- moving
+    `HEADER_CALL_GRAPH_PASS` to its new owner module took the base
+    measurement down with `ModuleNotFoundError` before it recorded a single
+    sample, and the job's existing degrade-to-report-only grep did not
+    match it, so it failed the whole job rather than degrading.
+
+    Checked by actually hiding the module rather than by asserting on the
+    source text: a test that greps for a `try`/`except ImportError` passes
+    against one that catches the wrong thing.
+    """
+
+    @staticmethod
+    def _hide(monkeypatch, *module_names: str) -> None:
+        """Make `module_names` unimportable, as a pre-move package would."""
+        import builtins
+
+        real_import = builtins.__import__
+        hidden = set(module_names)
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name in hidden:
+                raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+            return real_import(name, globals, locals, fromlist, level)
+
+        for name in hidden:
+            monkeypatch.delitem(sys.modules, name, raising=False)
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    def test_pass_name_resolves_against_a_pre_move_package(self, monkeypatch):
+        """The real base-branch shape: no new module, constant on the old one.
+
+        Faithful to what `performance.yml` actually installs on the base
+        side, rather than to a shape no build has ever had: hiding the new
+        module *without* restoring the constant where it used to live would
+        simulate a package that lost the symbol entirely, which is a broken
+        install, not a previous release.
+        """
+        import abicheck.buildsource.header_graph as old_owner
+
+        monkeypatch.setattr(
+            old_owner, "HEADER_CALL_GRAPH_PASS", "header_call_graph", raising=False
+        )
+        self._hide(monkeypatch, "abicheck.buildsource.header_graph_ast_projection")
+        assert hg_gate._header_call_graph_pass() == "header_call_graph"
+
+    def test_pass_name_resolves_against_this_build(self, monkeypatch):
+        # The other half of the same claim: the fallback must not be what is
+        # always taken, or the harness would stop noticing a real rename.
+        assert hg_gate._header_call_graph_pass() == "header_call_graph"
+
+    def test_a_package_carrying_it_in_neither_place_still_raises(self, monkeypatch):
+        """Not silently defaulting is the point.
+
+        A harness that swallowed this and returned a guess would assert the
+        attach stamped a pass name the package never defines -- an
+        always-green check over a measurement that may be degraded. Better
+        to abort the run loudly.
+        """
+        self._hide(
+            monkeypatch,
+            "abicheck.buildsource.header_graph_ast_projection",
+            "abicheck.buildsource.header_graph",
+        )
+        with pytest.raises(ModuleNotFoundError):
+            hg_gate._header_call_graph_pass()
+
+    def test_the_value_is_read_from_the_package_not_hard_coded(self, monkeypatch):
+        """A literal copy would verify a pass name no build stamps.
+
+        The point of checking this constant at all is that the attach really
+        stamped the pass *this* abicheck names. If the harness carried its
+        own string, a future rename would leave it asserting against a value
+        nothing produces -- green, over a degraded attach.
+        """
+        import abicheck.buildsource.header_graph_ast_projection as owner
+
+        monkeypatch.setattr(owner, "HEADER_CALL_GRAPH_PASS", "renamed_in_this_build")
+        assert hg_gate._header_call_graph_pass() == "renamed_in_this_build"
+
+
 class TestRequireRealAstAttach:
     class _FakeGraph:
         def __init__(self, passes):

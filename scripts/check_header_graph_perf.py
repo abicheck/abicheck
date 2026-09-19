@@ -469,6 +469,37 @@ def _resolve_includes(
     return inc_extra, tuple(deferred), tuple(deferred_token_dirs(deferred))
 
 
+def _header_call_graph_pass() -> str:
+    """``HEADER_CALL_GRAPH_PASS``, from whichever module this build owns it in.
+
+    This harness is deliberately run against a *different* installed
+    ``abicheck`` than the checkout it sits in -- the ``performance.yml``
+    PR-vs-base job runs head's copy of this script against base's installed
+    package, so one harness measures both sides. That makes every
+    ``abicheck`` import here a cross-version compatibility surface, not an
+    ordinary import: the constant moved from ``header_graph`` to
+    ``header_graph_ast_projection``, and importing only the new location
+    made the base measurement die with ``ModuleNotFoundError`` before it
+    took a single sample.
+
+    Deliberately resolved by import rather than hard-coded as the literal
+    string: a hard-coded copy would keep "working" if the *value* ever
+    changed, silently verifying a pass name no build stamps, which is the
+    failure this check exists to catch. Both locations are tried, so this
+    keeps measuring a base package from before the move and a head package
+    after it.
+    """
+    try:
+        from abicheck.buildsource.header_graph_ast_projection import (
+            HEADER_CALL_GRAPH_PASS,
+        )
+    except ImportError:  # pragma: no cover - only on a pre-move abicheck
+        from abicheck.buildsource.header_graph import (  # type: ignore[attr-defined,no-redef]
+            HEADER_CALL_GRAPH_PASS,
+        )
+    return HEADER_CALL_GRAPH_PASS
+
+
 def _require_real_ast_attach(snap: Any, n: int, backend: str) -> None:
     """Raise unless *snap*'s attached graph reflects a genuine clang AST parse.
 
@@ -498,13 +529,11 @@ def _require_real_ast_attach(snap: Any, n: int, backend: str) -> None:
     checking ``HEADER_CALL_GRAPH_PASS`` alone).
     """
     from abicheck.buildsource.header_graph import HEADER_INCLUDE_GRAPH_PASS
-    from abicheck.buildsource.header_graph_ast_projection import (
-        HEADER_CALL_GRAPH_PASS,
-    )
 
     graph = getattr(getattr(snap, "build_source", None), "source_graph", None)
     passes = getattr(graph, "extractor_passes", {}) if graph is not None else {}
-    if not passes.get(HEADER_CALL_GRAPH_PASS):
+    call_graph_pass = _header_call_graph_pass()
+    if not passes.get(call_graph_pass):
         raise RuntimeError(
             f"size={n} backend={backend}: _attach_header_graph degraded to a "
             "declaration-only graph (HEADER_CALL_GRAPH_PASS not stamped) instead "
