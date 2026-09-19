@@ -330,11 +330,10 @@ def _kept_signature_haystack(
 ) -> str:
     """The joined signature text of everything scoping is keeping anyway.
 
-    Deliberately single-hop: only the kept, already-retained declarations' own
-    return/parameter/variable types and field/base spellings, never a
-    *dependency* candidate's own fields/bases -- chasing further would re-admit
-    the transitive implementation closure (e.g. ``std::string``'s own
-    ``_Alloc_hider`` field) this scoping exists to drop.
+    Deliberately single-hop: only the kept declarations' own return/parameter/
+    variable types and field/base spellings, never a *dependency* candidate's
+    own fields/bases -- chasing further re-admits the transitive implementation
+    closure (e.g. ``std::string``'s ``_Alloc_hider``) this scoping drops.
     """
     texts: list[str] = []
     for fn in kept_functions:
@@ -346,7 +345,8 @@ def _kept_signature_haystack(
         texts.extend(f.type for f in rec.fields)
         texts.extend(rec.resolved_bases())
         texts.extend(rec.resolved_virtual_bases())
-    return "\n".join(t for t in texts if t)
+    # Deduplicated -- see tests/test_dumper_scoping_haystack.py for why.
+    return "\n".join(dict.fromkeys(t for t in texts if t))
 
 
 def _kept_type_spellings(

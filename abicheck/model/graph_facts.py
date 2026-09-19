@@ -85,7 +85,7 @@ def _precedence_key(fact: GraphFact) -> tuple[int, str, str]:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class GraphFact:
     """One producer's contribution to a node/edge's ``attrs`` (ADR-046 D2).
 
@@ -235,7 +235,7 @@ def resolve_entity_attrs(
     return merge_graph_facts(facts)
 
 
-@dataclass
+@dataclass(slots=True)
 class GraphNode:
     """A single ABI/API-relevant graph node (ADR-031 D2).
 
@@ -305,7 +305,7 @@ class GraphNode:
         return node
 
 
-@dataclass
+@dataclass(slots=True)
 class GraphEdge:
     """A directed edge between two nodes, with provenance + confidence (D2, D9).
 
