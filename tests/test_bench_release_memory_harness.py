@@ -462,9 +462,7 @@ class TestControlledEnvironmentIsAFunctionOfTheArguments:
         """
         cases = self._cases()
         assert len(cases) == 2 * 2 * 2 * 2 * 6
-        distinct = {
-            tuple(sorted(self._expected(**case).items())) for case in cases
-        }
+        distinct = {tuple(sorted(self._expected(**case).items())) for case in cases}
         assert len(distinct) > 1
         # Every controlled variable must be both set and unset somewhere in
         # the domain, or its own rule is untested.
