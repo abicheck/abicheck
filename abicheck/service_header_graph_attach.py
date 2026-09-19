@@ -122,6 +122,10 @@ def _attach_header_graph(
         ClangHeaderIncludeExtractor,
         build_header_only_graph,
     )
+    from .buildsource.header_graph_ast_projection import (
+        HeaderGraphAstProjection,
+        project_header_graph_ast,
+    )
     from .buildsource.include_graph import augment_graph_with_includes
     from .buildsource.model import (
         CoverageStatus,
@@ -231,9 +235,34 @@ def _attach_header_graph(
             )
     except (SnapshotError, ValidationError):
         ast_root = None
+    # Reduce the AST to the four compact projections the graph builder
+    # actually reads, then drop the tree BEFORE the graph is allocated.
+    # Holding both at once is what made a member's peak the sum of the two
+    # (`docs/contribute/measurements/header-graph-attach-memory.md`): the
+    # parsed dicts are the larger of the pair by roughly 5x on a real
+    # library, and the graph's own long-lived objects, allocated into the
+    # arenas that parse dirtied, then *pin* them for the rest of the dump.
+    # Projecting first costs one extra reference to compact data and lets
+    # the graph land in arenas the AST has already released. Evidence is
+    # untouched: the same four pure readers run over the same tree in the
+    # same order (`project_header_graph_ast`), `DECL_CALLS_DECL` included.
+    projection: HeaderGraphAstProjection | None = None
+    if ast_root is not None:
+        with memory_trace.phase("dump.header_graph.project"):
+            projection = project_header_graph_ast(ast_root)
+    # `ast_root` is the only surviving reference to the tree at this point
+    # (`_clang_header_dump` is called with `memoize=False`, so nothing was
+    # written into the in-process AST memo either), so clearing the name
+    # drops it here rather than at function exit. `gc.collect()` is
+    # deliberately NOT called: a clang AST is an acyclic dict/list
+    # structure, so refcounting frees it immediately, and a collection here
+    # would cost a full-heap walk for nothing (the earlier attribution
+    # measured `gc.collect()` on this path freeing exactly zero objects).
+    ast_root = None
+    memory_trace.mark("dump.header_graph.ast_released")
     graph = build_header_only_graph(
         snap,
-        ast_root,
+        ast_projection=projection,
         public_header_paths=[str(p) for p in (public_headers or [])],
         public_dir_paths=[str(p) for p in (public_header_dirs or [])],
         header_paths=[str(p) for p in resolved_headers],

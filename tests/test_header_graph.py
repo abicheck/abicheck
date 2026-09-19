@@ -24,10 +24,12 @@ compiler or build integration required, mirroring ``test_type_graph.py``'s
 from __future__ import annotations
 
 from abicheck.buildsource.header_graph import (
-    HEADER_CALL_GRAPH_PASS,
-    HEADER_TYPE_GRAPH_PASS,
     ClangHeaderIncludeExtractor,
     build_header_only_graph,
+)
+from abicheck.buildsource.header_graph_ast_projection import (
+    HEADER_CALL_GRAPH_PASS,
+    HEADER_TYPE_GRAPH_PASS,
 )
 from abicheck.buildsource.include_graph import augment_graph_with_includes
 from abicheck.buildsource.source_graph import (

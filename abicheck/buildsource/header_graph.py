@@ -108,8 +108,13 @@ from ..provenance import (
     classify_origin,
     split_include_roots,
 )
-from .call_graph import augment_graph_with_calls, parse_clang_ast_calls
-from .inline_graph_fold import _mark_role_coverage
+from .header_graph_ast_projection import (
+    _PROVENANCE,
+    HEADER_TYPE_GRAPH_PASS,
+    HeaderGraphAstProjection,
+    project_header_graph_ast,
+    seed_ast_graph,
+)
 from .type_graph import (
     EDGE_DECL_HAS_TYPE,
     EDGE_TYPE_HAS_FIELD_TYPE,
@@ -121,24 +126,16 @@ from .type_graph import (
     _is_excluded_type,
     _resolve_nested_type_names,
     augment_graph_with_types,
-    index_declared_entity_files,
-    index_declared_type_files,
-    parse_clang_ast_types,
 )
 
 if TYPE_CHECKING:
     from ..model import Function, Variable
 
-#: Extractor-pass names this module stamps onto ``SourceGraphSummary.
-#: extractor_passes`` (ADR-031 D9 coverage honesty), distinct from
-#: ``inline_graph_fold``'s build-integrated ``"call_graph"``/``"type_graph"``
-#: so a reader (and ``source_graph_findings._common_dependency_edge_kinds``)
-#: never conflates a header-only pass with a full build-integrated one.
-HEADER_CALL_GRAPH_PASS = "header_call_graph"
-HEADER_TYPE_GRAPH_PASS = "header_type_graph"
+#: The one pass name this module still owns. ``HEADER_CALL_GRAPH_PASS``/
+#: ``HEADER_TYPE_GRAPH_PASS`` moved to ``header_graph_ast_projection`` with
+#: the code that stamps them -- import them from there, not from here
+#: (ADR-061: no delegation-only re-export).
 HEADER_INCLUDE_GRAPH_PASS = "header_include_graph"
-
-_PROVENANCE = "header_ast_l2"
 
 
 def _decl_identity(fn_or_var: Function | Variable) -> str:
@@ -334,154 +331,6 @@ def _flat_structural_type_edges(snapshot: AbiSnapshot) -> list[TypeEdge]:
     return edges
 
 
-def _seed_ast_type_nodes(
-    graph: SourceGraphSummary,
-    ast_root: dict[str, Any],
-    header_node: Callable[[str], str],
-    classify: Callable[[str], ScopeOrigin],
-) -> None:
-    """Seed ``record_type`` nodes from the AST's own qualified-name index.
-
-    Deliberately not from ``snapshot.types``/``snapshot.enums``: the flat
-    snapshot model records a *bare*, unqualified type name (see
-    ``dumper_clang._ClangAstParser._build_record``), while the type graph's node
-    ids are the AST's *resolved qualified* name (``ns::Widget``) — two
-    representations that would silently fail to join on any namespaced type.
-    Deriving both the file (hence origin) and the node id from the same AST
-    index sidesteps that mismatch, and covers the ADR's headline case: a public
-    struct rarely has its own exported binary symbol, so it needs ``visibility``
-    set directly on the type node to act as a valid graph "entry"
-    (``is_public_dependency_node``).
-    """
-    for qname, file in index_declared_type_files(ast_root).items():
-        origin = classify(file)
-        if origin == ScopeOrigin.UNKNOWN:
-            continue
-        node_id = _type_node_id(qname)
-        # ``augment_graph_with_types`` defaults every AST-only type node to
-        # "record_type" uniformly (it cannot distinguish record/enum/typedef
-        # without an L4 surface) — matching that convention here keeps
-        # first-writer-wins joins consistent either way.
-        graph.add_node(
-            GraphNode(
-                id=node_id,
-                kind="record_type",
-                label=qname,
-                provenance=_PROVENANCE,
-                confidence=CONF_HIGH,
-                attrs={"visibility": origin.value},
-            )
-        )
-        graph.add_edge(
-            GraphEdge(
-                src=header_node(file),
-                dst=node_id,
-                kind="SOURCE_DECLARES",
-                provenance=_PROVENANCE,
-                confidence=CONF_HIGH,
-            )
-        )
-
-
-def _unseeded_decl_endpoints(
-    ast_root: dict[str, Any], type_edges: list[Any], call_edges: list[Any]
-) -> tuple[tuple[str, str], ...]:
-    """``(identity, file)`` for every edge endpoint the snapshot never seeded.
-
-    Annotates any AST-only decl target ``augment_graph_with_types``/
-    ``augment_graph_with_calls`` would otherwise create with no provenance at
-    all — a private declaration that is not a function or (namespace-scope)
-    variable, e.g. an ``EnumConstantDecl`` referenced by ``inline int f() {
-    return Color::RED; }``, is never seeded from
-    ``snapshot.functions``/``snapshot.variables``, since the flat AbiSnapshot
-    model has no equivalent per-enumerator entity to iterate. The
-    build-integrated path backfills this via ``augment_graph_with_types``'s
-    ``project_files`` parameter (matched against ``BuildEvidence``'s
-    compile-unit sources); a header-only world has no such set, but each edge
-    already carries its own target's declaring file
-    (``dst_file``/``callee_file``/``caller_file``), which is exactly what
-    ``classify_origin`` needs (Codex review).
-
-    A ``DECL_REFERENCES_DECL`` edge's *source* can be unseeded too — a field's
-    default member initializer (``struct Widget { int x = detail::k; };``)
-    makes ``Widget::x`` the edge's ``src``, and a field is never in
-    ``snapshot.functions``/``snapshot.variables`` either (Codex review). Unlike
-    the targets, ``TypeEdge`` carries no ``src_file``, so this falls back to
-    ``index_declared_entity_files`` (the unfiltered declaring-file index,
-    including fields) — computed once, lazily, only if there is at least one
-    such source to look up.
-    """
-    ref_srcs = {e.src for e in type_edges if e.kind == "DECL_REFERENCES_DECL"}
-    entity_files = index_declared_entity_files(ast_root) if ref_srcs else {}
-    return (
-        *((e.dst, e.dst_file) for e in type_edges if e.kind == "DECL_REFERENCES_DECL"),
-        *((src, entity_files.get(src, "")) for src in ref_srcs),
-        *((e.caller, e.caller_file) for e in call_edges),
-        *((e.callee, e.callee_file) for e in call_edges),
-    )
-
-
-def _seed_ast_graph(
-    graph: SourceGraphSummary,
-    ast_root: dict[str, Any],
-    header_node: Callable[[str], str],
-    classify: Callable[[str], ScopeOrigin],
-) -> None:
-    """Seed type nodes and fold the clang type/call edges into *graph*."""
-    _seed_ast_type_nodes(graph, ast_root, header_node, classify)
-    type_edges = parse_clang_ast_types(ast_root)
-    call_edges = parse_clang_ast_calls(ast_root)
-    for identity, file in _unseeded_decl_endpoints(ast_root, type_edges, call_edges):
-        if not identity or not file:
-            continue
-        node_id = _decl_node_id(identity)
-        if graph.has_node(node_id):
-            # Already seeded as a real function/variable.
-            continue
-        origin = classify(file)
-        graph.add_node(
-            GraphNode(
-                id=node_id,
-                kind="source_decl",
-                label=identity,
-                provenance=_PROVENANCE,
-                confidence=CONF_HIGH,
-                attrs=(
-                    {"visibility": origin.value}
-                    if origin != ScopeOrigin.UNKNOWN
-                    else {}
-                ),
-            )
-        )
-    augment_graph_with_types(graph, type_edges)
-    augment_graph_with_calls(graph, call_edges)
-    # A header-only pass is a single parse over the whole header aggregate —
-    # never narrowed/scoped like a per-compile-unit build-integrated pass, and
-    # ``_clang_header_dump`` raises on a failed/empty parse rather than
-    # returning a degraded partial result (ADR-028 D3 "never abort collection"
-    # lives one layer up, in the caller's try/except around the clang
-    # invocation) — so reaching this line means the whole pass ran cleanly.
-    # Stamped unconditionally, regardless of edge count (ADR-041 P0 slice 2
-    # coverage-honesty convention: "ran, zero output" must be distinguishable
-    # from "never ran").
-    graph.extractor_passes[HEADER_CALL_GRAPH_PASS] = True
-    graph.extractor_passes[HEADER_TYPE_GRAPH_PASS] = True
-    # ADR-046 D3 role coverage (Codex review, fresh evidence): this call above
-    # is the *same* ``type_graph.parse_clang_ast_types()`` walker the
-    # build-integrated ``fold_type_graph`` drives — reused unmodified, per
-    # this module's own docstring — so it has the identical per-role fidelity
-    # (no known gap for any ``ROLE_COVERAGE_MATRIX`` role, same as the
-    # build-integrated pass). Without this, `source_graph_findings.
-    # _disagreeing_roles()` would see *no* role key on either side of a
-    # header-only-vs-header-only comparison, forever (this pass has never
-    # stamped one, in any abicheck version) — reading as vacuous agreement
-    # rather than "role coverage unknown," and letting a genuinely new
-    # `template_param`/`default_template_arg`/`enum_underlying` edge slip
-    # through as a false `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` the same way
-    # the build-integrated pass's own pre-D3-consumer gap did.
-    _mark_role_coverage(graph.extractor_passes, HEADER_TYPE_GRAPH_PASS)
-
-
 def _seed_flat_graph(
     graph: SourceGraphSummary, snapshot: AbiSnapshot, header_node: Callable[[str], str]
 ) -> None:
@@ -523,6 +372,7 @@ def build_header_only_graph(
     snapshot: AbiSnapshot,
     ast_root: dict[str, Any] | None = None,
     *,
+    ast_projection: HeaderGraphAstProjection | None = None,
     public_header_paths: list[str] | None = None,
     public_dir_paths: list[str] | None = None,
     header_paths: list[str] | None = None,
@@ -536,6 +386,12 @@ def build_header_only_graph(
     ``None`` when clang was unavailable/not selected, in which case the graph
     still carries ``source_decl``/``header`` nodes (declaration-level
     visibility from the snapshot alone) but no type/call edges.
+
+    *ast_projection* is that same evidence already reduced to
+    :class:`HeaderGraphAstProjection`, so the caller can drop the parsed
+    tree before this builder allocates anything (see that module's
+    docstring for the measurement). Observably equivalent to passing the
+    tree it came from, ``None`` included. Passing both raises.
 
     *public_header_paths*/*public_dir_paths* are the same public-header
     inputs already threaded through
@@ -587,6 +443,10 @@ def build_header_only_graph(
     own declarations but still ``private_header`` for its own header node
     (Codex review, fresh evidence).
     """
+    if ast_root is not None and ast_projection is not None:
+        raise ValueError(
+            "build_header_only_graph takes ast_root or ast_projection, not both"
+        )
     graph = SourceGraphSummary()
     header_segs, dir_segs, have_public_set = build_public_set(
         public_header_paths, public_dir_paths
@@ -676,8 +536,10 @@ def build_header_only_graph(
     for var in snapshot.variables:
         seed_decl(var)
 
-    if ast_root is not None:
-        _seed_ast_graph(graph, ast_root, header_node, classify)
+    if ast_projection is not None:
+        seed_ast_graph(graph, ast_projection, header_node, classify)
+    elif ast_root is not None:
+        seed_ast_graph(graph, project_header_graph_ast(ast_root), header_node, classify)
     else:
         _seed_flat_graph(graph, snapshot, header_node)
 

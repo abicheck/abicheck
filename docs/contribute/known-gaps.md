@@ -10508,3 +10508,69 @@ Python dict tree — either building the graph from a streaming parse, or
 pruning the AST to what the graph needs first. Neither is attempted here, and
 the existing `check_header_graph_perf.py` gate measures the attach's *time*
 only, so this dimension is currently ungated.
+
+## Releasing the clang AST before the graph build does not reduce the peak (2026-09-19)
+
+The follow-up to the entry above, recorded because it **did not pay** in the
+way its own premise predicted, and because measuring it reattributes the peak
+one level further down.
+
+`_attach_header_graph` now projects the AST into the four compact values
+`build_header_only_graph` actually reads
+(`buildsource/header_graph_ast_projection.py`) and releases the tree before
+the graph is allocated, so the two are never resident together. That part
+works exactly as intended. On the real reference library — oneDAL 2024.7
+`libonedal_core.so.2`, conda-forge `dal`/`dal-devel`, default `castxml`
+backend, cold AST cache, one `daal.h` — the graph build's own residency cost
+falls from **+147 MiB to +25 MiB**, because the graph now lands in arenas the
+AST parse has already freed instead of taking fresh ones. The projection
+itself is 23.6 MiB against a 1044 MiB tree (2.3%).
+
+**And the member's peak does not move at all: 2215.4 MiB before, 2215.2 MiB
+after.** Nor does the memory retained once the attach returns (1287.6 vs
+1291.5 MiB — the two are within each other's noise, and the *after* figure is
+nominally the larger one). The graph/AST overlap was simply never where the
+peak was.
+
+**Where the peak actually is.** The attach's high-water mark occurs *inside*
+`json.load`, before the graph exists: `dump.header_graph.clang_ast` ends at
+1332 MiB, while `VmHWM` for the same window is 2215 MiB. The difference is
+the JSON document itself, held as one `bytes`/`str` while the tree is built
+from it. So the peak is `document + tree`, not `tree + graph`. Checked
+rather than assumed that this is reducible by decoding more carefully: on a
+247 MB AST, `json.load(fh)` and an explicit read/decode/`del raw`/`loads`
+sequence both peak at **640.9 vs 641.0 MiB** — CPython already drops the
+source buffer, and there is no stdlib spelling that avoids holding one full
+copy of the document during the parse.
+
+**What that leaves, with a number.** The remaining lever is the *tree*, not
+the document: prune it during the parse to the keys the four readers touch
+(`kind`, `inner`, `name`, `id`, `qualType`, `file`, `type`, `mangledName`,
+`range`, `loc`, `referencedDecl`, `ownedTagDecl`, `bases`, … — a bounded,
+auditable set). Measured ceiling on the same 247 MB AST: a recursive
+key-whitelist copy is **224.9 MiB against 359.8 MiB, i.e. 62%**, so ~38% of
+the tree is fields nothing reads. Applied to oneDAL's 1044 MiB tree that is
+roughly 400 MiB off a 2215 MiB peak (~18%). Not attempted here: it must run
+as an `object_pairs_hook`, which the existing streaming pruner measured at a
+13-30% wall-time cost on *every* object in the document, and the gate for
+`attach_ms` allows 50%; and a whitelist that is wrong in one key silently
+drops edges rather than raising, which is exactly the failure mode
+`tests/test_header_graph_ast_projection.py`'s differential invariant would
+have to be extended to cover before it could be trusted.
+
+**Shipped anyway, on its own merits, not as a memory fix:** the reordering is
+strictly non-worse, evidence-identical (verified through the real `compare`
+CLI on a real pair: every finding, section, verdict and exit code byte-equal
+apart from one `extractor.duration_seconds` field), and it is the
+precondition for any pruning work, since the projection is the thing that
+defines what a pruned tree would have to preserve. The `attach_ms` gate is
+unchanged by it (13.1s → 13.6s on the STL fixture, within run-to-run
+spread). Do not cite it as having reduced oneDAL's memory; it did not.
+
+**Now gated.** `check_header_graph_perf.py` measures `attach_peak_rss_mib`
+and `attach_retained_mib` alongside the three time metrics, each in a fresh
+subprocess over an STL-bearing fixture (the pre-existing fixture retains
+0.1-2.8 MiB, far too little to gate on). The `performance.yml` PR-vs-base job
+gates both. This closes the "currently ungated" clause of the entry above —
+a change that holds one more copy of the AST costs no measurable time and
+would have passed every gate that existed before.
