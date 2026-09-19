@@ -41,9 +41,19 @@ compact projections of it:
 Taking all four **before** the graph exists lets the caller drop its
 reference to the AST first, so the two never occupy memory at the same time
 and the graph's own long-lived objects land in arenas the AST parse has
-already released rather than pinning them (the pinning effect is what made
-"dropping the graph frees 1486 MiB" a misattribution in that measurement --
-the graph pins that memory, it does not spend it).
+already released rather than pinning them.
+
+What that is and is not worth, measured on that same library (the
+2026-09-19 follow-up in the doc above) rather than argued: the graph
+build's own residency cost falls from **+147 MiB to +25 MiB**, and the
+projection costs 23.6 MiB against a 1044 MiB tree. It does **not** lower
+the member's peak (2215.4 -> 2215.2 MiB) or what the attach retains once it
+returns (1287.6 vs 1291.5 MiB, within noise) -- the peak is inside
+``json.load``, where the document is held as one ``str`` while the tree is
+built from it, so it is ``document + tree`` and never ``tree + graph``.
+Don't cite this module as having fixed that; the open lever is pruning the
+tree, and this projection is the statement of what such a prune would have
+to preserve.
 
 This is a *memory-ordering* change only. The same four functions run, over
 the same tree, in the same order, and their results are handed to the same

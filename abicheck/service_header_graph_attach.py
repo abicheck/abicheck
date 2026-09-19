@@ -236,16 +236,26 @@ def _attach_header_graph(
     except (SnapshotError, ValidationError):
         ast_root = None
     # Reduce the AST to the four compact projections the graph builder
-    # actually reads, then drop the tree BEFORE the graph is allocated.
-    # Holding both at once is what made a member's peak the sum of the two
-    # (`docs/contribute/measurements/header-graph-attach-memory.md`): the
-    # parsed dicts are the larger of the pair by roughly 5x on a real
-    # library, and the graph's own long-lived objects, allocated into the
-    # arenas that parse dirtied, then *pin* them for the rest of the dump.
-    # Projecting first costs one extra reference to compact data and lets
-    # the graph land in arenas the AST has already released. Evidence is
-    # untouched: the same four pure readers run over the same tree in the
-    # same order (`project_header_graph_ast`), `DECL_CALLS_DECL` included.
+    # actually reads, then drop the tree BEFORE the graph is allocated, so
+    # the two are never resident together.
+    #
+    # Be precise about what this buys, because the obvious claim is wrong
+    # and was measured (`docs/contribute/measurements/
+    # header-graph-attach-memory.md`, the 2026-09-19 follow-up): on the real
+    # reference library it does NOT lower the member's peak (2215.4 ->
+    # 2215.2 MiB) and does NOT lower what the attach retains once it returns
+    # (1287.6 vs 1291.5 MiB, within noise). The peak lives inside
+    # `json.load`, where the whole document is held as one str while the
+    # tree is built from it -- `document + tree`, never `tree + graph`.
+    # What this does buy is the graph build's own residency cost, +147 MiB
+    # -> +25 MiB, because the graph now lands in arenas the parse already
+    # freed instead of taking fresh ones; and it is what makes a future
+    # prune of the tree expressible, since the projection is exactly the
+    # statement of what such a prune would have to preserve.
+    #
+    # Evidence is untouched: the same four pure readers run over the same
+    # tree in the same order (`project_header_graph_ast`),
+    # `DECL_CALLS_DECL` included.
     projection: HeaderGraphAstProjection | None = None
     if ast_root is not None:
         with memory_trace.phase("dump.header_graph.project"):
