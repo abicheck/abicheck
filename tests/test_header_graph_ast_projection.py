@@ -173,9 +173,7 @@ AST_CASES: dict[str, dict] = {
             "name": "detail",
             "inner": [_record("Impl", file=PRIVATE_HEADER)],
         },
-        _record(
-            "Public", file=PUBLIC_HEADER, inner=[_field("p", "detail::Impl *")]
-        ),
+        _record("Public", file=PUBLIC_HEADER, inner=[_field("p", "detail::Impl *")]),
     ),
     "enum_and_constants": _tu(
         _enum("Color", file=PUBLIC_HEADER, constants=["RED", "GREEN"])
@@ -260,13 +258,27 @@ def _graph_fingerprint(graph: Any) -> tuple:
     return (
         tuple(
             sorted(
-                (n.id, n.kind, n.label, n.provenance, n.confidence, tuple(sorted(n.attrs.items())))
+                (
+                    n.id,
+                    n.kind,
+                    n.label,
+                    n.provenance,
+                    n.confidence,
+                    tuple(sorted(n.attrs.items())),
+                )
                 for n in graph.nodes
             )
         ),
         tuple(
             sorted(
-                (e.src, e.dst, e.kind, e.provenance, e.confidence, getattr(e, "role", None))
+                (
+                    e.src,
+                    e.dst,
+                    e.kind,
+                    e.provenance,
+                    e.confidence,
+                    getattr(e, "role", None),
+                )
                 for e in graph.edges
             )
         ),
@@ -360,9 +372,7 @@ class TestProjectionIsObservationallyEqualToTheAst:
             )
             assert bool(projection.entity_files) == has_ref_edge, name
         # The enumeration is only a rule if it contains both answers.
-        assert any(
-            project_header_graph_ast(a).entity_files for a in AST_CASES.values()
-        )
+        assert any(project_header_graph_ast(a).entity_files for a in AST_CASES.values())
         assert any(
             not project_header_graph_ast(a).entity_files for a in AST_CASES.values()
         )
@@ -467,6 +477,7 @@ class TestAstReleasedBeforeGraphBuild:
         import abicheck.service_header_graph_attach as attach_module
 
         ast = _tu(_record("Public", file=PUBLIC_HEADER))
+
         # A weak reference needs a weakref-able object; a bare dict is not,
         # so the tree is rooted in a tiny holder whose lifetime tracks it.
         class _Tree(dict):
@@ -492,9 +503,7 @@ class TestAstReleasedBeforeGraphBuild:
             observed["projection_supplied"] = kw.get("ast_projection") is not None
             return real_build(*a, **kw)
 
-        monkeypatch.setattr(
-            header_graph_module, "build_header_only_graph", spy_build
-        )
+        monkeypatch.setattr(header_graph_module, "build_header_only_graph", spy_build)
         monkeypatch.setattr(
             "abicheck.dumper._clang_header_dump", fake_clang_header_dump
         )
