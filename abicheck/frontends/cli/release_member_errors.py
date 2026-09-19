@@ -36,6 +36,7 @@ not of the comparison's own arguments.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import click
@@ -47,7 +48,20 @@ from ...errors import (
     UnsupportedArtifactError,
 )
 
-__all__ = ["member_error_entry"]
+__all__ = ["member_dispatch_failure_entry", "member_error_entry"]
+
+#: Where an unexpected member failure's traceback goes. A release never
+#: aborts on one member, so the traceback cannot propagate to the terminal
+#: the way an ordinary crash would -- without this the *only* surviving
+#: trace of an internal defect is ``str(exc)``, and for a bare ``KeyError``
+#: that is a tuple with no type name and no origin. A real six-member
+#: oneDAL run reported exactly ``(138821602538640, 'const dense&', 0, 12)``
+#: and nothing else, which identified neither the failing subsystem nor the
+#: exception class. Logging keeps the release's own output unchanged for
+#: every existing consumer while making the failure diagnosable with
+#: ``logging.basicConfig(level=logging.DEBUG)`` or any handler the embedder
+#: already has.
+_log = logging.getLogger("abicheck.release")
 
 
 def _write_not_comparable_report(
@@ -122,9 +136,59 @@ def member_error_entry(
         # axis, not an operational `ERROR` crash floored to exit 4.
         return {"library": old_path.name, "verdict": "unsupported", "reason": str(exc)}
     if isinstance(exc, click.ClickException | click.UsageError):
+        # A stated CLI-level failure: its own message is the diagnostic, and
+        # it carries no internal traceback worth logging.
         return {
             "library": old_path.name,
             "verdict": "ERROR",
             "error": exc.format_message(),
+            "error_type": type(exc).__name__,
         }
-    return {"library": old_path.name, "verdict": "ERROR", "error": str(exc)}
+    # Anything reaching here is an *unexpected* failure -- an abicheck
+    # defect until shown otherwise -- so it keeps its identity: the member
+    # it belongs to, the exception class, and a full traceback on the
+    # diagnostic channel. ``str(exc)`` alone is not an account of an
+    # internal failure; ``KeyError``'s is its bare argument.
+    #
+    # The classification itself is deliberately unchanged: ADR-063 D6's
+    # `OperationalStatus.EXTRACTION_ERROR` is already defined as "a library
+    # failed to dump/extract/compare", which covers an internal comparison
+    # failure. Renaming it would be a schema change bought for nothing.
+    _log.exception(
+        "unexpected failure comparing release member %s", old_path.name, exc_info=exc
+    )
+    return {
+        "library": old_path.name,
+        "verdict": "ERROR",
+        "error": str(exc),
+        "error_type": type(exc).__name__,
+    }
+
+
+def member_dispatch_failure_entry(
+    exc: BaseException, library_name: str
+) -> dict[str, object]:
+    """This member's entry for a failure that escaped :func:`member_error_entry`.
+
+    The release fan-out has two exception boundaries. The inner one wraps the
+    comparison body and reaches :func:`member_error_entry` with the member's
+    full identity. This is the outer one: a failure reaching it escaped the
+    worker's own classification -- in the dispatch, in the context copy, or out
+    of the classification itself -- so only the library's name is available,
+    but the diagnostic obligation is identical. It lives here, next to the
+    classification it backs up, rather than inline in the executor loop.
+
+    It echoes to stderr as well as logging, because this boundary's message is
+    what a user watching a long release run actually sees; the inner one's
+    outcome is carried in the report.
+    """
+    _log.exception(
+        "unexpected failure dispatching release member %s", library_name, exc_info=exc
+    )
+    click.echo(f"Error comparing {library_name}: {type(exc).__name__}: {exc}", err=True)
+    return {
+        "library": library_name,
+        "verdict": "ERROR",
+        "error": str(exc),
+        "error_type": type(exc).__name__,
+    }

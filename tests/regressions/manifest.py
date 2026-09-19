@@ -47,6 +47,7 @@ from __future__ import annotations
 
 from .bug_class_schema import BugClass, KnownGap
 from .manifest_classification import CLASSIFICATION_BUG_CLASSES
+from .manifest_concurrency import CONCURRENCY_BUG_CLASSES
 from .manifest_config import CONFIG_BUG_CLASSES
 from .manifest_evidence import EVIDENCE_BUG_CLASSES
 from .manifest_guards import GUARD_BUG_CLASSES
@@ -1451,6 +1452,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     + CONFIG_BUG_CLASSES
     + EVIDENCE_BUG_CLASSES
     + PERFORMANCE_BUG_CLASSES
+    + CONCURRENCY_BUG_CLASSES
     + SERIALIZATION_BUG_CLASSES
     + GUARD_BUG_CLASSES
     + INTEGRATION_BUG_CLASSES

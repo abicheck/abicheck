@@ -44,11 +44,56 @@ string and the compiled pattern) and never a mutable list a caller could
 edit in place and so corrupt for the next reader. Keys hold only a
 pattern-identity token, the text, and the window -- never a snapshot,
 declaration, or bound scanner instance.
+
+Concurrency contract
+--------------------
+
+Both caches are process-wide module globals read and written by every
+worker of a directory/package ``compare``'s release fan-out (real threads,
+one process -- see ``cli_compare_release_pairwise``). They are therefore
+**thread-safe**, under one narrow lock each, with these invariants:
+
+* *Every* multi-step state transition is atomic: lookup-plus-recency-
+  update, admission-plus-accounting-plus-eviction, pattern reference
+  counting, and vocabulary publication. ``OrderedDict`` operations are
+  individually atomic under the GIL, which is exactly why this was not
+  obvious and not caught: the defect was never a torn dict, it was a
+  *compound* operation. ``get`` read a value, another worker's ``put``
+  evicted that key, and ``get``'s own ``move_to_end`` then raised
+  ``KeyError((token, text, start, end))`` -- observed in a real six-member
+  oneDAL release comparison, which reported three members as failed
+  extractions on one run and completed cleanly on the next.
+* **Expensive work never runs under a lock.** Regex compilation
+  (``_VocabularyCache.get_or_compile``'s ``compile_fn``) and matching
+  (``matches_for``'s ``compute``) happen outside it, and publication is
+  rechecked afterwards. Two workers that miss on the same key
+  simultaneously **may both compute it**; that duplicate work is accepted
+  deliberately, because the alternative -- one global lock spanning the
+  compile -- serializes the very member comparisons the fan-out exists to
+  run concurrently. Whichever publication lands first wins, and since a
+  result is a pure function of its key, which one wins is unobservable.
+* ``clear()`` is safe to call concurrently, but it is a **lifecycle
+  reset, not a barrier**. It advances a generation counter; a computation
+  already in flight still completes and its caller still receives a
+  correct result, but that result is not published into the new epoch. So
+  pre-clear state can never reappear afterwards, and no entry, byte count
+  or pattern reference outlives the clear that dropped it. ``clear()``
+  does *not* wait for in-flight work, and nothing here promises it does.
+* Pattern identity stays safe: a token is a bare ``id()``, and it is only
+  ever *stored* while ``put`` holds a strong reference to the pattern it
+  names, so a recycled id can never resolve to another pattern's results.
+  Locking changes none of that -- it only makes the store and the
+  reference count one transition.
+
+No lock is held across a caller-supplied callback, so a callback cannot
+deadlock or re-enter a held lock, and the two caches' locks are never held
+at the same time.
 """
 
 from __future__ import annotations
 
 import re
+import threading
 from collections import OrderedDict
 from collections.abc import Callable, Collection, Iterable
 
@@ -210,6 +255,8 @@ class _MatchCache:
     """
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._generation = 0
         self._entries: OrderedDict[
             tuple[int, str, int, int], tuple[SpellingMatch, ...]
         ] = OrderedDict()
@@ -218,6 +265,19 @@ class _MatchCache:
         self.hits = 0
         self.misses = 0
         self.bypasses = 0
+
+    @property
+    def generation(self) -> int:
+        """The lifecycle epoch a computation should be published into.
+
+        Read *before* an uncached computation starts and handed back to
+        :meth:`put`; a :meth:`clear` in between advances it and the result
+        is then dropped rather than resurrecting pre-clear state into a
+        cache whose whole contract was just reset. See this module's
+        "Concurrency contract" note.
+        """
+        with self._lock:
+            return self._generation
 
     def token_for(self, pattern: re.Pattern[str]) -> int:
         """*pattern*'s cache token -- **without** retaining it.
@@ -268,62 +328,100 @@ class _MatchCache:
         in this vocabulary" is exactly as reusable as a positive answer and
         is the common case for a large vocabulary.
         """
-        cached = self._entries.get(key)
-        if cached is None:
+        with self._lock:
+            cached = self._entries.get(key)
+            if cached is not None:
+                # Lookup and recency update are one transition: splitting
+                # them let a concurrent ``put``'s eviction remove this very
+                # key between the two halves, and ``move_to_end`` then
+                # raised ``KeyError`` out of what is supposed to be a pure
+                # cache read, aborting a whole release member comparison.
+                self._entries.move_to_end(key)
+                self.hits += 1
+                return cached
             # An empty result is cached too -- "this text names nothing in
             # this vocabulary" is exactly as reusable as a positive answer,
             # and is the common case for a large vocabulary. So absence
             # here means *not computed*, never *computed as empty*.
             self.misses += 1
             return None
-        self._entries.move_to_end(key)
-        self.hits += 1
-        return cached
 
     def put(
         self,
         key: tuple[int, str, int, int],
         matches: tuple[SpellingMatch, ...],
         pattern: re.Pattern[str],
+        generation: int | None = None,
     ) -> None:
+        """Admit *matches* for *key*, retaining *pattern* alongside it.
+
+        Admission, the byte and entry accounting, the pattern reference
+        count and the eviction loop are **one** transition under this
+        cache's lock: each of them reads state the others write, so
+        interleaving any two of them leaves ``retained_bytes``, the entry
+        count and ``_keepalive``'s reference counts disagreeing with the
+        entries that are actually present.
+
+        *generation* is the epoch :attr:`generation` reported before the
+        caller's computation began. A :meth:`clear` since then means this
+        result belongs to a lifetime that has ended, so it is dropped
+        rather than resurrected -- see the "Concurrency contract" note.
+        """
         text = key[1]
-        if (
-            len(text) > MAX_CACHED_TEXT_CHARS
-            or len(matches) > MAX_CACHED_RESULT_MATCHES
-        ):
-            self.bypasses += 1
-            return
-        if key in self._entries:
-            return
-        # A pattern whose own retained cost cannot fit the whole budget is
-        # not cached against: admitting it would evict every other entry on
-        # the next ``put`` and then be evicted itself, so the cache would
-        # thrash while retaining more than it is allowed to. Only applies
-        # when this entry would be the one to start retaining it -- an
-        # already-retained pattern is a sunk cost its other entries own.
-        if (
-            self._keepalive.get(key[0]) is None
-            and _pattern_bytes(pattern) > MAX_RETAINED_BYTES
-        ):
-            self.bypasses += 1
-            return
-        self._entries[key] = matches
-        self._bytes += _entry_bytes(text, matches)
-        self._retain(key[0], pattern)
-        while self._entries and (
-            self._bytes > MAX_RETAINED_BYTES or len(self._entries) > MAX_ENTRIES
-        ):
-            evicted_key, evicted = self._entries.popitem(last=False)
-            self._bytes -= _entry_bytes(evicted_key[1], evicted)
-            self._release(evicted_key[0])
+        with self._lock:
+            if generation is not None and generation != self._generation:
+                return
+            if (
+                len(text) > MAX_CACHED_TEXT_CHARS
+                or len(matches) > MAX_CACHED_RESULT_MATCHES
+            ):
+                self.bypasses += 1
+                return
+            if key in self._entries:
+                # Two workers missed on the same key and both computed it:
+                # the first publication wins and the second is discarded.
+                # The result is a pure function of the key, so which one
+                # wins cannot change what a later reader observes.
+                return
+            # A pattern whose own retained cost cannot fit the whole budget is
+            # not cached against: admitting it would evict every other entry on
+            # the next ``put`` and then be evicted itself, so the cache would
+            # thrash while retaining more than it is allowed to. Only applies
+            # when this entry would be the one to start retaining it -- an
+            # already-retained pattern is a sunk cost its other entries own.
+            if (
+                self._keepalive.get(key[0]) is None
+                and _pattern_bytes(pattern) > MAX_RETAINED_BYTES
+            ):
+                self.bypasses += 1
+                return
+            self._entries[key] = matches
+            self._bytes += _entry_bytes(text, matches)
+            self._retain(key[0], pattern)
+            while self._entries and (
+                self._bytes > MAX_RETAINED_BYTES or len(self._entries) > MAX_ENTRIES
+            ):
+                evicted_key, evicted = self._entries.popitem(last=False)
+                self._bytes -= _entry_bytes(evicted_key[1], evicted)
+                self._release(evicted_key[0])
 
     def clear(self) -> None:
-        self._entries.clear()
-        self._keepalive.clear()
-        self._bytes = 0
-        self.hits = 0
-        self.misses = 0
-        self.bypasses = 0
+        """Reset this cache to its empty state and end the current epoch.
+
+        Safe to call while other threads are computing: advancing the
+        generation is what stops an in-flight computation publishing a
+        pre-clear result afterwards. It is *not* a barrier -- a computation
+        already in flight still finishes and its caller still receives its
+        (correct, just uncached) result.
+        """
+        with self._lock:
+            self._generation += 1
+            self._entries.clear()
+            self._keepalive.clear()
+            self._bytes = 0
+            self.hits = 0
+            self.misses = 0
+            self.bypasses = 0
 
     @property
     def retained_bytes(self) -> int:
@@ -334,10 +432,12 @@ class _MatchCache:
         vocabulary-cache eviction does not release, since a match entry
         outlives the vocabulary entry that compiled its pattern.
         """
-        return self._bytes
+        with self._lock:
+            return self._bytes
 
     def __len__(self) -> int:
-        return len(self._entries)
+        with self._lock:
+            return len(self._entries)
 
 
 class _VocabularyCache:
@@ -351,6 +451,8 @@ class _VocabularyCache:
     """
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._generation = 0
         self._entries: OrderedDict[frozenset[str], re.Pattern[str] | None] = (
             OrderedDict()
         )
@@ -362,26 +464,58 @@ class _VocabularyCache:
         spellings: Collection[str],
         compile_fn: Callable[[frozenset[str]], re.Pattern[str] | None],
     ) -> re.Pattern[str] | None:
+        """*spellings*' compiled alternation, compiling it at most once per
+        publication.
+
+        ``compile_fn`` runs **outside** the lock. Compiling a multi-megabyte
+        alternation is the single most expensive thing this module does, and
+        holding a shared lock across it would serialize every release member
+        on one worker's compile -- the opposite of what the surrounding
+        parallelism is for. The cost is that two workers missing on the same
+        vocabulary simultaneously may both compile it; that is **allowed and
+        deliberate**. Publication is then rechecked under the lock and the
+        first publisher wins, so every caller still ends up with *one*
+        pattern object per vocabulary -- which is what keeps the sibling
+        match cache from keying two token streams for one vocabulary.
+        """
         key = frozenset(spellings)
-        if key in self._entries:
-            self._entries.move_to_end(key)
-            self.hits += 1
-            return self._entries[key]
-        self.misses += 1
+        with self._lock:
+            if key in self._entries:
+                # Membership test, recency update and value read are one
+                # transition: a concurrent eviction between them would turn
+                # a cache hit into a ``KeyError``.
+                self._entries.move_to_end(key)
+                self.hits += 1
+                return self._entries[key]
+            self.misses += 1
+            generation = self._generation
         compiled = compile_fn(key)
-        self._entries[key] = compiled
-        self._entries.move_to_end(key)
-        while len(self._entries) > MAX_CACHED_VOCABULARIES:
-            self._entries.popitem(last=False)
-        return compiled
+        with self._lock:
+            if generation != self._generation:
+                # A ``clear`` ended the lifetime this compile belongs to.
+                # The pattern itself is still correct, so the caller gets
+                # it; it is simply not published into the new epoch.
+                return compiled
+            if key in self._entries:
+                self._entries.move_to_end(key)
+                return self._entries[key]
+            self._entries[key] = compiled
+            while len(self._entries) > MAX_CACHED_VOCABULARIES:
+                self._entries.popitem(last=False)
+            return compiled
 
     def clear(self) -> None:
-        self._entries.clear()
-        self.hits = 0
-        self.misses = 0
+        """Reset this cache and end the current epoch -- see
+        :meth:`_MatchCache.clear`, whose contract this mirrors."""
+        with self._lock:
+            self._generation += 1
+            self._entries.clear()
+            self.hits = 0
+            self.misses = 0
 
     def __len__(self) -> int:
-        return len(self._entries)
+        with self._lock:
+            return len(self._entries)
 
 
 MATCH_CACHE = _MatchCache()
@@ -407,13 +541,19 @@ def matches_for(
     cached = MATCH_CACHE.get(key)
     if cached is not None:
         return cached
+    # Read before computing, published with the result: a ``clear`` that
+    # lands while ``compute`` runs must not have this pre-clear result
+    # appear in the post-clear cache. *compute* runs outside every lock --
+    # it is the regex work this cache exists to avoid, and serializing it
+    # would defeat the release fan-out's parallelism entirely.
+    generation = MATCH_CACHE.generation
     normalized = tuple(
         m
         if isinstance(m, SpellingMatch)
         else SpellingMatch(m.group(0), m.start(), m.end())
         for m in compute()
     )
-    MATCH_CACHE.put(key, normalized, pattern)
+    MATCH_CACHE.put(key, normalized, pattern, generation=generation)
     return normalized
 
 
