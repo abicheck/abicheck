@@ -46,6 +46,7 @@ entry is checked, not just written" discipline `check_ai_readiness.py`'s
 from __future__ import annotations
 
 from .bug_class_schema import BugClass, KnownGap
+from .manifest_caching import CACHING_BUG_CLASSES
 from .manifest_classification import CLASSIFICATION_BUG_CLASSES
 from .manifest_concurrency import CONCURRENCY_BUG_CLASSES
 from .manifest_config import CONFIG_BUG_CLASSES
@@ -1448,6 +1449,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
 #: edit here.
 BUG_CLASSES: tuple[BugClass, ...] = (
     _ANALYSIS_BUG_CLASSES
+    + CACHING_BUG_CLASSES
     + CLASSIFICATION_BUG_CLASSES
     + CONFIG_BUG_CLASSES
     + EVIDENCE_BUG_CLASSES

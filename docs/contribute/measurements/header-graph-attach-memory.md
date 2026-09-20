@@ -271,3 +271,89 @@ figures are extremely stable across fresh processes (2215.4 / 2215.2, and
 conclusion is solid; the retained pair (1287.6 vs 1291.5) is a difference
 smaller than the spread and should be read as "unchanged", not as a
 regression.
+
+---
+
+# Follow-up 2: the fix was not to parse cheaper, but not to parse (2026-09-20)
+
+The section above ends by naming one remaining lever — pruning the tree,
+ceiling measured at 62% of its size. That lever was measured and is *not*
+the one that paid. This section records what was tried, what each attempt
+actually bought, and the one that did.
+
+## Four approaches, measured on one real 263 MB clang AST
+
+Each in a fresh process; the projection's digest is compared so a faster
+approach cannot quietly be a different answer.
+
+| approach | peak RSS | time | projection |
+|---|---|---|---|
+| baseline (`json.load`, then project) | 698.3 MiB | 4.5 s | — |
+| key-whitelist prune (`object_pairs_hook`) | 660.0 MiB (−5%) | 6.3 s (+40%) | identical |
+| element streaming, naive char loop | 626.8 MiB | 31.1 s | — |
+| element streaming, regex-jump scanner | **261.5 MiB (−63%)** | 7.4 s (parse ×4.3) | — |
+| **cached projection (warm)** | **88.4 MiB (−87%)** | **0.11 s (×40)** | identical |
+
+Two things this rules out. **Pruning does not pay**: the ceiling from the
+earlier `deep_size` walk assumed a tighter key set than a correctness-safe
+one turns out to be, and the peak barely moves because the document
+transient is untouched — 5% of peak for 40% more time. **Streaming does
+pay on peak but is a real trade**: −63% for ×4.3 on the parse, and a
+production version needs both reader passes re-expressed over a stream
+(two passes over the file), so the true cost is higher than that row.
+
+## Two incidental findings worth keeping
+
+* **62% of clang's JSON document is pretty-print whitespace.** The file is
+  263 MB; the same content serialized compactly is 99 MiB. The parse
+  transient tracks the *file* size, so we pay memory for indentation.
+* **`-ast-dump-filter=hv` produces 884 KB instead of 263 MB** — 300x less,
+  showing how little of the AST belongs to the library rather than its
+  dependencies. Not usable: it drops the dependency declarations that
+  public signatures reference, which changes evidence rather than cost.
+
+## What shipped: cache the projection
+
+The projection is the complete input to the graph build — that is what the
+differential invariant in `tests/test_header_graph_ast_projection.py`
+establishes — and it is 50x smaller than the AST it comes from. So a warm
+run has no reason to reconstruct it.
+
+oneDAL 2024.7 `libonedal_core.so.2`, castxml backend, fresh process per run,
+cold cache directory created for the COLD row and reused for WARM:
+
+| | COLD | WARM |
+|---|---|---|
+| peak RSS | 2093.5 MiB | **434.7 MiB (−79%)** |
+| attach wall time | 22.4 s | **6.4 s (−71%)** |
+| graph | 49481 nodes / 98330 edges | identical |
+| graph digest | `b0ea90456d38cb8a` | **identical** |
+| AST cache entry | 822.4 MiB | 822.4 MiB |
+| projection entry | 16.5 MiB | 16.5 MiB |
+
+Of that peak, 286 MiB is the primary dump, which this change does not
+touch — so the *attach's own* contribution falls from ~1806 MiB to
+~148 MiB, a 92% cut. The 6.4 s that remain are the include-graph pass
+(`clang -M` per header) and graph construction, not AST parsing.
+
+**A cold run is unchanged.** It parses once, exactly as before, and now
+stores what it computed. So the first analysis of a given header set on a
+given toolchain still pays the full price; every repeat does not.
+
+## Cold and warm, precisely
+
+Three states, which this page previously left implicit:
+
+1. **In-process memo** — under `--ast-frontend clang` the primary snapshot
+   pass already parsed this AST and hands it over (`dumper_cache`'s memo
+   slot). Free. Never populated under the default castxml backend, which is
+   why the attach pays at all.
+2. **Warm** — an AST cache entry exists on disk. Before this change that
+   saved only the `clang` subprocess: abicheck still read 822 MiB and
+   rebuilt the same ~1 GiB of dicts, so warm and cold had *the same peak*.
+   Now it reads 16.5 MiB and builds nothing.
+3. **Cold** — no entry. `clang` runs, the document is parsed once, and both
+   the AST entry and the projection are stored.
+
+The state that changed is (2), and its old behaviour is the reason this
+looked like a memory problem in the extractor rather than a caching one.
