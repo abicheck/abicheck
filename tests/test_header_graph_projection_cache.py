@@ -692,3 +692,153 @@ double total_area(const std::vector<std::unique_ptr<Shape>>& shapes);
         # codec that drops it -- verified by mutation (truncating the encoded
         # field list by one passed an `==` oracle outright).
         assert _as_tuple(restored) == _as_tuple(projection)
+
+
+class TestTheCacheNeverRaises:
+    """Every failure is a re-parse, stated as an invariant over injected faults.
+
+    The bug class, from `manifest_caching`: a best-effort cache must not be
+    able to turn its own failure into the run's failure (ADR-028 D3 —
+    a header-graph dump degrades, never aborts). This file already covered
+    *content* the codec cannot trust; it did not cover the **filesystem
+    operations** around it, and a review found the gap: `read_text(encoding=
+    "utf-8")` raises `UnicodeDecodeError`, which is a `ValueError` and not an
+    `OSError`, so a sidecar holding invalid UTF-8 escaped and aborted the
+    dump.
+
+    A test pinned to that one exception on that one call would foreclose only
+    the input the reviewer named. So this enumerates the whole small domain
+    instead — every filesystem call either function makes × every exception
+    it can plausibly see — which is what catches the *next* unguarded call
+    (the `unlink` in the write path's own error handler was unguarded too,
+    and no `UnicodeDecodeError` test would have said so).
+    """
+
+    #: The ordinary `OSError`s a full disk, a read-only mount, a sandbox or
+    #: Windows file locking give. Every call below can raise any of these.
+    _OS_FAULTS = [
+        pytest.param(PermissionError(13, "Permission denied"), id="eacces"),
+        pytest.param(OSError(28, "No space left on device"), id="enospc"),
+        pytest.param(OSError(30, "Read-only file system"), id="erofs"),
+        pytest.param(IsADirectoryError(21, "Is a directory"), id="eisdir"),
+        pytest.param(OSError(5, "Input/output error"), id="eio"),
+    ]
+
+    #: The reviewed fault, deliberately **not** in the list above: decoding
+    #: is what `read_text` does and no other call here performs, so pairing
+    #: it with `unlink`/`mkdir`/`write_text` would assert that the module
+    #: guards against something a filesystem cannot produce. Writing this as
+    #: a cross product is how the first version of this test failed four
+    #: cases for a fault none of those calls can raise -- a matrix has to
+    #: enumerate *plausible* faults per call, not every pairing.
+    _DECODE_FAULT = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    #: Every filesystem call the two entry points make, each with the faults
+    #: reachable through it. Spelled out rather than discovered, so adding a
+    #: call to the module without adding it here leaves the omission visible
+    #: in the diff.
+    _READ_CALLS = [
+        pytest.param("read_text", _DECODE_FAULT, id="read_text-invalid-utf8"),
+        *[
+            pytest.param("read_text", f.values[0], id=f"read_text-{f.id}")
+            for f in _OS_FAULTS
+        ],
+        *[pytest.param("unlink", f.values[0], id=f"unlink-{f.id}") for f in _OS_FAULTS],
+    ]
+    _WRITE_CALLS = [
+        # `_OS_FAULTS` is the outer loop deliberately: in a class body only
+        # the outermost iterable of a comprehension is evaluated in class
+        # scope, so a nested `for f in _OS_FAULTS` is an `F821`.
+        pytest.param(call, f.values[0], id=f"{call}-{f.id}")
+        for f in _OS_FAULTS
+        for call in ("mkdir", "write_text", "unlink")
+    ]
+
+    @staticmethod
+    def _projection() -> HeaderGraphAstProjection:
+        return project_header_graph_ast(AST_CASES["call_edge"])
+
+    @pytest.mark.parametrize(("call", "fault"), _READ_CALLS)
+    def test_loading_never_raises(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        call: str,
+        fault: Exception,
+    ) -> None:
+        entry = tmp_path / "abc.json"
+        # A *rejected* body, so the unlink path is reached too -- with a
+        # valid body, injecting into `unlink` would assert nothing.
+        projection_sidecar_path(entry).write_text("not a projection")
+
+        def boom(*_a: Any, **_k: Any):
+            raise fault
+
+        monkeypatch.setattr(Path, call, boom)
+        assert load_cached_projection(entry) is None
+
+    @pytest.mark.parametrize(("call", "fault"), _WRITE_CALLS)
+    def test_storing_never_raises(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        call: str,
+        fault: Exception,
+    ) -> None:
+        def boom(*_a: Any, **_k: Any):
+            raise fault
+
+        monkeypatch.setattr(Path, call, boom)
+        # Returns None on success too, so the claim is "does not raise".
+        assert (
+            store_cached_projection(tmp_path / "abc.json", self._projection()) is None
+        )
+
+    @pytest.mark.parametrize("fault", _OS_FAULTS)
+    def test_a_failed_write_that_also_fails_to_clean_up_never_raises(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fault: Exception
+    ) -> None:
+        """The compound case, which single-call injection cannot reach.
+
+        The write path's cleanup runs in precisely the conditions that made
+        the write fail, so both failing at once is the realistic case, not a
+        contrived one -- and it is the case a bare `unlink` in an `except`
+        block gets wrong.
+        """
+
+        def boom_write(*_a: Any, **_k: Any):
+            raise OSError(28, "No space left on device")
+
+        def boom_unlink(*_a: Any, **_k: Any):
+            raise fault
+
+        monkeypatch.setattr(Path, "write_text", boom_write)
+        monkeypatch.setattr(Path, "unlink", boom_unlink)
+        assert (
+            store_cached_projection(tmp_path / "abc.json", self._projection()) is None
+        )
+
+    def test_a_real_invalid_utf8_sidecar_is_a_miss_and_is_evicted(
+        self, tmp_path: Path
+    ) -> None:
+        """The reviewed case end to end, with real bytes and no injection.
+
+        Fault injection proves the handler covers the exception; only real
+        bytes prove `read_text` actually raises it here, which is the half a
+        mock cannot establish (AGENTS.md's real-dependency rule, applied to
+        the filesystem).
+        """
+        entry = tmp_path / "abc.json"
+        sidecar = projection_sidecar_path(entry)
+        sidecar.write_bytes(
+            b'{"schema": "abicheck-header-graph-projection/1", \xff\xfe}'
+        )
+
+        assert load_cached_projection(entry) is None
+        assert not sidecar.exists(), "an undecodable sidecar must not be kept"
+
+        # And the cache still works afterwards: eviction, not poisoning.
+        store_cached_projection(entry, self._projection())
+        restored = load_cached_projection(entry)
+        assert restored is not None
+        assert _as_tuple(restored) == _as_tuple(self._projection())
