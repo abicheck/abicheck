@@ -33,7 +33,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from . import deadline
 from .dumper_cache import (
@@ -44,6 +44,7 @@ from .dumper_cache import (
 from .dumper_clang_streaming import load_pruned_clang_ast, streaming_prune_suppressed
 from .errors import SnapshotError
 from .extract.env_flags import env_flag
+from .storage.derived_ast import offer_derived_ast_source
 from .storage.json_chunked_write import _atomic_write_json
 from .sycl_context import decode_and_select_frontend_context_from_path
 
@@ -678,6 +679,44 @@ def _parse_clang_ast_result(
         )
         root = selected.ast
     else:
+        # The cold half of the derived-artifact mechanism (see
+        # `derived_ast.offer_derived_ast_source`). A final consumer that
+        # only needs a *derived* form of this AST -- today the header-graph
+        # projection -- reads the document from disk itself and never has a
+        # tree built, which is the point: the `json.load` below holds the
+        # whole document as one `str` while building ~1.5x its size in
+        # dicts from it, and that pair, not the tree alone, is the attach's
+        # measured peak. A warm run already skipped this via the cache
+        # entry; this is what makes the *first* run cheap too.
+        #
+        # Deliberately only in this branch: `dpcpp_capable` above is the
+        # concatenated multi-document stream case, where `ast_path` holds
+        # one document per -cc1 pass and selecting between them is
+        # `sycl_context`'s job, not something a single-document reader may
+        # be handed.
+        #
+        # The cache write below is unaffected -- it copies `ast_path`
+        # byte-for-byte and never touches `root` -- so skipping the parse
+        # still leaves a warm entry (and its sidecar) for the next run.
+        superseded = offer_derived_ast_source(ast_path)
+        if superseded is not None:
+            # Same order as the parsing path below: deadline-check, write
+            # the cache entry, deadline-check, return.
+            deadline.check()
+            if cache_write:
+                try:
+                    _atomic_copy(ast_path, cached)
+                except OSError:
+                    pass
+            deadline.check()
+            # Deliberately not a tree, and deliberately still typed as one:
+            # this is the same opaque marker `dumper_cache.load_cached_ast`
+            # already returns on its own derived-artifact path, and every
+            # caller branches on `DerivedAstArtifact.used` rather than on
+            # this value -- which is exactly why the marker is private to
+            # that module and has no type of its own to widen every AST
+            # return annotation with.
+            return cast("dict[str, Any]", superseded)
         prune_enabled = _streaming_prune_enabled()
         try:
             with open(ast_path, "rb") as fh:  # bytes: json detects encoding

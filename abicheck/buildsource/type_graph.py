@@ -1034,9 +1034,41 @@ def _walk_children(
     would already use (the record's own qualified name for a field,
     :func:`_var_decl_ident` for a variable) rather than inventing a name for
     the enum itself, since it has no public identity of its own to name.
+
+    A thin wrapper over :func:`_walk_child_sequence` for the ordinary
+    whole-tree walk, which always starts a fresh anonymous-tag group at each
+    parent and has no use for the trailing state it returns.
     """
-    pending_anon_enum: dict[str, Any] | None = None
-    for child in node.get("inner", []) or []:
+    _walk_child_sequence(node.get("inner", []) or [], scope, enclosing_func, edges, idx)
+
+
+def _walk_child_sequence(
+    children: Any,
+    scope: list[str],
+    enclosing_func: str,
+    edges: list[TypeEdge],
+    idx: _AstIndexes,
+    pending_anon_enum: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Walk *children* in order, threading the anonymous-tag group state.
+
+    Split out of :func:`_walk_children` so a caller that supplies the child
+    list itself -- rather than reading it off one parent node -- can carry
+    that state across calls. The header-graph streaming projection
+    (:mod:`abicheck.buildsource.header_graph_ast_stream`) is the one such
+    caller: it hands the translation unit's top-level declarations over one
+    at a time so the whole tree is never resident, and an anonymous
+    ``EnumDecl`` and the ``TypedefDecl``/``FieldDecl``/``VarDecl`` declarator
+    that names it are *siblings*, so at top level they can fall either side
+    of an element boundary. Returning the trailing state (and accepting it
+    back on the next call) is what keeps that split invisible: the sequence
+    of calls sees exactly the sibling run a single call over the whole list
+    would have seen.
+
+    Returns the group state left over after the last child, for that caller
+    to feed into the next call.
+    """
+    for child in children:
         if isinstance(child, dict):
             tag_id = str((pending_anon_enum or {}).get("id") or "")
             name = str(child.get("name") or "")
@@ -1098,6 +1130,7 @@ def _walk_children(
                 # first match silently dropped every declarator after it.
                 pending_anon_enum = None
         _walk_types(child, scope, enclosing_func, edges, idx)
+    return pending_anon_enum
 
 
 def _emit_record_member_edges(

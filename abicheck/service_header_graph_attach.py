@@ -36,6 +36,7 @@ import ``.service`` or this module back.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -126,6 +127,10 @@ def _attach_header_graph(
         HeaderGraphAstProjection,
         project_header_graph_ast,
     )
+    from .buildsource.header_graph_ast_stream import (
+        ClangAstStreamError,
+        project_header_graph_ast_file,
+    )
     from .buildsource.header_graph_projection_cache import (
         load_cached_projection,
         store_cached_projection,
@@ -139,8 +144,67 @@ def _attach_header_graph(
     )
     from .buildsource.pack import BuildSourcePack
     from .dumper import _clang_header_dump, _resolve_clang_bin
-    from .dumper_cache import DerivedAstArtifact, derived_ast_scope
     from .dumper_clang_streaming import suppress_streaming_prune
+    from .storage.derived_ast import DerivedAstArtifact, derived_ast_scope
+
+    # Everything either projection path may raise on an AST that is readable
+    # but not shaped the way the readers assume.
+    #
+    # The readers walk a tree they trust: `for child in node.get("inner", [])
+    # or []` raises `TypeError` when `inner` is a number rather than a list,
+    # and a sibling shape mismatch raises `AttributeError`. Neither is
+    # hypothetical for a *corrupt cache entry*, and neither was contained --
+    # so a bad file on disk aborted the whole dump instead of costing the
+    # header graph, which is exactly what ADR-028 D3 ("degrade to no fact,
+    # never a wrong fact, never an aborted collection") forbids.
+    #
+    # `RecursionError` is here for the reason `clang_ast_run` already guards
+    # it: a pathologically deep TU exhausts the interpreter stack inside
+    # `json.loads`. `ValueError` covers `json.JSONDecodeError`, and `OSError`
+    # the file going away between the offer and the read.
+    #
+    # Hardening every walker against every malformed shape is deliberately
+    # *not* the fix: it would touch the hottest code in the extractor to
+    # defend against input clang never produces, and would mask real shape
+    # bugs. Containing it where both paths converge keeps one rule in one
+    # place.
+    # Below this document size, the whole-tree parse is simply cheaper and
+    # costs nothing worth avoiding, so the stream declines and the caller
+    # parses normally.
+    #
+    # Streaming trades CPU for memory: it decodes every element twice (the
+    # readers are two-pass and the second pass needs whole-translation-unit
+    # indexes) plus a structural scan, for ~2-3x the parse's wall time. That
+    # is a good trade only where the memory exists to be saved. Measured, the
+    # two ends are 100x apart: this repository's own header-graph perf
+    # fixtures produce 0.2/0.6/2.5 MiB documents at sizes 25/100/400, where
+    # the whole document and tree together are a few MiB and there is no
+    # memory problem at all, while oneDAL's `libonedal_core.so.2` produces
+    # 263 MiB, where the attach peaked at 2.1 GiB. Streaming everything made
+    # the small case 44-71% slower for nothing, which the PR-vs-base attach
+    # gate correctly rejected.
+    #
+    # A clang AST tree costs roughly 1.5x its document and peaks at roughly
+    # 2.5x (263 MiB document -> ~400 MiB of dicts, ~674 MiB peak, measured),
+    # so this threshold reads as "stream once the whole-tree peak would
+    # exceed roughly 80 MiB". It sits ~13x above the largest fixture and
+    # ~100x below the real case, so neither lands near it by accident.
+    # `ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB` overrides it, which is how the
+    # tests drive both paths over one document.
+    _STREAM_MIN_BYTES = (
+        float(os.environ.get("ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB", "32"))
+        * 1024
+        * 1024
+    )
+
+    _MALFORMED_AST_ERRORS = (
+        ClangAstStreamError,
+        ValueError,
+        OSError,
+        RecursionError,
+        TypeError,
+        AttributeError,
+    )
 
     cc = compile if compile is not None else CompileContext()
     # Case-insensitive, None-safe: PE/Mach-O's own main pass
@@ -161,6 +225,45 @@ def _attach_header_graph(
     # when the clang acquisition raises. An empty artifact reads as "no
     # cache, nothing to store", which is exactly right for both.
     derived_projection = DerivedAstArtifact()
+    # Set when the projection below was computed by *streaming* an AST
+    # document rather than read from a sidecar, which is the one case that
+    # still owes a cache write. `derived_projection.used` cannot say which
+    # of the two happened, and storing unconditionally would rewrite an
+    # identical sidecar on every warm run.
+    streamed_paths: list[Path] = []
+
+    def _projection_for(ast_path: Path) -> HeaderGraphAstProjection | None:
+        """Answer the AST acquisition with a projection, or decline.
+
+        Offered two different paths (see `dumper_cache.
+        offer_derived_ast_source`): the AST *cache entry*, before anything
+        is read, and -- when no entry existed -- the document `clang` just
+        wrote. Both are single-document AST dumps, so both are streamable;
+        the sidecar is only ever consulted for the first, since a fresh
+        temp file has none.
+
+        Declining (``None``) is always safe: the caller then parses the AST
+        the way it always did. So every failure here degrades to the old
+        cost rather than to a wrong or missing graph (ADR-028 D3) -- an
+        unreadable document, a truncated one, a shape the scanner does not
+        recognise.
+        """
+        cached = load_cached_projection(ast_path)
+        if cached is not None:
+            return cached
+        try:
+            if ast_path.stat().st_size < _STREAM_MIN_BYTES:
+                return None
+        except OSError:
+            return None
+        try:
+            with memory_trace.phase("dump.header_graph.project_streaming"):
+                projection = project_header_graph_ast_file(ast_path)
+        except _MALFORMED_AST_ERRORS:
+            return None
+        streamed_paths.append(ast_path)
+        return projection
+
     try:
         resolved_headers = expand_header_inputs(headers)
         if resolved_headers:
@@ -229,7 +332,7 @@ def _attach_header_graph(
         with (
             suppress_streaming_prune(),
             memory_trace.phase("dump.header_graph.clang_ast"),
-            derived_ast_scope(load_cached_projection) as derived_projection,
+            derived_ast_scope(_projection_for) as derived_projection,
         ):
             ast_root, _resolved_kind, _resolved_force_cpp = _clang_header_dump(
                 resolved_headers,
@@ -280,16 +383,37 @@ def _attach_header_graph(
     # `DECL_CALLS_DECL` included.
     projection: HeaderGraphAstProjection | None = None
     if derived_projection.used:
-        # Warm: the projection came straight off disk and no AST was ever
-        # parsed. `ast_root` holds the cache layer's own marker rather than a
-        # tree, so it must not be projected -- `used` is the discriminator,
-        # never a type check on that marker.
+        # No tree was ever built: the projection came either straight off a
+        # sidecar (warm) or from streaming the AST document itself (cold).
+        # `ast_root` holds the cache layer's own marker rather than a tree,
+        # so it must not be projected -- `used` is the discriminator, never
+        # a type check on that marker.
         projection = derived_projection.value
-        memory_trace.mark("dump.header_graph.projection_cache:hit")
+        memory_trace.mark(
+            "dump.header_graph.projection_streamed"
+            if streamed_paths
+            else "dump.header_graph.projection_cache:hit"
+        )
+        if streamed_paths and derived_projection.cache_path is not None:
+            # A streamed projection still owes the sidecar the warm path
+            # reads, so the next run skips even the stream. Stored against
+            # the AST *cache entry* path, never the streamed document's own
+            # -- on a cold run that was a temp file the dump unlinks.
+            store_cached_projection(derived_projection.cache_path, projection)
     elif ast_root is not None:
-        with memory_trace.phase("dump.header_graph.project"):
-            projection = project_header_graph_ast(ast_root)
-        if derived_projection.cache_path is not None:
+        try:
+            with memory_trace.phase("dump.header_graph.project"):
+                projection = project_header_graph_ast(ast_root)
+        except _MALFORMED_AST_ERRORS:
+            # Same containment as the streaming loader above, and for the
+            # same reason: the readers walk a tree whose shape they trust,
+            # so a document whose `inner` is a number rather than a list
+            # raises `TypeError` out of the walk. That is reachable from a
+            # corrupt AST cache entry, and letting it escape would abort a
+            # whole dump over a bad cache file -- the exact failure ADR-028
+            # D3 forbids. Degrade to the declaration-only graph instead.
+            projection = None
+        if projection is not None and derived_projection.cache_path is not None:
             # Store beside the AST entry this projection was derived from, so
             # the two share one key and one lifetime. Best-effort by design:
             # `store_cached_projection` never raises, because failing to warm

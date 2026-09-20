@@ -357,3 +357,186 @@ Three states, which this page previously left implicit:
 
 The state that changed is (2), and its old behaviour is the reason this
 looked like a memory problem in the extractor rather than a caching one.
+
+---
+
+# Follow-up 3: the cold run stopped parsing too (2026-09-20)
+
+Follow-up 2 closed state (2) above. State (3) — the first run in CI, the
+first after a header edit, every cache-cold container — still paid the full
+parse, which by then was the *entire* remaining cost.
+
+## What the cold peak was made of
+
+The fixture is `check_header_graph_perf.py`'s own memory-shaped header at
+`n=60`, which compiles to a **262.8 MiB** `clang -ast-dump=json` document —
+the same shape and within 1% of the scale of the real oneDAL AST this
+investigation started from, so it reproduces the earlier readings rather
+than approximating them. Measured with `ru_maxrss`, fresh process each:
+
+| step | peak RSS | wall |
+|---|---|---|
+| `json.load` of the document | 674.1 MiB | 4.5 s |
+| `json.load` + `project_header_graph_ast` | 698.9 MiB | 4.5 s |
+
+Decomposed: the tree alone is **~400 MiB** resident afterwards, and the peak
+is **263 MiB above it** — the document, held as one `str` while the dicts
+are built from it. That is the `document + tree` attribution follow-up 2
+established, now measured directly rather than inferred. (Follow-up 2's
+263 MB/698.3 MiB baseline row reproduces here at 262.8 MiB/698.9 MiB.)
+
+## What shipped: stream the top-level declarations
+
+`abicheck/buildsource/header_graph_ast_stream.py`. The root
+`TranslationUnitDecl`'s `inner` array holds every top-level declaration;
+the scanner finds each one's byte extent and hands it to `json.loads`
+alone, so nothing beyond the current element is ever resident. The same
+four readers then run over that stream.
+
+| | peak RSS | wall |
+|---|---|---|
+| `json.load` + `project_header_graph_ast` | 698.9 MiB | 4.5 s |
+| `project_header_graph_ast_file` | 298.4 MiB | 13.1 s |
+
+**−57%, at 2.9x the wall time of the parse it replaces.**
+
+Two things paid for most of that, and neither was the scanner:
+
+- **`call_graph`'s `member_index` retained whole nodes**, i.e. every
+  indexed function's *body*, for the life of the parse — so each top-level
+  element stayed pinned after the stream released it. Storing only the
+  fields such an entry is ever read through
+  (`buildsource/call_decl_record.py`) is worth **+168 MiB → +44 MiB** here.
+  The read set is exhaustive and stated there; it is also strictly better
+  for the non-streaming path, and the projection digest is unchanged on
+  real clang output.
+- **The second pass re-read the file by seeking**, not by scanning again.
+  The structural scan, not the decode, dominates: recording the 378
+  `(start, end)` pairs from the first pass took the projection from 21.7 s
+  to 13.1 s and its peak from 336 MiB to 298 MiB.
+
+## End to end, on a cold cache
+
+`check_header_graph_perf.py --memory-probe`, three fresh processes per
+side, each with a private empty `XDG_CACHE_HOME`:
+
+| backend | attach peak RSS | RSS after attach |
+|---|---|---|
+| castxml, before | 605.5 MiB | 430.4 MiB |
+| castxml, after | **210.8 MiB** | **210.3 MiB** |
+| clang, before | 554.6 MiB | 420.5 MiB |
+| clang, after | 554.7 MiB | 422.9 MiB |
+
+**−65% peak and −51% retained on castxml; clang unchanged, and that is
+correct.** Under `--ast-frontend clang` the memo (state 1 above) hands the
+attach a tree the *primary* dump already built, and `load_cached_ast`
+consults the memo before offering anything to a derived consumer — so the
+attach never performed a second parse there, and the 554 MiB it reports is
+the primary dump's own `json.load`, a different owner. castxml leaves no
+memo, which is exactly why it was the backend the original oneDAL
+measurement indicted.
+
+Verified directly rather than assumed: instrumenting both derivation paths
+shows `castxml → {tree: 0, stream: 1}` and `clang → {tree: 1, stream: 0}`.
+
+## On the real library, which is the number that matters
+
+Everything above is the synthetic fixture. oneDAL 2024.7 from conda-forge
+(`dal-devel=2024.7.0`), `libonedal_core.so.2` against the full `daal.h`
+transitive surface — the same library and version this whole investigation
+started from. Cold each time (a private empty `XDG_CACHE_HOME`), measured
+as the process's own `VmHWM` at two points:
+
+| | peak after primary dump | peak after attach | attach wall | graph digest |
+|---|---|---|---|---|
+| before | 298.9 MiB | **2096.8 MiB** | 23.1 s | `0070a982b565d9a5` |
+| after | 299.0 MiB | **877.2 MiB** | 48.3 s | `0070a982b565d9a5` |
+
+**−1219.6 MiB, −58%**, at 2.1x the attach's wall time.
+
+Three things to read off this rather than the fixture table:
+
+- **It reproduces the original measurement.** 2096.8 MiB against the
+  2093.5 MiB this page opened with, on the same library, so this is the
+  same peak being fixed and not a different one.
+- **The evidence is provably unchanged.** The digest is over every node,
+  its kind/label/provenance/confidence/attrs, every edge, and every
+  `extractor_passes` entry — 49,482 nodes and 98,331 edges — and it is
+  identical. The streaming path is confirmed to have actually run
+  (instrumenting both derivations gives `{tree: 0, stream: 1}`), so this
+  is not two whole-tree runs agreeing with each other.
+- **The attach really was almost all of it.** The primary L2 dump peaks at
+  299 MiB either way; the attach added ~1798 MiB before and ~578 MiB now.
+  That 1798 MiB matches the ~1806 MiB attach share the earlier follow-up
+  attributed by a different method.
+
+A whole `abicheck dump` CLI run over the same library (which does more than
+the attach: provenance, snapshot serialization, L3–L5 embedding) goes
+2102.5 → 1629 MiB across three runs a side. Lower in percentage terms
+because the rest of that run is untouched — the attach's own share is the
+table above.
+
+## Only above a size threshold
+
+The trade is CPU for memory, so it is applied only where memory is the
+constraint. Measured on this repository's own header-graph perf fixtures
+against the real case:
+
+| document | AST size | whole-tree peak |
+|---|---|---|
+| perf fixture, size 25 | 0.2 MiB | a few MiB |
+| perf fixture, size 100 | 0.6 MiB | a few MiB |
+| perf fixture, size 400 | 2.5 MiB | a few MiB |
+| oneDAL `libonedal_core.so.2` | **263 MiB** | **2.1 GiB** |
+
+A hundred-fold gap. Streaming everything made the small case **44–71%
+slower in attach wall time for no memory saved**, and the PR-vs-base
+attach gate rejected it — correctly; that is a real user-facing regression
+for anyone with a small library, not gate noise. The attach now streams
+only above 32 MiB of document (`ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB`),
+which reads as "stream once the whole-tree peak would exceed roughly
+80 MiB", since a tree costs ~1.5x its document and peaks at ~2.5x. That
+sits ~13x above the largest fixture and ~100x below the real case, so
+neither lands near it by accident. Confirmed after the change: the perf
+fixture's attach is 271–283 ms against a 274 ms base, and oneDAL still
+streams (`{tree: 0, stream: 1}`) at an unchanged 877 MiB peak.
+
+## Where the floor now is
+
+Not the scanner. Top-level elements are extremely skewed — in this document
+the largest single one is **53.3 MiB of JSON, 20% of the whole file**, and
+the top ten are 57% of it, because one STL instantiation cluster arrives as
+one declaration. Streaming cannot subdivide below one element, so the floor
+is that element's own tree (~81 MiB) plus its bytes plus the accumulated
+indexes. Splitting *within* an element is a different and much larger
+design question, not attempted.
+
+This scales with the library, which is why oneDAL's attach still adds
+578 MiB where the fixture's adds ~90: its largest top-level declaration is
+correspondingly larger. The remaining lever is subdividing *within* an
+element, not a better scanner.
+
+## What the equivalence rests on
+
+A streamed walk differs from a whole-tree walk only where clang's format is
+order-dependent across top-level siblings, and there are exactly two such
+places: the **sticky `loc.file`** (emitted only when it changes, so a
+declaration can inherit its file from a previous sibling) and an
+**anonymous tag and its declarator**, which are siblings and so can fall
+either side of a boundary. Both are threaded explicitly.
+
+This is the part worth not relearning. The first fixture used during
+development matched digests exactly **with the anonymous-tag threading
+deleted** — it simply contained no anonymous enum at top level. Mutating
+each rule in turn is what caught it, and
+`TestTheFixtureStillExercisesTheBoundaryRules` now asserts the compiled
+fixture really contains both shapes, so the equivalence test cannot quietly
+stop testing what it is for.
+
+## Caveat
+
+One fixture, one host, one compiler (clang 18, Linux). The castxml/clang
+split above is a property of which backend leaves an in-process memo, not
+of the host. The wall-time multiple is the weakest number here: it is
+dominated by the structural scan, which is a pure-Python regex loop and
+will move with the interpreter.

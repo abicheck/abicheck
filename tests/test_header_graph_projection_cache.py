@@ -303,7 +303,7 @@ class TestTheWarmRunReallySkipsTheParse:
 
         entry = tmp_path / "cache" / "abcdef.json"
         entry.parent.mkdir(parents=True, exist_ok=True)
-        counts = {"ast_reads": 0, "projections": 0}
+        counts = {"ast_reads": 0, "projections": 0, "streams": 0}
 
         real_load = dumper_cache.load_cached_ast
 
@@ -330,7 +330,18 @@ class TestTheWarmRunReallySkipsTheParse:
         monkeypatch.setattr(
             "abicheck.dumper._clang_header_dump", fake_clang_header_dump
         )
+        import abicheck.buildsource.header_graph_ast_stream as stream_mod
+
+        real_stream = stream_mod.project_header_graph_ast_file
+
+        def counting_stream(path):
+            counts["streams"] += 1
+            return real_stream(path)
+
         monkeypatch.setattr(proj_mod, "project_header_graph_ast", counting_project)
+        monkeypatch.setattr(
+            stream_mod, "project_header_graph_ast_file", counting_stream
+        )
         monkeypatch.setattr(
             attach_mod, "expand_header_inputs", lambda headers: list(headers)
         )
@@ -384,30 +395,97 @@ class TestTheWarmRunReallySkipsTheParse:
         counts = self._install(monkeypatch, tmp_path, AST_CASES["call_edge"])
 
         cold = self._graph_shape(self._attach(self._snapshot()))
-        assert counts == {"ast_reads": 1, "projections": 1}, "cold run must parse"
+        assert counts == {"ast_reads": 1, "projections": 1, "streams": 0}, (
+            "cold run must parse"
+        )
 
         warm = self._graph_shape(self._attach(self._snapshot()))
         # The mechanism: no AST was produced and nothing was projected.
-        assert counts == {"ast_reads": 1, "projections": 1}, (
+        assert counts == {"ast_reads": 1, "projections": 1, "streams": 0}, (
             "the warm run parsed an AST again — the projection cache did not engage"
         )
         # And the result is indistinguishable.
         assert warm == cold
 
-    def test_a_discarded_sidecar_falls_back_to_parsing(
+    def test_a_discarded_sidecar_falls_back_to_re_deriving(
         self, monkeypatch, tmp_path: Path
     ) -> None:
         """The cache must be optional in both directions: losing it costs a
-        re-parse, never a wrong or missing graph."""
+        re-derivation, never a wrong or missing graph.
+
+        *Which* re-derivation is itself the assertion. The AST cache entry
+        still exists, so the second run streams it
+        (`header_graph_ast_stream`) rather than building the whole tree --
+        which is the point of the streaming path: a lost sidecar costs a
+        second pass over a file, not a second gigabyte of dicts. Counting
+        both mechanisms separately is what stops this reading as a pass if
+        the stream silently stopped being reachable and the tree parse
+        quietly took over again.
+        """
+        # Pin the size threshold off: this test is about *which* mechanism
+        # re-derives a lost sidecar, and the fixture AST is a few hundred
+        # bytes, so at the production threshold it would never stream and
+        # the assertion below would be about the fallback instead.
+        monkeypatch.setenv("ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB", "0")
         counts = self._install(monkeypatch, tmp_path, AST_CASES["call_edge"])
         cold = self._graph_shape(self._attach(self._snapshot()))
+        assert (counts["projections"], counts["streams"]) == (1, 0), (
+            "the cold run here has no AST document to stream yet (the fake "
+            "clang returns a tree directly), so it must project one"
+        )
 
         for sidecar in (tmp_path / "cache").glob("*.projection.json"):
             sidecar.unlink()
 
         again = self._graph_shape(self._attach(self._snapshot()))
-        assert counts["projections"] == 2, "a missing sidecar must re-project"
+        assert counts["streams"] == 1, "a missing sidecar must re-derive"
+        assert counts["projections"] == 1, (
+            "re-deriving from an AST document on disk must stream it, never "
+            "fall back to building the whole tree again"
+        )
         assert again == cold
+
+    @pytest.mark.parametrize(
+        ("threshold_mib", "expect_stream"),
+        [("0", True), ("4096", False)],
+    )
+    def test_only_a_large_enough_document_is_streamed(
+        self, monkeypatch, tmp_path: Path, threshold_mib: str, expect_stream: bool
+    ) -> None:
+        """Streaming trades CPU for memory, so it must not run where there
+        is no memory to save.
+
+        Measured, the two ends are 100x apart: this repository's own
+        header-graph perf fixtures produce 0.2-2.5 MiB documents, where the
+        whole document and tree together are a few MiB, while the real case
+        is 263 MiB. Streaming the small one cost 44-71% of attach wall time
+        for nothing, which the PR-vs-base attach gate correctly rejected.
+
+        Both sides are driven over the *same* document by moving the
+        threshold rather than the input, so this tests the decision and not
+        two different ASTs. Each side asserts which mechanism actually ran:
+        the two paths produce the identical projection by construction, so
+        the results alone cannot tell them apart.
+        """
+        monkeypatch.setenv("ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB", threshold_mib)
+        counts = self._install(monkeypatch, tmp_path, AST_CASES["call_edge"])
+
+        cold = self._graph_shape(self._attach(self._snapshot()))
+        # The fake clang hands back a tree directly, so the stream is only
+        # reachable on a second run, where the AST entry exists on disk.
+        for sidecar in (tmp_path / "cache").glob("*.projection.json"):
+            sidecar.unlink()
+        again = self._graph_shape(self._attach(self._snapshot()))
+
+        assert again == cold, "the two paths must agree whichever ran"
+        if expect_stream:
+            assert counts["streams"] == 1, "a large-enough document must stream"
+        else:
+            assert counts["streams"] == 0, (
+                "a document below the threshold must not stream -- that is "
+                "CPU spent with no memory saved"
+            )
+            assert counts["projections"] == 2, "it must re-project instead"
 
 
 class TestThePathsWhereNoAstIsAcquired:
@@ -491,6 +569,81 @@ class TestThePathsWhereNoAstIsAcquired:
         snap = self._attach(self._snapshot(), [Path(PUBLIC_HEADER)])
         assert snap.build_source is not None
         assert snap.build_source.source_graph is not None
+
+    @pytest.mark.parametrize(
+        ("label", "ast"),
+        [
+            ("inner is a number", {"kind": "TranslationUnitDecl", "inner": 1}),
+            (
+                "a child's inner is a number",
+                {
+                    "kind": "TranslationUnitDecl",
+                    "inner": [{"kind": "FunctionDecl", "name": "f", "inner": 7}],
+                },
+            ),
+            (
+                "a child's inner is a string",
+                {
+                    "kind": "TranslationUnitDecl",
+                    "inner": [{"kind": "CXXRecordDecl", "name": "R", "inner": "x"}],
+                },
+            ),
+            ("inner is a mapping", {"kind": "TranslationUnitDecl", "inner": {"a": 1}}),
+        ],
+    )
+    def test_a_readable_but_misshapen_ast_still_attaches_a_graph(
+        self, monkeypatch, label: str, ast: dict
+    ) -> None:
+        """A corrupt AST cache entry must cost the graph, not the dump.
+
+        The readers walk a tree whose shape they trust -- `for child in
+        node.get("inner", []) or []` raises `TypeError` when `inner` is a
+        number -- and that is reachable from a cache file that decoded fine
+        but holds the wrong shape. Uncontained, it escaped the projection
+        step and aborted the whole dump, which is the failure ADR-028 D3
+        names directly.
+
+        Parametrized over several *independently-chosen* misshapen trees,
+        not only the one reported: the bug class is "a shape the readers
+        assume, violated anywhere in the walk", so a single fixture would
+        foreclose exactly one node position.
+        """
+        import abicheck.service_header_graph_attach as attach_mod
+
+        monkeypatch.setattr(
+            attach_mod, "expand_header_inputs", lambda headers: list(headers)
+        )
+        monkeypatch.setattr(
+            attach_mod, "resolve_inferred_header_roots", lambda *a, **k: ([], [])
+        )
+        monkeypatch.setattr(
+            "abicheck.dumper._clang_header_dump",
+            lambda *a, **k: (ast, None, True),
+        )
+
+        snap = self._attach(self._snapshot(), [Path(PUBLIC_HEADER)])
+        assert snap.build_source is not None
+        assert snap.build_source.source_graph is not None
+
+    def test_the_misshapen_asts_really_do_break_the_readers(self) -> None:
+        """Vacuity guard: each fixture above must actually raise.
+
+        If a shape stopped reaching the walk, the containment test would
+        pass while proving nothing about containment.
+        """
+        from abicheck.buildsource.header_graph_ast_projection import (
+            project_header_graph_ast,
+        )
+
+        for ast in (
+            {"kind": "TranslationUnitDecl", "inner": 1},
+            {
+                "kind": "TranslationUnitDecl",
+                "inner": [{"kind": "FunctionDecl", "name": "f", "inner": 7}],
+            },
+        ):
+            with pytest.raises((TypeError, AttributeError)):
+                project_header_graph_ast(ast)
 
 
 @pytest.mark.skipif(
@@ -609,19 +762,43 @@ double total_area(const std::vector<std::unique_ptr<Shape>>& shapes);
         cache_root.mkdir()
         monkeypatch.setenv("XDG_CACHE_HOME", str(cache_root))
 
+        import abicheck.buildsource.header_graph_ast_stream as stream_mod
+
+        # Both ways a projection can be derived, counted apart. A single
+        # combined counter would let the cold run's streaming path silently
+        # revert to a whole-tree parse -- the exact regression this file's
+        # memory work exists to prevent -- while this test still passed.
         projections = {"n": 0}
+        streams = {"n": 0}
         real_project = proj_mod.project_header_graph_ast
+        real_stream = stream_mod.project_header_graph_ast_file
 
         def counting_project(root):
             projections["n"] += 1
             return real_project(root)
 
+        def counting_stream(path):
+            streams["n"] += 1
+            return real_stream(path)
+
         monkeypatch.setattr(proj_mod, "project_header_graph_ast", counting_project)
+        monkeypatch.setattr(
+            stream_mod, "project_header_graph_ast_file", counting_stream
+        )
+        # Pinned, not left to the fixture's size: whether this header's AST
+        # clears the production threshold depends on the host's standard
+        # library, and this test's claim is about the cache, not about
+        # which side of the threshold a given libstdc++ lands on.
+        monkeypatch.setenv("ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB", "0")
 
         cold = self._shape(self._attach(self._snapshot(), header))
-        assert projections["n"] == 1, (
-            "the cold run did not project a real clang AST -- clang produced no "
-            "tree, so this test would assert nothing about the cache"
+        assert streams["n"] == 1, (
+            "the cold run did not stream a real clang AST document -- so this "
+            "test would assert nothing about either the cache or the stream"
+        )
+        assert projections["n"] == 0, (
+            "the cold run built the whole tree: the streaming path did not "
+            "engage on a real clang run, which is where its whole saving is"
         )
         # The cold run must have produced something worth caching: an empty
         # projection would make the warm comparison vacuous.
@@ -634,9 +811,9 @@ double total_area(const std::vector<std::unique_ptr<Shape>>& shapes);
         _reset_ast_memo()
 
         warm = self._shape(self._attach(self._snapshot(), header))
-        assert projections["n"] == 1, (
-            "the warm run projected a real clang AST again -- the projection "
-            "cache did not engage on the real dependency's output"
+        assert (projections["n"], streams["n"]) == (0, 1), (
+            "the warm run re-derived the projection -- the projection cache "
+            "did not engage on the real dependency's output"
         )
         assert warm == cold
 

@@ -857,6 +857,15 @@ Core pipeline (in order of data flow):
      `_DELEGATE_NODE_LIMIT` is handed to the C encoder whole, because the
      memory saving comes from the *member* boundary and descending small
      objects in Python is pure time
+   - `storage/derived_ast.py` — the rule letting the *final* consumer of a
+     clang AST be handed its **location** instead of its contents, when a
+     cheap derived form is all it wants (`derived_ast_scope` opens the
+     offer, `offer_derived_ast_source` makes it once per place an AST
+     becomes available, `DerivedAstArtifact.used` is the discriminator —
+     never a type check on the opaque marker). A callback, so `storage`
+     never imports the layers that own those derived types. Both a warm
+     cache entry and a freshly written document answer to it, which is what
+     makes a *cold* header-graph attach cheap and not only a warm one
    - `snapshot_io.py` — ADR-059's canonical snapshot *storage envelope* I/O:
      plain/gzip/zstd detection (magic bytes), atomic + deterministic
      compressed writes, decompression-bomb limits. A dependency-free leaf
