@@ -33,10 +33,13 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
+from _clang_ast_cache_isolation import _reset_ast_memo
 
 from abicheck.buildsource.call_graph import CallEdge
 from abicheck.buildsource.header_graph_ast_projection import (
@@ -488,3 +491,204 @@ class TestThePathsWhereNoAstIsAcquired:
         snap = self._attach(self._snapshot(), [Path(PUBLIC_HEADER)])
         assert snap.build_source is not None
         assert snap.build_source.source_graph is not None
+
+
+@pytest.mark.skipif(
+    shutil.which("clang++") is None,
+    reason="the real-dependency lane needs a live clang++",
+)
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="clang L2 header backend is ELF/Linux-scoped (see test_clang_header_backend_integration.py)",
+)
+class TestAgainstRealClang:
+    """The same invariant against a **live** ``clang -ast-dump=json``.
+
+    Every other test in this file hands the cache a hand-built AST dict. That
+    is precisely the shortcut ADR-059 §12 names: a test that constructs the
+    dependency's output itself cannot fail on a disagreement between what the
+    dependency really emits and what this code assumes it emits — the
+    projection's field set, the shape of a ``loc``/``file`` entry, the node
+    kinds a call edge is recovered from. A fixture drifts silently; clang does
+    not.
+
+    So this drives the real thing, through the real attach entry point, over a
+    real STL-bearing header (the scale where the AST is large enough for the
+    projection to be a meaningfully different object, which is the whole point
+    of the cache), and asserts both halves: the graph a warm run builds is
+    identical to the cold one's, **and** the warm run projected nothing.
+    """
+
+    _HEADER = """
+#pragma once
+#include <string>
+#include <vector>
+#include <memory>
+
+namespace realdep {
+
+struct Point {
+    int x;
+    int y;
+};
+
+class Shape {
+public:
+    virtual ~Shape();
+    virtual double area() const = 0;
+    std::string label() const;
+private:
+    std::vector<Point> pts_;
+};
+
+class Box : public Shape {
+public:
+    double area() const override;
+    std::shared_ptr<Shape> clone() const;
+};
+
+std::vector<Point> collect(const Shape& s);
+double total_area(const std::vector<std::unique_ptr<Shape>>& shapes);
+
+}  // namespace realdep
+"""
+
+    @staticmethod
+    def _snapshot():
+        from abicheck.model import AbiSnapshot
+
+        return AbiSnapshot(
+            library="librealdep.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            enums=[],
+        )
+
+    @staticmethod
+    def _attach(snapshot, header: Path):
+        import abicheck.service_header_graph_attach as attach_mod
+
+        return attach_mod._attach_header_graph(
+            snapshot,
+            header_graph=True,
+            header_graph_includes=False,
+            headers=[header],
+            includes=[],
+            lang="c++",
+            compile=None,
+            public_headers=[header],
+            public_header_dirs=None,
+        )
+
+    @staticmethod
+    def _shape(snap) -> tuple:
+        g = snap.build_source.source_graph
+        return (
+            tuple(sorted((n.id, n.kind) for n in g.nodes)),
+            tuple(sorted((e.src, e.dst, e.kind) for e in g.edges)),
+            tuple(sorted(g.extractor_passes.items())),
+        )
+
+    def test_a_warm_run_over_a_real_clang_ast_skips_the_parse(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import abicheck.buildsource.header_graph_ast_projection as proj_mod
+
+        header = tmp_path / "realdep.h"
+        header.write_text(self._HEADER)
+
+        # One shared AST cache root across both runs -- that sharing is the
+        # mechanism under test, not an oversight (contrast
+        # `_isolate_ast_cache`'s per-configuration roots, which exist for
+        # differential tests whose two sides must *not* share). It is still
+        # isolated from the developer's real `~/.cache`, so the cold run is
+        # genuinely cold whatever ran before.
+        cache_root = tmp_path / "xdg"
+        cache_root.mkdir()
+        monkeypatch.setenv("XDG_CACHE_HOME", str(cache_root))
+
+        projections = {"n": 0}
+        real_project = proj_mod.project_header_graph_ast
+
+        def counting_project(root):
+            projections["n"] += 1
+            return real_project(root)
+
+        monkeypatch.setattr(proj_mod, "project_header_graph_ast", counting_project)
+
+        cold = self._shape(self._attach(self._snapshot(), header))
+        assert projections["n"] == 1, (
+            "the cold run did not project a real clang AST -- clang produced no "
+            "tree, so this test would assert nothing about the cache"
+        )
+        # The cold run must have produced something worth caching: an empty
+        # projection would make the warm comparison vacuous.
+        sidecars = sorted(cache_root.rglob("*.projection.json"))
+        assert sidecars, "the cold run wrote no projection sidecar"
+        assert cold[0], "the cold run built no graph nodes from the real AST"
+
+        # A disk-cache hit alone does not force a reparse; the in-process AST
+        # memo has to go too, or the second run never reaches the cache layer.
+        _reset_ast_memo()
+
+        warm = self._shape(self._attach(self._snapshot(), header))
+        assert projections["n"] == 1, (
+            "the warm run projected a real clang AST again -- the projection "
+            "cache did not engage on the real dependency's output"
+        )
+        assert warm == cold
+
+    def test_the_cached_projection_round_trips_a_real_clang_ast_exactly(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """What clang really emits must survive the codec unchanged.
+
+        The round-trip tests above prove the codec is faithful to *fixtures*.
+        This proves it against the dependency's own output, which is where a
+        field the projection carries but the codec forgets would actually
+        show up -- with a real projection, not a two-edge hand-built one.
+        """
+        from abicheck.dumper import _clang_header_dump
+
+        header = tmp_path / "realdep.h"
+        header.write_text(self._HEADER)
+        cache_root = tmp_path / "xdg"
+        cache_root.mkdir()
+        monkeypatch.setenv("XDG_CACHE_HOME", str(cache_root))
+
+        ast_root, _kind, _forced = _clang_header_dump(
+            [header], [], lang="c++", memoize=False
+        )
+        assert ast_root, "live clang produced no AST"
+
+        projection = project_header_graph_ast(ast_root)
+
+        # Vacuity guard on the oracle, per AGENTS.md's matrix-test rule. The
+        # codec encodes each edge positionally against a field list derived
+        # from the dataclass, so a *dropped trailing field* round-trips
+        # perfectly whenever the data happens to leave it at its default --
+        # which is the tautology ADR-059 §12 describes, and which a
+        # hand-built two-edge fixture walks straight into. Requiring two
+        # distinct observed values per field means the equality below
+        # actually pins every field. (This header's real projection supplies
+        # them comfortably: measured 15,267 type edges and 2,881 call edges,
+        # every field 2-5,704 distinct values.)
+        for edges in (projection.type_edges, projection.call_edges):
+            assert edges, "the real AST projected no edges of one kind"
+            for f in dataclasses.fields(edges[0]):
+                distinct = {getattr(e, f.name) for e in edges}
+                assert len(distinct) > 1, (
+                    f"every {type(edges[0]).__name__}.{f.name} in the real "
+                    "projection holds one value, so the round-trip below "
+                    "would pass for a codec that drops this field"
+                )
+
+        restored = decode_projection(encode_projection(projection))
+        assert restored is not None
+        # `_as_tuple`, not `==`: `TypeEdge.resolution` is declared
+        # `compare=False`, so dataclass equality is structurally blind to a
+        # codec that drops it -- verified by mutation (truncating the encoded
+        # field list by one passed an `==` oracle outright).
+        assert _as_tuple(restored) == _as_tuple(projection)
