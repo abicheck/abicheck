@@ -10589,9 +10589,20 @@ unchanged by it (13.1s → 13.6s on the STL fixture, within run-to-run
 spread). Do not cite it as having reduced oneDAL's memory; it did not.
 
 **Now gated.** `check_header_graph_perf.py` measures `attach_peak_rss_mib`
-and `attach_retained_mib` alongside the three time metrics, each in a fresh
+and `attach_end_rss_mib` alongside the three time metrics, each in a fresh
 subprocess over an STL-bearing fixture (the pre-existing fixture retains
 0.1-2.8 MiB, far too little to gate on). The `performance.yml` PR-vs-base job
 gates both. This closes the "currently ungated" clause of the entry above —
 a change that holds one more copy of the AST costs no measurable time and
 would have passed every gate that existed before.
+
+One design note worth not relearning, because CI caught it and a unit test
+now does: both memory metrics are **absolute** RSS, never a delta against
+the pre-attach reading. `perf_measurement.is_gateable` is written for
+wall-clock durations and rejects anything `<= 0`, while a retained-memory
+delta is legitimately negative whenever the attach releases more than it
+allocates — which is exactly what the clang backend does, since its AST
+comes from the in-process memo the primary pass wrote. The first version
+failed CI with `measured attach_retained_mib=-28.4 is not a gateable
+value`, i.e. on a *better* result than the baseline's. A metric whose
+domain does not match its gate's predicate cannot be gated at all.

@@ -20,7 +20,9 @@
 
 - **`scripts/check_header_graph_perf.py` now gates the header-graph attach's
   memory, not just its wall time** — `attach_peak_rss_mib` and
-  `attach_retained_mib`, each measured in a fresh subprocess over an
+  `attach_end_rss_mib` (absolute RSS, never a signed delta — `is_gateable`
+  rejects `<= 0`, and a retained delta goes negative whenever the attach
+  releases more than it allocates), each measured in a fresh subprocess over an
   STL-bearing fixture and gated independently like the three existing time
   metrics (report schema `abicheck-header-graph-perf/3`). Holding an extra
   copy of the parsed AST costs no measurable time, so every pre-existing gate

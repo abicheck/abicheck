@@ -204,14 +204,13 @@ DEFAULT_REGRESS_MIN_DELTA_MS = 0.0
 #: Absolute MiB floor for :data:`MEMORY_METRICS`, the memory counterpart of
 #: ``DEFAULT_REGRESS_MIN_DELTA_MS``. Non-zero by default, unlike the
 #: millisecond floor, because a pure percentage tolerance is meaningless on
-#: these values at the default sweep sizes: measured here, ``attach_retained_
-#: mib`` is 0.1-2.8 MiB at sizes 25-100, where a 50% tolerance would flag a
-#: 0.1 -> 0.2 MiB page-granularity wobble as a regression. A floor of 32 MiB
-#: means the memory gate fires on a real structural change (holding another
-#: copy of the AST, or a per-declaration allocation that scales) and stays
-#: quiet on allocator noise -- and a caller that sweeps a size large enough
-#: for these metrics to dominate can lower it per metric via
-#: ``--regress-min-delta-ms-attach_retained``.
+#: these values: a run-to-run wobble of a few MiB in a ~600 MiB RSS figure
+#: is page accounting, not a regression, and a pure percentage tolerance
+#: has no way to say so. A floor of 32 MiB means the memory gate fires on a
+#: real structural change (holding another copy of the AST, or a
+#: per-declaration allocation that scales) and stays quiet on allocator
+#: noise -- and a caller can tighten it per metric via
+#: ``--regress-min-delta-ms-attach_end_rss``.
 DEFAULT_REGRESS_MIN_DELTA_MIB = 32.0
 
 #: The three independently-gated metrics, in report order. ``dump_ms`` is the
@@ -233,6 +232,23 @@ DEFAULT_REGRESS_MIN_DELTA_MIB = 32.0
 #: "measured-but-ungated" defect the three-metric split above already fixed
 #: once for ``dump_ms``.
 #:
+#: Both are **absolute** RSS figures, never a delta against the pre-attach
+#: reading. That is a correctness requirement, not a presentation choice:
+#: `perf_measurement.is_gateable` is written for wall-clock durations and
+#: rejects anything `<= 0` ("neither is a plausible wall-clock duration"),
+#: while a retained-memory *delta* is legitimately negative whenever the
+#: attach releases more than it allocates -- which is exactly what the
+#: clang backend does, since its AST comes from the in-process memo the
+#: primary pass wrote, so the attach frees a tree it never allocated. A
+#: signed delta therefore made the *best* outcome indistinguishable from a
+#: broken measurement: CI failed with `measured attach_retained_mib=-28.4
+#: is not a gateable value`. Absolute RSS cannot be negative, so the metric
+#: and the predicate agree by construction. The cost is that these figures
+#: include the primary dump's own footprint, so an extraction regression
+#: moves them too -- accepted deliberately, because a fan-out's per-member
+#: budget is sized from what a member actually holds, not from the attach's
+#: marginal share of it.
+#:
 #: Both are read from a **fresh subprocess** per (size, backend), not from
 #: the in-process ``_one_pair`` loop, and each is a single sample rather
 #: than a median of ``--repeat``. Both choices are forced by what RSS is:
@@ -245,10 +261,10 @@ DEFAULT_REGRESS_MIN_DELTA_MIB = 32.0
 #: under repetition. A fresh process per point costs one extra dump+attach
 #: but measures the thing a release fan-out's per-member budget is actually
 #: sized from. Measured stability on the reference host across three fresh
-#: processes: peak 793.7/793.7/793.5 MiB, retained 580.1/573.2/578.9 MiB --
-#: under 1.5%, which is why one sample is enough and a median of noisy
-#: repeats is not needed.
-MEMORY_METRICS: tuple[str, ...] = ("attach_peak_rss_mib", "attach_retained_mib")
+#: processes: peak 793.7/793.7/793.5 MiB, end-of-attach RSS 580.1/573.2/
+#: 578.9 MiB -- under 1.5%, which is why one sample is enough and a median
+#: of noisy repeats is not needed.
+MEMORY_METRICS: tuple[str, ...] = ("attach_peak_rss_mib", "attach_end_rss_mib")
 
 #: The metrics ``_measure_one``'s in-process repeat loop produces and takes a
 #: median of. :data:`MEMORY_METRICS` deliberately are not among them -- see
@@ -692,6 +708,21 @@ def _peak_rss_mib() -> float:
     return float("nan")
 
 
+def _memory_metrics(*, peak_mib: float, end_rss_mib: float) -> dict[str, float]:
+    """The two memory metrics from one probe's raw readings.
+
+    Split out from :func:`_memory_probe` purely so the arithmetic is
+    testable without a clang toolchain -- the defect this shape exists to
+    prevent (a metric whose value can legitimately be `<= 0`, which
+    `is_gateable` rejects) was only reachable through a full measurement
+    before, so it shipped and failed in CI rather than in a unit test.
+    """
+    return {
+        "attach_peak_rss_mib": peak_mib,
+        "attach_end_rss_mib": end_rss_mib,
+    }
+
+
 def _memory_probe(n: int, backend: str) -> dict[str, float]:
     """One dump+attach in this (fresh) process, reporting its memory cost.
 
@@ -723,12 +754,7 @@ def _memory_probe(n: int, backend: str) -> dict[str, float]:
                 gcc_option_tokens=deferred_tokens,
                 extra_hash_dirs=extra_hash_dirs,
             )
-        # The attach's cost is what this gate owns, so the primary dump's
-        # own footprint is subtracted rather than folded in -- `dump_ms`
-        # already gates that phase, and a retained figure that included it
-        # would move whenever the *extraction* changed.
         gc.collect()
-        before = _rss_mib()
         attached = _attach_header_graph(
             snap,
             header_graph=True,
@@ -742,10 +768,7 @@ def _memory_probe(n: int, backend: str) -> dict[str, float]:
         )
         _require_real_ast_attach(attached, n, backend)
         gc.collect()
-        return {
-            "attach_peak_rss_mib": _peak_rss_mib(),
-            "attach_retained_mib": _rss_mib() - before,
-        }
+        return _memory_metrics(peak_mib=_peak_rss_mib(), end_rss_mib=_rss_mib())
 
 
 def _measure_memory(n: int, backend: str) -> dict[str, float]:

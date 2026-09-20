@@ -697,12 +697,12 @@ jobs:
               --regress-min-delta-ms-dump 30 \
               --regress-min-delta-ms-total 40 \
               --regress-min-delta-ms-attach_peak_rss 48 \
-              --regress-min-delta-ms-attach_retained 48 \
+              --regress-min-delta-ms-attach_end_rss 48 \
               --require-all-metrics \
               | tee header_graph_regression.txt
             # Every metric is gated independently: the three time ones
             # (dump_ms/attach_ms/total_ms) plus the two memory ones
-            # (attach_peak_rss_mib/attach_retained_mib). The absolute floors
+            # (attach_peak_rss_mib/attach_end_rss_mib). The absolute floors
             # differ per metric because the metrics differ by roughly an order
             # of magnitude in size: a shared 10ms floor is right for attach_ms
             # but is well inside runner noise for the ~100ms+ dump and total

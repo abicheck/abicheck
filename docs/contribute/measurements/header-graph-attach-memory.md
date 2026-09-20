@@ -225,10 +225,14 @@ a real old/new pair: 1913 findings, same verdict, same exit code, every
 report section byte-equal apart from one `extractor.duration_seconds`.
 
 The attach's memory is also no longer ungated: `check_header_graph_perf.py`
-now carries `attach_peak_rss_mib` and `attach_retained_mib`, measured in a
-fresh subprocess (a `VmHWM` never resets, and a retained delta measured
-after an earlier repeat dirtied the arenas reads near zero — both would
-report a *better* number the more repeats you ask for) over an STL-bearing
+now carries `attach_peak_rss_mib` and `attach_end_rss_mib`, measured in a
+fresh subprocess (a `VmHWM` never resets, and a figure measured after an
+earlier repeat dirtied the arenas reads low — both would report a *better*
+number the more repeats you ask for). Both are absolute RSS rather than a
+delta against the pre-attach reading, because `is_gateable` rejects
+`<= 0` and a retained *delta* is legitimately negative on the clang
+backend, whose AST comes from the primary pass's memo — so the attach
+frees a tree it never allocated over an STL-bearing
 fixture, because the pre-existing fixture retains 0.1-2.8 MiB and cannot
 carry a memory gate at all.
 
