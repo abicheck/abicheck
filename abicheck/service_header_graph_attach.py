@@ -139,7 +139,7 @@ def _attach_header_graph(
     )
     from .buildsource.pack import BuildSourcePack
     from .dumper import _clang_header_dump, _resolve_clang_bin
-    from .dumper_cache import derived_ast_scope
+    from .dumper_cache import DerivedAstArtifact, derived_ast_scope
     from .dumper_clang_streaming import suppress_streaming_prune
 
     cc = compile if compile is not None else CompileContext()
@@ -155,6 +155,12 @@ def _attach_header_graph(
     eff_includes: list[Path] = list(includes)
     eff_tokens: tuple[str, ...] = cc.gcc_option_tokens
     deferred_dirs: tuple[Path, ...] = ()
+    # Bound before the try, not by the `with` below: every path out of that
+    # block has to be able to ask whether a cached projection was used, and
+    # the block does not run at all when there are no resolved headers or
+    # when the clang acquisition raises. An empty artifact reads as "no
+    # cache, nothing to store", which is exactly right for both.
+    derived_projection = DerivedAstArtifact()
     try:
         resolved_headers = expand_header_inputs(headers)
         if resolved_headers:

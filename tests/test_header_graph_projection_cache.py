@@ -405,3 +405,86 @@ class TestTheWarmRunReallySkipsTheParse:
         again = self._graph_shape(self._attach(self._snapshot()))
         assert counts["projections"] == 2, "a missing sidecar must re-project"
         assert again == cold
+
+
+class TestThePathsWhereNoAstIsAcquired:
+    """The cache must not make a degraded attach worse than no cache at all.
+
+    `_attach_header_graph` reaches its projection step on paths where the
+    clang acquisition never ran: no header resolved to a real file, or the
+    parse raised and was caught. The cache's bookkeeping is created *inside*
+    that acquisition block, so a first version read it unconditionally
+    afterwards and raised `UnboundLocalError` on both paths — turning a
+    documented graceful degradation (ADR-028 D3: never abort the dump) into
+    a crash. Caught by the existing `test_service_unit.py` wiring tests;
+    stated here as the invariant rather than left to them, because they are
+    about header wiring and would not obviously be the place someone looks
+    when adding the next thing to that block.
+    """
+
+    @staticmethod
+    def _attach(snapshot, headers):
+        import abicheck.service_header_graph_attach as attach_mod
+
+        return attach_mod._attach_header_graph(
+            snapshot,
+            header_graph=True,
+            header_graph_includes=False,
+            headers=headers,
+            includes=[],
+            lang=None,
+            compile=None,
+            public_headers=None,
+            public_header_dirs=None,
+        )
+
+    def _snapshot(self):
+        from abicheck.model import AbiSnapshot
+
+        return AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            enums=[],
+        )
+
+    def test_a_header_that_does_not_exist_still_attaches_a_graph(self) -> None:
+        """The exact path the first version crashed on, with no mocks.
+
+        A relative, nonexistent header makes `expand_header_inputs` raise
+        *before* the clang acquisition block is entered, so nothing inside it
+        — including the cache's own bookkeeping — is ever bound. Deliberately
+        unmocked: patching the expansion away would describe the crash
+        without reproducing how a caller reaches it.
+        """
+        snap = self._attach(self._snapshot(), [Path("no-such-header.h")])
+        assert snap.build_source is not None
+        assert snap.build_source.source_graph is not None
+
+    @pytest.mark.parametrize("exc_name", ["SnapshotError", "ValidationError"])
+    def test_a_failed_clang_acquisition_still_attaches_a_graph(
+        self, monkeypatch, exc_name: str
+    ) -> None:
+        """ADR-028 D3: a failed parse degrades to a declaration-only graph,
+        it does not abort the dump — and must not now crash instead."""
+        import abicheck.errors as errors
+        import abicheck.service_header_graph_attach as attach_mod
+
+        exc = getattr(errors, exc_name)
+
+        def raising(*_a: Any, **_k: Any):
+            raise exc("clang is unavailable")
+
+        monkeypatch.setattr(
+            attach_mod, "expand_header_inputs", lambda headers: list(headers)
+        )
+        monkeypatch.setattr(
+            attach_mod, "resolve_inferred_header_roots", lambda *a, **k: ([], [])
+        )
+        monkeypatch.setattr("abicheck.dumper._clang_header_dump", raising)
+
+        snap = self._attach(self._snapshot(), [Path(PUBLIC_HEADER)])
+        assert snap.build_source is not None
+        assert snap.build_source.source_graph is not None
