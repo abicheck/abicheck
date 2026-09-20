@@ -303,7 +303,7 @@ class TestTheWarmRunReallySkipsTheParse:
 
         entry = tmp_path / "cache" / "abcdef.json"
         entry.parent.mkdir(parents=True, exist_ok=True)
-        counts = {"ast_reads": 0, "projections": 0}
+        counts = {"ast_reads": 0, "projections": 0, "streams": 0}
 
         real_load = dumper_cache.load_cached_ast
 
@@ -330,7 +330,18 @@ class TestTheWarmRunReallySkipsTheParse:
         monkeypatch.setattr(
             "abicheck.dumper._clang_header_dump", fake_clang_header_dump
         )
+        import abicheck.buildsource.header_graph_ast_stream as stream_mod
+
+        real_stream = stream_mod.project_header_graph_ast_file
+
+        def counting_stream(path):
+            counts["streams"] += 1
+            return real_stream(path)
+
         monkeypatch.setattr(proj_mod, "project_header_graph_ast", counting_project)
+        monkeypatch.setattr(
+            stream_mod, "project_header_graph_ast_file", counting_stream
+        )
         monkeypatch.setattr(
             attach_mod, "expand_header_inputs", lambda headers: list(headers)
         )
@@ -384,29 +395,49 @@ class TestTheWarmRunReallySkipsTheParse:
         counts = self._install(monkeypatch, tmp_path, AST_CASES["call_edge"])
 
         cold = self._graph_shape(self._attach(self._snapshot()))
-        assert counts == {"ast_reads": 1, "projections": 1}, "cold run must parse"
+        assert counts == {"ast_reads": 1, "projections": 1, "streams": 0}, (
+            "cold run must parse"
+        )
 
         warm = self._graph_shape(self._attach(self._snapshot()))
         # The mechanism: no AST was produced and nothing was projected.
-        assert counts == {"ast_reads": 1, "projections": 1}, (
+        assert counts == {"ast_reads": 1, "projections": 1, "streams": 0}, (
             "the warm run parsed an AST again — the projection cache did not engage"
         )
         # And the result is indistinguishable.
         assert warm == cold
 
-    def test_a_discarded_sidecar_falls_back_to_parsing(
+    def test_a_discarded_sidecar_falls_back_to_re_deriving(
         self, monkeypatch, tmp_path: Path
     ) -> None:
         """The cache must be optional in both directions: losing it costs a
-        re-parse, never a wrong or missing graph."""
+        re-derivation, never a wrong or missing graph.
+
+        *Which* re-derivation is itself the assertion. The AST cache entry
+        still exists, so the second run streams it
+        (`header_graph_ast_stream`) rather than building the whole tree --
+        which is the point of the streaming path: a lost sidecar costs a
+        second pass over a file, not a second gigabyte of dicts. Counting
+        both mechanisms separately is what stops this reading as a pass if
+        the stream silently stopped being reachable and the tree parse
+        quietly took over again.
+        """
         counts = self._install(monkeypatch, tmp_path, AST_CASES["call_edge"])
         cold = self._graph_shape(self._attach(self._snapshot()))
+        assert (counts["projections"], counts["streams"]) == (1, 0), (
+            "the cold run here has no AST document to stream yet (the fake "
+            "clang returns a tree directly), so it must project one"
+        )
 
         for sidecar in (tmp_path / "cache").glob("*.projection.json"):
             sidecar.unlink()
 
         again = self._graph_shape(self._attach(self._snapshot()))
-        assert counts["projections"] == 2, "a missing sidecar must re-project"
+        assert counts["streams"] == 1, "a missing sidecar must re-derive"
+        assert counts["projections"] == 1, (
+            "re-deriving from an AST document on disk must stream it, never "
+            "fall back to building the whole tree again"
+        )
         assert again == cold
 
 
@@ -609,19 +640,38 @@ double total_area(const std::vector<std::unique_ptr<Shape>>& shapes);
         cache_root.mkdir()
         monkeypatch.setenv("XDG_CACHE_HOME", str(cache_root))
 
+        import abicheck.buildsource.header_graph_ast_stream as stream_mod
+
+        # Both ways a projection can be derived, counted apart. A single
+        # combined counter would let the cold run's streaming path silently
+        # revert to a whole-tree parse -- the exact regression this file's
+        # memory work exists to prevent -- while this test still passed.
         projections = {"n": 0}
+        streams = {"n": 0}
         real_project = proj_mod.project_header_graph_ast
+        real_stream = stream_mod.project_header_graph_ast_file
 
         def counting_project(root):
             projections["n"] += 1
             return real_project(root)
 
+        def counting_stream(path):
+            streams["n"] += 1
+            return real_stream(path)
+
         monkeypatch.setattr(proj_mod, "project_header_graph_ast", counting_project)
+        monkeypatch.setattr(
+            stream_mod, "project_header_graph_ast_file", counting_stream
+        )
 
         cold = self._shape(self._attach(self._snapshot(), header))
-        assert projections["n"] == 1, (
-            "the cold run did not project a real clang AST -- clang produced no "
-            "tree, so this test would assert nothing about the cache"
+        assert streams["n"] == 1, (
+            "the cold run did not stream a real clang AST document -- so this "
+            "test would assert nothing about either the cache or the stream"
+        )
+        assert projections["n"] == 0, (
+            "the cold run built the whole tree: the streaming path did not "
+            "engage on a real clang run, which is where its whole saving is"
         )
         # The cold run must have produced something worth caching: an empty
         # projection would make the warm comparison vacuous.
@@ -634,9 +684,9 @@ double total_area(const std::vector<std::unique_ptr<Shape>>& shapes);
         _reset_ast_memo()
 
         warm = self._shape(self._attach(self._snapshot(), header))
-        assert projections["n"] == 1, (
-            "the warm run projected a real clang AST again -- the projection "
-            "cache did not engage on the real dependency's output"
+        assert (projections["n"], streams["n"]) == (0, 1), (
+            "the warm run re-derived the projection -- the projection cache "
+            "did not engage on the real dependency's output"
         )
         assert warm == cold
 

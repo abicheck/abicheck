@@ -126,6 +126,10 @@ def _attach_header_graph(
         HeaderGraphAstProjection,
         project_header_graph_ast,
     )
+    from .buildsource.header_graph_ast_stream import (
+        ClangAstStreamError,
+        project_header_graph_ast_file,
+    )
     from .buildsource.header_graph_projection_cache import (
         load_cached_projection,
         store_cached_projection,
@@ -139,8 +143,8 @@ def _attach_header_graph(
     )
     from .buildsource.pack import BuildSourcePack
     from .dumper import _clang_header_dump, _resolve_clang_bin
-    from .dumper_cache import DerivedAstArtifact, derived_ast_scope
     from .dumper_clang_streaming import suppress_streaming_prune
+    from .storage.derived_ast import DerivedAstArtifact, derived_ast_scope
 
     cc = compile if compile is not None else CompileContext()
     # Case-insensitive, None-safe: PE/Mach-O's own main pass
@@ -161,6 +165,46 @@ def _attach_header_graph(
     # when the clang acquisition raises. An empty artifact reads as "no
     # cache, nothing to store", which is exactly right for both.
     derived_projection = DerivedAstArtifact()
+    # Set when the projection below was computed by *streaming* an AST
+    # document rather than read from a sidecar, which is the one case that
+    # still owes a cache write. `derived_projection.used` cannot say which
+    # of the two happened, and storing unconditionally would rewrite an
+    # identical sidecar on every warm run.
+    streamed_paths: list[Path] = []
+
+    def _projection_for(ast_path: Path) -> HeaderGraphAstProjection | None:
+        """Answer the AST acquisition with a projection, or decline.
+
+        Offered two different paths (see `dumper_cache.
+        offer_derived_ast_source`): the AST *cache entry*, before anything
+        is read, and -- when no entry existed -- the document `clang` just
+        wrote. Both are single-document AST dumps, so both are streamable;
+        the sidecar is only ever consulted for the first, since a fresh
+        temp file has none.
+
+        Declining (``None``) is always safe: the caller then parses the AST
+        the way it always did. So every failure here degrades to the old
+        cost rather than to a wrong or missing graph (ADR-028 D3) -- an
+        unreadable document, a truncated one, a shape the scanner does not
+        recognise.
+        """
+        cached = load_cached_projection(ast_path)
+        if cached is not None:
+            return cached
+        if not ast_path.exists():
+            return None
+        try:
+            with memory_trace.phase("dump.header_graph.project_streaming"):
+                projection = project_header_graph_ast_file(ast_path)
+        except (ClangAstStreamError, ValueError, OSError, RecursionError):
+            # `RecursionError` for the same reason `clang_ast_run` already
+            # guards it: a pathologically deep TU exhausts the interpreter's
+            # stack inside `json.loads`, and degrading to the ordinary parse
+            # (which guards it too) is better than aborting the dump.
+            return None
+        streamed_paths.append(ast_path)
+        return projection
+
     try:
         resolved_headers = expand_header_inputs(headers)
         if resolved_headers:
@@ -229,7 +273,7 @@ def _attach_header_graph(
         with (
             suppress_streaming_prune(),
             memory_trace.phase("dump.header_graph.clang_ast"),
-            derived_ast_scope(load_cached_projection) as derived_projection,
+            derived_ast_scope(_projection_for) as derived_projection,
         ):
             ast_root, _resolved_kind, _resolved_force_cpp = _clang_header_dump(
                 resolved_headers,
@@ -280,12 +324,23 @@ def _attach_header_graph(
     # `DECL_CALLS_DECL` included.
     projection: HeaderGraphAstProjection | None = None
     if derived_projection.used:
-        # Warm: the projection came straight off disk and no AST was ever
-        # parsed. `ast_root` holds the cache layer's own marker rather than a
-        # tree, so it must not be projected -- `used` is the discriminator,
-        # never a type check on that marker.
+        # No tree was ever built: the projection came either straight off a
+        # sidecar (warm) or from streaming the AST document itself (cold).
+        # `ast_root` holds the cache layer's own marker rather than a tree,
+        # so it must not be projected -- `used` is the discriminator, never
+        # a type check on that marker.
         projection = derived_projection.value
-        memory_trace.mark("dump.header_graph.projection_cache:hit")
+        memory_trace.mark(
+            "dump.header_graph.projection_streamed"
+            if streamed_paths
+            else "dump.header_graph.projection_cache:hit"
+        )
+        if streamed_paths and derived_projection.cache_path is not None:
+            # A streamed projection still owes the sidecar the warm path
+            # reads, so the next run skips even the stream. Stored against
+            # the AST *cache entry* path, never the streamed document's own
+            # -- on a cold run that was a temp file the dump unlinks.
+            store_cached_projection(derived_projection.cache_path, projection)
     elif ast_root is not None:
         with memory_trace.phase("dump.header_graph.project"):
             projection = project_header_graph_ast(ast_root)

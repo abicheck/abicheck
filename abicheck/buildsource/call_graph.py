@@ -58,6 +58,10 @@ from ..model.graph_facts import (
 from ..model.mangled_name import strip_macho_itanium_decoration
 from ..model.source_graph import function_decl_identity
 from .adapters.base import source_from_argv
+from .call_decl_record import (
+    _OVERRIDE_MARKER_KINDS,
+    _compact_decl_record,
+)
 from .clang_ast_run import run_clang_ast_dump
 from .source_graph_build import project_source_files
 from .source_graph_build_source_abi import _file_in_project
@@ -316,12 +320,6 @@ def _resolve_ref_callee_identity(
     node_id = str(ref.get("id") or "")
     indexed = id_index.get(node_id, "")
     return indexed or _identity(ref)
-
-
-#: clang AST node kinds that mark a method as overriding/finalizing a base
-#: virtual slot *without* repeating ``"virtual": true`` on the override's own
-#: declaration (see ``_ref_is_virtual``'s docstring for the empirical finding).
-_OVERRIDE_MARKER_KINDS = frozenset({"OverrideAttr", "FinalAttr"})
 
 
 def _ref_is_virtual(ref: dict[str, Any]) -> bool:
@@ -630,7 +628,7 @@ def _enter_function_scope(
     # id_index's flat identity string alone can't provide (Codex review,
     # fresh evidence -- see `_find_referenced_decl`'s own docstring).
     if node_id:
-        member_index.setdefault(node_id, node)
+        member_index.setdefault(node_id, _compact_decl_record(node))
     return caller, caller_file
 
 
@@ -763,7 +761,7 @@ def _index_member_decls(node: Any, index: dict[str, dict[str, Any]]) -> None:
     if kind in _FUNCTION_DECL_KINDS:
         node_id = str(node.get("id") or "")
         if node_id:
-            index.setdefault(node_id, node)
+            index.setdefault(node_id, _compact_decl_record(node))
     for child in node.get("inner", []) or []:
         _index_member_decls(child, index)
 

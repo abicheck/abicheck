@@ -14,7 +14,6 @@ import threading
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, TimeoutError as FutureTimeoutError
 from contextlib import contextmanager
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
@@ -24,6 +23,7 @@ if TYPE_CHECKING:
 from defusedxml import ElementTree as DefusedET
 
 from . import deadline
+from .storage.derived_ast import offer_derived_ast_source
 
 log = logging.getLogger(__name__)
 
@@ -541,55 +541,6 @@ def ast_memoize_active() -> bool:
     return _ast_memoize_scope.get()
 
 
-@dataclass
-class DerivedAstArtifact:
-    """What a final AST consumer got instead of the AST, and where from.
-
-    ``used`` is the discriminator callers branch on -- never identity on the
-    marker :func:`load_cached_ast` returns, which is private to this module.
-    ``cache_path`` is filled in even on a miss, so a caller that had to parse
-    can store its derived artifact beside the entry it came from.
-    """
-
-    value: Any = None
-    used: bool = False
-    cache_path: Path | None = None
-
-
-_derived_ast_slot: contextvars.ContextVar[tuple[DerivedAstArtifact, Any] | None] = (
-    contextvars.ContextVar("_derived_ast_slot", default=None)
-)
-
-#: Returned by :func:`load_cached_ast` when a derived artifact superseded the
-#: AST. Private on purpose: callers read ``DerivedAstArtifact.used`` instead,
-#: so no call site depends on this object's identity.
-_AST_SUPERSEDED = object()
-
-
-@contextmanager
-def derived_ast_scope(loader: Any) -> Iterator[DerivedAstArtifact]:
-    """Let the *final* consumer of an AST substitute a cheap derived form.
-
-    Inside this scope, :func:`load_cached_ast` offers *loader* the AST cache
-    entry's own path before reading it. If *loader* returns a value, the AST
-    is never read or parsed at all and that value is reported here instead.
-
-    Exists as a callback rather than as knowledge of any particular derived
-    type because this module must not import the layers that own those types
-    -- ``buildsource`` imports the cache, never the reverse, and
-    ``check_architecture.py`` enforces that direction.
-
-    Only a consumer that genuinely needs nothing else from the AST may open
-    one: a run inside this scope may receive no AST at all.
-    """
-    slot = DerivedAstArtifact()
-    token = _derived_ast_slot.set((slot, loader))
-    try:
-        yield slot
-    finally:
-        _derived_ast_slot.reset(token)
-
-
 def store_cached_ast(key: str, backend: str, root: Any) -> None:
     """Memoize an already-parsed AST *root* for (*backend*, *key*) in the
     calling thread's own pending slot (see :data:`_ast_memo_slot`'s own
@@ -649,16 +600,10 @@ def load_cached_ast(
     # because a derived entry is self-sufficient -- it stays valid for this
     # key even if the AST itself was evicted, and re-parsing then would be a
     # pure loss.
-    derived = _derived_ast_slot.get()
-    if derived is not None:
-        holder, loader = derived
-        holder.cache_path = cache_path
-        value = loader(cache_path)
-        if value is not None:
-            holder.value = value
-            holder.used = True
-            deadline.check()
-            return _AST_SUPERSEDED
+    superseded = offer_derived_ast_source(cache_path, is_cache_entry=True)
+    if superseded is not None:
+        deadline.check()
+        return superseded
     if not cache_path.exists():
         return None
     deadline.check()

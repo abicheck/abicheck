@@ -784,23 +784,35 @@ def _measure_memory(n: int, backend: str) -> dict[str, float]:
     """
     if not Path("/proc/self/statm").exists():
         return dict.fromkeys(MEMORY_METRICS, float("nan"))
-    proc = subprocess.run(
-        [
-            sys.executable,
-            str(Path(__file__).resolve()),
-            "--memory-probe",
-            str(n),
-            backend,
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"memory probe failed for size={n} backend={backend} "
-            f"(exit {proc.returncode}):\n{proc.stderr[-4000:]}"
+    with tempfile.TemporaryDirectory(prefix="hgperf_xdg_") as xdg:
+        # An empty, private `XDG_CACHE_HOME`, so this is unambiguously the
+        # **cold** figure. Not housekeeping: since the header-graph attach
+        # learned to stream a cached projection (and, failing that, the AST
+        # document itself), a populated cache is not a faster measurement of
+        # the same thing -- it is a measurement of a different path, roughly
+        # a third of the cold peak. Inheriting the ambient cache would make
+        # this metric mean whatever the runner's `~/.cache` happened to
+        # hold, so a real cold regression could land under a warm baseline
+        # and read as a pass. The fixture is rebuilt per point anyway (see
+        # `_build_fixture`), so nothing is lost by starting empty.
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "--memory-probe",
+                str(n),
+                backend,
+            ],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "XDG_CACHE_HOME": xdg},
         )
-    return {k: float(v) for k, v in json.loads(proc.stdout).items()}
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"memory probe failed for size={n} backend={backend} "
+                f"(exit {proc.returncode}):\n{proc.stderr[-4000:]}"
+            )
+        return {k: float(v) for k, v in json.loads(proc.stdout).items()}
 
 
 def _measure_size(

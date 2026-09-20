@@ -60,7 +60,16 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
         # version integer is the kind of registry entry this repository has
         # repeatedly watched go stale.
         fixed_by=(1338, 1339),
-        seed_tests=("tests/test_header_graph_projection_cache.py",),
+        seed_tests=(
+            "tests/test_header_graph_projection_cache.py",
+            # The same invariant against a *third* producer of the same
+            # artifact: a projection streamed from the AST document itself
+            # must equal the one built from the whole tree, exactly. Its own
+            # module because the thing it can get wrong is different -- not
+            # a stale or mis-shaped cache entry, but a walk that loses the
+            # state clang's format carries across sibling declarations.
+            "tests/test_header_graph_ast_stream.py",
+        ),
         # `()` deliberately, per this field's own contract: "cli" needs a
         # real Click/`CliRunner` invocation and "python-api" a call through
         # `abicheck.service`, and every seed test here calls
@@ -77,6 +86,12 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
             # invokes the live `clang -ast-dump=json` backend, not a
             # hand-built AST fragment fed to an internal parser.
             "frontend": ("clang",),
+            # How the projection was produced. Every value must yield the
+            # identical artifact, and the axis exists because each is a
+            # genuinely different mechanism with its own failure: the whole
+            # tree (the reference), the streamed document (loses
+            # cross-sibling state), the sidecar (stale or mis-shaped).
+            "derivation": ("whole-tree", "streamed", "sidecar"),
             # Every filesystem call either entry point makes, against the
             # faults reachable through it -- the axis the first version of
             # this class had no coverage on at all, which is how an
