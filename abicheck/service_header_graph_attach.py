@@ -126,6 +126,10 @@ def _attach_header_graph(
         HeaderGraphAstProjection,
         project_header_graph_ast,
     )
+    from .buildsource.header_graph_projection_cache import (
+        load_cached_projection,
+        store_cached_projection,
+    )
     from .buildsource.include_graph import augment_graph_with_includes
     from .buildsource.model import (
         CoverageStatus,
@@ -135,6 +139,7 @@ def _attach_header_graph(
     )
     from .buildsource.pack import BuildSourcePack
     from .dumper import _clang_header_dump, _resolve_clang_bin
+    from .dumper_cache import derived_ast_scope
     from .dumper_clang_streaming import suppress_streaming_prune
 
     cc = compile if compile is not None else CompileContext()
@@ -209,9 +214,16 @@ def _attach_header_graph(
         # parse case (a memo-hit is separately covered by
         # `_streaming_prune_enabled()`'s own `ast_memoize_active()` check,
         # which applies to the *primary* pass this memo entry came from).
+        # The projection cache goes here rather than around this whole
+        # block: `derived_ast_scope` offers the AST cache entry's own path to
+        # `load_cached_projection` *before* anything is read, so a warm run
+        # skips the 822 MiB read and the ~1 GiB of dicts it would become.
+        # A miss still records the path, which is how the cold run below
+        # knows where to store what it computed.
         with (
             suppress_streaming_prune(),
             memory_trace.phase("dump.header_graph.clang_ast"),
+            derived_ast_scope(load_cached_projection) as derived_projection,
         ):
             ast_root, _resolved_kind, _resolved_force_cpp = _clang_header_dump(
                 resolved_headers,
@@ -261,9 +273,22 @@ def _attach_header_graph(
     # tree in the same order (`project_header_graph_ast`),
     # `DECL_CALLS_DECL` included.
     projection: HeaderGraphAstProjection | None = None
-    if ast_root is not None:
+    if derived_projection.used:
+        # Warm: the projection came straight off disk and no AST was ever
+        # parsed. `ast_root` holds the cache layer's own marker rather than a
+        # tree, so it must not be projected -- `used` is the discriminator,
+        # never a type check on that marker.
+        projection = derived_projection.value
+        memory_trace.mark("dump.header_graph.projection_cache:hit")
+    elif ast_root is not None:
         with memory_trace.phase("dump.header_graph.project"):
             projection = project_header_graph_ast(ast_root)
+        if derived_projection.cache_path is not None:
+            # Store beside the AST entry this projection was derived from, so
+            # the two share one key and one lifetime. Best-effort by design:
+            # `store_cached_projection` never raises, because failing to warm
+            # a cache must not fail the dump.
+            store_cached_projection(derived_projection.cache_path, projection)
     # `ast_root` is the only surviving reference to the tree at this point
     # (`_clang_header_dump` is called with `memoize=False`, so nothing was
     # written into the in-process AST memo either), so clearing the name

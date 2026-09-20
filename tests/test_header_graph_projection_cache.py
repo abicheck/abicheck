@@ -1,0 +1,407 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""The projection cache's contract: a warm run must be indistinguishable.
+
+The bug class this states as an executable invariant: *a cache that serves a
+derived artifact must serve exactly what recomputing would have produced, and
+must refuse to serve anything it cannot prove it understands.* Both halves
+matter and they fail differently — serving the wrong projection is silently
+wrong evidence (fewer graph edges, fewer findings, no error anywhere), while
+refusing too eagerly is only a slow run.
+
+So the tests below check equality of the *result* over generated inputs, and
+separately assert the **mechanism**: that a warm run really skipped the parse
+rather than quietly recomputing and agreeing. Per AGENTS.md's differential
+rule, every equality assertion here would pass just as happily against an
+implementation with no cache at all.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from abicheck.buildsource.call_graph import CallEdge
+from abicheck.buildsource.header_graph_ast_projection import (
+    HeaderGraphAstProjection,
+    project_header_graph_ast,
+)
+from abicheck.buildsource.header_graph_projection_cache import (
+    PROJECTION_CACHE_SCHEMA,
+    decode_projection,
+    encode_projection,
+    load_cached_projection,
+    projection_sidecar_path,
+    store_cached_projection,
+)
+from abicheck.buildsource.type_graph import TypeEdge
+
+PUBLIC_HEADER = "/proj/include/pub.h"
+PRIVATE_HEADER = "/proj/include/detail/impl.h"
+
+
+def _loc(file: str) -> dict[str, Any]:
+    return {"file": file, "line": 1, "col": 1}
+
+
+def _record(name: str, *, file: str, inner: list[dict] | None = None) -> dict:
+    return {
+        "kind": "CXXRecordDecl",
+        "name": name,
+        "loc": _loc(file),
+        "inner": inner or [],
+    }
+
+
+def _field(name: str, qual_type: str, *, init: dict | None = None) -> dict:
+    d: dict[str, Any] = {
+        "kind": "FieldDecl",
+        "name": name,
+        "type": {"qualType": qual_type},
+    }
+    if init is not None:
+        d["inner"] = [init]
+    return d
+
+
+def _function(
+    name: str, *, file: str, mangled: str | None = None, body: list[dict] | None = None
+) -> dict:
+    inner: list[dict] = []
+    if body is not None:
+        inner.append({"kind": "CompoundStmt", "inner": body})
+    d: dict[str, Any] = {
+        "kind": "FunctionDecl",
+        "name": name,
+        "loc": _loc(file),
+        "type": {"qualType": "void ()"},
+        "inner": inner,
+    }
+    if mangled:
+        d["mangledName"] = mangled
+    return d
+
+
+def _tu(*decls: dict) -> dict:
+    return {"kind": "TranslationUnitDecl", "inner": list(decls)}
+
+
+#: Structurally distinct ASTs, so the round-trip is exercised over every
+#: projection member rather than one shape — including the empty case, which
+#: is the one most likely to round-trip by accident.
+AST_CASES: dict[str, dict] = {
+    "empty": _tu(),
+    "one_record": _tu(_record("Public", file=PUBLIC_HEADER)),
+    "private_field_type": _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "detail",
+            "inner": [_record("Impl", file=PRIVATE_HEADER)],
+        },
+        _record("Public", file=PUBLIC_HEADER, inner=[_field("p", "detail::Impl *")]),
+    ),
+    "field_initializer_reference": _tu(
+        {
+            "kind": "VarDecl",
+            "name": "k",
+            "loc": _loc(PRIVATE_HEADER),
+            "type": {"qualType": "int"},
+        },
+        _record(
+            "Widget",
+            file=PUBLIC_HEADER,
+            inner=[
+                _field(
+                    "x",
+                    "int",
+                    init={
+                        "kind": "DeclRefExpr",
+                        "referencedDecl": {
+                            "kind": "VarDecl",
+                            "name": "k",
+                            "loc": _loc(PRIVATE_HEADER),
+                        },
+                    },
+                )
+            ],
+        ),
+    ),
+    "call_edge": _tu(
+        _function("helper", file=PRIVATE_HEADER, mangled="_ZN6helperEv"),
+        _function(
+            "entry",
+            file=PUBLIC_HEADER,
+            mangled="_Z5entryv",
+            body=[
+                {
+                    "kind": "CallExpr",
+                    "inner": [
+                        {
+                            "kind": "DeclRefExpr",
+                            "referencedDecl": _function("helper", file=PRIVATE_HEADER),
+                        }
+                    ],
+                }
+            ],
+        ),
+    ),
+}
+
+
+def _as_tuple(p: HeaderGraphAstProjection) -> tuple:
+    return (
+        tuple(sorted(p.type_files.items())),
+        tuple(sorted(p.entity_files.items())),
+        tuple(sorted(dataclasses.astuple(e) for e in p.type_edges)),
+        tuple(sorted(dataclasses.astuple(e) for e in p.call_edges)),
+    )
+
+
+class TestRoundTrip:
+    @pytest.mark.parametrize("name", sorted(AST_CASES))
+    def test_a_projection_survives_the_cache_unchanged(self, name: str) -> None:
+        original = project_header_graph_ast(AST_CASES[name])
+        restored = decode_projection(encode_projection(original))
+        assert restored is not None
+        assert _as_tuple(restored) == _as_tuple(original)
+
+    def test_the_cases_are_not_all_the_same_projection(self) -> None:
+        """Vacuity guard: equality above means nothing if every case is empty."""
+        shapes = {
+            n: _as_tuple(project_header_graph_ast(a)) for n, a in AST_CASES.items()
+        }
+        assert len(set(shapes.values())) > 1
+        assert any(
+            p.type_edges
+            for p in (project_header_graph_ast(a) for a in AST_CASES.values())
+        )
+        assert any(
+            p.call_edges
+            for p in (project_header_graph_ast(a) for a in AST_CASES.values())
+        )
+
+    def test_round_trip_through_a_real_file(self, tmp_path: Path) -> None:
+        ast_entry = tmp_path / "deadbeef.json"
+        ast_entry.write_text("{}")
+        original = project_header_graph_ast(AST_CASES["call_edge"])
+        store_cached_projection(ast_entry, original)
+        restored = load_cached_projection(ast_entry)
+        assert restored is not None
+        assert _as_tuple(restored) == _as_tuple(original)
+
+
+class TestItRefusesWhatItCannotTrust:
+    """Every rejection must be a miss, never a wrong answer or a crash."""
+
+    def test_a_missing_entry_is_a_miss(self, tmp_path: Path) -> None:
+        assert load_cached_projection(tmp_path / "nothing.json") is None
+
+    @pytest.mark.parametrize(
+        "blob", ["", "not json", "[]", "null", '{"schema": "other/1"}']
+    )
+    def test_an_unusable_entry_is_a_miss(self, blob: str, tmp_path: Path) -> None:
+        entry = tmp_path / "x.json"
+        projection_sidecar_path(entry).write_text(blob)
+        assert load_cached_projection(entry) is None
+
+    def test_an_unusable_entry_is_discarded_not_kept(self, tmp_path: Path) -> None:
+        """Otherwise a corrupt sidecar costs every future run a re-parse."""
+        entry = tmp_path / "x.json"
+        sidecar = projection_sidecar_path(entry)
+        sidecar.write_text("garbage")
+        assert load_cached_projection(entry) is None
+        assert not sidecar.exists()
+
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            pytest.param(lambda d: d.update(schema="abicheck-x/99"), id="schema"),
+            pytest.param(
+                lambda d: d.update(type_edge_fields=["src", "dst"]), id="type_fields"
+            ),
+            pytest.param(
+                lambda d: d.update(call_edge_fields=["caller"]), id="call_fields"
+            ),
+        ],
+    )
+    def test_a_schema_this_build_does_not_share_is_refused(self, mutate) -> None:
+        """The self-describing half: a reordered or extended edge dataclass
+        must invalidate its own cache, with no version number to remember."""
+        doc = json.loads(
+            encode_projection(project_header_graph_ast(AST_CASES["call_edge"]))
+        )
+        mutate(doc)
+        assert decode_projection(json.dumps(doc)) is None
+
+    def test_todays_document_is_accepted(self) -> None:
+        """The complement — without it, a decoder that refused everything
+        would pass every test above while disabling the cache entirely."""
+        blob = encode_projection(project_header_graph_ast(AST_CASES["call_edge"]))
+        assert json.loads(blob)["schema"] == PROJECTION_CACHE_SCHEMA
+        assert decode_projection(blob) is not None
+
+    def test_the_field_lists_are_read_from_the_dataclasses(self) -> None:
+        """A hand-maintained copy would drift silently; this is what makes
+        the rejection above automatic rather than remembered."""
+        doc = json.loads(encode_projection(HeaderGraphAstProjection()))
+        assert doc["type_edge_fields"] == [f.name for f in dataclasses.fields(TypeEdge)]
+        assert doc["call_edge_fields"] == [f.name for f in dataclasses.fields(CallEdge)]
+
+
+class TestSidecarIdentity:
+    def test_the_sidecar_belongs_to_one_ast_entry(self, tmp_path: Path) -> None:
+        a = projection_sidecar_path(tmp_path / "aaa.json")
+        b = projection_sidecar_path(tmp_path / "bbb.json")
+        assert a != b
+        assert a.parent == (tmp_path / "aaa.json").parent
+
+    def test_two_keys_do_not_share_a_projection(self, tmp_path: Path) -> None:
+        """The correctness property the sidecar naming exists for: a
+        different AST cache entry is a different projection, always."""
+        first, second = tmp_path / "aaa.json", tmp_path / "bbb.json"
+        store_cached_projection(first, project_header_graph_ast(AST_CASES["call_edge"]))
+        assert load_cached_projection(second) is None
+        restored = load_cached_projection(first)
+        assert restored is not None and restored.call_edges
+
+
+class TestTheWarmRunReallySkipsTheParse:
+    """Prove the mechanism, not the agreement (AGENTS.md's differential rule).
+
+    Every equality assertion above holds for an implementation that ignores
+    the cache and recomputes — which is the behaviour this change exists to
+    remove, and which would show up only as a gigabyte of RSS nobody
+    measured. So these watch the AST itself: it must be read on the cold run
+    and never touched on the warm one.
+    """
+
+    @staticmethod
+    def _install(monkeypatch, tmp_path: Path, ast: dict) -> dict[str, int]:
+        """Point the attach at a fake clang whose AST reads are counted."""
+        import abicheck.dumper_cache as dumper_cache
+        import abicheck.service_header_graph_attach as attach_mod
+
+        entry = tmp_path / "cache" / "abcdef.json"
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        counts = {"ast_reads": 0, "projections": 0}
+
+        real_load = dumper_cache.load_cached_ast
+
+        def fake_clang_header_dump(*_a: Any, **_k: Any):
+            # Route through the real cache layer so the derived-artifact
+            # scope is exercised exactly as production exercises it.
+            got = real_load("k", "clang", entry, memoize=False)
+            if got is not None:
+                return got, None, True
+            counts["ast_reads"] += 1
+            # Write the real document, as a real clang run would: a later
+            # fallback must find the AST itself here, not a placeholder.
+            entry.write_text(json.dumps(ast))
+            return ast, None, True
+
+        import abicheck.buildsource.header_graph_ast_projection as proj_mod
+
+        real_project = proj_mod.project_header_graph_ast
+
+        def counting_project(root):
+            counts["projections"] += 1
+            return real_project(root)
+
+        monkeypatch.setattr(
+            "abicheck.dumper._clang_header_dump", fake_clang_header_dump
+        )
+        monkeypatch.setattr(proj_mod, "project_header_graph_ast", counting_project)
+        monkeypatch.setattr(
+            attach_mod, "expand_header_inputs", lambda headers: list(headers)
+        )
+        monkeypatch.setattr(
+            attach_mod, "resolve_inferred_header_roots", lambda *a, **k: ([], [])
+        )
+        return counts
+
+    @staticmethod
+    def _attach(snapshot):
+        import abicheck.service_header_graph_attach as attach_mod
+
+        return attach_mod._attach_header_graph(
+            snapshot,
+            header_graph=True,
+            header_graph_includes=False,
+            headers=[Path(PUBLIC_HEADER)],
+            includes=[],
+            lang=None,
+            compile=None,
+            public_headers=None,
+            public_header_dirs=None,
+        )
+
+    @staticmethod
+    def _snapshot():
+        from abicheck.model import AbiSnapshot
+
+        return AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[],
+            variables=[],
+            types=[],
+            enums=[],
+        )
+
+    def _graph_shape(self, snap) -> tuple:
+        g = snap.build_source.source_graph
+        return (
+            tuple(
+                sorted((n.id, n.kind, tuple(sorted(n.attrs.items()))) for n in g.nodes)
+            ),
+            tuple(sorted((e.src, e.dst, e.kind) for e in g.edges)),
+            tuple(sorted(g.extractor_passes.items())),
+        )
+
+    def test_the_second_run_reads_no_ast_and_builds_the_same_graph(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        counts = self._install(monkeypatch, tmp_path, AST_CASES["call_edge"])
+
+        cold = self._graph_shape(self._attach(self._snapshot()))
+        assert counts == {"ast_reads": 1, "projections": 1}, "cold run must parse"
+
+        warm = self._graph_shape(self._attach(self._snapshot()))
+        # The mechanism: no AST was produced and nothing was projected.
+        assert counts == {"ast_reads": 1, "projections": 1}, (
+            "the warm run parsed an AST again — the projection cache did not engage"
+        )
+        # And the result is indistinguishable.
+        assert warm == cold
+
+    def test_a_discarded_sidecar_falls_back_to_parsing(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """The cache must be optional in both directions: losing it costs a
+        re-parse, never a wrong or missing graph."""
+        counts = self._install(monkeypatch, tmp_path, AST_CASES["call_edge"])
+        cold = self._graph_shape(self._attach(self._snapshot()))
+
+        for sidecar in (tmp_path / "cache").glob("*.projection.json"):
+            sidecar.unlink()
+
+        again = self._graph_shape(self._attach(self._snapshot()))
+        assert counts["projections"] == 2, "a missing sidecar must re-project"
+        assert again == cold
