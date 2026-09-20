@@ -139,6 +139,14 @@ NON_ADR062_MODULES = frozenset(
         # the same snapshot-envelope body of work, not an ADR-062 Phase 0
         # primitive.
         "incremental_encode",
+        # The derived-AST handoff: it lets a final AST consumer take a
+        # cheap derived form (the header-graph projection) instead of a
+        # parsed tree. It lives here because ADR-061 routes cache
+        # management to `storage`, not because it is a storage *format*
+        # primitive -- it defines no on-disk shape, has no `from_dict`, no
+        # lookup key and no versioned document, so every invariant this
+        # directory sweeps for is vacuous against it.
+        "derived_ast",
     }
 )
 
