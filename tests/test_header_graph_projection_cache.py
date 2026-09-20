@@ -523,6 +523,81 @@ class TestThePathsWhereNoAstIsAcquired:
         assert snap.build_source is not None
         assert snap.build_source.source_graph is not None
 
+    @pytest.mark.parametrize(
+        ("label", "ast"),
+        [
+            ("inner is a number", {"kind": "TranslationUnitDecl", "inner": 1}),
+            (
+                "a child's inner is a number",
+                {
+                    "kind": "TranslationUnitDecl",
+                    "inner": [{"kind": "FunctionDecl", "name": "f", "inner": 7}],
+                },
+            ),
+            (
+                "a child's inner is a string",
+                {
+                    "kind": "TranslationUnitDecl",
+                    "inner": [{"kind": "CXXRecordDecl", "name": "R", "inner": "x"}],
+                },
+            ),
+            ("inner is a mapping", {"kind": "TranslationUnitDecl", "inner": {"a": 1}}),
+        ],
+    )
+    def test_a_readable_but_misshapen_ast_still_attaches_a_graph(
+        self, monkeypatch, label: str, ast: dict
+    ) -> None:
+        """A corrupt AST cache entry must cost the graph, not the dump.
+
+        The readers walk a tree whose shape they trust -- `for child in
+        node.get("inner", []) or []` raises `TypeError` when `inner` is a
+        number -- and that is reachable from a cache file that decoded fine
+        but holds the wrong shape. Uncontained, it escaped the projection
+        step and aborted the whole dump, which is the failure ADR-028 D3
+        names directly.
+
+        Parametrized over several *independently-chosen* misshapen trees,
+        not only the one reported: the bug class is "a shape the readers
+        assume, violated anywhere in the walk", so a single fixture would
+        foreclose exactly one node position.
+        """
+        import abicheck.service_header_graph_attach as attach_mod
+
+        monkeypatch.setattr(
+            attach_mod, "expand_header_inputs", lambda headers: list(headers)
+        )
+        monkeypatch.setattr(
+            attach_mod, "resolve_inferred_header_roots", lambda *a, **k: ([], [])
+        )
+        monkeypatch.setattr(
+            "abicheck.dumper._clang_header_dump",
+            lambda *a, **k: (ast, None, True),
+        )
+
+        snap = self._attach(self._snapshot(), [Path(PUBLIC_HEADER)])
+        assert snap.build_source is not None
+        assert snap.build_source.source_graph is not None
+
+    def test_the_misshapen_asts_really_do_break_the_readers(self) -> None:
+        """Vacuity guard: each fixture above must actually raise.
+
+        If a shape stopped reaching the walk, the containment test would
+        pass while proving nothing about containment.
+        """
+        from abicheck.buildsource.header_graph_ast_projection import (
+            project_header_graph_ast,
+        )
+
+        for ast in (
+            {"kind": "TranslationUnitDecl", "inner": 1},
+            {
+                "kind": "TranslationUnitDecl",
+                "inner": [{"kind": "FunctionDecl", "name": "f", "inner": 7}],
+            },
+        ):
+            with pytest.raises((TypeError, AttributeError)):
+                project_header_graph_ast(ast)
+
 
 @pytest.mark.skipif(
     shutil.which("clang++") is None,

@@ -19,3 +19,12 @@
   so that backend is unchanged. Evidence is identical either way: the same
   readers run over the same nodes in the same order, verified by comparing
   the whole projection against the non-streaming one over real clang output.
+
+### Fixed
+
+- **A corrupt clang AST cache entry no longer aborts a dump.** The
+  header-graph readers walk a tree whose shape they trust, so an entry that
+  decoded as JSON but held the wrong shape (an `inner` that is a number
+  rather than a list) raised `TypeError` out of the projection step and
+  failed the whole dump, where ADR-028 D3 requires degrading to the
+  declaration-only graph. Both projection paths now contain it.

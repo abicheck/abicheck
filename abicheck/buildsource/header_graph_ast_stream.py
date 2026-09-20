@@ -140,6 +140,16 @@ recursion and a streamed one cannot:
   boundary lands between them. ``type_graph._walk_child_sequence`` exists so
   that state can be handed back and forth here.
 
+A third rule is about what this scanner *refuses*. It must never accept a
+document ``json.loads`` would reject, because then this module answers
+where the whole-tree path raises -- and the two would disagree exactly when
+an AST cache entry is corrupt, which is the one case the equivalence claim
+most needs to hold. So the element separators are *counted*, not merely
+allowed (:func:`_check_gap`), and a top-level element that is not a JSON
+object is rejected rather than skipped. Both raise, and every caller
+answers a raise by parsing the document the ordinary way, so strictness
+here costs a slow run and never a wrong answer.
+
 Getting either wrong is silent: the edges simply differ. So equivalence is
 not argued, it is executed -- ``tests/test_header_graph_ast_stream.py``
 compares this module's projection against
@@ -189,11 +199,13 @@ _STRING_END = re.compile(rb'(?<!\\)(?:\\\\)*"')
 _CHUNK = 1 << 20
 
 
-#: What may legally sit between two top-level elements: the separating
-#: comma and any pretty-printing whitespace. Anything else there is a
-#: non-object element (a bare number, a string, a nested array), which this
-#: scanner cannot bound -- see :func:`_check_gap`.
-_BETWEEN_ELEMENTS = frozenset(b", \t\r\n")
+#: Pretty-printing whitespace, the only thing that may sit around an
+#: element separator. The separating comma itself is counted rather than
+#: merely allowed -- see :func:`_check_gap`.
+_JSON_WHITESPACE = frozenset(b" \t\r\n")
+
+#: The element separator itself, as the integer a ``bytearray`` iterates.
+_COMMA = ord(",")
 
 
 class ClangAstStreamError(ValueError):
@@ -206,20 +218,48 @@ class ClangAstStreamError(ValueError):
     """
 
 
-def _check_gap(buf: bytearray, start: int, end: int) -> None:
-    """Reject anything but separators between two top-level elements.
+def _check_gap(
+    buf: bytearray, start: int, end: int, *, expected: int, carried: int = 0
+) -> None:
+    """Validate the bytes between two top-level tokens.
 
-    Element boundaries here are object braces, so a top-level element that
-    is *not* an object is not merely unsupported -- it is invisible. A bare
-    ``1`` or ``"a"`` inside ``inner`` produces no structural token this
-    scanner stops on, so it would be skipped and the projection would
-    silently come out short. clang never emits one, but "never" is exactly
-    the assumption worth failing loudly on rather than reading past: every
-    caller treats a raised error as "parse it the ordinary way", so the
-    cost of being wrong here is a slow run, not a wrong answer.
+    Two different malformations hide here, and only counting the commas
+    catches both.
+
+    A top-level element that is **not an object** is invisible to this
+    scanner: element boundaries are object braces, so a bare ``1`` or
+    ``true`` produces no structural token to stop on and would simply be
+    skipped, leaving the projection silently short.
+
+    A **wrong number of separators** is subtler, and is what makes this a
+    count rather than a membership test. ``[{...} {...}]`` (none),
+    ``[,{...}]`` (leading), ``[{...},,{...}]`` (doubled) and ``[{...},]``
+    (trailing) are all rejected by ``json.loads`` and were all silently
+    accepted here while any number of commas was allowed -- which would
+    make this module answer where the whole-tree path raises, breaking the
+    one property everything else rests on (*the same projection, however it
+    was derived*) precisely when a cache entry is corrupt.
+
+    *expected* is 1 before every element after the first, and 0 before the
+    first element and before the closing ``]`` -- so a leading and a
+    trailing comma are each rejected by the same rule that rejects a
+    missing one.
+
+    Raising is always safe: every caller falls back to parsing the document
+    normally, so being wrong here costs a slow run, never a wrong answer.
     """
-    if not _BETWEEN_ELEMENTS.issuperset(buf[start:end]):
+    gap = buf[start:end]
+    if not _JSON_WHITESPACE.issuperset(set(gap) - {_COMMA}):
         raise ClangAstStreamError("top-level AST element is not a JSON object")
+    # *carried* counts separators already seen in an earlier part of this
+    # same gap that had to be discarded before the token deciding how many
+    # were due had been read, so the comparison is over the whole gap.
+    found = carried + gap.count(b",")
+    if found != expected:
+        raise ClangAstStreamError(
+            f"malformed separator between top-level AST elements: expected "
+            f"{expected} comma(s), found {found}"
+        )
 
 
 def _find_root_inner(fh: Any, buf: bytearray) -> bool:
@@ -330,6 +370,11 @@ def stream_top_level_decls(
         base = fh.tell() - len(buf)
         depth = 0
         pos = 0
+        # Separator bookkeeping (see `_check_gap`). `carried_commas` holds
+        # separators already seen in a gap that had to be discarded before
+        # the token deciding how many were due had been read.
+        yielded_any = False
+        carried_commas = 0
         while True:
             match = _STRUCTURAL.search(buf, pos)
             if match is None:
@@ -339,7 +384,14 @@ def stream_top_level_decls(
                     # discarding it, or a bare scalar element that happens
                     # to carry no structural byte (`1`, `true`, `null`)
                     # would be dropped silently here rather than rejected.
-                    _check_gap(buf, pos, len(buf))
+                    # Separator counting cannot happen yet (the next token
+                    # decides how many are due), so only the byte set is
+                    # checked here and the commas are carried forward.
+                    if not _JSON_WHITESPACE.issuperset(set(buf[pos:]) - {_COMMA}):
+                        raise ClangAstStreamError(
+                            "top-level AST element is not a JSON object"
+                        )
+                    carried_commas += buf[pos:].count(b",")
                     del buf[:pos]
                     base += pos
                     pos = 0
@@ -370,7 +422,11 @@ def stream_top_level_decls(
                 pos = end.end()
                 continue
             if depth == 0:
-                _check_gap(buf, pos, at)
+                # 1 comma before every element after the first; 0 before the
+                # first and before the closing `]`.
+                due = 0 if (token == b"]" or not yielded_any) else 1
+                _check_gap(buf, pos, at, expected=due, carried=carried_commas)
+                carried_commas = 0
             if depth == 0 and token != b"{":
                 if token == b"]":
                     return  # end of the root's `inner`
@@ -400,6 +456,7 @@ def stream_top_level_decls(
                 if record_extents is not None:
                     record_extents.append((base, base + pos))
                 yield json.loads(buf[:pos])
+                yielded_any = True
                 del buf[:pos]
                 base += pos
                 pos = 0

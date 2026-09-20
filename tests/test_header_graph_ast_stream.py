@@ -259,6 +259,102 @@ class TestScannerAgainstStdlibJson:
         with pytest.raises(ClangAstStreamError):
             list(stream_top_level_decls(path))
 
+    @pytest.mark.parametrize("n_elements", [0, 1, 2, 3])
+    @pytest.mark.parametrize("commas", [0, 1, 2])
+    @pytest.mark.parametrize("where", ["leading", "between", "trailing"])
+    def test_every_separator_arrangement_agrees_with_the_stdlib(
+        self, tmp_path: Path, n_elements: int, commas: int, where: str
+    ) -> None:
+        """Exhaustive over a small domain, with `json.loads` as the oracle.
+
+        The separator rule is the one place this scanner can *accept* what
+        the stdlib rejects, and an accepted malformation is worse than a
+        rejected one: it makes this module answer where the whole-tree path
+        raises, breaking the single property the streaming path rests on
+        (the same projection, however derived) exactly when a cache entry
+        is corrupt. Enumerating the arrangements -- none, one and two
+        commas in each of the three positions, across zero to three
+        elements -- is what covers the *class*; the four shapes CodeRabbit
+        named are four points inside it.
+        """
+        elements = [f'{{"kind":"K{i}"}}' for i in range(n_elements)]
+        sep = "," * commas
+        if where == "leading":
+            body = sep + ",".join(elements)
+        elif where == "trailing":
+            body = ",".join(elements) + sep
+        else:
+            body = sep.join(elements) if len(elements) > 1 else ",".join(elements)
+        doc = f'{{"inner": [{body}]}}'
+        path = tmp_path / "doc.json"
+        path.write_text(doc, encoding="utf-8")
+
+        try:
+            expected = json.loads(doc)["inner"]
+        except ValueError:
+            with pytest.raises(ClangAstStreamError):
+                list(stream_top_level_decls(path))
+            return
+        assert list(stream_top_level_decls(path)) == expected
+
+    @pytest.mark.parametrize(
+        ("separator", "valid"),
+        [(",", True), (",,", False), ("", False), (", ,", False)],
+    )
+    def test_separator_counting_survives_a_read_chunk_refill(
+        self, tmp_path: Path, separator: str, valid: bool
+    ) -> None:
+        """The subtle half of the separator rule.
+
+        When the gap is reached before the token that decides how many
+        separators are due, its bytes must be discarded to make room --
+        so the commas are *carried* rather than counted on the spot. A
+        rule that only counted the final fragment would accept a doubled
+        comma here while rejecting it a few bytes earlier, which is the
+        kind of position-dependence a fixed-size fixture never reaches.
+        """
+        from abicheck.buildsource import header_graph_ast_stream as mod
+
+        pad = json.dumps({"kind": "Pad", "x": "y" * (mod._CHUNK + 11)})
+        doc = f'{{"inner": [{pad}{separator}{{"k":1}}]}}'
+        path = tmp_path / "doc.json"
+        path.write_text(doc, encoding="utf-8")
+        if valid:
+            assert list(stream_top_level_decls(path)) == json.loads(doc)["inner"]
+        else:
+            with pytest.raises(ClangAstStreamError):
+                list(stream_top_level_decls(path))
+
+    def test_the_separator_sweep_covers_both_outcomes(self, tmp_path: Path) -> None:
+        """Vacuity guard on the sweep above.
+
+        If every generated document were valid (or every one invalid) the
+        parametrization would assert only one half of the rule while
+        looking exhaustive.
+        """
+        accepted = rejected = 0
+        for n in (0, 1, 2, 3):
+            for commas in (0, 1, 2):
+                for where in ("leading", "between", "trailing"):
+                    elements = [f'{{"kind":"K{i}"}}' for i in range(n)]
+                    sep = "," * commas
+                    if where == "leading":
+                        body = sep + ",".join(elements)
+                    elif where == "trailing":
+                        body = ",".join(elements) + sep
+                    else:
+                        body = (
+                            sep.join(elements)
+                            if len(elements) > 1
+                            else ",".join(elements)
+                        )
+                    try:
+                        json.loads(f'{{"inner": [{body}]}}')
+                        accepted += 1
+                    except ValueError:
+                        rejected += 1
+        assert accepted > 0 and rejected > 0, (accepted, rejected)
+
     def test_a_scalar_element_is_rejected_even_across_a_chunk_boundary(
         self, tmp_path: Path
     ) -> None:
