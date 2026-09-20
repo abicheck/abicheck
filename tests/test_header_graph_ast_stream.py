@@ -525,6 +525,179 @@ def _assert_same_projection(
     assert streamed.call_edges == whole.call_edges
 
 
+#: Hand-built documents in clang's own shape, covering each projection
+#: member: a record, a private field type, a field initializer reference
+#: (the `DECL_REFERENCES_DECL` edge that makes `entity_files` non-empty),
+#: and a call edge. Deliberately *not* a substitute for the real-clang
+#: comparison below -- that one is what proves the shape is faithful. These
+#: exist so the projection driver is exercised on a host with no compiler,
+#: which is what the coverage lane is.
+_PUB = "/proj/include/pub.h"
+_PRIV = "/proj/include/detail/impl.h"
+
+
+def _loc(file: str) -> dict:
+    return {"file": file, "line": 1, "col": 1}
+
+
+SYNTHETIC_ASTS: dict[str, dict] = {
+    "empty": {"kind": "TranslationUnitDecl", "inner": []},
+    "one_record": {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {"kind": "CXXRecordDecl", "name": "Public", "loc": _loc(_PUB), "inner": []}
+        ],
+    },
+    "private_field_type": {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "NamespaceDecl",
+                "name": "detail",
+                "inner": [
+                    {
+                        "kind": "CXXRecordDecl",
+                        "name": "Impl",
+                        "loc": _loc(_PRIV),
+                        "inner": [],
+                    }
+                ],
+            },
+            {
+                "kind": "CXXRecordDecl",
+                "name": "Public",
+                "loc": _loc(_PUB),
+                "inner": [
+                    {
+                        "kind": "FieldDecl",
+                        "name": "p",
+                        "type": {"qualType": "detail::Impl *"},
+                    }
+                ],
+            },
+        ],
+    },
+    "field_initializer_reference": {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "VarDecl",
+                "name": "k",
+                "loc": _loc(_PRIV),
+                "type": {"qualType": "int"},
+            },
+            {
+                "kind": "CXXRecordDecl",
+                "name": "Widget",
+                "loc": _loc(_PUB),
+                "inner": [
+                    {
+                        "kind": "FieldDecl",
+                        "name": "x",
+                        "type": {"qualType": "int"},
+                        "inner": [
+                            {
+                                "kind": "DeclRefExpr",
+                                "referencedDecl": {
+                                    "kind": "VarDecl",
+                                    "name": "k",
+                                    "loc": _loc(_PRIV),
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
+        ],
+    },
+    "call_edge": {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "FunctionDecl",
+                "name": "helper",
+                "mangledName": "_ZN6helperEv",
+                "loc": _loc(_PRIV),
+                "type": {"qualType": "void ()"},
+                "inner": [],
+            },
+            {
+                "kind": "FunctionDecl",
+                "name": "entry",
+                "mangledName": "_Z5entryv",
+                "loc": _loc(_PUB),
+                "type": {"qualType": "void ()"},
+                "inner": [
+                    {
+                        "kind": "CompoundStmt",
+                        "inner": [
+                            {
+                                "kind": "CallExpr",
+                                "inner": [
+                                    {
+                                        "kind": "DeclRefExpr",
+                                        "referencedDecl": {
+                                            "kind": "FunctionDecl",
+                                            "name": "helper",
+                                            "loc": _loc(_PRIV),
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+        ],
+    },
+}
+
+
+class TestStreamedProjectionWithoutACompiler:
+    """The same equivalence, on a host that cannot run `clang`.
+
+    The real-clang comparison below is what proves these hand-built
+    documents are shaped like the thing they stand in for, and it stays
+    the authority. But it self-skips wherever no compiler exists -- which
+    includes the coverage lane -- leaving the projection driver
+    (`stream_recorded_decls`, `project_header_graph_ast_file`) unexercised
+    exactly where a regression would be reported as untested rather than
+    caught.
+    """
+
+    @pytest.mark.parametrize("name", sorted(SYNTHETIC_ASTS))
+    def test_it_equals_the_whole_tree_projection(
+        self, tmp_path: Path, name: str
+    ) -> None:
+        ast = SYNTHETIC_ASTS[name]
+        path = tmp_path / "ast.json"
+        path.write_text(json.dumps(ast, indent=2), encoding="utf-8")
+        _assert_same_projection(
+            project_header_graph_ast_file(path), project_header_graph_ast(ast)
+        )
+
+    def test_the_synthetic_cases_are_not_all_the_same_projection(self) -> None:
+        """Vacuity guard: equality over five empty projections proves nothing.
+
+        Each member of the projection must be non-empty in at least one
+        case, or that member's half of the comparison above is untested.
+        """
+        projections = [project_header_graph_ast(a) for a in SYNTHETIC_ASTS.values()]
+        assert any(p.type_files for p in projections)
+        assert any(p.type_edges for p in projections)
+        assert any(p.call_edges for p in projections)
+        assert any(p.entity_files for p in projections)
+        shapes = {
+            (
+                tuple(sorted(p.type_files.items())),
+                tuple(repr(e) for e in p.type_edges),
+                tuple(repr(e) for e in p.call_edges),
+            )
+            for p in projections
+        }
+        assert len(shapes) > 1
+
+
 @needs_clang
 class TestStreamedProjectionEqualsWholeTreeProjection:
     def test_on_a_header_containing_both_boundary_shapes(self, tmp_path: Path) -> None:
