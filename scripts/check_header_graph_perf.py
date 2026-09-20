@@ -146,6 +146,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import gc
 import importlib.util
 import json
 import os
@@ -200,6 +201,18 @@ DEFAULT_REGRESS_TOLERANCE = 0.5  # a gated metric may grow at most 50% vs. basel
 #: historical pure-percentage-tolerance behaviour by default.
 DEFAULT_REGRESS_MIN_DELTA_MS = 0.0
 
+#: Absolute MiB floor for :data:`MEMORY_METRICS`, the memory counterpart of
+#: ``DEFAULT_REGRESS_MIN_DELTA_MS``. Non-zero by default, unlike the
+#: millisecond floor, because a pure percentage tolerance is meaningless on
+#: these values: a run-to-run wobble of a few MiB in a ~600 MiB RSS figure
+#: is page accounting, not a regression, and a pure percentage tolerance
+#: has no way to say so. A floor of 32 MiB means the memory gate fires on a
+#: real structural change (holding another copy of the AST, or a
+#: per-declaration allocation that scales) and stays quiet on allocator
+#: noise -- and a caller can tighten it per metric via
+#: ``--regress-min-delta-ms-attach_end_rss``.
+DEFAULT_REGRESS_MIN_DELTA_MIB = 32.0
+
 #: The three independently-gated metrics, in report order. ``dump_ms`` is the
 #: primary header-AST extraction pass, ``attach_ms`` the always-on header-graph
 #: attach layered on top of it, and ``total_ms`` the one ``perf_counter`` span
@@ -210,7 +223,55 @@ DEFAULT_REGRESS_MIN_DELTA_MS = 0.0
 #: replaced a hard-coded single ``"attach_ms"`` gate, and a metric being
 #: *measured but ungated* is the specific defect that replacement fixes, so a
 #: metric added here without a gate would reintroduce it.
-METRICS: tuple[str, ...] = ("dump_ms", "attach_ms", "total_ms")
+#: The memory metrics, gated exactly like the time ones. Added because the
+#: attach's *memory* was the one thing nothing anywhere gated: PR #1335's
+#: measurement (``docs/contribute/measurements/
+#: header-graph-attach-memory.md``) localised a release member's whole peak
+#: inside this step while this gate watched only its wall time, so a
+#: regression there was invisible by construction -- the same
+#: "measured-but-ungated" defect the three-metric split above already fixed
+#: once for ``dump_ms``.
+#:
+#: Both are **absolute** RSS figures, never a delta against the pre-attach
+#: reading. That is a correctness requirement, not a presentation choice:
+#: `perf_measurement.is_gateable` is written for wall-clock durations and
+#: rejects anything `<= 0` ("neither is a plausible wall-clock duration"),
+#: while a retained-memory *delta* is legitimately negative whenever the
+#: attach releases more than it allocates -- which is exactly what the
+#: clang backend does, since its AST comes from the in-process memo the
+#: primary pass wrote, so the attach frees a tree it never allocated. A
+#: signed delta therefore made the *best* outcome indistinguishable from a
+#: broken measurement: CI failed with `measured attach_retained_mib=-28.4
+#: is not a gateable value`. Absolute RSS cannot be negative, so the metric
+#: and the predicate agree by construction. The cost is that these figures
+#: include the primary dump's own footprint, so an extraction regression
+#: moves them too -- accepted deliberately, because a fan-out's per-member
+#: budget is sized from what a member actually holds, not from the attach's
+#: marginal share of it.
+#:
+#: Both are read from a **fresh subprocess** per (size, backend), not from
+#: the in-process ``_one_pair`` loop, and each is a single sample rather
+#: than a median of ``--repeat``. Both choices are forced by what RSS is:
+#: ``VmHWM`` is a process-lifetime high-water mark that never resets, so a
+#: second in-process repeat can only ratchet it; and a retained-RSS delta
+#: measured after an earlier repeat has already dirtied the allocator's
+#: arenas reads near zero however much the run really holds, since the
+#: second run reuses the first's freed pages. Both would therefore report a
+#: *better* number the more repeats you ask for -- a gate that relaxes
+#: under repetition. A fresh process per point costs one extra dump+attach
+#: but measures the thing a release fan-out's per-member budget is actually
+#: sized from. Measured stability on the reference host across three fresh
+#: processes: peak 793.7/793.7/793.5 MiB, end-of-attach RSS 580.1/573.2/
+#: 578.9 MiB -- under 1.5%, which is why one sample is enough and a median
+#: of noisy repeats is not needed.
+MEMORY_METRICS: tuple[str, ...] = ("attach_peak_rss_mib", "attach_end_rss_mib")
+
+#: The metrics ``_measure_one``'s in-process repeat loop produces and takes a
+#: median of. :data:`MEMORY_METRICS` deliberately are not among them -- see
+#: that constant for why they cannot be sampled that way.
+TIME_METRICS: tuple[str, ...] = ("dump_ms", "attach_ms", "total_ms")
+
+METRICS: tuple[str, ...] = (*TIME_METRICS, *MEMORY_METRICS)
 
 #: Legacy key a pre-schema-2 report used for what is now ``dump_ms``. Read as
 #: an alias so the PR-vs-base CI job (which measures the *base* branch with the
@@ -222,9 +283,14 @@ METRICS: tuple[str, ...] = ("dump_ms", "attach_ms", "total_ms")
 #: the bad arithmetic ``total_ms`` exists to avoid.
 LEGACY_METRIC_ALIASES: dict[str, str] = {"dump_ms": "baseline_ms"}
 
-#: Report schema. ``2`` is the three-metric shape; ``1`` (implicit, unstamped)
-#: was ``baseline_ms``/``attach_ms`` with only the latter gated.
-REPORT_SCHEMA = "abicheck-header-graph-perf/2"
+#: Report schema. ``3`` adds :data:`MEMORY_METRICS`; ``2`` was the
+#: three-time-metric shape; ``1`` (implicit, unstamped) was
+#: ``baseline_ms``/``attach_ms`` with only the latter gated. A schema-2
+#: baseline stays gateable for the metrics it *does* carry --
+#: ``gateable_metrics`` already drops a metric the baseline lacks -- so the
+#: PR-vs-base job keeps working across the commit that adds these, rather
+#: than hard-failing on a baseline the base branch could not have written.
+REPORT_SCHEMA = "abicheck-header-graph-perf/3"
 
 
 def _have(tool: str) -> bool:
@@ -260,7 +326,79 @@ def _synthesize_source(n: int) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _build_fixture(tmp_dir: Path, n: int) -> tuple[Path, Path]:
+#: Dependency headers the memory fixture pulls in. The time fixture
+#: deliberately includes none (see ``_synthesize_header``): its axis is the
+#: *count* of the library's own declarations. That makes it nearly useless
+#: for memory, which was measured rather than assumed -- at sizes 25-100 the
+#: whole attach retains 0.1-2.8 MiB, so any tolerance is either noise or
+#: vacuum, and the regression this gate was added for (holding the parsed AST
+#: across the graph build) is ~7% of a figure that small. What actually
+#: dominates a real library's attach is the *dependency* AST: these six
+#: headers alone take the same measurement to 573 MiB peak / 424 MiB
+#: retained, with the same shape as the oneDAL profile that motivated the
+#: gate (an AST several times the graph's own size), in ~8s.
+_MEMORY_FIXTURE_DEP_HEADERS: tuple[str, ...] = (
+    "<vector>",
+    "<map>",
+    "<string>",
+    "<memory>",
+    "<unordered_map>",
+    "<functional>",
+)
+
+#: Declaration count for the memory fixture. Deliberately tiny: the
+#: dependency headers above, not this number, are what makes the AST large,
+#: and measurement says growing it buys a nearly flat curve for real time
+#: (n=4 -> 573 MiB peak in 8.1s; n=20 -> 634 MiB in 9.8s). So the cheapest
+#: point that already reproduces the shape is the right one -- this gate
+#: runs on every performance-workflow invocation.
+MEMORY_FIXTURE_SIZE = 4
+
+
+def _synthesize_memory_header(n: int) -> str:
+    """A public header whose *dependency* AST dominates, unlike the time one.
+
+    Each declaration names STL types in its own signature, so the aggregate
+    parse instantiates real template machinery reachable from the library's
+    own public surface -- the condition under which the attach's AST is
+    several times the size of the graph built from it.
+    """
+    lines = ["#pragma once"]
+    lines += [f"#include {h}" for h in _MEMORY_FIXTURE_DEP_HEADERS]
+    lines += ["namespace hgmem {", ""]
+    for i in range(n):
+        lines.append(
+            f"struct S{i} {{ int a; std::vector<int> v; "
+            f"std::map<std::string, int> m; std::shared_ptr<S{i}> p; "
+            f"int get() const; void set(const std::vector<S{i}>& xs); }};"
+        )
+    for i in range(n):
+        lines.append(
+            f"std::vector<S{i}> fn{i}(const std::map<std::string, S{i}>& in, S{i}* o);"
+        )
+    lines += ["", "}  // namespace hgmem"]
+    return "\n".join(lines) + "\n"
+
+
+def _synthesize_memory_source(n: int) -> str:
+    lines = ['#include "api.h"', "namespace hgmem {", ""]
+    for i in range(n):
+        lines.append(f"int S{i}::get() const {{ return a; }}")
+        lines.append(
+            f"void S{i}::set(const std::vector<S{i}>& xs) {{ a = (int)xs.size(); }}"
+        )
+        lines.append(
+            f"std::vector<S{i}> fn{i}(const std::map<std::string, S{i}>& in, S{i}* o)"
+            f" {{ std::vector<S{i}> r; for (auto& kv : in) {{ r.push_back(kv.second);"
+            f" o->set(r); }} return r; }}"
+        )
+    lines += ["", "}  // namespace hgmem"]
+    return "\n".join(lines) + "\n"
+
+
+def _build_fixture(
+    tmp_dir: Path, n: int, *, memory_shaped: bool = False
+) -> tuple[Path, Path]:
     """Compile a real ELF ``.so`` + write its header for size *n*. Returns
     ``(so_path, header_path)``.
 
@@ -276,12 +414,29 @@ def _build_fixture(tmp_dir: Path, n: int) -> tuple[Path, Path]:
     cost this gate exists to catch).
     """
     header = tmp_dir / "api.h"
-    header.write_text(_synthesize_header(n))
     src = tmp_dir / "api.cpp"
-    src.write_text(_synthesize_source(n))
+    if memory_shaped:
+        header.write_text(_synthesize_memory_header(n))
+        src.write_text(_synthesize_memory_source(n))
+    else:
+        header.write_text(_synthesize_header(n))
+        src.write_text(_synthesize_source(n))
     so = tmp_dir / "libhgperf.so"
     proc = subprocess.run(
-        ["g++", "-shared", "-fPIC", "-O0", "-o", str(so), str(src), f"-I{tmp_dir}"],
+        [
+            "g++",
+            "-shared",
+            "-fPIC",
+            "-O0",
+            # The memory fixture's STL-bearing declarations need a standard
+            # new enough for them; the time fixture is plain C++ and is
+            # unaffected, so one flag list serves both.
+            "-std=c++17",
+            "-o",
+            str(so),
+            str(src),
+            f"-I{tmp_dir}",
+        ],
         capture_output=True,
         text=True,
     )
@@ -330,6 +485,37 @@ def _resolve_includes(
     return inc_extra, tuple(deferred), tuple(deferred_token_dirs(deferred))
 
 
+def _header_call_graph_pass() -> str:
+    """``HEADER_CALL_GRAPH_PASS``, from whichever module this build owns it in.
+
+    This harness is deliberately run against a *different* installed
+    ``abicheck`` than the checkout it sits in -- the ``performance.yml``
+    PR-vs-base job runs head's copy of this script against base's installed
+    package, so one harness measures both sides. That makes every
+    ``abicheck`` import here a cross-version compatibility surface, not an
+    ordinary import: the constant moved from ``header_graph`` to
+    ``header_graph_ast_projection``, and importing only the new location
+    made the base measurement die with ``ModuleNotFoundError`` before it
+    took a single sample.
+
+    Deliberately resolved by import rather than hard-coded as the literal
+    string: a hard-coded copy would keep "working" if the *value* ever
+    changed, silently verifying a pass name no build stamps, which is the
+    failure this check exists to catch. Both locations are tried, so this
+    keeps measuring a base package from before the move and a head package
+    after it.
+    """
+    try:
+        from abicheck.buildsource.header_graph_ast_projection import (
+            HEADER_CALL_GRAPH_PASS,
+        )
+    except ImportError:  # pragma: no cover - only on a pre-move abicheck
+        from abicheck.buildsource.header_graph import (  # type: ignore[attr-defined,no-redef]
+            HEADER_CALL_GRAPH_PASS,
+        )
+    return HEADER_CALL_GRAPH_PASS
+
+
 def _require_real_ast_attach(snap: Any, n: int, backend: str) -> None:
     """Raise unless *snap*'s attached graph reflects a genuine clang AST parse.
 
@@ -358,14 +544,12 @@ def _require_real_ast_attach(snap: Any, n: int, backend: str) -> None:
     distinct failure mode from the AST-parse one above, not covered by
     checking ``HEADER_CALL_GRAPH_PASS`` alone).
     """
-    from abicheck.buildsource.header_graph import (
-        HEADER_CALL_GRAPH_PASS,
-        HEADER_INCLUDE_GRAPH_PASS,
-    )
+    from abicheck.buildsource.header_graph import HEADER_INCLUDE_GRAPH_PASS
 
     graph = getattr(getattr(snap, "build_source", None), "source_graph", None)
     passes = getattr(graph, "extractor_passes", {}) if graph is not None else {}
-    if not passes.get(HEADER_CALL_GRAPH_PASS):
+    call_graph_pass = _header_call_graph_pass()
+    if not passes.get(call_graph_pass):
         raise RuntimeError(
             f"size={n} backend={backend}: _attach_header_graph degraded to a "
             "declaration-only graph (HEADER_CALL_GRAPH_PASS not stamped) instead "
@@ -489,19 +673,134 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
             }
 
     _one_pair()  # untimed warmup — discarded
-    samples: dict[str, list[float]] = {m: [] for m in METRICS}
+    samples: dict[str, list[float]] = {m: [] for m in TIME_METRICS}
     for _ in range(repeat):
         one = _one_pair()
-        for metric in METRICS:
+        for metric in TIME_METRICS:
             samples[metric].append(one[metric])
 
     result: dict[str, Any] = {}
-    for metric in METRICS:
+    for metric in TIME_METRICS:
         stats = summarize_samples(samples[metric])
         result[metric] = stats.median
         result[f"{metric}_samples"] = samples[metric]
         result[f"{metric}_cv"] = stats.cv
     return result
+
+
+def _rss_mib() -> float:
+    """This process's resident set, from ``/proc/self/statm``."""
+    with open("/proc/self/statm") as fh:
+        return int(fh.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / (1024 * 1024)
+
+
+def _peak_rss_mib() -> float:
+    """This process's lifetime peak RSS (``VmHWM``), in MiB.
+
+    The kernel's own high-water mark rather than a sampling thread: a
+    sampler under the GIL misses a peak that occurs inside one C-level
+    ``json`` call, which is exactly where this step's peak lives.
+    """
+    with open("/proc/self/status") as fh:
+        for line in fh:
+            if line.startswith("VmHWM:"):
+                return int(line.split()[1]) / 1024.0
+    return float("nan")
+
+
+def _memory_metrics(*, peak_mib: float, end_rss_mib: float) -> dict[str, float]:
+    """The two memory metrics from one probe's raw readings.
+
+    Split out from :func:`_memory_probe` purely so the arithmetic is
+    testable without a clang toolchain -- the defect this shape exists to
+    prevent (a metric whose value can legitimately be `<= 0`, which
+    `is_gateable` rejects) was only reachable through a full measurement
+    before, so it shipped and failed in CI rather than in a unit test.
+    """
+    return {
+        "attach_peak_rss_mib": peak_mib,
+        "attach_end_rss_mib": end_rss_mib,
+    }
+
+
+def _memory_probe(n: int, backend: str) -> dict[str, float]:
+    """One dump+attach in this (fresh) process, reporting its memory cost.
+
+    Runs the same dump/attach sequence ``_one_pair`` does, over the
+    **memory-shaped** fixture rather than the time one -- see
+    :data:`_MEMORY_FIXTURE_DEP_HEADERS` for why the time fixture cannot
+    carry these two metrics, and :data:`MEMORY_METRICS` for why this needs
+    a whole process of its own.
+
+    *n* is accepted and threaded through so the sweep's shape is preserved
+    (one point per size/backend, keyed the same way), but note the size
+    axis is nearly flat here by design: the dependency headers dominate.
+    """
+    from abicheck import dumper_cache
+    from abicheck.compile_context import CompileContext
+    from abicheck.dumper import dump
+    from abicheck.service import _attach_header_graph
+
+    with tempfile.TemporaryDirectory(prefix="hgperf_mem_") as tmp:
+        so, header = _build_fixture(Path(tmp), n, memory_shaped=True)
+        inc_extra, deferred_tokens, extra_hash_dirs = _resolve_includes(header)
+        with dumper_cache.ast_memoize_scope():
+            snap = dump(
+                so,
+                [header],
+                extra_includes=inc_extra,
+                header_backend=backend,
+                lang=None,
+                gcc_option_tokens=deferred_tokens,
+                extra_hash_dirs=extra_hash_dirs,
+            )
+        gc.collect()
+        attached = _attach_header_graph(
+            snap,
+            header_graph=True,
+            header_graph_includes=True,
+            headers=[header],
+            includes=[],
+            lang=None,
+            compile=CompileContext(),
+            public_headers=None,
+            public_header_dirs=None,
+        )
+        _require_real_ast_attach(attached, n, backend)
+        gc.collect()
+        return _memory_metrics(peak_mib=_peak_rss_mib(), end_rss_mib=_rss_mib())
+
+
+def _measure_memory(n: int, backend: str) -> dict[str, float]:
+    """:func:`_memory_probe` in a fresh interpreter, or NaN if it cannot run.
+
+    A failure here is reported as an ungateable value rather than raised:
+    the memory metrics are read from ``/proc``, so they are simply absent on
+    a non-Linux host, and `is_gateable` already means "this point cannot be
+    compared" everywhere downstream. A *correctness* failure inside the
+    probe (a degraded attach) still fails, because
+    ``_require_real_ast_attach`` runs inside the child and a non-zero exit
+    is surfaced below.
+    """
+    if not Path("/proc/self/statm").exists():
+        return dict.fromkeys(MEMORY_METRICS, float("nan"))
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "--memory-probe",
+            str(n),
+            backend,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"memory probe failed for size={n} backend={backend} "
+            f"(exit {proc.returncode}):\n{proc.stderr[-4000:]}"
+        )
+    return {k: float(v) for k, v in json.loads(proc.stdout).items()}
 
 
 def _measure_size(
@@ -550,7 +849,9 @@ def _measure_size(
                 raise
             print(f"SKIP: size={n} backend={backend}: {exc}")
             continue
-        points.append({"size": n, "backend": backend, **result})
+        points.append(
+            {"size": n, "backend": backend, **result, **_measure_memory(n, backend)}
+        )
     return points
 
 
@@ -732,7 +1033,8 @@ def check_regressions(
                 failures.append(
                     f"size={size} backend={backend}: {metric} {current:.1f} > "
                     f"baseline {base:.1f} + {allowed_delta:.1f} allowed ({pct:+.0f}%) "
-                    f"[tolerance={threshold.tolerance} min_delta_ms={threshold.min_delta} "
+                    f"[tolerance={threshold.tolerance} "
+                    f"min_delta_{_metric_unit(metric)}={threshold.min_delta} "
                     f"source={threshold.source}]"
                 )
     return failures
@@ -744,13 +1046,16 @@ def _cv_pct(p: dict[str, Any], metric: str) -> float:
     return cv * 100.0 if cv is not None else float("nan")
 
 
-_TABLE_COLUMNS = ("size", "backend", *METRICS, *(f"{m}_cv%" for m in METRICS))
+#: Only the time metrics get a CV column: a coefficient of variation over one
+#: sample is always ``nan``, and printing four such columns per row buries the
+#: numbers that do vary.
+_TABLE_COLUMNS = ("size", "backend", *METRICS, *(f"{m}_cv%" for m in TIME_METRICS))
 
 
 def _row_cells(p: dict[str, Any]) -> list[str]:
     cells = [str(p["size"]), str(p.get("backend", "clang"))]
     cells += [f"{float(p[m]):.1f}" if is_gateable(p.get(m)) else "n/a" for m in METRICS]
-    cells += [f"{_cv_pct(p, m):.1f}" for m in METRICS]
+    cells += [f"{_cv_pct(p, m):.1f}" for m in TIME_METRICS]
     return cells
 
 
@@ -783,6 +1088,34 @@ _positive_int = positive_int_arg
 #: module's own historical name since tests/test_header_graph_perf_gate.py
 #: references it directly.
 _finite_nonnegative_float = finite_nonnegative_float_arg
+
+
+def _metric_unit(metric: str) -> str:
+    """A metric's unit, for labelling the absolute floor in human output.
+
+    The floor is stated in whatever unit the metric is measured in, so
+    printing ``min_delta_ms=32.0`` beside a MiB metric -- which is what a
+    single hard-coded label did -- tells the reader the wrong thing about
+    the number that gated them. The *flag* keeps its historical ``-ms-``
+    spelling (renaming it would break a CI job's existing arguments); only
+    the printed label follows the metric.
+    """
+    return "mib" if metric in MEMORY_METRICS else "ms"
+
+
+def _metric_flag(metric: str) -> str:
+    """A metric's per-metric-override flag suffix: its name minus the unit.
+
+    Deliberately strips every unit this module measures in, not just ``_ms``
+    -- the original spelling hard-coded ``removesuffix("_ms")``, which would
+    have produced ``--regress-tolerance-attach_peak_rss_mib`` (unit and all)
+    the moment a non-millisecond metric was added, silently breaking the
+    naming convention the millisecond flags established.
+    """
+    for unit in ("_ms", "_mib"):
+        if metric.endswith(unit):
+            return metric.removesuffix(unit)
+    return metric
 
 
 def resolve_thresholds(args: argparse.Namespace) -> dict[str, GateThreshold]:
@@ -824,9 +1157,23 @@ def resolve_thresholds(args: argparse.Namespace) -> dict[str, GateThreshold]:
         ),
         source="explicit" if stated else "default",
     )
+    # A metric's absolute floor has to be in that metric's own unit, so the
+    # millisecond default cannot serve both families. Only the *floor*
+    # differs: the fractional tolerance is unitless and stays shared, and a
+    # caller-stated per-metric value still outranks either default, so the
+    # receipt's `source` label keeps meaning what it says.
+    memory_base = GateThreshold(
+        tolerance=base.tolerance,
+        min_delta=(
+            DEFAULT_REGRESS_MIN_DELTA_MIB
+            if args.regress_min_delta_ms is None
+            else args.regress_min_delta_ms
+        ),
+        source=base.source,
+    )
     return {
         metric: resolve_threshold(
-            default=base,
+            default=memory_base if metric in MEMORY_METRICS else base,
             explicit_tolerance=getattr(args, f"tolerance_{metric}"),
             explicit_min_delta=getattr(args, f"min_delta_{metric}"),
         )
@@ -884,28 +1231,32 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         nargs="+",
         choices=list(METRICS),
         default=list(METRICS),
-        help="Which metrics to gate (default: all three, gated independently). "
+        help="Which metrics to gate (default: all of them, gated "
+        "independently). "
         "Narrowing this is a deliberate, visible choice recorded in the JSON "
         "report's effective_thresholds block -- it is not how a metric should "
         "ever come to be measured-but-ungated by accident.",
     )
     for metric in METRICS:
         p.add_argument(
-            f"--regress-tolerance-{metric.removesuffix('_ms')}",
+            f"--regress-tolerance-{_metric_flag(metric)}",
             type=_finite_nonnegative_float,
             default=None,
             dest=f"tolerance_{metric}",
             help=f"Per-metric override of --regress-tolerance for {metric}.",
         )
         p.add_argument(
-            f"--regress-min-delta-ms-{metric.removesuffix('_ms')}",
+            f"--regress-min-delta-ms-{_metric_flag(metric)}",
             type=_finite_nonnegative_float,
             default=None,
             dest=f"min_delta_{metric}",
-            help=f"Per-metric override of --regress-min-delta-ms for {metric}. "
-            f"Useful because the three metrics differ by an order of magnitude "
-            f"in absolute size, so one shared absolute floor is either useless "
-            f"for the large one or noise-prone for the small one.",
+            help=f"Per-metric override of --regress-min-delta-ms for {metric} "
+            f"(in {metric.rsplit('_', 1)[-1]}, this metric's own unit -- the "
+            f"flag keeps its historical `-ms-` spelling so the millisecond "
+            f"overrides a CI job already passes are unchanged). Useful "
+            f"because the metrics differ by orders of magnitude in absolute "
+            f"size, so one shared absolute floor is either useless for the "
+            f"large one or noise-prone for the small one.",
         )
     p.add_argument(
         "--require-all-metrics",
@@ -993,7 +1344,8 @@ def _report_and_gate(
     for metric, threshold in thresholds.items():
         print(
             f"  {metric}: tolerance={threshold.tolerance} "
-            f"min_delta_ms={threshold.min_delta} source={threshold.source}"
+            f"min_delta_{_metric_unit(metric)}={threshold.min_delta} "
+            f"source={threshold.source}"
         )
 
     if baseline is None:
@@ -1152,4 +1504,12 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # `--memory-probe SIZE BACKEND` is this script re-invoking itself for one
+    # memory sample (see `_measure_memory`). Handled before `parse_args` on
+    # purpose: it is an internal protocol between the harness and its own
+    # child, not user-facing surface, so it is deliberately absent from
+    # `--help` and from the gated-metric plumbing.
+    if len(sys.argv) == 4 and sys.argv[1] == "--memory-probe":
+        print(json.dumps(_memory_probe(int(sys.argv[2]), sys.argv[3])))
+        raise SystemExit(0)
     raise SystemExit(main())

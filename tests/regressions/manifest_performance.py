@@ -33,6 +33,53 @@ __all__ = ["PERFORMANCE_BUG_CLASSES"]
 
 PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
+        id="perf.evidence_released_before_its_consumer_runs",
+        invariant=(
+            "Reordering when a large intermediate is released relative to "
+            "the structure built from it must not change what that "
+            "structure contains. The guard has two halves, and neither "
+            "alone is a guard: an equivalence over *generated* inputs "
+            "between the two entry points, checked against an oracle that "
+            "is not the projection's own code (a differential between two "
+            "paths that share the projection passes against a projection "
+            "that drops a member -- verified, a blanked field survived the "
+            "whole matrix); and an observation that the release actually "
+            "happened, since every output assertion holds equally for an "
+            "implementation that keeps the intermediate alive, which is "
+            "the behaviour being removed."
+        ),
+        # The attach parsed a whole clang AST into dicts and then built the
+        # L5 header graph while it was still resident. PR #1335's
+        # measurement localised a release member's peak inside this step;
+        # the fix projects the AST to the four pure readers the builder uses
+        # and drops the tree first. The class is the *shape*, not this one
+        # step: any "free it earlier" change can silently narrow evidence,
+        # and the narrowing shows up as a smaller result, never as a raised
+        # exception.
+        fixed_by=(1335, 1338),
+        seed_tests=("tests/test_header_graph_ast_projection.py",),
+        public_surfaces=("cli", "python-api"),
+        axes={
+            "entry_point": ("ast_root", "ast_projection", "neither"),
+            "evidence": ("type-edges", "call-edges", "reference-edges", "none"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The equivalence is enforced for the header-graph "
+                    "attach's own AST. The other large intermediates a dump "
+                    "holds across a consumer -- the castxml XML tree in "
+                    "`dumper_castxml.py`, the per-TU manifest fragments -- "
+                    "have no equivalent projection and so no equivalent "
+                    "guard; a future release-earlier change there would be "
+                    "checked only by whatever domain tests happen to cover "
+                    "the affected findings."
+                ),
+                reference="docs/contribute/measurements/header-graph-attach-memory.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="perf.pure_content_digest_recomputed_per_consumer",
         invariant=(
             "A pure, expensive, content-derived value reached by several "

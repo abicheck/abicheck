@@ -45,9 +45,9 @@ from abicheck.model.source_graph_query import (
 
 from ..model.graph_facts import GraphEdge
 from ..model.source_graph import EVIDENCE_TIER_L5, SourceGraphSummary
-from .header_graph import (
+from .header_graph import HEADER_INCLUDE_GRAPH_PASS
+from .header_graph_ast_projection import (
     HEADER_CALL_GRAPH_PASS,
-    HEADER_INCLUDE_GRAPH_PASS,
     HEADER_TYPE_GRAPH_PASS,
 )
 from .source_graph_compare import _kind_map, _label_map

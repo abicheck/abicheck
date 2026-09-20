@@ -37,7 +37,9 @@ from __future__ import annotations
 import pytest
 from hypothesis import given, settings, strategies as st
 
-from abicheck.buildsource.header_graph import HEADER_TYPE_GRAPH_PASS
+from abicheck.buildsource.header_graph_ast_projection import (
+    HEADER_TYPE_GRAPH_PASS,
+)
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.buildsource.source_graph_findings import (
     _common_dependency_edge_kinds,

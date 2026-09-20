@@ -696,14 +696,29 @@ jobs:
               --regress-tolerance 0.3 --regress-min-delta-ms 10 \
               --regress-min-delta-ms-dump 30 \
               --regress-min-delta-ms-total 40 \
+              --regress-min-delta-ms-attach_peak_rss 48 \
+              --regress-min-delta-ms-attach_end_rss 48 \
               --require-all-metrics \
               | tee header_graph_regression.txt
-            # All three metrics (dump_ms/attach_ms/total_ms) are gated
-            # independently. The absolute floors differ per metric because the
-            # metrics differ by roughly an order of magnitude in size: a shared
-            # 10ms floor is right for attach_ms but is well inside runner noise
-            # for the ~100ms+ dump and total windows, where it would reduce the
-            # gate to the relative tolerance alone.
+            # Every metric is gated independently: the three time ones
+            # (dump_ms/attach_ms/total_ms) plus the two memory ones
+            # (attach_peak_rss_mib/attach_end_rss_mib). The absolute floors
+            # differ per metric because the metrics differ by roughly an order
+            # of magnitude in size: a shared 10ms floor is right for attach_ms
+            # but is well inside runner noise for the ~100ms+ dump and total
+            # windows, where it would reduce the gate to the relative
+            # tolerance alone.
+            #
+            # The two memory floors are in MiB (the flag keeps its historical
+            # `-ms-` spelling; the value is read in the metric's own unit) and
+            # are raised above the script's own 32 MiB default because a
+            # shared CI runner's page accounting is noisier than the reference
+            # host the default was measured on. They exist at all because the
+            # attach's memory was measured-but-ungated: PR #1335 localised a
+            # release member's whole peak inside this step while this job
+            # watched only its wall time, so holding one more copy of the
+            # parsed clang AST cost ~0ms and would have passed every gate
+            # here.
             #
             # --require-all-metrics IS passed. An earlier version of this comment
             # argued the opposite -- that the base branch writes its report with

@@ -77,6 +77,17 @@ class TestSyntheticFixtureGeneration:
 _ALL = hg_gate.METRICS
 
 
+def _all_but(*excluded: str) -> list[str]:
+    """Every gateable metric except *excluded*, in ``METRICS`` order.
+
+    Spelled as a complement rather than a literal list so that adding a
+    metric to ``METRICS`` extends these expectations automatically instead
+    of turning them into assertions about a stale subset -- the same reason
+    ``_ALL`` is read off the module rather than restated here.
+    """
+    return [m for m in _ALL if m not in excluded]
+
+
 def _th(tolerance: float = 0.5, min_delta: float = 0.0) -> dict:
     """A uniform ``GateThreshold`` for every metric, for the logic tests below."""
     return {m: GateThreshold(tolerance, min_delta) for m in _ALL}
@@ -89,12 +100,16 @@ def _base(
     dump_ms: float = 100.0,
     attach_ms: float = 20.0,
     total_ms: float = 121.0,
+    attach_peak_rss_mib: float = 400.0,
+    attach_end_rss_mib: float = 600.0,
 ) -> dict:
     return {
         (size, backend): {
             "dump_ms": dump_ms,
             "attach_ms": attach_ms,
             "total_ms": total_ms,
+            "attach_peak_rss_mib": attach_peak_rss_mib,
+            "attach_end_rss_mib": attach_end_rss_mib,
         }
     }
 
@@ -106,6 +121,8 @@ def _pt(
     dump_ms: float = 100.0,
     attach_ms: float = 20.0,
     total_ms: float = 121.0,
+    attach_peak_rss_mib: float = 400.0,
+    attach_end_rss_mib: float = 600.0,
 ) -> dict:
     return {
         "size": size,
@@ -113,6 +130,8 @@ def _pt(
         "dump_ms": dump_ms,
         "attach_ms": attach_ms,
         "total_ms": total_ms,
+        "attach_peak_rss_mib": attach_peak_rss_mib,
+        "attach_end_rss_mib": attach_end_rss_mib,
     }
 
 
@@ -179,9 +198,39 @@ class TestPerPhaseGating:
 
     def test_every_metric_can_fail_at_once(self):
         failures = hg_gate.check_regressions(
-            [_pt(dump_ms=500.0, attach_ms=500.0, total_ms=1000.0)], _base(), _th()
+            [
+                _pt(
+                    dump_ms=500.0,
+                    attach_ms=500.0,
+                    total_ms=1000.0,
+                    attach_peak_rss_mib=2000.0,
+                    attach_end_rss_mib=2000.0,
+                )
+            ],
+            _base(),
+            _th(),
         )
         assert _metrics_in(failures) == set(_ALL)
+
+    def test_a_memory_only_regression_is_caught_and_scoped(self):
+        """The whole point of the two memory metrics being gated at all.
+
+        A change that holds an extra copy of the parsed AST across the
+        graph build costs no measurable wall time and would pass every
+        time-based gate in this file -- which is exactly how the attach's
+        memory came to be the largest cost in a release fan-out with
+        nothing anywhere watching it.
+        """
+        failures = hg_gate.check_regressions(
+            [_pt(attach_end_rss_mib=1500.0)], _base(), _th()
+        )
+        assert _metrics_in(failures) == {"attach_end_rss_mib"}
+
+    def test_a_peak_only_regression_is_caught_and_scoped(self):
+        failures = hg_gate.check_regressions(
+            [_pt(attach_peak_rss_mib=1200.0)], _base(), _th()
+        )
+        assert _metrics_in(failures) == {"attach_peak_rss_mib"}
 
     def test_a_metric_excluded_from_thresholds_is_not_gated(self):
         # --metrics must really narrow the gate, and must narrow only what it
@@ -269,31 +318,33 @@ class TestNonGateableValuesCannotSilentlyPass:
         "bad", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0]
     )
     def test_a_bad_baseline_value_is_not_gated(self, bad):
-        base = {(10, "clang"): {"dump_ms": bad, "attach_ms": 20.0, "total_ms": 121.0}}
-        assert hg_gate.gateable_metrics(_pt(), base) == ["attach_ms", "total_ms"]
+        base = _base()
+        base[10, "clang"]["dump_ms"] = bad
+        assert hg_gate.gateable_metrics(_pt(), base) == _all_but("dump_ms")
 
     @pytest.mark.parametrize(
         "bad", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0]
     )
     def test_a_bad_measured_value_is_not_gated(self, bad):
-        assert hg_gate.gateable_metrics(_pt(dump_ms=bad), _base()) == [
-            "attach_ms",
-            "total_ms",
-        ]
+        assert hg_gate.gateable_metrics(_pt(dump_ms=bad), _base()) == _all_but(
+            "dump_ms"
+        )
 
     @pytest.mark.parametrize("bad", [float("nan"), float("inf")])
     def test_a_bad_value_never_produces_a_pass_verdict(self, bad):
         # The real hazard, stated directly: an enormous measured value against
         # a NaN baseline must not come back as "no failures, all good".
-        base = {(10, "clang"): {"dump_ms": bad, "attach_ms": 20.0, "total_ms": 121.0}}
+        base = _base()
+        base[10, "clang"]["dump_ms"] = bad
         assert hg_gate.check_regressions([_pt(dump_ms=1e9)], base, _th()) == []
         assert any(
             "dump_ms" in u for u in hg_gate.ungated_metrics([_pt(dump_ms=1e9)], base)
         )
 
     def test_a_missing_measured_metric_is_reported_not_gated(self):
-        point = {"size": 10, "backend": "clang", "attach_ms": 20.0, "total_ms": 121.0}
-        assert hg_gate.gateable_metrics(point, _base()) == ["attach_ms", "total_ms"]
+        point = _pt()
+        del point["dump_ms"]
+        assert hg_gate.gateable_metrics(point, _base()) == _all_but("dump_ms")
         reported = hg_gate.ungated_metrics([point], _base())
         assert any("metric=dump_ms" in r for r in reported)
 
@@ -319,11 +370,18 @@ class TestUngatedMetrics:
         assert len(reported) == len(_ALL)
         assert all("no baseline entry" in r for r in reported)
 
-    def test_a_legacy_baseline_reports_only_the_metric_it_lacks(self):
-        # The cross-version case the CI regression lane really hits.
+    def test_a_legacy_baseline_reports_only_the_metrics_it_lacks(self):
+        # The cross-version case the CI regression lane really hits: the base
+        # branch's own copy of this script wrote a baseline predating some of
+        # today's metrics, and the run must keep gating the ones it *does*
+        # carry rather than hard-failing. Stated as a complement so a metric
+        # added later is automatically expected here too.
         legacy = {(10, "clang"): {"dump_ms": 100.0, "attach_ms": 20.0}}
         reported = hg_gate.ungated_metrics([_pt()], legacy)
-        assert [r.split("metric=")[1].split(":")[0] for r in reported] == ["total_ms"]
+        assert [r.split("metric=")[1].split(":")[0] for r in reported] == _all_but(
+            "dump_ms", "attach_ms"
+        )
+        assert hg_gate.gateable_metrics(_pt(), legacy) == ["dump_ms", "attach_ms"]
 
 
 class TestLoadBaseline:
@@ -516,10 +574,32 @@ class TestResolveThresholds:
 
     def test_the_resolved_values_still_fall_back_to_the_module_defaults(self):
         # Defaulting the flags to None must not leave the threshold itself None.
+        # The tolerance is unitless and therefore shared; the absolute floor is
+        # per-unit, so a memory metric must NOT inherit the millisecond one --
+        # a 0.0 ms floor on a 0.1 MiB value is a pure percentage gate on
+        # page-granularity noise, which is what this split exists to avoid.
         resolved = hg_gate.resolve_thresholds(self._args([]))
-        for t in resolved.values():
-            assert t.tolerance == hg_gate.DEFAULT_REGRESS_TOLERANCE
-            assert t.min_delta == hg_gate.DEFAULT_REGRESS_MIN_DELTA_MS
+        assert set(resolved) == set(hg_gate.METRICS)
+        for metric, t in resolved.items():
+            assert t.tolerance == hg_gate.DEFAULT_REGRESS_TOLERANCE, metric
+            expected = (
+                hg_gate.DEFAULT_REGRESS_MIN_DELTA_MIB
+                if metric in hg_gate.MEMORY_METRICS
+                else hg_gate.DEFAULT_REGRESS_MIN_DELTA_MS
+            )
+            assert t.min_delta == expected, metric
+        assert (
+            hg_gate.DEFAULT_REGRESS_MIN_DELTA_MIB
+            != hg_gate.DEFAULT_REGRESS_MIN_DELTA_MS
+        )
+
+    def test_an_explicit_shared_floor_overrides_both_unit_defaults(self):
+        # The escape hatch must really reach the memory metrics too, or a
+        # caller could not tighten them at all without naming each one.
+        resolved = hg_gate.resolve_thresholds(
+            self._args(["--regress-min-delta-ms", "7"])
+        )
+        assert {t.min_delta for t in resolved.values()} == {7.0}
 
 
 class TestMainEntryPoint:
@@ -819,9 +899,9 @@ class TestRequireRealAstAttach:
             self.build_source = build_source
 
     def test_passes_when_both_passes_stamped(self):
-        from abicheck.buildsource.header_graph import (
+        from abicheck.buildsource.header_graph import HEADER_INCLUDE_GRAPH_PASS
+        from abicheck.buildsource.header_graph_ast_projection import (
             HEADER_CALL_GRAPH_PASS,
-            HEADER_INCLUDE_GRAPH_PASS,
         )
 
         snap = self._FakeSnap(
@@ -842,7 +922,9 @@ class TestRequireRealAstAttach:
         # Regression guard: the main AST parse can succeed while the
         # separate include-graph (`clang -M`) pass degrades or never runs
         # -- checking HEADER_CALL_GRAPH_PASS alone would miss this.
-        from abicheck.buildsource.header_graph import HEADER_CALL_GRAPH_PASS
+        from abicheck.buildsource.header_graph_ast_projection import (
+            HEADER_CALL_GRAPH_PASS,
+        )
 
         snap = self._FakeSnap(
             self._FakeBuildSource(self._FakeGraph({HEADER_CALL_GRAPH_PASS: True}))
@@ -961,7 +1043,25 @@ class TestLiveMeasurement:
         # integration"` sweep cannot see it).
         for metric in hg_gate.METRICS:
             assert result[metric] > 0, metric
+        # Only the time metrics carry a per-repeat sample list and a CV: the
+        # memory ones are one fresh-subprocess sample each, by construction
+        # (see hg_gate.MEMORY_METRICS). Asserting the split rather than
+        # skipping it keeps a future metric from quietly landing on the wrong
+        # side of it.
+        for metric in hg_gate.TIME_METRICS:
             assert result[f"{metric}_samples"], metric
+        for metric in hg_gate.MEMORY_METRICS:
+            assert f"{metric}_samples" not in result, metric
+        assert set(hg_gate.TIME_METRICS) | set(hg_gate.MEMORY_METRICS) == set(
+            hg_gate.METRICS
+        )
+        # The retained figure is the attach's own, so it must be a fraction of
+        # the whole process peak, not comparable to it.
+        # Both are absolute RSS in the same process, and the peak is a
+        # high-water mark over a window the end-of-attach reading sits
+        # inside, so this ordering is a property of the two definitions --
+        # not a coincidence of this fixture's size.
+        assert 0 < result["attach_end_rss_mib"] <= result["attach_peak_rss_mib"]
         # total_ms is the whole window, so it cannot be smaller than either
         # phase it contains -- a real invariant the arithmetic must satisfy.
         assert result["total_ms"] >= result["dump_ms"]

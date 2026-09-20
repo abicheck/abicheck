@@ -122,6 +122,10 @@ def _attach_header_graph(
         ClangHeaderIncludeExtractor,
         build_header_only_graph,
     )
+    from .buildsource.header_graph_ast_projection import (
+        HeaderGraphAstProjection,
+        project_header_graph_ast,
+    )
     from .buildsource.include_graph import augment_graph_with_includes
     from .buildsource.model import (
         CoverageStatus,
@@ -231,9 +235,48 @@ def _attach_header_graph(
             )
     except (SnapshotError, ValidationError):
         ast_root = None
+    # Reduce the AST to the four compact projections the graph builder
+    # actually reads, then drop the tree BEFORE the graph is allocated, so
+    # the two are never resident together.
+    #
+    # Be precise about what this buys, because the obvious claim is wrong
+    # and was measured (`docs/contribute/measurements/
+    # header-graph-attach-memory.md`, the 2026-09-19 follow-up). On the real
+    # reference library, three runs per side: it does NOT lower the member's
+    # peak (2216.3 -> 2215.3 MiB), and steady-state retention once the
+    # attach returns is ~8-12 MiB *higher*, not lower. The peak lives inside
+    # `json.load`, where the whole document is held as one str while the
+    # tree is built from it -- `document + tree`, never `tree + graph`.
+    #
+    # What it does buy is residency *during* the attach: the graph build
+    # goes from +147 MiB to -27 MiB against the AST-parse level, ~175 MiB
+    # lower at that point, because the graph lands in arenas the parse
+    # already freed. And it makes a future prune of the tree expressible at
+    # all -- the projection is exactly the statement of what such a prune
+    # would have to preserve, and that prune has a measured 62%-of-tree
+    # ceiling where this has none left. Do not cite this as having reduced
+    # oneDAL's memory; it did not.
+    #
+    # Evidence is untouched: the same four pure readers run over the same
+    # tree in the same order (`project_header_graph_ast`),
+    # `DECL_CALLS_DECL` included.
+    projection: HeaderGraphAstProjection | None = None
+    if ast_root is not None:
+        with memory_trace.phase("dump.header_graph.project"):
+            projection = project_header_graph_ast(ast_root)
+    # `ast_root` is the only surviving reference to the tree at this point
+    # (`_clang_header_dump` is called with `memoize=False`, so nothing was
+    # written into the in-process AST memo either), so clearing the name
+    # drops it here rather than at function exit. `gc.collect()` is
+    # deliberately NOT called: a clang AST is an acyclic dict/list
+    # structure, so refcounting frees it immediately, and a collection here
+    # would cost a full-heap walk for nothing (the earlier attribution
+    # measured `gc.collect()` on this path freeing exactly zero objects).
+    ast_root = None
+    memory_trace.mark("dump.header_graph.ast_released")
     graph = build_header_only_graph(
         snap,
-        ast_root,
+        ast_projection=projection,
         public_header_paths=[str(p) for p in (public_headers or [])],
         public_dir_paths=[str(p) for p in (public_header_dirs or [])],
         header_paths=[str(p) for p in resolved_headers],
@@ -244,6 +287,15 @@ def _attach_header_graph(
         # docstring and dumper_hybrid.merge_snapshots' "visibility" stamp.
         fact_provenance=snap.fact_provenance,
     )
+    # The graph build is the projection's only consumer, so let it go here
+    # rather than at function exit. Measured, not tidiness: holding it to
+    # the end left this attach retaining ~5 MiB MORE than the code it
+    # replaced (three runs above both baseline runs on oneDAL), because the
+    # projection's own indexes and edge lists -- 23.6 MiB there -- outlived
+    # the only thing that reads them. A reordering whose whole claim is
+    # "nothing is held longer than it is needed" has to hold that for its
+    # own intermediate too.
+    projection = None
     memory_trace.mark("dump.header_graph.build:done")
     if header_graph_includes and resolved_headers and cc.frontend_context == "host":
         # `ClangHeaderIncludeExtractor` drives a plain `clang -M` per header
