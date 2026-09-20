@@ -140,6 +140,17 @@ recursion and a streamed one cannot:
   boundary lands between them. ``type_graph._walk_child_sequence`` exists so
   that state can be handed back and forth here.
 
+**Not every document is streamed.** The trade above is CPU for memory, and
+it is only a good trade where there is memory to save, so
+``service_header_graph_attach`` applies it above a document-size threshold
+(``ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB``, 32 MiB) and parses smaller
+documents whole. Measured, the two ends are 100x apart: this repository's
+own header-graph perf fixtures produce 0.2/0.6/2.5 MiB documents at sizes
+25/100/400, where document and tree together are a few MiB, against
+oneDAL's 263 MiB. Streaming the small case cost 44-71% of attach wall time
+for nothing, and the PR-vs-base attach gate rejected it, correctly. The
+threshold is stated where the decision is made, with its reasoning.
+
 A third rule is about what this scanner *refuses*. It must never accept a
 document ``json.loads`` would reject, because then this module answers
 where the whole-tree path raises -- and the two would disagree exactly when

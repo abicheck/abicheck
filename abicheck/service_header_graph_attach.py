@@ -36,6 +36,7 @@ import ``.service`` or this module back.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -167,6 +168,35 @@ def _attach_header_graph(
     # defend against input clang never produces, and would mask real shape
     # bugs. Containing it where both paths converge keeps one rule in one
     # place.
+    # Below this document size, the whole-tree parse is simply cheaper and
+    # costs nothing worth avoiding, so the stream declines and the caller
+    # parses normally.
+    #
+    # Streaming trades CPU for memory: it decodes every element twice (the
+    # readers are two-pass and the second pass needs whole-translation-unit
+    # indexes) plus a structural scan, for ~2-3x the parse's wall time. That
+    # is a good trade only where the memory exists to be saved. Measured, the
+    # two ends are 100x apart: this repository's own header-graph perf
+    # fixtures produce 0.2/0.6/2.5 MiB documents at sizes 25/100/400, where
+    # the whole document and tree together are a few MiB and there is no
+    # memory problem at all, while oneDAL's `libonedal_core.so.2` produces
+    # 263 MiB, where the attach peaked at 2.1 GiB. Streaming everything made
+    # the small case 44-71% slower for nothing, which the PR-vs-base attach
+    # gate correctly rejected.
+    #
+    # A clang AST tree costs roughly 1.5x its document and peaks at roughly
+    # 2.5x (263 MiB document -> ~400 MiB of dicts, ~674 MiB peak, measured),
+    # so this threshold reads as "stream once the whole-tree peak would
+    # exceed roughly 80 MiB". It sits ~13x above the largest fixture and
+    # ~100x below the real case, so neither lands near it by accident.
+    # `ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB` overrides it, which is how the
+    # tests drive both paths over one document.
+    _STREAM_MIN_BYTES = (
+        float(os.environ.get("ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB", "32"))
+        * 1024
+        * 1024
+    )
+
     _MALFORMED_AST_ERRORS = (
         ClangAstStreamError,
         ValueError,
@@ -221,7 +251,10 @@ def _attach_header_graph(
         cached = load_cached_projection(ast_path)
         if cached is not None:
             return cached
-        if not ast_path.exists():
+        try:
+            if ast_path.stat().st_size < _STREAM_MIN_BYTES:
+                return None
+        except OSError:
             return None
         try:
             with memory_trace.phase("dump.header_graph.project_streaming"):

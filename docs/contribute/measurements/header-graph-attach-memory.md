@@ -476,6 +476,31 @@ the attach: provenance, snapshot serialization, L3–L5 embedding) goes
 because the rest of that run is untouched — the attach's own share is the
 table above.
 
+## Only above a size threshold
+
+The trade is CPU for memory, so it is applied only where memory is the
+constraint. Measured on this repository's own header-graph perf fixtures
+against the real case:
+
+| document | AST size | whole-tree peak |
+|---|---|---|
+| perf fixture, size 25 | 0.2 MiB | a few MiB |
+| perf fixture, size 100 | 0.6 MiB | a few MiB |
+| perf fixture, size 400 | 2.5 MiB | a few MiB |
+| oneDAL `libonedal_core.so.2` | **263 MiB** | **2.1 GiB** |
+
+A hundred-fold gap. Streaming everything made the small case **44–71%
+slower in attach wall time for no memory saved**, and the PR-vs-base
+attach gate rejected it — correctly; that is a real user-facing regression
+for anyone with a small library, not gate noise. The attach now streams
+only above 32 MiB of document (`ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB`),
+which reads as "stream once the whole-tree peak would exceed roughly
+80 MiB", since a tree costs ~1.5x its document and peaks at ~2.5x. That
+sits ~13x above the largest fixture and ~100x below the real case, so
+neither lands near it by accident. Confirmed after the change: the perf
+fixture's attach is 271–283 ms against a 274 ms base, and oneDAL still
+streams (`{tree: 0, stream: 1}`) at an unchanged 877 MiB peak.
+
 ## Where the floor now is
 
 Not the scanner. Top-level elements are extremely skewed — in this document

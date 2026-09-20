@@ -422,6 +422,11 @@ class TestTheWarmRunReallySkipsTheParse:
         the stream silently stopped being reachable and the tree parse
         quietly took over again.
         """
+        # Pin the size threshold off: this test is about *which* mechanism
+        # re-derives a lost sidecar, and the fixture AST is a few hundred
+        # bytes, so at the production threshold it would never stream and
+        # the assertion below would be about the fallback instead.
+        monkeypatch.setenv("ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB", "0")
         counts = self._install(monkeypatch, tmp_path, AST_CASES["call_edge"])
         cold = self._graph_shape(self._attach(self._snapshot()))
         assert (counts["projections"], counts["streams"]) == (1, 0), (
@@ -439,6 +444,48 @@ class TestTheWarmRunReallySkipsTheParse:
             "fall back to building the whole tree again"
         )
         assert again == cold
+
+    @pytest.mark.parametrize(
+        ("threshold_mib", "expect_stream"),
+        [("0", True), ("4096", False)],
+    )
+    def test_only_a_large_enough_document_is_streamed(
+        self, monkeypatch, tmp_path: Path, threshold_mib: str, expect_stream: bool
+    ) -> None:
+        """Streaming trades CPU for memory, so it must not run where there
+        is no memory to save.
+
+        Measured, the two ends are 100x apart: this repository's own
+        header-graph perf fixtures produce 0.2-2.5 MiB documents, where the
+        whole document and tree together are a few MiB, while the real case
+        is 263 MiB. Streaming the small one cost 44-71% of attach wall time
+        for nothing, which the PR-vs-base attach gate correctly rejected.
+
+        Both sides are driven over the *same* document by moving the
+        threshold rather than the input, so this tests the decision and not
+        two different ASTs. Each side asserts which mechanism actually ran:
+        the two paths produce the identical projection by construction, so
+        the results alone cannot tell them apart.
+        """
+        monkeypatch.setenv("ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB", threshold_mib)
+        counts = self._install(monkeypatch, tmp_path, AST_CASES["call_edge"])
+
+        cold = self._graph_shape(self._attach(self._snapshot()))
+        # The fake clang hands back a tree directly, so the stream is only
+        # reachable on a second run, where the AST entry exists on disk.
+        for sidecar in (tmp_path / "cache").glob("*.projection.json"):
+            sidecar.unlink()
+        again = self._graph_shape(self._attach(self._snapshot()))
+
+        assert again == cold, "the two paths must agree whichever ran"
+        if expect_stream:
+            assert counts["streams"] == 1, "a large-enough document must stream"
+        else:
+            assert counts["streams"] == 0, (
+                "a document below the threshold must not stream -- that is "
+                "CPU spent with no memory saved"
+            )
+            assert counts["projections"] == 2, "it must re-project instead"
 
 
 class TestThePathsWhereNoAstIsAcquired:
@@ -738,6 +785,11 @@ double total_area(const std::vector<std::unique_ptr<Shape>>& shapes);
         monkeypatch.setattr(
             stream_mod, "project_header_graph_ast_file", counting_stream
         )
+        # Pinned, not left to the fixture's size: whether this header's AST
+        # clears the production threshold depends on the host's standard
+        # library, and this test's claim is about the cache, not about
+        # which side of the threshold a given libstdc++ lands on.
+        monkeypatch.setenv("ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB", "0")
 
         cold = self._shape(self._attach(self._snapshot(), header))
         assert streams["n"] == 1, (

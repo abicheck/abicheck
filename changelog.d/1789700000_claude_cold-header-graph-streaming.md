@@ -28,3 +28,12 @@
   rather than a list) raised `TypeError` out of the projection step and
   failed the whole dump, where ADR-028 D3 requires degrading to the
   declaration-only graph. Both projection paths now contain it.
+
+### Changed
+
+- **Streaming applies only above a document-size threshold**
+  (`ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB`, default 32 MiB). It trades CPU
+  for memory, which is only worth it at scale: a small library's AST
+  document is a couple of MiB, where the whole tree costs nothing worth
+  avoiding and streaming was measurably 44–71% slower in attach wall time
+  for no benefit.
