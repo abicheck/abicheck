@@ -497,6 +497,71 @@ class TestScannerAgainstStdlibJson:
         ok.write_text(f'{{"inner": [{pad}, {{"k": 1}}]}}', encoding="utf-8")
         assert len(list(stream_top_level_decls(ok))) == 2
 
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            '{"inner": []',
+            '{"inner": [{"k":1}]',
+            '{"inner": [{"k":1}]} garbage',
+            '{"inner": [{"k":1}], "bad"}',
+            '{"inner": [{"k":1}] "kind":"T"}',
+        ],
+    )
+    def test_a_broken_root_suffix_raises(self, tmp_path: Path, spelling: str) -> None:
+        """What follows the `inner` array can still invalidate the document.
+
+        The scan stops at that array's own `]`, which says nothing about the
+        rest: the root may never close, data may follow it, or a later
+        member may be malformed. All were accepted, returning elements from
+        a document `json.loads` rejects.
+        """
+        path = tmp_path / "doc.json"
+        path.write_text(spelling, encoding="utf-8")
+        with pytest.raises(ClangAstStreamError):
+            list(stream_top_level_decls(path))
+
+    def test_a_duplicate_inner_key_raises_rather_than_disagreeing(
+        self, tmp_path: Path
+    ) -> None:
+        """The one case where both readings *succeed* with different content.
+
+        `json.loads` keeps the **last** `inner`; this scanner has already
+        yielded the **first**. So unlike every other malformation here it is
+        not decline-versus-accept — it is two different element lists, each
+        reported as success, which is precisely the silent divergence the
+        equivalence property exists to rule out. Declining sends the caller
+        to the whole-document parse, which is the reading that wins.
+        """
+        doc = '{"inner": [{"k":1}], "inner": [{"k":2},{"k":3}]}'
+        path = tmp_path / "doc.json"
+        path.write_text(doc, encoding="utf-8")
+        assert len(json.loads(doc)["inner"]) == 2, "the oracle keeps the last value"
+        with pytest.raises(ClangAstStreamError):
+            list(stream_top_level_decls(path))
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            '{"inner": [{"k":1}], "kind": "T"}',
+            '{"inner": [{"k":1}], "kind": "inner"}',
+            '{"inner": [{"inner": [{"z":1}]}]}',
+            '{"inner": [{"k":1}], "a": 1, "b": [2,3], "c": {"d": 4}}',
+        ],
+    )
+    def test_a_legitimate_root_suffix_is_not_rejected(
+        self, tmp_path: Path, spelling: str
+    ) -> None:
+        """The other half of the rule, or it would just reject everything.
+
+        A later member, a *value* that happens to read `inner`, a nested
+        `inner` one level down, and richer trailing members must all still
+        stream. The `"kind": "inner"` case is why the duplicate check tests
+        for a following colon rather than matching the text.
+        """
+        path = tmp_path / "doc.json"
+        path.write_text(spelling, encoding="utf-8")
+        assert list(stream_top_level_decls(path)) == json.loads(spelling)["inner"]
+
     def test_a_document_that_is_not_an_object_raises(self, tmp_path: Path) -> None:
         path = tmp_path / "doc.json"
         path.write_text("   \n  ", encoding="utf-8")

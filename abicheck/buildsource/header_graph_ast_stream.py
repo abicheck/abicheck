@@ -340,6 +340,83 @@ def _find_root_inner(fh: Any, buf: bytearray) -> bool:
             return False
 
 
+def _next_nonspace(fh: Any, buf: bytearray, pos: int) -> bytes:
+    """The next non-whitespace byte at or after *pos*, reading more as needed.
+
+    ``b""`` at end of input. Used to tell a `"inner"` *key* (followed by a
+    colon) from a `"inner"` *value* (not), which is what makes the
+    duplicate-key check below precise rather than a substring guess.
+    """
+    while True:
+        while pos < len(buf):
+            char = bytes(buf[pos : pos + 1])
+            if not char.isspace():
+                return char
+            pos += 1
+        chunk = fh.read(_CHUNK)
+        if not chunk:
+            return b""
+        buf.extend(chunk)
+
+
+#: How much of the document after the ``inner`` array this will read in
+#: order to validate it. clang puts ``inner`` last, so the tail is a closing
+#: brace and a newline; a document with megabytes after it is not one this
+#: scanner should be spending memory on, and the structural guarantees
+#: already made (brace balance, no trailing data) still hold past this point.
+_MAX_ROOT_SUFFIX = 1 << 20
+
+
+def _validate_root_suffix(fh: Any, buf: bytearray, pos: int) -> None:
+    """Check everything after the root's ``inner`` array closed.
+
+    The scanner stops at the ``inner`` array's own ``]``, which says nothing
+    about the rest of the document -- and several malformations live in that
+    tail, all of which were accepted: a root object that never closes
+    (``{"inner": []``), data after it (``{"inner": []} junk``), a broken
+    member (``{"inner": [], "bad"}``), and ``inner`` declared **twice**.
+
+    That last one is the dangerous one, because it is not decline-vs-accept:
+    ``json.loads`` keeps the *last* value and this scanner has already
+    returned the *first*, so both "succeed" with different content.
+    Everything else here is built so a disagreement with ``json.loads``
+    surfaces as a raised error and a fallback to the ordinary parse; a
+    quietly different element list defeats that.
+
+    Rather than hand-roll a grammar check, the tail is validated *by*
+    ``json.loads``: splicing it onto a synthetic one-member object
+    reconstitutes a complete document whose grammar is exactly the original
+    root's from this point on, and ``object_pairs_hook`` then exposes the
+    raw key list, which is what makes a duplicate ``inner`` visible at all
+    (a plain parse would silently keep the last one, reproducing the bug).
+    """
+    tail = bytearray(buf[pos:])
+    while len(tail) <= _MAX_ROOT_SUFFIX:
+        chunk = fh.read(_CHUNK)
+        if not chunk:
+            break
+        tail.extend(chunk)
+    if len(tail) > _MAX_ROOT_SUFFIX:
+        # Beyond what is worth holding; the structural guarantees already
+        # made stand, and this is not a shape clang produces.
+        return
+    # `"":0` is a member no clang AST carries, so it cannot collide with a
+    # real key, and it supplies the "a member has already been written"
+    # context the tail continues from -- which is what makes a missing
+    # comma (`{"inner": [], "bad"}`) a grammar error here too.
+    try:
+        pairs = json.loads(b'{"":0' + bytes(tail), object_pairs_hook=list)
+    except ValueError as exc:
+        raise ClangAstStreamError(
+            f"malformed AST document after the `inner` array: {exc}"
+        ) from exc
+    if any(key == "inner" for key, _ in pairs):
+        raise ClangAstStreamError(
+            "AST document declares `inner` more than once; the streamed and "
+            "whole-document readings would differ"
+        )
+
+
 def _after_colon_bracket(fh: Any, buf: bytearray, pos: int) -> int | None:
     """Index just past ``: [`` starting at *pos*, or ``None`` if that is not
     what follows (so the ``inner`` just matched was a value, not the array
@@ -471,7 +548,11 @@ def stream_top_level_decls(
                 carried_commas = 0
             if depth == 0 and token != b"{":
                 if token == b"]":
-                    return  # end of the root's `inner`
+                    # End of the root's `inner` -- but not yet the end of
+                    # the document, and what follows can still contradict
+                    # what was just yielded. See `_validate_root_suffix`.
+                    _validate_root_suffix(fh, buf, at + 1)
+                    return
                 # A top-level element that is not a JSON object. clang never
                 # emits one, and this scanner's element boundaries are
                 # object braces, so continuing would hand `json.loads` a

@@ -1,7 +1,7 @@
 ### Changed
 
 - **A cold header-graph attach now streams the clang AST from disk instead
-  of parsing it into memory, cutting its peak RSS by about two thirds.**
+  of parsing it into memory, cutting its peak RSS by about 58%.**
   Caching the attach's AST projection already made a *warm* run cheap, but
   the first run in CI, the first after a header edit, and every cache-cold
   container still built the whole tree: measured on a 263 MiB
