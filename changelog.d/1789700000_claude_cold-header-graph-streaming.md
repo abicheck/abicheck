@@ -37,3 +37,10 @@
   document is a couple of MiB, where the whole tree costs nothing worth
   avoiding and streaming was measurably 44–71% slower in attach wall time
   for no benefit.
+- **A truncated clang AST document is now rejected rather than silently
+  read short.** The streaming scanner accepted a document cut off after a
+  complete element, or one whose root never closed, returning the elements
+  it had managed to read and reporting success — where `json.loads`
+  rejects all of them. A half-written cache file is the likeliest
+  corruption in practice, and the result was a short projection: missing
+  graph edges, hence missing findings, with no error anywhere.

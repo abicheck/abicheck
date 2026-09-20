@@ -180,6 +180,121 @@ class TestScannerAgainstStdlibJson:
         path = _write(tmp_path, doc, indent=indent)
         assert list(stream_top_level_decls(path)) == json.load(path.open())["inner"]
 
+    @settings(max_examples=60, deadline=None)
+    @given(elements=st.lists(_ELEMENTS, max_size=4))
+    def test_it_still_agrees_when_every_structure_spans_a_read(
+        self, elements: list[dict], tmp_path_factory
+    ) -> None:
+        """The same oracle, with the read buffer shrunk to a few bytes.
+
+        Every branch that refills the buffer mid-structure -- a string, the
+        root's own `inner` key, the `: [` after it, an element, the gap
+        between two -- is reachable only when a structure straddles a read
+        boundary. At the production 1 MiB chunk a test document almost
+        never does, so those branches are the ones a subtle buffer bug
+        would hide in: an off-by-one in what is discarded, a span searched
+        from the wrong offset, a separator counted twice.
+
+        Shrinking `_CHUNK` forces all of them over the *same* generated
+        documents and the same `json.loads` oracle, rather than asserting
+        the refill logic against a hand-computed expectation.
+        """
+        # Set directly rather than via `monkeypatch`: Hypothesis rejects a
+        # function-scoped fixture inside `@given`, since the fixture is set
+        # up once while the body runs many times.
+        from abicheck.buildsource import header_graph_ast_stream as mod
+
+        original = mod._CHUNK
+        mod._CHUNK = 4
+        try:
+            tmp_path = tmp_path_factory.mktemp("tinychunk")
+            doc = {"id": "0x1", "kind": "TranslationUnitDecl", "inner": elements}
+            path = _write(tmp_path, doc, indent=2)
+            assert list(stream_top_level_decls(path)) == json.load(path.open())["inner"]
+        finally:
+            mod._CHUNK = original
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            '{"inner": [{"k": "unterminated',
+            '{"id": "unterminated',
+            '{"inner": [{"k": 1}',
+            '{"inner": [{"k": 1},',
+            '{"inner": ',
+            '{"id": "x"',
+        ],
+    )
+    def test_a_document_cut_short_mid_structure_raises(
+        self, tmp_path: Path, monkeypatch, spelling: str
+    ) -> None:
+        """Every "ran out of input" path, at a chunk size that reaches them.
+
+        Each is a distinct exit: a string that never closes while scanning
+        the root's keys, one that never closes inside an element, a
+        document cut off after a *complete* element, one cut off after its
+        separator, a root whose `inner` never gets its `[`, and a root that
+        never closes at all.
+
+        The third and fifth are why this test exists rather than being
+        folded into the malformed-separator sweep. Both were silently
+        **accepted** -- the scanner returned the elements it had managed to
+        read and reported success -- which is the same "answers where the
+        whole-tree path raises" failure as a bad separator, and the likelier
+        one: a half-written cache file truncates after a complete element
+        far more often than it grows a stray comma. A short projection is
+        missing graph edges, hence missing findings, with no error anywhere.
+        """
+        from abicheck.buildsource import header_graph_ast_stream as mod
+
+        monkeypatch.setattr(mod, "_CHUNK", 4)
+        path = tmp_path / "doc.json"
+        path.write_text(spelling, encoding="utf-8")
+        with pytest.raises(ClangAstStreamError):
+            list(stream_top_level_decls(path))
+
+    @pytest.mark.parametrize(
+        "spelling",
+        ['{"inner": [{"k": 1}, 12345]}', '{"inner": [{"k": 1}, true]}'],
+    )
+    def test_a_scalar_element_is_rejected_from_the_refill_branch_too(
+        self, tmp_path: Path, monkeypatch, spelling: str
+    ) -> None:
+        """A bare scalar has two rejection sites, and they are different code.
+
+        One is the ordinary gap check before the next structural token; the
+        other is the refill branch, reached when the read runs out *inside*
+        the gap, before any structural byte follows. A scalar carries no
+        structural byte of its own, so at a small enough chunk it is the
+        refill branch that has to catch it -- and if only the first site
+        checked, the element would be dropped and the projection would come
+        out short with no error.
+        """
+        from abicheck.buildsource import header_graph_ast_stream as mod
+
+        monkeypatch.setattr(mod, "_CHUNK", 4)
+        path = tmp_path / "doc.json"
+        path.write_text(spelling, encoding="utf-8")
+        with pytest.raises(ClangAstStreamError):
+            list(stream_top_level_decls(path))
+
+    def test_the_root_inner_key_is_found_when_it_spans_reads(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """`"inner"`, the `:` and the `[` may each land in a different read.
+
+        The key is matched structurally and then confirmed by looking past
+        it for `: [`, so a refill can fall between any two of those three
+        tokens. Padding the preceding key makes that happen at every chunk
+        size small enough to reach it.
+        """
+        from abicheck.buildsource import header_graph_ast_stream as mod
+
+        monkeypatch.setattr(mod, "_CHUNK", 4)
+        doc = {"kind": "T" * 40, "inner": [{"kind": "A"}, {"kind": "B"}]}
+        path = _write(tmp_path, doc, indent=4)
+        assert list(stream_top_level_decls(path)) == doc["inner"]
+
     def test_absent_inner_yields_nothing(self, tmp_path: Path) -> None:
         path = _write(tmp_path, {"id": "0x1", "kind": "TranslationUnitDecl"}, indent=2)
         assert list(stream_top_level_decls(path)) == []

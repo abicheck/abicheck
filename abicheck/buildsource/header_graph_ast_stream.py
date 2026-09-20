@@ -157,9 +157,16 @@ where the whole-tree path raises -- and the two would disagree exactly when
 an AST cache entry is corrupt, which is the one case the equivalence claim
 most needs to hold. So the element separators are *counted*, not merely
 allowed (:func:`_check_gap`), and a top-level element that is not a JSON
-object is rejected rather than skipped. Both raise, and every caller
-answers a raise by parsing the document the ordinary way, so strictness
-here costs a slow run and never a wrong answer.
+object is rejected rather than skipped, and so is a **truncated** one --
+including a document cut off after a *complete* element, which is the
+likeliest corruption of all, since a half-written cache file truncates far
+more often than it grows a stray comma. Reaching end-of-file is therefore
+always an error here: a well-formed document returns on the ``inner``
+array's own closing bracket and never gets that far. All of these raise,
+and every caller answers a raise by parsing the document the ordinary way,
+so strictness here costs a slow run and never a wrong answer -- where
+accepting any of them costs a silently short projection, hence missing
+graph edges and missing findings, with no error anywhere.
 
 Getting either wrong is silent: the edges simply differ. So equivalence is
 not argued, it is executed -- ``tests/test_header_graph_ast_stream.py``
@@ -291,9 +298,16 @@ def _find_root_inner(fh: Any, buf: bytearray) -> bool:
         if match is None:
             chunk = fh.read(_CHUNK)
             if not chunk:
-                if depth == 0:
-                    raise ClangAstStreamError("no root JSON object found")
-                return False
+                # Either nothing was read at all, or the root object never
+                # closed. Both are truncation, and neither may be reported
+                # as the legitimate "this root has no `inner`" -- that case
+                # returns below, on the root's own closing brace, and is
+                # the only way an absent `inner` is answered.
+                raise ClangAstStreamError(
+                    "no root JSON object found"
+                    if depth == 0
+                    else "truncated AST document: the root object never closed"
+                )
             buf.extend(chunk)
             continue
         token = match.group()
@@ -402,17 +416,34 @@ def stream_top_level_decls(
                         raise ClangAstStreamError(
                             "top-level AST element is not a JSON object"
                         )
+                    # Carry the separators *and* drop the bytes holding
+                    # them. Discarding only `buf[:pos]` left them in the
+                    # buffer, so the next gap check counted the same comma
+                    # a second time and rejected a valid document -- found
+                    # by the tiny-chunk property test, which is the only
+                    # thing that reaches this branch. Dropping the whole
+                    # buffer is safe precisely here: the search found no
+                    # structural byte from `pos` on, and the check above
+                    # just proved the remainder is whitespace and commas.
                     carried_commas += buf[pos:].count(b",")
-                    del buf[:pos]
-                    base += pos
+                    base += len(buf)
+                    del buf[:]
                     pos = 0
                 else:
                     pos = len(buf)
                 chunk = fh.read(_CHUNK)
                 if not chunk:
-                    if depth:
-                        raise ClangAstStreamError("truncated AST document")
-                    return
+                    # Reaching the end of the file is *always* truncation
+                    # here, at any depth: a well-formed document returns on
+                    # the `inner` array's own closing bracket and never
+                    # gets this far. Returning cleanly at depth 0 instead
+                    # accepted a document `json.loads` rejects -- the same
+                    # "answers where the whole-tree path raises" failure as
+                    # a malformed separator, and the likelier one in
+                    # practice, since a half-written cache file truncates
+                    # after a complete element far more often than it
+                    # grows a stray comma.
+                    raise ClangAstStreamError("truncated AST document")
                 buf.extend(chunk)
                 continue
             token = match.group()
