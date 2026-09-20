@@ -59,14 +59,50 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
         # dataclasses' own field lists) precisely because a hand-bumped
         # version integer is the kind of registry entry this repository has
         # repeatedly watched go stale.
-        fixed_by=(1338,),
+        fixed_by=(1338, 1339),
         seed_tests=("tests/test_header_graph_projection_cache.py",),
-        public_surfaces=("cli", "python-api"),
+        # `()` deliberately, per this field's own contract: "cli" needs a
+        # real Click/`CliRunner` invocation and "python-api" a call through
+        # `abicheck.service`, and every seed test here calls
+        # `service_header_graph_attach._attach_header_graph` and
+        # `dumper._clang_header_dump` directly. Claiming either would
+        # conceal exactly the cross-surface gap this registry exists to
+        # surface -- recorded below as a known gap instead (CodeRabbit
+        # review, PR #1339).
+        public_surfaces=(),
         axes={
             "cache_state": ("cold", "warm", "sidecar-discarded"),
             "schema": ("current", "reordered-fields", "unknown-version", "corrupt"),
+            # Earns a real entry per this field's frontend rule: a seed test
+            # invokes the live `clang -ast-dump=json` backend, not a
+            # hand-built AST fragment fed to an internal parser.
+            "frontend": ("clang",),
+            # Every filesystem call either entry point makes, against the
+            # faults reachable through it -- the axis the first version of
+            # this class had no coverage on at all, which is how an
+            # unguarded `UnicodeDecodeError` escaped.
+            "io_fault": ("invalid-utf8", "eacces", "enospc", "erofs", "eisdir", "eio"),
         },
         known_gaps=(
+            KnownGap(
+                description=(
+                    "No seed test for this class reaches a real public "
+                    "surface (a Click invocation or a call through "
+                    "`abicheck.service`, per `BugClass.public_surfaces`'s "
+                    "own contract). The cold/warm equivalence is proven "
+                    "through `_attach_header_graph` and the codec through "
+                    "its own entry points -- both internal, however real "
+                    "the clang backend driving them is. A silent "
+                    "recompute or a stale projection would therefore be "
+                    "caught at that layer but is not asserted to survive "
+                    "into a real `compare`/`dump` invocation's reported "
+                    "output. Not attempted here: the measured evidence for "
+                    "this change is a CLI run on oneDAL, which is a "
+                    "measurement rather than a gating test (CodeRabbit "
+                    "review, PR #1339)."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-4",
+            ),
             KnownGap(
                 description=(
                     "The equality-plus-mechanism pair is enforced for the "
