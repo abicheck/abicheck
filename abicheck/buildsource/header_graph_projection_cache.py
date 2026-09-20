@@ -149,8 +149,38 @@ def decode_projection(blob: str) -> HeaderGraphAstProjection | None:
         return None
 
 
+#: Everything a filesystem operation in this module may raise that must not
+#: reach the caller. `OSError` is the obvious half; `UnicodeDecodeError` is
+#: not, and it is the one that matters -- `read_text(encoding="utf-8")`
+#: raises it (a `ValueError`, not an `OSError`) for a sidecar holding
+#: invalid UTF-8, which a truncated write or an unrelated binary file landing
+#: at that name produces. Escaping here would abort the header-graph dump
+#: and leave the bad entry in place to do it again, which is the same
+#: ADR-028 D3 violation -- a cache failure becoming a run failure -- as the
+#: `UnboundLocalError` this change already fixed once (CodeRabbit review,
+#: PR #1339).
+_CACHE_IO_ERRORS = (OSError, UnicodeDecodeError)
+
+
+def _discard_sidecar(path: Path) -> None:
+    """Remove a sidecar this build will not use, best-effort.
+
+    Eviction is an optimisation -- it saves the *next* run a rejection, not
+    this one -- so a read-only directory or a Windows sharing violation must
+    not turn a cache miss into a failed dump.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def load_cached_projection(ast_cache_path: Path) -> HeaderGraphAstProjection | None:
     """The projection stored beside *ast_cache_path*, or ``None``.
+
+    Never raises, for the same reason :func:`store_cached_projection` does
+    not: every outcome here is either a projection or a re-parse, and a
+    re-parse is what the run would have done without this cache at all.
 
     An unreadable or untrusted entry is discarded rather than kept, so a
     corrupt sidecar costs one re-parse instead of every future one.
@@ -158,11 +188,12 @@ def load_cached_projection(ast_cache_path: Path) -> HeaderGraphAstProjection | N
     path = projection_sidecar_path(ast_cache_path)
     try:
         blob = path.read_text(encoding="utf-8")
-    except OSError:
+    except _CACHE_IO_ERRORS:
+        _discard_sidecar(path)
         return None
     projection = decode_projection(blob)
     if projection is None:
-        path.unlink(missing_ok=True)
+        _discard_sidecar(path)
     return projection
 
 
@@ -184,4 +215,9 @@ def store_cached_projection(
         tmp.write_text(encode_projection(projection), encoding="utf-8")
         os.replace(tmp, path)
     except OSError:
-        tmp.unlink(missing_ok=True)
+        # Through `_discard_sidecar`, not a bare `unlink`: the cleanup of a
+        # failed write runs in exactly the conditions that made the write
+        # fail (a full or read-only filesystem), so it is the likeliest of
+        # these calls to raise a second time -- and "never raises" must hold
+        # on the failure path too, not only the happy one.
+        _discard_sidecar(tmp)
