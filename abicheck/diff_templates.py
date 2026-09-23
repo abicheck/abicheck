@@ -57,6 +57,7 @@ from .compare.template_surface import (
     reconciled_public_functions,
 )
 from .diff_helpers import make_change
+from .model.graph_identity import _normalize_graph_identity
 from .model.surface_facts import is_public_export
 
 if TYPE_CHECKING:
@@ -546,8 +547,9 @@ def _canonical_identity_name(
     if normalized.startswith("_Z"):
         resolved = demangled.get(normalized)
         if resolved:
-            return resolved
-    return _qualified_function_name(name, mangled)
+            return _normalize_graph_identity(resolved)
+    # Drop a lambda/anonymous-tag spelling's checkout directory (`(lambda at /old/x.hpp:1:2)`).
+    return _normalize_graph_identity(_qualified_function_name(name, mangled))
 
 
 def _callable_identity_name(
@@ -609,10 +611,11 @@ def _functions_by_stem(
 
 def _function_signature(f: Function) -> tuple[str, int, str]:
     """Return a comparable signature tuple for *f*."""
+    norm = _normalize_graph_identity
     return (
-        f.return_type,
+        norm(f.return_type),
         len(f.params),
-        "|".join(p.type for p in f.params),
+        "|".join(norm(p.type) for p in f.params),
     )
 
 
