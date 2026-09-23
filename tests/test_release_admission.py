@@ -6,6 +6,7 @@ run behaves exactly as the fixed per-depth sizing did."""
 from __future__ import annotations
 
 import random
+import sys
 import threading
 import time
 
@@ -162,6 +163,9 @@ def test_plan_disables_the_gate_for_an_operator_budget(monkeypatch):
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="clang header path is exercised on ELF hosts"
+)
 def test_a_real_clang_dump_reports_its_ast_cold_and_warm(tmp_path, monkeypatch):
     """The sites the gate learns from: clang's spilled output on a cold run,
     the cache entry on a warm one -- both must reach the observer."""

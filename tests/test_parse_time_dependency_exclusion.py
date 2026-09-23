@@ -19,6 +19,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -27,7 +28,14 @@ from click.testing import CliRunner
 import abicheck.dumper_clang as dumper_clang
 from abicheck.cli import main
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    # clang cannot parse MinGW's libstdc++ headers, and a PE dump never
+    # reaches the clang ELF path whose skip this pins (known-gaps.md, MinGW).
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="clang header parse is ELF/Linux-only here"
+    ),
+]
 
 _HEADER = """\
 #include <map>
