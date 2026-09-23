@@ -127,6 +127,9 @@ def test_nothing_is_dropped_outside_a_fresh_filtered_dump(scope, extracted_now) 
         snap, [Path(_API)], ["*/eve-*/*"], extracted_now=extracted_now
     )
     assert _names(out) == _names(snap)
+    # ...and an include-only match is not recorded as an achieved exclusion.
+    if extracted_now:
+        assert out.excluded_header_patterns == ()
 
 
 def test_unmatched_pattern_changes_nothing() -> None:

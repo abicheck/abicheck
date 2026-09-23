@@ -71,7 +71,7 @@ def record_achieved_header_exclusions(
     from ..model.header_exclusion_record import record_header_exclusions
 
     achieved = set(matched_exclusion_patterns(headers, exclude_headers))
-    if extracted_now and exclude_headers:
+    if extracted_now and exclude_headers and snapshot.dependency_scope == "filtered":
         # A header reached only through another header's `#include` is still
         # excluded: its declarations are scoped out like a toolchain header's
         # (kept only where the library's own surface references them).
