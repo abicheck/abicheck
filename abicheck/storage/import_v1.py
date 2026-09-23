@@ -269,6 +269,56 @@ def import_legacy_snapshot(
     refused" section for why this module cannot default or derive it itself.
     Raises `ValueError` if the document's own `schema_version` exceeds it.
     """
+    if artifact_kind is None:
+        stated_platform = (
+            legacy_document.get("platform")
+            if isinstance(legacy_document, Mapping)
+            else None
+        )
+        artifact_kind = (
+            stated_platform
+            if isinstance(stated_platform, str) and stated_platform
+            else "elf"
+        )
+    source_schema_version, section_dtos = legacy_section_dtos(
+        legacy_document, max_known_schema_version=max_known_schema_version
+    )
+    sections: dict[str, ObjectRef] = {}
+    section_schema_versions: dict[str, int] = {}
+    for section_kind, dto_dict in section_dtos:
+        sections[section_kind] = ObjectRef(
+            kind=section_kind, digest=store.put(dto_dict)
+        )
+        section_schema_versions[section_kind] = SECTION_SCHEMA_VERSIONS[section_kind]
+
+    artifact = ArtifactRef(
+        artifact_id=artifact_id,
+        variant_id=variant_id,
+        kind=artifact_kind,
+        sections=sections,
+    )
+    variant = VariantRef(variant_id=variant_id, artifact_ids=(artifact_id,))
+    versions = StorageVersions(
+        section_schema_versions=section_schema_versions,
+        source_schema_version=source_schema_version,
+    )
+    return PackageManifest(
+        versions=versions, variant_refs=(variant,), artifact_refs=(artifact,)
+    )
+
+
+def legacy_section_dtos(
+    legacy_document: Mapping[str, Any], *, max_known_schema_version: int
+) -> tuple[int, list[tuple[str, dict[str, Any]]]]:
+    """`import_legacy_snapshot`'s validation and section encoding, without
+    the object store: ``(source_schema_version, [(section_kind, dto_dict)])``.
+
+    Every check `import_legacy_snapshot` documents runs here (it is that
+    function's body), and each section goes through its dedicated DTO codec.
+    Split out so `sectioned_document.to_sectioned_document`, which inlines
+    the sections anyway, does not hash, canonicalize and deep-copy the whole
+    document through a throwaway store only to read each section back.
+    """
     _mapping(legacy_document, "legacy_document")
     # This value gates the "too new to interpret" refusal below, so -- the
     # same as the document's own schema_version just below -- it is not
@@ -291,13 +341,6 @@ def import_legacy_snapshot(
         raise ValueError(
             "max_known_schema_version must be a positive int, not "
             f"{max_known_schema_version!r}"
-        )
-    if artifact_kind is None:
-        stated_platform = legacy_document.get("platform")
-        artifact_kind = (
-            stated_platform
-            if isinstance(stated_platform, str) and stated_platform
-            else "elf"
         )
     if "schema_version" in legacy_document:
         raw_schema_version = legacy_document["schema_version"]
@@ -355,11 +398,8 @@ def import_legacy_snapshot(
         )
 
     ir, conflicts = semantic_ir_from_document(legacy_document)
-    legacy_sections = split_legacy_document(legacy_document)
-
-    sections: dict[str, ObjectRef] = {}
-    section_schema_versions: dict[str, int] = {}
-    for section_kind, payload in legacy_sections.items():
+    section_dtos: list[tuple[str, dict[str, Any]]] = []
+    for section_kind, payload in split_legacy_document(legacy_document).items():
         # ADR-063 Track 4 (8B): every `LEGACY_SECTION_KINDS` member now has
         # its own dedicated DTO -- `_LEGACY_SECTION_CODECS` above -- instead
         # of the generic pass-through; the `else` branch is the fallback a
@@ -370,33 +410,12 @@ def import_legacy_snapshot(
             section_dto = to_dto_fn(payload)
         else:
             section_dto = legacy_section_to_dto(section_kind, payload)
-        sections[section_kind] = ObjectRef(
-            kind=section_kind, digest=store.put(section_dto.to_dict())
-        )
-        section_schema_versions[section_kind] = SECTION_SCHEMA_VERSIONS[section_kind]
+        section_dtos.append((section_kind, section_dto.to_dict()))
     if ir is not None or conflicts:
-        dto = semantic_ir_to_dto(ir, conflicts)
-        sections[SEMANTIC_IR_SECTION_KIND] = ObjectRef(
-            kind=SEMANTIC_IR_SECTION_KIND, digest=store.put(dto.to_dict())
+        section_dtos.append(
+            (SEMANTIC_IR_SECTION_KIND, semantic_ir_to_dto(ir, conflicts).to_dict())
         )
-        section_schema_versions[SEMANTIC_IR_SECTION_KIND] = SECTION_SCHEMA_VERSIONS[
-            SEMANTIC_IR_SECTION_KIND
-        ]
-
-    artifact = ArtifactRef(
-        artifact_id=artifact_id,
-        variant_id=variant_id,
-        kind=artifact_kind,
-        sections=sections,
-    )
-    variant = VariantRef(variant_id=variant_id, artifact_ids=(artifact_id,))
-    versions = StorageVersions(
-        section_schema_versions=section_schema_versions,
-        source_schema_version=source_schema_version,
-    )
-    return PackageManifest(
-        versions=versions, variant_refs=(variant,), artifact_refs=(artifact,)
-    )
+    return source_schema_version, section_dtos
 
 
 def export_legacy_snapshot(

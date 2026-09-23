@@ -45,10 +45,10 @@ independently versioned sections, structural completeness checking
 .import_legacy_snapshot`/`export_legacy_sections` -- the same split/DTO-
 encode/decode, schema-version validation, semantic_ir handling, and
 completeness checking those functions already implement and this package's
-own tests already exercise. Writing routes through a throwaway
-`InMemoryObjectStore` instead of a real directory; reading hands the inline
-sections to the decoder directly, since it has nothing to address them
-by. Only the *packaging* step
+own tests already exercise. Writing encodes each section through
+`legacy_section_dtos` (the import's own validation and codecs, minus the
+object store); reading hands the inline sections to the decoder directly,
+since neither side has anything to address them by. Only the *packaging* step
 (collect each section's DTO dict inline instead of publishing it to a
 content-addressed store) is new here.
 """
@@ -58,8 +58,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .import_v1 import export_legacy_sections, import_legacy_snapshot
-from .package import InMemoryObjectStore
+from .canonical import strip_capture_metadata
+from .dto import SECTION_SCHEMA_VERSIONS
+from .import_v1 import export_legacy_sections, legacy_section_dtos
 
 __all__ = [
     "SECTION_SCHEMA_VERSIONS_KEY",
@@ -120,23 +121,30 @@ def to_sectioned_document(
     every real caller (this function is always packaging a document this
     same build just produced, or one already validated readable by it).
     """
-    store = InMemoryObjectStore()
-    manifest = import_legacy_snapshot(
-        legacy_document,
-        store=store,
-        artifact_id=_ARTIFACT_ID,
-        max_known_schema_version=max_known_schema_version,
-        variant_id=_VARIANT_ID,
+    # Encoded directly, not through a throwaway object store: the store
+    # canonicalized, hashed and deep-copied every section only for this
+    # function to fetch each one back by digest (measured on a 76-root SVS
+    # snapshot: 424 -> 283 MiB peak, 81 -> 28 s). `strip_capture_metadata`
+    # is exactly the normalization the store applied, and sections are
+    # emitted in the sorted order `ArtifactRef.sections` gave them.
+    source_schema_version, section_dtos = legacy_section_dtos(
+        legacy_document, max_known_schema_version=max_known_schema_version
     )
-    artifact = manifest.artifact_refs[0]
-    sections = {
-        section_kind: store.get(ref.digest)
-        for section_kind, ref in artifact.sections.items()
-    }
+    section_dtos.sort(key=lambda item: item[0])
+    section_dtos.reverse()
+    sections: dict[str, Any] = {}
+    while section_dtos:
+        # Popped, so each raw DTO is released as soon as its normalized
+        # copy exists -- never both forms of the whole document at once.
+        kind, dto_dict = section_dtos.pop()
+        sections[kind] = strip_capture_metadata(dto_dict)
+        del dto_dict
     return {
-        "schema_version": manifest.versions.source_schema_version,
+        "schema_version": source_schema_version,
         SECTIONS_KEY: sections,
-        SECTION_SCHEMA_VERSIONS_KEY: dict(manifest.versions.section_schema_versions),
+        SECTION_SCHEMA_VERSIONS_KEY: {
+            kind: SECTION_SCHEMA_VERSIONS[kind] for kind in sections
+        },
     }
 
 
