@@ -324,7 +324,10 @@ def execute_and_write_header_only_dump_cli_run(
     from dataclasses import replace as _replace
 
     from ...service_dump_pipeline import DumpExecutionOptions
-    from ...workflows.extraction import resolve_source_frontend_clang_bin
+    from ...workflows.extraction import (
+        dump_manifest_header_roots,
+        resolve_source_frontend_clang_bin,
+    )
 
     exec_resolved = _replace(
         resolved,
@@ -349,7 +352,15 @@ def execute_and_write_header_only_dump_cli_run(
         extractor=resolved.header_backend,
         depth=resolved.requested_depth,
         include_dependencies=include_dependencies,
-        header_roots=headers,
+        # Same root set the binary path scopes with (`commands/dump.py`):
+        # a pathless `--dump-manifest` dump has no `-H` headers at all, and
+        # scoping with an empty set falls back to "anything under a system
+        # prefix is a dependency" -- which deletes a project staged under
+        # `usr/include` (Codex review).
+        header_roots=headers
+        + dump_manifest_header_roots(resolved.evidence.dump_manifest)
+        + tuple(resolved.public_headers)
+        + tuple(resolved.public_header_dirs),
         clang_bin=resolve_source_frontend_clang_bin(
             gcc_path, gcc_prefix, exclude_cl_style=False
         ),

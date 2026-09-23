@@ -226,6 +226,44 @@ class TestHeaderOnlyDependencyScoping:
             assert decl.source_header is not None, decl.name
             assert str(lib) in (decl.source_location or ""), decl.name
 
+    @pytest.mark.parametrize("operand", ["manifest", "header"])
+    def test_project_staged_under_a_system_prefix_is_kept(
+        self, tmp_path: Path, operand: str
+    ):
+        """A project whose own headers sit under a system-looking path
+        (a staged `usr/include`) must keep its API, however its roots were
+        named. Regression (Codex review): a pathless `--dump-manifest` dump
+        was scoped with the empty `-H` set, whose fallback treats every
+        system-prefixed header as a dependency -- two differing APIs both
+        dumped empty and compared `NO_CHANGE`."""
+        import json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.serialization import snapshot_from_dict
+
+        _skip_if_no_header_ast_toolchain()
+        inc = tmp_path / "stage" / "usr" / "include" / "mylib"
+        inc.mkdir(parents=True)
+        header = inc / "api.hpp"
+        header.write_text("int exposed_api(int value);\n", encoding="utf-8")
+        if operand == "manifest":
+            manifest = tmp_path / "m.yaml"
+            manifest.write_text(
+                f"roots:\n  - {header}\ntranslation_units:\n"
+                f"  - name: main\n    forced_includes:\n      - {header}\n",
+                encoding="utf-8",
+            )
+            args = ["--dump-manifest", str(manifest)]
+        else:
+            args = ["-H", str(header)]
+        out = tmp_path / "snap.json"
+        result = CliRunner().invoke(main, ["dump", *args, "-o", str(out)])
+        assert result.exit_code == 0, result.output
+        snap = snapshot_from_dict(json.loads(out.read_text(encoding="utf-8")))
+        assert [f.name for f in snap.functions] == ["exposed_api"]
+
     def test_typed_api_populates_source_header(self, tmp_path: Path):
         """The typed API reaches the same executor, so it must carry the
         same provenance -- checked before any scoping runs."""
