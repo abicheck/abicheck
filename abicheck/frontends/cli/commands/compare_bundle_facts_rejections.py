@@ -788,4 +788,12 @@ def apply_env_toggles_for_stored_pair(
         return
     from ....workflows.extraction import load_build_config_with_digest
 
-    apply_env_toggles(ctx, load_build_config_with_digest(config_path)[0])
+    try:
+        cfg = load_build_config_with_digest(config_path)[0]
+    except ValueError as exc:
+        # A malformed config is a usage error (exit 64), discovered or not;
+        # the compile-context merge may have tolerated it with a warning.
+        raise click.UsageError(
+            f"cannot parse build config {config_path}: {exc}"
+        ) from exc
+    apply_env_toggles(ctx, cfg)

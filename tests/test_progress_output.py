@@ -52,10 +52,14 @@ def records(monkeypatch: pytest.MonkeyPatch):
             captured.append(record.getMessage())
 
     sink = _Sink()
+    saved_level = logger.level
     monkeypatch.setattr(logger, "handlers", [sink])
     monkeypatch.setattr(logger, "propagate", False)
-    monkeypatch.setattr(logger, "level", logging.INFO)
-    return captured
+    # setLevel, not a plain attribute write: it clears the logging module's
+    # isEnabledFor cache, which an earlier test may have filled with False.
+    logger.setLevel(logging.INFO)
+    yield captured
+    logger.setLevel(saved_level)
 
 
 class _Clock:
@@ -103,9 +107,13 @@ def test_trivial_loops_report_nothing(records: list[str], total: int) -> None:
 
 def test_disabled_logger_is_a_pure_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
     logger = logging.getLogger(progress.LOGGER_NAME)
-    monkeypatch.setattr(logger, "level", logging.WARNING)
-    items = object(), object(), object()
-    assert tuple(progress.track(items, "work", 3)) == items
+    saved_level = logger.level
+    logger.setLevel(logging.WARNING)
+    try:
+        items = object(), object(), object()
+        assert tuple(progress.track(items, "work", 3)) == items
+    finally:
+        logger.setLevel(saved_level)
 
 
 def test_phase_reports_start_and_duration(
