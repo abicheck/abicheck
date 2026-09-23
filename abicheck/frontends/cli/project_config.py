@@ -69,13 +69,11 @@ def resolve_project_compare_config(
     (or the built-in default) always wins.
     """
     from ...cli_compare_options import _cli_flag
-    from ...cli_helpers_compare import (
-        discover_project_config,
-        resolve_compare_config,
-    )
+    from ...cli_helpers_compare import resolve_compare_config
+    from ...config_paths import resolve_project_config
     from ...workflows.extraction import load_build_config_with_digest
 
-    cfg_path = config if config is not None else discover_project_config()
+    cfg_path = resolve_project_config(config, search_from=Path.cwd()).path
     cfg_sha: str | None = None
     try:
         project_cfg = None

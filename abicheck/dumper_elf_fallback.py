@@ -142,7 +142,7 @@ def _try_dwarf_snapshot(
 
     if dwarf_only and headers:
         warnings.warn(
-            "--dwarf-only: ignoring provided headers; using DWARF as primary data source.",
+            "debug.dwarf_only: ignoring provided headers; using DWARF as primary data source.",
             UserWarning,
             stacklevel=3,
         )

@@ -1238,7 +1238,7 @@ runs:
             strip_untrusted_execution_keys,
             validate_base_config,
         )
-        from abicheck.cli_helpers_compare import discover_project_config
+        from abicheck.config_paths import discover_project_config
         from abicheck.config_paths import discover_build_config
 
         def _gha_escape(text: object) -> str:

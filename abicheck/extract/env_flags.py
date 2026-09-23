@@ -98,6 +98,7 @@ BOOLEAN_ENV_FLAGS: dict[str, bool] = {
     # ── Opt-out: on unless switched off ─────────────────────────────────
     "ABICHECK_AUTO_SYSTEM_INCLUDES": True,
     "ABICHECK_PARALLEL_EXTRACTION": True,
+    "ABICHECK_PROGRESS": True,
     "ABICHECK_PREPROCESSOR_SCAN": True,
 }
 

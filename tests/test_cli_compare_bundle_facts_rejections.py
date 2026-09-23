@@ -513,7 +513,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         )
 
         assert code == 64
-        assert "--write" in out
+        assert "-o sarif=... is not available" in out
 
     def test_depth_build_is_rejected(self, tmp_path: Path) -> None:
         # Codex review: --depth build/source collect L3-L5 evidence from

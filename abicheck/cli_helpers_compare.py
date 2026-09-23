@@ -34,7 +34,6 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from .config_paths import find_config_in_dir
 from .dry_run_estimate import pair_wide_cxx20_std_override
 from .workflows.extraction import (
     has_explicit_std,
@@ -685,24 +684,6 @@ def resolve_compare_config(
         require_complete_analysis=require_complete_analysis,
         deployment=deployment,
     )
-
-
-def discover_project_config(start: Path | None = None) -> Path | None:
-    """Find a project ``.abicheck.yml`` for ``compare`` (ADR-037 D4).
-
-    Looks in *start* (default: current working directory) and then walks up to
-    the filesystem root, returning the first recognized config file found —
-    see :mod:`abicheck.config_paths` for the set of locations checked within
-    each directory (the root spelling, ``.github/``, and
-    ``.github/abicheck/``). ``compare`` runs from a project checkout, so the
-    nearest enclosing config is the project's reviewed contract.
-    """
-    base = (start or Path.cwd()).resolve()
-    for d in (base, *base.parents):
-        found = find_config_in_dir(d)
-        if found is not None:
-            return found
-    return None
 
 
 def _merge_redundant_changes(result: DiffResult) -> None:

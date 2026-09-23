@@ -617,7 +617,7 @@ def compact_inputs_pack(
         raise ValueError(
             f"{output_path} already exists and is not this pack's recognized "
             "prior compaction output (manifest.last_compacted) -- refusing to "
-            "overwrite an unrelated file. Choose a different --output-filename "
+            "overwrite an unrelated file. Choose a different output filename "
             "or remove the conflicting file first."
         )
 

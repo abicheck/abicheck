@@ -118,7 +118,7 @@ class TestDumpDebugFormatValidation:
 
         assert result.exit_code != 0
         assert (
-            "--debug-format btf is only supported for ELF binaries, not PE"
+            "debug.format 'btf' is only supported for ELF binaries, not PE"
             in result.output
         )
 
@@ -133,7 +133,7 @@ class TestDumpDebugFormatValidation:
 
         assert result.exit_code != 0
         assert (
-            "--debug-format ctf is only supported for ELF binaries, not MACHO"
+            "debug.format 'ctf' is only supported for ELF binaries, not MACHO"
             in result.output
         )
 

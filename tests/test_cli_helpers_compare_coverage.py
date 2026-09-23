@@ -19,11 +19,11 @@ from abicheck.cli_helpers_compare import (
     _pair_wide_dialect_override,
     _resolve_build_context_flags,
     _resolve_severity,
-    discover_project_config,
     dry_run_compile_db_matched,
     fold_l0_hard_removals,
     load_required_symbols,
 )
+from abicheck.config_paths import discover_project_config
 from abicheck.dry_run_estimate import CompileContext
 from abicheck.errors import AbicheckError
 from abicheck.model import AbiSnapshot

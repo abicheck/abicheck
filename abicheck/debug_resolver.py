@@ -486,8 +486,8 @@ class DebuginfodResolver:
             return True
         _logger.warning(
             "Skipping debuginfod URL %s (scheme %r not allowed; "
-            "only https is accepted by default, use "
-            "--debuginfod-allow-insecure to also allow http)",
+            "only https is accepted; point debug.debuginfod_url / "
+            "DEBUGINFOD_URLS at an https server)",
             url,
             scheme,
         )

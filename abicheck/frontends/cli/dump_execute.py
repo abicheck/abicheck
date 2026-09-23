@@ -212,6 +212,7 @@ def execute_and_write_dump_cli_run(
     *,
     notify: Callable[[str], None],
     build_config: Path | None,
+    build_config_explicit: bool = True,
     stamp_provenance: Callable[..., None],
     write_snapshot_output: Callable[..., None],
     git_tag: str | None,
@@ -277,6 +278,7 @@ def execute_and_write_dump_cli_run(
         snapshot_compression=snapshot_compression,
         public_headers=public_headers,
         public_header_dirs=public_header_dirs,
+        build_config_explicit=build_config_explicit,
     )
 
 
@@ -285,6 +287,7 @@ def execute_and_write_header_only_dump_cli_run(
     *,
     notify: Callable[[str], None],
     build_config: Path | None,
+    build_config_explicit: bool = True,
     stamp_provenance: Callable[..., None],
     write_snapshot_output: Callable[..., None],
     git_tag: str | None,
@@ -331,6 +334,7 @@ def execute_and_write_header_only_dump_cli_run(
         requested_depth=None,
         execution_options=DumpExecutionOptions(
             build_config=build_config,
+            build_config_explicit=build_config_explicit,
             allow_build_query=True,
             seed_collect_mode=resolved.collect_mode,
             source_frontend_from_folded_context=True,
@@ -356,4 +360,5 @@ def execute_and_write_header_only_dump_cli_run(
         snapshot_compression=snapshot_compression,
         public_headers=resolved.public_headers,
         public_header_dirs=resolved.public_header_dirs,
+        build_config_explicit=build_config_explicit,
     )

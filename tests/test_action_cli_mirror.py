@@ -173,7 +173,7 @@ class TestTheGatesDocumentedLimit:
         """**This is the limitation, pinned as a test on purpose.**
 
         Both drifts the audit actually cared about —
-        `cli_resolve._reject_compile_context_for_set_inputs` and
+        a directory-compare compile-context guard (since deleted) and
         `cli_compare_options._resolve_depth_for_set_inputs` — live in functions
         that still exist and merely reject less than the Action believes. A
         citation to either resolves perfectly, before and after.

@@ -758,43 +758,6 @@ def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> str | None:
     return _resolve_depth_for_set_inputs(ctx)
 
 
-def _reject_compile_context_for_set_inputs(ctx: click.Context) -> None:
-    """Guard the *sided* per-side L2 compile context for directory/package compares.
-
-    The both-sides compile context (--ast-frontend/--compiler/
-    --compiler-prefix/--compiler-option/--sysroot/--nostdinc/
-    --frontend-context, and the project ``.abicheck.yml`` ``compile:`` block)
-    is threaded through the release fan-out — see this module's own comment
-    above. Only a sided ``--ast-frontend old=/new=`` override has no
-    per-library-pair-within-a-release meaning, so it is rejected loudly here
-    (a `UsageError`, mirroring the `--exit-code-scheme` guard) rather than
-    silently ignored.
-
-    Detected via :func:`cli_options.sided_frontend_explicit`, not a plain
-    ``ctx.get_parameter_source("old_header_backend")`` dict lookup:
-    ``old_header_backend``/``new_header_backend`` are kwargs
-    ``normalize_sided_options`` synthesizes into the command's own kwargs
-    dict, never real Click-registered parameters — so `get_parameter_source`
-    for either name is never ``COMMANDLINE``, making a dict-keyed check on
-    them silently inert (a prior revision of this guard carried exactly that
-    dead check).
-    """
-    # Lazy import: cli_options already imports this module (lazily) for
-    # classify_compare_operand/_reject_evidence_flags_for_set_inputs, so a
-    # top-level `from .cli_options import ...` here would close that cycle
-    # (see cli_options.py's own "cli_options -> cli_resolve -> ..." comment).
-    from .cli_options import sided_frontend_explicit
-
-    if sided_frontend_explicit(ctx):
-        raise click.UsageError(
-            "--ast-frontend old=/new= is not supported for directory/package "
-            "(release) comparisons: a sided override has no per-library-pair "
-            "meaning across a release (every library's own old vs. new is "
-            "already compared under one shared, both-sides compile context). "
-            "Compare the libraries individually to use a sided override."
-        )
-
-
 def resolve_directory_compile_context(
     ctx: click.Context,
     *,

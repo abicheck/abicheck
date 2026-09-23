@@ -162,7 +162,6 @@ from .dumper_toolchain import (
     _tool_identity_metadata as _tool_identity_metadata,
 )
 from .errors import (
-    AstContextMissingError,
     SnapshotError,
     UnsupportedCastxmlVersionError,
     ValidationError,
@@ -174,11 +173,13 @@ from .extract.export_symbol_identity import (
 )
 from .extract.header_ast_backend import (
     HEADER_BACKENDS as HEADER_BACKENDS,
+    _is_hybrid_request,
     _resolve_effective_ast_backend as _resolve_effective_ast_backend,
     _resolve_header_backend as _resolve_header_backend,
     _resolve_single_ast_backend as _resolve_single_ast_backend,
 )
 from .extract.header_ast_fields import parse_header_ast_fields
+from .extract.progress import timed
 from .model import AbiSnapshot, RecordType
 from .storage import closure_identity
 
@@ -215,12 +216,12 @@ def _resolve_clang_langmode(
 def _log_c_to_cpp_selfheal(explicit_c_request: bool) -> None:
     """Log the C→C++ self-heal at the right level for how C was chosen."""
     if explicit_c_request:
-        # Explicit --lang c that needs the C++ stdlib: keep the self-heal visible
+        # Explicit compile.lang: c that needs the C++ stdlib: keep the self-heal visible
         # — the result is C++ ABI evidence, not the C requested (Codex review).
         log.warning(
-            "clang was asked for C (--lang c) but the header(s) require the "
+            "clang was asked for C (compile.lang: c) but the header(s) require the "
             "C++ standard library; self-healing to C++ mode. The result is "
-            "C++ ABI evidence — pass --lang c++ to make this explicit, or "
+            "C++ ABI evidence — set compile.lang: c++ to make this explicit, or "
             "verify you intended a C library."
         )
     else:
@@ -228,7 +229,7 @@ def _log_c_to_cpp_selfheal(explicit_c_request: bool) -> None:
             "clang auto-detected C for a pure-#include umbrella header (no "
             "inline C++ syntax to key on), then self-healed to C++ after a "
             "missing C++ standard header — an unambiguous C++ signal. The "
-            "result is unaffected; pass --lang c++ to skip the initial C probe."
+            "result is unaffected; set compile.lang: c++ to skip the C probe."
         )
 
 
@@ -534,9 +535,10 @@ def _castxml_fallback_reason(
         message = (
             f"{exc}\n\nAutomatic CastXML-to-Clang fallback is disabled because "
             "the two frontends can produce materially different findings. "
-            "Install a compatible CastXML, select --ast-frontend clang "
-            "explicitly, or opt in with --allow-ast-frontend-fallback "
-            "(ABICHECK_ALLOW_AST_FALLBACK=1)."
+            "Install a compatible CastXML, select the clang backend explicitly "
+            "(.abicheck.yml compile.frontend: clang, or ABICHECK_AST_FRONTEND=clang), "
+            "or opt in to the fallback (compile.ast_frontend_fallback: true, or "
+            "ABICHECK_ALLOW_AST_FALLBACK=1)."
         )
         raise type(exc)(message) from exc
     log.warning(
@@ -544,8 +546,9 @@ def _castxml_fallback_reason(
         "unsupported castxml version, or a header that refuses direct "
         "inclusion); falling back to the clang header backend, which "
         "parses against the host toolchain and can exclude direct-include "
-        "#error guard headers. Set --ast-frontend castxml to force castxml "
-        "and see the original error."
+        "#error guard headers. Set compile.frontend: castxml in .abicheck.yml "
+        "(or ABICHECK_AST_FRONTEND=castxml) to force castxml and see the "
+        "original error."
     )
     if is_version_gate_failure:
         return "castxml-unsupported-version"
@@ -786,8 +789,8 @@ def _resolve_gated_castxml_bin(castxml_bin: str | None) -> str:
             "castxml not found in PATH. Install with: apt install castxml, "
             "brew install castxml, conda install -c conda-forge castxml, "
             "or choco install castxml (Windows); then ensure castxml is in PATH. "
-            "On a clang-only host, run with --ast-frontend clang (or "
-            "ABICHECK_AST_FRONTEND=clang) to use the clang JSON-AST backend "
+            "On a clang-only host, set compile.frontend: clang in .abicheck.yml "
+            "(or ABICHECK_AST_FRONTEND=clang) to use the clang JSON-AST backend "
             "instead — note it does not carry record size/alignment/offset "
             "layout, so layout-only breaks need castxml or debug info (L1)."
         ) from exc
@@ -981,10 +984,10 @@ def _castxml_dump(
             ):
                 raise
             log.warning(
-                "castxml failed to parse the header(s) under --lang c; the header "
+                "castxml failed to parse the header(s) under compile.lang: c; the header "
                 "contains C++-only constructs (class / namespace / template), so "
-                "retrying in C++ mode. Pass --lang c++ to select this directly and "
-                "silence this warning."
+                "retrying in C++ mode. Set compile.lang: c++ in .abicheck.yml to "
+                "select this directly and silence this warning."
             )
             try:
                 root = _run_castxml_attempt(
@@ -1282,20 +1285,11 @@ def dump(
                 "-- declare the equivalent in the manifest itself."
             )
 
-    if _resolve_header_backend(header_backend) == "hybrid":
-        if dump_manifest is not None:
-            raise ValidationError(
-                "dump_manifest is not yet supported with the 'hybrid' AST "
-                "frontend; pass an explicit --ast-frontend castxml/clang."
-            )
-        if frontend_context != "host":
-            # Hybrid has no device concept (castxml+clang merge); reject
-            # rather than silently defaulting both recursive calls to "host".
-            raise AstContextMissingError(
-                f"--frontend-context {frontend_context!r} requires the "
-                "clang header backend (--ast-frontend clang); 'hybrid' "
-                "merges castxml+clang and has no device-context semantics."
-            )
+    if _is_hybrid_request(
+        header_backend,
+        dump_manifest_given=dump_manifest is not None,
+        frontend_context=frontend_context,
+    ):
         from .dumper_hybrid import run_hybrid_dump
 
         return run_hybrid_dump(
@@ -1558,7 +1552,7 @@ def _dump_elf(
         # btf/ctf resolves no real DWARF either — Codex review, twice).
         if dwarf_only and resolved_debug_format != "dwarf":
             warnings.warn(
-                f"--dwarf-only requested but resolved debug format is {resolved_debug_format!r}; ignoring.",
+                f"debug.dwarf_only requested but resolved debug format is {resolved_debug_format!r}; ignoring.",
                 UserWarning,
                 stacklevel=2,
             )
@@ -1602,7 +1596,7 @@ def _dump_elf(
         # ast_result.is_clang is the only reliable signal (Codex review).
         from .dumper_manifest import resolve_header_ast_result
 
-        ast_result = resolve_header_ast_result(
+        ast_result = timed("header AST parse")(resolve_header_ast_result)(
             dump_manifest=dump_manifest,
             headers=headers,
             extra_includes=extra_includes,
@@ -1816,7 +1810,7 @@ def _dump_macho(
     # guaranteeing zero header/export matches for any C++ Mach-O binary and
     # falling back to export-table-only mode (observed on macOS CI; the
     # equivalent ELF path never had this double-strip).
-    parser = _header_ast_parser(
+    parser = timed("header AST parse")(_header_ast_parser)(
         headers,
         extra_includes,
         backend=header_backend,
@@ -1953,7 +1947,7 @@ def _dump_pe(
             language_profile=profile_hint,
         )
 
-    parser = _header_ast_parser(
+    parser = timed("header AST parse")(_header_ast_parser)(
         headers,
         extra_includes,
         backend=header_backend,
