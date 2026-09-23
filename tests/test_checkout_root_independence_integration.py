@@ -259,3 +259,53 @@ def test_vtable_of_class_derived_from_lambda_specialization_is_resolved(
         if c["kind"] == "type_vtable_changed"
     }
     assert any("Derived" in s for s in vt), (kinds, vt)
+
+
+@pytest.mark.parametrize("frontend", _frontends() or ["castxml"])
+def test_exclude_header_scopes_out_what_only_the_excluded_header_provides(
+    built_tree: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, frontend: str
+) -> None:
+    """``--exclude-header`` treats a matched header like a toolchain header
+    even when it is only reached through another header's ``#include``:
+    what it alone declares is not observed, while a type the library's own
+    public API uses keeps being checked."""
+    if frontend not in _frontends():
+        pytest.skip(f"{frontend} not found in PATH")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", frontend)
+    shutil.copytree(built_tree, tmp_path / "old")
+    shutil.copytree(built_tree, tmp_path / "new")
+    # NEW's excluded header gains unreferenced internals, and `foldable` --
+    # which the public `lib::Holder` embeds -- gains a field.
+    (tmp_path / "new/include/eve-1/eve/detail/kumi.hpp").write_text(
+        _KUMI.replace(
+            "  F func; T value;", "  F func; T value; long extra_field;"
+        ).replace(
+            "inline auto make_add()",
+            "struct ExtraInternal { int a; };\ninline int extra_helper() { return 7; }\n"
+            "int extra_decl(ExtraInternal const&);\n"
+            "inline auto make_add()",
+        )
+    )
+
+    def names(report: dict) -> str:
+        return json.dumps(
+            [
+                [c["kind"], c.get("symbol"), c.get("description")]
+                for c in report["changes"]
+            ]
+        )
+
+    _, plain = _compare("old", "new", [])
+    _, scoped = _compare("old", "new", ["--exclude-header", "*/eve-*/*"])
+
+    unreferenced = ("ExtraInternal", "extra_helper", "extra_decl")
+    seen_without_flag = [n for n in unreferenced if n in names(plain)]
+    assert not any(n in names(scoped) for n in unreferenced), names(scoped)
+    # Not vacuous: castxml reports these additions without the flag. (clang
+    # already leaves unreferenced non-public additions out on its own.)
+    if frontend == "castxml":
+        assert seen_without_flag, names(plain)
+    # A layout change to an excluded-header type the public `lib::Holder`
+    # embeds is still reported.
+    assert "extra_field" in names(scoped) or "Holder" in names(scoped), names(scoped)

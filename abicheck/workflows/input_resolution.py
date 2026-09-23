@@ -442,8 +442,7 @@ def resolve_input(
     body's eight exits -- a snapshot that reached one of them unstamped
     would claim a complete surface it does not have, and "the branch nobody
     updated" is exactly how that happens, so there is one exit to forget.
-    It is idempotent, which matters because the body re-enters this wrapper
-    for a symlink/alias target.
+    It is idempotent (the body re-enters this wrapper for a symlink target).
     """
     exclude_headers = tuple(kwargs.get("exclude_headers") or ())
     reject_exclusions_against_a_manifest(exclude_headers, kwargs.get("dump_manifest"))
@@ -456,6 +455,7 @@ def resolve_input(
         headers or [],
         exclude_headers,
         extracted_now=not is_stored_snapshot_operand(path),
+        scope_inputs=kwargs,
     )
 
 

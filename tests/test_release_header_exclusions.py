@@ -366,7 +366,7 @@ class TestAnUnmatchedRuleWarnsOnceForTheWholeRun:
                 "no_such_header_anywhere.h",
             ]
         )
-        occurrences = result.output.count("matched no header for")
+        occurrences = result.output.count("matched no header under -H for")
         assert occurrences == 1, (
             "a release-wide unmatched rule must be reported once, not once "
             f"per library (seen {occurrences} times):\n{result.output}"

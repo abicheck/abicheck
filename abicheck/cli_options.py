@@ -362,9 +362,12 @@ def exclude_header_option(func: F) -> F:
         "sides. Use it when a header *directory* contains headers that "
         "cannot be parsed together -- two vendored copies of a third-party "
         "API declaring conflicting typedefs, for example -- which otherwise "
-        "makes the whole directory unusable as a -H operand. Anything only "
-        "an excluded header declared is simply not observed, and is "
-        "reported as reduced evidence rather than as a removal.",
+        "makes the whole directory unusable as a -H operand. A matching "
+        "header reached through another header's #include is scoped out "
+        "like a toolchain header: what only it declares is not observed "
+        "(reported as reduced evidence, not a removal), while types the "
+        "library's own API uses are still checked. Requires dependency "
+        "scoping (off under --include-system-declarations).",
     )(func)
 
 
