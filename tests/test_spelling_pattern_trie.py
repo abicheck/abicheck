@@ -134,3 +134,4 @@ def test_one_vocabulary_one_pattern_text() -> None:
 
 def test_empty_vocabulary() -> None:
     assert _build_spelling_pattern([]) is None
+    assert _build_flat_spelling_pattern([]) is None
