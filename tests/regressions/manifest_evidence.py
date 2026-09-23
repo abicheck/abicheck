@@ -718,4 +718,27 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="evidence.spelling_matcher_same_offset_underreport",
+        invariant=(
+            "The whole-token spelling matcher reports every registered "
+            "spelling that occurs in the text with a valid boundary on both "
+            "sides -- including one that starts at the same offset as a "
+            "longer registered spelling (a class template inside its own "
+            "instantiation) and one nested strictly inside another -- and "
+            "nothing that crosses a token boundary. Right boundaries are "
+            "judged on the real text: a lowered `endpos` makes `re` treat "
+            "the window end as end of string, so a candidate ending there "
+            "must be re-checked rather than trusted."
+        ),
+        fixed_by=(1344,),
+        seed_tests=(
+            "tests/test_spelling_nested_same_offset.py",
+            "tests/test_spelling_match_cache.py",
+        ),
+        axes={
+            "occurrence": ("same-offset", "nested", "both"),
+            "window": ("whole-text", "caller start/end"),
+        },
+    ),
 )
