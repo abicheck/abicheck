@@ -1167,3 +1167,28 @@ def test_internal_template_leak_still_distinguishes_distinct_lambdas() -> None:
     assert [c.kind for c in changes] == [
         ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API
     ]
+
+
+def test_lambda_only_instantiations_are_examined() -> None:
+    """A template whose every instantiation takes a lambda argument used to
+    be skipped outright: the ``(`` of ``(lambda at ...)`` was read as a
+    parameter list, so no stem ever looked templated."""
+    old = _snap(
+        funcs=[
+            _fn("lib::detail::f<(lambda at /r/h.hpp:1:2)>", mangled="a"),
+            _fn("lib::detail::f<(lambda at /r/h.hpp:3:4)>", mangled="b"),
+        ]
+    )
+    new = _snap(funcs=[_fn("lib::detail::f<(lambda at /r/h.hpp:1:2)>", mangled="a")])
+    changes = detect_internal_template_leaks(old, new)
+    assert [(c.kind, c.symbol) for c in changes] == [
+        (ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API, "lib::detail::f")
+    ]
+    # ...and the same set under another checkout root is unchanged.
+    moved = _snap(
+        funcs=[
+            _fn(f.name.replace("/r/", "/elsewhere/"), mangled=f.mangled)
+            for f in old.functions
+        ]
+    )
+    assert detect_internal_template_leaks(old, moved) == []

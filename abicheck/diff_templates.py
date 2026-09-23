@@ -52,9 +52,12 @@ from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .compare.template_surface import (
     cpo_identity as _cpo_id,
+    mask_operator_symbols,
     qualified_declaration_name as _qualified_function_name,  # noqa: F401  (re-exported)
     reconciled_cpo_surfaces,
     reconciled_public_functions,
+    strip_template_args as _strip_template_args,
+    template_angle_depth,
 )
 from .diff_helpers import make_change
 from .model.graph_identity import _normalize_graph_identity
@@ -66,25 +69,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-def _strip_template_args(name: str) -> str:
-    """Drop everything from the first top-level ``<`` to the matching ``>``."""
-    if "<" not in name:
-        return name
-    depth = 0
-    out: list[str] = []
-    for ch in name:
-        if ch == "<":
-            depth += 1
-            continue
-        if ch == ">":
-            if depth > 0:
-                depth -= 1
-            continue
-        if depth == 0:
-            out.append(ch)
-    return "".join(out)
 
 
 def _is_internal_segment(name: str, internal_segments: tuple[str, ...]) -> bool:
@@ -130,7 +114,7 @@ _DECLTYPE_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])decltype$")
 def _looks_like_template_instantiation(name: str) -> bool:
     """A declared C++ name is a template instantiation iff it contains a
     top-level ``<`` followed by a non-bracket character."""
-    return bool(name) and bool(_TEMPLATE_ARGS_RE.search(name))
+    return bool(name) and bool(_TEMPLATE_ARGS_RE.search(mask_operator_symbols(name)))
 
 
 def _pointer_declarator_star_index(qualified: str, paren_index: int) -> int:
@@ -324,6 +308,12 @@ def _strip_param_signature(qualified: str) -> str:
     wrapper_star_index = -1
     while i != -1:
         prefix = qualified[:i]
+        if template_angle_depth(prefix):  # e.g. `f<(lambda at h:1:2)>`: an argument
+            close = _matching_close_paren(qualified, i)
+            if close == -1:
+                return qualified
+            i = qualified.find("(", close + 1)
+            continue
         m = _OPERATOR_TOKEN_RE.search(prefix)
         if m is not None and m.end() == len(prefix) and qualified[i : i + 2] == "()":
             # operator()'s own, empty parentheses are part of the
