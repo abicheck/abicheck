@@ -313,6 +313,10 @@ class TestHeaderOnlyDependencyScoping:
         origins = {f.name: f.origin.value for f in snap.functions}
         assert origins == {"root_api": "public_header", "extra_api": "public_header"}
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="clang cannot parse MinGW's libstdc++ headers -- see known-gaps.md",
+    )
     def test_clang_sticky_file_does_not_misattribute_library_declarations(
         self, tmp_path: Path
     ):
