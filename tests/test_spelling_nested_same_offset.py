@@ -197,3 +197,38 @@ def test_stdlib_reachability_sees_the_template_inside_its_instantiation(
         types=[record(template), record(instantiation)],
     )
     assert directly_referenced_stdlib_types(snap) == {template, instantiation}
+
+
+def test_an_empty_spelling_terminates_and_respects_boundaries() -> None:
+    """A zero-length candidate cannot shrink the window any further, so the
+    per-offset loop must stop on it rather than spin. Production vocabularies
+    carry no empty spelling; this pins the guard that makes one harmless."""
+    text = "Foo , ( Bar"
+    got = finditer_allow_nested(compile_spelling_pattern({"", "Foo", "Bar"}), text)
+    spans = _spans(got)
+    assert (0, 3, "Foo") in spans
+    assert (8, 11, "Bar") in spans
+    empties = [s for s in spans if s[2] == ""]
+    assert empties, "the guard path was not exercised"
+    for i, _, _ in empties:
+        assert i == 0 or not _is_token_char(text[i - 1])
+        assert i == len(text) or not _is_token_char(text[i])
+
+
+@pytest.mark.parametrize(
+    ("vocab", "text", "expected"),
+    [
+        ({"Foo", "Foob"}, "Foob", [(0, 4, "Foob")]),
+        ({"ab", "abc", "abcd"}, "abcd x", [(0, 4, "abcd")]),
+        ({"ns::A", "ns::AB"}, "ns::AB*", [(0, 6, "ns::AB")]),
+    ],
+)
+def test_a_candidate_ending_at_a_lowered_endpos_is_rechecked(
+    vocab, text, expected
+) -> None:
+    """The ``endpos`` trap, hit directly: after the longer match, the window
+    is lowered to end one character earlier, where ``re`` sees end-of-string
+    and accepts the one-shorter spelling. The real next character continues
+    the token, so it must be rejected."""
+    got = _spans(finditer_allow_nested(compile_spelling_pattern(vocab), text))
+    assert got == expected == _oracle(vocab, text)
