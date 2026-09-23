@@ -30,7 +30,6 @@ directly, so a command cannot pick up one axis and silently forget another.
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -86,11 +85,9 @@ if TYPE_CHECKING:
 from ...model import AbiSnapshot
 
 _logger = logging.getLogger("abicheck")
-# `extract.progress`'s logger and switch, by name: frontends may not import
-# `extract` (ADR-061), so the two names are pinned equal by
-# tests/test_progress_output.py instead.
+# `extract.progress`'s logger, by name: frontends may not import `extract`
+# (ADR-061), so the name is pinned equal by tests/test_progress_output.py.
 _progress_logger = logging.getLogger("abicheck.progress")
-_PROGRESS_ENV = "ABICHECK_PROGRESS"
 
 # Marker attribute (P3, CLI-audit) stamped on every handler `_setup_verbosity`
 # installs, so a repeated call within one process (the `compare-release`
@@ -131,13 +128,9 @@ def _setup_verbosity(verbose: bool) -> None:
     setattr(progress_handler, _VERBOSITY_HANDLER_MARKER, True)
     _progress_logger.addHandler(progress_handler)
     _progress_logger.propagate = False
-    _progress_logger.setLevel(
-        logging.INFO
-        if verbose
-        or os.environ.get(_PROGRESS_ENV, "").strip().lower()
-        not in {"0", "false", "no", "off"}
-        else logging.WARNING
-    )
+    # INFO: progress.py emits unless ABICHECK_PROGRESS is off; DEBUG (-v):
+    # it emits regardless. The switch is read there, via env_flags.
+    _progress_logger.setLevel(logging.DEBUG if verbose else logging.INFO)
 
 
 def _safe_write_output(output: Path, text: str) -> None:

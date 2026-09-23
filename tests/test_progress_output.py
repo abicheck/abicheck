@@ -53,6 +53,8 @@ def records(monkeypatch: pytest.MonkeyPatch):
 
     sink = _Sink()
     saved_level = logger.level
+    # conftest turns progress off suite-wide; these tests are about it.
+    monkeypatch.setenv(progress.PROGRESS_ENV, "1")
     monkeypatch.setattr(logger, "handlers", [sink])
     monkeypatch.setattr(logger, "propagate", False)
     # setLevel, not a plain attribute write: it clears the logging module's
@@ -147,13 +149,19 @@ def test_timed_keeps_the_wrapped_signature(records: list[str]) -> None:
 # ── the CLI wiring ──────────────────────────────────────────────────────────
 
 
-def test_cli_names_the_same_logger_and_switch() -> None:
-    """``frontends`` may not import ``extract``, so runtime spells the two
-    names itself; they must stay equal to the module's own."""
+def test_cli_names_the_same_logger() -> None:
+    """``frontends`` may not import ``extract``, so runtime spells the
+    logger name itself; it must stay equal to the module's own."""
     from abicheck.frontends.cli import runtime
 
     assert runtime._progress_logger.name == progress.LOGGER_NAME
-    assert runtime._PROGRESS_ENV == progress.PROGRESS_ENV
+
+
+def test_the_switch_is_a_registered_env_flag() -> None:
+    """Read through the shared ``env_flags`` registry, not parsed by hand."""
+    from abicheck.extract.env_flags import BOOLEAN_ENV_FLAGS
+
+    assert BOOLEAN_ENV_FLAGS[progress.PROGRESS_ENV] is True
 
 
 @pytest.mark.parametrize(

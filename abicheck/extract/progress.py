@@ -45,7 +45,6 @@ from __future__ import annotations
 
 import functools
 import logging
-import os
 import time
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
@@ -73,14 +72,24 @@ _F = TypeVar("_F", bound=Callable[..., object])
 
 def enabled_by_env() -> bool:
     """``False`` only when ``ABICHECK_PROGRESS`` is set to an off value."""
-    value = os.environ.get(PROGRESS_ENV, "").strip().lower()
-    return value not in {"0", "false", "no", "off"}
+    from .env_flags import env_flag
+
+    return env_flag(PROGRESS_ENV)
+
+
+def _enabled() -> bool:
+    """Emit when the front end asked for it: its logger at DEBUG (``-v``)
+    always, at INFO (the CLI default) unless ``ABICHECK_PROGRESS`` is off.
+    A library caller that configured no logging stays at WARNING: silent."""
+    if _log.isEnabledFor(logging.DEBUG):
+        return True
+    return _log.isEnabledFor(logging.INFO) and enabled_by_env()
 
 
 @contextmanager
 def phase(label: str) -> Iterator[None]:
     """Report *label* starting, then finishing (or failing) with its duration."""
-    if not _log.isEnabledFor(logging.INFO):
+    if not _enabled():
         yield
         return
     start = time.monotonic()
@@ -113,7 +122,7 @@ def track(items: Iterable[_T], label: str, total: int) -> Iterator[_T]:
     Counts items as the caller consumes them, so wrapping a pool's
     ``map``/``as_completed`` reports completed work, not submitted work.
     """
-    if not _log.isEnabledFor(logging.INFO) or total <= 1:
+    if total <= 1 or not _enabled():
         yield from items
         return
     start = last = time.monotonic()
