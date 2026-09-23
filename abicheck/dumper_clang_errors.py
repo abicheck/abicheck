@@ -44,6 +44,7 @@ from .dumper_cache import (
 from .dumper_clang_streaming import load_pruned_clang_ast, streaming_prune_suppressed
 from .errors import SnapshotError
 from .extract.env_flags import env_flag
+from .storage.ast_size_observer import report_ast_size
 from .storage.derived_ast import offer_derived_ast_source
 from .storage.json_chunked_write import _atomic_write_json
 from .sycl_context import decode_and_select_frontend_context_from_path
@@ -667,6 +668,7 @@ def _parse_clang_ast_result(
             f"clang produced no AST for the header(s) (exit {result.returncode}): "
             f"{result.stderr[:1000].strip()}"
         )
+    report_ast_size(ast_size)
     # A pathological header's AST can be hundreds of MB to multiple GB, so
     # loading and walking it costs real time on its own, on top of the
     # subprocess wall-clock run_bounded already bounded. Re-check here (before

@@ -138,7 +138,7 @@ def run_tu_fragment(
     public surface, regardless of which TU happens to force-include them.
 
     ``pruning_header_roots`` (Codex review, PR #840): the streaming pruner's
-    root set must match ``dumper_scoping.dump_manifest_header_roots``'s own
+    root set must match ``extract.dump_manifest_roots.dump_manifest_header_roots``'s own
     computation exactly, or it can misclassify (and permanently drop) a
     declaration the authoritative post-hoc filter would have retained --
     that function folds in *every* TU's ``forced_includes`` and
@@ -457,7 +457,7 @@ def run_tu_loop(
     explicit_public_dirs = [str(d) for d in public_header_dirs]
 
     # Codex review, PR #840: the streaming pruner's root set must match
-    # `dumper_scoping.dump_manifest_header_roots`'s own computation exactly
+    # `extract.dump_manifest_roots.dump_manifest_header_roots`'s own computation exactly
     # -- the *manifest-wide* union across every TU's own `forced_includes`/
     # `project_owned` includes, not just the one TU currently being parsed.
     # A per-TU-only slice (this function's own siblings compute one, for

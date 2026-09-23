@@ -119,6 +119,7 @@ from .dumper_castxml import (
     is_synthetic_ctor_key,
     is_synthetic_dtor_key,
 )
+from .extract.dependency_exclusion import suppress_dependency_exclusion
 from .extract.semantic_ir_merge import merge_semantic_ir
 from .fact_provenance import (
     backfill_fact,
@@ -1196,17 +1197,16 @@ def run_hybrid_dump(
 ) -> AbiSnapshot:
     """Run *dump_fn* (``dumper.dump``) once per real backend and merge.
 
-    Takes *dump_fn* as a parameter, rather than importing ``dumper.dump``
-    directly, so this module never depends on ``dumper.py`` (which already
-    depends on this one) — avoiding an import cycle without needing a
-    deferred/local import on either side. Every keyword argument is forwarded
+    Takes *dump_fn* as a parameter so this module never depends on
+    ``dumper.py``, which depends on it. Every keyword argument is forwarded
     to both sub-dumps unchanged except ``header_backend``, which this
-    function sets explicitly on each call; reuses every format handler,
-    ELF/PE/Mach-O metadata attachment, and provenance tagging in *dump_fn*
-    completely unchanged for both sub-dumps — only the merge step
-    (:func:`merge_snapshots`) is new.
+    function sets explicitly on each call; only :func:`merge_snapshots` is
+    new. The parse-time dependency skip is off: only clang could apply it.
     """
-    with closure_identity.defer_closure_identity_renumbering():
+    with (
+        closure_identity.defer_closure_identity_renumbering(),
+        suppress_dependency_exclusion(),
+    ):
         castxml_snap = dump_fn(so_path, headers, header_backend="castxml", **kwargs)
         clang_snap = dump_fn(so_path, headers, header_backend="clang", **kwargs)
     return closure_identity.renumber_anonymous_closure_identities(

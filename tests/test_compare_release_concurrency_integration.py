@@ -308,12 +308,15 @@ class TestConcurrentReleaseWorkflow:
         real_parallel = pairwise._compare_release_parallel
         parallel_calls: list[int] = []
 
-        def spy_parallel(matched_keys, common_args, old_map, workers):  # type: ignore[no-untyped-def]
+        def spy_parallel(matched_keys, common_args, old_map, workers, admission=None):  # type: ignore[no-untyped-def]
             parallel_calls.append(workers)
-            return real_parallel(matched_keys, common_args, old_map, workers)
+            return real_parallel(matched_keys, common_args, old_map, workers, admission)
 
         monkeypatch.setattr(pairwise, "_compare_release_parallel", spy_parallel)
 
+        # An operator budget turns the AST-costed admission gate off, so a
+        # small runner cannot serialize the 2/4-worker runs this compares.
+        monkeypatch.setenv("ABICHECK_RELEASE_JOB_MEM_GIB", "1")
         pinned_counts: list[int] = []
         results = {}
         for workers in (1, 2, 4):
@@ -321,7 +324,9 @@ class TestConcurrentReleaseWorkflow:
             def pinned(*args: object, _w: int = workers, **kwargs: object):  # type: ignore[no-untyped-def]
                 resolved = real(*args, **kwargs)  # type: ignore[arg-type]
                 pinned_counts.append(_w)
-                return (_w, *resolved[1:])
+                # Pinned means unclamped too: with a clamp in effect the pool
+                # is the pre-clamp count and the memory gate throttles it.
+                return (_w, None, *resolved[2:])
 
             monkeypatch.setattr(
                 "abicheck.workflows.release_jobs.resolve_release_worker_count", pinned

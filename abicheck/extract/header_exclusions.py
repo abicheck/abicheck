@@ -236,7 +236,7 @@ def reject_exclusions_against_a_manifest(
     self-describing extraction contract (ADR-050 D3): narrowing it from the
     command line would contradict the document the run was told to honour,
     and the roots it declares are matched exactly by
-    ``dumper_scoping.dump_manifest_header_roots``. Excluding a header from a
+    ``extract.dump_manifest_roots.dump_manifest_header_roots``. Excluding a header from a
     manifest dump is a real capability, but it belongs in the manifest --
     recorded in ``docs/contribute/known-gaps.md`` rather than approximated
     here.

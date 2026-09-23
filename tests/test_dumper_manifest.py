@@ -350,7 +350,7 @@ def test_run_tu_fragment_calls_parser_with_tu_own_headers_and_includes():
 
 def test_run_tu_fragment_pruning_header_roots_includes_project_owned_includes():
     """Codex review, PR #840: the streaming pruner's root set must match
-    ``dumper_scoping.dump_manifest_header_roots``'s own computation -- which
+    ``extract.dump_manifest_roots.dump_manifest_header_roots``'s own computation -- which
     folds in every TU's ``project_owned``-marked ``includes``, not just its
     ``forced_includes`` -- or a declaration reached only via a
     ``project_owned`` include directory (not force-included directly) is
@@ -407,7 +407,7 @@ def test_run_tu_loop_carries_manifest_wide_ownership_roots_into_every_tu():
     declaration "main"'s own header-AST parse reaches under that shared
     directory must not be misclassified as a dependency and pruned, even
     though "main" itself never mentions that directory -- the authoritative
-    post-hoc filter (``dumper_scoping.dump_manifest_header_roots``) unions
+    post-hoc filter (``extract.dump_manifest_roots.dump_manifest_header_roots``) unions
     across the whole manifest, so the streaming pruner's root set must too.
     """
     calls: list = []

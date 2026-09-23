@@ -104,13 +104,21 @@ class TestCompareReleaseLibrariesMemoryClamp:
         monkeypatch.setattr(
             release_jobs, "release_jobs_mem_cap", lambda depth=None, **kw: 2
         )
+        monkeypatch.setattr(
+            "abicheck.process_resources.available_mem_gib", lambda: 12.0
+        )
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
         captured_jobs: list[int] = []
+        captured_admission: list[object] = []
 
         def _fake_sequential(matched_keys, common_args):
             return []
 
-        def _fake_parallel(matched_keys, common_args, old_map, max_workers):
+        def _fake_parallel(
+            matched_keys, common_args, old_map, max_workers, admission=None
+        ):
             captured_jobs.append(max_workers)
+            captured_admission.append(admission)
             return []
 
         monkeypatch.setattr(
@@ -126,7 +134,11 @@ class TestCompareReleaseLibrariesMemoryClamp:
             ),
             jobs=0,
         )
+        # Binary depth: the AST-costed gate is header-only, so the clamp
+        # alone sizes the pool, as before.
         assert captured_jobs == [2]
+        (admission,) = captured_admission
+        assert admission is not None and admission._committable is None
         assert "reduced 64 -> 2" in capsys.readouterr().err
 
     def test_explicit_jobs_are_never_clamped(self, monkeypatch, capsys) -> None:
@@ -134,9 +146,13 @@ class TestCompareReleaseLibrariesMemoryClamp:
             release_jobs, "release_jobs_mem_cap", lambda depth=None, **kw: 1
         )
         captured_jobs: list[int] = []
+        captured_admission: list[object] = []
 
-        def _fake_parallel(matched_keys, common_args, old_map, max_workers):
+        def _fake_parallel(
+            matched_keys, common_args, old_map, max_workers, admission=None
+        ):
             captured_jobs.append(max_workers)
+            captured_admission.append(admission)
             return []
 
         monkeypatch.setattr(

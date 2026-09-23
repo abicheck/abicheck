@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 from defusedxml import ElementTree as DefusedET
 
 from . import deadline
+from .storage.ast_size_observer import report_ast_size
 from .storage.derived_ast import offer_derived_ast_source
 
 log = logging.getLogger(__name__)
@@ -627,10 +628,13 @@ def load_cached_ast(
         return None
     deadline.check()
     try:
-        root = json.loads(cache_path.read_text(encoding="utf-8"))
+        text = cache_path.read_text(encoding="utf-8")
+        root = json.loads(text)
     except (ValueError, OSError):
         cache_path.unlink(missing_ok=True)
         return None
+    report_ast_size(len(text))
+    del text
     deadline.check()  # loading a huge cached AST can eat the rest of the budget
     if on_disk_load is not None:
         root = on_disk_load(root)

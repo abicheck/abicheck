@@ -150,3 +150,61 @@ class TestFromSectionedDocumentRejectsMalformedInput:
         del sectioned[SECTION_SCHEMA_VERSIONS_KEY]
         with pytest.raises(ValueError, match="section_schema_versions"):
             from_sectioned_document(sectioned)
+
+
+def _via_object_store(doc: dict) -> dict:
+    """The pre-direct packaging, kept as the oracle: import into a real
+    `InMemoryObjectStore` and read every section back by digest."""
+    from abicheck.storage.import_v1 import import_legacy_snapshot
+    from abicheck.storage.package import InMemoryObjectStore
+
+    store = InMemoryObjectStore()
+    manifest = import_legacy_snapshot(
+        doc,
+        store=store,
+        artifact_id="snapshot",
+        max_known_schema_version=SCHEMA_VERSION,
+        variant_id="default",
+    )
+    artifact = manifest.artifact_refs[0]
+    return {
+        "schema_version": manifest.versions.source_schema_version,
+        SECTIONS_KEY: {k: store.get(r.digest) for k, r in artifact.sections.items()},
+        SECTION_SCHEMA_VERSIONS_KEY: dict(manifest.versions.section_schema_versions),
+    }
+
+
+_ALL_FIXTURE_DOCS = sorted(
+    p
+    for root in (_FIXTURES_DIR.parent, _FIXTURES_DIR)
+    for p in root.rglob("*.json")
+    if '"functions"' in p.read_text(encoding="utf-8", errors="replace")[:200_000]
+)
+
+
+class TestDirectPackagingMatchesTheObjectStorePath:
+    """`to_sectioned_document` encodes sections directly instead of through a
+    throwaway object store; the written bytes must not change."""
+
+    def test_fixture_corpus_is_not_vacuous(self) -> None:
+        assert len(_ALL_FIXTURE_DOCS) >= 5
+
+    @pytest.mark.parametrize("path", _ALL_FIXTURE_DOCS, ids=lambda p: p.name)
+    def test_byte_identical_on_every_fixture_snapshot(self, path: Path) -> None:
+        from abicheck.serialization import load_snapshot
+
+        try:
+            doc = snapshot_to_dict(load_snapshot(path))
+        except Exception:
+            pytest.skip("not a loadable snapshot")
+        direct = to_sectioned_document(doc, max_known_schema_version=SCHEMA_VERSION)
+        assert json.dumps(direct, indent=2) == json.dumps(
+            _via_object_store(doc), indent=2
+        )
+
+    @pytest.mark.parametrize("bad", [0, -1, True, 1.5, "3", SCHEMA_VERSION + 1])
+    def test_schema_version_validation_still_runs(self, bad: object) -> None:
+        with pytest.raises(ValueError):
+            to_sectioned_document(
+                {"schema_version": bad}, max_known_schema_version=SCHEMA_VERSION
+            )
