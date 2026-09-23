@@ -128,6 +128,7 @@ from .dumper_clang_qualifiers import (  # noqa: F401  (compatibility re-exports)
     _reduce_opaque_kind_set,
 )
 from .errors import AstContextMissingError, SnapshotError
+from .extract.dependency_exclusion import active_dependency_predicate
 from .extract.headers.clang import (
     context as _clang_context,
     enums as _clang_enums,
@@ -773,6 +774,9 @@ class _ClangAstParser:
         # Workstream F S1 ("Header-only comparison"): see
         # `extract.headers.clang.context.visibility`'s own docstring.
         self._no_binary_evidence = no_binary_evidence
+        # Set only when the caller has declared dependency scoping will run
+        # (`extract.dependency_exclusion`); see `_skips_dependency_decl`.
+        self._dependency_predicate = active_dependency_predicate()
         # Per-*logical-scope* (not per-walk-frame, and not per-AST-node
         # either) anonymous-ordinal state, keyed by `child_scope_path` --
         # the typed `ScopePath` a `_walk` call's children actually enter --
@@ -1191,6 +1195,31 @@ class _ClangAstParser:
             )
         return file
 
+    def _skips_dependency_decl(
+        self, node: dict[str, Any], kind: str | None, name: str, file: str
+    ) -> bool:
+        """Whether a function/variable is one dependency scoping will drop.
+
+        Only when a caller declared scoping will run, only for a declaration
+        in a dependency header, and only for a binary-less (header-only)
+        dump. With a binary, the pre-scoping surface graph also records
+        dependency declarations, so skipping would change it (measured:
+        ``tests/test_parse_time_dependency_exclusion.py``); a binary dump
+        also matches exported dependency symbols to these declarations.
+        Types are never skipped -- scoping keeps a dependency type a kept
+        signature names. The output is unchanged; the model objects scoping
+        would discard are simply never built (SVS, 76 roots: 106,815
+        skipped, -21% wall).
+        """
+        predicate = self._dependency_predicate
+        return (
+            predicate is not None
+            and self._no_binary_evidence
+            and bool(name)
+            and (kind in _FUNCTION_NODE_KINDS or kind == "VarDecl")
+            and predicate(file)
+        )
+
     def _categorize(
         self,
         node: dict[str, Any],
@@ -1206,6 +1235,8 @@ class _ClangAstParser:
         template_param_kinds: tuple[str, ...] = (),
         template_type_param_names: tuple[str, ...] = (),
     ) -> None:
+        if self._skips_dependency_decl(node, kind, name, file):
+            return
         entry = _Decl(
             node=node,
             scope=scope,

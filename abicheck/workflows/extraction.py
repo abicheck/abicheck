@@ -135,10 +135,12 @@ from ..dumper_cache import ast_acquisition_scope, ast_memoize_scope
 from ..dumper_clang import resolve_source_frontend_clang_bin
 from ..dumper_clang_streaming import suppress_streaming_prune
 from ..dumper_contract import _manifest_declared_includes
-from ..dumper_scoping import dump_manifest_header_roots, resolve_dependency_scope
+from ..dumper_scoping import resolve_dependency_scope
 from ..dwarf_snapshot import show_data_sources
 from ..dwarf_unified import parse_dwarf
 from ..elf_metadata import parse_elf_metadata
+from ..extract.dependency_exclusion import dependency_exclusion_scope
+from ..extract.dump_manifest_roots import dump_manifest_header_roots
 from ..header_conditionals import attach_build_context_for_parsed_headers
 from ..header_utils import (
     dedup_paths_preserve_order,
@@ -276,5 +278,6 @@ __all__ = [
     "split_public_header_inputs",
     "strip_vendor_hash",
     "suppress_streaming_prune",
+    "dependency_exclusion_scope",
     "validate_inputs_pack",
 ]

@@ -11,7 +11,7 @@ concrete return value or raised exception:
 - ``check_dump_debug_format_error``'s PE/Mach-O rejection
 - ``resolve_dump_collect_context``'s warning and ``--depth binary`` branches
 - ``resolve_dump_compile_context``'s pre-resolved-context verbatim return
-- ``dumper_scoping.dump_manifest_header_roots``' ownership set
+- ``extract.dump_manifest_roots.dump_manifest_header_roots``' ownership set
 
 The ``perform_elf_dump``/``handle_non_elf_dump`` execution tests this file
 used to hold went away with those functions (ADR-063 Track 1 -- they had no

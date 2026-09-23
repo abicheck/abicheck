@@ -63,10 +63,8 @@ def record_achieved_header_exclusions(
     ``model.header_exclusion_record.record_header_exclusions``, which owns
     the "a loaded snapshot keeps its own provenance" rule.
     """
-    from ..dumper_scoping import (
-        dump_manifest_header_roots,
-        scope_snapshot_excluding_dependencies,
-    )
+    from ..dumper_scoping import scope_snapshot_excluding_dependencies
+    from ..extract.dump_manifest_roots import dump_manifest_header_roots
     from ..extract.header_exclusions import matched_exclusion_patterns
     from ..model.header_exclusion_record import record_header_exclusions
 

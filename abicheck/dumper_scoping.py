@@ -96,11 +96,12 @@ import functools
 import inspect
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence, Set as AbstractSet
-from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
 from .dumper_clang_streaming import suppress_streaming_prune
+from .extract.dependency_exclusion import dependency_exclusion_scope
+from .extract.dump_manifest_roots import dump_manifest_header_roots
 from .extract.header_exclusions import scoping_header_predicate
 from .extract.occurrence_dependency_scope import (
     scoped_occurrences_excluding_dependencies,
@@ -232,65 +233,6 @@ def _typedef_alias_reachability(
 #: ``_directly_referenced_dependency_names`` and its nested-match
 #: suppression at the end of that function.
 _TAG_KEYWORDS = frozenset({"struct", "class", "union", "enum"})
-
-
-def dump_manifest_header_roots(dump_manifest: Any) -> tuple[Path, ...]:
-    """Every path a ``--dump-manifest`` document declares as project-owned,
-    for forwarding into :func:`scope_snapshot_excluding_dependencies`'s
-    ``header_roots`` -- not just ``roots`` (Codex review).
-    ``public_header_paths``/``public_header_dirs`` (the manifest's own
-    ADR-015 provenance-input equivalent of the public-header set) and any
-    per-translation-unit include directory
-    explicitly marked ``project_owned: true`` are just as much "the dump's
-    actual root set" as ``roots`` -- a declaration under one of them must
-    not be misclassified as a dependency just because those paths happen to
-    sit under a system prefix, the same reasoning ``roots`` itself already
-    gets. Shared by both ``dump`` (``cli_dump_helpers.py``) and
-    ``compare``'s implicit live-binary dumping (this module's own
-    ``apply_dependency_scope_to_run_dump_result``) so a manifest's roots are
-    never dropped just because the dumping path used ``--dump-manifest``
-    instead of ``-H`` (Codex review).
-    """
-    if dump_manifest is None:
-        return ()
-    roots = [
-        *dump_manifest.roots,
-        *dump_manifest.public_header_paths,
-        *dump_manifest.public_header_dirs,
-    ]
-    for tu in dump_manifest.translation_units:
-        # Codex review: forced_includes is "what this TU actually compiles"
-        # (dump_manifest.py's own docstring: "a TU may force-include a
-        # private support header alongside a public one") -- not required to
-        # already be in roots/project_owned includes, so a private support
-        # header force-included from a system-prefixed install path was
-        # otherwise misclassified as a toolchain dependency and filtered out.
-        roots.extend(tu.forced_includes)
-        roots.extend(inc.path for inc in tu.includes if inc.project_owned)
-    return tuple(roots)
-
-
-def dump_manifest_public_roots(dump_manifest: Any) -> tuple[Path, ...]:
-    """The manifest's *declared-public* roots only (``roots``/
-    ``public_header_paths``/``public_header_dirs``) -- unlike
-    :func:`dump_manifest_header_roots`, deliberately excludes each TU's
-    ``project_owned`` include directories (Codex review). Those are
-    sibling/private support roots used only to keep
-    ``resolve_dependency_scope`` from misclassifying a project-owned
-    directory as a toolchain dependency; they are not declared public API
-    surface. Forwarding them into L4 source replay's own public-header set
-    (as :func:`dump_manifest_header_roots` is for) would make the source
-    extractors treat every declaration under a private support directory as
-    API-relevant, false-flagging private-header churn as a source break."""
-    if dump_manifest is None:
-        return ()
-    return tuple(
-        (
-            *dump_manifest.roots,
-            *dump_manifest.public_header_paths,
-            *dump_manifest.public_header_dirs,
-        )
-    )
 
 
 def _kept_identifiers(names: set[str], qualified_names: set[str]) -> set[str]:
@@ -1045,17 +987,22 @@ def apply_dependency_scope_to_run_dump_result(
     than listed in ``headers``) must not be misclassified as a dependency
     either (Codex review, twice: the first pass only folded in
     ``public_header_dirs``, missing the file-level ``public_headers`` set)."""
+    return resolve_dependency_scope(
+        snap,
+        include_dependencies,
+        _run_dump_header_roots(bound_args),
+    )
+
+
+def _run_dump_header_roots(bound_args: inspect.BoundArguments) -> tuple[Any, ...]:
+    """Scoping roots for one ``run_dump`` call (see the function above)."""
     headers = tuple(bound_args.arguments.get("headers") or ())
     manifest_roots = dump_manifest_header_roots(
         bound_args.arguments.get("dump_manifest")
     )
     public_headers = tuple(bound_args.arguments.get("public_headers") or ())
     public_header_dirs = tuple(bound_args.arguments.get("public_header_dirs") or ())
-    return resolve_dependency_scope(
-        snap,
-        include_dependencies,
-        headers + manifest_roots + public_headers + public_header_dirs,
-    )
+    return headers + manifest_roots + public_headers + public_header_dirs
 
 
 def wrap_run_dump_with_dependency_scope(
@@ -1118,12 +1065,15 @@ def wrap_run_dump_with_dependency_scope(
         # just a missing "auto-enable from this flag" convenience. `False`
         # needs no suppression: the pruner can never be more aggressive than
         # this wrapper's own filter is about to apply anyway.
-        with suppress_streaming_prune() if include_dependencies else nullcontext():
+        bound = sig.bind_partial(*args, **kwargs)  # extract.dependency_exclusion
+        with (
+            suppress_streaming_prune()
+            if include_dependencies
+            else dependency_exclusion_scope(_run_dump_header_roots(bound))
+        ):
             snap = uncached_fn(*args, **kwargs)
         return apply_dependency_scope_to_run_dump_result(
-            snap,
-            include_dependencies,
-            sig.bind_partial(*args, **kwargs),
+            snap, include_dependencies, bound
         )
 
     run_dump.__signature__ = extended_sig  # type: ignore[attr-defined]
