@@ -29,7 +29,7 @@ before materializing) is the same discipline applied here to extraction.
 owns the *mechanism* for a cheaper clang walk; this plan owns *which*
 declarations a walk may drop.
 
-**Effort:** L overall (5 phases, roughly 6–9 PRs). **Risk:** medium —
+**Effort:** L overall (six phases, 0–5: four implementation phases, a measurement harness first and a default decision last; roughly 6–9 PRs). **Risk:** medium —
 Phase 3 changes what a dump contains, so it is opt-in and recorded until
 measured on oneDAL.
 
@@ -314,10 +314,16 @@ One new snapshot field, `AbiSnapshot.extraction_scope` (schema bump):
 - **Comparability** (`comparability.py`, next to
   `_check_header_exclusions_comparable`): refuse with
   `ScopeMismatchError` when both sides carry the field and
-  `dependency_evidence` or `prefilter` differ. A differing
-  `ownership_rules` changes classification, not presence. It is a warning
-  plus a report line, since re-scoping a project is a legitimate event
-  and the report shows which findings moved.
+  `dependency_evidence` or `prefilter` differ, **and** when
+  `ownership_rules` differ while either side uses
+  `dependency_evidence: referenced`. Under `referenced` the closure is
+  seeded from owned declarations, so a changed root changes which
+  dependency declarations exist in the snapshot. That would surface as
+  false additions or removals, or hide a dependency layout change.
+  Re-scoping such a project requires a new baseline. Only when both sides
+  use `full` does a differing `ownership_rules` change classification
+  alone, not presence. That case is a warning plus a report line showing
+  which findings moved.
 - A snapshot without the field loads as `unknown` — never as `full` — the
   same "unprovable is not native" rule `header_exclusion_record.py`
   applies.
