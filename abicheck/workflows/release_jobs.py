@@ -37,6 +37,12 @@ worker pool is exactly the kind of "coordinate release behavior" concern
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .release_admission import MemoryAdmission
+
 #: Rough peak resident memory per concurrent release-fan-out worker (GiB):
 #: each holds up to two full ``AbiSnapshot``s (old + new) resident at once.
 #: Tunable via ``ABICHECK_RELEASE_JOB_MEM_GIB``; the cap is skipped when RAM
@@ -267,3 +273,55 @@ def resolve_release_worker_count(
     if cap is None or cap >= effective:
         return effective, None, budget
     return cap, effective, budget
+
+
+@dataclass(frozen=True)
+class ReleaseWorkerPlan:
+    """:func:`resolve_release_worker_count`'s answer plus the gate that
+    refines it while the fan-out runs.
+
+    *initial_jobs*/*clamped_from*/*budget_gib* are that function's result,
+    unchanged -- what the first wave admits and what the notice reports.
+    *pool_size* is how many threads exist: the unclamped count whenever the
+    *admission* gate is enforcing memory, since it then decides how many of
+    them run at once and may admit more than *initial_jobs* once measured
+    AST sizes show members are cheaper than the per-depth default.
+    """
+
+    initial_jobs: int
+    clamped_from: int | None
+    budget_gib: float
+    pool_size: int
+    admission: MemoryAdmission
+
+
+def plan_release_workers(
+    jobs: int, *, depth: str | None = None, header_roots: bool = False
+) -> ReleaseWorkerPlan:
+    """Size the fan-out, and build the AST-size-costed admission gate.
+
+    The gate is off -- every thread runs freely, today's behaviour -- for an
+    explicit *jobs* (never clamped), a host whose memory cannot be probed,
+    and an operator-set ``ABICHECK_RELEASE_JOB_MEM_GIB``: a stated budget
+    is an instruction, so it is not replaced by a measurement.
+    """
+    import os
+
+    from ..process_resources import available_mem_gib
+    from .release_admission import MemoryAdmission
+
+    effective, clamped_from, budget = resolve_release_worker_count(
+        jobs, depth=depth, header_roots=header_roots
+    )
+    avail = None if jobs > 0 else available_mem_gib()
+    gated = avail is not None and not os.environ.get("ABICHECK_RELEASE_JOB_MEM_GIB")
+    committable = (
+        max(0.0, avail * _release_mem_utilization() - _release_mem_reserve_gib())
+        if gated and avail is not None
+        else None
+    )
+    admission = MemoryAdmission(
+        committable, default_cost_gib=budget, floor_gib=_RELEASE_JOB_MEM_BUDGET_GIB
+    )
+    pool = clamped_from if gated and clamped_from is not None else effective
+    return ReleaseWorkerPlan(effective, clamped_from, budget, pool, admission)

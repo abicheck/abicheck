@@ -25,6 +25,8 @@ mirroring ``buildsource/source_replay.py``'s identical L4 pattern) -- an
 
 from __future__ import annotations
 
+import pytest
+
 import abicheck.process_resources as process_resources
 from abicheck import cli_compare_release_pairwise as release_pairwise
 from abicheck.workflows import release_jobs
@@ -104,13 +106,21 @@ class TestCompareReleaseLibrariesMemoryClamp:
         monkeypatch.setattr(
             release_jobs, "release_jobs_mem_cap", lambda depth=None, **kw: 2
         )
+        monkeypatch.setattr(
+            "abicheck.process_resources.available_mem_gib", lambda: 12.0
+        )
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
         captured_jobs: list[int] = []
+        captured_admission: list[object] = []
 
         def _fake_sequential(matched_keys, common_args):
             return []
 
-        def _fake_parallel(matched_keys, common_args, old_map, max_workers):
+        def _fake_parallel(
+            matched_keys, common_args, old_map, max_workers, admission=None
+        ):
             captured_jobs.append(max_workers)
+            captured_admission.append(admission)
             return []
 
         monkeypatch.setattr(
@@ -126,7 +136,14 @@ class TestCompareReleaseLibrariesMemoryClamp:
             ),
             jobs=0,
         )
-        assert captured_jobs == [2]
+        # The pool keeps all 64 threads; the memory gate, seeded with the
+        # same per-depth budget the clamp used, decides how many run at once
+        # (`workflows.release_admission`, tested in test_release_admission).
+        assert captured_jobs == [64]
+        (admission,) = captured_admission
+        assert admission is not None and admission._committable == pytest.approx(
+            12.0 * 0.85 - 1.0
+        )
         assert "reduced 64 -> 2" in capsys.readouterr().err
 
     def test_explicit_jobs_are_never_clamped(self, monkeypatch, capsys) -> None:
@@ -134,9 +151,13 @@ class TestCompareReleaseLibrariesMemoryClamp:
             release_jobs, "release_jobs_mem_cap", lambda depth=None, **kw: 1
         )
         captured_jobs: list[int] = []
+        captured_admission: list[object] = []
 
-        def _fake_parallel(matched_keys, common_args, old_map, max_workers):
+        def _fake_parallel(
+            matched_keys, common_args, old_map, max_workers, admission=None
+        ):
             captured_jobs.append(max_workers)
+            captured_admission.append(admission)
             return []
 
         monkeypatch.setattr(

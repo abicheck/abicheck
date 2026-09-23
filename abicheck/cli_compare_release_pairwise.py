@@ -69,6 +69,7 @@ if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
     from .pack_application import PackApplication
     from .workflows.gate import SeverityConfig
+    from .workflows.release_admission import MemoryAdmission
 
 
 def _release_owned_crosschecks() -> frozenset[str]:
@@ -780,25 +781,15 @@ def _compare_release_libraries(
     (Codex review, fresh evidence; see :func:`_compare_release_parallel`'s
     own docstring for why the distinction matters).
 
-    R3 (CLI-audit): the auto default (*jobs* ``<= 0``) additionally clamps
-    to available RAM via :func:`_release_jobs_mem_cap` -- see that
-    function's own docstring for why a bare ``os.cpu_count()`` default can
-    wildly oversubscribe memory on a very-high-core-count host or a
-    cpu-count-vs-memory-mismatched container. A positive *jobs* is never
-    clamped -- unlike the ``ABICHECK_L4_JOBS`` env-var override this
-    pattern is mirrored from (:mod:`abicheck.buildsource.source_replay`),
-    which clamps even an explicit override since it has no equivalent "the
-    caller deliberately chose this" signal to respect. There is no CLI flag
-    for *jobs* any more (ADR-068 D5 / plan Phase 7h removed ``-j``/``--jobs``
-    outright -- always auto-detect and memory-clamp); the CLI's own call
-    site always passes ``jobs=0``, and *jobs* stays a Tier-2 parameter for
-    direct callers only.
+    R3 (CLI-audit): the auto default (*jobs* ``<= 0``) is sized and then
+    memory-gated by ``workflows.release_jobs.plan_release_workers`` (the
+    gate costs members by measured AST size); a positive *jobs* is never
+    clamped. The CLI always passes ``jobs=0`` (ADR-068 D5 removed ``-j``).
     """
-    from .workflows.release_jobs import resolve_release_worker_count
+    from .workflows.release_jobs import plan_release_workers
 
-    effective_jobs, clamped_from, budget_gib = resolve_release_worker_count(
-        jobs, depth=depth, header_roots=bool(old_h or new_h)
-    )
+    plan = plan_release_workers(jobs, depth=depth, header_roots=bool(old_h or new_h))
+    effective_jobs, clamped_from, budget_gib = plan.initial_jobs, plan.clamped_from, plan.budget_gib  # fmt: skip
     if clamped_from is not None:
         click.echo(
             f"Note: parallel release workers reduced {clamped_from} -> "
@@ -856,10 +847,10 @@ def _compare_release_libraries(
     # per-member answer already agrees with the scalar path.
     owned = _release_owned_crosschecks() if len(matched_keys) > 1 else frozenset()
     with release_owned_checks_scope(owned):
-        if effective_jobs > 1 and len(matched_keys) > 1:
+        if plan.pool_size > 1 and len(matched_keys) > 1:
             library_results.extend(
                 _compare_release_parallel(
-                    matched_keys, common_args, old_map, effective_jobs
+                    matched_keys, common_args, old_map, plan.pool_size, plan.admission
                 ),
             )
         else:
@@ -955,8 +946,10 @@ def _compare_release_parallel(
     common_args: _CompareReleaseCommonArgs,
     old_map: dict[str, Path],
     max_workers: int,
+    admission: MemoryAdmission | None = None,
 ) -> list[dict[str, object]]:
-    """Run per-library release comparisons in parallel.
+    """Run per-library release comparisons in parallel, each member admitted
+    through *admission* when given (``workflows.release_admission``).
 
     Results are collected by key and returned in *matched_keys* order so the
     report is deterministic regardless of completion timing (parallel is now the
@@ -1000,6 +993,7 @@ def _compare_release_parallel(
     race on that shared set (also caught by the same test failure).
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    from contextlib import nullcontext
     from contextvars import Context, copy_context
 
     def _run_in_context(ctx: Context, key: str) -> dict[str, object]:
@@ -1013,7 +1007,13 @@ def _compare_release_parallel(
         # covers `_compare_one_library`'s own `except` paths; free when
         # tracing is off (the default).
         with memory_trace.phase("release.member", key=key):
-            return ctx.run(_compare_one_library, key, *common_args)
+            return ctx.run(_admitted, key)
+
+    def _admitted(key: str) -> dict[str, object]:
+        # Inside `ctx.run`, so the AST-size sink `admit` installs is in the
+        # context this member's dumps (and their side threads) report to.
+        with admission.admit() if admission else nullcontext():
+            return _compare_one_library(key, *common_args)
 
     results_by_key: dict[str, dict[str, object]] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
