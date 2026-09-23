@@ -290,7 +290,17 @@ def test_a_discovered_config_never_executes_its_build_query(
     src = tmp_path / "src"
     src.mkdir()
     sentinel = tmp_path / "pwned"
-    cfg = _write_cfg(tmp_path, f"build:\n  query: 'touch {sentinel}'\n")
+    # Portable (no `touch` on Windows); POSIX spelling because the query is
+    # parsed with shlex, which would eat Windows backslashes.
+    import sys
+
+    import yaml
+
+    query = (
+        f"{Path(sys.executable).as_posix()} -c "
+        f"\"open('{sentinel.as_posix()}', 'w').close()\""
+    )
+    cfg = _write_cfg(tmp_path, yaml.safe_dump({"build": {"query": query}}))
 
     embed_build_source(
         AbiSnapshot(library="x", version="1"),

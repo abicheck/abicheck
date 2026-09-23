@@ -246,7 +246,7 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1346,),
         seed_tests=("tests/test_project_config_resolution.py",),
-        public_surfaces=("dump", "compare"),
+        public_surfaces=("dump",),
     ),
     BugClass(
         id="config.env_flag_value_domain",
