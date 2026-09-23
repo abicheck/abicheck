@@ -409,13 +409,45 @@ class DependencyDeclPruningHook:
         # nothing: `_index_decl_id_qualified_names`'s walk only needs "id"
         # and "name" (any "kind" indexes), and `_ClangAstParser` itself
         # still never consults an unrecognized ``kind`` like this one.
-        return {
+        placeholder = {
             "kind": PRUNED_PLACEHOLDER_KIND,
             "id": node.get("id"),
             "name": node.get("name"),
             "loc": loc,
             "abicheck_pruned_original_kind": kind,
         }
+        terminal = _terminal_location(node)
+        if terminal:
+            # Last key, so it is the last location in document order: clang
+            # omits a file/line equal to the previous one it wrote, and the
+            # subtree dropped here may have written a newer one. Without it,
+            # `extract.headers.clang.locations.materialize_locations` would
+            # hand the next declaration the pre-subtree file.
+            placeholder["abicheck_pruned_terminal_loc"] = terminal
+        return placeholder
+
+
+def _terminal_location(node: dict[str, Any]) -> dict[str, Any]:
+    """The last explicit ``file`` and ``line`` clang wrote inside *node*, as
+    a bare location (``offset``/``col`` present so it reads as one); empty
+    when the subtree wrote neither. A file change always carries its line,
+    so the two last-seen values are exactly the state after the subtree."""
+    last: dict[str, Any] = {}
+    stack: list[Any] = [node]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            if "offset" in item and "col" in item:
+                for key in ("file", "line"):
+                    if key in item:
+                        last[key] = item[key]
+            # Reversed onto a LIFO stack, so items pop in document order.
+            stack.extend(
+                v for k, v in reversed(list(item.items())) if k != "includedFrom"
+            )
+        elif isinstance(item, list):
+            stack.extend(reversed(item))
+    return {"offset": 0, "col": 0, **last} if last else {}
 
 
 def load_pruned_clang_ast(

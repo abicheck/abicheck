@@ -357,8 +357,8 @@ def _clang_header_dump(
         )
 
     _memoize = dumper_cache.resolve_request_memoization(memoize)
-    _cached_result = materialize_locations(  # explicit locations, see there
-        dumper_cache.load_cached_ast(key, "clang", cached, memoize=_memoize)
+    _cached_result = dumper_cache.load_cached_ast(
+        key, "clang", cached, memoize=_memoize, on_disk_load=materialize_locations
     )
     if _cached_result is not None:
         return cast("dict[str, Any]", _cached_result), resolved_kind, force_cpp

@@ -131,3 +131,72 @@ def test_deep_tree_does_not_hit_the_recursion_limit():
         node = child
     materialize_locations(root)
     assert node["loc"]["file"] == "/a.h"
+
+
+_DEP = "/usr/include/c++/13/bits/dep.h"
+_OWN = "/proj/include/a.h"
+
+
+def _decl(rng: random.Random, depth: int) -> dict:
+    """A declaration: dependency functions (prunable) or project nodes."""
+    in_dep = rng.random() < 0.5
+    files = [_DEP, "/usr/include/c++/13/bits/other.h"] if in_dep else [_OWN]
+    node: dict = {
+        "id": hex(rng.randrange(1 << 32)),
+        "kind": "FunctionDecl" if in_dep else "CXXRecordDecl",
+        "name": "f",
+        "loc": {
+            "offset": 1,
+            "file": files[0],
+            "line": rng.randrange(1, 9),
+            "col": 1,
+        },
+    }
+    if depth:
+        node["inner"] = [
+            {
+                "kind": "ParmVarDecl",
+                "loc": {
+                    "offset": 2,
+                    "file": rng.choice(files),
+                    "line": rng.randrange(1, 9),
+                    "col": 2,
+                },
+            }
+            for _ in range(rng.randrange(0, 3))
+        ]
+    return node
+
+
+@pytest.mark.parametrize("seed", range(100))
+def test_pruning_keeps_the_location_state_of_what_it_removes(seed):
+    """A pruned subtree may have written the file/line the next declaration
+    inherits; the placeholder must carry that state forward. Oracle: the
+    same tree materialized without pruning."""
+    import io
+    import json
+
+    from abicheck.dumper_clang_streaming import (
+        PRUNED_PLACEHOLDER_KIND,
+        load_pruned_clang_ast,
+    )
+
+    rng = random.Random(seed)
+    explicit = {
+        "kind": "TranslationUnitDecl",
+        "inner": [_decl(rng, 1) for _ in range(8)],
+    }
+    encoded = _clang_encode(explicit)
+    pruned, count = load_pruned_clang_ast(
+        io.BytesIO(json.dumps(encoded).encode()), header_roots=(_OWN,)
+    )
+    materialize_locations(pruned)
+    expected = {
+        n["id"]: (n["loc"]["file"], n["loc"]["line"])
+        for n in materialize_locations(copy.deepcopy(encoded))["inner"]
+    }
+    for n in pruned["inner"]:
+        if n.get("kind") != PRUNED_PLACEHOLDER_KIND:
+            assert (n["loc"]["file"], n["loc"]["line"]) == expected[n["id"]], n["id"]
+    if seed == 0:
+        assert count > 0  # vacuity guard: pruning engaged

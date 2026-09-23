@@ -46,20 +46,14 @@ _T = TypeVar("_T")
 __all__ = ["materialize_locations"]
 
 
-def _is_location(node: dict[str, Any]) -> bool:
-    # A bare source location always carries `offset` and `col`. The
-    # `includedFrom` object (`{"file": ...}`) carries neither, and must not
-    # move the state: clang writes it without updating `LastLocFilename`.
-    return "offset" in node and "col" in node
-
-
 def materialize_locations(root: _T) -> _T:
     """Fill every omitted ``file``/``line`` in *root*, in place, and return it.
 
     Iterative, in document order (JSON object key order is preserved by
     :mod:`json`), so arbitrarily deep ASTs cannot hit the recursion limit.
-    Idempotent; anything that is not a dict/list (a derived-artifact marker
-    handed back by the AST cache) passes through untouched.
+    Idempotent; anything
+    that is not a dict/list (a derived-artifact marker handed back by the
+    AST cache) passes through untouched.
     """
     current_file: Any = None
     current_line: Any = None
@@ -70,7 +64,9 @@ def materialize_locations(root: _T) -> _T:
             stack.pop()
             continue
         if isinstance(item, dict):
-            if _is_location(item):
+            if "offset" in item and "col" in item:
+                # A bare location is a leaf apart from `includedFrom`, which
+                # never moves the state -- so there is nothing to descend into.
                 if "file" in item:
                     current_file = item["file"]
                 elif current_file is not None:
@@ -79,7 +75,8 @@ def materialize_locations(root: _T) -> _T:
                     current_line = item["line"]
                 elif current_line is not None:
                     item["line"] = current_line
-            stack.append(v for k, v in item.items() if k != "includedFrom")
+                continue
+            stack.append(iter(item.values()))
         elif isinstance(item, list):
             stack.append(iter(item))
     return root

@@ -346,16 +346,25 @@ class TestHeaderOnlyDependencyScoping:
         config.write_text(
             "compile:\n  frontend: clang\n  std: c++20\n", encoding="utf-8"
         )
-        out = tmp_path / "snap.json"
-        result = CliRunner().invoke(
-            main, ["dump", "--config", str(config), "-H", str(header), "-o", str(out)]
-        )
-        assert result.exit_code == 0, result.output
-        snap = snapshot_from_dict(json.loads(out.read_text(encoding="utf-8")))
-        located = {
-            d.name: (d.source_location or "").rsplit("/", 1)[-1]
-            for d in [*snap.functions, *snap.variables, *snap.types]
-        }
+        # Twice: the first run parses fresh, the second is an AST disk-cache
+        # hit -- two different producers, and both must make locations explicit.
+        located_runs = []
+        for run in ("fresh", "cached"):
+            out = tmp_path / f"snap-{run}.json"
+            result = CliRunner().invoke(
+                main,
+                ["dump", "--config", str(config), "-H", str(header), "-o", str(out)],
+            )
+            assert result.exit_code == 0, result.output
+            snap = snapshot_from_dict(json.loads(out.read_text(encoding="utf-8")))
+            located_runs.append(
+                {
+                    d.name: (d.source_location or "").rsplit("/", 1)[-1]
+                    for d in [*snap.functions, *snap.variables, *snap.types]
+                }
+            )
+        located = located_runs[0]
+        assert located_runs[1] == located
         assert located == {
             "twice": "api.hpp:5",
             "use": "api.hpp:6",
