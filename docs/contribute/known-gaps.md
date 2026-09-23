@@ -10365,8 +10365,19 @@ own (pre-existing) gap, not a property of the streaming write.
 
 ### `finditer_allow_nested` loses a shorter spelling that starts where a longer match does
 
-**Status: found and characterized, deliberately not fixed in the same change
-as the match-cache ownership work.** Present at `950efbc64`.
+**Status: fixed** in its own change, as this entry required (the
+under-report half only -- the scaling half below remains open). Present at
+`950efbc64` through `e9d820797`. `finditer_allow_nested` now probes every
+boundary-valid offset and, at each one, enumerates candidates longest first
+by re-matching with a lowered `endpos`, re-checking the right boundary
+against the real text so the `endpos`-as-end-of-string trap described below
+cannot accept `Foo` inside `Foobar`. It still uses the compiled alternation,
+so it needs no second index and no change to any caller.
+`tests/test_spelling_nested_same_offset.py` pins the table below and checks
+the new matcher against an independent brute-force oracle (every substring,
+both boundaries judged on the real text), plus the strict-superset property
+against the previous implementation. The history below is kept for why the
+fix is shaped this way.
 
 `compare/spelling_pattern.py`'s `finditer_allow_nested` finds nested matches
 by re-searching the window `(m.start() + 1, m.end())` after each match. That
