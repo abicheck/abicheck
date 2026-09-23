@@ -61,7 +61,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from .canonical import canonical_form
+from .canonical import canonical_form_unless_trusted
 
 __all__ = ["GraphSection"]
 
@@ -153,7 +153,9 @@ class GraphSection:
                 f"{type(self.surface_graph).__name__}"
             )
         object.__setattr__(
-            self, "surface_graph", _freeze(canonical_form(dict(self.surface_graph)))
+            self,
+            "surface_graph",
+            _freeze(canonical_form_unless_trusted(dict(self.surface_graph))),
         )
 
     def to_document(self) -> dict[str, Any]:

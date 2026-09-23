@@ -42,11 +42,13 @@ independently versioned sections, structural completeness checking
 
 **Why this duplicates almost no logic.** `to_sectioned_document`/
 `from_sectioned_document` are thin wrappers over `storage.import_v1
-.import_legacy_snapshot`/`export_legacy_snapshot` -- the same split/DTO-
+.import_legacy_snapshot`/`export_legacy_sections` -- the same split/DTO-
 encode/decode, schema-version validation, semantic_ir handling, and
 completeness checking those functions already implement and this package's
-own tests already exercise -- routed through a throwaway
-`InMemoryObjectStore` instead of a real directory. Only the *packaging* step
+own tests already exercise. Writing routes through a throwaway
+`InMemoryObjectStore` instead of a real directory; reading hands the inline
+sections to the decoder directly, since it has nothing to address them
+by. Only the *packaging* step
 (collect each section's DTO dict inline instead of publishing it to a
 content-addressed store) is new here.
 """
@@ -56,8 +58,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .import_v1 import export_legacy_snapshot, import_legacy_snapshot
-from .package import ArtifactRef, InMemoryObjectStore, ObjectRef
+from .import_v1 import export_legacy_sections, import_legacy_snapshot
+from .package import InMemoryObjectStore
 
 __all__ = [
     "SECTION_SCHEMA_VERSIONS_KEY",
@@ -199,17 +201,16 @@ def from_sectioned_document(document: Mapping[str, Any]) -> dict[str, Any]:
             "the document is truncated or was hand-edited; refusing to merge "
             "unaccounted-for section content"
         )
-    store = InMemoryObjectStore()
-    sections: dict[str, ObjectRef] = {}
-    for section_kind, dto_dict in sections_raw.items():
-        digest = store.put(dto_dict)
-        sections[section_kind] = ObjectRef(kind=section_kind, digest=digest)
-    artifact = ArtifactRef(
+    # Straight to the section decoder, not through a content-addressed
+    # store: every section is already in hand, so hashing each one only to
+    # fetch it back by that digest bought nothing and cost a full
+    # canonicalization, surrogate walk, serialization and deep copy of the
+    # whole document (the largest single term of a stored-baseline load).
+    return export_legacy_sections(
+        (
+            (section_kind, f"{SECTIONS_KEY}[{section_kind!r}]", dto_dict)
+            for section_kind, dto_dict in sections_raw.items()
+        ),
         artifact_id=_ARTIFACT_ID,
-        variant_id=_VARIANT_ID,
-        kind="elf",
-        sections=sections,
-    )
-    return export_legacy_snapshot(
-        artifact, store=store, source_schema_version=schema_version
+        source_schema_version=schema_version,
     )

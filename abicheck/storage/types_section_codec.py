@@ -56,7 +56,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from .canonical import canonical_form
+from .canonical import canonical_form_unless_trusted
 
 __all__ = ["TypesSection"]
 
@@ -144,7 +144,9 @@ class TypesSection:
     types: tuple[Any, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "types", _freeze(canonical_form(list(self.types))))
+        object.__setattr__(
+            self, "types", _freeze(canonical_form_unless_trusted(list(self.types)))
+        )
 
     def to_document(self) -> dict[str, Any]:
         """The `{"types": [...]}` payload shape `storage.dto.types_to_dto`

@@ -86,6 +86,52 @@ _PAYLOAD_FIELD_EXCLUSIONS: frozenset[str] = frozenset(
 )
 
 
+#: Per-type answer to "which fields does :func:`_collect_strings` visit on
+#: an instance of this type": a tuple of field names for a dataclass type,
+#: ``None`` for any other type. Every input to that answer -- the type's own
+#: dataclass fields, :data:`_PAYLOAD_FIELD_EXCLUSIONS`, the ``Fact`` shape --
+#: is fixed per type, so it is computed once rather than on every one of the
+#: (up to millions of) instances a real snapshot walk reaches. A ``dict``
+#: keyed by the type, not an ``lru_cache``: an unbounded cache is right for a
+#: key set that is exactly the program's dataclass types, and a hit is one
+#: dict lookup.
+_COLLECT_PLAN: dict[type, tuple[str, ...] | None] = {}
+
+
+def _collect_plan(tp: type) -> tuple[str, ...] | None:
+    plan = _COLLECT_PLAN.get(tp, _MISSING)
+    if plan is not _MISSING:
+        return plan  # type: ignore[return-value]
+    if not _dataclasses.is_dataclass(tp):
+        _COLLECT_PLAN[tp] = None
+        return None
+    fields = _dataclasses.fields(tp)
+    # ADR-063 Phase 5: a `model.fact.Fact[T]`'s own `status` field is a
+    # plain `enum.Enum`, structurally never a string, and skipping it is
+    # what keeps this walk's "cheap no-op" common case cheap (real PR #982
+    # perf-gate regression, ~2x on the serialize scenario, without it).
+    # Recognized structurally (this module is import-free): a class
+    # literally named "Fact" with exactly this field shape.
+    is_fact = tp.__name__ == "Fact" and {f.name for f in fields} == {
+        "status",
+        "value",
+        "diagnostics",
+        "producer",
+    }
+    computed = tuple(
+        f.name
+        for f in fields
+        if f.name not in _PAYLOAD_FIELD_EXCLUSIONS
+        and not _legacy_sibling_is_payload_excluded(f.name)
+        and not (is_fact and f.name == "status")
+    )
+    _COLLECT_PLAN[tp] = computed
+    return computed
+
+
+_MISSING = object()
+
+
 def _collect_strings(value: object, out: list[str]) -> None:
     """Append every ``str`` reachable from *value* to *out*, recursing
     through dataclasses, lists/tuples, and dicts (keys and values) --
@@ -97,46 +143,27 @@ def _collect_strings(value: object, out: list[str]) -> None:
     treating it as ordinary text here is harmless for *collection*, but the
     identical check in :func:`_walk_rewrite_strings` below must not, so both
     stay symmetric rather than silently diverging on what counts as a string.
+
+    Which fields a dataclass contributes is decided once per type
+    (:func:`_collect_plan`); the checks per node are otherwise unchanged. A
+    ``type`` object itself is never walked as an instance -- the plan is
+    looked up on ``type(value)``, and a class's metaclass is not a
+    dataclass.
     """
-    if isinstance(value, str) and not isinstance(value, _Enum):
-        out.append(value)
-    elif _dataclasses.is_dataclass(value) and not isinstance(value, type):
-        fields = _dataclasses.fields(value)
-        # ADR-063 Phase 5: every `model.fact.Fact[T]` sibling now reachable
-        # from `functions`/`variables`/`types`/`enums` (up to ~10 per
-        # declaration) makes this walk's own "cheap no-op when nothing
-        # embeds a marker" common case measurably non-cheap (real PR #982
-        # perf-gate regression, ~2x on the serialize scenario) unless a
-        # `Fact`'s own `status: FactStatus` field is skipped -- it is
-        # structurally guaranteed to never hold a string (`FactStatus` is a
-        # plain `enum.Enum`, not `(str, Enum)`; `model/` has no other field
-        # literally named "status"), so recursing into it can never
-        # contribute to `out`. Recognized the same cheap-first structural
-        # way `_walk_rewrite_strings`' own `is_fact_value_field` already
-        # recognizes a `Fact` (this module is deliberately import-free, see
-        # its own docstring) -- a class literally named "Fact" with this
-        # exact field shape is close enough that a false positive would
-        # need a coincidentally-identical, unrelated type. Read-only here,
-        # so (unlike `_walk_rewrite_strings`) frozen-ness doesn't matter and
-        # `fields` is reused instead of calling `dataclasses.fields()` a
-        # second time just to build the comparison set.
-        is_fact = type(value).__name__ == "Fact" and {f.name for f in fields} == {
-            "status",
-            "value",
-            "diagnostics",
-            "producer",
-        }
-        for f in fields:
-            if (
-                f.name in _PAYLOAD_FIELD_EXCLUSIONS
-                or _legacy_sibling_is_payload_excluded(f.name)
-            ):
-                continue
-            if is_fact and f.name == "status":
-                continue
-            _collect_strings(getattr(value, f.name), out)
-    elif isinstance(value, (list, tuple)):
-        for item in value:
+    tp = type(value)
+    if tp is str:
+        out.append(value)  # type: ignore[arg-type]
+        return
+    if isinstance(value, str):
+        if not isinstance(value, _Enum):
+            out.append(value)
+        return
+    plan = _collect_plan(tp)
+    if plan is not None:
+        for name in plan:
+            _collect_strings(getattr(value, name), out)
+    elif tp is list or tp is tuple or isinstance(value, (list, tuple)):
+        for item in value:  # type: ignore[attr-defined]
             _collect_strings(item, out)
     elif isinstance(value, _Mapping):
         for k, v in value.items():

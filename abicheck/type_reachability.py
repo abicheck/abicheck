@@ -1012,7 +1012,7 @@ def _run_stdlib_reference_scan(
     return scan
 
 
-def directly_referenced_stdlib_types(
+def _directly_referenced_stdlib_types_uncached(
     snapshot: AbiSnapshot, *, exclude_export_only_roots: bool = False
 ) -> frozenset[str]:
     """Stdlib/runtime-namespaced :class:`RecordType` names in *snapshot* that
@@ -1201,3 +1201,22 @@ def directly_referenced_stdlib_type_spellings(
         committed_roots=committed_roots,
     )
     return result
+
+
+def directly_referenced_stdlib_types(
+    snapshot: AbiSnapshot, *, exclude_export_only_roots: bool = False
+) -> frozenset[str]:
+    """See :func:`_directly_referenced_stdlib_types_uncached` for the full
+    contract. Reused within one detector pass
+    (:mod:`abicheck.compare.detection_memo`), since several detectors ask
+    the identical question of the same snapshot."""
+    from .compare.detection_memo import memoized
+
+    return memoized(
+        "directly_referenced_stdlib_types",
+        snapshot,
+        exclude_export_only_roots,
+        lambda: _directly_referenced_stdlib_types_uncached(
+            snapshot, exclude_export_only_roots=exclude_export_only_roots
+        ),
+    )

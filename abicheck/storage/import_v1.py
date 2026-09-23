@@ -111,7 +111,7 @@ adapter can close from a document alone.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from .dto import (
@@ -435,6 +435,36 @@ def export_legacy_snapshot(
     review) rather than failing loudly on the corrupted/hand-edited manifest
     that produced it.
     """
+    return export_legacy_sections(
+        (
+            (section_kind, ref.digest, store.get(ref.digest))
+            for section_kind, ref in artifact.sections.items()
+        ),
+        artifact_id=artifact.artifact_id,
+        source_schema_version=source_schema_version,
+    )
+
+
+def export_legacy_sections(
+    sections: Iterable[tuple[str, str, Any]],
+    *,
+    artifact_id: str,
+    source_schema_version: int,
+) -> dict[str, Any]:
+    """`export_legacy_snapshot`'s body, over already-fetched section objects.
+
+    Each *sections* entry is ``(section_kind, locator, raw_section_dto)``;
+    *locator* only names the object in error messages (a digest for a real
+    store, a document path for an inline sectioned document).
+
+    Split out so a caller that already holds every section's decoded JSON --
+    `sectioned_document.from_sectioned_document` -- need not content-hash
+    each one into a throwaway in-memory store only to fetch it straight back
+    out by that digest. The hash was never read; on a large snapshot it cost
+    a full canonicalization, a surrogate-pair walk and a serialization of
+    every section, then a deep copy on `get`. Every check below still runs
+    on exactly the same content.
+    """
     if not isinstance(source_schema_version, int) or isinstance(
         source_schema_version, bool
     ):
@@ -451,13 +481,12 @@ def export_legacy_snapshot(
         )
     legacy_sections: dict[str, dict[str, Any]] = {}
     document: dict[str, Any] = {}
-    for section_kind, ref in artifact.sections.items():
-        raw = store.get(ref.digest)
+    for section_kind, locator, raw in sections:
         dto = SectionDTO.from_dict(raw)
         if dto.section_kind != section_kind:
             raise ValueError(
-                f"artifact {artifact.artifact_id!r} section {section_kind!r} "
-                f"-> {ref.digest!r} stores a SectionDTO for kind "
+                f"artifact {artifact_id!r} section {section_kind!r} "
+                f"-> {locator!r} stores a SectionDTO for kind "
                 f"{dto.section_kind!r} instead -- the package is corrupted "
                 "or was hand-edited"
             )
@@ -490,8 +519,8 @@ def export_legacy_snapshot(
             missing = missing_required_section_fields(section_kind, payload)
             if missing:
                 raise ValueError(
-                    f"artifact {artifact.artifact_id!r} section "
-                    f"{section_kind!r} -> {ref.digest!r} is missing "
+                    f"artifact {artifact_id!r} section "
+                    f"{section_kind!r} -> {locator!r} is missing "
                     f"field(s) {sorted(missing)} a real write always "
                     "includes -- the section's stored content is truncated "
                     "or was hand-edited"

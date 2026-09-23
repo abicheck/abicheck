@@ -27,6 +27,7 @@ of in a detector module already at its debt baseline.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
@@ -148,7 +149,7 @@ def reconciled_public_functions(
     :mod:`abicheck.compare.surface_reconcile` for why the repair belongs to
     the surface and not to each disposition site.
     """
-    return reconcile_declaration_lists(
+    return _reconcile(
         public_functions(old),
         public_functions(new),
         old_all=old.functions,
@@ -196,7 +197,7 @@ def reconciled_public_function_maps(
     )
     if cached is not None:
         return cached
-    reconciled_old, reconciled_new = reconcile_declaration_lists(
+    reconciled_old, reconciled_new = _reconcile(
         public_functions(old),
         public_functions(new),
         old_all=old.functions,
@@ -244,7 +245,7 @@ def reconciled_public_variables(
     entity -- the same reasoning ``SymbolIdentityIndex`` records for
     declining a variable alias tier.
     """
-    return reconcile_declaration_lists(
+    return _reconcile(
         public_variables(old),
         public_variables(new),
         old_all=old.variables,
@@ -294,7 +295,7 @@ def reconciled_cpo_surfaces(
     """
     old_funcs, new_funcs = reconciled_public_functions(old, new)
     old_vars, new_vars = reconciled_public_variables(old, new)
-    cross_old_funcs, cross_new_vars = reconcile_declaration_lists(
+    cross_old_funcs, cross_new_vars = _reconcile(
         old_funcs,
         new_vars,
         old_all=old.functions,
@@ -308,7 +309,7 @@ def reconciled_cpo_surfaces(
             getattr(new, "elf", None), VARIABLE_SYMBOL_TYPES
         ),
     )
-    cross_old_vars, cross_new_funcs = reconcile_declaration_lists(
+    cross_old_vars, cross_new_funcs = _reconcile(
         old_vars,
         new_funcs,
         old_all=old.variables,
@@ -323,6 +324,52 @@ def reconciled_cpo_surfaces(
         ),
     )
     return (cross_old_funcs, cross_old_vars, cross_new_funcs, cross_new_vars)
+
+
+def _needs_demangle(name: str, mangled: str) -> bool:
+    """Whether :func:`qualified_declaration_name` must demangle *mangled*."""
+    return (
+        "::" not in name
+        and not ("<" in name and not name.startswith("operator"))
+        and mangled.startswith("_Z")
+    )
+
+
+_Old = TypeVar("_Old", Function, "Variable")
+_New = TypeVar("_New", Function, "Variable")
+
+
+def _reconcile(
+    old_list: Sequence[_Old],
+    new_list: Sequence[_New],
+    *,
+    old_all: Sequence[_Old],
+    new_all: Sequence[_New],
+    **kwargs: Any,
+) -> tuple[list[_Old], list[_New]]:
+    """`reconcile_declaration_lists`, after demangling every declaration its
+    identity functions may ask about in **one** batch.
+
+    Those identities (:func:`alias_identity`, :func:`cpo_identity`) resolve
+    names one declaration at a time through :func:`qualified_declaration_name`,
+    and each first-time name used to cost its own ``c++filt`` process --
+    ~950 of them, 4.3 s of an 18.7 s synthetic compare. Batching up front
+    turns every later lookup into a `demangle_batch` cache hit; the names and
+    their demangled forms are unchanged.
+    """
+    from ..demangle import demangle_batch
+
+    pending = [
+        d.mangled
+        for group in (old_all, new_all)
+        for d in group
+        if d.mangled and _needs_demangle(d.name, d.mangled)
+    ]
+    if pending:
+        demangle_batch(pending)
+    return reconcile_declaration_lists(
+        old_list, new_list, old_all=old_all, new_all=new_all, **kwargs
+    )
 
 
 def qualified_declaration_name(name: str, mangled: str) -> str:
@@ -344,13 +391,11 @@ def qualified_declaration_name(name: str, mangled: str) -> str:
         two unrelated declarations (Codex review, P1). A qualified operator
         carries ``::`` and is caught by the first test.
 
-        Cached because the alias index calls this once per declaration in both
-        full maps, and demangling is the expensive step in building it; the
-        result is a pure function of the two spellings.
+        Every call site's declarations are demangled in one batch first
+        (:func:`_reconcile`), so the lookup here is a `demangle_batch` cache
+        hit; the result is a pure function of the two spellings.
     """
-    if "::" in name or ("<" in name and not name.startswith("operator")):
-        return name
-    if mangled.startswith("_Z"):
+    if _needs_demangle(name, mangled):
         from ..demangle import demangle_batch
 
         return demangle_batch([mangled]).get(mangled, name)
@@ -430,7 +475,7 @@ def reconciled_abi_visible_functions(
         old,
         new,
         RECONCILED_ABI_VISIBLE,
-        reconcile_declaration_lists(
+        _reconcile(
             abi_visible_functions(old),
             abi_visible_functions(new),
             old_all=old.functions,
