@@ -1,6 +1,7 @@
 """``_collect_strings`` decides a dataclass's visited fields once per type.
 
-The oracle is the pre-change per-node implementation, kept here verbatim,
+The oracle is the pre-change per-node implementation (same checks, split
+into per-branch helpers),
 so any divergence in *which* strings are collected -- or in their order,
 which ``collect_anonymous_type_ordinals`` consumes -- fails.
 """
@@ -29,32 +30,39 @@ def _reference(value: object, out: list[str]) -> None:
     if isinstance(value, str) and not isinstance(value, enum.Enum):
         out.append(value)
     elif dataclasses.is_dataclass(value) and not isinstance(value, type):
-        fields = dataclasses.fields(value)
-        is_fact = type(value).__name__ == "Fact" and {f.name for f in fields} == {
-            "status",
-            "value",
-            "diagnostics",
-            "producer",
-        }
-        for f in fields:
-            if (
-                f.name in _PAYLOAD_FIELD_EXCLUSIONS
-                or _legacy_sibling_is_payload_excluded(f.name)
-            ):
-                continue
-            if is_fact and f.name == "status":
-                continue
-            _reference(getattr(value, f.name), out)
+        _reference_dataclass(value, out)
     elif isinstance(value, (list, tuple)):
         for item in value:
             _reference(item, out)
     elif isinstance(value, Mapping):
-        for k, v in value.items():
-            if isinstance(k, str) and not isinstance(k, enum.Enum):
-                out.append(k)
-            elif dataclasses.is_dataclass(k) and not isinstance(k, type):
-                _reference(k, out)
-            _reference(v, out)
+        _reference_mapping(value, out)
+
+
+def _reference_dataclass(value: Any, out: list[str]) -> None:
+    fields = dataclasses.fields(value)
+    is_fact = type(value).__name__ == "Fact" and {f.name for f in fields} == {
+        "status",
+        "value",
+        "diagnostics",
+        "producer",
+    }
+    for f in fields:
+        excluded = (
+            f.name in _PAYLOAD_FIELD_EXCLUSIONS
+            or _legacy_sibling_is_payload_excluded(f.name)
+        )
+        if excluded or (is_fact and f.name == "status"):
+            continue
+        _reference(getattr(value, f.name), out)
+
+
+def _reference_mapping(value: Mapping[Any, Any], out: list[str]) -> None:
+    for k, v in value.items():
+        if isinstance(k, str) and not isinstance(k, enum.Enum):
+            out.append(k)
+        elif dataclasses.is_dataclass(k) and not isinstance(k, type):
+            _reference(k, out)
+        _reference(v, out)
 
 
 def _both(value: object) -> tuple[list[str], list[str]]:

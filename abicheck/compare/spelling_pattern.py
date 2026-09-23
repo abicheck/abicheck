@@ -190,25 +190,33 @@ def _trie_body(node: dict[str, Any], depth: int) -> str:
     """
     if depth > _MAX_TRIE_DEPTH:
         raise _TrieTooDeep
-    literal: list[str] = []
-    while True:
-        edges = [k for k in node if k != _TERMINAL]
-        if len(edges) == 1 and _TERMINAL not in node:
-            literal.append(re.escape(edges[0]))
-            node = node[edges[0]]
-            continue
-        break
-    prefix = "".join(literal)
+    prefix, node = _literal_chain(node)
     alternatives = [
-        re.escape(edge) + _trie_body(node[edge], depth + 1) for edge in sorted(edges)
+        re.escape(edge) + _trie_body(node[edge], depth + 1)
+        for edge in sorted(k for k in node if k != _TERMINAL)
     ]
+    if not alternatives:
+        return prefix
+    group = (
+        alternatives[0]
+        if len(alternatives) == 1
+        else "(?:" + "|".join(alternatives) + ")"
+    )
     if _TERMINAL in node:
-        if not alternatives:
-            return prefix
-        return prefix + "(?:" + "|".join(alternatives) + ")?"
-    if len(alternatives) == 1:
-        return prefix + alternatives[0]
-    return prefix + "(?:" + "|".join(alternatives) + ")"
+        # Optional, and greedy: the continuation is tried before stopping here.
+        return prefix + "(?:" + group + ")?"
+    return prefix + group
+
+
+def _literal_chain(node: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Follow single-child, non-terminal nodes from *node*, returning their
+    edges as one escaped literal and the first node that branches or ends."""
+    literal: list[str] = []
+    while _TERMINAL not in node and len(node) == 1:
+        (edge,) = node
+        literal.append(re.escape(edge))
+        node = node[edge]
+    return "".join(literal), node
 
 
 def _bounded(body: str) -> str:

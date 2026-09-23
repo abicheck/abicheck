@@ -44,23 +44,38 @@ def _snap(producer: str, family: str) -> AbiSnapshot:
 def test_producer_difference_always_unverifies_declaration_and_source(
     old_p, new_p, old_f, new_f
 ):
-    old, new = _snap(old_p, old_f), _snap(new_p, new_f)
-    result = check_contracts_comparable(old, new, diagnostic=True)
-    producers_differ = bool(old_p and new_p and old_p != new_p)
+    result = check_contracts_comparable(
+        _snap(old_p, old_f), _snap(new_p, new_f), diagnostic=True
+    )
     if old_f == new_f:
         # Identical fingerprints: no mismatch, whatever the producer.
         assert result is None
         return
     assert isinstance(result, ComparabilityMismatch)
-    # Oracle stated independently of the implementation's constant.
-    assert {"layout", "runtime"} <= result.dimensions
-    assert ({"declaration", "source"} <= result.dimensions) == producers_differ
-    assurance = dimension_assurance(result)
-    assert assurance is not None
-    expected = "unverified" if producers_differ else "trusted"
-    assert assurance["declaration"] == expected
-    assert assurance["source"] == expected
-    assert assurance["symbol"] == "trusted"
+    assert result.dimensions == _expected_dimensions(old_p, new_p)
+    assert dimension_assurance(result) == _expected_assurance(old_p, new_p)
+
+
+def _producers_differ(old_p: str, new_p: str) -> bool:
+    return bool(old_p and new_p and old_p != new_p)
+
+
+def _expected_dimensions(old_p: str, new_p: str) -> frozenset[str]:
+    """Oracle stated independently of the implementation's constants: a
+    compiler-family difference touches layout and runtime; a producer
+    difference adds declaration and source."""
+    base = {"layout", "runtime"}
+    if _producers_differ(old_p, new_p):
+        base |= {"declaration", "source"}
+    return frozenset(base)
+
+
+def _expected_assurance(old_p: str, new_p: str) -> dict[str, str]:
+    unverified = _expected_dimensions(old_p, new_p)
+    return {
+        axis: ("unverified" if axis in unverified else "trusted")
+        for axis in ("declaration", "layout", "runtime", "source", "symbol")
+    }
 
 
 def test_helper_is_symmetric_and_empty_without_evidence():
