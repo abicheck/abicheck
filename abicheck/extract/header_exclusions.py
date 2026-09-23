@@ -42,9 +42,10 @@ from ..model.header_exclusion_record import (
     GLOB_MATCHING,
     exclusions_are_symmetric,
 )
+from .dependency_header_roots import dependency_header_predicate
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
 
@@ -72,23 +73,30 @@ def apply_header_exclusions(
 
     Deliberately a *path* filter and nothing more. It does not know about
     ABI visibility, public/private surface, or include graphs -- excluding a
-    header removes it from the parsed translation unit, and anything only it
-    declared is then simply not observed, which the surface/evidence layers
-    already know how to report as reduced evidence rather than as removal.
+    header removes it from the parse roots. A header it is still reached by
+    through ``#include`` is scoped out afterwards by
+    :func:`scoping_header_predicate` (``workflows.header_exclusion_audit``),
+    the same way a toolchain header is; either way anything only it declared
+    is not observed, which the evidence layers report as reduced evidence.
     """
     if not patterns:
         return list(headers)
-    kept: list[Path] = []
-    for h in headers:
-        text = str(h)
-        name = h.name
-        if any(
-            fnmatch(name, pat) or fnmatch(text, pat) or fnmatch(text, f"*/{pat}")
-            for pat in patterns
-        ):
-            continue
-        kept.append(h)
-    return kept
+    return [h for h in headers if not header_matches_exclusion(str(h), patterns)]
+
+
+def header_matches_exclusion(path: str | None, patterns: Sequence[str]) -> bool:
+    """Whether *path* is excluded by one of *patterns* -- the one match rule
+    shared by the parse-root filter above and the dependency scope, which
+    drops declarations an excluded header contributes through another
+    header's ``#include``. Tried against the bare file name, the full path,
+    and the path under any leading directory (``**/`` semantics)."""
+    if not path or not patterns:
+        return False
+    name = path.replace("\\", "/").rsplit("/", 1)[-1]
+    return any(
+        fnmatch(name, pat) or fnmatch(path, pat) or fnmatch(path, f"*/{pat}")
+        for pat in patterns
+    )
 
 
 def _expanded_header_inputs(headers: Sequence[Path]) -> list[Path]:
@@ -302,3 +310,28 @@ def exclusion_asymmetry_reason(
             )
         )
     )
+
+
+def scoping_header_predicate(
+    header_roots: Sequence[Path | str] | None, patterns: Sequence[str]
+) -> Callable[[str | None], bool]:
+    """``dependency_header_predicate(header_roots)``, widened so a header matching one of *patterns* also counts as
+    a dependency (option A of the ``--exclude-header`` contract: an excluded
+    header is scoped exactly like a toolchain header -- its declarations are
+    dropped unless the library's own public surface references them).
+    Returns the plain dependency predicate when there are no patterns."""
+    is_dep = dependency_header_predicate(header_roots)
+    if not patterns:
+        return is_dep
+    cache: dict[str | None, bool] = {}
+
+    def predicate(source_header: str | None) -> bool:
+        hit = cache.get(source_header)
+        if hit is None:
+            hit = is_dep(source_header) or header_matches_exclusion(
+                source_header, patterns
+            )
+            cache[source_header] = hit
+        return hit
+
+    return predicate

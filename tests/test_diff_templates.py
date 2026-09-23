@@ -1109,3 +1109,86 @@ class TestPipelineIntegration:
         from abicheck.post_processing import DEFAULT_PIPELINE
 
         assert "detect_template_patterns" in DEFAULT_PIPELINE.step_names
+
+
+# ---------------------------------------------------------------------------
+# Checkout-root independence of internal-template instantiation identity
+# ---------------------------------------------------------------------------
+
+_LAMBDA_SHAPES = [
+    "kumi::detail::foldable<(lambda at {root}/include/eve/detail/kumi.hpp:1138:31), const unsigned char &>::operator<<",
+    "lib::detail::apply<lambda at {root}/x/y.h:4:37>",
+    "lib::detail::wrap<(unnamed struct at {root}/a.hpp:56:5), (lambda at {root}/b.hpp:7:8)>",
+    "lib::internal::run<(anonymous union at {root}/c.h:1:2)>",
+]
+_ROOTS = [
+    ("/w/sh-leg4-work/old", "/w/sh-leg4-work/new"),
+    ("/tmp/a", "/home/ci/build/tree"),
+    ("C:/src/old", "D:/other/new"),
+]
+
+
+@pytest.mark.parametrize("shape", _LAMBDA_SHAPES)
+@pytest.mark.parametrize(("old_root", "new_root"), _ROOTS)
+def test_internal_template_leak_ignores_checkout_root_in_lambda_identity(
+    shape: str, old_root: str, new_root: str
+) -> None:
+    """Identical headers extracted under two directories must not read as a
+    removed+added instantiation pair (false BREAKING on byte-identical
+    binaries): the path only spells where the tree was unpacked."""
+
+    def side(root: str) -> AbiSnapshot:
+        name = shape.format(root=root)
+        param = shape.format(root=root).split("<", 1)[1]
+        # A plain sibling instantiation of the same template is what makes
+        # the stem internal-and-templated (as in the real report).
+        sibling = name.split("<", 1)[0] + "<int>"
+        return _snap(
+            funcs=[
+                _fn(name, mangled="sym_1", params=[("p", f"X<{param}")]),
+                _fn(sibling, mangled="sym_2"),
+            ]
+        )
+
+    assert detect_internal_template_leaks(side(old_root), side(new_root)) == []
+
+
+def test_internal_template_leak_still_distinguishes_distinct_lambdas() -> None:
+    """Stripping the directory keeps header basename + line:col, so two
+    genuinely different lambdas still differ (the removal still fires)."""
+    plain = _fn("lib::detail::f<int>", mangled="p")
+    old = _snap(
+        funcs=[plain, _fn("lib::detail::f<(lambda at /a/h.hpp:1:2)>", mangled="s")]
+    )
+    new = _snap(
+        funcs=[plain, _fn("lib::detail::f<(lambda at /b/h.hpp:9:9)>", mangled="s")]
+    )
+    changes = detect_internal_template_leaks(old, new)
+    assert [c.kind for c in changes] == [
+        ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API
+    ]
+
+
+def test_lambda_only_instantiations_are_examined() -> None:
+    """A template whose every instantiation takes a lambda argument used to
+    be skipped outright: the ``(`` of ``(lambda at ...)`` was read as a
+    parameter list, so no stem ever looked templated."""
+    old = _snap(
+        funcs=[
+            _fn("lib::detail::f<(lambda at /r/h.hpp:1:2)>", mangled="a"),
+            _fn("lib::detail::f<(lambda at /r/h.hpp:3:4)>", mangled="b"),
+        ]
+    )
+    new = _snap(funcs=[_fn("lib::detail::f<(lambda at /r/h.hpp:1:2)>", mangled="a")])
+    changes = detect_internal_template_leaks(old, new)
+    assert [(c.kind, c.symbol) for c in changes] == [
+        (ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API, "lib::detail::f")
+    ]
+    # ...and the same set under another checkout root is unchanged.
+    moved = _snap(
+        funcs=[
+            _fn(f.name.replace("/r/", "/elsewhere/"), mangled=f.mangled)
+            for f in old.functions
+        ]
+    )
+    assert detect_internal_template_leaks(old, moved) == []

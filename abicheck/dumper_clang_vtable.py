@@ -484,9 +484,10 @@ def _base_qualnames(node: dict[str, Any]) -> list[str]:
         type_obj = b.get("type")
         if not isinstance(type_obj, dict):
             continue
+        # Same checkout-path stripping the specialization index key gets.
         bname = str(type_obj.get("desugaredQualType") or type_obj.get("qualType") or "")
         if bname:
-            out.append(bname)
+            out.append(strip_anonymous_type_location(bname))
     return out
 
 
@@ -639,6 +640,7 @@ from .extract.headers.clang.templates import (  # noqa: E402,F401
     _template_param_names,
     build_specialization_index as _extract_build_specialization_index,
 )
+from .name_classification import strip_anonymous_type_location  # noqa: E402
 
 
 def build_specialization_index(

@@ -189,9 +189,12 @@ nothing), list each symbol. See
 **parsed** surface, so a header *directory* containing two headers that
 cannot be parsed in one translation unit stays usable as a `-H` operand
 (the reported case is Intel MKL's `include/`, which ships FFTW2 and FFTW3
-headers declaring conflicting typedefs). Anything only an excluded header
-declared is simply not observed, and is reported as reduced evidence rather
-than as a removal. Both sides of a comparison are narrowed by the same
+headers declaring conflicting typedefs). A matching header is also scoped
+out when it is only reached through another header's `#include`, exactly
+like a toolchain header: anything only it declares is not observed (reported
+as reduced evidence rather than as a removal), while a type the library's own
+public API uses is still checked. This needs dependency scoping, so it does
+not apply under `--include-system-declarations`. Both sides of a comparison are narrowed by the same
 rules, and a pair whose two sides were narrowed differently is refused
 rather than compared.
 

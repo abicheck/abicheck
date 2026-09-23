@@ -126,9 +126,10 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "(two vendored copies of a third-party API that cannot be parsed in "
         "one translation unit make the whole directory unusable). And not "
         "an analysis-disabling hatch: it narrows what is *parsed*, not what "
-        "is *reported* -- anything only an excluded header declared is "
-        "simply not observed, and the evidence layers report that as "
-        "reduced assurance rather than as a clean result."
+        "is *reported* -- anything only an excluded header declared (also "
+        "when reached via #include) is not observed, types the library's "
+        "own API uses stay checked, and the evidence layers report the "
+        "narrowing as reduced assurance rather than as a clean result."
     ),
     "--define": _keep(
         "ADR-074. A *per-run operand*, not a toolchain setting: a feature "

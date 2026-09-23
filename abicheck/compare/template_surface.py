@@ -50,7 +50,68 @@ if TYPE_CHECKING:
 
 _ABI_TAG_RE = re.compile(r"\[abi:[^\]]*\]")
 
+# An operator name's own ``<``/``>`` characters (``operator<<``,
+# ``operator->``, ``operator<=>``) are not template brackets.
+_OPERATOR_SYMBOL_RE = re.compile(r"\boperator\s*(?:<=>|<<=|>>=|<<|>>|<=|>=|->\*?|<|>)")
+
+
+def strip_template_args(name: str) -> str:
+    """Drop every top-level ``<...>`` template-argument list from *name*,
+    keeping an operator name's own ``<``/``>`` (``C<int>::operator<<`` ->
+    ``C::operator<<``, never the ambiguous ``C::operator``)."""
+    if "<" not in name:
+        return name
+    depth, pos, out = 0, 0, []
+    while pos < len(name):
+        m = _OPERATOR_SYMBOL_RE.match(name, pos) if depth == 0 else None
+        if m is not None:
+            out.append(m.group(0))
+            pos = m.end()
+            continue
+        ch = name[pos]
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            out.append(ch)
+        pos += 1
+    return "".join(out).rstrip()
+
+
+def mask_operator_symbols(name: str) -> str:
+    """*name* with each operator name's own ``<``/``>`` removed."""
+    return _OPERATOR_SYMBOL_RE.sub("operator", name)
+
+
+def template_angle_depth(text: str) -> int:
+    """How many template-argument lists are still open at the end of *text*.
+
+    A ``(`` found at a positive depth belongs to a template argument --
+    clang's ``(lambda at h.hpp:1:2)``/``(unnamed struct at ...)`` spellings,
+    a function-type argument ``F<int(double)>`` -- never to the declaration's
+    own parameter list. Parenthesised spans are skipped whole, so a ``<``/``>``
+    comparison inside one cannot unbalance the count.
+    """
+    depth = paren = 0
+    for ch in mask_operator_symbols(text):
+        if ch == "(":
+            paren += 1
+        elif ch == ")":
+            paren = max(0, paren - 1)
+        elif paren:
+            continue
+        elif ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+    return depth
+
+
 __all__ = [
+    "mask_operator_symbols",
+    "strip_template_args",
+    "template_angle_depth",
     "abi_visible_functions",
     "alias_identity",
     "public_functions",
