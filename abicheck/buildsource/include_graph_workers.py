@@ -38,6 +38,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from .. import deadline, process_resources
+from ..extract.progress import track
 
 __all__ = [
     "DepfileProbe",
@@ -307,7 +308,7 @@ def run_probes(
             )
             for unit in planned
         ]
-        return [f.result() for f in futures]
+        return [f.result() for f in track(futures, "include map", len(futures))]
 
 
 def _run_probe_in_worker(

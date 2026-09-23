@@ -65,6 +65,7 @@ from .dwarf_advanced import (
 )
 from .dwarf_metadata import DwarfMetadata, _process_cu_impl as _meta_process_cu
 from .dwarf_utils import dwarf_low_memory_mode, free_cu_die_cache, has_real_dwarf_info
+from .extract.progress import timed
 
 log = logging.getLogger(__name__)
 
@@ -196,6 +197,7 @@ def parse_dwarf_from_session(
 # ---------------------------------------------------------------------------
 
 
+@timed("DWARF debug info")
 def parse_dwarf(
     so_path: Path,
     *,

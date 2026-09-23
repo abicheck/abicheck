@@ -119,7 +119,7 @@ def resolve_dispatch_compile_context(
     rejected too (``reject_explicit_compile_config_for_stored_pair``, which
     since Phase 7 also covers the former ``--allow-ast-frontend-fallback``/
     ``--allow-unsupported-castxml`` flags' config-key equivalents)."""
-    from ....cli_helpers_compare import discover_project_config
+    from ....config_paths import resolve_project_config
     from .compare_bundle_facts_rejections import (
         apply_env_toggles_for_stored_pair,
         reject_explicit_compile_config_for_stored_pair,
@@ -131,7 +131,9 @@ def resolve_dispatch_compile_context(
     _config_explicit = (
         ctx.get_parameter_source("config") == click.core.ParameterSource.COMMANDLINE
     )
-    kwargs["config"] = kwargs.get("config") or discover_project_config()
+    kwargs["config"] = resolve_project_config(
+        kwargs.get("config"), search_from=Path.cwd()
+    ).path
     if new_is_stored:
         if _config_explicit and kwargs["config"] is not None:
             reject_explicit_compile_config_for_stored_pair(kwargs["config"])
@@ -143,23 +145,20 @@ def resolve_dispatch_compile_context(
     )
 
     _headers, _includes = _resolve_new_side_headers_includes(kwargs)
-    # Phase 7: the --ast-frontend/--sysroot/--nostdinc/--compiler* kwargs below
-    # are gone from compare's CLI, so each `.get()` resolves to its "nothing
-    # explicit" default -- i.e. "defer to .abicheck.yml's compile: block".
-    header_backend = (
-        kwargs.get("new_header_backend") or kwargs.get("header_backend") or "auto"
-    )
+    # The compile-context flags are gone from compare's CLI (ADR-037 D8.1),
+    # so every one of them is passed as its "nothing explicit" default --
+    # i.e. "defer to .abicheck.yml's compile: block".
     compile_context, merged_includes = resolve_compile_context(
         ctx,
-        sysroot=kwargs.get("sysroot"),
-        nostdinc=bool(kwargs.get("nostdinc", False)),
-        header_backend=header_backend,
+        sysroot=None,
+        nostdinc=False,
+        header_backend="auto",
         includes=tuple(_includes),
         build_config=kwargs["config"],
-        frontend_context=kwargs.get("frontend_context", "host"),
-        compiler_path=kwargs.get("compiler_path"),
-        compiler_prefix=kwargs.get("compiler_prefix"),
-        compiler_option_tokens=tuple(kwargs.get("compiler_option_tokens") or ()),
+        frontend_context="host",
+        compiler_path=None,
+        compiler_prefix=None,
+        compiler_option_tokens=(),
         # ADR-074's -D/--define -- Click really does populate this one.
         defines=tuple(kwargs.get("defines") or ()),
         # kwargs["config"] may be the cwd-upward auto-discovered path above
@@ -391,9 +390,9 @@ def dispatch(
         # whatever --header/--new-header was given and ran L2 extraction
         # anyway, reporting findings outside the requested depth.
         headers = []
-    header_backend = (
-        kwargs.get("new_header_backend") or kwargs.get("header_backend") or "auto"
-    )
+    # No CLI frontend flag exists (ADR-037 D8.1); compile.frontend in the
+    # config is folded in by the resolved compile context.
+    header_backend = "auto"
 
     suppression, policy_file = _load_suppression_and_policy(
         kwargs.get("suppress"), kwargs["policy"], kwargs.get("policy_file_path")
@@ -705,8 +704,8 @@ def dispatch(
         # independent of whether -o/--output/--write were even given.
         if output_dir.exists() and not output_dir.is_dir():
             raise click.UsageError(
-                f"--output-dir {output_dir}: this path already exists and "
-                "is not a directory -- choose a different --output-dir"
+                f"-o json={output_dir}/: this path already exists and "
+                "is not a directory -- choose a different per-library directory"
             )
         # Codex review: --output-dir's per-library filenames
         # (`{safe_name}.json`, derived from diff.library below) are known
@@ -738,21 +737,21 @@ def dispatch(
             output_dir_resolved = output_dir.resolve()
             if output_dir_resolved in reserved_paths:
                 raise click.UsageError(
-                    f"--output-dir {output_dir}: this path is also named by "
-                    "-o/--output or --write -- a directory and a report "
+                    f"-o json={output_dir}/: this path is also named by "
+                    "another -o target -- a directory and a report "
                     "file cannot share the same path, choose a different "
-                    "--output-dir or a different -o/--write path"
+                    "per-library directory or a different -o path"
                 )
             for diff in result.per_library:
                 safe_name = Path(diff.library).name or "library"
                 target = (output_dir / f"{safe_name}.json").resolve()
                 if target in reserved_paths:
                     raise click.UsageError(
-                        f"--output-dir {output_dir}: the per-library report "
+                        f"-o json={output_dir}/: the per-library report "
                         f"for {diff.library!r} would be written to "
-                        f"{target}, which collides with -o/--output or "
-                        "--write's own output path -- choose a different "
-                        "--output-dir, or a different -o/--write path"
+                        f"{target}, which collides with "
+                        "another -o target's path -- choose a different "
+                        "per-library directory, or a different -o path"
                     )
         # Codex review, fresh evidence: this was previously deferred until
         # after the primary/secondary writes below, right before the

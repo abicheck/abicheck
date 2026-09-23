@@ -128,7 +128,7 @@ def reject_unsupported_options(
     fmt = kwargs.get("fmt", "json")
     if fmt not in STORED_BUNDLE_FACTS_FORMATS:
         raise click.UsageError(
-            f"--format {fmt} is not available with a stored-bundle-facts OLD_INPUT: only "
+            f"-o {fmt}=... is not available with a stored-bundle-facts OLD_INPUT: only "
             "json/markdown are supported for a stored-bundle-facts "
             "comparison. Choose one of: json, markdown."
         )
@@ -151,7 +151,7 @@ def reject_unsupported_options(
             # the promised second artifact. Rejected the same way an
             # unsupported primary --format is, rather than silently skipped.
             raise click.UsageError(
-                f"--write {secondary_fmt}=... is not available with "
+                f"-o {secondary_fmt}=... is not available with "
                 "a stored-bundle-facts OLD_INPUT: only json/markdown are supported for a "
                 "stored-bundle-facts comparison."
             )
@@ -555,18 +555,6 @@ def reject_unsupported_options(
             "with a stored-bundle-facts OLD_INPUT: OLD_FACTS is already a resolved, "
             "stored snapshot with no header re-extraction available."
         )
-    if kwargs.get("old_header_backend") is not None:
-        # Codex review, fresh evidence: normalize_sided_options puts an
-        # old=-scoped --ast-frontend into old_header_backend, but
-        # compare_bundle_facts.dispatch() only ever reads the new=-scoped/
-        # uniform header_backend value (same root cause as the old=-scoped
-        # --header/--include rejection just above) -- OLD_FACTS is already
-        # resolved and cannot be re-extracted under a different frontend.
-        raise click.UsageError(
-            "--ast-frontend old=... is not supported together with "
-            "a stored-bundle-facts OLD_INPUT: OLD_FACTS is already a resolved, stored "
-            "snapshot with no header re-extraction available."
-        )
     if kwargs.get("old_version") not in (None, "", "old"):
         # Codex review, fresh evidence: neither compare_release_against_
         # bundle_facts() nor compare_stored_bundle_facts_pair() has an
@@ -637,24 +625,6 @@ def _reject_new_side_extraction_options_for_stored_pair(
             "NEW_INPUT are stored BundleFacts documents: neither side has "
             "any header re-extraction available."
         )
-    if kwargs.get("new_header_backend") is not None or kwargs.get(
-        "header_backend"
-    ) not in (
-        None,
-        "auto",
-    ):
-        # `header_backend` (the uniform/base value) defaults to the literal
-        # string "auto", never None (cli_options._split_sided_frontend) --
-        # unlike `old_header_backend`/`new_header_backend`, which really do
-        # default to None. Checking `is not None` here would reject every
-        # ordinary invocation, since the untouched default is always
-        # present; only a value that actually differs from that silent
-        # default means the flag was really given.
-        raise click.UsageError(
-            "--ast-frontend is not supported when both OLD_INPUT and "
-            "NEW_INPUT are stored BundleFacts documents: neither side has "
-            "any header re-extraction available."
-        )
     if kwargs.get("devel_pkg2") is not None:
         raise click.UsageError(
             "A --header new=... development package is not supported when both OLD_INPUT and "
@@ -718,25 +688,10 @@ def _reject_new_side_extraction_options_for_stored_pair(
     # source are still rejected, unconditionally, above: this driver has
     # no channel to *collect* L3-L5 evidence on either side, only to
     # enforce and project already-resolved evidence.
-    # Codex review, fresh evidence: compare_cmd builds a real CompileContext
-    # from these before calling dispatch() (resolve_compile_context), but
-    # this stored/stored branch never consumes compile_context at all --
-    # neither side does any header-frontend extraction, so every one of
-    # these was silently accepted and discarded rather than applied or
-    # rejected.
-    # Phase 7 (one-comparison-product.md §4.1): --compiler/--compiler-prefix/
-    # --compiler-option/--sysroot/--nostdinc/--frontend-context are gone from
-    # compare's CLI entirely -- an explicit --config declaring the matching
-    # compile: keys is rejected instead, by
-    # reject_explicit_compile_config_for_stored_pair below (this dispatcher
-    # already calls it for every explicit --config, stored/stored included).
-    if kwargs.get("lang_explicit"):
-        raise click.UsageError(
-            "--lang is not supported when both OLD_INPUT and NEW_INPUT are "
-            "stored BundleFacts documents: neither side's language is "
-            "re-detected or re-parsed from headers, so there is nothing "
-            "left for it to select."
-        )
+    # The compile-context flags (--ast-frontend/--lang/--compiler/...) are
+    # gone from compare's CLI (ADR-037 D8.1); an explicit --config declaring
+    # the matching compile: keys, compile.lang included, is rejected by
+    # reject_explicit_compile_config_for_stored_pair below instead.
 
 
 def reject_explicit_compile_config_for_stored_pair(config_path: Path) -> None:
@@ -780,6 +735,7 @@ def reject_explicit_compile_config_for_stored_pair(config_path: Path) -> None:
         or bc.compile_ast_frontend_fallback is not None
         or bc.compile_allow_unsupported_castxml is not None
         or bc.compile_frontend_context is not None
+        or bc.compile_lang is not None
     ):
         raise click.UsageError(
             f"{config_path} declares compile: settings, which are not "

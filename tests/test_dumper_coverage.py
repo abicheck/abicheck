@@ -1408,7 +1408,7 @@ class TestFromHeadersProvenance:
             ),
             patch.object(dumper, "_resolve_debug_metadata", side_effect=_fake_resolve),
             patch.object(dumper, "_try_dwarf_snapshot") as mock_try_dwarf,
-            pytest.warns(UserWarning, match="dwarf-only"),
+            pytest.warns(UserWarning, match="dwarf_only"),
         ):
             dumper._dump_elf(
                 so, [], [], "1.0", "c++", debug_format="btf", dwarf_only=True

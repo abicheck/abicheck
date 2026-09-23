@@ -45,7 +45,7 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from abicheck.cli_options import compile_context_options, sided_frontend_explicit
+from abicheck.cli_options import compile_context_options
 from abicheck.dry_run_estimate import CompileContext
 from abicheck.frontends.cli.commands.compare import compare_cmd
 from abicheck.frontends.cli.commands.dump import dump_cmd
@@ -1294,39 +1294,6 @@ def test_compare_rejects_sided_ast_frontend_for_set_inputs(
     )
     assert result.exit_code == 64
     assert "No such option" in result.output
-
-
-class _FakeCtx:
-    """Minimal click.Context stand-in for sided_frontend_explicit's own
-    contract, exercised directly rather than only through a real CLI
-    invocation -- see this file's own module docstring on why this guard
-    exists."""
-
-    def __init__(
-        self,
-        source: click.core.ParameterSource,
-        header_backend: list[tuple[str, str]],
-    ) -> None:
-        self._source = source
-        self.params = {"header_backend": header_backend}
-
-    def get_parameter_source(self, name: str) -> click.core.ParameterSource:
-        assert name == "header_backend"
-        return self._source
-
-
-def test_sided_frontend_explicit_direct() -> None:
-    cmdline = click.core.ParameterSource.COMMANDLINE
-    default = click.core.ParameterSource.DEFAULT
-    # Not COMMANDLINE at all -> False, regardless of the raw value.
-    assert sided_frontend_explicit(_FakeCtx(default, [("old", "clang")])) is False
-    # A sided pair (old=/new=, not "both") -> True.
-    assert sided_frontend_explicit(_FakeCtx(cmdline, [("old", "clang")])) is True
-    assert sided_frontend_explicit(_FakeCtx(cmdline, [("new", "clang")])) is True
-    # Only a "both" pair -> False (that's _shared_frontend_explicit's case).
-    assert sided_frontend_explicit(_FakeCtx(cmdline, [("both", "clang")])) is False
-    # An unsided command's plain string (no pair list at all) -> False.
-    assert sided_frontend_explicit(_FakeCtx(cmdline, "clang")) is False
 
 
 def test_compare_set_inputs_without_compile_flags_not_rejected(

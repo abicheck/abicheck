@@ -338,10 +338,12 @@ def _resolve_no_baseline_invocation(
     # (CodeRabbit review). `config_explicit` stays tied to the raw kwarg, so
     # a discovered config still does not clear the `compile.compiler`
     # untrusted-executable gate.
-    from ....cli_helpers_compare import discover_project_config
     from ....cli_options import resolve_compile_context
+    from ....config_paths import resolve_project_config
 
-    _discovered_config = kwargs.get("config") or discover_project_config()
+    _discovered_config = resolve_project_config(
+        kwargs.get("config"), search_from=Path.cwd()
+    ).path
     compile_context, merged_includes = resolve_compile_context(
         ctx,
         sysroot=None,

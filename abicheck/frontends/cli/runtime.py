@@ -30,6 +30,7 @@ directly, so a command cannot pick up one axis and silently forget another.
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -85,6 +86,11 @@ if TYPE_CHECKING:
 from ...model import AbiSnapshot
 
 _logger = logging.getLogger("abicheck")
+# `extract.progress`'s logger and switch, by name: frontends may not import
+# `extract` (ADR-061), so the two names are pinned equal by
+# tests/test_progress_output.py instead.
+_progress_logger = logging.getLogger("abicheck.progress")
+_PROGRESS_ENV = "ABICHECK_PROGRESS"
 
 # Marker attribute (P3, CLI-audit) stamped on every handler `_setup_verbosity`
 # installs, so a repeated call within one process (the `compare-release`
@@ -107,14 +113,31 @@ def _setup_verbosity(verbose: bool) -> None:
     accumulates duplicate stderr handlers that would each re-emit the same
     log line.
     """
-    for existing in list(_logger.handlers):
-        if getattr(existing, _VERBOSITY_HANDLER_MARKER, False):
-            _logger.removeHandler(existing)
+    for logger in (_logger, _progress_logger):
+        for existing in list(logger.handlers):
+            if getattr(existing, _VERBOSITY_HANDLER_MARKER, False):
+                logger.removeHandler(existing)
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
     setattr(handler, _VERBOSITY_HANDLER_MARKER, True)
     _logger.addHandler(handler)
     _logger.setLevel(logging.DEBUG if verbose else logging.WARNING)
+    # Progress lines (abicheck/progress.py) are on by default -- a long
+    # phase must never look like a hang -- on stderr only, with their own
+    # prefix and no propagation, so they neither reach stdout nor repeat
+    # through the handler above. ABICHECK_PROGRESS=0 silences them.
+    progress_handler = logging.StreamHandler(sys.stderr)
+    progress_handler.setFormatter(logging.Formatter("abicheck: %(message)s"))
+    setattr(progress_handler, _VERBOSITY_HANDLER_MARKER, True)
+    _progress_logger.addHandler(progress_handler)
+    _progress_logger.propagate = False
+    _progress_logger.setLevel(
+        logging.INFO
+        if verbose
+        or os.environ.get(_PROGRESS_ENV, "").strip().lower()
+        not in {"0", "false", "no", "off"}
+        else logging.WARNING
+    )
 
 
 def _safe_write_output(output: Path, text: str) -> None:

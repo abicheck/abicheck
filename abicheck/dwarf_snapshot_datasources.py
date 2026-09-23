@@ -20,7 +20,7 @@ Phase 0's detector migration pushed it over) -- a genuine leaf module (no
 dependency on ``_DwarfSnapshotBuilder`` or anything else in that module).
 ``dwarf_snapshot.py`` re-exports ``show_data_sources`` (`as`-aliased) so
 every existing ``from abicheck.dwarf_snapshot import show_data_sources``
-call site (``cli_datasources.py``, ``cli_dump_helpers.py``,
+call site (``cli_dump_helpers.py``,
 ``workflows/extraction.py``, and their tests) is unaffected.
 """
 

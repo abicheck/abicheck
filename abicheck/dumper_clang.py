@@ -290,7 +290,7 @@ def _resolve_dpcpp_multi_context(
     is_dpcpp = _is_dpcpp_family_binary(clang_bin)
     if frontend_context != "host" and not is_dpcpp:
         raise AstContextMissingError(
-            f"--frontend-context {frontend_context!r} requires a DPC++-capable "
+            f"compile.frontend_context {frontend_context!r} requires a DPC++-capable "
             f"compiler (icx/icpx/dpcpp/dpcpp-cl); {clang_bin!r} is a plain "
             "clang/gcc invocation with no device AST context to select."
         )
@@ -300,10 +300,10 @@ def _resolve_dpcpp_multi_context(
     sycl_explicitly_off = is_dpcpp and _user_explicitly_disabled_sycl(user_tokens)
     if frontend_context != "host" and sycl_explicitly_off:
         raise AstContextMissingError(
-            f"--frontend-context {frontend_context!r} requires SYCL to be "
-            "enabled, but the given --compiler-option explicitly "
+            f"compile.frontend_context {frontend_context!r} requires SYCL to be "
+            "enabled, but the configured compile.options explicitly "
             "disable it (-fno-sycl) -- remove -fno-sycl or drop "
-            "--frontend-context device."
+            "compile.frontend_context: device."
         )
     return is_dpcpp and not sycl_explicitly_off
 
@@ -550,7 +550,8 @@ def _resolve_clang_bin(
         raise SnapshotError(
             f"{clang_bin} not found in PATH. The clang header backend needs clang/clang++ "
             "installed (apt install clang, brew install llvm, or conda install -c conda-forge "
-            "clang). Or use the castxml frontend (--ast-frontend castxml)."
+            "clang). Or use the castxml frontend (compile.frontend: castxml in "
+            ".abicheck.yml, or ABICHECK_AST_FRONTEND=castxml)."
         )
     return clang_bin
 

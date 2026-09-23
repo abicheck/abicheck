@@ -50,10 +50,8 @@ from pathlib import Path
 import pytest
 
 from abicheck.buildsource.build_config_io import BuildConfig
-from abicheck.buildsource.l2_seed import (
-    _l2_seed_config,
-    seed_includes_and_fold_compile_context,
-)
+from abicheck.buildsource.l2_seed import seed_includes_and_fold_compile_context
+from abicheck.buildsource.l2_seed_args import _l2_seed_config
 
 
 def test_l2_seed_config_folds_explicit_build_targets(tmp_path: Path) -> None:

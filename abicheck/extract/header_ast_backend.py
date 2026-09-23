@@ -56,6 +56,7 @@ from ..errors import AstContextMissingError, ValidationError
 
 __all__ = [
     "HEADER_BACKENDS",
+    "_is_hybrid_request",
     "_resolve_effective_ast_backend",
     "_resolve_header_backend",
     "_resolve_single_ast_backend",
@@ -90,6 +91,36 @@ def _resolve_header_backend(backend: str | None) -> str:
     return "castxml"
 
 
+def _is_hybrid_request(
+    backend: str | None, *, dump_manifest_given: bool, frontend_context: str
+) -> bool:
+    """Answer whether *backend* resolves to ``hybrid``, rejecting the two
+    requests a hybrid (castxml+clang merge) dump cannot honor.
+
+    The hybrid-side sibling of :func:`_resolve_single_ast_backend`'s own
+    castxml/device-context check: every "can the selected backend honor
+    this request" decision lives in this module, so :mod:`abicheck.dumper`
+    only dispatches.
+    """
+    if _resolve_header_backend(backend) != "hybrid":
+        return False
+    if dump_manifest_given:
+        raise ValidationError(
+            "dump_manifest is not yet supported with the 'hybrid' AST "
+            "frontend; set compile.frontend: castxml or clang in .abicheck.yml "
+            "(or ABICHECK_AST_FRONTEND)."
+        )
+    if frontend_context != "host":
+        # Hybrid has no device concept (castxml+clang merge); reject rather
+        # than silently defaulting both recursive calls to "host".
+        raise AstContextMissingError(
+            f"compile.frontend_context {frontend_context!r} requires the "
+            "clang header backend (compile.frontend: clang); 'hybrid' "
+            "merges castxml+clang and has no device-context semantics."
+        )
+    return True
+
+
 def _resolve_single_ast_backend(backend: str, frontend_context: str) -> str:
     """Resolve *backend* to the one L2 frontend that will actually run.
 
@@ -118,8 +149,8 @@ def _resolve_single_ast_backend(backend: str, frontend_context: str) -> str:
         and ((backend or "auto").lower() == "castxml" or _env_pinned_castxml)
     ):
         raise AstContextMissingError(
-            f"--frontend-context {frontend_context!r} requires the clang "
-            "header backend (--ast-frontend clang); castxml has no SYCL/"
+            f"compile.frontend_context {frontend_context!r} requires the clang "
+            "header backend (compile.frontend: clang); castxml has no SYCL/"
             "DPC++ host/device context concept."
         )
     return resolved

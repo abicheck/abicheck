@@ -212,13 +212,13 @@
     },
     {
       "path": "abicheck/buildsource/l2_seed.py",
-      "baseline_lines": 1037,
+      "baseline_lines": 856,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised by 7 lines (ADR-063 Phase 4, Codex review): derive_l2_include_dirs/derive_l2_compile_context/seed_includes_and_fold_compile_context each wrap their own collect_inline_pack call in a broad best-effort except Exception, which silently swallowed the new Bazel target-scoping ValidationError (e.g. at --depth headers, where embed_build_source's own real check never even runs, making this L2-seed call the only place the error could fire at all) -- a real, silent-failure regression the ADR-063 Phase 4 slice itself introduced. Fixed by carving ValidationError out of the catch-all, mirroring the file's pre-existing HeaderCompileContextAmbiguousError carve-out for the identical reason (a deliberate usage error, not a best-effort collection failure). Comments already minimized to two lines each; no smaller diff was found that still states both the exception and why it must propagate.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised by 7 lines (ADR-063 Phase 4, Codex review): derive_l2_include_dirs/derive_l2_compile_context/seed_includes_and_fold_compile_context each wrap their own collect_inline_pack call in a broad best-effort except Exception, which silently swallowed the new Bazel target-scoping ValidationError (e.g. at --depth headers, where embed_build_source's own real check never even runs, making this L2-seed call the only place the error could fire at all) -- a real, silent-failure regression the ADR-063 Phase 4 slice itself introduced. Fixed by carving ValidationError out of the catch-all, mirroring the file's pre-existing HeaderCompileContextAmbiguousError carve-out for the identical reason (a deliberate usage error, not a best-effort collection failure). Comments already minimized to two lines each; no smaller diff was found that still states both the exception and why it must propagate. Lowered 1037 -> 856: config/pack-argument resolution for the seed moved to buildsource/l2_seed_args.py, its own owner.",
       "review_by": "2026-11-30"
     },
     {
@@ -344,13 +344,13 @@
     },
     {
       "path": "abicheck/buildsource/source_replay.py",
-      "baseline_lines": 1408,
+      "baseline_lines": 1318,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Lowered 1408 -> 1318: the L4 pool execution (`_extract_cache_misses`/`_extract_serially`/`_deadline_bound_worker`) moved to buildsource/source_replay_pool.py, which also owns its progress reporting.",
       "review_by": "2026-11-30"
     },
     {
@@ -531,13 +531,13 @@
     },
     {
       "path": "abicheck/cli_dump_helpers.py",
-      "baseline_lines": 968,
+      "baseline_lines": 917,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 962 -> 968 (PR #1283, the Intel MKL evaluation fixes). The `--exclude-header PATTERN` operand threaded through one more layer: the parameter, its pass-through, and the one comment saying why it is filtered after the directory walk rather than during it. There is no responsibility to move -- the surrounding function's whole job is assembling this call's arguments, and the matching rule itself already lives in the new `extract/header_exclusions.py` leaf rather than here.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 962 -> 968 (PR #1283, the Intel MKL evaluation fixes). The `--exclude-header PATTERN` operand threaded through one more layer: the parameter, its pass-through, and the one comment saying why it is filtered after the directory walk rather than during it. There is no responsibility to move -- the surrounding function's whole job is assembling this call's arguments, and the matching rule itself already lives in the new `extract/header_exclusions.py` leaf rather than here. Lowered 968 -> 917: `resolve_dump_compile_context` moved to frontends/cli/dump_debug_config.py beside the rest of dump's project-config resolution.",
       "review_by": "2026-11-30"
     },
     {

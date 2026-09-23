@@ -235,6 +235,20 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="config.command_specific_discovery",
+        invariant=(
+            "Every command selects its project config with one rule "
+            "(config_paths.resolve_project_config: --config > --sources "
+            "root > nearest config above the front end's search root), and "
+            "trust follows how the config was chosen, never whether a path "
+            "was passed: a discovered config contributes passive settings "
+            "but never runs build.query."
+        ),
+        fixed_by=(1346,),
+        seed_tests=("tests/test_project_config_resolution.py",),
+        public_surfaces=("dump", "compare"),
+    ),
+    BugClass(
         id="config.env_flag_value_domain",
         invariant=(
             "Every ABICHECK_* boolean environment knob answers the same "

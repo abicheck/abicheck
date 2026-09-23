@@ -961,10 +961,9 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         (CLI-audit P1, G34 Phase B plan doc's acknowledged "pre-existing
         bug, not one this phase introduced"): a bundle cell's `new-library`
         is the `bundle-staging` *directory* it stages its members into, and
-        `cli_resolve._reject_compile_context_for_set_inputs` hard-rejects
-        `--compiler`/`--gcc-options` for a directory/package compare, since
-        the per-library release fan-out never threads a single-pair L2
-        compile context to each pair. Before this guard, a profile that set
+        the CLI once hard-rejected `--compiler`/`--gcc-options` for a
+        directory/package compare (that guard went away with the
+        compile-context flags themselves). Before this guard, a profile that set
         `compile.binding` for its target cells would have that same per-cell
         override reach every bundle cell too, turning a previously working
         bundle check into a hard operational error.

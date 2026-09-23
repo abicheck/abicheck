@@ -48,6 +48,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from .. import deadline
 from ..build_context import _extract_flags
+from ..extract.progress import track
 from ..model.graph_facts import (
     CONF_HIGH,
     CONF_REDUCED,
@@ -1272,11 +1273,14 @@ class ClangCallGraphExtractor:
                     _probe,
                 )
                 with ThreadPoolExecutor(max_workers=self.last_jobs) as pool:
-                    for edges, local_diagnostics in pool.map(pool_worker, units):
+                    done = pool.map(pool_worker, units)
+                    for edges, local_diagnostics in track(
+                        done, "call graph", len(units)
+                    ):
                         add_edges(edges)
                         self.diagnostics.extend(local_diagnostics)
             else:
-                for cu in units:
+                for cu in track(units, "call graph", len(units)):
                     edges, local_diagnostics = _probe(cu)
                     add_edges(edges)
                     self.diagnostics.extend(local_diagnostics)

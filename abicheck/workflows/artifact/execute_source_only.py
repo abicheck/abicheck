@@ -157,6 +157,7 @@ def execute_source_only_dump_request(
         side.build_info,
         side.sources,
         build_config=options.build_config,
+        build_config_explicit=options.build_config_explicit,
         clang_bin=clang_bin,
         collect_mode=resolved.collect_mode,
         build_query=options.build_query,
