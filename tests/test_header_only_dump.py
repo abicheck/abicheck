@@ -264,6 +264,45 @@ class TestHeaderOnlyDependencyScoping:
         snap = snapshot_from_dict(json.loads(out.read_text(encoding="utf-8")))
         assert [f.name for f in snap.functions] == ["exposed_api"]
 
+    def test_manifest_public_dir_classifies_its_headers_public(self, tmp_path: Path):
+        """A header covered only by a manifest `public_header_dirs` entry --
+        not itself a root -- is `public_header`. Regression (CodeRabbit
+        review): the manifest's directories were passed to provenance as
+        header *files*, which match nothing by containment."""
+        import json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.serialization import snapshot_from_dict
+
+        _skip_if_no_header_ast_toolchain()
+        root_dir = tmp_path / "root"
+        root_dir.mkdir()
+        pub = tmp_path / "pub"
+        pub.mkdir()
+        (pub / "extra.hpp").write_text("int extra_api(int);\n", encoding="utf-8")
+        umbrella = root_dir / "api.hpp"
+        umbrella.write_text(
+            f'#include "{pub / "extra.hpp"}"\nint root_api(int);\n',
+            encoding="utf-8",
+        )
+        manifest = tmp_path / "m.yaml"
+        manifest.write_text(
+            f"roots:\n  - {umbrella}\npublic_header_dirs:\n  - {pub}\n"
+            f"translation_units:\n  - name: main\n    forced_includes:\n"
+            f"      - {umbrella}\n",
+            encoding="utf-8",
+        )
+        out = tmp_path / "snap.json"
+        result = CliRunner().invoke(
+            main, ["dump", "--dump-manifest", str(manifest), "-o", str(out)]
+        )
+        assert result.exit_code == 0, result.output
+        snap = snapshot_from_dict(json.loads(out.read_text(encoding="utf-8")))
+        origins = {f.name: f.origin.value for f in snap.functions}
+        assert origins == {"root_api": "public_header", "extra_api": "public_header"}
+
     def test_typed_api_populates_source_header(self, tmp_path: Path):
         """The typed API reaches the same executor, so it must carry the
         same provenance -- checked before any scoping runs."""

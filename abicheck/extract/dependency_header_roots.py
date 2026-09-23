@@ -144,6 +144,8 @@ class DependencyHeaderRoots:
         return origin is ScopeOrigin.SYSTEM_HEADER
 
     def _owned(self, source_header: str) -> bool:
+        """Whether a spelling of *source_header* is a root, or lies under a
+        root's directory -- the ownership test minus the basename fallback."""
         return any(
             any(_suffix_match(root, segs) for root in self.header_segs)
             or _matches_any_dir(segs, list(self.dir_segs))

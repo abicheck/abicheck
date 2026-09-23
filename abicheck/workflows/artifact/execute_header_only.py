@@ -187,13 +187,23 @@ def execute_header_only_dump_request(
     # `source_header`) silently keeps the whole transitive toolchain
     # surface: a 5-header SVS root kept 32,339 libstdc++/libc/fmt functions
     # beside its own 304.
-    from ...dumper_scoping import dump_manifest_public_roots
     from ...provenance import apply_provenance
 
+    # A manifest's declared-public *files* and *directories* go to their own
+    # slots: a directory handed over as a header matches nothing by
+    # containment, so a header covered only by it would lose its origin.
+    manifest_files = (
+        [*dump_manifest.roots, *dump_manifest.public_header_paths]
+        if dump_manifest is not None
+        else []
+    )
+    manifest_dirs = (
+        list(dump_manifest.public_header_dirs) if dump_manifest is not None else []
+    )
     apply_provenance(
         snap,
-        [*resolved.public_headers, *dump_manifest_public_roots(dump_manifest)],
-        list(resolved.public_header_dirs),
+        [*resolved.public_headers, *manifest_files],
+        [*resolved.public_header_dirs, *manifest_dirs],
         include_search_dirs=list(side.includes),
     )
 
