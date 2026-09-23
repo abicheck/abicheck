@@ -158,3 +158,42 @@ def test_deep_nesting_does_not_recurse() -> None:
     # Every spelling occurs (the bare ``A`` at every level, since ``<``
     # ends a token), and nothing outside the vocabulary is reported.
     assert {m.group() for m in got} == vocab
+
+
+@pytest.mark.parametrize(
+    ("template", "instantiation", "signature"),
+    [
+        ("std::vector", "std::vector<int>", "std::vector<int>"),
+        ("std::vector", "std::vector<int>", "const std::vector<int> &"),
+        ("std::map", "std::map<int, int>", "std::map<int, int> *"),
+    ],
+)
+def test_stdlib_reachability_sees_the_template_inside_its_instantiation(
+    template, instantiation, signature
+) -> None:
+    """The user-visible consequence, through the reachability API that
+    decides which stdlib records a public signature keeps in scope: with
+    both the class template and its instantiation registered, the template
+    was dropped because it starts at the same offset."""
+    from abicheck.model import AbiSnapshot, Function, RecordType, Visibility
+    from abicheck.type_reachability import directly_referenced_stdlib_types
+
+    def record(qualified: str) -> RecordType:
+        return RecordType(
+            name=qualified.split("::", 1)[1], kind="class", qualified_name=qualified
+        )
+
+    snap = AbiSnapshot(
+        library="libx.so",
+        version="1",
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1fv",
+                return_type=signature,
+                visibility=Visibility.PUBLIC,
+            )
+        ],
+        types=[record(template), record(instantiation)],
+    )
+    assert directly_referenced_stdlib_types(snap) == {template, instantiation}
