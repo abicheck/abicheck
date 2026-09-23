@@ -3379,16 +3379,11 @@ elif [[ "$MODE" == "compare" ]]; then
   # lifted, which made a release comparison through this Action strictly
   # less capable than the same comparison run through the CLI directly.
   #
-  # The one compile-context input the CLI still refuses for this shape is a
-  # *sided* `--ast-frontend old=/new=` override
-  # (`cli_resolve._reject_compile_context_for_set_inputs`): "parse the old
-  # library's headers with a different frontend than the new one" has no
-  # per-library-pair-within-a-release meaning. This Action exposes no sided
-  # spelling of any of these inputs at all -- `ast-frontend` is a single
-  # scalar folded into one both-sides `compile:` block -- so there is
-  # nothing here that could be silently dropped by that rejection; a sided
-  # override typed into `extra-args` reaches the CLI verbatim and fails
-  # there, loudly, as its own UsageError.
+  # The CLI has no compile-context flag at all any more (ADR-037 D8.1 /
+  # ADR-068 Phase 6 moved the whole family to `.abicheck.yml` `compile:`),
+  # so there is no sided per-side override left for it to refuse. This
+  # Action folds `ast-frontend` & co. into one both-sides `compile:` block,
+  # which the release fan-out threads to every library pair.
   add_compile_context_flags true
 
   # Build/source evidence (--depth build/source) — new (candidate) side only.

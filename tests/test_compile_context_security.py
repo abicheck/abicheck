@@ -336,7 +336,7 @@ class TestBundleFactsDispatchCompileConfigEnvToggles:
         no crash from a None build config."""
         monkeypatch.delenv("ABICHECK_ALLOW_AST_FALLBACK", raising=False)
 
-        from abicheck import cli_helpers_compare, cli_options
+        from abicheck import cli_options
         from abicheck.frontends.cli.commands.compare_bundle_facts import (
             resolve_dispatch_compile_context,
         )
@@ -346,8 +346,10 @@ class TestBundleFactsDispatchCompileConfigEnvToggles:
             "resolve_compile_context",
             lambda ctx, **kw: (CompileContext(), ()),
         )
+        from abicheck import config_paths
+
         monkeypatch.setattr(
-            cli_helpers_compare, "discover_project_config", lambda: None
+            config_paths, "discover_project_config", lambda start=None: None
         )
 
         cli_ctx = click.Context(click.Command("compare"))

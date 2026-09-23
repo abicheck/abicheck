@@ -123,6 +123,12 @@ when both are set.
 
 ---
 
+## Progress output
+
+| Variable | Values | Default | Effect | Module |
+|----------|--------|---------|--------|--------|
+| `ABICHECK_PROGRESS` | `0`/`false`/`no`/`off` disables; anything else (or unset) enables | enabled | Progress lines for the long phases of a CLI run -- the header-AST parse, DWARF, build/source (L3-L5) evidence, and `i/N` counters for the per-TU header parse, L4 source replay, include map and call graph -- written to **stderr** as `abicheck: ...`, so stdout (a snapshot or report) is unchanged. Counters are throttled to one line per 5 s. `-v` always enables them. A Python caller that configures no logging hears nothing. | `extract/progress.py`, `frontends/cli/runtime.py` (`_setup_verbosity`) |
+
 ## Other environment variables abicheck honours
 
 These are standard / third-party variables read for caching, Windows symbol

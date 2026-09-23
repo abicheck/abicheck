@@ -233,6 +233,19 @@ def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatc
 
 
 @pytest.fixture(autouse=True)
+def _silence_progress_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the CLI's default-on progress lines (``abicheck/progress.py``) out
+    of every test's captured output.
+
+    ``CliRunner`` folds stderr into ``result.output``, which a large share of
+    this suite parses as the command's JSON; a progress line there would
+    break those tests for a reason unrelated to what they check. Tests of the
+    progress output itself set ``ABICHECK_PROGRESS=1`` explicitly.
+    """
+    monkeypatch.setenv("ABICHECK_PROGRESS", "0")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_ast_memo() -> Iterator[None]:
     """Clear the in-process clang-AST memo slot (``dumper_cache._ast_memo_slot``,
     G31 Phase C AST reuse) before and after every test.

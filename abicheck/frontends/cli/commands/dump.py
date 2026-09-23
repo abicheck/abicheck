@@ -30,9 +30,9 @@ import click
 
 from ....cli_dump_helpers import (
     _dump_will_attempt_hybrid_l4_extraction,
+    check_dump_debug_format_error,
     reject_snapshot_compression_conflict,
     resolve_dump_collect_context,
-    resolve_dump_compile_context,
     resolve_dump_debug_format,
 )
 from ....cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
@@ -72,10 +72,8 @@ from ....service_compare_evidence import (
 )
 from ..dump_debug_config import (
     DumpDebugConfig,
-    resolve_dump_build_compile_db_filter,
-    resolve_dump_debug_fields,
-    resolve_dump_lang_and_env_toggles,
-    resolve_dump_scope_exclude_headers,
+    resolve_dump_compile_context,
+    resolve_dump_project_config,
 )
 from ..options.params import (
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
@@ -320,31 +318,28 @@ def dump_cmd(
     reject_snapshot_compression_conflict(output, snapshot_compression)
     _setup_verbosity(verbose)
 
-    # Phase 7: compile.lang default + env-var toggles.
-    lang, _config_lang_explicit = resolve_dump_lang_and_env_toggles(
+    # One config selection feeds every config-sourced field (and, below,
+    # the pipeline): --config > --sources root > nearest config above cwd.
+    _project = resolve_dump_project_config(
         click.get_current_context(),
         build_config=build_config,
         sources=sources,
         lang=lang,
         lang_default=LANG_DEFAULT,
         apply_env_toggles=apply_compile_config_env_toggles,
-    )
-    # §4.2's CONFIG row: `build.compile_db_filter` replaces
-    # `--compile-db-filter`.
-    compile_db_filter = resolve_dump_build_compile_db_filter(build_config, sources)
-    # `scope.exclude_headers` -- `--exclude-header`'s config spelling.
-    # `dump` and `compare` produce operands for each other, so a config-only
-    # rule reaching one and not the other makes the same project config
-    # succeed on one and fail on the other. Resolver docstring has the rest.
-    exclude_headers = resolve_dump_scope_exclude_headers(
-        build_config, sources, tuple(exclude_headers)
-    )
-    # Phase 7c: debug.* config only
-    _debug = resolve_dump_debug_fields(
-        _resolved_debug,
-        build_config=build_config,
-        sources=sources,
+        exclude_headers=tuple(exclude_headers),
+        resolved_debug=_resolved_debug,
         debug_roots=debug_roots,
+    )
+    config_path, lang, _config_lang_explicit = (
+        _project.path,
+        _project.lang,
+        _project.lang_explicit,
+    )
+    compile_db_filter, exclude_headers, _debug = (
+        _project.compile_db_filter,
+        _project.exclude_headers,
+        _project.debug,
     )
     dwarf_only, debug_format_opt, debuginfod, debuginfod_url, pdb_path = (
         _debug.dwarf_only,
@@ -484,7 +479,8 @@ def dump_cmd(
         nostdinc=False,
         header_backend="auto",
         includes=includes,
-        build_config=build_config,
+        build_config=config_path,
+        config_explicit=_project.explicit,
         sources=sources,
         frontend_context="host",
         compiler_path=None,
@@ -662,7 +658,8 @@ def dump_cmd(
     _resolved = dataclasses.replace(
         _resolved,
         execution_options=DumpExecutionOptions(
-            build_config=build_config,
+            build_config=config_path,
+            build_config_explicit=_project.explicit,
             allow_build_query=True,
             legacy_compile_db_tokens=tuple(_preview_flags),
             legacy_compile_db_matched=_preview_matched,
@@ -693,7 +690,7 @@ def dump_cmd(
         _dry_result = render_dump_dry_run(
             _resolved,
             output=output,
-            build_config=build_config,
+            build_config=config_path,
             snapshot_compression=snapshot_compression,
             has_compile_db=compile_db_path is not None,
             # External review: dry-run previously only checked bare -p/
@@ -745,7 +742,8 @@ def dump_cmd(
             execute_and_write_header_only_dump_cli_run(
                 _resolved,
                 notify=_click_notify,
-                build_config=build_config,
+                build_config=config_path,
+                build_config_explicit=_project.explicit,
                 stamp_provenance=_stamp_provenance,
                 write_snapshot_output=_write_snapshot_output_fn,
                 git_tag=git_tag,
@@ -802,7 +800,7 @@ def dump_cmd(
             build_info,
             version,
             output,
-            build_config,
+            config_path,
             git_tag,
             build_id,
             no_git,
@@ -813,6 +811,7 @@ def dump_cmd(
             gcc_path=gcc_path,
             gcc_prefix=gcc_prefix,
             snapshot_compression=snapshot_compression,
+            build_config_explicit=_project.explicit,
         )
         return
 
@@ -833,11 +832,11 @@ def dump_cmd(
     # conventional ``libfoo.so`` dev symlink is often a GNU ld linker script;
     # follow it to the real shared library before dispatching.
     so_path, binary_fmt = _normalize_binary_input(so_path)
-    if effective_debug_format is not None and binary_fmt in ("pe", "macho"):
-        raise click.BadParameter(
-            f"--debug-format {effective_debug_format} is only supported for ELF "
-            f"binaries, not {binary_fmt.upper()}."
-        )
+    debug_format_error = check_dump_debug_format_error(
+        effective_debug_format, binary_fmt
+    )
+    if debug_format_error is not None:
+        raise click.BadParameter(debug_format_error)
 
     # ADR-063 Phase 1: both binary formats now execute through the identical
     # `execute_dump_request` pipeline (`perform_elf_dump`/`handle_non_elf_dump`
@@ -900,7 +899,8 @@ def dump_cmd(
         resolve_dump_request_for_cli(_exec_request),
         requested_depth=None,
         execution_options=DumpExecutionOptions(
-            build_config=build_config,
+            build_config=config_path,
+            build_config_explicit=_project.explicit,
             allow_build_query=True,
             legacy_compile_db_tokens=tuple(build_context_flags),
             legacy_compile_db_matched=compile_db_matched,
@@ -926,7 +926,8 @@ def dump_cmd(
     execute_and_write_dump_cli_run(
         _exec_resolved,
         notify=_click_notify,
-        build_config=build_config,
+        build_config=config_path,
+        build_config_explicit=_project.explicit,
         stamp_provenance=_stamp_provenance,
         write_snapshot_output=_write_snapshot_output_fn,
         git_tag=git_tag,

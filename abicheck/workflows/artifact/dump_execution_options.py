@@ -149,6 +149,11 @@ class DumpExecutionOptions:
     """
 
     build_config: Path | None = None
+    #: ``False`` when *build_config* was discovered by the front end
+    #: (:func:`abicheck.config_paths.resolve_project_config`) rather than named
+    #: by the operator: its passive settings apply, but it is never trusted to
+    #: run ``build.query`` or to make ``build.compile_db`` an explicit input.
+    build_config_explicit: bool = True
     build_query: str | None = None
     build_compile_db: str | None = None
     changed_paths: tuple[str, ...] = ()

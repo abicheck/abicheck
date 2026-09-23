@@ -98,7 +98,7 @@ def test_l2_seed_pack_inputs_recognizes_flow2_build_info_pack(tmp_path: Path) ->
     -- ``embed_build_source`` already does this (``bi_is_inputs``); this L2
     seed path previously checked only ``is_pack_dir`` and silently treated
     the pack directory as a literal, un-normalized source tree instead."""
-    from abicheck.buildsource.l2_seed import _l2_seed_pack_inputs
+    from abicheck.buildsource.l2_seed_args import _l2_seed_pack_inputs
 
     pack = _write_flow2_inputs_pack(tmp_path, with_compile_db=True)
     base_build, raw_build_info, raw_sources = _l2_seed_pack_inputs(pack, None)
@@ -112,7 +112,7 @@ def test_l2_seed_pack_inputs_recognizes_flow2_sources_pack(tmp_path: Path) -> No
     """Same recognition via ``--sources``, only when no ``--build-info`` was
     also given (an explicit ``--build-info`` always wins L3, matching this
     function's pre-existing classic-pack precedence rule)."""
-    from abicheck.buildsource.l2_seed import _l2_seed_pack_inputs
+    from abicheck.buildsource.l2_seed_args import _l2_seed_pack_inputs
 
     pack = _write_flow2_inputs_pack(tmp_path, with_compile_db=True)
     base_build, raw_build_info, raw_sources = _l2_seed_pack_inputs(None, pack)
@@ -128,7 +128,7 @@ def test_l2_seed_pack_inputs_sources_pack_yields_to_explicit_build_info(
     """A raw, non-pack ``--build-info`` still wins L3 over a Flow-2
     ``--sources`` pack, mirroring the classic-``BuildSourcePack`` rule this
     function's own docstring already states."""
-    from abicheck.buildsource.l2_seed import _l2_seed_pack_inputs
+    from abicheck.buildsource.l2_seed_args import _l2_seed_pack_inputs
 
     src_pack = _write_flow2_inputs_pack(tmp_path, with_compile_db=True)
     build_info = tmp_path / "build"
@@ -148,7 +148,7 @@ def test_l2_seed_pack_inputs_flow2_pack_without_compile_db_yields_no_evidence(
     seed uses degrades to ``None`` the same way the full ``ingest_inputs_pack``
     does for a compile-DB-less pack (see ``test_ingest_without_compile_db_
     skips_l3`` in ``tests/test_inputs_pack.py``)."""
-    from abicheck.buildsource.l2_seed import _l2_seed_pack_inputs
+    from abicheck.buildsource.l2_seed_args import _l2_seed_pack_inputs
 
     pack = _write_flow2_inputs_pack(tmp_path, with_compile_db=False)
     base_build, raw_build_info, raw_sources = _l2_seed_pack_inputs(pack, None)

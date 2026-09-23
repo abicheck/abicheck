@@ -34,6 +34,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -115,30 +116,6 @@ class TestCompareOldBundleFactsEarlyRejections:
 
         assert code == 64
         assert "--include" in out
-
-    def test_old_side_ast_frontend_operand_is_rejected(self, tmp_path: Path) -> None:
-        # Codex review: normalize_sided_options puts an old=-scoped
-        # --ast-frontend into old_header_backend, but dispatch() only ever
-        # reads the new=-scoped/uniform header_backend value -- OLD_FACTS
-        # is already a resolved, stored snapshot with no header
-        # re-extraction available.
-        facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
-        new_dir = tmp_path / "new"
-        new_dir.mkdir()
-
-        code, out = _invoke(
-            "compare",
-            str(facts_path),
-            str(new_dir),
-            "--ast-frontend",
-            "old=clang",
-            "-o",
-            "json=-",
-        )
-
-        assert code == 64
-        assert "--ast-frontend" in out
 
     def test_explicit_demangle_is_rejected(self, tmp_path: Path) -> None:
         # Codex review: --demangle is documented to apply to markdown
@@ -591,3 +568,50 @@ class TestDsoOnlyRejectedForSingleFileNewInput:
         # Reaches a later, unrelated failure (no matching libraries) --
         # never the new "single library file" rejection.
         assert "single library file" not in out
+
+
+class TestStoredPairExplicitCompileConfig:
+    """An explicit ``--config`` declaring any ``compile:`` key -- ``lang``
+    included -- has no channel on a stored/stored comparison and is
+    rejected by the one config-based guard (the old per-flag branches
+    read kwargs no command registers any more)."""
+
+    @pytest.mark.parametrize(
+        "compile_block",
+        [
+            "  lang: c\n",
+            "  frontend: clang\n",
+            "  frontend_context: device\n",
+            "  options: [-fno-exceptions]\n",
+            "  std: c++17\n",
+        ],
+    )
+    def test_each_compile_key_is_rejected(
+        self, tmp_path: Path, compile_block: str
+    ) -> None:
+        from abicheck.frontends.cli.commands.compare_bundle_facts_rejections import (
+            reject_explicit_compile_config_for_stored_pair,
+        )
+
+        cfg = tmp_path / "cfg.yml"
+        cfg.write_text("compile:\n" + compile_block)
+        with pytest.raises(click.UsageError, match="declares compile: settings"):
+            reject_explicit_compile_config_for_stored_pair(cfg)
+
+    def test_config_without_compile_block_is_accepted(self, tmp_path: Path) -> None:
+        from abicheck.frontends.cli.commands.compare_bundle_facts_rejections import (
+            reject_explicit_compile_config_for_stored_pair,
+        )
+
+        cfg = tmp_path / "cfg.yml"
+        cfg.write_text("severity:\n  preset: default\n")
+        assert reject_explicit_compile_config_for_stored_pair(cfg) is None
+
+    def test_removed_frontend_flag_is_an_unknown_option(self, tmp_path: Path) -> None:
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
+        code, out = _invoke(
+            "compare", str(facts_path), str(facts_path), "--ast-frontend", "clang"
+        )
+        assert code == 64
+        assert "No such option" in out

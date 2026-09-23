@@ -510,7 +510,7 @@ class TestViewGrammar:
             ["compare", str(old_p), str(new_p), "--view", "show=not_a_real_token"],
         )
         assert result.exit_code == 64, result.output
-        assert "Unknown --show-only token" in result.output
+        assert "Unknown --view show= token" in result.output
 
     def test_combined_view_tokens_do_not_change_canonical_result(
         self, tmp_path: Path

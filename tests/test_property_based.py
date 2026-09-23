@@ -427,7 +427,7 @@ def test_show_only_filter_rejects_invalid_tokens(invalid_tok: str):
     """An invalid token should raise ValueError."""
     import pytest
 
-    with pytest.raises(ValueError, match="Unknown --show-only token"):
+    with pytest.raises(ValueError, match="Unknown --view show= token"):
         ShowOnlyFilter.parse(invalid_tok)
 
 

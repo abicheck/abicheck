@@ -38,7 +38,6 @@ from abicheck.buildsource.source_replay import (
     CI_MODE_TO_SCOPE,
     REPLAY_SCOPES,
     SourceAbiCache,
-    _extract_cache_misses,
     _extractor_version,
     compute_tu_cache_key,
     public_header_roots_for,
@@ -46,6 +45,7 @@ from abicheck.buildsource.source_replay import (
     scope_for_ci_mode,
     select_compile_units,
 )
+from abicheck.buildsource.source_replay_pool import _extract_cache_misses
 
 
 def _cu(cu_id: str, source: str, target_id: str = "", **kw: object) -> CompileUnit:
@@ -1214,8 +1214,6 @@ def test_extract_cache_misses_installs_sigterm_cleanup_in_process_pool_workers(
     the worker with Python's default disposition, leaving its detached
     clang/castxml process group untracked and orphaned. Must pass it as
     the pool's initializer."""
-    import abicheck.buildsource.source_replay as sr
-
     captured: dict[str, object] = {}
 
     class _FakeProcessPoolExecutor:
@@ -1231,11 +1229,13 @@ def test_extract_cache_misses_installs_sigterm_cleanup_in_process_pool_workers(
         def map(self, fn, items):
             return [fn(u) for u in items]
 
-    monkeypatch.setattr(sr, "ProcessPoolExecutor", _FakeProcessPoolExecutor)
-    monkeypatch.setattr(sr, "_l4_use_process_pool", lambda: True)
+    monkeypatch.setattr(
+        "abicheck.buildsource.source_replay_pool.ProcessPoolExecutor",
+        _FakeProcessPoolExecutor,
+    )
 
     units = [_cu(f"cu://u{i}", f"src/u{i}.cpp") for i in range(2)]
-    sr._extract_cache_misses(lambda cu: (None, None), units, jobs=2)
+    _extract_cache_misses(lambda cu: (None, None), units, 2, use_process_pool=True)
 
     assert captured.get("initializer") is deadline.install_sigterm_cleanup
 

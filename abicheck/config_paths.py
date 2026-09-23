@@ -20,10 +20,12 @@ Many projects prefer to keep tool configuration out of the repo root and
 already have a convention for that — GitHub's own ``.github/`` directory,
 which is where CI workflows, issue templates, and `CODEOWNERS` already live.
 This module is the single place that enumerates the recognized locations
-within one directory, so every discovery entry point (`compare`'s
-``discover_project_config()`` in ``cli_helpers_compare.py``, `dump`'s
-``discover_build_config()`` in ``buildsource/inline.py``) agrees on the same
-set instead of drifting independently.
+within one directory, **and** the single place that decides which config a
+run uses: :func:`resolve_project_config` is the one precedence rule every
+command shares (explicit ``--config`` > the ``--sources`` tree root > the
+nearest enclosing config above the front end's search root), so ``dump``
+and ``compare`` cannot disagree about whether a project's ``.abicheck.yml``
+applies.
 
 Precedence within one directory, checked in order:
 
@@ -41,6 +43,7 @@ regardless of which of these three paths it was found at.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 #: The recognized config filename itself, unchanged regardless of location.
@@ -117,3 +120,61 @@ def discover_build_config(source_tree: Path | None) -> Path | None:
     if source_tree is None or not source_tree.is_dir():
         return None
     return find_config_in_dir(source_tree)
+
+
+def discover_project_config(start: Path | None = None) -> Path | None:
+    """Return the nearest config at or above *start* (default: cwd).
+
+    Looks in *start* and then each parent up to the filesystem root, returning
+    the first recognized config file found (see :func:`find_config_in_dir`
+    for the locations checked within each directory). A command run from a
+    project checkout picks up that project's reviewed contract this way.
+    """
+    base = (start or Path.cwd()).resolve()
+    for d in (base, *base.parents):
+        found = find_config_in_dir(d)
+        if found is not None:
+            return found
+    return None
+
+
+@dataclass(frozen=True)
+class ProjectConfigRef:
+    """Which project config a run uses, and how it was chosen.
+
+    *explicit* is ``True`` only for a path the operator named (``--config``,
+    or a typed-API ``build_config``). It is the trust bit: an explicit config
+    may authorize executable settings (``build.query``, ``compile.compiler``);
+    a discovered one only ever contributes passive settings, because a
+    checkout or an enclosing directory may carry a config nobody reviewed.
+    """
+
+    path: Path | None
+    explicit: bool
+
+
+def resolve_project_config(
+    explicit: Path | None,
+    *,
+    sources: Path | None = None,
+    search_from: Path | None = None,
+) -> ProjectConfigRef:
+    """The one config-selection rule every command and pipeline stage shares.
+
+    Precedence, first match wins:
+
+    1. *explicit* -- ``--config`` (or the typed API's ``build_config``).
+    2. The *sources* tree's own root (:func:`discover_build_config`): a
+       ``dump --sources`` tree carries its own contract.
+    3. The nearest enclosing config at or above *search_from*
+       (:func:`discover_project_config`). Only a CLI front end passes it --
+       as the current directory -- so running any command from inside a
+       project checkout finds that project's config. The typed API passes
+       ``None`` and so never depends on the process's working directory.
+    """
+    if explicit is not None:
+        return ProjectConfigRef(explicit, True)
+    found = discover_build_config(sources)
+    if found is None and search_from is not None:
+        found = discover_project_config(search_from)
+    return ProjectConfigRef(found, False)

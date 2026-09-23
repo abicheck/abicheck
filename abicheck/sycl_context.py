@@ -172,7 +172,7 @@ def _one_match_or_raise(
         raise AstContextMissingError(
             f"no AST context with kind={requested_kind!r} found among "
             f"{total_decoded} decoded context(s) (available kinds: "
-            f"{available_kinds!r}). Did you mean --frontend-context "
+            f"{available_kinds!r}). Did you mean compile.frontend_context: "
             f"{'device' if requested_kind == 'host' else 'host'}?"
         )
     if len(matches) > 1:

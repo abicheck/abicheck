@@ -138,7 +138,8 @@ def _resolve_embedded_pdb(
     # Block network/UNC paths during auto-discovery
     if not allow_network and _is_network_path(embedded):
         log.debug(
-            "locate_pdb: skipping network path %s (use --pdb-path to override)",
+            "locate_pdb: skipping network path %s (set debug.pdb_path in "
+            ".abicheck.yml to override)",
             embedded,
         )
         # Still try the filename-only fallback (always local)

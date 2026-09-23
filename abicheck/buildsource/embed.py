@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..errors import ValidationError
+from ..extract.progress import timed
 from .inputs_pack import is_inputs_pack_dir
 from .merge_support import (
     _combine_packs,
@@ -51,12 +52,14 @@ if TYPE_CHECKING:
     from ..model import AbiSnapshot
 
 
+@timed("build/source evidence (L3-L5)")
 def embed_build_source(
     snap: AbiSnapshot,
     build_info: Path | None,
     sources: Path | None,
     *,
     build_config: Path | None = None,
+    build_config_explicit: bool = True,
     clang_bin: str = "clang",
     collect_mode: str = "source-target",
     build_query: str | None = None,
@@ -154,7 +157,10 @@ def embed_build_source(
         # non-executable settings are still honored, but their query never runs.
         # (Inferred build queries — cmake/make/bazel that abicheck constructs
         # itself — always run regardless; see buildsource.build_query.)
-        cfg_trusted_for_query = build_config is not None or build_query is not None
+        # *build_config_explicit* False marks a front-end-discovered config
+        # (config_paths.resolve_project_config): read, never trusted.
+        operator_config = build_config is not None and build_config_explicit
+        cfg_trusted_for_query = operator_config or build_query is not None
         try:
             cfg = load_build_config(cfg_path) if cfg_path is not None else None
         except ValueError as exc:
@@ -196,8 +202,7 @@ def embed_build_source(
             # not fall through to inference) when it came from the CLI
             # build_compile_db or an operator --config — never from an
             # auto-discovered .abicheck.yml (review).
-            compile_db_explicit=build_compile_db is not None
-            or build_config is not None,
+            compile_db_explicit=build_compile_db is not None or operator_config,
             base_build=bi_pack.build_evidence if bi_pack else None,
             clang_bin=clang_bin,
             extractor=extractor,
