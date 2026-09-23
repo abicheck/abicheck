@@ -56,8 +56,9 @@ def test_learned_cost_is_the_largest_member_observed(seed):
         with gate.admit():
             for n in sizes:
                 report_ast_size(n)
-    # Independent oracle: floor + ratio * (sum per member), maximum over members.
-    expected = max(1.0 + PEAK_PER_AST_BYTE * sum(m) / _GIB for m in members)
+    # Independent oracle: floor + ratio * (sum per member), maximum over
+    # members, never below the default.
+    expected = max(4.0, *(1.0 + PEAK_PER_AST_BYTE * sum(m) / _GIB for m in members))
     assert gate.estimate_gib() == pytest.approx(expected)
 
 
@@ -70,7 +71,13 @@ def test_reports_from_a_copied_context_thread_reach_the_member():
         t = threading.Thread(target=ctx.run, args=(report_ast_size, _GIB))
         t.start()
         t.join()
-    assert gate.estimate_gib() == pytest.approx(1.0 + PEAK_PER_AST_BYTE)
+    assert gate.estimate_gib() == pytest.approx(4.0)  # default floor
+    with gate.admit():
+        ctx = contextvars.copy_context()
+        t = threading.Thread(target=ctx.run, args=(report_ast_size, 3 * _GIB))
+        t.start()
+        t.join()
+    assert gate.estimate_gib() == pytest.approx(1.0 + 3 * PEAK_PER_AST_BYTE)
 
 
 @pytest.mark.parametrize("seed", range(10))
@@ -127,24 +134,32 @@ def test_ungated_admits_everything_at_once():
     assert not barrier.broken
 
 
-def test_smaller_measured_members_admit_more_than_the_default_would():
-    """The point of the gate: 4 GiB default on 6 GiB committable admits one;
-    once a member measures at 1.5 GiB, four fit."""
+def test_a_small_measured_member_never_lowers_the_charge_below_the_default():
+    """A finished small member says nothing about the unmeasured ones, so the
+    default stays the floor (Codex review): 6 GiB committable at a 4 GiB
+    default still admits one at a time after a 1.5 GiB member finishes."""
     gate = MemoryAdmission(6.0, default_cost_gib=4.0, floor_gib=1.0)
     with gate.admit():
-        report_ast_size(_GIB // 4)  # 1.0 + 2.0 * 0.25 = 1.5 GiB
-    barrier = threading.Barrier(4, timeout=5)
+        report_ast_size(_GIB // 4)  # measured 1.0 + 2.0 * 0.25 = 1.5 GiB
+    assert gate.estimate_gib() == 4.0
+    with gate.admit():
+        report_ast_size(4 * _GIB)  # measured 9.0 GiB: raises the charge
+    assert gate.estimate_gib() == pytest.approx(9.0)
 
-    def member():
-        with gate.admit():
-            barrier.wait()
 
-    threads = [threading.Thread(target=member) for _ in range(4)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    assert not barrier.broken
+@pytest.mark.parametrize("depth", ["binary", "build", "source"])
+def test_learning_is_header_depth_only(monkeypatch, depth):
+    from abicheck.workflows import release_jobs
+
+    monkeypatch.setattr("abicheck.process_resources.available_mem_gib", lambda: 16.0)
+    monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+    assert (
+        release_jobs.plan_release_workers(0, depth=depth).admission._committable is None
+    )
+    assert (
+        release_jobs.plan_release_workers(0, depth="headers").admission._committable
+        is not None
+    )
 
 
 def test_plan_disables_the_gate_for_an_operator_budget(monkeypatch):

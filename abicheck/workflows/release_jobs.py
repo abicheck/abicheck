@@ -284,8 +284,8 @@ class ReleaseWorkerPlan:
     unchanged -- what the first wave admits and what the notice reports.
     *pool_size* is how many threads exist: the unclamped count whenever the
     *admission* gate is enforcing memory, since it then decides how many of
-    them run at once and may admit more than *initial_jobs* once measured
-    AST sizes show members are cheaper than the per-depth default.
+    them run at once (never more than *initial_jobs* at the default cost,
+    fewer once a member measures above it).
     """
 
     initial_jobs: int
@@ -302,7 +302,7 @@ def plan_release_workers(
 
     The gate is off -- every thread runs freely, today's behaviour -- for an
     explicit *jobs* (never clamped), a host whose memory cannot be probed,
-    and an operator-set ``ABICHECK_RELEASE_JOB_MEM_GIB``: a stated budget
+    any depth but ``headers``, and an operator-set ``ABICHECK_RELEASE_JOB_MEM_GIB``: a stated budget
     is an instruction, so it is not replaced by a measurement.
     """
     import os
@@ -314,7 +314,13 @@ def plan_release_workers(
         jobs, depth=depth, header_roots=header_roots
     )
     avail = None if jobs > 0 else available_mem_gib()
-    gated = avail is not None and not os.environ.get("ABICHECK_RELEASE_JOB_MEM_GIB")
+    # Header depth only: the AST-to-peak ratio was measured for a header
+    # dump; a build/source worker's L4 machinery is not proportional to it.
+    gated = (
+        avail is not None
+        and sizing_depth(depth, header_roots=header_roots) == "headers"
+        and not os.environ.get("ABICHECK_RELEASE_JOB_MEM_GIB")
+    )
     committable = (
         max(0.0, avail * _release_mem_utilization() - _release_mem_reserve_gib())
         if gated and avail is not None

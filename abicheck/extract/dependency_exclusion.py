@@ -45,7 +45,11 @@ from pathlib import Path
 
 from .dependency_header_roots import dependency_header_predicate
 
-__all__ = ["active_dependency_predicate", "dependency_exclusion_scope"]
+__all__ = [
+    "active_dependency_predicate",
+    "dependency_exclusion_scope",
+    "suppress_dependency_exclusion",
+]
 
 _PREDICATE: ContextVar[Callable[[str | None], bool] | None] = ContextVar(
     "abicheck_dependency_exclusion_predicate", default=None
@@ -72,3 +76,18 @@ def active_dependency_predicate() -> Callable[[str | None], bool] | None:
     """The in-scope ``is_dependency(source_header)`` predicate, or ``None``
     when no caller has declared that dependency scoping will run."""
     return _PREDICATE.get()
+
+
+@contextmanager
+def suppress_dependency_exclusion() -> Iterator[None]:
+    """Parse with no early skip inside this block, even under a scope.
+
+    For a hybrid dump: only the clang leg can skip, so skipping there would
+    hand ``dumper_hybrid.merge_snapshots`` two legs that disagree about the
+    dependency declarations it reconciles and backfills from.
+    """
+    token = _PREDICATE.set(None)
+    try:
+        yield
+    finally:
+        _PREDICATE.reset(token)

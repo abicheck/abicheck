@@ -1,10 +1,11 @@
 ### Changed
 
-- The directory/package `compare` fan-out now admits members against memory
-  using a cost learned from each member's measured header-AST size
-  (`floor + 2.0 x AST bytes`), rather than only the fixed 4.0 GiB
-  header-depth guess. The first wave is sized exactly as before. After a
-  member finishes, later members are charged the largest measured cost, so
-  small libraries run more workers at once and very large ones run fewer.
-  `ABICHECK_RELEASE_JOB_MEM_GIB` still fixes the budget and turns learning
-  off.
+- At header depth, the directory/package `compare` fan-out now admits
+  members through a memory gate that also learns each member's cost from
+  its measured header-AST size (`floor + 2.0 x AST bytes`). The per-depth
+  4.0 GiB budget remains the minimum charge, so the first wave is sized
+  exactly as before. Once a member measures above that budget, later members
+  are charged the larger figure and fewer run at once, which avoids
+  overcommit on releases with very large headers.
+  `ABICHECK_RELEASE_JOB_MEM_GIB`, an explicit job count, or any depth other
+  than headers keeps the previous fixed sizing.

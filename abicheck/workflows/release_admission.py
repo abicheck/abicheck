@@ -30,8 +30,16 @@ observes the AST sizes that member's dumps report
 cost: ``floor + PEAK_PER_AST_BYTE * sum(sizes)``. The sum, not the maximum,
 because a member resolves its old and new sides concurrently by default,
 so both documents can be resident at once. Every later admission is charged
-the largest cost any finished member was observed to need, and waits while
-the members in flight plus that cost would exceed the committable budget.
+the larger of the per-depth default and the largest cost any finished member
+was observed to need, and waits while the members in flight plus that cost
+would exceed the committable budget.
+
+The measurement only ever *raises* the charge. A member's cost is not known
+until it has allocated, so lowering the charge because one small library
+finished would let several large unmeasured ones start together -- the
+overcommit the cap exists to prevent. What it buys is the other direction:
+a release whose members need more than the default stops admitting them at
+the default.
 
 Two properties are kept deliberately:
 
@@ -90,7 +98,14 @@ class MemoryAdmission:
             return self._estimate()
 
     def _estimate(self) -> float:
-        return self._default if self._learned is None else self._learned
+        # Only ever raised: a member that has not reported yet may be the
+        # largest one, so a small finished member never lowers what the next
+        # unmeasured member is charged below the per-depth default.
+        return (
+            self._default
+            if self._learned is None
+            else max(self._default, self._learned)
+        )
 
     def cost_of(self, ast_bytes: int) -> float:
         """The cost of a member whose dumps reported *ast_bytes* in total."""

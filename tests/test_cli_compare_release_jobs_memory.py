@@ -25,8 +25,6 @@ mirroring ``buildsource/source_replay.py``'s identical L4 pattern) -- an
 
 from __future__ import annotations
 
-import pytest
-
 import abicheck.process_resources as process_resources
 from abicheck import cli_compare_release_pairwise as release_pairwise
 from abicheck.workflows import release_jobs
@@ -136,14 +134,11 @@ class TestCompareReleaseLibrariesMemoryClamp:
             ),
             jobs=0,
         )
-        # The pool keeps all 64 threads; the memory gate, seeded with the
-        # same per-depth budget the clamp used, decides how many run at once
-        # (`workflows.release_admission`, tested in test_release_admission).
-        assert captured_jobs == [64]
+        # Binary depth: the AST-costed gate is header-only, so the clamp
+        # alone sizes the pool, as before.
+        assert captured_jobs == [2]
         (admission,) = captured_admission
-        assert admission is not None and admission._committable == pytest.approx(
-            12.0 * 0.85 - 1.0
-        )
+        assert admission is not None and admission._committable is None
         assert "reduced 64 -> 2" in capsys.readouterr().err
 
     def test_explicit_jobs_are_never_clamped(self, monkeypatch, capsys) -> None:
