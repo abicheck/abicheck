@@ -314,6 +314,9 @@ class TestConcurrentReleaseWorkflow:
 
         monkeypatch.setattr(pairwise, "_compare_release_parallel", spy_parallel)
 
+        # An operator budget turns the AST-costed admission gate off, so a
+        # small runner cannot serialize the 2/4-worker runs this compares.
+        monkeypatch.setenv("ABICHECK_RELEASE_JOB_MEM_GIB", "1")
         pinned_counts: list[int] = []
         results = {}
         for workers in (1, 2, 4):
