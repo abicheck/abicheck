@@ -774,5 +774,12 @@ def _parse_clang_ast_result(
                 _atomic_copy(ast_path, cached)
         except OSError:
             pass
+    # After the cache write: the cache keeps clang's own (sticky) encoding,
+    # and every reader of the tree -- this one, or `load_cached_ast` on a
+    # later hit -- sees explicit locations. See that module for why the
+    # walker cannot track clang's sticky file itself.
+    from .extract.headers.clang.locations import materialize_locations
+
+    materialize_locations(root)
     deadline.check()
     return root

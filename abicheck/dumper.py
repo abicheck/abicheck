@@ -179,6 +179,7 @@ from .extract.header_ast_backend import (
     _resolve_single_ast_backend as _resolve_single_ast_backend,
 )
 from .extract.header_ast_fields import parse_header_ast_fields
+from .extract.headers.clang.locations import materialize_locations
 from .model import AbiSnapshot, RecordType
 from .storage import closure_identity
 
@@ -355,8 +356,8 @@ def _clang_header_dump(
         )
 
     _memoize = dumper_cache.resolve_request_memoization(memoize)
-    _cached_result = dumper_cache.load_cached_ast(
-        key, "clang", cached, memoize=_memoize
+    _cached_result = materialize_locations(  # explicit locations, see there
+        dumper_cache.load_cached_ast(key, "clang", cached, memoize=_memoize)
     )
     if _cached_result is not None:
         return cast("dict[str, Any]", _cached_result), resolved_kind, force_cpp

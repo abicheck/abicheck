@@ -313,6 +313,57 @@ class TestHeaderOnlyDependencyScoping:
         origins = {f.name: f.origin.value for f in snap.functions}
         assert origins == {"root_api": "public_header", "extra_api": "public_header"}
 
+    def test_clang_sticky_file_does_not_misattribute_library_declarations(
+        self, tmp_path: Path
+    ):
+        """clang omits a location's file when it equals the last one it
+        wrote, and the walker skips function bodies, so a file change inside
+        one leaked into the next declaration. Every declaration below was
+        recorded under `<concepts>` and the default dump came out empty --
+        the Intel SVS shape (`CACHE_LINE_BYTES` at `concepts:55`)."""
+        import json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.serialization import snapshot_from_dict
+
+        if shutil.which("clang") is None:
+            pytest.skip("no clang on PATH")
+        header = tmp_path / "api.hpp"
+        header.write_text(
+            "#include <concepts>\n#include <cstddef>\n#include <memory>\n"
+            "namespace n {\n"
+            "template <std::integral T> T twice(T t) { return t * 2; }\n"
+            "inline int use() { return twice(3); }\n"
+            "const std::size_t K = 64;\n"
+            "struct Box { int v; };\n"
+            "int after(Box b);\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        config = tmp_path / "cfg.yml"
+        config.write_text(
+            "compile:\n  frontend: clang\n  std: c++20\n", encoding="utf-8"
+        )
+        out = tmp_path / "snap.json"
+        result = CliRunner().invoke(
+            main, ["dump", "--config", str(config), "-H", str(header), "-o", str(out)]
+        )
+        assert result.exit_code == 0, result.output
+        snap = snapshot_from_dict(json.loads(out.read_text(encoding="utf-8")))
+        located = {
+            d.name: (d.source_location or "").rsplit("/", 1)[-1]
+            for d in [*snap.functions, *snap.variables, *snap.types]
+        }
+        assert located == {
+            "twice": "api.hpp:5",
+            "use": "api.hpp:6",
+            "K": "api.hpp:7",
+            "Box": "api.hpp:8",
+            "after": "api.hpp:9",
+        }
+
     def test_typed_api_populates_source_header(self, tmp_path: Path):
         """The typed API reaches the same executor, so it must carry the
         same provenance -- checked before any scoping runs."""

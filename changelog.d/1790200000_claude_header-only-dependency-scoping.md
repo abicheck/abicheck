@@ -14,3 +14,11 @@
   `saveload/core.h` kept 3,164 toolchain functions). castxml's bundled
   builtin headers (`share/castxml/clang/include`) are now recognised as
   toolchain headers too.
+- The clang header backend no longer misattributes a declaration's source
+  file. clang omits a location's file when it equals the last one written,
+  and the parser tracked that only across the nodes it visits, which skip
+  function bodies. SVS's `CACHE_LINE_BYTES` (`threadlocal.h:55`) was recorded
+  at `/usr/include/c++/13/concepts:55`. Every clang AST now has its locations
+  made explicit once, when it is loaded. On one SVS root, a default
+  header-only dump now keeps 445 functions instead of 245. A small header
+  using `<concepts>` previously produced an empty snapshot.
