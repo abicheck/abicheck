@@ -37,6 +37,7 @@ convention (root ``AGENTS.md``). Marked ``integration`` throughout.
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -180,6 +181,15 @@ class TestHeaderOnlyDependencyScoping:
     type a kept signature names is deliberately retained).
     """
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "MinGW's sysroot headers (<prefix>/<triple>/include) are not yet "
+            "recognised as toolchain headers, and clang cannot parse MinGW's "
+            "libstdc++ -- docs/contribute/known-gaps.md, 'MinGW toolchain "
+            "headers are not classified as dependencies'"
+        ),
+    )
     @pytest.mark.parametrize("backend", ["castxml", "clang"])
     @pytest.mark.parametrize("includes", sorted(_STD_INCLUDE_SETS))
     def test_default_dump_keeps_only_the_librarys_own_functions(

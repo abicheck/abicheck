@@ -10626,3 +10626,30 @@ comes from the in-process memo the primary pass wrote. The first version
 failed CI with `measured attach_retained_mib=-28.4 is not a gateable
 value`, i.e. on a *better* result than the baseline's. A metric whose
 domain does not match its gate's predicate cannot be gated at all.
+
+## MinGW toolchain headers are not classified as dependencies (2026-09-23)
+
+Found by `tests/test_header_only_dump.py::TestHeaderOnlyDependencyScoping` on
+the `windows-latest` integration lane. After #1347 made header-only dumps apply
+the default toolchain-declaration exclusion, a castxml dump on MinGW still kept
+`_mingw.h`'s `__debugbreak`. castxml reports that header as
+`C:/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/15.2.0/../../../../x86_64-w64-mingw32/include/_mingw.h`,
+which collapses to `<prefix>/x86_64-w64-mingw32/include/`: GCC's per-target
+sysroot include directory. `provenance._is_toolchain_compiler_include_dir`
+recognises `lib/gcc/<triple>/<version>/include` but not this layout, so it
+isn't treated as a system header. This affects binary+header dumps on MinGW too,
+not only header-only ones.
+
+Not fixed in #1347 because the obvious pattern, `<prefix>/<triple>/include`, is
+not safe on path shape alone. `_TARGET_TRIPLE_RE` accepts any 2-4 hyphenated
+components, so an ordinary project directory like `my-lib/include` would match
+and the project's own API would be dropped: exactly the failure this
+classifier must never cause. A sound fix needs positive evidence that the
+directory belongs to the toolchain. Options: a sibling `lib/gcc/<triple>/`
+under the same prefix, or the compiler's own reported search list
+(`-print-search-dirs` / `-v`).
+
+On the same lane, clang cannot parse MinGW's libstdc++ `<cstdio>` for a
+header-only dump (`__STRICT_ANSI__` warnings, then errors). This is an
+environment limitation of clang with MinGW headers, not something abicheck
+causes. That test is skipped on Windows until both are resolved.
