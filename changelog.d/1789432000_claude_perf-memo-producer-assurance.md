@@ -25,3 +25,16 @@
   re-projected on every run (6.6 s on oneDAL) and never stored a sidecar.
   It now takes a stored projection when one exists (dropping the tree at
   once), and stores the one it computes otherwise.
+- Template/ABI-tag/CPO reconciliation demangles each side's declarations in
+  one `c++filt` batch before resolving per-declaration identities, instead
+  of spawning `c++filt` once per first-seen name (about 950 processes and
+  4.3 s of an 18.7 s synthetic C++ compare; the compare stage went from
+  6.2 s to 2.4 s with identical findings).
+- The type-spelling vocabulary is compiled as a prefix-trie regex instead of
+  a flat alternation: the same matches and spans (tested differentially
+  against the old builder), but a cold lookup no longer tries every
+  alternative -- ~500x faster on a 40,000-spelling vocabulary. Vocabularies
+  nested too deeply for the trie fall back to the flat alternation.
+- The closure-marker string walk that runs on every dump and load decides
+  which dataclass fields to visit once per type instead of per node (2.6x
+  faster, identical output).
