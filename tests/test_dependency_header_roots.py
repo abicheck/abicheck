@@ -310,3 +310,48 @@ class TestDependencyHeaderPredicate:
             module.DependencyHeaderRoots.is_dependency = original  # type: ignore[method-assign]
 
         assert calls == [project_header]
+
+
+_COLLIDING_BASENAMES = ("allocator.h", "core.h", "string.h", "config.h", "memory")
+_SYSTEM_LAYOUTS = (
+    "/usr/include/c++/13/bits/{b}",
+    "/usr/include/{b}",
+    "/usr/include/fmt/{b}",
+    "/usr/local/include/dep/{b}",
+    "/opt/env/lib/gcc/x86_64-conda-linux-gnu/14.3.0/include/{b}",
+    "/opt/env/share/castxml/clang/include/{b}",
+)
+
+
+class TestBasenameCollisionIsNotOwnership:
+    """A system header sharing a root's *basename* is still a dependency.
+
+    Regression from a real SVS scan: roots ``svs/core/allocator.h`` and
+    ``svs/lib/saveload/core.h`` made ``classify_origin``'s basename-only
+    fallback read libstdc++'s ``bits/allocator.h`` and fmt's ``core.h`` as
+    the library's own, so 3,164 toolchain functions survived dependency
+    scoping. Enumerated over basename x system layout x root shape; the
+    oracle is the root-independent ``is_system_header`` heuristic, not the
+    predicate under test.
+    """
+
+    @pytest.mark.parametrize("basename", _COLLIDING_BASENAMES)
+    def test_colliding_system_header_stays_a_dependency(
+        self, tmp_path: Path, basename: str
+    ):
+        pkg = tmp_path / "proj" / "include" / "pkg"
+        (pkg / "sub").mkdir(parents=True)
+        own = pkg / basename
+        own.write_text("")
+        sibling = pkg / "sub" / "other.h"
+        sibling.write_text("")
+        for roots in ([own], [pkg], [own, sibling]):
+            is_dep = dependency_header_predicate([str(r) for r in roots])
+            for layout in _SYSTEM_LAYOUTS:
+                system_header = layout.format(b=basename)
+                assert is_system_header(system_header), system_header  # vacuity
+                assert is_dep(system_header), (roots, system_header)
+                assert is_dependency_header(system_header, roots), system_header
+            # The library's own headers are never dependencies.
+            assert not is_dep(str(own))
+            assert not is_dep(str(sibling))

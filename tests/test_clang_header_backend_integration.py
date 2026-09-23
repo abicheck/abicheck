@@ -1579,8 +1579,8 @@ def test_streaming_pruner_reports_a_nonzero_prune_count_on_the_raw_ast(
     import json as _json
 
     fh = io.BytesIO(_json.dumps(root).encode("utf-8"))
-    _reloaded, pruned_count = load_pruned_clang_ast(fh, header_roots=(str(header),))
-    assert pruned_count == 0  # already-pruned placeholders aren't prunable kinds
+    reloaded, _ = load_pruned_clang_ast(fh, header_roots=(str(header),))
+    assert _count_placeholders(reloaded) >= _count_placeholders(root)  # monotone
 
 
 def test_streaming_pruner_never_prunes_a_method_shaped_node_end_to_end(

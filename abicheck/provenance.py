@@ -362,6 +362,7 @@ def _is_toolchain_compiler_include_dir(header_segs: tuple[str, ...]) -> bool:
       covers it -- no separate check is needed for that case.
     - ``lib/clang/<version>/include`` -- Clang's private builtin headers
       (``stddef.h``, the vector-intrinsic headers, ...).
+    - ``share/castxml/clang/include`` -- the same, as castxml bundles them.
 
     Deliberately does NOT match a bare ``include/c++/<version>`` anywhere in
     the path with no anchor at all (Codex review): an earlier revision did,
@@ -390,6 +391,8 @@ def _is_toolchain_compiler_include_dir(header_segs: tuple[str, ...]) -> bool:
     further ``..``-collapsing beyond what :func:`_segments` already does).
     """
     n = len(header_segs)
+    if _contiguous_subsequence(("share", "castxml", "clang", "include"), header_segs):
+        return True
     for i, seg in enumerate(header_segs):
         if seg != "lib":
             continue

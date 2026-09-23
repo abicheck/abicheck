@@ -550,7 +550,12 @@ def store_cached_ast(key: str, backend: str, root: Any) -> None:
 
 
 def load_cached_ast(
-    key: str, backend: str, cache_path: Path, *, memoize: bool = True
+    key: str,
+    backend: str,
+    cache_path: Path,
+    *,
+    memoize: bool = True,
+    on_disk_load: Callable[[Any], Any] | None = None,
 ) -> Any | None:
     """Return a previously-parsed AST for (*backend*, *key*), or ``None``.
 
@@ -559,6 +564,12 @@ def load_cached_ast(
     their own module namespace (as several tests do) must have that
     override actually govern the disk path this function reads, which a
     second, independent ``_cache_path`` call from this module could not see.
+
+    *on_disk_load* -- applied to a tree decoded from the disk cache, before
+    it is memoized, and to nothing else: a memo-slot hit is the very object a
+    previous caller already processed. The clang backend passes
+    ``extract.headers.clang.locations.materialize_locations`` (a callback,
+    since this storage-layer module may not import ``extract``).
 
     *memoize* -- ``False`` for a caller that is itself the *final* consumer
     of this AST (the header-graph attach step, when the primary snapshot
@@ -621,6 +632,8 @@ def load_cached_ast(
         cache_path.unlink(missing_ok=True)
         return None
     deadline.check()  # loading a huge cached AST can eat the rest of the budget
+    if on_disk_load is not None:
+        root = on_disk_load(root)
     if memoize:
         store_cached_ast(key, backend, root)
     return root
