@@ -407,7 +407,8 @@ def _check_profile_fingerprint_comparable(
                 "profile_fingerprint — the comparison cannot be verified "
                 "safe."
             ),
-            dimensions=_ALL_PROFILE_DIMENSIONS,
+            dimensions=_ALL_PROFILE_DIMENSIONS
+            | header_ast_producer_dimensions(old, new),
         )
 
     differing = _differing_keys(
@@ -440,4 +441,35 @@ def _check_profile_fingerprint_comparable(
         if (unknown_differing or not differing)
         else _dimensions_for_fields(unexplained, _PROFILE_FIELD_DIMENSIONS)
     )
+    dimensions |= header_ast_producer_dimensions(old, new)
     return ComparabilityMismatch(kind="profile", reason=reason, dimensions=dimensions)
+
+
+#: What a *header-AST producer* difference (castxml vs. clang) leaves
+#: unverified, on top of whatever the differing profile fields name. The
+#: producer is not a ``profile_fields`` key -- it surfaces there only
+#: indirectly, as ``compiler_family``/``compiler_version``, which map to
+#: layout/runtime alone because a GCC-to-GCC bump really is only that. But
+#: two producers build the declaration surface itself differently
+#: (visibility, ``entity_id`` scope, template patterns, inline
+#: materialization), and every L4/L5 ``source_decl`` node is seeded from it,
+#: so a waived cross-producer pair must not report either axis as trusted.
+_HEADER_AST_PRODUCER_DIMENSIONS: frozenset[str] = frozenset({"declaration", "source"})
+
+
+def header_ast_producer_dimensions(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> frozenset[str]:
+    """:data:`_HEADER_AST_PRODUCER_DIMENSIONS` when both sides recorded a
+    header-AST producer and the two differ, else the empty set.
+
+    An unrecorded producer on either side adds nothing here: that case has
+    no producer evidence to disagree with, and the profile-field dimensions
+    computed alongside already carry whatever the fingerprint mismatch
+    itself established.
+    """
+    old_producer = (getattr(old, "ast_toolchain", None) or {}).get("producer") or ""
+    new_producer = (getattr(new, "ast_toolchain", None) or {}).get("producer") or ""
+    if old_producer and new_producer and old_producer != new_producer:
+        return _HEADER_AST_PRODUCER_DIMENSIONS
+    return frozenset()

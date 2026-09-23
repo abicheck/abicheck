@@ -231,6 +231,16 @@ class DetectorRegistry:
         Returns:
             (changes, detector_results) — aggregated changes and per-detector metadata.
         """
+        from .compare.detection_memo import detection_memo_scope
+
+        with detection_memo_scope():
+            return self._run_all(old, new)
+
+    def _run_all(
+        self,
+        old: AbiSnapshot,
+        new: AbiSnapshot,
+    ) -> tuple[list[Change], list[DetectorResult]]:
         changes: list[Change] = []
         detector_results: list[DetectorResult] = []
 
