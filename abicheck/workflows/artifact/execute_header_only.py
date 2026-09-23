@@ -179,6 +179,23 @@ def execute_header_only_dump_request(
         ),
     )
 
+    # `build_header_only_snapshot` parses; it does not classify (see
+    # `release_surface_acquisition.acquire_public_surface`, which runs the
+    # same pass for the same reason). Without it every declaration's
+    # `source_header` stays `None`, so the default dependency exclusion
+    # (`dumper_scoping.scope_snapshot_excluding_dependencies`, keyed on
+    # `source_header`) silently keeps the whole transitive toolchain
+    # surface: a 5-header SVS root kept 32,339 libstdc++/libc/fmt functions
+    # beside its own 304.
+    from ...provenance import apply_provenance
+
+    apply_provenance(
+        snap,
+        list(resolved.public_headers),
+        list(resolved.public_header_dirs),
+        include_search_dirs=list(side.includes),
+    )
+
     enforce_requested_depth(resolved.requested_depth, (("input", snap),))
     try:
         # Defensive fallback, mirrors execute_dump_request's/

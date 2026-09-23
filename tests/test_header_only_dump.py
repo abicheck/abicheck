@@ -154,6 +154,91 @@ class TestHeaderOnlyDumpBasics:
             request.validate()
 
 
+_STD_INCLUDE_SETS = {
+    "vector": ("<vector>",),
+    "string+map": ("<string>", "<map>"),
+    "memory+functional": ("<memory>", "<functional>"),
+    "c-stdio": ("<cstdio>",),
+}
+
+
+def _backend_available(backend: str) -> bool:
+    return shutil.which(backend) is not None
+
+
+class TestHeaderOnlyDependencyScoping:
+    """A header-only dump must apply the same default toolchain-declaration
+    exclusion an ordinary binary dump does.
+
+    Regression: `execute_header_only_dump_request` never ran
+    `provenance.apply_provenance`, so `source_header` stayed `None` on every
+    declaration and `dumper_scoping`'s header-origin filter kept the whole
+    transitive toolchain surface -- a 5-header SVS root wrote 32,643
+    functions, 304 of them its own. Oracle, independent of the scoping
+    code: after a default dump, no kept function or variable is *located*
+    outside the library's own directory (types are exempt -- a dependency
+    type a kept signature names is deliberately retained).
+    """
+
+    @pytest.mark.parametrize("backend", ["castxml", "clang"])
+    @pytest.mark.parametrize("includes", sorted(_STD_INCLUDE_SETS))
+    def test_default_dump_keeps_only_the_librarys_own_functions(
+        self, tmp_path: Path, backend: str, includes: str
+    ):
+        import json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.serialization import snapshot_from_dict
+
+        if not _backend_available(backend):
+            pytest.skip(f"no {backend} on PATH")
+        lib = tmp_path / "lib"
+        lib.mkdir()
+        header = lib / "api.hpp"
+        header.write_text(
+            "".join(f"#include {inc}\n" for inc in _STD_INCLUDE_SETS[includes])
+            + "namespace mylib {\n"
+            "struct Item { int v; };\n"
+            "int count(const Item* xs, unsigned n);\n"
+            "extern int mylib_global;\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        config = tmp_path / "cfg.yml"
+        config.write_text(
+            f"compile:\n  frontend: {backend}\n  std: c++17\n", encoding="utf-8"
+        )
+        out = tmp_path / "snap.json"
+        result = CliRunner().invoke(
+            main, ["dump", "--config", str(config), "-H", str(header), "-o", str(out)]
+        )
+        assert result.exit_code == 0, result.output
+        snap = snapshot_from_dict(json.loads(out.read_text(encoding="utf-8")))
+
+        # The library's own declarations survive (castxml also records
+        # `Item`'s implicit members, which are the library's too) ...
+        assert "count" in {f.name for f in snap.functions}
+        assert "mylib_global" in {v.name for v in snap.variables}
+        # ... and nothing located outside the library does.
+        for decl in [*snap.functions, *snap.variables]:
+            assert decl.source_header is not None, decl.name
+            assert str(lib) in (decl.source_location or ""), decl.name
+
+    def test_typed_api_populates_source_header(self, tmp_path: Path):
+        """The typed API reaches the same executor, so it must carry the
+        same provenance -- checked before any scoping runs."""
+        _skip_if_no_header_ast_toolchain()
+        header = tmp_path / "api.hpp"
+        header.write_text(
+            "#include <vector>\nint add(int a, int b);\n", encoding="utf-8"
+        )
+        snap = _dump_header_only(header, "1.0")
+        assert snap.functions
+        assert all(f.source_header is not None for f in snap.functions)
+
+
 @pytest.fixture()
 def _pair(tmp_path: Path):
     """Build (old_snapshot, new_snapshot) from two header trees, or skip."""
@@ -301,13 +386,15 @@ class TestHeaderOnlyReportContract:
             "enum Color { RED, GREEN, BLUE };\nint add(int a, int b);\n",
         )
         result = checker.compare(old, new)
-        # The unreferenced enum's own member addition is real, detected
-        # evidence -- but out of the public-API-reachable surface, so it is
-        # recorded (never dropped) in the out-of-surface ledger with its
-        # own reason, exactly the "record before disposing" principle.
-        assert result.out_of_surface_count >= 1
-        reasons = {c.surface_exclusion_reason for c in result.out_of_surface_changes}
-        assert "non-public-type" in reasons
+        # An enum declared in the `-H` header is public API whether or not a
+        # function references it: provenance classifies it PUBLIC_HEADER,
+        # exactly as the binary+headers path does, so the addition is an
+        # in-surface finding. (Before header-only dumps ran
+        # `apply_provenance` every origin was UNKNOWN and this addition was
+        # pushed to the out-of-surface ledger instead.)
+        assert {e.origin.value for e in old.enums} == {"public_header"}
+        assert "enum_member_added" in _kinds(result)
+        assert result.out_of_surface_count == 0
 
 
 class TestHeaderOnlyBinaryPathUnaffected:

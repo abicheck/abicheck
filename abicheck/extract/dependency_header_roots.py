@@ -76,11 +76,17 @@ from typing import TYPE_CHECKING
 from ..model import ScopeOrigin
 from ..provenance import (
     _is_bare_system_dir,
+    _matches_any_dir,
+    _suffix_match,
     build_public_set,
     classify_origin,
     is_system_header,
 )
-from .path_aliases import absolutize_header_root, public_root_alias_segments
+from .path_aliases import (
+    absolutize_header_root,
+    public_root_alias_segments,
+    source_header_alias_segments,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Sequence
@@ -126,7 +132,23 @@ class DependencyHeaderRoots:
             list(self.dir_segs),
             have_public_set=self.have_set,
         )
+        if origin is ScopeOrigin.PUBLIC_HEADER and is_system_header(source_header):
+            # `classify_origin`'s D3 basename-only fallback exists for a root
+            # spelled under a different prefix than the parser reports. These
+            # roots are absolutized on the host that ran the parse, so a
+            # basename-only match can only be a coincidence -- libstdc++'s
+            # `bits/allocator.h` against a library's own `core/allocator.h`
+            # (a real SVS scan kept 3,164 toolchain functions that way).
+            # Require a real path-suffix or directory match instead.
+            return not self._owned(source_header)
         return origin is ScopeOrigin.SYSTEM_HEADER
+
+    def _owned(self, source_header: str) -> bool:
+        return any(
+            any(_suffix_match(root, segs) for root in self.header_segs)
+            or _matches_any_dir(segs, list(self.dir_segs))
+            for segs in source_header_alias_segments(source_header)
+        )
 
 
 def prepare_dependency_header_roots(
