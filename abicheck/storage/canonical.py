@@ -48,7 +48,9 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from .guards import binary_buffer as _is_binary_buffer
@@ -282,6 +284,46 @@ def copy_of_canonical_form(value: Any) -> Any:
     if type(value) is list:
         return [copy_of_canonical_form(v) for v in value]
     return value
+
+
+#: Set only inside :func:`canonical_input_trusted`.
+_INPUT_IS_CANONICAL: ContextVar[bool] = ContextVar(
+    "abicheck_storage_input_is_canonical", default=False
+)
+
+
+@contextmanager
+def canonical_input_trusted() -> Iterator[None]:
+    """Declare that every value handed to :func:`canonical_form_unless_trusted`
+    inside this block is *already* `canonical_form`'s own output, in plain
+    (unfrozen) `dict`/`list` form, and exclusively owned by the callee.
+
+    Only a caller that can *prove* that may open it. The one that does is
+    `storage.dto`'s ``*_from_dto`` decoders: their input is
+    ``SectionDTO.to_dict()["payload"]``, a fresh `_unfreeze` of a payload
+    the `SectionDTO` constructor already ran through `canonical_form` (and
+    `_unfreeze` preserves its sorted key order). Re-canonicalizing it in the
+    section codec's constructor was a full, allocation-heavy traversal of
+    the section -- the largest one on a stored baseline -- whose output was
+    always equal to its input.
+    """
+    token = _INPUT_IS_CANONICAL.set(True)
+    try:
+        yield
+    finally:
+        _INPUT_IS_CANONICAL.reset(token)
+
+
+def canonical_form_unless_trusted(value: Any) -> Any:
+    """`canonical_form(value)`, or *value* itself inside
+    :func:`canonical_input_trusted` (see there for when that is sound).
+
+    Returning *value* uncopied is fine for the one kind of caller this
+    exists for: a constructor that immediately deep-copies the result into
+    an immutable tree anyway (`_freeze`)."""
+    if _INPUT_IS_CANONICAL.get():
+        return value
+    return canonical_form(value)
 
 
 def strip_capture_metadata(value: Any) -> Any:

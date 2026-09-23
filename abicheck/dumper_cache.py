@@ -593,6 +593,14 @@ def load_cached_ast(
     if slot is not None and slot[0] == backend and slot[1] == key:
         _ast_memo_slot.set(None)
         deadline.check()
+        # The tree is already in hand, but a final consumer may still have a
+        # stored derived form that is cheaper than projecting it -- and must
+        # learn the entry path either way, or it can never store one.
+        superseded = offer_derived_ast_source(
+            cache_path, is_cache_entry=True, tree_in_hand=True
+        )
+        if superseded is not None:
+            return superseded
         return slot[2]
     # A derived-artifact consumer gets the entry's path before anything is
     # read, which is the whole point: the parse this function would otherwise

@@ -104,7 +104,9 @@ def derived_ast_scope(loader: Any) -> Iterator[DerivedAstArtifact]:
         _derived_ast_slot.reset(token)
 
 
-def offer_derived_ast_source(path: Path, *, is_cache_entry: bool = False) -> Any | None:
+def offer_derived_ast_source(
+    path: Path, *, is_cache_entry: bool = False, tree_in_hand: bool = False
+) -> Any | None:
     """Offer the AST document at *path* to an active derived-artifact consumer.
 
     Returns an opaque non-``None`` marker when the consumer took it, meaning
@@ -131,6 +133,16 @@ def offer_derived_ast_source(path: Path, *, is_cache_entry: bool = False) -> Any
     *is_cache_entry* is what keeps those two distinct: only the first is a
     stable, content-addressed location, so only it may claim
     ``cache_path``. The fresh document is a temp file the caller unlinks.
+
+    *tree_in_hand* is passed through to the loader (``loader(path,
+    tree_in_hand=...)``). It is true when the caller already holds the
+    parsed tree -- the in-process memo handoff from a primary clang-frontend
+    pass. The loader should then accept only a derived form that is cheaper
+    than projecting that tree (a stored sidecar), never re-read *path*
+    itself. The offer is still made on that path so the entry is recorded
+    in ``cache_path``: without it, a clang-frontend run projected the tree
+    but had nowhere to store the result, so its projection cache never
+    warmed.
     """
     derived = _derived_ast_slot.get()
     if derived is None:
@@ -138,7 +150,7 @@ def offer_derived_ast_source(path: Path, *, is_cache_entry: bool = False) -> Any
     holder, loader = derived
     if is_cache_entry:
         holder.cache_path = path
-    value = loader(path)
+    value = loader(path, tree_in_hand=tree_in_hand)
     if value is None:
         return None
     holder.value = value

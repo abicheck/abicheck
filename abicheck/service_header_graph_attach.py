@@ -232,7 +232,9 @@ def _attach_header_graph(
     # identical sidecar on every warm run.
     streamed_paths: list[Path] = []
 
-    def _projection_for(ast_path: Path) -> HeaderGraphAstProjection | None:
+    def _projection_for(
+        ast_path: Path, *, tree_in_hand: bool = False
+    ) -> HeaderGraphAstProjection | None:
         """Answer the AST acquisition with a projection, or decline.
 
         Offered two different paths (see `dumper_cache.
@@ -249,7 +251,9 @@ def _attach_header_graph(
         recognise.
         """
         cached = load_cached_projection(ast_path)
-        if cached is not None:
+        if cached is not None or tree_in_hand:
+            # With the tree already parsed (the clang-frontend memo handoff),
+            # projecting it beats streaming the same document off disk.
             return cached
         try:
             if ast_path.stat().st_size < _STREAM_MIN_BYTES:
