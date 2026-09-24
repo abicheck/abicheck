@@ -29,9 +29,10 @@
   (`section_dto_dict`, `GraphSection.validated_document`) and no longer
   re-canonicalizes the finished sections: 28.4 s to 6.6 s for oneDAL's live
   snapshot, byte-identical output.
-- zstd snapshots of 8 MiB or more are compressed in zstd's multi-threaded
-  mode (up to 8 workers). Its output does not depend on the worker count, so
-  stored bytes are the same on any machine; smaller snapshots keep their
-  existing bytes. Level 19 on oneDAL: 33.9 s to 21.6 s on four busy cores.
+- `ABICHECK_ZSTD_THREADS=N` opts a large (8 MiB or more) zstd snapshot write
+  into zstd's multi-threaded mode (up to 8 workers, not on Windows). Its
+  frame is the same for any worker count, though not the same as the
+  default single-threaded frame. Level 19 on oneDAL: 33.9 s to 21.6 s on four
+  busy cores. Off by default, so stored bytes are unchanged.
 - `_quoted_spans` returns immediately for a name with no `"` (almost every
   name): its per-character loop ran over ~470k names per oneDAL load.

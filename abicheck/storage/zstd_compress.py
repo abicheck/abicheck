@@ -15,35 +15,46 @@
 
 """zstd compression for the snapshot write path, and its worker policy.
 
-Split out of `snapshot_io` (at its ADR-061 no-growth line baseline). Inputs
-of :data:`ZSTD_MULTITHREAD_MIN_BYTES` or more use zstd's multi-threaded
-mode. zstd documents that mode's output as independent of the worker count
-(any ``nbWorkers >= 1`` yields the same frame), so stored bytes stay the
-same across machines with different core counts; only the single-threaded
-mode (``threads=0``) differs, which is why a smaller input keeps it and its
-bytes are unchanged from earlier releases. Level 19 over oneDAL's 203 MB
-snapshot: 33.9 s single-threaded, 21.6 s with four workers on a four-core box
-already busy with a test run, 0.05% larger.
+Split out of `snapshot_io` (at its ADR-061 no-growth line baseline).
+
+zstd's multi-threaded mode is **opt-in**, via ``ABICHECK_ZSTD_THREADS=N``.
+Its frame is independent of the worker count (any ``nbWorkers >= 1`` yields
+the same frame) but differs from the single-threaded frame. So enabling it
+by default would make snapshot bytes depend on whether a machine enabled it,
+and it crashed the test worker process outright on the Windows CI runners
+(``python-zstandard`` 0.25). Level 19 over oneDAL's 203 MB snapshot: 33.9 s
+single-threaded, 21.6 s with four workers on a busy four-core Linux box,
+0.05% larger -- worth it for a large-snapshot publisher that opts in.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from typing import Any
 
-#: Inputs at least this large are compressed multi-threaded.
+#: Inputs at least this large may be compressed multi-threaded (when opted
+#: in); a small frame is not worth a worker pool.
 ZSTD_MULTITHREAD_MIN_BYTES = 8 * 1024 * 1024
 
 #: Cap on workers. Level-19 jobs span several window sizes each, so a
 #: ~200 MB input has only a handful to spread; more workers add memory.
 ZSTD_MAX_THREADS = 8
 
+#: The opt-in: a positive worker count (capped at `ZSTD_MAX_THREADS`).
+ZSTD_THREADS_ENV = "ABICHECK_ZSTD_THREADS"
+
 
 def zstd_threads(size: int) -> int:
-    """The ``threads`` argument for compressing *size* bytes."""
-    if size < ZSTD_MULTITHREAD_MIN_BYTES:
+    """The ``threads`` argument for compressing *size* bytes: ``0``
+    (single-threaded) unless opted in, off Windows, and large enough."""
+    try:
+        requested = int(os.environ.get(ZSTD_THREADS_ENV, "0"))
+    except ValueError:
+        requested = 0
+    if requested <= 0 or sys.platform == "win32" or size < ZSTD_MULTITHREAD_MIN_BYTES:
         return 0
-    return max(1, min(os.cpu_count() or 1, ZSTD_MAX_THREADS))
+    return min(requested, ZSTD_MAX_THREADS)
 
 
 def compress_zstd(zstandard: Any, data: bytes, *, level: int) -> bytes:
