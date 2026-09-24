@@ -551,6 +551,24 @@ pytest_add_cli_args = [
     # aggregate Action and touches none of its files. Free exclusion, no
     # `_ACCEPTED_KILL_LOSS` entry needed -- the file imports no `abicheck`
     # module at all, `only_mutate` or otherwise (confirmed by grep).
+    # Same subprocess re-entry class as the entries around it, first reached
+    # by PR #1358 (whose storage/schema change put this path-filtered lane
+    # into a real run): these two classes run `python -m
+    # abicheck.frontends.action.cli`/`actions/aggregate/run.sh` from a
+    # scratch cwd, where the mutated tree's import finds no `[tool.mutmut]`.
+    # Deselected per subprocess-spawning test, not ignored per file, so the
+    # file's in-process tests keep contributing kills (cost recorded in
+    # tests/test_mutation_workflow_contract.py's _ACCEPTED_KILL_LOSS).
+    "--deselect=tests/test_action_analysis_context.py::TestTheProducerWritesWhatTheConsumerReads::test_the_block_survives_into_the_aggregate_document",
+    "--deselect=tests/test_action_analysis_context.py::TestTheProducerWritesWhatTheConsumerReads::test_a_zero_comparison_run_still_carries_the_context",
+    "--deselect=tests/test_action_analysis_context.py::TestTheProducerWritesWhatTheConsumerReads::test_the_consumer_reads_it_back_through_the_bounded_reader",
+    "--deselect=tests/test_action_analysis_context.py::TestTheProducerWritesWhatTheConsumerReads::test_no_context_block_is_emitted_when_none_was_recorded",
+    "--deselect=tests/test_action_analysis_context.py::TestTheProducerWritesWhatTheConsumerReads::test_reading_a_report_with_no_block_refuses_by_default",
+    "--deselect=tests/test_action_analysis_context.py::TestTheProducerWritesWhatTheConsumerReads::test_the_absent_state_is_available_without_refusing",
+    "--deselect=tests/test_action_analysis_context.py::TestTheProducerWritesWhatTheConsumerReads::test_a_missing_report_is_an_absent_context_not_a_crash",
+    "--deselect=tests/test_action_analysis_context.py::TestTheProducerWritesWhatTheConsumerReads::test_the_producer_refuses_a_malformed_value_in_its_own_job",
+    "--deselect=tests/test_action_analysis_context.py::TestTheAggregateActionRecordsIt::test_the_context_transport_never_lands_in_the_reports_directory",
+    "--deselect=tests/test_action_analysis_context.py::TestTheAggregateActionRecordsIt::test_a_leading_dot_would_not_have_been_enough",
     "--ignore=tests/test_action_aggregate.py",
     "--ignore=tests/test_action_check_target.py",
     # Split out of the file directly above for a `no_growth` file-size
