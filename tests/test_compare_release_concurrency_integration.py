@@ -350,6 +350,116 @@ class TestConcurrentReleaseWorkflow:
         assert results[1] == results[2] == results[4], results
 
 
+@pytest.mark.integration
+class TestInstrumentedParallelReleaseMatchesStored:
+    """Parallel live fan-out with in-worker instrumentation == stored/serial.
+
+    The oneDAL measurement that reported members ending ``ERROR`` with
+    ``tupleobject.c: bad argument to internal function`` ran the fan-out
+    under a benchmark hook that took ``len(gc.get_objects())`` inside each
+    worker's header-graph attach. That census broke the *other* workers'
+    ``tuple(...)`` construction (``memory_trace.gc_census_is_safe``). The
+    hook now goes through ``memory_trace.gc_object_count``; this states the
+    workflow-level claim: with that hook installed in every worker and four
+    workers pinned, the live report is the stored/serial report.
+    """
+
+    def test_live_parallel_with_census_hook_matches_stored_serial(
+        self,
+        release: tuple[Path, Path, Path],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import threading  # noqa: PLC0415
+
+        import abicheck.cli_compare_release_pairwise as pairwise  # noqa: PLC0415
+        from abicheck import service_dump_native as native  # noqa: PLC0415
+        from abicheck.workflows import memory_trace, release_jobs  # noqa: PLC0415
+        from tests.test_compare_release import _invoke_combined  # noqa: PLC0415
+
+        old_dir, new_dir, headers = release
+        header = str(headers / "common.h")
+
+        censuses: list[tuple[bool, int | None]] = []
+        real_attach = native._attach_header_graph
+
+        def attach(snap, *args, **kwargs):  # type: ignore[no-untyped-def]
+            snap = real_attach(snap, *args, **kwargs)
+            censuses.append(
+                (
+                    threading.current_thread() is threading.main_thread(),
+                    memory_trace.gc_object_count(),
+                )
+            )
+            return snap
+
+        monkeypatch.setattr(native, "_attach_header_graph", attach)
+        monkeypatch.setenv("ABICHECK_RELEASE_JOB_MEM_GIB", "1")
+        real_resolve = release_jobs.resolve_release_worker_count
+        workers_now = [4]
+
+        def pinned(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+            resolved = real_resolve(*args, **kwargs)  # type: ignore[arg-type]
+            return (workers_now[0], None, *resolved[2:])
+
+        monkeypatch.setattr(release_jobs, "resolve_release_worker_count", pinned)
+        real_parallel = pairwise._compare_release_parallel
+        parallel_calls: list[int] = []
+
+        def spy_parallel(matched_keys, common_args, old_map, workers, admission=None):  # type: ignore[no-untyped-def]
+            parallel_calls.append(workers)
+            return real_parallel(matched_keys, common_args, old_map, workers, admission)
+
+        monkeypatch.setattr(pairwise, "_compare_release_parallel", spy_parallel)
+
+        live_report = tmp_path / "live.json"
+        live_code, live_out = _invoke_combined(
+            "compare", str(old_dir), str(new_dir), "-H", header,
+            "-o", f"json={live_report}",
+        )  # fmt: skip
+        # Both halves of the differential actually ran: the fan-out went
+        # parallel, and the census hook fired inside its workers, where it
+        # must decline rather than enumerate the heap.
+        assert parallel_calls == [4], parallel_calls
+        worker_censuses = [n for on_main, n in censuses if not on_main]
+        assert worker_censuses, f"the hook never ran in a worker: {censuses}"
+        assert all(n is None for n in worker_censuses), worker_censuses
+
+        stored = {"old": tmp_path / "old", "new": tmp_path / "new"}
+        for side, lib_dir in (("old", old_dir), ("new", new_dir)):
+            stored[side].mkdir()
+            for lib in sorted(lib_dir.glob("*.so")):
+                code, out = _invoke_combined(
+                    "dump", str(lib), "-H", header,
+                    "-o", str(stored[side] / f"{lib.name}.json"),
+                )  # fmt: skip
+                assert code == 0, out
+        workers_now[0] = 1
+        parallel_calls.clear()
+        stored_report = tmp_path / "stored.json"
+        stored_code, stored_out = _invoke_combined(
+            "compare", str(stored["old"]), str(stored["new"]),
+            "-o", f"json={stored_report}",
+        )  # fmt: skip
+        assert parallel_calls == [], "the stored oracle ran in parallel"
+
+        live = json.loads(live_report.read_text())
+        oracle = json.loads(stored_report.read_text())
+        errored = [
+            e for e in live.get("libraries") or [] if e.get("verdict") == "ERROR"
+        ]
+        assert not errored, errored
+        assert "internal function" not in live_out
+        # A stored member is named after its snapshot file (`libx.so.json`);
+        # that suffix is the only thing the two paths may disagree on.
+        for entry in oracle.get("libraries") or []:
+            entry["library"] = str(entry.get("library")).removesuffix(".json")
+        assert (live_code, _semantic_projection(live)) == (
+            stored_code,
+            _semantic_projection(oracle),
+        ), (live_out, stored_out)
+
+
 class TestMemberFailureIsReportedNotLaundered:
     """Failure injection at the fan-out's own exception boundary."""
 

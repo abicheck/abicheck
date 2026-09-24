@@ -398,12 +398,49 @@ the stored directories, then runs the live directory compare.
   findings).
 - The **live** fan-out never serializes a graph, so 5a–5c cannot change it;
   the spread above is run-to-run noise.
-- **Pre-existing defect found, not fixed here:** in three of the four live
-  runs, one member (a different one each time, in base and in this branch
-  alike) ended `ERROR` with CPython's `../Objects/tupleobject.c:911: bad
-  argument to internal function`, while the same members compare cleanly
-  when stored and compared serially. That points at a thread-safety bug in
-  the parallel release workers, independent of the graph work.
+- **The `ERROR` members were caused by the benchmark, not by the release
+  workers.** In three of the four live runs above, one member (a different
+  one each time) ended `ERROR` with CPython's `../Objects/tupleobject.c:911:
+  bad argument to internal function`. That is `_PyTuple_Resize` refusing a
+  tuple whose refcount is not 1. The extra reference came from this script's
+  own attach hook, which recorded `len(gc.get_objects())` from inside each
+  fan-out worker. That list references every GC-tracked object, including a
+  tuple another worker is still building in `tuple(<generator>)` (the victim
+  here was `qualified_name_segments_walk._walk_rewrite_strings`, during a
+  member's dump). CPython 3.13 checks the eval breaker after a `CALL`, so the
+  GIL can pass to the builder while that list is still alive. The census now
+  goes through `memory_trace.gc_object_count()`, which returns `null` when
+  any other Python thread exists. `tests/test_gc_census_thread_safety.py`
+  holds the invariant and rejects any other first-party heap census.
+  Measured on this host (4 vCPU, 15 GiB, cold caches, `graph` variant, this
+  script's child):
+
+  | Harness | Live runs | Runs with an `ERROR` member | Seconds per run |
+  |---|---|---|---|
+  | before (census in workers) | 4 | 2 (`libonedal.so.3`, then `libonedal_dpc.so.3`) | 204–211 |
+  | after (`gc_object_count`) | 10 | 0 | 195–212 |
+  | plain `abicheck compare` (no harness) | 6 | 0 | 177–276 |
+
+  All ten post-fix reports equal the stored/stored directory compare of
+  per-member dumps (122 s of dumps + 75 s of compare) after normalising the
+  stored member names' `.json` suffix. Both members read
+  `COMPATIBLE_WITH_RISK`, with identical findings. The fix costs nothing
+  measurable, because the release path itself never changed.
+- **Audit of state shared between release workers.** Checked: every
+  `functools.lru_cache` on the member path (C-level, thread-safe, pure
+  keys); the locked caches (`policy/type_spelling`,
+  `compare/spelling_match_cache`, `compare/spelling_pattern_registry`,
+  `model/graph_identity`'s normalize memo, `model/lazy_graph`'s decode-once
+  lock, `extract/cache_header_scan`'s counters,
+  `workflows/release_surface_acquisition`'s ledger); `compare/detection_memo`
+  (a `ContextVar`, so per worker); and zstd (a fresh
+  `ZstdCompressor`/`ZstdDecompressor` per call, never shared). The one
+  unlocked candidate, `demangle`'s `_BATCH_CACHE_OK`/`_BATCH_CACHE_FAIL`
+  (an `in`-then-`[]` read, and FIFO eviction), is safe on a GIL build: no
+  eval-breaker point sits between those operations, so no other thread can
+  run in the gap. A 6-thread stress test with the bound shrunk to 4 entries
+  confirmed it. It would need a lock under free-threaded CPython, which CI
+  does not run.
 
 ### Outcome against the recommendations
 
