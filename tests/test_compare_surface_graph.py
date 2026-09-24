@@ -17,9 +17,12 @@
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.compare.surface_graph import (
+    EDGE_EVIDENCE_CLASS,
     EDGE_KIND_DECLARES,
-    EDGE_KIND_EXPORTS,
+    EDGE_KIND_DECLARES_LINKER_NAME,
     EDGE_KIND_REFERENCES,
     NODE_KIND_DECLARATION,
     NODE_KIND_HEADER,
@@ -28,7 +31,9 @@ from abicheck.compare.surface_graph import (
     build_public_surface_facts,
 )
 from abicheck.model.declarations import Function, Variable
+from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
 from abicheck.model.entities import RecordType, TypeField
+from abicheck.model.graph_evidence_class import EdgeEvidenceClass
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.model.source_graph import SourceGraphSummary
 
@@ -176,17 +181,24 @@ class TestReferencesEdges:
         assert len(refs) == 1
 
 
-class TestExportsEdges:
-    def test_symbol_node_and_exports_edge(self) -> None:
+class TestLinkerNameEdges:
+    def test_symbol_node_and_linker_name_edge(self) -> None:
         fn = Function(name="f", mangled="_Z1fv", return_type="void")
         snap = _snapshot(functions=[fn])
         graph = SourceGraphSummary()
         build_public_surface_facts(snap, graph)
         symbol_nodes = [n for n in graph.nodes if n.kind == NODE_KIND_SYMBOL]
         assert [n.label for n in symbol_nodes] == ["_Z1fv"]
-        exports = [e for e in graph.edges if e.kind == EDGE_KIND_EXPORTS]
-        assert len(exports) == 1
-        assert exports[0].src == symbol_nodes[0].id
+        linked = [e for e in graph.edges if e.kind == EDGE_KIND_DECLARES_LINKER_NAME]
+        assert len(linked) == 1
+        assert linked[0].src == symbol_nodes[0].id
+
+    def test_exports_kind_is_not_emitted(self) -> None:
+        # "exports" is reserved for a future observed export-table join.
+        fn = Function(name="f", mangled="_Z1fv", return_type="void")
+        graph = SourceGraphSummary()
+        build_public_surface_facts(_snapshot(functions=[fn]), graph)
+        assert "exports" not in {e.kind for e in graph.edges}
 
     def test_no_mangled_name_means_no_symbol_node(self) -> None:
         fn = Function(name="f", mangled="", return_type="void")
@@ -305,3 +317,70 @@ class TestReferencedIdentifiersAttr:
         decl_nodes = [n for n in graph.nodes if n.kind == NODE_KIND_DECLARATION]
         assert len(decl_nodes) == 1  # confirms the collision actually occurred
         assert {"Alpha", "Beta"} <= set(decl_nodes[0].attrs["referenced_identifiers"])
+
+
+def _rich_snapshot(**extra: object) -> AbiSnapshot:
+    rec = RecordType(name="S", kind="struct", fields=[TypeField(name="x", type="int")])
+    fns = [
+        Function(name="f", mangled="_Z1fv", return_type="S*", source_header="inc/s.h"),
+        Function(name="g", mangled="", return_type="void"),
+    ]
+    var = Variable(name="v", mangled="v", type="S", source_header="inc/s.h")
+    return _snapshot(functions=fns, variables=[var], types=[rec], **extra)
+
+
+class TestEdgeEvidenceClass:
+    def test_every_emitted_edge_kind_has_exactly_one_class(self) -> None:
+        graph = SourceGraphSummary()
+        build_public_surface_facts(_rich_snapshot(), graph)
+        emitted = {e.kind for e in graph.edges}
+        # The fixture must actually exercise every declared kind, or this
+        # check would pass vacuously for a kind it never saw.
+        assert emitted == set(EDGE_EVIDENCE_CLASS)
+        for kind in emitted:
+            assert isinstance(EDGE_EVIDENCE_CLASS[kind], EdgeEvidenceClass)
+
+    def test_every_evidence_class_value_is_known(self) -> None:
+        assert {c.value for c in EdgeEvidenceClass} == {
+            "observed",
+            "resolved_join",
+            "derived",
+        }
+
+    def test_linker_name_edge_is_derived(self) -> None:
+        assert (
+            EDGE_EVIDENCE_CLASS[EDGE_KIND_DECLARES_LINKER_NAME]
+            is EdgeEvidenceClass.DERIVED
+        )
+        assert "exports" not in EDGE_EVIDENCE_CLASS
+
+    @pytest.mark.parametrize(
+        "exported",
+        [
+            [],
+            ["_Z1fv"],
+            ["_Z1fv", "v", "_Z5otherv", "unrelated_export"],
+            ["only_unrelated"],
+        ],
+    )
+    def test_derived_edges_do_not_depend_on_export_table(
+        self, exported: list[str]
+    ) -> None:
+        """No derived edge is produced from export-table data: adding,
+        removing, or matching exports never changes the derived edge set."""
+
+        def derived(snap: AbiSnapshot) -> set[tuple[str, str, str]]:
+            graph = SourceGraphSummary()
+            build_public_surface_facts(snap, graph)
+            return {
+                (e.src, e.dst, e.kind)
+                for e in graph.edges
+                if EDGE_EVIDENCE_CLASS[e.kind] is EdgeEvidenceClass.DERIVED
+            }
+
+        baseline = derived(_rich_snapshot())
+        elf = ElfMetadata(symbols=[ElfSymbol(name=n) for n in exported])
+        assert derived(_rich_snapshot(elf=elf)) == baseline
+        # Oracle independent of the builder: one edge per declaration that
+        # carries its own mangled name, regardless of the export table.
+        assert {src for src, _dst, _k in baseline} == {"symbol://_Z1fv", "symbol://v"}

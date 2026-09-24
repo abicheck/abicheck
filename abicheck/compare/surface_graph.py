@@ -22,8 +22,10 @@ plan's "don't attempt a change with no real caller" discipline).
 **Edge kinds populated this slice**: ``declares`` (header → declaration/
 type), ``references`` (declaration/type → type, from field/base/signature
 type references resolvable to another declared type in this same
-snapshot), ``exports`` (symbol → declaration, from the observed export
-table). **Not populated**: ``includes`` (header → header) — every
+snapshot), ``declares_linker_name`` (symbol → declaration, projected from
+the declaration's own mangled name -- evidence class ``derived``, *not* an
+observed export-table join; ``EDGE_EVIDENCE_CLASS`` records each kind's
+class). **Not populated**: ``includes`` (header → header) — every
 function/variable's ``Visibility.PUBLIC`` is already resolved
 per-declaration at parse time (ADR-016), so this phase's own relevance
 query does not need a transitive header-inclusion walk to seed roots (see
@@ -72,8 +74,11 @@ rather than attempted reactively here.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import TYPE_CHECKING, NamedTuple
 
+from ..model.graph_evidence_class import EdgeEvidenceClass
 from ..model.graph_facts import GraphEdge, GraphNode
 from ..model.occurrence import OccurrenceId, canonical_key
 
@@ -86,6 +91,7 @@ if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
 
 __all__ = [
+    "EDGE_EVIDENCE_CLASS",
     "ReferencedIdentifiers",
     "build_public_surface_facts",
     "fact_list",
@@ -102,7 +108,21 @@ NODE_KIND_SYMBOL = "symbol"
 
 EDGE_KIND_DECLARES = "declares"
 EDGE_KIND_REFERENCES = "references"
-EDGE_KIND_EXPORTS = "exports"
+#: A declaration's *own* mangled linker name, projected from the record
+#: itself -- never matched against the observed export table. ``exports``
+#: is deliberately left unused for a future observed export-table join.
+EDGE_KIND_DECLARES_LINKER_NAME = "declares_linker_name"
+
+#: The evidence class of every edge kind this builder can emit. A new edge
+#: kind must be added here too (``tests/test_compare_surface_graph.py``
+#: checks exhaustiveness against what the builder actually emits).
+EDGE_EVIDENCE_CLASS: Mapping[str, EdgeEvidenceClass] = MappingProxyType(
+    {
+        EDGE_KIND_DECLARES: EdgeEvidenceClass.OBSERVED,
+        EDGE_KIND_REFERENCES: EdgeEvidenceClass.RESOLVED_JOIN,
+        EDGE_KIND_DECLARES_LINKER_NAME: EdgeEvidenceClass.DERIVED,
+    }
+)
 
 _TYPE_NOISE: frozenset[str] = frozenset(
     {
@@ -424,24 +444,28 @@ def _build_type_index(
     return index
 
 
-def _add_export_edges(graph: SurfaceGraphLike, decl_node_ids: dict[str, str]) -> None:
-    """``exports`` edges from a ``symbol`` node to its declaration, for
-    every declaration this builder resolved a mangled linker name for.
-    Deliberately not export-table-matched (that is `export_surface.py`'s
-    own, more precise root-seeding logic) — this is a straightforward
-    "this declaration's own linker identity is a symbol" edge, useful graph
-    data independent of whether it was actually observed exported."""
+def _add_linker_name_edges(
+    graph: SurfaceGraphLike, decl_node_ids: dict[str, str]
+) -> None:
+    """``declares_linker_name`` edges (evidence class ``derived``) from a
+    ``symbol`` node to its declaration, for every declaration this builder
+    resolved a mangled linker name for. Deliberately not export-table-matched
+    (that is `export_surface.py`'s own root-seeding logic): the edge says
+    "this declaration's own linker identity is this symbol", never that the
+    symbol was observed exported."""
     for mangled, decl_node_id in decl_node_ids.items():
         symbol_id = f"symbol://{mangled}"
         graph.add_node(GraphNode(id=symbol_id, kind=NODE_KIND_SYMBOL, label=mangled))
         graph.add_edge(
-            GraphEdge(src=symbol_id, dst=decl_node_id, kind=EDGE_KIND_EXPORTS)
+            GraphEdge(
+                src=symbol_id, dst=decl_node_id, kind=EDGE_KIND_DECLARES_LINKER_NAME
+            )
         )
 
 
 def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> None:
     """Populate *graph* with declaration/type/header/symbol nodes and
-    declares/references/exports edges for *snap*, from L0-L2 facts alone.
+    declares/references/declares_linker_name edges for *snap*, from L0-L2 facts alone.
     Idempotent — ``add_node``/``add_edge`` already dedup by id/relation
     key, so calling this twice on the same graph (or on a graph another
     builder already wrote into) is safe.
@@ -508,4 +532,4 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
         node_id = _approximate_node_id(alias, kind="typedef")
         _add_references(graph, node_id, type_index, target)
 
-    _add_export_edges(graph, decl_node_ids)
+    _add_linker_name_edges(graph, decl_node_ids)
