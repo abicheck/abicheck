@@ -143,24 +143,34 @@ class CastxmlParserContext:
             if eid:
                 self.id_map[eid] = el
         local: dict[str, bool] = {}
+        groups = self._groups_by_tag()
         for el in self.root:
             if self._is_function_local(el, local):
                 continue
-            tag = el.tag
-            if tag in ("Method", "Destructor") and el.get("virtual") == "1":
-                ctx = el.get("context")
-                if ctx:
-                    self.virtual_methods_by_class.setdefault(ctx, []).append(el)
-            if tag in FUNCTION_TAGS:
-                self.function_els.append(el)
-            elif tag == "Variable":
-                self.variable_els.append(el)
-            elif tag in ("Struct", "Class", "Union"):
-                self.record_els.append(el)
-            elif tag == "Enumeration":
-                self.enum_els.append(el)
-            elif tag == "Typedef":
-                self.typedef_els.append(el)
+            self._group(el, groups)
+
+    def _group(self, el: Element, groups: dict[str, list[Element]]) -> None:
+        """Add *el* to the virtual-method index and its tag's grouped list."""
+        tag = el.tag
+        if tag in ("Method", "Destructor") and el.get("virtual") == "1":
+            ctx = el.get("context")
+            if ctx:
+                self.virtual_methods_by_class.setdefault(ctx, []).append(el)
+        group = groups.get(tag)
+        if group is not None:
+            group.append(el)
+
+    def _groups_by_tag(self) -> dict[str, list[Element]]:
+        groups = {tag: self.function_els for tag in FUNCTION_TAGS}
+        groups.update(
+            Variable=self.variable_els,
+            Struct=self.record_els,
+            Class=self.record_els,
+            Union=self.record_els,
+            Enumeration=self.enum_els,
+            Typedef=self.typedef_els,
+        )
+        return groups
 
     def _is_function_local(self, el: Element, memo: dict[str, bool]) -> bool:
         """Whether *el*'s ``context`` chain reaches a function-like element.

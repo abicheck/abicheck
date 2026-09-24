@@ -112,25 +112,36 @@ def _is_clang_family(cc_bin: str) -> bool:
     return "clang" in name
 
 
+#: Exact GNU spellings that change predefined macros or search paths.
+_GNU_EXACT_FLAGS: frozenset[str] = frozenset(
+    {"-nostdinc", "-nostdinc++", "-ansi", "-pthread"}
+)
+#: GNU prefixes that do (``-O`` sets ``__OPTIMIZE__``/``__OPTIMIZE_SIZE__``).
+_GNU_PREFIXES: tuple[str, ...] = ("-std=", "--sysroot=", "-O")
+
+
+def _is_target_flag(token: str) -> bool:
+    """``-m32``, ``-march=...``, ``-mavx2``, ``-mno-sse4.2``; never
+    ``-mllvm`` (parser-only) nor ``-MD``/``-MF`` (upper case, excluded by
+    construction)."""
+    return token.startswith("-m") and len(token) > 2 and not token.startswith("-mllvm")
+
+
+def _is_feature_macro_flag(token: str) -> bool:
+    if not token.startswith("-f"):
+        return False
+    name = token[2:]
+    return name.removeprefix("no-") in _FEATURE_MACRO_F_FLAGS
+
+
 def _gnu_argument_kept(token: str, *, clang_family: bool) -> bool:
-    if token.startswith("-std=") or token.startswith("--sysroot="):
-        return True
-    if token in ("-nostdinc", "-nostdinc++", "-ansi", "-pthread"):
-        return True
-    if token.startswith("-m") and len(token) > 2 and not token.startswith("-mllvm"):
-        # -m32, -m64, -march=..., -mavx2, -mno-sse4.2 ... ; excludes -MD/-MF
-        # (upper case, dependency output) by construction.
-        return True
-    if token.startswith("-O"):
-        return True  # __OPTIMIZE__, __OPTIMIZE_SIZE__
-    if token.startswith("-f"):
-        name = token[2:]
-        if name.startswith("no-"):
-            name = name[3:]
-        return name in _FEATURE_MACRO_F_FLAGS
-    if clang_family and token.startswith(_CLANG_ONLY_PREFIXES):
-        return True
-    return False
+    return (
+        token in _GNU_EXACT_FLAGS
+        or token.startswith(_GNU_PREFIXES)
+        or _is_target_flag(token)
+        or _is_feature_macro_flag(token)
+        or (clang_family and token.startswith(_CLANG_ONLY_PREFIXES))
+    )
 
 
 def _msvc_argument_kept(token: str) -> bool:
@@ -162,21 +173,27 @@ def emulation_arguments(
         token = tokens[index]
         if token in _PARSER_ONLY_VALUE_FLAGS:
             index += 2
-            continue
-        if token in _SEPARATE_VALUE_FLAGS and index + 1 < len(tokens):
-            if cc_id != "msvc" and (
-                token not in _CLANG_ONLY_VALUE_FLAGS or clang_family
-            ):
+        elif token in _SEPARATE_VALUE_FLAGS and index + 1 < len(tokens):
+            if _value_flag_kept(token, cc_id=cc_id, clang_family=clang_family):
                 kept += [token, tokens[index + 1]]
             index += 2
-            continue
-        if cc_id == "msvc":
-            if _msvc_argument_kept(token):
+        else:
+            if _single_argument_kept(token, cc_id=cc_id, clang_family=clang_family):
                 kept.append(token)
-        elif _gnu_argument_kept(token, clang_family=clang_family):
-            kept.append(token)
-        index += 1
+            index += 1
     return kept
+
+
+def _value_flag_kept(token: str, *, cc_id: str, clang_family: bool) -> bool:
+    if cc_id == "msvc":
+        return False
+    return token not in _CLANG_ONLY_VALUE_FLAGS or clang_family
+
+
+def _single_argument_kept(token: str, *, cc_id: str, clang_family: bool) -> bool:
+    if cc_id == "msvc":
+        return _msvc_argument_kept(token)
+    return _gnu_argument_kept(token, clang_family=clang_family)
 
 
 def emulated_compiler_command(

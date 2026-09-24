@@ -135,8 +135,6 @@ def _tools_available() -> bool:
     reason="builds and dumps an ELF shared library",
 )
 def test_castxml_and_clang_backends_agree_on_local_declarations(tmp_path: Path) -> None:
-    from abicheck.serialization import load_snapshot
-
     header = tmp_path / "api.h"
     header.write_text(_LOCAL_SHAPES)
     src = tmp_path / "a.cpp"
@@ -157,44 +155,44 @@ def test_castxml_and_clang_backends_agree_on_local_declarations(tmp_path: Path) 
         ],
         check=True,
     )
-    surfaces = {}
-    for frontend in ("castxml", "clang"):
-        config = tmp_path / f"{frontend}.yml"
-        config.write_text(f"compile:\n  std: c++20\n  frontend: {frontend}\n")
-        out = tmp_path / f"{frontend}.json"
-        result = subprocess.run(
-            [
-                "abicheck",
-                "dump",
-                str(lib),
-                "-H",
-                str(header),
-                "--config",
-                str(config),
-                "-o",
-                str(out),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, result.stderr[-2000:]
-        snap = load_snapshot(out)
-        surfaces[frontend] = {
-            "types": sorted(t.name for t in snap.types if t.name in ("V", "R")),
-            "enums": sorted(e.name for e in snap.enums if e.name == "K"),
-            "typedefs": sorted(n for n in snap.typedefs if n in ("T", "L")),
-            "q_functions": sorted(
-                f.name
-                for f in snap.functions
-                if f.name in ("mk", "mk2", "mk3", "h", "cmp", "use", "V", "~V")
-            ),
-        }
-        # A local record's own members (castxml emits its implicit special
-        # members) must not leak either.
-        surfaces[frontend]["local_members"] = sorted(
-            f.name for f in snap.functions if f.name in ("V", "~V")
-        )
+    surfaces = {
+        frontend: _surface(_dump_with(frontend, lib, header, tmp_path))
+        for frontend in ("castxml", "clang")
+    }
     assert surfaces["castxml"] == surfaces["clang"]
     # The namespace-scope record is real and must survive the exclusion.
     assert surfaces["castxml"]["types"] == ["R"]
     assert surfaces["castxml"]["local_members"] == []
+
+
+def _dump_with(frontend: str, lib: Path, header: Path, tmp_path: Path) -> Path:
+    """``abicheck dump`` through the real CLI with one header frontend."""
+    config = tmp_path / f"{frontend}.yml"
+    config.write_text(f"compile:\n  std: c++20\n  frontend: {frontend}\n")
+    out = tmp_path / f"{frontend}.json"
+    argv = ["abicheck", "dump", str(lib), "-H", str(header)]
+    argv += ["--config", str(config), "-o", str(out)]
+    result = subprocess.run(argv, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr[-2000:]
+    return out
+
+
+def _surface(snapshot_path: Path) -> dict[str, list[str]]:
+    """The declarations the fixture's local-type traps could leak into."""
+    from abicheck.serialization import load_snapshot
+
+    snap = load_snapshot(snapshot_path)
+    functions = [f.name for f in snap.functions]
+    return {
+        "types": _only([t.name for t in snap.types], {"V", "R"}),
+        "enums": _only([e.name for e in snap.enums], {"K"}),
+        "typedefs": _only(list(snap.typedefs), {"T", "L"}),
+        "q_functions": _only(functions, {"mk", "mk2", "mk3", "h", "cmp", "use"}),
+        # A local record's own members (castxml emits its implicit special
+        # members) must not leak either.
+        "local_members": _only(functions, {"V", "~V"}),
+    }
+
+
+def _only(names: list[str], allowed: set[str]) -> list[str]:
+    return sorted(n for n in names if n in allowed)

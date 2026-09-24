@@ -105,13 +105,7 @@ def ownership_closure(
     document. Linear in the document size.
     """
     by_id = {el.get("id", ""): el for el in root}
-    owned_files = {
-        el.get("id", "")
-        for el in root
-        if el.tag == "File"
-        and any(el.get("name", "").startswith(r) for r in target_roots)
-    }
-    stack = [el.get("id", "") for el in root if el.get("file") in owned_files]
+    stack = _seed_ids(root, target_roots)
     seeds = len(stack)
     keep: set[str] = set()
     while stack:
@@ -119,19 +113,38 @@ def ownership_closure(
         if eid in keep or eid not in by_id:
             continue
         keep.add(eid)
-        el = by_id[eid]
-        if el.tag == "Namespace":
-            parent = el.get("context")
-            if parent:
-                stack.append(parent)
-            continue
-        stack.extend(element_refs(el))
-    # A cv-qualified variant of a kept type is its own element.
-    for el in root:
-        if el.tag == "CvQualifiedType" and _strip_cv(el.get("type", "")) in keep:
-            keep.add(el.get("id", ""))
-    keep.update(el.get("id", "") for el in root if el.tag == "File")
+        stack.extend(_closure_refs(by_id[eid]))
+    keep.update(_implied_ids(root, keep))
     return keep, seeds
+
+
+def _seed_ids(root: ET.Element, target_roots: list[str]) -> list[str]:
+    """Every element declared in a file under one of *target_roots*."""
+    owned_files = {
+        el.get("id", "")
+        for el in root
+        if el.tag == "File"
+        and any(el.get("name", "").startswith(r) for r in target_roots)
+    }
+    return [el.get("id", "") for el in root if el.get("file") in owned_files]
+
+
+def _closure_refs(el: ET.Element) -> Iterable[str]:
+    """What keeping *el* requires: a namespace needs only its parent."""
+    if el.tag == "Namespace":
+        parent = el.get("context")
+        return [parent] if parent else []
+    return element_refs(el)
+
+
+def _implied_ids(root: ET.Element, keep: set[str]) -> Iterable[str]:
+    """Files, and the cv-qualified variant of every kept type (castxml gives
+    it its own element)."""
+    for el in root:
+        if el.tag == "File" or (
+            el.tag == "CvQualifiedType" and _strip_cv(el.get("type", "")) in keep
+        ):
+            yield el.get("id", "")
 
 
 def prune_to(root: ET.Element, keep: set[str]) -> None:
@@ -203,15 +216,13 @@ def owned_counts(xml_path: Path, owners: list[tuple[str, str]]) -> dict[str, obj
         counts = Counter(_owner(item.source_location or "", owners) for item in items)
         out[label] = dict(sorted(counts.items()))
     target = owners[0][0]
+
+    def owned(item: object) -> bool:
+        return _owner(getattr(item, "source_location", None) or "", owners) == target
+
     out["target_keys"] = sorted(
-        f"f:{f.mangled or f.name}"
-        for f in functions
-        if _owner(f.source_location or "", owners) == target
-    ) + sorted(
-        f"t:{t.name}@{t.source_location}"
-        for t in types
-        if _owner(t.source_location or "", owners) == target
-    )
+        f"f:{f.mangled or f.name}" for f in functions if owned(f)
+    ) + sorted(f"t:{t.name}@{t.source_location}" for t in types if owned(t))
     return out
 
 
@@ -277,33 +288,32 @@ def measure(args: argparse.Namespace) -> dict[str, object]:
     return result
 
 
-def _dump(args: argparse.Namespace, frontend: str, work: Path) -> dict[str, object]:
-    flags = shlex.split(args.flags)
-    config = work / f"abicheck-{frontend}.yml"
+def _dump_config(flags: list[str], frontend: str) -> str:
+    """The ``.abicheck.yml`` text reproducing *flags* for *frontend*."""
     lines = ["compile:", f"  frontend: {frontend}"]
     std = [f.split("=", 1)[1] for f in flags if f.startswith("-std=")]
     if std:
         lines.append(f"  std: {std[-1]}")
-    for key, prefix in (("include_dirs", "-I"), ("defines", "-D")):
-        values = [f[2:] for f in flags if f.startswith(prefix)]
-        if values:
-            lines.append(f"  {key}:")
-            lines += [f"    - {v}" for v in values]
-    options = [f for f in flags if f.startswith("-f") or f.startswith("-m")]
-    if options:
-        lines.append("  options:")
-        lines += [f"    - {v}" for v in options]
-    config.write_text("\n".join(lines) + "\n")
+    lines += _yaml_list("include_dirs", _stripped(flags, "-I"))
+    lines += _yaml_list("defines", _stripped(flags, "-D"))
+    lines += _yaml_list("options", [f for f in flags if f.startswith(("-f", "-m"))])
+    return "\n".join(lines) + "\n"
+
+
+def _stripped(flags: list[str], prefix: str) -> list[str]:
+    return [f[len(prefix) :] for f in flags if f.startswith(prefix)]
+
+
+def _yaml_list(key: str, values: list[str]) -> list[str]:
+    return [f"  {key}:", *(f"    - {v}" for v in values)] if values else []
+
+
+def _dump(args: argparse.Namespace, frontend: str, work: Path) -> dict[str, object]:
+    config = work / f"abicheck-{frontend}.yml"
+    config.write_text(_dump_config(shlex.split(args.flags), frontend))
     out = work / f"snapshot-{frontend}.json"
-    argv = [
-        sys.executable,
-        "-m",
-        "abicheck",
-        "dump",
-        args.binary,
-        "--config",
-        str(config),
-    ]
+    argv = [sys.executable, "-m", "abicheck", "dump", args.binary]
+    argv += ["--config", str(config)]
     for header in args.header:
         argv += ["-H", header]
     env_cache = work / f"cache-{frontend}"
@@ -311,22 +321,29 @@ def _dump(args: argparse.Namespace, frontend: str, work: Path) -> dict[str, obje
     os.environ["ABICHECK_CACHE_DIR"] = str(env_cache)
     measured = run_measured([*argv, "-o", str(out)], None)
     if out.exists():
-        size = out.stat().st_size
-        measured["snapshot_mb"] = round(size / 1e6, 1)
+        measured.update(_read_back(out, args.owner))
+    return measured
+
+
+def _read_back(out: Path, owner_args: list[str]) -> dict[str, object]:
+    size = out.stat().st_size
+    result: dict[str, object] = {
+        "snapshot_mb": round(size / 1e6, 1),
         # Recorded, then lifted for this read-back only: a default dump can
         # write a snapshot larger than the default reader will accept.
-        measured["exceeds_default_read_limit"] = size > (1 << 30)
-        for var in (
-            "ABICHECK_SNAPSHOT_MAX_STORED_BYTES",
-            "ABICHECK_SNAPSHOT_MAX_DECODED_BYTES",
-        ):
-            os.environ[var] = str(16 << 30)
-        owners = [tuple(o.split("=", 1)) for o in args.owner]
-        try:
-            measured.update(_snapshot_summary(out, owners))
-        except Exception as exc:  # a measurement, not a gate: record and go on
-            measured["summary_error"] = f"{type(exc).__name__}: {exc}"[:300]
-    return measured
+        "exceeds_default_read_limit": size > (1 << 30),
+    }
+    for var in (
+        "ABICHECK_SNAPSHOT_MAX_STORED_BYTES",
+        "ABICHECK_SNAPSHOT_MAX_DECODED_BYTES",
+    ):
+        os.environ[var] = str(16 << 30)
+    owners = [tuple(o.split("=", 1)) for o in owner_args]
+    try:
+        result.update(_snapshot_summary(out, owners))
+    except Exception as exc:  # a measurement, not a gate: record and go on
+        result["summary_error"] = f"{type(exc).__name__}: {exc}"[:300]
+    return result
 
 
 def _snapshot_summary(path: Path, owners: list[tuple[str, str]]) -> dict[str, object]:
