@@ -417,14 +417,32 @@ def _mangled(node: dict[str, Any]) -> str:
     return ""
 
 
+def _c_linkage_name(node: dict[str, Any]) -> str:
+    """The observed linker symbol of a C-linkage declaration -- clang reports
+    ``mangledName == name`` there, which :func:`_mangled` deliberately treats
+    as "no mangling". Kept as the ``names["linker"]`` identity so the L5 graph
+    can key the declaration on the same linker name the L2 header graph
+    uses (evidence-entity-model invariant I1)."""
+    mangled = node.get("mangledName")
+    name = node.get("name", "")
+    if isinstance(mangled, str) and mangled and mangled == name:
+        return mangled
+    return ""
+
+
 def _qualified(scope: list[str], name: str) -> str:
     return "::".join([*scope, name]) if scope else name
 
 
-def _entity_names(name: str, mangled: str = "") -> dict[str, str]:
+def _entity_names(
+    name: str, mangled: str = "", node: dict[str, Any] | None = None
+) -> dict[str, str]:
     names = {"source_qualified": name}
     if mangled:
         names["mangled"] = mangled
+    linker = _c_linkage_name(node) if node is not None else ""
+    if linker:
+        names["linker"] = linker
     return names
 
 

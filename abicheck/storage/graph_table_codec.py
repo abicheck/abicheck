@@ -108,6 +108,7 @@ _SCALAR_FIELDS = (
     "narrowed_scope",
     "degraded_passes",
     "entity_resolver",
+    "identity_aliases",
 )
 #: Exact JSON scalar types whose values need no deep copy on decode.
 _SCALARS = frozenset({str, int, float, bool, type(None)})
@@ -226,6 +227,8 @@ def _graph_fields(graph: SourceGraphSummary) -> dict[str, Any]:
     resolver = graph.entity_resolver
     if resolver.aliases or resolver.conflicts:
         out["entity_resolver"] = resolver.to_dict()
+    if graph.identity_aliases:
+        out["identity_aliases"] = dict(sorted(graph.identity_aliases.items()))
     return out
 
 

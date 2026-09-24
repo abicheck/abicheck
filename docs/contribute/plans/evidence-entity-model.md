@@ -64,8 +64,9 @@ export may have no known public declaration. Both are valid.
 ### Invariants (the acceptance contract)
 
 - **I1 — one ID per entity.** Every producer that names a declaration or type
-  resolves it through the same identity function (ADR-063 `EntityId`/
-  `OccurrenceId`). Two producers that see the same declaration yield the
+  resolves it through the same identity function
+  (`model/graph_entity_identity.py`, whose keys are in bijection with the
+  linker-name tiers of ADR-063's `EntityId`; see "Phase 1 — landed"). Two producers that see the same declaration yield the
   same node ID. An entity with no resolvable identity gets an explicit
   `unresolved` node, never an approximate one that silently collides.
 - **I2 — joins are evidence, not name equality.** A declaration's mangled
@@ -95,7 +96,7 @@ Ordered by how many incorrect conclusions each phase prevents, not by size.
 | Phase | Scope | Size | Depends on |
 |---|---|---|---|
 | **0 — Evidence-class retag** (**landed**: `model/graph_evidence_class.py`'s `EdgeEvidenceClass`, `compare/surface_graph.py`'s `EDGE_EVIDENCE_CLASS`; the linker-name edge is now `declares_linker_name`/`derived`; builder edges were confirmed not persisted — production never writes them into `AbiSnapshot.surface_graph` — so no schema change) | Add an evidence-class attribute to the surface-graph edge kinds. Rename or retag the linker-name `exports` edge as `derived` (for example `declares_linker_name`). Keep the name `exports` free for a future observed join. Update `tests/test_compare_surface_graph.py`. No schema change unless graph edges are persisted; check first. | S | — |
-| **1 — Identity invariants** | Small L2/L0/L1 fixtures stating I1 as property tests (the same declaration seen via castxml, clang, DWARF, and the export table → one node). Then route `surface_graph.py` and `header_graph.py` node IDs through `semantic_ir`/`EntityId`, with explicit alias and unresolved nodes. Migrate readers in the same PR as producers. | L | ADR-063 Phase 2/6 |
+| **1 — Identity invariants** (**landed**: `model/graph_entity_identity.py` is the one node-id function for every declaration/type graph producer; see [Phase 1 — landed](#phase-1-landed)) | Small L2/L0/L1 fixtures stating I1 as property tests (the same declaration seen via castxml, clang, DWARF, and the export table → one node). Then route `surface_graph.py` and `header_graph.py` node IDs through `semantic_ir`/`EntityId`, with explicit alias and unresolved nodes. Migrate readers in the same PR as producers. | L | ADR-063 Phase 2/6 |
 | **2 — Explicit cross-layer joins** | An observed `exports` join (export table → entity, via `model/export_index.py`'s projection) and an L1 debug-type → entity join, each carrying I2 join states. Replaces the per-query reconciliation readers do today. | M–L | 1 |
 | **3 — Ownership in the graph** | Expose `model/release_surface.py` providers and contract inputs (public roots, namespace selection) as graph-level owner relations. Wiring, not new design. | M | 1 |
 | **4 — Coverage-aware queries** | A query API returning I4's three-valued answer per edge kind and scope, built on the existing per-pass coverage records and `Fact` statuses. | M | 0, 2 |
@@ -107,6 +108,92 @@ Ordered by how many incorrect conclusions each phase prevents, not by size.
 
 Phases 0 and 5 are independent and small, so they can start now. Phase 5's
 numbers should inform Phases 1–2 before those choose what to materialize.
+
+## Phase 1 — landed
+
+Landed in [abicheck/abicheck#1358](https://github.com/abicheck/abicheck/pull/1358)
+(ADR-063 amended, D3 "graph node identity"). Phases 2 and 3 are now
+unblocked: both join onto the one key this phase established.
+
+### ID schemes before and after
+
+| Scheme | Producer | Readers | Before | After |
+|---|---|---|---|---|
+| Header-graph declaration seed | `buildsource/header_graph.py` `seed_decl` | L5 findings, `graph_reconcile`, `cli_graph` | `decl://<mangled or bare name>`; a castxml ctor/dtor placeholder used as if it were a linker name; unmangled overloads collapsed onto `decl://<name>` | `snapshot_identities()` table: `decl://<linker name>`, else explicit `unresolved://` |
+| AST replay declarations | `model.source_graph.function_decl_identity` (call/type/override/macro/template graphs, `source_edges`) | same | C linkage keyed `decl://<qualified>#sha256:<qualType>`, so it never met its header node | delegates to `declaration_key`: the linker name whenever clang reported one (`mangledName == name` is the C-linkage symbol); unmangled fallback unchanged |
+| L4 source-ABI fold | `buildsource/source_graph_build_source_abi.py` | same | `decl://SourceEntity.identity()` (C linkage: `qualified#hash`, linker name blanked by the extractor) | `source_entity_decl_node_id`: linker name from `mangled_name` or the new `names["linker"]`; the `identity()` spelling recorded as an alias |
+| Flat header-graph types (no clang AST) | `header_graph._seed_flat_type_node` / `_flat_structural_type_edges` | L5 findings | `type://<bare leaf>`: `ns::W`/`other::W` one node | `type://<qualified>`; a spelling two declarations share becomes two `unresolved://` nodes |
+| AST / L4 types | `header_graph_ast_projection`, `type_graph`, L4 fold | same | `type://<clang qualified name>` | unchanged (= `type_identity`) |
+| Public-surface builder | `compare/surface_graph.py` | `policy/public_surface_closure.py`, `export_surface.py` | `EntityId.key`, fallback `declaration::`/`type::`/`typedef::` (`_approximate_node_id`); kinds `declaration`/`type` | same `snapshot_identities()` table as the header graph; kinds `source_decl`/`record_type`/`enum_type`/`typedef`; readers look ids up via `ReferencedIdentifiers.node_id()`. `_approximate_node_id` and `node_id_for_*` deleted |
+| Second spellings | (none) | — | a second node | `SourceGraphSummary.identity_aliases` (Mach-O decoration, L4 legacy `identity()`), persisted |
+| `EntityId.key` / `OccurrenceId` | header-AST producers | diff matching, `finding_identity`, `semantic_ir` | also a surface-graph node id | unchanged, no longer a graph node id |
+| ADR-048 `CanonicalIdentity`, ADR-046 `EntityResolver` | `model/entity_identity.py`, `SourceGraphSummary.resolve_entities` | `graph_reconcile`, `graph_impact` | reconciliation keys derived from a node | unchanged: derived from nodes, not node ids |
+| `finding_identity` | `finding_identity.py` | dedup, reports | finding ids | unchanged (not graph identity) |
+| Kythe/CodeQL ingest | `buildsource/graph_backends.py` | L5 | `decl://<VName signature>` | unchanged; see gaps |
+| Symbols | surface builder / L4 | — | `symbol://`, `binary_symbol://` | unchanged (Phase 2) |
+| AST-seeded bare names (`type_graph._decl_identity`, `call_graph._identity`) | AST passes | the passes' own resolution indexes | index keys, not node ids | unchanged |
+
+### What landed
+
+- **Tests first** (strict xfail, then flipped): `tests/test_graph_identity_invariants.py`
+  (header graph + surface builder over one graph: one node per declaration,
+  overloads/namespaced/inline-namespace types kept apart, explicit
+  `unresolved`, Mach-O alias, L4 join, input-order independence),
+  `tests/test_graph_identity_invariants_integration.py` (one header dumped
+  through castxml, clang and hybrid: one id per entity, identical across
+  frontends), `tests/test_graph_entity_identity.py` (hypothesis properties of
+  the identity function against generated ground truth).
+- **One identity function**, `model/graph_entity_identity.py`: linker name,
+  else `qualified#signature` (non-callables: `qualified`), else
+  `unresolved://`; types by qualified name; typedefs in the type space except
+  a C tag-namespace clash; `UnresolvedOccurrences` keeps identical unresolved
+  evidence apart; `snapshot_identities()` is the table both L2 producers read.
+- **Storage**: snapshot schema v50, `SourceGraphSummary.schema_version` 3,
+  persisted `identity_aliases`. Old ids cannot be rewritten from what a stored
+  graph carries (the AST `qualType` behind a signature hash; the scope a
+  bare-leaf node stood for), so a pre-v3/v3 graph pair is reported *not
+  compared* (`compare/source_graph_identity_scheme.py`, on the L5 coverage row
+  and as a warning) rather than diffed.
+
+### Measured on oneDAL
+
+Same setup as the Phase 5 measurements below (`libonedal_core.so.3`, PyPI
+`daal`/`daal-include` 2025.10.0 vs 2025.11.0, `scripts/bench_graph_materialization.py`),
+one repeat per variant, `main` at `87731bc` vs this phase:
+
+| Variant | Measure | Before | After |
+|---|---|---|---|
+| `graph+facts` | nodes | 110,907 | 69,288 |
+| `graph+facts` | graph section (compact / zstd-3) | 136.4 / 4.71 MB | 120.8 / 4.20 MB |
+| `graph+facts` | snapshot raw | 353.0 MB | 326.7 MB |
+| `graph+facts` | dump parent RSS | 2,157 MiB | 1,946 MiB |
+| `graph+facts` | compare | 367 s / 2,656 MiB | 331 s / 2,383 MiB |
+| `graph` (default) | nodes | 49,523 | 49,264 |
+| `graph` (default) | graph section (compact / zstd-3) | 74.4 / 2.70 MB | 75.6 / 2.81 MB |
+
+- The 29,109 `declaration` and 3,142 `type` duplicates are gone. `symbol`
+  nodes fall from 29,109 to 18,249, because only resolved declarations get a
+  linker-name node.
+- In the default graph, 259 C-linkage `decl://<name>`/`decl://<name>#sha256:…`
+  pairs merged into one node each.
+- The default graph section is 1.6% larger. About 11.6k castxml ctor/dtor
+  placeholder nodes are now explicit `unresolved://` nodes: a longer prefix
+  plus an `identity` attr. A first cut that also packed the `EntityId` key
+  into those ids measured 81.4 MB and was trimmed.
+- Both comparisons report the same 5,078 artifact-backed findings.
+
+### Remaining documented gaps
+
+- PDB/BTF/CTF function/variable identity stays `unresolved` (ADR-063 Phase 6):
+  no linker name reaches those records here.
+- A castxml-only constructor/destructor (synthetic placeholder, no mangling)
+  is `unresolved` and does not join clang's mangled node for the same
+  constructor; only a hybrid dump, which reconciles the two, joins them.
+- castxml drops an inline-namespace segment (`ns::S` vs clang `ns::v1::S`);
+  per G15 the two stay separate without further evidence.
+- Kythe/CodeQL-ingested nodes keep their VName-signature ids.
+- The DWARF (L1) and export-table (L0) sides of I1 are Phase 2's joins onto
+  this key; this phase covers the L2 header-AST producers and L4/L5 replay.
 
 ## Tests
 

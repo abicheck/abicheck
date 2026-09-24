@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -613,7 +614,16 @@ def diff_embedded_build_source(
     # `docs/contribute/plans/one-semantic-pipeline.md`'s Phase 10 checklist.
     old_graph = _side_source_graph(old_snapshot, old_pack)
     new_graph = _side_source_graph(new_snapshot, new_pack)
+    graph_not_compared: str | None = None
     if old_graph is not None and new_graph is not None:
+        from ..compare.source_graph_identity_scheme import (
+            source_graph_identity_mismatch,
+        )
+
+        graph_not_compared = source_graph_identity_mismatch(
+            old_graph.schema_version, new_graph.schema_version
+        )
+    if old_graph is not None and new_graph is not None and graph_not_compared is None:
         from .source_graph_findings import diff_source_graph_findings
 
         # ``_src`` (the L4 surface diff, if both sides had one) lets the graph
@@ -635,6 +645,32 @@ def diff_embedded_build_source(
     # checks ran for this scan (Codex review). The side-by-side table below
     # still exposes old/new asymmetry to humans.
     coverage = optional_coverage(new_pack)
+    if graph_not_compared is not None:
+        # Evidence-entity-model I1: a pre-v3 graph against a v3 one is not
+        # diffed (their node ids name entities differently); say so on the
+        # L5 row itself rather than let an absent graph finding read as
+        # "no graph change".
+        coverage = [
+            replace(
+                row,
+                detail=f"{row.detail}; {graph_not_compared}"
+                if row.detail
+                else graph_not_compared,
+            )
+            if row.layer == DataLayer.L5_SOURCE_GRAPH.value
+            else row
+            for row in coverage
+        ]
+        if not any(row.layer == DataLayer.L5_SOURCE_GRAPH.value for row in coverage):
+            coverage.append(
+                LayerCoverage(
+                    layer=DataLayer.L5_SOURCE_GRAPH.value,
+                    status=CoverageStatus.PRESENT,
+                    detail=graph_not_compared,
+                )
+            )
+        if on_output is not None:
+            _emit(on_output, [f"Warning: {graph_not_compared}"])
     intrinsic = intrinsic_coverage(new_snapshot)
     if on_output is not None:
         _emit(on_output, coverage_lines(intrinsic, coverage))

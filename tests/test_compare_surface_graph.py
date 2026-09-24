@@ -25,9 +25,11 @@ from abicheck.compare.surface_graph import (
     EDGE_KIND_DECLARES_LINKER_NAME,
     EDGE_KIND_REFERENCES,
     NODE_KIND_DECLARATION,
+    NODE_KIND_ENUM_TYPE,
     NODE_KIND_HEADER,
+    NODE_KIND_RECORD_TYPE,
     NODE_KIND_SYMBOL,
-    NODE_KIND_TYPE,
+    NODE_KIND_TYPEDEF,
     build_public_surface_facts,
 )
 from abicheck.model.declarations import Function, Variable
@@ -36,6 +38,8 @@ from abicheck.model.entities import RecordType, TypeField
 from abicheck.model.graph_evidence_class import EdgeEvidenceClass
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.model.source_graph import SourceGraphSummary
+
+TYPE_KINDS = frozenset({NODE_KIND_RECORD_TYPE, NODE_KIND_ENUM_TYPE, NODE_KIND_TYPEDEF})
 
 
 def _snapshot(**kwargs: object) -> AbiSnapshot:
@@ -107,7 +111,7 @@ class TestReferencesEdges:
         build_public_surface_facts(snap, graph)
         refs = [e for e in graph.edges if e.kind == EDGE_KIND_REFERENCES]
         assert len(refs) == 1
-        type_node_ids = {n.id for n in graph.nodes if n.kind == NODE_KIND_TYPE}
+        type_node_ids = {n.id for n in graph.nodes if n.kind in TYPE_KINDS}
         assert refs[0].dst in type_node_ids
 
     def test_record_field_references_another_record(self) -> None:
@@ -227,7 +231,7 @@ class TestIdempotence:
 
         graph = SourceGraphSummary()
         graph.add_node(
-            GraphNode(id="decl://preexisting", kind="declaration", label="pre")
+            GraphNode(id="decl://preexisting", kind=NODE_KIND_DECLARATION, label="pre")
         )
         fn = Function(name="f", mangled="_Z1fv", return_type="void")
         snap = _snapshot(functions=[fn])
@@ -236,12 +240,12 @@ class TestIdempotence:
         assert len([n for n in graph.nodes if n.kind == NODE_KIND_DECLARATION]) == 2
 
 
-class TestApproximateFallbackWhenEntityIdUnpopulated:
+class TestIdentityWithoutEntityId:
     """Every declaration constructed above has ``entity_id=None`` (the test
-    fixtures never set it) -- this whole test module is therefore already
-    exercising the approximate-fallback path exclusively; this class just
-    makes that coverage explicit and pins the collision-avoidance property
-    the fallback itself promises."""
+    fixtures never set it). Node ids come from the linker name / qualified
+    type name (``model.graph_entity_identity``), not from ``entity_id``, so
+    this pins the collision-avoidance properties that identity promises
+    without one."""
 
     def test_two_same_leaf_names_in_different_namespaces_do_not_collide(self) -> None:
         a = Function(name="ns_a::f", mangled="_ZN4ns_a1fEv", return_type="void")
@@ -256,16 +260,15 @@ class TestApproximateFallbackWhenEntityIdUnpopulated:
         self,
     ) -> None:
         # Legal C: `struct stat { ... };` alongside a function `int stat(...)`.
-        # Both share the qualified name "stat"; without a per-kind namespace
-        # in the approximate-fallback id, both would resolve to the same
-        # node id and silently merge into one (Codex review, PR #962).
+        # Both share the qualified name "stat"; the decl:// and type:// id
+        # spaces keep them apart (Codex review, PR #962).
         fn = Function(name="stat", mangled="stat", return_type="int")
         rec = RecordType(name="stat", kind="struct", qualified_name="stat")
         snap = _snapshot(functions=[fn], types=[rec])
         graph = SourceGraphSummary()
         build_public_surface_facts(snap, graph)
         decl_nodes = [n for n in graph.nodes if n.kind == NODE_KIND_DECLARATION]
-        type_nodes = [n for n in graph.nodes if n.kind == NODE_KIND_TYPE]
+        type_nodes = [n for n in graph.nodes if n.kind in TYPE_KINDS]
         assert len(decl_nodes) == 1
         assert len(type_nodes) == 1
         assert decl_nodes[0].id != type_nodes[0].id
@@ -297,26 +300,43 @@ class TestReferencedIdentifiersAttr:
         snap = _snapshot(types=[rec])
         graph = SourceGraphSummary()
         build_public_surface_facts(snap, graph)
-        type_node = next(n for n in graph.nodes if n.kind == NODE_KIND_TYPE)
+        type_node = next(n for n in graph.nodes if n.kind in TYPE_KINDS)
         assert {"Inner", "Base"} <= set(type_node.attrs["referenced_identifiers"])
 
-    def test_colliding_approximate_declarations_union_rather_than_drop(self) -> None:
-        # Two overloads sharing one demangled name with no resolved
-        # entity_id collide onto the same approximate declaration node id
-        # (this module's own documented fallback). Each references a
-        # different, otherwise-unrelated type; the merged node's
-        # referenced_identifiers must carry BOTH, not silently keep only
-        # whichever registration's fact won the generic cross-producer
-        # merge tie-break (the anti-hiding regression this precomputed
-        # union step exists to prevent).
+    def test_overloads_sharing_a_name_never_collide(self) -> None:
+        # Evidence-entity-model I1: two overloads sharing one demangled name
+        # are two entities (their linker names differ), so they are two
+        # nodes, each carrying only its own references. The retired
+        # approximate-name fallback used to collapse them.
         overload_a = Function(name="f", mangled="_Z1fi", return_type="Alpha*")
         overload_b = Function(name="f", mangled="_Z1fd", return_type="Beta*")
         snap = _snapshot(functions=[overload_a, overload_b])
         graph = SourceGraphSummary()
         build_public_surface_facts(snap, graph)
+        refs = {
+            n.id: n.attrs["referenced_identifiers"]
+            for n in graph.nodes
+            if n.kind == NODE_KIND_DECLARATION
+        }
+        assert refs == {"decl://_Z1fi": ["Alpha"], "decl://_Z1fd": ["Beta"]}
+
+    def test_same_identity_declarations_union_rather_than_drop(self) -> None:
+        # Two records of one entity (the same linker name, e.g. a declaration
+        # parsed through two headers) *are* one node. Each references a
+        # different type; the node's referenced_identifiers must carry BOTH,
+        # not silently keep only whichever registration's fact won the
+        # generic cross-producer merge tie-break (the anti-hiding regression
+        # this precomputed union step exists to prevent), and the node is
+        # flagged as a collision for a per-declaration reader.
+        first = Function(name="f", mangled="_Z1fv", return_type="Alpha*")
+        second = Function(name="f", mangled="_Z1fv", return_type="Beta*")
+        snap = _snapshot(functions=[first, second])
+        graph = SourceGraphSummary()
+        build_public_surface_facts(snap, graph)
         decl_nodes = [n for n in graph.nodes if n.kind == NODE_KIND_DECLARATION]
-        assert len(decl_nodes) == 1  # confirms the collision actually occurred
+        assert len(decl_nodes) == 1
         assert {"Alpha", "Beta"} <= set(decl_nodes[0].attrs["referenced_identifiers"])
+        assert decl_nodes[0].attrs["identifiers_collision"] is True
 
 
 def _rich_snapshot(**extra: object) -> AbiSnapshot:

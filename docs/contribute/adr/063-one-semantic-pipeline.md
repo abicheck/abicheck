@@ -457,6 +457,36 @@ constructor) are explicitly **not** persisted identity; `EntityId` is
 produced once, downstream of backend-specific extraction, not re-derived
 from a backend-specific string at comparison time.
 
+**Amendment (2026-09-24, accepted): graph node identity (evidence-entity-model
+Phase 1, invariant I1).** `EntityId` stays the identity primitive for diff
+matching and persisted declarations, but it is **not** the graph node key.
+Only a header-AST producer may construct an `EntityId`
+(`tests/test_entity_id_carrier.py`), and the other graph producers -- the
+AST replay passes (call/type/override/macro/template graphs), the L4
+source extractors, and later the L0 export and L1 debug joins -- never can.
+Keying graph nodes on it left the public-surface builder and the header
+graph with two ids for one declaration (29,109 duplicate `declaration`/
+`source_decl` pairs on oneDAL). One function,
+`abicheck/model/graph_entity_identity.py`, now mints every declaration and
+type node id: a declaration's **linker name** when any producer observed
+one (the mangled name, or the plain symbol for C linkage -- the
+`("mangled", ...)`/`("extern_c",)` tiers of `EntityId`, which it is in
+bijection with, and the one signal every evidence layer carries), else the
+source-qualified `qualified#signature` the AST/L4 producers already share;
+a type's qualified name. An entity with no such evidence -- the castxml
+synthetic ctor/dtor key this section already rules out as persisted
+identity, an unmangled overload, a qualified spelling two declarations
+share -- is an explicit `unresolved://` node, never merged. A second
+spelling of a proven-same entity (Mach-O decoration) is a persisted
+`SourceGraphSummary.identity_aliases` entry, never a second node. This
+changes persisted graph ids: snapshot schema v50 /
+`SourceGraphSummary.schema_version` 3, with a pre-v3/v3 graph pair
+reported as not compared (`compare/source_graph_identity_scheme.py`)
+because the old ids cannot be rewritten from evidence a stored graph
+carries. PDB/BTF/CTF function/variable identity (Phase 6's documented gap)
+stays `unresolved`. D5's "public-surface node and L5 node remain two
+separate, unreconciled nodes" limitation is closed by this amendment.
+
 ### D4 — `AnalysisPlan` resolved before any extraction runs
 
 Before a single collector or backend is invoked, an immutable `AnalysisPlan`

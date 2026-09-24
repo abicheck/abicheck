@@ -279,13 +279,13 @@ class TestClosureIgnoresSurfaceGraphEntirely:
         module's own (never-registered-here) facts could contribute. Because
         the closure walk never reads this attrs value at all, the resolved
         surface is unaffected either way."""
-        from abicheck.compare.surface_graph import node_id_for_type
+        from abicheck.compare.surface_graph import referenced_identifiers_by_node
         from abicheck.model.graph_facts import GraphNode
         from abicheck.model.graph_vocabulary import CONF_HIGH
 
         snap = _outer_inner_snapshot()
         outer = next(t for t in snap.types if t.name == "Outer")
-        poisoned_id = node_id_for_type(outer.entity_id, outer.name)
+        poisoned_id = referenced_identifiers_by_node(snap).node_id(outer)
         graph = SourceGraphSummary()
         graph.add_node(
             GraphNode(
