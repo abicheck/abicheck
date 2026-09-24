@@ -423,6 +423,10 @@ also_copy = [
     # all, so the test's real-vs-expected comparison sees an empty set
     # (Codex review, fresh evidence: mutmut PR lane failure).
     "tools",
+    # Committed perf receipts. `test_perf_receipt.py::TestCommittedReceiptsAre
+    # Honest` globs `reports/perf/*.json` and asserts at least one exists, so
+    # without the copy the stats run aborts on its vacuity guard.
+    "reports",
     # The three committed publication trees `scripts/gen_agent_skills.py`
     # generates from `skills-src/`. `test_gen_agent_skills.py` compares them
     # against it, so copying only the source reports every generated file as
