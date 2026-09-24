@@ -154,7 +154,7 @@ class TestGuard:
 #: safe. Everything else must call `memory_trace.gc_object_count`.
 _CENSUS_ALLOWLIST: dict[str, str] = {
     "abicheck/workflows/memory_trace.py": "the guard itself",
-    "scripts/benchmark_scaling.py": (
+    "scripts/perf_cache_reset.py": (
         "clears lru_caches before a traced run; heap census only when gc_census_is_safe(), else a namespace walk"
     ),
     "tests/test_gc_census_thread_safety.py": "the negative control above",
@@ -200,7 +200,7 @@ class TestNoUnguardedCensus:
         )
 
     def test_allowlisted_benchmark_still_checks_the_guard(self) -> None:
-        text = (_REPO / "scripts/benchmark_scaling.py").read_text(encoding="utf-8")
+        text = (_REPO / "scripts/perf_cache_reset.py").read_text(encoding="utf-8")
         assert "gc_census_is_safe()" in text
 
 
