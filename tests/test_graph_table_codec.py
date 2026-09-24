@@ -286,6 +286,8 @@ _CORRUPTIONS = {
     "short_fact_row": _set(("facts", 0), [0, 0]),
     "fact_index_out_of_range": _set(("nodes", "facts", 0), [0, 99]),
     "unknown_encoding": _set(("encoding",), "graph-table/99"),
+    "entity_with_no_facts": _set(("nodes", "facts", 0), []),
+    "columns_block_not_an_object": _set(("edges",), [[0]]),
 }
 
 

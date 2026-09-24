@@ -421,3 +421,47 @@ def test_a_flat_input_document_mutated_after_load_does_not_change_the_graph() ->
     graph = snap.surface_graph
     assert isinstance(graph, SourceGraphSummary)
     assert graph.has_node("header:///inc/a.h")
+
+
+class TestPendingGraphEdgeBranches:
+    """The defensive and racing branches of ``PendingGraph``/``LazyGraphField``."""
+
+    def test_a_reader_blocked_behind_a_finishing_decode_reuses_its_value(self) -> None:
+        import threading
+
+        from abicheck.model.lazy_graph import PendingGraph
+
+        calls: list[int] = []
+        cell = PendingGraph(lambda: calls.append(1) or "decoded")
+        out: list[object] = []
+        with cell._lock:  # the "other" decoder holds the lock ...
+            reader = threading.Thread(target=lambda: out.append(cell.resolve()))
+            reader.start()
+            while reader.is_alive() and not cell._lock.locked():
+                pass
+            cell._value, cell._done = "by-the-other-thread", True  # ... and finishes
+        reader.join(5)
+        assert out == ["by-the-other-thread"]
+        assert calls == []  # the blocked reader did not decode again
+
+    @pytest.mark.parametrize("op", ["resolve", "deepcopy"])
+    def test_a_pending_cell_without_a_decoder_raises_not_empty(self, op: str) -> None:
+        import copy
+
+        from abicheck.model.lazy_graph import PendingGraph
+
+        cell = PendingGraph(lambda: "x")
+        cell._decoder = None  # corrupted state: pending, nothing to run
+        with pytest.raises(RuntimeError, match="lost its decoder"):
+            cell.resolve() if op == "resolve" else copy.deepcopy(cell)
+
+    def test_descriptor_declared_in_a_class_body_names_itself(self) -> None:
+        from abicheck.model.lazy_graph import LazyGraphField, PendingGraph
+
+        class Holder:
+            graph = LazyGraphField("placeholder")
+
+        h = Holder()
+        h.__dict__["graph"] = PendingGraph(lambda: "g")
+        assert Holder.graph is None  # class access: the field default
+        assert h.graph == "g"  # __set_name__ rebound it to "graph"
