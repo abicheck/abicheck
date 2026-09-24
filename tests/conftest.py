@@ -538,7 +538,35 @@ def _materialize_generated_skill_trees() -> None:
         _write_if_stale()
 
 
+def _keep_mutmut_stats_out_of_child_processes() -> None:
+    """Stop a real subprocess inheriting mutmut's ``stats`` phase.
+
+    Under ``mutmut run``'s stats phase every mutated function records its hit
+    through ``mutmut.configuration.config()``, which locates ``[tool.mutmut]``
+    from the *current directory*. A test that runs ``python -m abicheck...``
+    in a temp directory inherits ``MUTANT_UNDER_TEST=stats``, finds no config
+    and dies ("Could not figure out where the code to mutate is"), aborting
+    the whole run -- which is why ``[tool.mutmut]`` had grown one
+    ``--ignore`` per such file. A child's hits never reach this process's
+    stats anyway, so the child loses nothing by running unmutated-stats.
+    The phase is pinned in mutmut's process-local copy first, so this process
+    keeps recording after the environment entry is removed.
+    """
+    if os.environ.get("MUTANT_UNDER_TEST") != "stats":
+        return
+    try:
+        from mutmut.mutation import trampoline
+    except ImportError:
+        return
+    setter = getattr(trampoline, "set_mutant_under_test", None)
+    if setter is None:
+        return  # an older mutmut with no process-local copy: leave it alone
+    setter("stats")
+    os.environ.pop("MUTANT_UNDER_TEST", None)
+
+
 def pytest_configure(config: pytest.Config) -> None:
+    _keep_mutmut_stats_out_of_child_processes()
     _materialize_generated_skill_trees()
     config.addinivalue_line(
         "markers",
