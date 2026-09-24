@@ -69,20 +69,7 @@ _EXPECTED = {
 
 _DECL = {"plain": ("foo", "foo"), "mangled": ("foo", "_Z3fooi")}
 
-_GAP = pytest.mark.xfail(
-    strict=True, reason="x86 PE decoration carries no alias record yet"
-)
-
-_CASES = [
-    pytest.param(
-        kind,
-        conv,
-        machine,
-        marks=_GAP if conv != "none" and _EXPECTED[(kind, conv)][machine] is _M else (),
-    )
-    for (kind, conv) in _EXPORT
-    for machine in _MACHINES
-]
+_CASES = [(kind, conv, machine) for (kind, conv) in _EXPORT for machine in _MACHINES]
 
 
 def _fn(name, mangled, *params):
@@ -144,7 +131,6 @@ def test_malformed_decoration_does_not_join_on_i386(export):
     assert j.export("pe", export).state is _U
 
 
-@_GAP
 def test_two_declarations_collapsing_onto_one_decorated_export_are_ambiguous():
     # Two unmangled `foo` declarations (distinct entities, both spelling `foo`)
     # both undecorate from `_foo@8`: the export is ambiguous, never guessed.
@@ -160,7 +146,6 @@ def test_two_declarations_collapsing_onto_one_decorated_export_are_ambiguous():
     assert len(rec.candidates) == 2
 
 
-@_GAP
 def test_one_declaration_with_two_decorated_exports_is_ambiguous():
     j = _join(_snap([_fn("foo", "foo")], ["_foo@8", "@foo@8"], _MACHINES["i386"]))
     assert j.declaration("decl://foo").state is JoinState.AMBIGUOUS
