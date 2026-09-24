@@ -76,11 +76,6 @@ MODES = ("public", "exports")
 #: Lookup-spelling tiers; every other node of a persisted graph is canonical.
 _SPELLING_PREFIXES = ("name:", "alias:")
 
-_UNIFIED = pytest.mark.xfail(
-    strict=True,
-    reason="replay graph still keys nodes by its own decl:/record: scheme",
-)
-
 
 def _canonical_nodes(snap: AbiSnapshot) -> set[str]:
     graph = build_type_graph(snap)
@@ -159,7 +154,6 @@ _COMBOS = [
 ]
 
 
-@_UNIFIED
 def test_canonical_replay_nodes_are_exactly_the_i1_ids() -> None:
     """Set equality over every combination, batched so one failure names
     every disagreeing shape at once."""
@@ -173,7 +167,6 @@ def test_canonical_replay_nodes_are_exactly_the_i1_ids() -> None:
     assert not bad, bad[:5]
 
 
-@_UNIFIED
 def test_entities_i1_keeps_apart_never_share_a_replay_node() -> None:
     """The ODR pair, the unrelated same-named typedef, and two unmangled
     overloads each stay distinct nodes; the I1-merged ``typedef struct A A``
@@ -192,7 +185,6 @@ def test_entities_i1_keeps_apart_never_share_a_replay_node() -> None:
     assert len(_canonical_nodes(overloads)) == 2
 
 
-@_UNIFIED
 def test_fresh_report_carries_the_new_encoding_version() -> None:
     from abicheck.contract_relevance_types import CONTRACT_EVIDENCE_SCHEMA_VERSION
     from abicheck.schemas import REPORT_SCHEMA_VERSION

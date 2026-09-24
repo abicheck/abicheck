@@ -46,35 +46,16 @@ Phase 4's own gate:
    different traversal order produce an equal, identically-serialized block
    (Phase 4's byte/order-independent round-trip gate).
 
-Node encoding for :class:`~abicheck.contract_evidence.TypeGraphSnapshot`
------------------------------------------------------------------------
+Node encoding
+-------------
 
-``TypeGraphSnapshot`` deliberately treats nodes as opaque strings, so this
-module owns the encoding. Every node is ``"<kind>:<identity>"``:
-
-===========  ============================================================
-``decl:``    one function/variable declaration, keyed by its canonical
-             linker identity (``mangled`` when recorded, else ``name``) --
-             refined with a signature discriminator for the one case where
-             that fallback names more than one declaration (see
-             :func:`_function_node_keys`)
-``record:``  one :class:`~abicheck.model.RecordType`, keyed by
-             ``qualified_name`` when the producer recorded one, else
-             ``name`` (see :func:`_type_identity`)
-``enum:``    one :class:`~abicheck.model.EnumType`, keyed the same way
-``typedef:`` one ``snapshot.typedefs`` alias, keyed by the alias
-``alias:``   a *lookup* spelling (demangled name, bare ``::`` tail, bare
-             leaf of a qualified type) that resolves to a canonical node
-             above -- one alias may resolve to *several*, which is what
-             makes it an alias rather than an identity
-===========  ============================================================
-
-and every edge is a resolved reference: ``decl: -> record:/enum:/typedef:``
-(signature types), ``record: -> ...`` (fields, bases, virtual bases),
-``typedef: -> ...`` (alias target), ``alias: -> ...`` (the canonical node a
-spelling resolves to). References are resolved *at collection time*, through
-the same name/bare-tail indexes :func:`~abicheck.surface._index_surface_types`
-builds for the live closure walk -- which is exactly why the block carries an
+Canonical nodes are the Phase 1 entity ids; ``name:``/``alias:`` spelling
+nodes point at them. The encoding, its schema-1 predecessor, and every
+reader of a persisted graph live in
+:mod:`abicheck.policy.contract_graph_encoding`. References are resolved
+*at collection time*, through the same name/bare-tail indexes
+:func:`~abicheck.surface._index_surface_types` builds for the live closure
+walk -- which is exactly why the block carries an
 ``identity_algorithm_version``: a future matcher resolving the same raw
 spellings differently produces a different graph from identical inputs, and
 D6 requires that to be tellable apart on replay rather than silently
@@ -126,7 +107,12 @@ from .contract_relevance_types import (
 from .diff_cxx_rules import owner_class_of
 from .export_surface import ExportSurface, observed_exports_by_platform
 from .model import AbiSnapshot, EnumType, Function, RecordType
+from .model.graph_entity_identity import SnapshotIdentities, snapshot_identities
 from .model.surface_facts import in_public_surface
+from .policy.contract_graph_encoding import (
+    alias_node as _alias_node,
+    name_node as _name_node,
+)
 from .policy.public_surface import (
     PublicSurface,
     _index_surface_types,
@@ -190,26 +176,6 @@ def evidence_record_id(provider: str, side: str) -> str:
 # --------------------------------------------------------------------------
 # Raw, policy-independent type graph.
 # --------------------------------------------------------------------------
-
-
-def _record_node(name: str) -> str:
-    return f"record:{name}"
-
-
-def _enum_node(name: str) -> str:
-    return f"enum:{name}"
-
-
-def _typedef_node(alias: str) -> str:
-    return f"typedef:{alias}"
-
-
-def _decl_node(key: str) -> str:
-    return f"decl:{key}"
-
-
-def _alias_node(key: str) -> str:
-    return f"alias:{key}"
 
 
 def _canonical_decl_key(name: str, mangled: str) -> str:
@@ -326,19 +292,31 @@ class _TypeIndex:
     resolves to *every* candidate, the same over-keeping
     ``_index_surface_types`` documents: never hide a real reference behind
     snapshot order.
+
+    Every node it answers is the entity's Phase 1 id from *ids* (see this
+    module's "Node encoding"), looked up per model *object* -- never
+    re-derived from a spelling, which is exactly what would merge two
+    records I1 keeps apart.
     """
 
-    def __init__(self, snap: AbiSnapshot) -> None:
+    def __init__(self, snap: AbiSnapshot, ids: SnapshotIdentities) -> None:
+        self._record_ids = {
+            id(r): i.node_id for r, i in zip(snap.types, ids.records, strict=True)
+        }
+        self._enum_ids = {
+            id(e): i.node_id for e, i in zip(snap.enums, ids.enums, strict=True)
+        }
+        self.typedef_ids = {alias: i.node_id for alias, i in ids.typedefs.items()}
         scratch = PublicSurface()
         record_by_name, enum_by_name = _index_surface_types(snap, scratch)
         self._nodes_by_spelling: dict[str, set[str]] = {}
         for name, records in record_by_name.items():
             self._nodes_by_spelling.setdefault(name, set()).update(
-                _record_node(_type_identity(r)) for r in records
+                self.record_node(r) for r in records
             )
         for name, enums in enum_by_name.items():
             self._nodes_by_spelling.setdefault(name, set()).update(
-                _enum_node(_type_identity(e)) for e in enums
+                self.enum_node(e) for e in enums
             )
         # `_index_surface_types` keys on `name` and its `::` tail only, so a
         # qualified identity is not a lookup key there. It has to be one here,
@@ -349,11 +327,11 @@ class _TypeIndex:
         # `_type_identifiers` derives on both sides.
         for rec in snap.types:
             self._nodes_by_spelling.setdefault(_type_identity(rec), set()).add(
-                _record_node(_type_identity(rec))
+                self.record_node(rec)
             )
         for en in snap.enums:
             self._nodes_by_spelling.setdefault(_type_identity(en), set()).add(
-                _enum_node(_type_identity(en))
+                self.enum_node(en)
             )
         # A typedef resolves by its **exact** key and nothing else, because
         # that is all `_walk_type_closure` does with one: `snap.typedefs.get(
@@ -364,7 +342,9 @@ class _TypeIndex:
         # `Secret` layout change the live evaluator proved out of contract
         # re-evaluated as `IN_CONTRACT` (Codex review, fresh evidence).
         for alias in snap.typedefs:
-            self._nodes_by_spelling.setdefault(alias, set()).add(_typedef_node(alias))
+            self._nodes_by_spelling.setdefault(alias, set()).add(
+                self.typedef_ids[alias]
+            )
         self.ambiguous_type_names = set(scratch.ambiguous_type_names)
         self.all_types = set(scratch.all_types)
         self._owner_seed_nodes = self._build_owner_seed_index(
@@ -410,7 +390,7 @@ class _TypeIndex:
         }
         out: dict[str, set[str]] = {}
         for rec in snap.types:
-            node = _record_node(_type_identity(rec))
+            node = self.record_node(rec)
             leaf_only = bool(rec.qualified_name) and rec.qualified_name != rec.name
             if not leaf_only and rec.name not in ambiguous:
                 out.setdefault(rec.name, set()).update(self.resolve(rec.name) or {node})
@@ -424,6 +404,12 @@ class _TypeIndex:
                     self.resolve(rec.qualified_name) | {node}
                 )
         return out
+
+    def record_node(self, rec: RecordType) -> str:
+        return self._record_ids[id(rec)]
+
+    def enum_node(self, en: EnumType) -> str:
+        return self._enum_ids[id(en)]
 
     def resolve(self, spelling: str) -> set[str]:
         return set(self._nodes_by_spelling.get(spelling, ()))
@@ -448,7 +434,9 @@ class _TypeIndex:
         return out
 
 
-def build_type_graph(snap: AbiSnapshot) -> TypeGraphSnapshot:
+def build_type_graph(
+    snap: AbiSnapshot, ids: SnapshotIdentities | None = None
+) -> TypeGraphSnapshot:
     """The raw record/enum/typedef/declaration graph of *snap*.
 
     Policy-independent by construction: every declaration is walked, whatever
@@ -456,8 +444,12 @@ def build_type_graph(snap: AbiSnapshot) -> TypeGraphSnapshot:
     a *domain* then treats as roots is the per-provider ``declarations`` list,
     not this graph -- which is why one graph serves both domains and a later
     re-evaluation under a third.
+
+    *ids* is ``snapshot_identities(snap)``, taken from the caller when it has
+    already computed it for the same snapshot.
     """
-    index = _TypeIndex(snap)
+    ids = ids if ids is not None else snapshot_identities(snap)
+    index = _TypeIndex(snap, ids)
     nodes: set[str] = set()
     edges: set[tuple[str, str]] = set()
 
@@ -466,9 +458,16 @@ def build_type_graph(snap: AbiSnapshot) -> TypeGraphSnapshot:
             nodes.add(target)
             edges.add((src, target))
 
-    for rec in snap.types:
-        node = _record_node(_type_identity(rec))
+    def canonical(node: str, spelling: str) -> None:
         nodes.add(node)
+        if spelling:
+            name = _name_node(spelling)
+            nodes.add(name)
+            edges.add((name, node))
+
+    for rec in snap.types:
+        node = index.record_node(rec)
+        canonical(node, _type_identity(rec))
         for fld in rec.fields:
             link(node, index.resolve_type_string(fld.type))
         for base in [*rec.resolved_bases(), *rec.resolved_virtual_bases()]:
@@ -476,29 +475,35 @@ def build_type_graph(snap: AbiSnapshot) -> TypeGraphSnapshot:
         _link_type_aliases(rec, node, nodes, edges)
 
     for en in snap.enums:
-        node = _enum_node(_type_identity(en))
-        nodes.add(node)
+        node = index.enum_node(en)
+        canonical(node, _type_identity(en))
         _link_type_aliases(en, node, nodes, edges)
 
     for alias, target in snap.typedefs.items():
-        node = _typedef_node(alias)
-        nodes.add(node)
-        link(node, index.resolve_type_string(target))
+        node = index.typedef_ids[alias]
+        canonical(node, alias)
+        # `typedef struct Foo Foo;` is one I1 entity with its tag: the
+        # target then resolves to this very node, and a self-edge says
+        # nothing a closure walk could use.
+        link(node, index.resolve_type_string(target) - {node})
 
-    for fn, key in zip(snap.functions, _function_node_keys(snap), strict=True):
-        node = _decl_node(key)
-        nodes.add(node)
+    for fn, key, ident in zip(
+        snap.functions, _function_node_keys(snap), ids.functions, strict=True
+    ):
+        node = ident.node_id
+        canonical(node, key)
         link(node, index.resolve_type_string(fn.return_type))
         for param in fn.params:
             link(node, index.resolve_type_string(getattr(param, "type", None)))
         _link_owner_class(fn, node, index, link)
-        _link_decl_aliases(fn.name, fn.mangled, node, nodes, edges)
+        _link_decl_aliases(fn.name, fn.mangled, key, node, nodes, edges)
 
-    for var in snap.variables:
-        node = _decl_node(_canonical_decl_key(var.name, var.mangled))
-        nodes.add(node)
+    for var, ident in zip(snap.variables, ids.variables, strict=True):
+        node = ident.node_id
+        key = _canonical_decl_key(var.name, var.mangled)
+        canonical(node, key)
         link(node, index.resolve_type_string(var.type))
-        _link_decl_aliases(var.name, var.mangled, node, nodes, edges)
+        _link_decl_aliases(var.name, var.mangled, key, node, nodes, edges)
 
     return TypeGraphSnapshot(nodes=tuple(nodes), edges=tuple(edges))
 
@@ -555,6 +560,7 @@ def _link_owner_class(
 def _link_decl_aliases(
     name: str,
     mangled: str,
+    exact: str,
     node: str,
     nodes: set[str],
     edges: set[tuple[str, str]],
@@ -568,9 +574,8 @@ def _link_decl_aliases(
     than the live one would silently lose roots and report findings out of a
     contract they are actually in.
     """
-    canonical = node.partition(":")[2]
     for key in _symbol_keys(name, mangled):
-        if key == canonical:
+        if key == exact:
             continue
         alias = _alias_node(key)
         nodes.add(alias)
@@ -635,27 +640,32 @@ def _domain_identity(snap: AbiSnapshot) -> str:
     return f"{snap.library}@{snap.version}"
 
 
-def _public_header_declarations(snap: AbiSnapshot, surf: PublicSurface) -> list[str]:
+def _public_header_declarations(
+    snap: AbiSnapshot, surf: PublicSurface, ids: SnapshotIdentities | None = None
+) -> list[str]:
     """Canonical node ids of the header provider's observed roots.
 
     Roots are the public-surface declarations
     :func:`~abicheck.surface._seed_public_roots` seeds the live closure from,
-    recorded as ``decl:`` node ids so a replay can start the same walk from
+    recorded as their Phase 1 node ids so a replay can start the same walk from
     the persisted graph. Public *types* are deliberately not listed: they are
     the closure's *result*, not its roots, and Section 5.1 keeps the
     mode-dependent closure in the decision receipt.
     """
+    ids = ids if ids is not None else snapshot_identities(snap)
     out: list[str] = []
-    for fn, key in zip(snap.functions, _function_node_keys(snap), strict=True):
+    for fn, ident in zip(snap.functions, ids.functions, strict=True):
         if in_public_surface(fn):
-            out.append(_decl_node(key))
-    for var in snap.variables:
+            out.append(ident.node_id)
+    for var, vident in zip(snap.variables, ids.variables, strict=True):
         if in_public_surface(var):
-            out.append(_decl_node(_canonical_decl_key(var.name, var.mangled)))
+            out.append(vident.node_id)
     return out
 
 
-def _export_table_declarations(snap: AbiSnapshot, exports: ExportSurface) -> list[str]:
+def _export_table_declarations(
+    snap: AbiSnapshot, exports: ExportSurface, ids: SnapshotIdentities | None = None
+) -> list[str]:
     """Canonical node ids of the declarations the export table rooted.
 
     Derived by asking which declarations
@@ -672,20 +682,21 @@ def _export_table_declarations(snap: AbiSnapshot, exports: ExportSurface) -> lis
     provably out of (Codex review, fresh evidence -- the identical trap
     ``export_surface._unresolved_type_edges`` already documents avoiding).
     """
+    ids = ids if ids is not None else snapshot_identities(snap)
     out: list[str] = []
-    for fn, key in zip(snap.functions, _function_node_keys(snap), strict=True):
+    for fn, ident in zip(snap.functions, ids.functions, strict=True):
         # Rootness is decided by *linker* identity (what the export table
-        # matched), while the node recorded is the graph's own key for that
-        # declaration -- the two differ only for an unmangled overload, where
-        # every member of the group shares one linker identity and so is
-        # rooted or not as a group, exactly as live roots them.
+        # matched), while the node recorded is the declaration's own Phase 1
+        # id -- the two differ for an unmangled overload, where every member
+        # of the group shares one linker identity and so is rooted or not as
+        # a group, exactly as live roots them.
         identity = _canonical_decl_key(fn.name, fn.mangled)
         if identity and identity in exports.root_identities:
-            out.append(_decl_node(key))
-    for var in snap.variables:
+            out.append(ident.node_id)
+    for var, vident in zip(snap.variables, ids.variables, strict=True):
         identity = _canonical_decl_key(var.name, var.mangled)
         if identity and identity in exports.root_identities:
-            out.append(_decl_node(identity))
+            out.append(vident.node_id)
     return out
 
 
@@ -779,9 +790,10 @@ def public_header_evidence(
     reads it from here for every domain, which is correct precisely because
     the graph is policy-independent.
     """
-    declarations = _public_header_declarations(snap, surf)
+    ids = snapshot_identities(snap)
+    declarations = _public_header_declarations(snap, surf, ids)
     status, completeness, reason = _public_header_status(surf)
-    graph = build_type_graph(snap)
+    graph = build_type_graph(snap, ids)
     record = EvidenceSearchRecord(
         id=evidence_record_id(PROVIDER_PUBLIC_HEADER, side),
         provider=PROVIDER_PUBLIC_HEADER,
@@ -971,110 +983,6 @@ def collect_contract_evidence(
                 )
             )
     return ContractEvidenceBlock(providers=tuple(entries))
-
-
-# --------------------------------------------------------------------------
-# Reading the persisted graph back (Phase 4's replay/re-evaluation).
-# --------------------------------------------------------------------------
-
-
-def resolve_graph_node(graph: TypeGraphSnapshot, spelling: str) -> set[str]:
-    """Canonical nodes a *spelling* names in an already-persisted graph.
-
-    Tries the three encodings a finding can name an entity by -- a
-    declaration key, a type name, and a lookup alias of either -- and follows
-    an ``alias:`` node's own edges to the canonical node(s) it stands for. A
-    spelling naming nothing returns an empty set, never a guess: the caller
-    (:mod:`abicheck.contract_replay`) reports that as unresolved rather than
-    proving an entity out of a contract whose graph never knew it.
-    """
-    out: set[str] = set()
-    nodes = set(graph.nodes)
-    for candidate in (
-        _decl_node(spelling),
-        _record_node(spelling),
-        _enum_node(spelling),
-        _typedef_node(spelling),
-    ):
-        if candidate in nodes:
-            out.add(candidate)
-    alias = _alias_node(spelling)
-    if alias in nodes:
-        out |= {dst for src, dst in graph.edges if src == alias}
-    return out
-
-
-def graph_node_index(
-    graph: TypeGraphSnapshot, *, follow_aliases: bool = True
-) -> dict[str, set[str]]:
-    """Spelling -> canonical nodes, built once for a whole persisted graph.
-
-    :func:`resolve_graph_node` answers one spelling by rescanning every node
-    and edge, which is O(nodes + edges) per call -- fine for a one-off lookup,
-    but a re-evaluation asks it once per spelling per finding over a graph
-    this module documents as whole-snapshot (CodeRabbit review). A caller
-    resolving many spellings against one graph builds this index instead; the
-    two agree by construction, since this is the same resolution rule stated
-    as a forward map rather than a search.
-
-    *follow_aliases* is what a caller whose own live matching is **exact**
-    turns off. ``--post-manifest``'s committed-export allowlist is matched
-    against ``Change.symbol`` verbatim by the live evaluator, so resolving
-    its entries through the alias tier here would root a *different*
-    declaration than the run did -- an unexported ``ns::foo`` carries the
-    bare alias ``foo`` that an exported C ``foo`` also owns (Codex review,
-    fresh evidence). Alias-following stays on for every other caller,
-    including a finding's own spelling, where recognizing fewer encodings
-    than the live lookup would silently lose roots.
-    """
-    index: dict[str, set[str]] = {}
-    alias_edges: dict[str, set[str]] = {}
-    known = set(graph.nodes)
-    for src, dst in graph.edges:
-        # `resolve_graph_node` follows an alias edge only when the `alias:`
-        # node itself is present, so this index must too: a hand-authored or
-        # truncated graph carrying an edge whose source node was dropped would
-        # otherwise resolve here and not there, and the two are documented to
-        # agree by construction (CodeRabbit review).
-        if src.startswith("alias:") and src in known:
-            alias_edges.setdefault(src, set()).add(dst)
-    for node in graph.nodes:
-        kind, _, identity = node.partition(":")
-        if kind == "alias" or not identity:
-            continue
-        index.setdefault(identity, set()).add(node)
-    if follow_aliases:
-        for alias, targets in alias_edges.items():
-            index.setdefault(alias.split(":", 1)[1], set()).update(targets)
-    return index
-
-
-def closure_from_graph(
-    graph: TypeGraphSnapshot, roots: Iterable[str]
-) -> frozenset[str]:
-    """Every node reachable from *roots* over *graph*'s edges, roots included.
-
-    The mode/root-dependent closure Section 5.1 keeps in the decision receipt
-    rather than in the observed evidence -- computed here from the persisted
-    graph alone, so a replay reproduces it without re-reading a binary or a
-    header (Section 5.1: "no silent live-file re-probe changes a replayed
-    verdict"). ``alias:`` edges are followed like any other, so a root named
-    by an alias still reaches its canonical node's own closure.
-    """
-    adjacency: dict[str, set[str]] = {}
-    for src, dst in graph.edges:
-        adjacency.setdefault(src, set()).add(dst)
-    known = set(graph.nodes)
-    seen: set[str] = set()
-    stack = [r for r in roots if r in known]
-    empty: set[str] = set()
-    while stack:
-        node = stack.pop()
-        if node in seen:
-            continue
-        seen.add(node)
-        stack.extend(adjacency.get(node, empty) - seen)
-    return frozenset(seen)
 
 
 # --------------------------------------------------------------------------

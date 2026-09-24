@@ -1000,7 +1000,22 @@ _ARTIFACT_NAMES = frozenset(
 #:        summary *does* now count only the observed subset and states the
 #:        inventory in its own ``; hygiene: ...`` clause -- text output,
 #:        not a machine contract.
-REPORT_SCHEMA_VERSION = "5.3"
+#: 5.4 -- ``contract_context.contract_evidence`` (``compare --contract``
+#:        only) moves to its own ``schema_version`` 2: the persisted replay
+#:        type graph's canonical nodes and every provider's ``declarations``
+#:        are now the Phase 1 entity node ids (``decl://<linker name>``,
+#:        ``type://<qualified name>``, explicit ``unresolved://...`` ids for
+#:        an entity with no resolvable identity), the same ids the L2 header
+#:        and public-surface graphs use, with a ``name:<spelling>`` exact
+#:        tier beside ``alias:``. ``decision_receipt.evaluated_contract_roots``/
+#:        ``evaluated_type_closure`` carry the same ids. Shape-compatible
+#:        (every field is still a string list) but the node *values* change,
+#:        so a consumer parsing schema-1 ``decl:``/``record:`` keys must
+#:        check ``contract_evidence.schema_version``; ``abicheck``'s own
+#:        replay reads both. Entities the old keys merged (two ODR-distinct
+#:        records sharing one name, identical unmangled overloads) are now
+#:        separate nodes, with unchanged replay decisions.
+REPORT_SCHEMA_VERSION = "5.4"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

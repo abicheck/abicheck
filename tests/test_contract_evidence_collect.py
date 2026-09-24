@@ -27,12 +27,9 @@ from abicheck.contract_evidence_collect import (
     PROVIDER_POST_MANIFEST,
     PROVIDER_PUBLIC_HEADER,
     build_type_graph,
-    closure_from_graph,
     collect_contract_evidence,
     evidence_record_id,
     evidence_refs_for_reason,
-    graph_node_index,
-    resolve_graph_node,
     validate_decision_evidence,
 )
 from abicheck.contract_relevance_types import (
@@ -53,7 +50,32 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.model.graph_entity_identity import (
+    declaration_identity,
+    unresolved_identity,
+)
+from abicheck.policy.contract_graph_encoding import (
+    closure_from_graph,
+    graph_node_index,
+    resolve_graph_node,
+)
 from abicheck.surface import compute_public_surface
+
+
+def _exact(graph: TypeGraphSnapshot, spelling: str) -> set[str]:
+    """The canonical nodes whose own exact spelling is *spelling*."""
+    return set(graph_node_index(graph, follow_aliases=False).get(spelling, ()))
+
+
+def _decl_id(spelling: str) -> str:
+    """The Phase 1 node id of a declaration whose recorded ``mangled`` is
+    *spelling* -- what the replay graph keys it by since contract_evidence
+    schema 2 (a non-linker spelling such as ``Foo::bar`` is an explicit
+    ``unresolved://`` id keyed on it)."""
+    ident = declaration_identity(linker_name=spelling)
+    if ident.resolved:
+        return ident.node_id
+    return unresolved_identity("decl", spelling).node_id
 
 
 def _snap(
@@ -98,9 +120,9 @@ class TestTypeGraph:
             types=[RecordType(name="Widget", kind="struct", fields=[])],
         )
         graph = build_type_graph(snap)
-        assert "decl:api" in graph.nodes
-        assert "record:Widget" in graph.nodes
-        assert ("decl:api", "record:Widget") in graph.edges
+        assert _decl_id("api") in graph.nodes
+        assert "type://Widget" in graph.nodes
+        assert (_decl_id("api"), "type://Widget") in graph.edges
 
     def test_field_and_base_edges_are_followed_transitively(self) -> None:
         snap = _snap(
@@ -120,8 +142,8 @@ class TestTypeGraph:
                 RecordType(name="Root", kind="struct", fields=[]),
             ],
         )
-        closure = closure_from_graph(build_type_graph(snap), ["decl:api"])
-        assert {"record:Outer", "record:Inner", "record:Root"} <= closure
+        closure = closure_from_graph(build_type_graph(snap), [_decl_id("api")])
+        assert {"type://Outer", "type://Inner", "type://Root"} <= closure
 
     def test_typedef_target_is_an_edge(self) -> None:
         snap = _snap(
@@ -129,9 +151,9 @@ class TestTypeGraph:
             types=[RecordType(name="Real", kind="struct", fields=[])],
             typedefs={"Alias": "Real"},
         )
-        closure = closure_from_graph(build_type_graph(snap), ["decl:api"])
-        assert "typedef:Alias" in closure
-        assert "record:Real" in closure
+        closure = closure_from_graph(build_type_graph(snap), [_decl_id("api")])
+        assert "type://Alias" in closure
+        assert "type://Real" in closure
 
     def test_unreferenced_type_is_outside_the_closure(self) -> None:
         snap = _snap(
@@ -142,9 +164,9 @@ class TestTypeGraph:
             ],
         )
         graph = build_type_graph(snap)
-        closure = closure_from_graph(graph, ["decl:api"])
-        assert "record:Orphan" in graph.nodes  # observed...
-        assert "record:Orphan" not in closure  # ...but not reachable
+        closure = closure_from_graph(graph, [_decl_id("api")])
+        assert "type://Orphan" in graph.nodes  # observed...
+        assert "type://Orphan" not in closure  # ...but not reachable
 
     def test_graph_is_policy_independent(self) -> None:
         """A private declaration is still observed -- the graph is raw facts.
@@ -165,7 +187,7 @@ class TestTypeGraph:
             types=[RecordType(name="Secret", kind="struct", fields=[])],
         )
         graph = build_type_graph(snap)
-        assert ("decl:internal", "record:Secret") in graph.edges
+        assert (_decl_id("internal"), "type://Secret") in graph.edges
 
     def test_graph_is_order_independent(self) -> None:
         types = [
@@ -179,9 +201,9 @@ class TestTypeGraph:
     def test_alias_spellings_resolve_to_the_canonical_node(self) -> None:
         snap = _snap(functions=[_public_fn("ns::api")])
         graph = build_type_graph(snap)
-        assert resolve_graph_node(graph, "ns::api") == {"decl:ns::api"}
+        assert resolve_graph_node(graph, "ns::api") == {_decl_id("ns::api")}
         # The bare tail is an alias of the same declaration.
-        assert resolve_graph_node(graph, "api") == {"decl:ns::api"}
+        assert resolve_graph_node(graph, "api") == {_decl_id("ns::api")}
 
     def test_unknown_spelling_resolves_to_nothing(self) -> None:
         graph = build_type_graph(_snap(functions=[_public_fn("api")]))
@@ -208,11 +230,11 @@ class TestTypeGraph:
             ],
         )
         graph = build_type_graph(snap)
-        assert ("decl:Foo::bar", "record:Foo") in graph.edges
-        closure = closure_from_graph(graph, ["decl:Foo::bar"])
+        assert (_decl_id("Foo::bar"), "type://Foo") in graph.edges
+        closure = closure_from_graph(graph, [_decl_id("Foo::bar")])
         # ...and the owner's own field closure comes with it, matching what
         # `_walk_type_closure` reaches from the same seed.
-        assert {"record:Foo", "record:Payload"} <= closure
+        assert {"type://Foo", "type://Payload"} <= closure
 
     def test_owner_edges_require_an_exact_record_identity(self) -> None:
         """A namespace function does not link to a same-tailed record.
@@ -230,8 +252,10 @@ class TestTypeGraph:
             types=[RecordType(name="other::api", kind="struct", fields=[])],
         )
         graph = build_type_graph(snap)
-        assert ("decl:api::run", "record:other::api") not in graph.edges
-        assert "record:other::api" not in closure_from_graph(graph, ["decl:api::run"])
+        assert (_decl_id("api::run"), "type://other::api") not in graph.edges
+        assert "type://other::api" not in closure_from_graph(
+            graph, [_decl_id("api::run")]
+        )
 
     def test_unmangled_overloads_do_not_share_one_node(self) -> None:
         """A display name is not a declaration identity.
@@ -264,13 +288,14 @@ class TestTypeGraph:
             types=[RecordType(name="Secret", kind="struct", fields=[])],
         )
         graph = build_type_graph(snap)
-        public_root, private_root = (
-            "decl:over()->int",
-            "decl:over(Secret *)->int",
-        )
+        # Each overload is its own Phase 1 node; its exact spelling is the
+        # signature-refined fallback key.
+        (public_root,) = _exact(graph, "over()->int")
+        (private_root,) = _exact(graph, "over(Secret *)->int")
+        assert public_root != private_root
         assert {public_root, private_root} <= set(graph.nodes)
-        assert "record:Secret" not in closure_from_graph(graph, [public_root])
-        assert "record:Secret" in closure_from_graph(graph, [private_root])
+        assert "type://Secret" not in closure_from_graph(graph, [public_root])
+        assert "type://Secret" in closure_from_graph(graph, [private_root])
         # The shared display name still resolves -- to both, since with no
         # linker identity recorded it genuinely names either one.
         assert resolve_graph_node(graph, "over") == {public_root, private_root}
@@ -305,9 +330,10 @@ class TestTypeGraph:
             types=[RecordType(name="Secret", kind="struct", fields=[])],
         )
         graph = build_type_graph(snap)
-        assert "decl:foo" in graph.nodes  # the one with a linker identity
-        assert "record:Secret" not in closure_from_graph(graph, ["decl:foo"])
-        assert "decl:foo(Secret *)->int" in graph.nodes
+        assert _decl_id("foo") in graph.nodes  # the one with a linker identity
+        assert "type://Secret" not in closure_from_graph(graph, [_decl_id("foo")])
+        (private,) = _exact(graph, "foo(Secret *)->int")
+        assert private.startswith("unresolved://decl/")
 
     def test_a_lone_unmangled_declaration_keeps_its_plain_name(self) -> None:
         """The discriminator is a tie-break, not a new encoding.
@@ -331,14 +357,17 @@ class TestTypeGraph:
             types=[RecordType(name="Secret", kind="struct", fields=[])],
         )
         graph = build_type_graph(snap)
-        assert "decl:solo" in graph.nodes
-        assert resolve_graph_node(graph, "solo") == {"decl:solo"}
+        (node,) = _exact(graph, "solo")
+        assert resolve_graph_node(graph, "solo") == {node}
 
-    def test_identical_unmangled_declarations_still_share_a_node(self) -> None:
-        """Merging is only wrong when it merges *different* declarations.
-
-        Two entries agreeing on name, parameters and return type reach the
-        same types and the same owner class, so one node loses nothing.
+    def test_identical_unmangled_declarations_are_two_nodes_one_spelling(
+        self,
+    ) -> None:
+        """Phase 1 keeps two unmangled declarations apart (I1: no merge
+        without shared identity evidence), so the replay graph does too --
+        but both answer to the one exact spelling ``dup`` and reach the same
+        types, so every lookup and closure is what the merged node gave
+        (schema 1 merged them into one ``decl:dup``).
         """
 
         def _decl() -> Function:
@@ -357,8 +386,11 @@ class TestTypeGraph:
                 types=[RecordType(name="Secret", kind="struct", fields=[])],
             )
         )
-        assert "decl:dup" in graph.nodes
-        assert [n for n in graph.nodes if n.startswith("decl:")] == ["decl:dup"]
+        nodes = _exact(graph, "dup")
+        assert len(nodes) == 2
+        assert all(n.startswith("unresolved://decl/") for n in nodes)
+        for node in nodes:
+            assert "type://Secret" in closure_from_graph(graph, [node])
 
     def test_a_qualified_record_identity_seeds_its_owner_edge(self) -> None:
         """``owner_class_of`` answers with the *qualified* identity.
@@ -384,12 +416,12 @@ class TestTypeGraph:
             ],
         )
         graph = build_type_graph(snap)
-        assert ("decl:ns::Widget::draw", "record:ns::Widget") in graph.edges
+        assert (_decl_id("ns::Widget::draw"), "type://ns::Widget") in graph.edges
         # The record is keyed by its qualified identity; the bare leaf two
         # namespaces could share is an alias of it, not its identity.
-        assert ("alias:Widget", "record:ns::Widget") in graph.edges
-        closure = closure_from_graph(graph, ["decl:ns::Widget::draw"])
-        assert {"record:ns::Widget", "record:Payload"} <= closure
+        assert ("alias:Widget", "type://ns::Widget") in graph.edges
+        closure = closure_from_graph(graph, [_decl_id("ns::Widget::draw")])
+        assert {"type://ns::Widget", "type://Payload"} <= closure
 
     def test_a_qualified_typedef_resolves_only_by_its_exact_key(self) -> None:
         """A typedef has no bare-tail spelling, unlike a record or an enum.
@@ -410,18 +442,18 @@ class TestTypeGraph:
         # would pass just as well if the typedef node *were* reached and only
         # its own edge to the target were broken -- a different bug with the
         # same symptom (CodeRabbit review).
-        bare_closure = closure_from_graph(build_type_graph(snap), ["decl:api"])
-        assert "typedef:ns::Alias" not in bare_closure
-        assert "record:Secret" not in bare_closure
+        bare_closure = closure_from_graph(build_type_graph(snap), [_decl_id("api")])
+        assert "type://ns::Alias" not in bare_closure
+        assert "type://Secret" not in bare_closure
         # The exact key still resolves, which is what live matches on.
         exact = _snap(
             functions=[_public_fn("api", ret="ns::Alias")],
             typedefs={"ns::Alias": "Secret"},
             types=[RecordType(name="Secret", kind="struct", fields=[])],
         )
-        exact_closure = closure_from_graph(build_type_graph(exact), ["decl:api"])
-        assert "typedef:ns::Alias" in exact_closure
-        assert "record:Secret" in exact_closure
+        exact_closure = closure_from_graph(build_type_graph(exact), [_decl_id("api")])
+        assert "type://ns::Alias" in exact_closure
+        assert "type://Secret" in exact_closure
 
     def test_an_enum_is_keyed_and_aliased_like_a_record(self) -> None:
         """``enum:`` is a first-class node kind, not a record afterthought.
@@ -442,12 +474,12 @@ class TestTypeGraph:
             ],
         )
         graph = build_type_graph(snap)
-        assert "enum:ns::Mode" in graph.nodes
+        assert "type://ns::Mode" in graph.nodes
         # Keyed by the qualified identity, with the bare leaf as an alias --
         # exactly the record rule.
-        assert ("alias:Mode", "enum:ns::Mode") in graph.edges
-        assert resolve_graph_node(graph, "Mode") == {"enum:ns::Mode"}
-        assert "enum:ns::Mode" in closure_from_graph(graph, ["decl:api"])
+        assert ("alias:Mode", "type://ns::Mode") in graph.edges
+        assert resolve_graph_node(graph, "Mode") == {"type://ns::Mode"}
+        assert "type://ns::Mode" in closure_from_graph(graph, [_decl_id("api")])
 
     def test_a_record_and_an_enum_sharing_a_leaf_both_resolve(self) -> None:
         """Ambiguity spans the two kinds, which is why they share a set.
@@ -462,8 +494,8 @@ class TestTypeGraph:
         )
         graph = build_type_graph(snap)
         assert resolve_graph_node(graph, "Mode") == {
-            "record:ns1::Mode",
-            "enum:ns2::Mode",
+            "type://ns1::Mode",
+            "type://ns2::Mode",
         }
         surf = compute_public_surface(snap)
         assert "Mode" in surf.ambiguous_type_names
@@ -503,15 +535,15 @@ class TestTypeGraph:
             ],
         )
         graph = build_type_graph(snap)
-        assert {"record:ns1::Foo", "record:ns2::Foo"} <= set(graph.nodes)
-        one = closure_from_graph(graph, ["record:ns1::Foo"])
-        assert "record:Public" in one
-        assert "record:Secret" not in one
+        assert {"type://ns1::Foo", "type://ns2::Foo"} <= set(graph.nodes)
+        one = closure_from_graph(graph, ["type://ns1::Foo"])
+        assert "type://Public" in one
+        assert "type://Secret" not in one
         # The shared leaf is an alias of *both* -- which is what makes a
         # finding that names it ambiguous rather than resolvable.
         assert resolve_graph_node(graph, "Foo") == {
-            "record:ns1::Foo",
-            "record:ns2::Foo",
+            "type://ns1::Foo",
+            "type://ns2::Foo",
         }
 
     def test_a_leaf_only_bare_name_still_seeds_no_owner(self) -> None:
@@ -534,17 +566,17 @@ class TestTypeGraph:
                 RecordType(name="Secret", kind="struct", fields=[]),
             ],
         )
-        closure = closure_from_graph(build_type_graph(snap), ["decl:api::run"])
-        assert "record:api" not in closure
-        assert "record:Secret" not in closure
+        closure = closure_from_graph(build_type_graph(snap), [_decl_id("api::run")])
+        assert "type://api" not in closure
+        assert "type://Secret" not in closure
 
     def test_free_function_seeds_no_owner(self) -> None:
         snap = _snap(
             functions=[_public_fn("api")],
             types=[RecordType(name="Unrelated", kind="struct", fields=[])],
         )
-        closure = closure_from_graph(build_type_graph(snap), ["decl:api"])
-        assert "record:Unrelated" not in closure
+        closure = closure_from_graph(build_type_graph(snap), [_decl_id("api")])
+        assert "type://Unrelated" not in closure
 
 
 class TestGraphNodeIndex:
@@ -567,8 +599,8 @@ class TestGraphNodeIndex:
         documented to agree by construction (CodeRabbit review).
         """
         graph = TypeGraphSnapshot(
-            nodes=("decl:ns::api",),
-            edges=(("alias:api", "decl:ns::api"),),
+            nodes=(_decl_id("ns::api"),),
+            edges=(("alias:api", _decl_id("ns::api")),),
         )
         assert resolve_graph_node(graph, "api") == set()
         assert graph_node_index(graph).get("api") is None
@@ -585,7 +617,7 @@ class TestProviderLedger:
             for e in block.providers
             if e.record.provider == PROVIDER_PUBLIC_HEADER and e.record.side == "old"
         )
-        assert entry.declarations == ("decl:api",)
+        assert entry.declarations == (_decl_id("api"),)
         assert entry.record.status is EvidenceProviderStatus.AVAILABLE
         assert entry.record.id == evidence_record_id(PROVIDER_PUBLIC_HEADER, "old")
 
@@ -634,7 +666,7 @@ class TestProviderLedger:
             for e in block.providers
             if e.record.provider == PROVIDER_EXPORT_TABLE and e.record.side == "new"
         )
-        assert entry.declarations == ("decl:api",)
+        assert entry.declarations == (_decl_id("api"),)
         assert entry.manifests == ("elf",)
         assert entry.record.domain_kind == "exports"
 
@@ -673,7 +705,7 @@ class TestProviderLedger:
             for e in block.providers
             if e.record.provider == PROVIDER_EXPORT_TABLE and e.record.side == "old"
         )
-        assert entry.declarations == ("decl:foo",)
+        assert entry.declarations == (_decl_id("foo"),)
 
     def test_export_provider_reports_which_guard_failed(self) -> None:
         """An export no declaration accounts for is reported by name.
@@ -927,7 +959,10 @@ class TestOverlayAttribution:
             collect_contract_evidence(old, old, surf, surf),
             mode=ContractMode.PUBLIC,
         ).decision_receipt
-        assert set(receipt.evaluated_contract_roots) == {"decl:pub", "decl:priv"}
+        assert set(receipt.evaluated_contract_roots) == {
+            _decl_id("pub"),
+            _decl_id("priv"),
+        }
 
     def test_no_overlay_configured_cites_the_domain_provider(self) -> None:
         refs = self._refs()
