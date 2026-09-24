@@ -22,7 +22,7 @@ Two layers of tests:
 from __future__ import annotations
 
 import shutil
-import subprocess
+import subprocess  # nosec B404 - runs the real compilers under test
 import tempfile
 from pathlib import Path
 
@@ -268,7 +268,7 @@ def _gxx_output(flag: str | None) -> subprocess.CompletedProcess[str]:
         empty = Path(tmp) / "empty.cpp"
         empty.write_text("\n")
         argv = ["g++", *([flag] if flag else []), "-dM", "-E", "-x", "c++", str(empty)]
-        return subprocess.run(argv, capture_output=True, text=True)
+        return subprocess.run(argv, capture_output=True, text=True)  # nosec B603 - fixed argv, no shell
 
 
 def _gxx_macros(flag: str | None) -> dict[str, str]:
@@ -312,7 +312,7 @@ def _castxml_macros(castxml: str, flag: str, tmp_path: Path) -> dict[str, str]:
     )
     out = cmd.index("-o")
     cmd = [*cmd[:out], "-E", "-dM", str(header)]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)  # nosec B603 - fixed argv, no shell
     return _macros(result.stdout)
 
 
@@ -376,7 +376,7 @@ def test_negative_control_flag_outside_group_disagrees(tmp_path: Path) -> None:
         str(header),
     ]
     macros = _macros(
-        subprocess.run(old_shape, capture_output=True, text=True, check=True).stdout
+        subprocess.run(old_shape, capture_output=True, text=True, check=True).stdout  # nosec B603 - fixed argv, no shell
     )
     assert macros.get("__cplusplus") != _gxx_macros("-std=c++20")["__cplusplus"]
 
@@ -406,6 +406,6 @@ def test_cpp20_concepts_header_parses_through_the_builder(tmp_path: Path) -> Non
         force_cpp=True,
         castxml_bin=castxml,
     )
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603 - fixed argv, no shell
     assert result.returncode == 0, result.stderr[-2000:]
     assert out.stat().st_size > 0

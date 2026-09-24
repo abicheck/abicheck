@@ -17,9 +17,9 @@ the real-tool test is the clang backend, which never emits them.
 from __future__ import annotations
 
 import shutil
-import subprocess
+import subprocess  # nosec B404 - runs the real compilers under test
 import sys
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405 - trusted test data
 from pathlib import Path
 
 import pytest
@@ -38,7 +38,7 @@ _GROUPED_TAGS = (
 
 
 def _context(xml: str) -> CastxmlParserContext:
-    ctx = CastxmlParserContext(ET.fromstring(xml), set(), set())
+    ctx = CastxmlParserContext(ET.fromstring(xml), set(), set())  # nosec B314 - fixture XML built in this test
     ctx.build_id_map()
     return ctx
 
@@ -142,7 +142,7 @@ def test_castxml_and_clang_backends_agree_on_local_declarations(tmp_path: Path) 
         '#include "api.h"\nint q::use(){ return q::mk().x + (int)q::mk2() + (int)q::mk3() + q::h(); }\n'
     )
     lib = tmp_path / "libq.so"
-    subprocess.run(
+    subprocess.run(  # nosec B603 B607 - fixed argv, no shell; tool resolved from PATH, as in production
         [
             "g++",
             "-std=c++20",
@@ -172,7 +172,7 @@ def _dump_with(frontend: str, lib: Path, header: Path, tmp_path: Path) -> Path:
     out = tmp_path / f"{frontend}.json"
     argv = ["abicheck", "dump", str(lib), "-H", str(header)]
     argv += ["--config", str(config), "-o", str(out)]
-    result = subprocess.run(argv, capture_output=True, text=True)
+    result = subprocess.run(argv, capture_output=True, text=True)  # nosec B603 - fixed argv, no shell
     assert result.returncode == 0, result.stderr[-2000:]
     return out
 

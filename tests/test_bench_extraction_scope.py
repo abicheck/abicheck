@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405 - trusted test data
 from pathlib import Path
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "bench_extraction_scope.py"
@@ -43,7 +43,7 @@ _XML = """<CastXML>
 
 
 def _closure() -> tuple[set[str], int]:
-    return bench.ownership_closure(ET.fromstring(_XML), ["/proj/include"])
+    return bench.ownership_closure(ET.fromstring(_XML), ["/proj/include"])  # nosec B314 - fixture XML built in this test
 
 
 def test_every_owned_element_is_a_seed_and_kept() -> None:
@@ -69,7 +69,7 @@ def test_a_kept_namespace_does_not_pull_in_its_members() -> None:
 
 
 def test_prune_keeps_exactly_the_closure_and_files() -> None:
-    root = ET.fromstring(_XML)
+    root = ET.fromstring(_XML)  # nosec B314 - fixture XML built in this test
     keep, _ = bench.ownership_closure(root, ["/proj/include"])
     bench.prune_to(root, keep)
     kept_ids = {el.get("id") for el in root}
@@ -78,7 +78,7 @@ def test_prune_keeps_exactly_the_closure_and_files() -> None:
 
 
 def test_no_target_root_keeps_nothing_but_files() -> None:
-    root = ET.fromstring(_XML)
+    root = ET.fromstring(_XML)  # nosec B314 - fixture XML built in this test
     keep, seeds = bench.ownership_closure(root, ["/elsewhere"])
     assert seeds == 0
     assert keep == {"f1", "f2"}
