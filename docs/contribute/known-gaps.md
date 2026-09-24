@@ -8339,6 +8339,22 @@ it is a divergence waiting for a front-end change to expose it.
 ## A directory `compare`'s `-H`/`--header` set is applied to every member, so header-derived findings are reported against libraries they do not belong to — steps 1 and the export-obligation half CLOSED (2026-09-17); steps 2/3 open
 
 **Update (2026-09-17), read this first.** The release product model landed:
+
+**Performance face of the same gap (2026-09).** Because every member is
+dumped against the union header/include set, per-member work that walks that
+set grows with the member count. The release total therefore grows
+super-linearly. On a generated fixture with 2 headers per library, 16
+libraries took 32.2 s against 6.9 s for 7. The two largest such walks
+are now shared or memoized:
+extraction-contract path resolution (`comparability_fields`) and the C++20
+dialect scan (`extract/header_scan_memo.py`). That brought 16 libraries to
+19.1 s and the marginal cost exponent over 1–10 libraries from 1.64 to 1.39.
+What remains is many small linear walks spread across the per-member dump:
+header expansion, inferred include roots, dependency-scope roots, one
+`clang -M` include probe per header, and the per-probe memory re-read the
+include-graph gate does on purpose. Steps 2/3 below remove all of them at
+once, by giving a member only its own headers or computing the
+release-scoped part once. Chasing each walk separately would not.
 a directory/package comparison now judges **one** public contract backed by
 **several** binary providers (`docs/learn/products-not-libraries.md` § "One
 public surface, many providers"). Concretely, against the three steps this
