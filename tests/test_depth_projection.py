@@ -122,7 +122,7 @@ from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
 from abicheck.model.extraction_contract import ExtractionContract
 from abicheck.model.source_graph import SourceGraphSummary
 from abicheck.policy.depth_projection import (
-    _allow_dwarf_name,
+    _public_dwarf_scope,
     project_build_source_pack_to_depth,
     project_pair_to_depth,
     project_snapshot_to_depth,
@@ -1047,9 +1047,9 @@ class TestProjectPairToDepthPreservesDwarfPublicScope:
 
     def test_empty_public_scope_skips_the_filter_entirely(self) -> None:
         """Neither side names any struct/enum at all -- ``_public_dwarf_
-        scope`` returns empty frozensets, so ``if dwarf_struct_scope:``/
-        ``if dwarf_enum_scope:`` both take their False branch and the raw
-        DWARF pool (whatever it holds) is left untouched, not emptied."""
+        scope`` returns ``None`` for both kinds (no header model to scope
+        by), so the raw DWARF pool (whatever it holds) is left untouched,
+        not emptied."""
         old = AbiSnapshot(
             library="lib",
             version="1",
@@ -1078,22 +1078,44 @@ class TestProjectPairToDepthPreservesDwarfPublicScope:
         assert set(new_p.dwarf.enums) == {"IE"}
 
 
-class TestAllowDwarfName:
-    """``_allow_dwarf_name`` -- the full-name-or-unqualified-suffix matcher
-    ``project_pair_to_depth`` uses to pre-scope the raw DWARF pool, and
-    ``diff_platform._diff_dwarf``'s own identically-behaved ``_allow_name``
-    mirrors. Exercised directly since every fixture above only ever uses
-    flat (unqualified) names, which never reaches the ``::``-split fallback
-    on its own."""
+class TestPublicDwarfScopeIsTheDebugTypeJoin:
+    """``_public_dwarf_scope`` -- the pre-scope ``project_pair_to_depth``
+    applies to the raw DWARF pool -- is the Phase 2 debug-type join's answer
+    (``compare/debug_type_scope.py``), the same call ``diff_platform.
+    _diff_dwarf`` makes. It replaced a full-name-or-bare-suffix matcher that
+    let any debug type whose last ``::`` segment equalled a header record's
+    bare name in (evidence-entity-model Phase 2)."""
 
-    def test_full_name_match(self) -> None:
-        assert _allow_dwarf_name("ns::S", frozenset({"ns::S"})) is True
+    @staticmethod
+    def _pair(header: RecordType, *debug_names: str) -> tuple[AbiSnapshot, AbiSnapshot]:
+        def snap(version: str) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="lib",
+                version=version,
+                types=[header],
+                dwarf=DwarfMetadata(
+                    has_dwarf=True,
+                    structs={n: StructLayout(name=n, byte_size=4) for n in debug_names},
+                ),
+            )
 
-    def test_unqualified_suffix_match(self) -> None:
-        assert _allow_dwarf_name("ns::S", frozenset({"S"})) is True
+        return snap("1"), snap("2")
 
-    def test_no_match(self) -> None:
-        assert _allow_dwarf_name("ns::S", frozenset({"Other"})) is False
+    def test_qualified_name_joins(self) -> None:
+        header = RecordType(name="S", kind="struct", qualified_name="ns::S")
+        structs, _enums = _public_dwarf_scope(*self._pair(header, "ns::S"))
+        assert structs == frozenset({"ns::S"})
+
+    def test_bare_suffix_no_longer_joins(self) -> None:
+        # A global `S` in the headers says nothing about `other::S` in DWARF.
+        header = RecordType(name="S", kind="struct")
+        structs, _enums = _public_dwarf_scope(*self._pair(header, "other::S", "S"))
+        assert structs == frozenset({"S"})
+
+    def test_no_header_model_of_a_kind_scopes_nothing(self) -> None:
+        header = RecordType(name="S", kind="struct")
+        _structs, enums = _public_dwarf_scope(*self._pair(header, "S"))
+        assert enums is None
 
 
 class TestMarkLayersNotCollectedInsertsAMissingRow:

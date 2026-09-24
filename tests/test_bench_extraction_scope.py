@@ -174,9 +174,15 @@ def test_a_platform_without_wait4_reports_unknown_memory_not_zero(
 @pytest.mark.skipif(not hasattr(os, "wait4"), reason="needs os.wait4")
 def test_peak_memory_is_in_megabytes_on_every_posix_platform() -> None:
     """ru_maxrss is KB on Linux and bytes on macOS; either way a child that
-    touches 64 MB reports roughly 64-2048 MB, not 1024x off in either
-    direction."""
+    touches 64 MB reports at least 64 MB and less than a 1024x unit error
+    (64 GiB).
+
+    The upper bound is deliberately the unit error itself, not a tight
+    ceiling: a child forked from a large parent can report the parent's
+    resident size as its high-water mark, and under mutmut the whole suite
+    runs in one ~4 GB process (measured: 4234 MB here, against the earlier
+    2048 cap). The parent's size is not what this test is about."""
     code = "b = bytearray(64 << 20); b[::4096] = b'x' * len(b[::4096])"
     result = bench.run_measured([sys.executable, "-c", code])
     assert result["returncode"] == 0
-    assert 64 <= result["peak_rss_mb"] <= 2048
+    assert 64 <= result["peak_rss_mb"] < 64 * 1024

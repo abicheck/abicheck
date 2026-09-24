@@ -71,8 +71,10 @@ export may have no known public declaration. Both are valid.
   `unresolved` node, never an approximate one that silently collides.
 - **I2 — joins are evidence, not name equality.** A declaration's mangled
   name is never treated as proof of an observed export. Every cross-layer
-  edge records its join state: `matched`, `ambiguous` (with candidates) or
-  `unmatched`.
+  edge records its join state: `matched`, `ambiguous` (with candidates),
+  `unmatched`, or `unknown` -- the other side was never observed (no export
+  table, no debug section), which is incomplete evidence, never a failed
+  match.
 - **I3 — every edge kind declares its evidence class:** `observed` (an
   extractor saw it), `resolved_join` (two observations were joined under a
   stated rule) or `derived` (a projection of snapshot records). Each class
@@ -97,9 +99,9 @@ Ordered by how many incorrect conclusions each phase prevents, not by size.
 |---|---|---|---|
 | **0 — Evidence-class retag** (**landed**: `model/graph_evidence_class.py`'s `EdgeEvidenceClass`, `compare/surface_graph.py`'s `EDGE_EVIDENCE_CLASS`; the linker-name edge is now `declares_linker_name`/`derived`; builder edges were confirmed not persisted — production never writes them into `AbiSnapshot.surface_graph` — so no schema change) | Add an evidence-class attribute to the surface-graph edge kinds. Rename or retag the linker-name `exports` edge as `derived` (for example `declares_linker_name`). Keep the name `exports` free for a future observed join. Update `tests/test_compare_surface_graph.py`. No schema change unless graph edges are persisted; check first. | S | — |
 | **1 — Identity invariants** (**landed**: `model/graph_entity_identity.py` is the one node-id function for every declaration/type graph producer; see [Phase 1 — landed](#phase-1-landed)) | Small L2/L0/L1 fixtures stating I1 as property tests (the same declaration seen via castxml, clang, DWARF, and the export table → one node). Then route `surface_graph.py` and `header_graph.py` node IDs through `semantic_ir`/`EntityId`, with explicit alias and unresolved nodes. Migrate readers in the same PR as producers. | L | ADR-063 Phase 2/6 |
-| **2 — Explicit cross-layer joins** | An observed `exports` join (export table → entity, via `model/export_index.py`'s projection) and an L1 debug-type → entity join, each carrying I2 join states. Replaces the per-query reconciliation readers do today. | M–L | 1 |
+| **2 — Explicit cross-layer joins** (**landed**: `compare/export_join.py`, `compare/debug_type_join.py`, vocabulary in `model/graph_join.py`; see [Phase 2 — landed](#phase-2-landed)) | An observed `exports` join (export table → entity, via `model/export_index.py`'s projection) and an L1 debug-type → entity join, each carrying I2 join states. Replaces the per-query reconciliation readers do today. | M–L | 1 |
 | **3 — Ownership in the graph** | Expose `model/release_surface.py` providers and contract inputs (public roots, namespace selection) as graph-level owner relations. Wiring, not new design. | M | 1 |
-| **4 — Coverage-aware queries** | A query API returning I4's three-valued answer per edge kind and scope, built on the existing per-pass coverage records and `Fact` statuses. | M | 0, 2 |
+| **4 — Coverage-aware queries** (**unblocked**: its Phase 0 and Phase 2 dependencies have landed; each join's `unknown` state and `CrossLayerJoin.complete` are the per-relationship coverage it builds on) | A query API returning I4's three-valued answer per edge kind and scope, built on the existing per-pass coverage records and `Fact` statuses. | M | 0, 2 |
 | **5 — Measure, then decide materialization** (**landed**: measured in "Phase 5 measurements"; its Recommendations 2–4 landed as 5a–5d below) | Profile a real large-product (oneDAL-class) dump with `ABICHECK_MEMORY_TRACE` and `scripts/bench_release_memory.py`: snapshot vs. graph vs. index cost. Decide which views to persist, which to compute on demand, and whether to use compact tables or lazy section loading (storage v2 Phase 2). | S to measure; follow-up TBD | — (can run in parallel) |
 | **5a — Lazy graph-section loading** (**landed**) | storage-format-v2 Phase 2 A2.1 for the `graph` section: decoded on first read of `surface_graph` / `build_source.source_graph` (`model/lazy_graph.py`). A default compare still reads the graph; the L5 diff was deliberately not gated (ADR-062 D8 note). | S | 5 |
 | **5b — Compact graph tables** (**landed**, schema v49) | `storage/graph_table_codec.py`: interned, columnar node/edge tables; pre-v49 graphs still load. ADR-063 D5 amended. | M | 5 |
@@ -130,7 +132,9 @@ unblocked: both join onto the one key this phase established.
 | ADR-048 `CanonicalIdentity`, ADR-046 `EntityResolver` | `model/entity_identity.py`, `SourceGraphSummary.resolve_entities` | `graph_reconcile`, `graph_impact` | reconciliation keys derived from a node | unchanged: derived from nodes, not node ids |
 | `finding_identity` | `finding_identity.py` | dedup, reports | finding ids | unchanged (not graph identity) |
 | Kythe/CodeQL ingest | `buildsource/graph_backends.py` | L5 | `decl://<VName signature>` | unchanged; see gaps |
-| Symbols | surface builder / L4 | — | `symbol://`, `binary_symbol://` | unchanged (Phase 2) |
+| Linker-name projection | surface builder `_add_linker_name_edges` | none in production (tests, graph views) | `symbol://<mangled>` + `exports` edge | `symbol://<mangled>` + `declares_linker_name` edge (`derived`, Phase 0): the declaration's own linker name, never proof of an export |
+| Observed export entries | `compare/export_join.py` (Phase 2) | `export_surface.py`, `policy/public_surface_closure.py`, surface builder | — | `binary_symbol://<platform>/<spelling>` (`binary_symbol` node, `exports` edge to the declaration, `resolved_join`). One node per table entry: the same spelling in an ELF and a Mach-O table is two observations |
+| Observed debug types | `compare/debug_type_join.py` (Phase 2) | `compare/debug_type_scope.py` (`_diff_dwarf`, depth projection), surface builder | — | `debug_type://debug/<record\|enum>/<qualified>[#n]` (`debug_type` node, `debug_type_of` edge to the header type, `resolved_join`); `#n` (n ≥ 2) is a layout-distinct ODR definition, never merged with the first |
 | AST-seeded bare names (`type_graph._decl_identity`, `call_graph._identity`) | AST passes | the passes' own resolution indexes | index keys, not node ids | unchanged |
 
 ### What landed
@@ -194,6 +198,142 @@ one repeat per variant, `main` at `87731bc` vs this phase:
 - Kythe/CodeQL-ingested nodes keep their VName-signature ids.
 - The DWARF (L1) and export-table (L0) sides of I1 are Phase 2's joins onto
   this key; this phase covers the L2 header-AST producers and L4/L5 replay.
+  (Closed by [Phase 2](#phase-2-landed).)
+
+## Phase 2 — landed
+
+Explicit, evidence-backed joins from L0 (observed export tables) and L1
+(observed debug types) onto the Phase 1 identity. This closes the L0/L1 side
+of I1 and states I2/I3 for both.
+
+### What landed
+
+- **Vocabulary** (`model/graph_join.py`): `JoinState` (`matched`,
+  `ambiguous`, `unmatched`, `unknown`), `JoinRecord` (candidates, rejected
+  candidates, a stable reason code, with the state/candidate-count invariant
+  enforced at construction), `CrossLayerJoin` (both sides, `complete`,
+  `edges()`, `state_counts()`), and `JoinSpec`: each edge kind's evidence
+  class (`resolved_join`), producer, inputs and recompute rule, in
+  `JOIN_SPECS`.
+- **Export join** (`compare/export_join.py`, edge `exports`, the name
+  Phase 0 reserved). Left side: every function/variable entity by its I1 node
+  id. Right side: every observed export-table entry, read only through
+  `model/export_index.py` (ELF `all_export_names` with
+  `default_versioned_names` marking what an unversioned link binds to; PE
+  `pe_export_ids_with_ordinal_placeholder`; Mach-O `all_export_names`; every
+  table a snapshot carries, via the new `build_raw_export_indexes`). Rule:
+  the table *contains* the declaration's linker spelling (`mangled`, else
+  `name`); on a Mach-O table only, Phase 1's one-underscore decoration alias,
+  refused when another declaration owns the shifted spelling exactly. An x86
+  PE `_foo@8` decoration carries no alias record and does not join.
+  A declaration is `ambiguous` only when it joins two entries of one table
+  (one entry per table is one entity observed twice); an export another
+  entity also claims marks each claimant `export_contested`.
+  No table at all: every declaration `unknown`, `complete=False`.
+- **Debug-type join** (`compare/debug_type_join.py`, edge `debug_type_of`).
+  Left side: every header record/enum entity. Right side: every occurrence in
+  `AbiSnapshot.dwarf` (DWARF, or BTF/CTF/PDB reduced to it). Rule: identical
+  qualified name and kind, and no contradiction on any layout fact both sides
+  carry (union-ness, size, field offsets, enumerator values). A contradicted
+  candidate goes to `rejected` with reason `layout_conflict`; a match
+  records `layout_corroborated` or `layout_unavailable`. castxml's dropped
+  inline namespace stays separate (G15). ODR conflicts are now *observed*:
+  the DWARF walk keeps every further, layout-distinct definition
+  (`DwarfMetadata.struct_odr_conflicts`/`enum_odr_conflicts`), each its own
+  `#n` occurrence; layout may single one out, otherwise the header entity is
+  `ambiguous`. `odr_conflicts_observed` says whether anyone looked (only
+  the DWARF walk does), so a BTF/CTF/PDB shape or pre-v51 snapshot never
+  reads "no conflict" by default. No debug info: every header entity
+  `unknown`.
+- **Graph**: the public-surface builder emits `binary_symbol` and
+  `debug_type` nodes (every observed subject, orphans included, with its
+  `join_state`), `exports` and `debug_type_of` edges, and an
+  `export_join_state` attr on each declaration node, so an inline
+  declaration with no export is visible as such. `declares_linker_name`
+  stays `derived`.
+- **Tests first** (strict xfail, flipped per commit): `tests/test_export_join.py`
+  and `tests/test_debug_type_join.py` (every join state, each I2 fixture the
+  plan names, both incomplete-evidence cases, each `JoinSpec`),
+  `tests/test_cross_layer_join_properties.py` (hypothesis: ground-truth
+  oracle, input-order independence, no join without a shared spelling,
+  exhaustive states, ODR never merged, plus a vacuity guard on the
+  generators), `tests/test_cross_layer_join_integration.py` (`integration`:
+  gcc `-g` + castxml through the real `dump` -> stored `compare` CLI; join
+  states, agreement with `binary_exported_fact` on every header-AST
+  declaration, the DWARF-tier scope change, `--contract exports` roots, and a
+  real two-CU ODR conflict), `tests/test_dwarf_odr_conflicts_storage.py`
+  (v51 round trip and pre-v51 migration).
+
+### Readers: which join replaces what
+
+| Reader | Before | After |
+|---|---|---|
+| `export_surface.py` (`--contract exports` roots, `unmatched_exports`) | private `_matched_export_names`, `_macho_shifted_spellings`, `_exact_export_owners`, its own table read in `observed_exports_by_platform`, set subtraction for leftovers | the `exports` join: a root is a declaration whose record is `matched` or `ambiguous`; leftovers are the join's `unmatched` entries; `observed_exports_by_platform` is a projection of the join's export domain. The private matchers are deleted |
+| `policy/public_surface_closure._seed_undeclared_exports` | default-versioned exports minus every declaration's `_symbol_keys` (display name, bare tail) | the join's `unmatched` default-version entries. **Documented fix:** a C export `foo` beside an unrelated `ns::foo` is undeclared now; the bare tail no longer "declares" it |
+| `diff_platform._diff_dwarf` (`_allow_name`) and `policy/depth_projection` (`_allow_dwarf_name`, `_public_dwarf_scope`) | a debug name in scope when it, or its last `::` segment, equalled any header record's bare name | `compare/debug_type_scope.py`: a debug name in scope when the debug-type join names a same-kind header entity with it (joined or layout-rejected) on either side, minus types opaque in both. **Documented fix:** a private `impl::Foo` beside a public `api::Foo` is no longer diffed, so it no longer shows up as a filtered out-of-surface finding. Both callers share the function |
+| `contract_evidence_collect.py` | reads `observed_exports_by_platform` for the provider digest; its own `decl:` node keys for the replay type graph | digest now over the join's export domain (same content). Its `decl:`/`record:` replay-graph keys are not export reconciliation and are unchanged (gap below) |
+| `workflows/crosscheck_ownership.py`, `compare/bundle_export_index.py` | no per-declaration matcher: run-scoped ownership and `symbol -> member` providers over `default_versioned_names` | unchanged: provider ownership across members is Phase 3's |
+| `extract/surface_fact_producers.py` (`binary_exported_fact`) | extraction-time lookup in the dynamic+static export sets (castxml/clang) or `dwarf_snapshot._is_exported` | unchanged, persisted observation. The join must not contradict it: the integration test asserts `matched` iff `binary_exported_fact` is true on every castxml declaration |
+
+### Measured on oneDAL
+
+Same operands and invocation as "Phase 5 measurements" (`libonedal_core.so.3`,
+PyPI `daal`/`daal-include` 2025.10.0 vs 2025.11.0, `daal.h` through
+`daal_all.hpp`, `-I include -I include/dal`), 4 vCPU / 15 GiB, Python 3.13,
+castxml 0.7.0, one run per cell, `main` at `577d856` vs this phase:
+
+| Variant | Build | Dump s (old / new) | Dump parent RSS | Compare s | Compare parent RSS | Graph section (compact / zstd-3) |
+|---|---|---|---|---|---|---|
+| `graph` | base | 90.0 / 87.9 | 898 MiB | 125.0 | 951 MiB | 9.9 MB / 0.97 MB |
+| `graph` | Phase 2 | 92.2 / 93.4 | 896 MiB | 124.5 | 950 MiB | 9.9 MB / 0.97 MB |
+| `graph+facts` | base | 98.9 / 100.4 | 965 MiB | 124.4 | 946 MiB | 9.9 MB / 0.97 MB |
+| `graph+facts` | Phase 2 | 101.5 / 100.5 | 985 MiB | 123.4 | 949 MiB | 9.9 MB / 0.97 MB |
+
+Join cost and states on the stored snapshots (old / new):
+
+| Join | Time | Left (declarations / header types) | Right (exports / debug types) |
+|---|---|---|---|
+| `exports` | 0.20 / 0.23 s (+0.09 s identity table) | 2,494 / 2,495 matched, 11,687 unmatched, 0 ambiguous | 2,494 / 2,495 matched, 10,858 / 10,864 unmatched |
+| `debug_type_of` | 0.003 s | 1,618 `unknown` | none |
+
+- Nothing new is persisted for these operands: stored nodes/edges and the
+  graph section are unchanged, since join edges are recomputed on demand and
+  the PyPI wheels carry no DWARF (so no ODR observation is written either).
+  Dump/compare time and RSS are within run-to-run noise; the `graph+facts`
+  dump's +20 MiB is the builder materializing the join nodes/edges.
+- The debug join is honestly `unknown` for every header type: a stripped
+  wheel has no debug section, and the join never reports that as "all
+  unmatched" (I4-ready).
+- Of 14,181 declaration entities, 11,687 join no export and 10.9k exports
+  join no declaration. This run did not break those orphans down by cause;
+  it is a baseline for Phase 4's coverage queries.
+- Both comparisons report the same 2,675 findings (verdict COMPATIBLE).
+
+### Remaining documented gaps
+
+- `dumper_layout_backfill.backfill_dwarf_layout` (clang backend, dump time)
+  keeps its own bare-name/suffix candidate lookup with field-name
+  corroboration. It is an extraction transform that fills layout, not a
+  per-query reader; moving it onto the qualified-name join would change
+  which records get backfilled, so it needs its own measured change.
+- `binary_exported_fact` can be true where the export join is `unmatched`:
+  the castxml/clang producers also count a `.symtab`-only (static) symbol,
+  and `dwarf_snapshot._is_exported` has a demangled-name tier. The join reads
+  only the dynamic export tables. No contradiction appears on the tested
+  fixtures; making the fact a projection of the join is left open.
+- `diff_helpers.record_canonical_names` still bridges a DWARF-qualified and
+  a header-bare *finding symbol* by bare name for deduplication. That is
+  finding identity, not an entity join.
+- x86 PE `stdcall`/`fastcall` decoration (`_foo@8`) has no alias record, so
+  such an export stays `unmatched` against `foo`.
+- PDB/BTF/CTF function/variable identity stays `unresolved` (ADR-063
+  Phase 6), so those declarations join an export only through their recorded
+  spelling. Their debug shapes do not observe ODR conflicts.
+- `contract_evidence_collect.py`'s replay type graph keeps its own
+  `decl:`/`record:` node keys (persisted in the compare report's contract
+  context); unifying them with the I1 ids is a report-schema change.
+- The L4 `SOURCE_DECL_MAPS_TO_SYMBOL` link (`buildsource/source_link.py`)
+  keeps its own matcher; it joins L4 source entities, not L2 declarations.
 
 ## Tests
 
@@ -204,6 +344,7 @@ one repeat per variant, `main` at `87731bc` vs this phase:
 - Phase 2 needs fixtures for each join state: a public inline declaration
   with no export (`unmatched`, not a missing export), an export with no
   declaration, and two declarations competing for one export (`ambiguous`).
+  (Landed: see "Phase 2 — landed".)
 - Phase 4 needs an oracle test: an edge kind whose producer did not run
   answers `unknown` and never `proven_absent`.
 

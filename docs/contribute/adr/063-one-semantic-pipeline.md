@@ -487,6 +487,29 @@ carries. PDB/BTF/CTF function/variable identity (Phase 6's documented gap)
 stays `unresolved`. D5's "public-surface node and L5 node remain two
 separate, unreconciled nodes" limitation is closed by this amendment.
 
+**Amendment (2026-09-24, accepted): explicit cross-layer joins
+(evidence-entity-model Phase 2, invariants I2/I3).** The L0 export table and
+the L1 debug types join onto the node identity above through two producers,
+never through name equality: `compare/export_join.py` (an export joins the
+declarations whose linker spelling the *observed* table contains -- on a
+Mach-O table, also through the one-underscore decoration alias, refused when
+another declaration owns the spelling exactly) and
+`compare/debug_type_join.py` (a debug type joins the same-kind header entity
+with the identical qualified name whose layout it does not contradict; an
+inline-namespace spelling castxml dropped stays separate). Each subject on
+each side records one state -- `matched`, `ambiguous` with its candidates,
+`unmatched`, or `unknown` when the other side was never observed -- in the
+shared vocabulary `model/graph_join.py`, whose `JoinSpec` names each edge
+kind's producer, inputs and recompute rule. The edges (`exports`,
+`debug_type_of`) are `resolved_join`; like every other public-surface
+builder output they are recomputed from the snapshot on demand and never
+persisted. The one new *observation* the debug join needs -- a
+layout-distinct second definition of a debug type another CU gave
+(`DwarfMetadata.struct_odr_conflicts`/`enum_odr_conflicts`, with
+`odr_conflicts_observed` saying whether anyone looked) -- is persisted:
+snapshot schema v51, written only when the DWARF walk ran, so a snapshot
+without one encodes exactly as v50.
+
 ### D4 — `AnalysisPlan` resolved before any extraction runs
 
 Before a single collector or backend is invoked, an immutable `AnalysisPlan`

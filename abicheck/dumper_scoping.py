@@ -864,6 +864,16 @@ def _scoped_dwarf(
         enums={
             k: v for k, v in dwarf.enums.items() if _name_matches(k, kept_identifiers)
         },
+        struct_odr_conflicts={
+            k: v
+            for k, v in dwarf.struct_odr_conflicts.items()
+            if _name_matches(k, kept_identifiers)
+        },
+        enum_odr_conflicts={
+            k: v
+            for k, v in dwarf.enum_odr_conflicts.items()
+            if _name_matches(k, kept_identifiers)
+        },
     )
 
 

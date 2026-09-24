@@ -25,7 +25,13 @@ type references resolvable to another declared type in this same
 snapshot), ``declares_linker_name`` (symbol → declaration, projected from
 the declaration's own mangled name -- evidence class ``derived``, *not* an
 observed export-table join; ``EDGE_EVIDENCE_CLASS`` records each kind's
-class). **Not populated**: ``includes`` (header → header) — every
+class), and the two Phase 2 ``resolved_join`` kinds (evidence-entity-model
+plan): ``exports`` (``binary_symbol`` -> declaration, from
+``compare/export_join.py``'s observed export-table join) and
+``debug_type_of`` (``debug_type`` -> header type, from
+``compare/debug_type_join.py``). Every observed export/debug occurrence is a
+node carrying its join state, so an orphan on either side stays visible.
+**Not populated**: ``includes`` (header → header) — every
 function/variable's ``Visibility.PUBLIC`` is already resolved
 per-declaration at parse time (ADR-016), so this phase's own relevance
 query does not need a transitive header-inclusion walk to seed roots (see
@@ -68,6 +74,13 @@ from ..model.graph_evidence_class import (
     EdgeEvidenceClass,
 )
 from ..model.graph_facts import GraphEdge, GraphNode
+from ..model.graph_join import (
+    EDGE_KIND_DEBUG_TYPE_OF,
+    EDGE_KIND_EXPORTS,
+    CrossLayerJoin,
+)
+from .debug_type_join import join_debug_types
+from .export_join import join_exports
 
 if TYPE_CHECKING:
     from ..model.fact import Fact
@@ -90,12 +103,21 @@ NODE_KIND_RECORD_TYPE = "record_type"
 NODE_KIND_ENUM_TYPE = "enum_type"
 NODE_KIND_TYPEDEF = "typedef"
 NODE_KIND_SYMBOL = "symbol"
+#: An observed export-table entry / debug-info type occurrence -- the other
+#: side of a Phase 2 join (``model/graph_join.py``).
+NODE_KIND_BINARY_SYMBOL = "binary_symbol"
+NODE_KIND_DEBUG_TYPE = "debug_type"
+#: The node/edge attr a join's per-subject state is stamped under.
+JOIN_STATE_ATTR = "join_state"
+#: The declaration-node attr carrying its ``exports`` join state, so an
+#: orphan declaration (a public inline function) is visible in the graph.
+EXPORT_JOIN_STATE_ATTR = "export_join_state"
 
 EDGE_KIND_DECLARES = "declares"
 EDGE_KIND_REFERENCES = "references"
 #: A declaration's *own* mangled linker name, projected from the record
-#: itself -- never matched against the observed export table. ``exports``
-#: is deliberately left unused for a future observed export-table join.
+#: itself -- never matched against the observed export table. The observed
+#: join is ``exports`` (``model.graph_join.EDGE_KIND_EXPORTS``, Phase 2).
 EDGE_KIND_DECLARES_LINKER_NAME = "declares_linker_name"
 
 #: The evidence class of every edge kind this builder can emit. A new edge
@@ -106,6 +128,8 @@ EDGE_EVIDENCE_CLASS: Mapping[str, EdgeEvidenceClass] = MappingProxyType(
         EDGE_KIND_DECLARES: EdgeEvidenceClass.OBSERVED,
         EDGE_KIND_REFERENCES: EdgeEvidenceClass.RESOLVED_JOIN,
         EDGE_KIND_DECLARES_LINKER_NAME: EdgeEvidenceClass.DERIVED,
+        EDGE_KIND_EXPORTS: EdgeEvidenceClass.RESOLVED_JOIN,
+        EDGE_KIND_DEBUG_TYPE_OF: EdgeEvidenceClass.RESOLVED_JOIN,
     }
 )
 
@@ -446,6 +470,37 @@ def _add_linker_name_edges(
         )
 
 
+def _add_join_edges(
+    graph: SurfaceGraphLike,
+    join: CrossLayerJoin,
+    node_kind: str,
+    labels: Mapping[str, str],
+) -> None:
+    """One node per observed subject of *join* (its state in
+    :data:`JOIN_STATE_ATTR`, orphans included) and one edge, of the join's own
+    ``resolved_join`` kind, per candidate relation."""
+    for subject, rec in join.right.items():
+        graph.add_node(
+            GraphNode(
+                provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
+                id=subject,
+                kind=node_kind,
+                label=labels[subject],
+                attrs={JOIN_STATE_ATTR: rec.state.value, "join_reason": rec.reason},
+            )
+        )
+    for src, dst in join.edges():
+        graph.add_edge(
+            GraphEdge(
+                provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
+                src=src,
+                dst=dst,
+                kind=join.spec.edge_kind,
+                attrs={JOIN_STATE_ATTR: join.right[src].state.value},
+            )
+        )
+
+
 def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> None:
     """Populate *graph* with declaration/type/header/symbol nodes and
     declares/references/declares_linker_name edges for *snap*, from L0-L2 facts alone.
@@ -457,6 +512,7 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
     ids = refs.ids
     type_index = _build_type_index(graph, snap, refs)
     decl_node_ids: dict[str, str] = {}
+    exports = join_exports(snap, ids)
 
     def _declaration(
         ident: GraphEntityIdentity, label: str, source_header: str | None
@@ -470,7 +526,11 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
                 id=node_id,
                 kind=NODE_KIND_DECLARATION,
                 label=label,
-                attrs={**_node_attrs(refs, node_id), **_identity_attrs(ident)},
+                attrs={
+                    **_node_attrs(refs, node_id),
+                    **_identity_attrs(ident),
+                    EXPORT_JOIN_STATE_ATTR: exports.declaration(node_id).state.value,
+                },
             )
         )
         _add_header_declares(graph, source_header, node_id)
@@ -509,3 +569,16 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
         _add_references(graph, ids.typedefs[alias].node_id, type_index, target)
 
     _add_linker_name_edges(graph, decl_node_ids)
+    _add_join_edges(
+        graph,
+        exports.join,
+        NODE_KIND_BINARY_SYMBOL,
+        {eid: e.spelling for eid, e in exports.entries.items()},
+    )
+    debug = join_debug_types(snap, ids)
+    _add_join_edges(
+        graph,
+        debug.join,
+        NODE_KIND_DEBUG_TYPE,
+        {oid: o.name for oid, o in debug.occurrences.items()},
+    )

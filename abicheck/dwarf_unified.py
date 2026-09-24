@@ -168,7 +168,7 @@ def parse_dwarf_from_session(
     the whole binary's DIE tree still resident from this one. Output is
     unaffected either way -- see ``free_cu_die_cache``'s docstring.
     """
-    meta = DwarfMetadata(has_dwarf=True)
+    meta = DwarfMetadata(has_dwarf=True, odr_conflicts_observed=True)
     adv = AdvancedDwarfMetadata(has_dwarf=True)
     adv.target_arch = session.arch
     low_memory = dwarf_low_memory_mode(session.dwarf)

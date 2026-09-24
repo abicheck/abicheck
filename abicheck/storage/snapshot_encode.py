@@ -204,6 +204,24 @@ _SNAPSHOT_SKIP_FIELDS = frozenset(
 )
 
 
+#: ``DwarfMetadata``'s ODR-conflict fields (schema v51). Written only when
+#: the producer looked for conflicts (or found one), so a snapshot whose
+#: debug info was never walked for them -- BTF/CTF/PDB, a symbols-only dump
+#: -- encodes byte-identically to v50.
+_DWARF_ODR_KEYS = ("struct_odr_conflicts", "enum_odr_conflicts")
+
+
+def _drop_unobserved_odr_conflicts(d: dict[str, Any]) -> None:
+    dwarf = d.get("dwarf")
+    if not isinstance(dwarf, dict):
+        return
+    for key in _DWARF_ODR_KEYS:
+        if not dwarf.get(key):
+            dwarf.pop(key, None)
+    if not dwarf.get("odr_conflicts_observed"):
+        dwarf.pop("odr_conflicts_observed", None)
+
+
 def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     """Encode *snap* into its canonical, fully-detached dictionary form.
 
@@ -231,6 +249,7 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
 
     # ElfMetadata/PeMetadata/MachoMetadata enums -> strings (storage/enum_codec.py).
     encode_platform_enums(d)
+    _drop_unobserved_odr_conflicts(d)
 
     # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
     encode_fact_fields(d)
