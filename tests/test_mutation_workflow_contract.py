@@ -509,6 +509,11 @@ def _reached_mutated_modules(path: Path, mutated: set[str]) -> frozenset[str]:
 #: gate, which may report a survivor that one of these tests would in fact
 #: have killed.
 _ACCEPTED_KILL_LOSS = {
+    # tracemalloc peak assertions: under mutmut the trampoline's own
+    # bookkeeping is traced too (a 1.1 GB first-call peak aborted the stats
+    # run), so it measures the instrumentation, not snapshot_io. The
+    # behavioural snapshot_io tests stay in the run. Surfaced by PR #1356.
+    "tests/test_snapshot_read_allocation.py": frozenset({"abicheck.snapshot_io"}),
     # Its producer/consumer tests run `python -m abicheck.frontends.action.cli`
     # as a real subprocess, which re-enters the mutated tree with no mutmut
     # config -- the same class as the entries above. Surfaced by PR #1356.
