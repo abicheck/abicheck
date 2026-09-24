@@ -564,7 +564,16 @@ def test_castxml_c_mode_user_std_token_not_overridden():
     assert "-std=gnu11" not in cmd
     assert "-x" in cmd and "c" in cmd  # C language mode still forced
     cc_index = cmd.index("--castxml-cc-gnu-c")
-    assert cmd[cc_index + 1 : cc_index + 6] == ["(", "gcc", "-x", "c", ")"]
+    # The user's standard reaches the emulated compiler too, not only the
+    # parser -- otherwise gcc reports its default C standard's macros.
+    assert cmd[cc_index + 1 : cc_index + 7] == [
+        "(",
+        "gcc",
+        "-std=gnu17",
+        "-x",
+        "c",
+        ")",
+    ]
 
 
 def test_castxml_c_mode_forces_explicit_cpp_driver_probe_to_c():
@@ -582,11 +591,12 @@ def test_castxml_c_mode_forces_explicit_cpp_driver_probe_to_c():
         force_cpp=False,
     )
     cc_index = cmd.index("--castxml-cc-gnu-c")
-    assert cmd[cc_index + 1 : cc_index + 6] == [
+    assert cmd[cc_index + 1 : cc_index + 7] == [
         "(",
         "/opt/cross/bin/g++",
         "-x",
         "c",
+        "-std=gnu11",
         ")",
     ]
 

@@ -25,6 +25,7 @@ from ._compiler_options import has_explicit_std, split_gcc_options
 from .dumper_ast_config_cpp20 import _preprocessed_header_content
 from .dumper_clang import _needs_sycl_host_only
 from .extract.cache_header_scan import iter_cache_header_files
+from .extract.castxml_compiler_emulation import emulated_compiler_command
 from .header_utils import drop_include_tokens_duplicating_paths
 
 #: Bumped once (Codex review, fresh evidence, P2): a pre-existing on-disk
@@ -36,6 +37,13 @@ from .header_utils import drop_include_tokens_duplicating_paths
 #: entries written from here on. Bump again if the clang cache format ever
 #: changes in some other incompatible way.
 _CLANG_CACHE_SCHEMA_VERSION = 3
+
+#: Salts every castxml header-parse cache key. Bumped to 2 when castxml's
+#: emulated compiler started receiving the run's standard/sysroot/target
+#: flags (`extract.castxml_compiler_emulation`): an entry written before that
+#: was parsed under the host compiler's default-standard macros, with the
+#: same key inputs, so it must not be served afterwards.
+_CASTXML_CACHE_SCHEMA_VERSION = 2
 
 
 def _cache_key(
@@ -63,6 +71,8 @@ def _cache_key(
     h.update(f"backend={backend}".encode())
     if backend == "clang":
         h.update(f"clang_cache_schema={_CLANG_CACHE_SCHEMA_VERSION}".encode())
+    elif backend == "castxml":
+        h.update(f"castxml_cache_schema={_CASTXML_CACHE_SCHEMA_VERSION}".encode())
     # `force_cpp` is `None` only for a handful of call sites (e.g.
     # `_ast_compile_provenance`'s own probing helpers) that never resolve a
     # real language-mode decision at all; every real dump-producing call site
@@ -424,15 +434,12 @@ def _build_castxml_command(
     # ``gnu`` + ``-x c`` can inject C++ _Float* approximations into C;
     # ``gnu-c`` avoids that. Parentheses preserve an explicit g++ path/prefix.
     castxml_cc_id = "gnu-c" if not force_cpp and cc_id == "gnu" else cc_id
-    compiler_command = (
-        ["(", cc_bin, "-x", "c", ")"] if castxml_cc_id == "gnu-c" else [cc_bin]
-    )
-    cmd = [
-        castxml_bin,
-        "--castxml-output=1",
-        f"--castxml-cc-{castxml_cc_id}",
-        *compiler_command,
-    ]
+    # Built as the arguments castxml's own parser sees; the emulated compiler
+    # gets the subset that changes its predefined macros or system search
+    # path (`extract.castxml_compiler_emulation`), so the two agree on the
+    # language standard, sysroot and target. For C this always includes
+    # `-x c`, which is what the `gnu-c` group has always carried.
+    cmd: list[str] = []
     for inc in extra_includes:
         cmd += ["-I", str(inc)]
 
@@ -470,8 +477,16 @@ def _build_castxml_command(
         else:
             cmd += ["-x", "c++", "-std=gnu++20"]
 
-    cmd += ["-o", str(out_xml), str(agg_path)]
-    return cmd
+    return [
+        castxml_bin,
+        "--castxml-output=1",
+        f"--castxml-cc-{castxml_cc_id}",
+        *emulated_compiler_command(cc_bin, castxml_cc_id, cmd),
+        *cmd,
+        "-o",
+        str(out_xml),
+        str(agg_path),
+    ]
 
 
 def _build_clang_header_command(

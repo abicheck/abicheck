@@ -185,9 +185,12 @@ def flat_names(path: ScopePath) -> tuple[str, ...]:
     information the typed path adds and the flat one cannot carry. A
     :class:`~abicheck.model.identity.LocalToFunction` segment likewise
     contributes nothing: it has no name of its own at all (its owner is an
-    ``EntityId``, not a spelling), and neither header-AST backend can
-    produce one today — clang's walk stops at a function node and castxml
-    emits no function-local declarations at all.
+    ``EntityId``, not a spelling), and neither header-AST backend produces
+    one today — clang's walk stops at a function node, and the castxml
+    parser leaves function-local declarations out of every grouped list
+    (castxml does emit one when an emitted signature names it, e.g. a local
+    type as a deduced ``auto`` return type; see
+    ``extract.headers.castxml.context.CastxmlParserContext.build_id_map``).
 
     >>> flat_names((Namespace("ns"), Anonymous("union", 0), Record("A")))
     ('ns', 'A')

@@ -83,7 +83,7 @@ def test_build_command_reflects_compile_context() -> None:
     out = Path("build/out.xml")
     src = Path("src/foo.cpp")
     cmd = build_castxml_command(cu, src, out)
-    assert cmd[:4] == ["castxml", "--castxml-output=1", "--castxml-cc-gnu", "g++"]
+    assert cmd[:4] == ["castxml", "--castxml-output=1", "--castxml-cc-gnu", "("]
     assert "-std=c++20" in cmd
     assert "-DFOO=1" in cmd
     assert "-DBARE" in cmd  # valueless define carries no '='

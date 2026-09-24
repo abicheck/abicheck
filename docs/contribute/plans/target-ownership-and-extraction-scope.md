@@ -101,11 +101,21 @@ Where the kept functions come from: SVS 4,568; fmt 4,204; toml++ 2,370;
 robin-map 1,457; spdlog 919. Section sizes: `graph` 351 MB,
 `declarations` 54 MB, `semantic_ir` 19 MB, `types` 2 MB.
 
-The castxml frontend could not complete the same dump: under
-`--castxml-cc-gnu g++` emulation castxml rejects libstdc++-13's
-`std::greater<>` in SVS's `type_traits.h`. Invoked without the emulation
-flag it parses cleanly (E1). This is tracked separately; it is a
-compiler-emulation issue, not a scoping one.
+The castxml frontend originally could not complete the same dump. castxml
+learns its predefined macros from the compiler it emulates, and abicheck
+passed `-std=c++20` to castxml's parser but not to that compiler. g++ then
+reported C++17, and libstdc++ declared no `std::integral`. Two parser bugs
+behind it, both fixed in the same PR as this plan, are described in that
+PR's changelog fragment. With them fixed, the castxml frontend completes:
+
+| Frontend | Time | Peak RSS | Snapshot |
+|---|---|---|---|
+| clang | 370 s | 6.66 GB | 733 MB |
+| castxml | 508 s | 7.89 GB | 1,210 MB |
+
+The castxml path is heavier because it has no parse-time dependency skip
+of the kind `dumper_clang_streaming.py` gives the clang path. Phase 3 of
+this plan covers both.
 
 ### E3 — what a name filter keeps and loses
 
@@ -393,4 +403,3 @@ One new snapshot field, `AbiSnapshot.extraction_scope` (schema bump):
 - Release fan-out ownership. `model/release_surface.py` already owns
   per-provider acquisition. This plan feeds its acquisition identity (the
   rules fold into `SurfaceAcquisitionIdentity`) and does not replace it.
-- The castxml compiler-emulation failure noted in E2.
