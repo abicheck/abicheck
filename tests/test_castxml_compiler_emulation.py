@@ -248,6 +248,15 @@ _ORACLE_FLAGS = [
 _HOST_DEFAULT_PAIRS = [("-fPIC", "-fno-pic")]
 
 
+def _gxx_targets_pe() -> bool:
+    """PE/COFF targets (MinGW, Cygwin) have no PIC model, so GCC defines no
+    ``__pic__`` there and neither flag of the PIC pair can change a macro."""
+    result = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
+        ["g++", "-dumpmachine"], capture_output=True, text=True, check=True
+    )
+    return any(t in result.stdout.lower() for t in ("mingw", "cygwin", "windows"))
+
+
 def _castxml_bin() -> str | None:
     return shutil.which("castxml")
 
@@ -331,11 +340,14 @@ def test_oracle_flags_really_change_a_watched_macro() -> None:
     default standard, a PIE-by-default GCC, no AVX on arm64), so this
     asserts on the host's own answer: the standard-selection flags -- the
     reported bug -- must be effective everywhere, and most of the list must
-    be effective on any one host.
+    be effective on any one host. The PIC pair is checked only where the
+    target has a PIC model (not PE/COFF).
     """
     effective = [flag for flag in _ORACLE_FLAGS if _effective_on_host(flag)]
     assert "-std=c++20" in effective
     assert len(effective) >= len(_ORACLE_FLAGS) // 2, effective
+    if _gxx_targets_pe():
+        return
     for pair in _HOST_DEFAULT_PAIRS:
         assert any(_effective_on_host(flag) for flag in pair), pair
 
