@@ -264,13 +264,16 @@ class TestCorruptSection:
 class _DecodeSpy:
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.calls = 0
-        original = SourceGraphSummary.from_dict.__func__  # type: ignore[attr-defined]
+        # `from_parts` is the one step every decode reaches: `from_dict` (the
+        # pre-v49 form) calls it, and so does the graph-table decoder, which
+        # builds its entities directly and never goes through `from_dict`.
+        original = SourceGraphSummary.from_parts.__func__  # type: ignore[attr-defined]
 
-        def spy(cls, d):  # type: ignore[no-untyped-def]
+        def spy(cls, *args):  # type: ignore[no-untyped-def]
             self.calls += 1
-            return original(cls, d)
+            return original(cls, *args)
 
-        monkeypatch.setattr(SourceGraphSummary, "from_dict", classmethod(spy))
+        monkeypatch.setattr(SourceGraphSummary, "from_parts", classmethod(spy))
 
 
 def _compare(old: Path, new: Path, *extra: str) -> int:

@@ -17,6 +17,22 @@
   Findings, verdicts, and graph nodes, edges and facts are unchanged. The
   stored graph's node order changes once, to AST document order (see Fixed).
 
+- **`compare` of stored snapshots skips the whole-snapshot content digest
+  when the two sides provably differ.** The digest is used only to tell the
+  user that the two inputs have identical content, and two snapshots with
+  different verbatim-persisted fields (for example `created_at`) cannot be
+  identical. So both full re-serializations are now skipped when such a
+  field differs; identical inputs still get the warning. Separately, the
+  snapshot encoder no longer walks the embedded build-source pack only to
+  discard the result, and it looks up each dataclass's field names once per
+  class. `snapshot_to_json` went from 2.1 s to 1.1 s on the header-graph
+  memory fixture. ELF parsing now decodes `.dynsym` once per parse instead
+  of twice, and decodes `.gnu.version` with a single `struct` call instead
+  of one pyelftools parse per entry. Parsing 41 host libraries went from
+  12.2 s to 5.3 s with identical metadata. End to end on the fixture,
+  `compare` of two stored snapshots went from 13.8 s to 8.6 s and a warm
+  `dump` from 13.5 s to 12.4 s, with byte-identical snapshots and reports.
+
 ### Fixed
 
 - **Two cold dumps of the same headers now store the same header graph.**

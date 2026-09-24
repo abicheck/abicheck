@@ -668,10 +668,9 @@ def classify_compare_pair(
     # live-binary-vs-snapshot compare has one side absent by design.
     old_digest = new_digest = None
     if result.old_metadata is None and result.new_metadata is None:
-        from .serialization import snapshot_content_digest
+        from .workflows.gate import snapshot_identity_digests
 
-        old_digest = snapshot_content_digest(old)
-        new_digest = snapshot_content_digest(new)
+        old_digest, new_digest = snapshot_identity_digests(old, new)
     note_if_same_binary_compared(
         result, old_snapshot_digest=old_digest, new_snapshot_digest=new_digest
     )

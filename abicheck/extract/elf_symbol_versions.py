@@ -30,7 +30,11 @@ owned module, never to trim the file to fit"). Reading a binary is
 
 from __future__ import annotations
 
+import struct
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
+
+from elftools.elf.enums import ENUM_VERSYM
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from elftools.elf.sections import SymbolTableSection
@@ -40,7 +44,65 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 from ..model.elf_facts import SymbolBinding
 from .elf_symbol_tables import _BINDING_MAP, _HIDDEN_VISIBILITIES
 
-__all__ = ["apply_versions_to_symbols"]
+__all__ = ["apply_versions_to_symbols", "decode_versym", "symbols_of"]
+
+#: Attribute holding a symbol table's fully-walked entries on the section
+#: object itself. A parse walks ``.dynsym`` twice -- once to build the
+#: symbol lists, once to attach versions -- and every ``iter_symbols`` entry
+#: is a pyelftools ``construct`` parse plus a string-table read. Stored on
+#: the section (whose class defines ``__eq__`` without ``__hash__``, so it
+#: cannot key a mapping), the cache lives exactly as long as the ``ELFFile``
+#: that owns it.
+_SYMBOLS_ATTR = "_abicheck_walked_symbols"
+
+
+def symbols_of(section: Any) -> Iterator[Any]:
+    """``section.iter_symbols()``, parsed at most once per section object.
+
+    Lazy on the first walk -- entries are yielded as they are decoded, so a
+    table that fails part-way raises at the same entry as before -- and
+    cached only once that walk completes.
+    """
+    cached = getattr(section, _SYMBOLS_ATTR, None)
+    if type(cached) is list:  # only what this function stored, never a stand-in
+        yield from cached
+        return
+    walked: list[Any] = []
+    for sym in section.iter_symbols():
+        walked.append(sym)
+        yield sym
+    setattr(section, _SYMBOLS_ATTR, walked)
+
+
+#: ``.gnu.version`` values pyelftools names rather than returning as an int.
+_NAMED_VERSYM = {v: k for k, v in ENUM_VERSYM.items() if isinstance(v, int)}
+
+
+def decode_versym(section: Any, count: int) -> list[tuple[int, bool]] | None:
+    """``(version_index, is_hidden)`` for the first *count* ``.gnu.version``
+    entries, decoded from the section's bytes in one ``struct`` call.
+
+    The same mapping the per-entry pyelftools read gave: a named value is
+    ``(0, False)`` for ``VER_NDX_LOCAL`` and ``(1, False)`` for every other
+    name; an unnamed one splits into its index and hidden bit. ``None`` when
+    the section is not a plain array of 2-byte entries covering *count*,
+    for the caller's per-entry path to handle.
+    """
+    header = section.header
+    if header["sh_entsize"] not in (0, 2) or header["sh_size"] < 2 * count:
+        return None
+    data = section.data()
+    if len(data) < 2 * count:
+        return None
+    order = "<" if section.elffile.little_endian else ">"
+    out: list[tuple[int, bool]] = []
+    for raw in struct.unpack_from(f"{order}{count}H", data):
+        name = _NAMED_VERSYM.get(raw)
+        if name is not None:
+            out.append((0, False) if name == "VER_NDX_LOCAL" else (1, False))
+        else:
+            out.append((raw & 0x7FFF, bool(raw & 0x8000)))
+    return out
 
 
 def _is_import_sym(sym: Any) -> bool:
@@ -85,7 +147,7 @@ def apply_versions_to_symbols(
     """
     export_idx = 0
     import_idx = 0
-    for sym_ordinal, sym in enumerate(dynsym.iter_symbols()):
+    for sym_ordinal, sym in enumerate(symbols_of(dynsym)):
         if sym_ordinal >= len(ver_entries):
             break
         ver_idx, is_hidden = ver_entries[sym_ordinal]
