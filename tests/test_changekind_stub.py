@@ -189,7 +189,12 @@ def test_the_formatter_leaves_the_generated_stub_alone_on_an_explicit_path():
         ["abicheck/"],  # how verify.py invokes it
     ):
         proc = _ruff("format", "--check", *argv)
-        assert proc.returncode == 0, (
+        # Only the stub is this test's claim. Whether the rest of the tree is
+        # formatted is `fmt-check`'s job, and it is not true of every tree
+        # this runs in: mutmut's `mutants/` copy holds unformatted mutated
+        # modules, which aborted the mutation gate's stats run here.
+        reported = proc.stdout + proc.stderr
+        assert STUB_RELPATH not in reported and proc.returncode in (0, 1), (
             f"`ruff format --check {' '.join(argv)}` wants to rewrite a "
             f"generated file; `gen_changekind_stub.py --check` would then "
             f"reject the result:\n{proc.stdout}\n{proc.stderr}"
