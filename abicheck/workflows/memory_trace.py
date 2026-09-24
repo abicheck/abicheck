@@ -62,6 +62,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from ..storage.ast_size_observer import set_ast_intake_hook
+
 __all__ = [
     "counts",
     "gc_object_count",
@@ -225,9 +227,33 @@ def _self_rss_bytes() -> int | None:
         return None
 
 
-def _child_pids(pid: int) -> list[int]:
-    """Direct children of *pid*, from ``/proc/<pid>/task/*/children``."""
+def _self_rss_peak_bytes() -> int | None:
+    """This process's peak resident set so far (``VmHWM``).
+
+    A sample reads *current* RSS, so a transient between two samples -- a
+    1 GB document decoded to a 1.9 GiB ``str`` and freed again -- never
+    showed in any of them. The high-water mark carries it to the next one.
+    """
+    try:
+        with open("/proc/self/status", encoding="ascii") as fh:
+            for line in fh:
+                if line.startswith("VmHWM:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def _child_pids(pid: int) -> list[int] | None:
+    """Direct children of *pid*, from ``/proc/<pid>/task/*/children``.
+
+    ``None`` -- not ``[]`` -- when no task of *pid* exposes that file at all:
+    it exists only on kernels built with ``CONFIG_PROC_CHILDREN``, and
+    reading "unavailable" as "no children" is how a 10-process release
+    fan-out was reported as ``tree_processes=1`` at every sample.
+    """
     out: list[int] = []
+    readable = False
     try:
         task_dir = Path(f"/proc/{pid}/task")
         for task in task_dir.iterdir():
@@ -235,10 +261,34 @@ def _child_pids(pid: int) -> list[int]:
                 raw = (task / "children").read_text(encoding="ascii")
             except OSError:
                 continue
+            readable = True
             out.extend(int(tok) for tok in raw.split())
     except (OSError, ValueError):
-        return out
-    return out
+        return out if readable else None
+    return out if readable else None
+
+
+def _parent_map() -> dict[int, list[int]]:
+    """``ppid -> [pid, ...]`` for every process, from ``/proc/*/stat``.
+
+    The fallback for a kernel without ``children`` files. ``comm`` (field 2)
+    is parenthesized and may itself contain spaces or parentheses, so the
+    fields are read after its *last* ``)``.
+    """
+    children: dict[int, list[int]] = {}
+    try:
+        entries = [e for e in os.listdir("/proc") if e.isdigit()]
+    except OSError:
+        return children
+    for entry in entries:
+        try:
+            with open(f"/proc/{entry}/stat", encoding="ascii", errors="replace") as fh:
+                stat = fh.read()
+            ppid = int(stat[stat.rindex(")") + 2 :].split()[1])
+        except (OSError, ValueError, IndexError):
+            continue
+        children.setdefault(ppid, []).append(int(entry))
+    return children
 
 
 def _proc_tree_pids(root: int | None = None) -> list[int]:
@@ -250,6 +300,7 @@ def _proc_tree_pids(root: int | None = None) -> list[int]:
     benchmark harness samples repeatedly rather than once.
     """
     root = os.getpid() if root is None else root
+    parents: dict[int, list[int]] | None = None
     seen: list[int] = []
     pending = [root]
     while pending:
@@ -257,7 +308,12 @@ def _proc_tree_pids(root: int | None = None) -> list[int]:
         if pid in seen:
             continue
         seen.append(pid)
-        pending.extend(_child_pids(pid))
+        kids = _child_pids(pid) if parents is None else None
+        if kids is None:
+            if parents is None:
+                parents = _parent_map()
+            kids = parents.get(pid, [])
+        pending.extend(kids)
     return seen
 
 
@@ -399,6 +455,7 @@ def sample(event: str, /, **attrs: Any) -> None:
         "pid": os.getpid(),
         "thread": threading.current_thread().name,
         "parent_rss_bytes": _self_rss_bytes(),
+        "parent_rss_peak_bytes": _self_rss_peak_bytes(),
         "tree_rss_bytes": tree_rss,
         "tree_pss_bytes": tree_pss,
         "tree_processes": procs,
@@ -560,3 +617,8 @@ def record_release_member(library: str, retention: Mapping[str, Any]) -> None:
     stats = ast_acquisition_stats()
     if stats is not None:
         counts("release.ast_scope", library=library, **stats)
+
+
+# The AST parse sites sit in layers that may not import this module, so they
+# report intake boundaries through a storage-level hook this module installs.
+set_ast_intake_hook(mark)
