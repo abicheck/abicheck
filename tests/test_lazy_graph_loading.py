@@ -42,6 +42,7 @@ from abicheck.model.lazy_graph import PendingGraph, is_graph_decoded
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.model.source_graph import SourceGraphSummary
 from abicheck.serialization import load_snapshot, save_snapshot, snapshot_from_dict
+from abicheck.storage.graph_table_codec import decode_graph_table
 from abicheck.storage.sectioned_document import from_sectioned_document
 from abicheck.storage.snapshot_encode import snapshot_to_json
 
@@ -234,7 +235,9 @@ _CORRUPTIONS = {
     "payload_not_a_mapping": lambda s: s["payload"].__setitem__("surface_graph", []),
     "wrong_section_kind": lambda s: s.__setitem__("section_kind", "types"),
     "extra_payload_key": lambda s: s["payload"].__setitem__("junk", 1),
-    "node_without_id": lambda s: s["payload"]["surface_graph"]["nodes"][0].pop("id"),
+    "node_id_out_of_range": lambda s: s["payload"]["surface_graph"]["nodes"][
+        "id"
+    ].__setitem__(0, 10**6),
 }
 
 
@@ -247,7 +250,7 @@ class TestCorruptSection:
         # The eager reference: the same document decoded without deferral.
         with pytest.raises(Exception) as eager:
             flat = from_sectioned_document(doc, defer_graph=False)
-            SourceGraphSummary.from_dict(flat["surface_graph"])
+            decode_graph_table(flat["surface_graph"])
         snap = snapshot_from_dict(doc)  # loading itself succeeds
         for _ in range(2):  # never degrades into an empty/None graph
             with pytest.raises(type(eager.value)) as lazy:

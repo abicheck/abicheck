@@ -36,7 +36,7 @@ named sections.
 
 ```json
 {
-  "schema_version": 48,
+  "schema_version": 49,
   "sections": {
     "binary":       {"section_kind": "binary",       "section_schema_version": 1, "payload": {"...": "..."}},
     "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {"...": "..."}},
@@ -61,7 +61,7 @@ maps are verbatim; each `payload` is elided.)*
 
 | Key | Meaning |
 |---|---|
-| `schema_version` | The **document's** version — one integer, currently **`48`**. Top-level so a loader can read it without parsing the rest. |
+| `schema_version` | The **document's** version — one integer, currently **`49`**. Top-level so a loader can read it without parsing the rest. |
 | `sections` | The nine named sections. Each carries its own `section_kind`, `section_schema_version` and `payload`. |
 | `section_schema_versions` | A flat map of the same per-section versions, so a reader can check them without walking `sections`. |
 
@@ -106,14 +106,14 @@ follow from that, and they have different answers:
 Loading an older snapshot **warns**, and the warning is the point:
 
 ```text
-UserWarning: Snapshot schema_version 8 predates this abicheck's schema_version 48:
+UserWarning: Snapshot schema_version 8 predates this abicheck's schema_version 49:
 header_cv_facts_reliable, param_kind_facts_reliable are marked unreliable on this
 snapshot, so the affected detectors will decline to trust these stale facts rather
 than risk a false positive purely from this tool upgrade.
 ```
 
 **Loading and re-saving does not upgrade the evidence.** A re-saved snapshot
-carries `schema_version: 48` and the current envelope, but the warning
+carries `schema_version: 49` and the current envelope, but the warning
 persists — it then says so explicitly — and the affected facts stay
 unestablished. Serialization cannot invent evidence an older extractor never
 collected. If you need those facts, **re-run `dump`** against the artifact.
@@ -193,7 +193,8 @@ declaration's `entity_id` carrier persisted through its own codec
 (`storage/entity_id_codec.py`), (v29) `AbiSnapshot.surface_graph` — the
 unconditional public-surface/L5 evidence graph (ADR-063 Phase 3 D5, see
 "Fields" below) persisted through its own `to_dict()` encoding, not
-`asdict()`'s naive recursion, and (v30) `RecordType.is_final_fact` — the
+`asdict()`'s naive recursion (from v49 in the compact graph-table encoding
+described in "Fields" below), and (v30) `RecordType.is_final_fact` — the
 fact/capability registry's (ADR-063 Phase 5 D7,
 `abicheck/model/fact_registry.py`) first registered `Fact[T]` conversion;
 needs no reliability flag, since `is_final`'s own `None` already
@@ -424,7 +425,7 @@ model rather than against either physical layout. Optional keys are omitted or `
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `48`). |
+| `schema_version` | int | Snapshot format version (currently `49`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -541,7 +542,7 @@ gets backfilled, only report on it.
 |-----|------|---------|
 | `build_source_pack` | object \| null | Reference to an out-of-band build/source pack (ADR-028). Older snapshots may store this under the legacy key `evidence_pack`, which the loader still reads. |
 | `build_source` | object \| null | Inline-embedded build/source facts for single-artifact workflows. Omitted when nothing was embedded. |
-| `surface_graph` | object \| omitted | (v29, ADR-063 Phase 3 D5) The unconditional public-surface/L5 evidence graph — never gated on `build_source`, unlike the row above. The key is omitted entirely (not written as `null`) for a snapshot predating this field, a binary-only snapshot, or one whose headers were never parsed — `encode_surface_graph()` pops the key rather than writing a null placeholder. When `build_source.source_graph` is the identical object, it is omitted from `build_source`'s own encoding rather than written twice; the loader restores that alias on read. |
+| `surface_graph` | object \| omitted | (v29, ADR-063 Phase 3 D5) The unconditional public-surface/L5 evidence graph — never gated on `build_source`, unlike the row above. The key is omitted entirely (not written as `null`) for a snapshot predating this field, a binary-only snapshot, or one whose headers were never parsed — `encode_surface_graph()` pops the key rather than writing a null placeholder. When `build_source.source_graph` is the identical object, it is omitted from `build_source`'s own encoding rather than written twice; the loader restores that alias on read. **From v49** the value is `storage/graph_table_codec.py`'s compact encoding (`"encoding": "graph-table/1"`): one `strings` table, `nodes`/`edges` objects of equal-length index columns, and deduplicated `attrs` and `facts` tables; the loader-recomputed `indexes`/`resolved`/`conflicts`/`occurrences` fields are not written. A value without `encoding` is the pre-v49 per-entity form and still loads. The graph is decoded on first access, not at load (a corrupt value raises then). |
 | `build_context_defines` | array of strings | The build's active `-D` macro set, harvested from a compile database (ADR-039). Empty when no compile database was supplied. |
 | `conditional_fields` | object | `{type: {field: {guard, type, is_bitfield, ...}}}` registry of record fields guarded by a single positive `#ifdef`/`#if defined(...)`, including fields a context-free header parse pruned from `types[].fields` (ADR-039). Feeds the build-context reconciliation diff pass, which runs unconditionally whenever both snapshots carry this field (one-comparison-product.md Phase 7i); empty when no compile database was supplied at dump time. |
 
@@ -559,7 +560,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare -o json=-`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `48`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `49`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

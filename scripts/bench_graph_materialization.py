@@ -64,6 +64,10 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Measure *this checkout's* abicheck, not whichever one the interpreter's
+# editable install points at: comparing two revisions means running this
+# script from two worktrees, and each child must import its own tree.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 VARIANTS = ("none", "graph", "graph+facts")
 
@@ -185,6 +189,24 @@ def _run(variant: str, argv: list[str], env: dict[str, str]) -> dict[str, object
     }
 
 
+def _graph_kinds(graph: dict[str, object]) -> tuple[list[str], list[str]]:
+    """Per-node and per-edge kinds, from either stored graph encoding: the
+    schema-v49 graph table (``storage/graph_table_codec.py``) or the older
+    per-entity ``SourceGraphSummary.to_dict()`` form."""
+    nodes = graph.get("nodes") or []
+    edges = graph.get("edges") or []
+    if isinstance(nodes, dict) and isinstance(edges, dict):
+        strings = graph.get("strings") or []
+        return (
+            [strings[i] for i in nodes.get("kind", [])],  # type: ignore[index]
+            [strings[i] for i in edges.get("kind", [])],  # type: ignore[index]
+        )
+    return (
+        [n.get("kind", "?") for n in nodes],  # type: ignore[union-attr]
+        [e.get("edge") or e.get("kind") or "?" for e in edges],  # type: ignore[union-attr]
+    )
+
+
 def _snapshot_stats(path: Path) -> dict[str, object]:
     import zstandard
 
@@ -197,22 +219,20 @@ def _snapshot_stats(path: Path) -> dict[str, object]:
     )
     graph_bytes = json.dumps(graph, separators=(",", ":")).encode() if graph else b""
     cctx = zstandard.ZstdCompressor(level=3)
-    nodes = graph.get("nodes") or []
-    edges = graph.get("edges") or []
+    node_kind_list, edge_kind_list = _graph_kinds(graph)
     node_kinds: dict[str, int] = {}
-    for n in nodes:
-        node_kinds[n.get("kind", "?")] = node_kinds.get(n.get("kind", "?"), 0) + 1
+    for kind in node_kind_list:
+        node_kinds[kind] = node_kinds.get(kind, 0) + 1
     edge_kinds: dict[str, int] = {}
-    for e in edges:
-        kind = e.get("edge") or e.get("kind") or "?"
+    for kind in edge_kind_list:
         edge_kinds[kind] = edge_kinds.get(kind, 0) + 1
     return {
         "raw_bytes": len(raw),
         "zstd3_bytes": len(cctx.compress(raw)),
         "graph_compact_bytes": len(graph_bytes),
         "graph_zstd3_bytes": len(cctx.compress(graph_bytes)) if graph_bytes else 0,
-        "nodes": len(nodes),
-        "edges": len(edges),
+        "nodes": len(node_kind_list),
+        "edges": len(edge_kind_list),
         "node_kinds": node_kinds,
         "edge_kinds": edge_kinds,
     }

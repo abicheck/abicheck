@@ -120,6 +120,7 @@ NON_ADR062_MODULES = frozenset(
         "enum_codec",
         "entity_id_codec",
         "surface_graph_codec",
+        "graph_table_codec",
         "semantic_ir_codec",
         "types_section_codec",
         "graph_section_codec",

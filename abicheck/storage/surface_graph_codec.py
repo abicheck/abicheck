@@ -59,6 +59,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from ..model.lazy_graph import PendingGraph, set_pending_graph
+from .graph_table_codec import decode_graph_table, encode_graph_table, is_graph_table
 
 if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
@@ -100,7 +101,9 @@ def encode_surface_graph(d: dict[str, Any], snap: AbiSnapshot) -> None:
     if graph is None:
         d.pop("surface_graph", None)
         return
-    d["surface_graph"] = graph.to_dict()
+    # Schema v49: the compact graph table, not ``to_dict()``'s per-entity
+    # objects (storage/graph_table_codec.py).
+    d["surface_graph"] = encode_graph_table(graph)  # type: ignore[arg-type]
     bs_dict = d.get("build_source")
     bs = snap.build_source
     if isinstance(bs_dict, dict) and bs is not None and bs.source_graph is graph:
@@ -156,8 +159,13 @@ def _constant(value: Any) -> Callable[[], Any]:
 
 def _graph_decoder(load_payload: Callable[[], Any]) -> Callable[[], Any]:
     def decode() -> Any:
+        from ..model.graph_identity import identity_normalization_memo
         from ..model.source_graph import SourceGraphSummary
 
-        return SourceGraphSummary.from_dict(load_payload())
+        payload = load_payload()
+        if is_graph_table(payload):
+            return decode_graph_table(payload)
+        with identity_normalization_memo():
+            return SourceGraphSummary.from_dict(payload)  # pre-v49 document
 
     return decode

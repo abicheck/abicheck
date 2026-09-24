@@ -25,7 +25,10 @@ compat facade) re-exports them transitively.
 
 from __future__ import annotations
 
+import contextlib
 import re
+import threading
+from collections.abc import Iterator
 from typing import Any
 
 from ..name_classification import (
@@ -239,7 +242,49 @@ def _normalize_graph_identity(identity: str) -> str:
     """
     if "at" not in identity:
         return identity
-    return _strip_bare_anonymous_type_location(strip_anonymous_type_location(identity))
+    memo = _NORMALIZE_MEMO
+    if memo is not None:
+        cached = memo.get(identity)
+        if cached is not None:
+            return cached
+    result = _strip_bare_anonymous_type_location(
+        strip_anonymous_type_location(identity)
+    )
+    if memo is not None:
+        memo[identity] = result
+    return result
+
+
+#: Per-scope memo for :func:`_normalize_graph_identity`, live only inside
+#: :func:`identity_normalization_memo`. Loading a stored graph normalizes
+#: every id, label and identity attr again (``GraphNode``/``GraphEdge.
+#: from_dict`` and ``SourceGraphSummary.add_node``/``add_edge`` each do), so
+#: a real graph repeats the same few distinct strings hundreds of thousands
+#: of times. A pure function of its argument, so memoizing cannot change a
+#: result; scoped rather than a module-lifetime cache so nothing is retained
+#: after the load.
+_NORMALIZE_MEMO: dict[str, str] | None = None
+_NORMALIZE_MEMO_DEPTH = 0
+_NORMALIZE_MEMO_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def identity_normalization_memo() -> Iterator[None]:
+    """Memoize :func:`_normalize_graph_identity` for the duration of the
+    block (re-entrant and thread-safe; the memo is dropped when the last
+    open scope exits)."""
+    global _NORMALIZE_MEMO, _NORMALIZE_MEMO_DEPTH
+    with _NORMALIZE_MEMO_LOCK:
+        _NORMALIZE_MEMO_DEPTH += 1
+        if _NORMALIZE_MEMO is None:
+            _NORMALIZE_MEMO = {}
+    try:
+        yield
+    finally:
+        with _NORMALIZE_MEMO_LOCK:
+            _NORMALIZE_MEMO_DEPTH -= 1
+            if _NORMALIZE_MEMO_DEPTH == 0:
+                _NORMALIZE_MEMO = None
 
 
 #: ``attrs`` keys carrying a raw declaration/qualified-name spelling that can

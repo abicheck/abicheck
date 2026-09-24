@@ -658,6 +658,21 @@ the implementation plan, not as a residual of this decision. The
 twelve-L5-call-site node-id-collision gap above is unaffected by this
 amendment — it was never about this closure walk.
 
+**Amendment (2026-09-24, evidence-entity-model Phase 5b/5c): how the
+persisted graph is stored.** D5's graph is persisted as
+`AbiSnapshot.surface_graph` (schema v29). From schema v49 it is stored in
+`storage/graph_table_codec.py`'s compact, interned, columnar encoding (one
+string table; per-node and per-edge index columns; deduplicated attrs and
+fact tables) instead of `SourceGraphSummary.to_dict()`'s per-entity objects,
+and without the fields the loader always recomputed (`indexes`, `resolved`,
+`conflicts`, `occurrences`). The in-memory graph a load produces is unchanged:
+the table decoder re-inflates the old per-entity shape and hands it to
+`SourceGraphSummary.from_dict`, so every load-time migration still applies,
+and a pre-v49 document still loads through `from_dict` directly. On real
+oneDAL the section shrank from 79 MB to under 10 MB (measurements in the
+evidence-entity-model plan's Phase 5 section). Persisting only *observed*
+evidence (Phase 5c) is recorded against the same plan.
+
 ### D6 — `RunOutcome` as independent axes; no `exit_code` inside the domain
 
 Generalize ADR-042's `CompatibilityDecision`/gate-decision split and the
