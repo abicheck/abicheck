@@ -493,6 +493,11 @@ def _canonical_expr(node: Any, id_index: _IdIndexProvider | None = None) -> Any:
     ):
         if key in node:
             out[key] = node[key]
+    # A closure's implicit members are named after its location-bearing
+    # type (``"~(lambda at /old/h.h:4:32)"``) -- collapse it exactly like a
+    # qualType, or the fingerprint changes with the checkout path.
+    if isinstance(out.get("name"), str):
+        out["name"] = _normalize_qual_type(out["name"])
     type_obj = node.get("type")
     if isinstance(type_obj, dict) and "qualType" in type_obj:
         out["type"] = _normalize_qual_type(type_obj["qualType"])
@@ -545,6 +550,8 @@ def _decl_stub(decl: Any, id_index: _IdIndexProvider | None) -> dict[str, Any] |
     for key in ("kind", "name"):
         if key in decl:
             stub[key] = decl[key]
+    if isinstance(stub.get("name"), str):
+        stub["name"] = _normalize_qual_type(stub["name"])
     decl_type = decl.get("type")
     if isinstance(decl_type, dict) and "qualType" in decl_type:
         stub["type"] = _normalize_qual_type(decl_type["qualType"])
@@ -562,5 +569,5 @@ def _decl_stub(decl: Any, id_index: _IdIndexProvider | None) -> dict[str, Any] |
         # parse is still a single AST walk.
         qualified = id_index().get(decl_id)
         if qualified is not None:
-            stub["qualified_name"] = qualified
+            stub["qualified_name"] = _normalize_qual_type(qualified)
     return stub or None
