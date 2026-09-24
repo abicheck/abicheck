@@ -167,3 +167,14 @@ def test_reference_sources_are_in_first_occurrence_order(srcs: list[str]) -> Non
     endpoints = _unseeded_decl_endpoints({s: PUB for s in srcs}, edges, [])
     sources = [ident for ident, _ in endpoints[len(edges) :]]
     assert sources == list(dict.fromkeys(srcs))
+
+
+def test_streamed_type_files_follow_document_order_in_process(tmp_path: Path) -> None:
+    from abicheck.buildsource.header_graph_ast_stream import (
+        project_header_graph_ast_file,
+    )
+
+    names = list(reversed(_NAMES))
+    path = tmp_path / "ast.json"
+    path.write_text(json.dumps(_tu(names)))
+    assert list(project_header_graph_ast_file(path).type_files) == names

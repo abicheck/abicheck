@@ -484,3 +484,53 @@ def test_finalize_recomputes_every_coverage_entry_not_persisted(
     graph.coverage = _observed_coverage(graph.coverage)
     graph.finalize()
     assert json.loads(json.dumps(graph.coverage)) == full
+
+
+class TestDirectDecoderRejectsCorruption:
+    """Every malformed entity entry is a ``ValueError`` on the direct path,
+    exactly as it was on the legacy-dict path."""
+
+    def _payload(self) -> dict[str, Any]:
+        g = SourceGraphSummary()
+        g.add_node(GraphNode(id="decl://a", kind="k", attrs={"v": 1}))
+        g.add_edge(GraphEdge(src="decl://a", dst="decl://a", kind="X"))
+        return _through_storage(encode_graph_table(g.finalize()))
+
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            lambda p: p.update(encoding="graph-table/999"),
+            lambda p: p["nodes"]["facts"].__setitem__(0, []),
+            lambda p: p["edges"]["facts"].__setitem__(0, "0"),
+            lambda p: p["nodes"]["facts"].__setitem__(0, 10_000),
+            lambda p: p["edges"]["facts"].__setitem__(0, [0, 10_000]),
+        ],
+        ids=["encoding", "empty-list", "non-int", "out-of-range", "range-in-list"],
+    )
+    def test_corrupt_entry_raises(self, mutate: Any) -> None:
+        payload = self._payload()
+        mutate(payload)
+        with pytest.raises(ValueError, match="graph table"):
+            graph_table_to_legacy_dict(payload)
+        with pytest.raises(ValueError, match="graph table"):
+            decode_graph_table(payload)
+
+    def test_multi_fact_entries_and_occurrences_match_the_legacy_path(self) -> None:
+        g = SourceGraphSummary()
+        g.add_node(GraphNode(id="decl://a", kind="k"))
+        for site in ("s1", "s2"):
+            g.add_edge(
+                GraphEdge(
+                    src="decl://a",
+                    dst="decl://b",
+                    kind="DECL_CALLS_DECL",
+                    provenance=f"p{site}",
+                    attrs={"callsite_id": site},
+                )
+            )
+        payload = _through_storage(encode_graph_table(g.finalize()))
+        assert any(type(f) is list for f in payload["edges"]["facts"])
+        direct = decode_graph_table(payload)
+        legacy = SourceGraphSummary.from_dict(graph_table_to_legacy_dict(payload))
+        assert direct.to_dict() == legacy.to_dict()
+        assert len(direct.edges[0].occurrences) == 2
