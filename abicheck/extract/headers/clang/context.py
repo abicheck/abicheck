@@ -51,6 +51,7 @@ from typing import Any
 
 from ....dumper_clang_vtable import build_vtable, is_record_definition
 from ....model import AccessLevel, ScopeOrigin, Visibility
+from ....model.export_index import ExportMatch, match_export
 from ....model.identity import ScopePath
 from ....model.mangled_name import strip_macho_itanium_decoration
 from ....name_classification import strip_anonymous_type_location
@@ -542,13 +543,9 @@ def visibility_and_surface_facts(
     *,
     no_binary_evidence: bool = False,
 ) -> tuple[Visibility, dict[str, Any]]:
-    """:func:`visibility` plus the three surface facts that answer separately.
-
-    One resolution, two representations: the legacy enum every existing
-    reader still takes, and the split facts (``model/surface_facts.py``)
-    every new one reads. The export fact is unknown -- never ``False`` --
-    for a header-only dump, which consulted no export table at all.
-    """
+    """:func:`visibility` plus the three split surface facts
+    (``model/surface_facts.py``); the export fact is unknown, never
+    ``False``, for a header-only dump, which consulted no export table."""
     vis = visibility(
         exported_dynamic,
         exported_static,
@@ -556,16 +553,25 @@ def visibility_and_surface_facts(
         name,
         no_binary_evidence=no_binary_evidence,
     )
-    # `ELF_ONLY` (a `.symtab`-only symbol) is export evidence too -- see the
-    # castxml sibling's note: the fresh producer and the legacy bridge must
-    # agree, or the same symbol reads differently by snapshot vintage.
+    # `ELF_ONLY` is export evidence too (so fresh and legacy-bridged
+    # snapshots agree) but its own tier, never the join's dynamic match.
     return vis, header_ast_surface_facts(
-        exported=(
-            None
-            if no_binary_evidence
-            else vis in (Visibility.PUBLIC, Visibility.ELF_ONLY)
+        exported=export_match(
+            exported_dynamic, exported_static, mangled, name, no_binary_evidence
         ),
         producer="clang",
+    )
+
+
+def export_match(
+    dynamic: set[str], static: set[str], mangled: str, name: str, no_binary: bool
+) -> ExportMatch | None:
+    """:func:`visibility`'s export half, tiered through the shared primitive
+    (same tables and order); ``None`` for a header-only dump."""
+    if no_binary:
+        return None
+    return match_export(
+        symbol_candidates(mangled), name, dynamic=dynamic, static=static
     )
 
 

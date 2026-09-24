@@ -85,6 +85,7 @@ from .model import (
     record_layout_facts,
     resolve_vptr_offset_bits,
 )
+from .model.export_index import ExportMatch, match_export
 from .model.identity import (
     EntityId,
     ScopePath,
@@ -527,10 +528,10 @@ class _DwarfSnapshotBuilder:
         if _attr_bool(die, "DW_AT_declaration") and not is_deleted:
             return
 
-        exported = self._is_exported(mangled, name)
+        exported = self._export_match(mangled, name)
         visibility = _admit_subprogram(
             is_deleted=is_deleted,
-            is_exported=exported,
+            is_exported=exported is not ExportMatch.ABSENT,
             is_external=_attr_bool(die, "DW_AT_external"),
         )
         if visibility is None:
@@ -567,7 +568,7 @@ class _DwarfSnapshotBuilder:
         qualified_name: str,
         is_deleted: bool,
         visibility: Visibility = Visibility.PUBLIC,
-        exported: bool = True,
+        exported: bool | ExportMatch = True,
         scope_path: ScopePath = (),
         default_access: AccessLevel = AccessLevel.PUBLIC,
     ) -> Function:
@@ -738,7 +739,8 @@ class _DwarfSnapshotBuilder:
             linkage_name = _attr_str(die, "DW_AT_MIPS_linkage_name")
         mangled = linkage_name or name
 
-        if not self._is_exported(mangled, name):
+        var_export = self._export_match(mangled, name)
+        if var_export is ExportMatch.ABSENT:
             return
 
         if mangled in self._seen_var_mangles:
@@ -760,7 +762,7 @@ class _DwarfSnapshotBuilder:
                 mangled=mangled,
                 type=type_name,
                 visibility=Visibility.PUBLIC,
-                **debug_info_surface_facts(exported=True),
+                **debug_info_surface_facts(exported=var_export),
                 is_const=is_const,
                 # ADR-063 Phase 2 -- see dwarf_scope.variable_entity_id.
                 entity_id=_dwarf_variable_entity_id(
@@ -1749,27 +1751,21 @@ class _DwarfSnapshotBuilder:
     # -------------------------------------------------------------------
 
     def _is_exported(self, mangled: str, name: str) -> bool:
-        """Check if a symbol is in the ELF exported symbol set.
+        return self._export_match(mangled, name) is not ExportMatch.ABSENT
 
-        Three-tier matching (FIX-B):
-        1. Exact mangled name match (fast path)
-        2. Plain name match (C functions)
-        3. Demangled fallback (C++ with mangling variance)
-        """
-        # Tier 1: exact mangled match
-        if mangled and mangled in self._exported_names:
-            return True
-        # Tier 2: plain name match (C functions)
-        if name and name in self._exported_names:
-            return True
-        # Tier 3: demangled fallback for C++ (FIX-B)
-        if mangled and mangled.startswith("_Z") and self._demangled_exports:
-            from .demangle import demangle as _demangle
+    def _export_match(self, mangled: str, name: str) -> ExportMatch:
+        """FIX-B's exact-mangled / plain-name / demangled tiers against the
+        ELF export set, through the shared ``model.export_index.match_export``
+        -- a demangled hit is its own tier, never the join's dynamic match."""
+        from . import demangle as _demangle_mod
 
-            demangled = _demangle(mangled)
-            if demangled and demangled in self._demangled_exports:
-                return True
-        return False
+        return match_export(
+            (mangled,),
+            name,
+            dynamic=self._exported_names,
+            demangled_dynamic=self._demangled_exports,
+            demangle=_demangle_mod.demangle,
+        )
 
     def _filter_types_by_reachability(self) -> None:
         """Filter types and enums to only those reachable from exports.

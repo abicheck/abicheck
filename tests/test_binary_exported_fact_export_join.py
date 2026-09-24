@@ -24,7 +24,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import pytest
 from hypothesis import given, settings, strategies as st
 
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
@@ -32,11 +31,6 @@ from abicheck.model import AbiSnapshot, Function, Variable, Visibility
 from abicheck.model.fact import FactStatus
 from abicheck.model.graph_join import JoinState
 from abicheck.model.surface_facts import binary_exported, is_binary_exported
-
-_XFAIL = pytest.mark.xfail(
-    strict=True,
-    reason="gap #2: binary_exported_fact tiers not explicit / not shared with the join yet",
-)
 
 #: Every way ground truth can place a symbol relative to one declaration.
 EXPOSURES = (
@@ -111,8 +105,10 @@ def _tables(world):
     return dyn, static
 
 
-def _oracle_tier(e: Entity, *, demangled_tier: bool) -> str:
-    """Ground-truth tier, read off the exposures directly."""
+def _oracle_tier(e: Entity, *, demangled_tier: bool, static_tier: bool = True) -> str:
+    """Ground-truth tier, read off the exposures directly. *demangled_tier*/
+    *static_tier*: whether the producer consults that evidence at all (the
+    DWARF producer reads only ``.dynsym``; the header-AST ones do not demangle)."""
     x = e.exposures
     if x & {"dyn_default", "dyn_nondefault"}:
         return "dynamic"
@@ -120,7 +116,7 @@ def _oracle_tier(e: Entity, *, demangled_tier: bool) -> str:
         return "name_alias"
     if demangled_tier and e.cxx and "dyn_mangling_variant" in x:
         return "demangled"
-    if "static" in x:
+    if static_tier and "static" in x:
         return "static_only"
     return "absent"
 
@@ -134,7 +130,6 @@ def _dyn_names(dyn):
 # ---------------------------------------------------------------------------
 
 
-@_XFAIL
 @settings(max_examples=200, deadline=None)
 @given(worlds())
 def test_match_export_primitive_matches_ground_truth(world):
@@ -155,7 +150,6 @@ def test_match_export_primitive_matches_ground_truth(world):
         assert got.value == _oracle_tier(e, demangled_tier=True), e
 
 
-@_XFAIL
 @settings(max_examples=150, deadline=None)
 @given(worlds())
 def test_castxml_and_clang_producers_record_the_ground_truth_tier(world):
@@ -179,7 +173,6 @@ def test_castxml_and_clang_producers_record_the_ground_truth_tier(world):
             assert _recorded_tier(fn) == want, (e, facts)
 
 
-@_XFAIL
 @settings(max_examples=100, deadline=None)
 @given(worlds())
 def test_dwarf_producer_records_the_ground_truth_tier(world):
@@ -208,7 +201,8 @@ def _assert_dwarf_tiers(world, builder, debug_info_surface_facts):
             exported=builder._export_match(e.mangled, e.name)
         )
         fn = Function(name=e.name, mangled=e.mangled, return_type="void", **facts)
-        assert _recorded_tier(fn) == _oracle_tier(e, demangled_tier=True), e
+        want = _oracle_tier(e, demangled_tier=True, static_tier=False)
+        assert _recorded_tier(fn) == want, e
 
 
 def _recorded_tier(decl) -> str:
@@ -223,7 +217,6 @@ def _recorded_tier(decl) -> str:
 # ---------------------------------------------------------------------------
 
 
-@_XFAIL
 @settings(max_examples=200, deadline=None)
 @given(worlds(), st.booleans())
 def test_fact_is_present_exactly_when_the_export_join_matches(world, as_variable):
@@ -285,3 +278,33 @@ def test_fact_is_present_exactly_when_the_export_join_matches(world, as_variable
         ), e
         # Truth-ness is preserved: every non-absent tier still reads exported.
         assert is_binary_exported(decl) == (tier != "absent"), e
+
+
+def test_exhaustive_small_domain_reaches_every_tier():
+    """Every exposure subset x linkage, exhaustively (128 worlds): the
+    primitive agrees with the oracle and the oracle is not vacuous -- all
+    five tiers occur, so the property tests above cannot pass on a
+    constant."""
+    from itertools import combinations
+
+    from abicheck.model.export_index import ExportMatch, match_export
+
+    seen = set()
+    for cxx in (False, True):
+        for k in range(len(EXPOSURES) + 1):
+            for combo in combinations(EXPOSURES, k):
+                e = Entity(base="f", cxx=cxx, exposures=frozenset(combo))
+                dyn, static = _tables([e])
+                names = _dyn_names(dyn)
+                got = match_export(
+                    (e.mangled,),
+                    e.name,
+                    dynamic=names,
+                    static=static | names,
+                    demangled_dynamic={d for n in names if (d := _fake_demangle(n))},
+                    demangle=_fake_demangle,
+                )
+                want = _oracle_tier(e, demangled_tier=True)
+                assert got.value == want, e
+                seen.add(want)
+    assert seen == {m.value for m in ExportMatch}

@@ -58,7 +58,9 @@ missing/empty distinction themselves.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -68,6 +70,7 @@ if TYPE_CHECKING:
     from .snapshot import AbiSnapshot
 
 __all__ = [
+    "ExportMatch",
     "RawExportEntry",
     "RawExportIndex",
     "all_export_names",
@@ -82,6 +85,7 @@ __all__ = [
     "export_names_or_modeled_fallback",
     "linked_export_names",
     "macho_callable_names",
+    "match_export",
     "named_pe_exports",
     "ordinal_only_pe_exports",
     "pe_export_ids_with_ordinal_placeholder",
@@ -433,3 +437,78 @@ def export_names_or_modeled_fallback(snap: AbiSnapshot) -> tuple[str, ...]:
     syms |= {v.mangled for v in snap.variables if getattr(v, "mangled", "")}
     syms.discard("")
     return tuple(sorted(syms))
+
+
+# ---------------------------------------------------------------------------
+# Declaration -> export-table match tier (ADR-063, 2026-09-24 note)
+# ---------------------------------------------------------------------------
+
+
+class ExportMatch(str, Enum):
+    """How a declaration was found in a binary's symbol tables.
+
+    The one vocabulary the export fact (``binary_exported_fact``) and the
+    observed ``exports`` join (``compare/export_join.py``) share. Only
+    :attr:`DYNAMIC` is the join's own rule -- the declaration's linker
+    spelling is an entry of the *dynamic* export table -- so only it may be
+    recorded as a plain ``Fact.present(True)``; each weaker tier is still
+    evidence a symbol exists (and keeps the fact truthy, which is what the
+    legacy ``Visibility.PUBLIC``/``ELF_ONLY`` reading always was), but it is
+    recorded as an explicit ``PARTIAL`` state rather than a silent ``True``
+    the join would contradict.
+    """
+
+    #: A linker spelling of the declaration is in the dynamic export table.
+    DYNAMIC = "dynamic"
+    #: Only the declaration's bare ``name`` is in the dynamic table while its
+    #: mangled spelling is not -- a *different* symbol by linker identity (an
+    #: ``extern "C"`` namesake), so the join does not claim it.
+    NAME_ALIAS = "name_alias"
+    #: Only a spelling that demangles to the same text is in the dynamic
+    #: table (DWARF's mangling-variance fallback).
+    DEMANGLED = "demangled"
+    #: Present only in the static ``.symtab`` -- a static symbol is not an
+    #: ABI export, no consumer can bind to it.
+    STATIC_ONLY = "static_only"
+    #: A symbol table was read and none of the above holds.
+    ABSENT = "absent"
+
+
+def match_export(
+    spellings: Iterable[str],
+    name: str,
+    *,
+    dynamic: Collection[str],
+    static: Collection[str] = (),
+    demangled_dynamic: Collection[str] = (),
+    demangle: Callable[[str], str | None] | None = None,
+) -> ExportMatch:
+    """Classify a declaration against a binary's symbol tables.
+
+    *spellings* are the declaration's own linker spellings (its mangled
+    name and any producer-known alias of it, e.g. a Mach-O decoration
+    candidate); when none is non-empty the bare *name* **is** the linker
+    spelling, exactly the join's ``mangled or name`` rule. *dynamic* is the
+    dynamic export table's names, *static* the static table's (which may
+    include the dynamic ones), *demangled_dynamic* the demangled texts of
+    the dynamic ``_Z`` names, consulted only when *demangle* is given.
+
+    First match wins in :class:`ExportMatch` order, which is the order every
+    producer checked in before this primitive existed -- so the truth value
+    ("any tier but ``ABSENT``") is unchanged for every input.
+    """
+    own = tuple(s for s in spellings if s)
+    linker = own if own else ((name,) if name else ())
+    if any(s in dynamic for s in linker):
+        return ExportMatch.DYNAMIC
+    if name and name not in linker and name in dynamic:
+        return ExportMatch.NAME_ALIAS
+    if demangle is not None and demangled_dynamic:
+        for s in own:
+            if s.startswith("_Z"):
+                text = demangle(s)
+                if text and text in demangled_dynamic:
+                    return ExportMatch.DEMANGLED
+    if any(s in static for s in linker) or (name and name in static):
+        return ExportMatch.STATIC_ONLY
+    return ExportMatch.ABSENT
