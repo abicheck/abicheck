@@ -500,7 +500,14 @@ def run_ast_acquisition_offering_entry(
     # The entry the producer actually wrote, which a result can determine:
     # clang's C->C++ self-heal caches under the retry mode's key, not the
     # requested one, and a sidecar must sit beside the real entry.
+    #
+    # Offered only while that entry exists: a result whose inputs changed
+    # mid-acquisition is never written (`identities_stable`), and a sidecar
+    # stored or read beside a missing entry could later be paired with a
+    # different AST cached under that key.
     path = entry_path(result) if callable(entry_path) else entry_path
+    if not path.is_file():
+        return result
     superseded = offer_derived_ast_source(path, is_cache_entry=True, tree_in_hand=True)
     if superseded is None:
         return result

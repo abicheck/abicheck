@@ -757,22 +757,24 @@ def acquisition_counters(monkeypatch: pytest.MonkeyPatch) -> _AcquisitionCounter
     # retained-table hit offers the cache entry to the header-graph attach
     # (`run_ast_acquisition_offering_entry`), which then reads the sidecar
     # instead of re-projecting the tree. Those reads are not counted here.
-    in_sidecar = [0]
+    # Per thread: the release fan-out runs two workers, and one worker's
+    # sidecar read must not hide the other's raw decode.
+    in_sidecar = threading.local()
     _count(
         dumper_cache.json,
         "loads",
-        lambda: in_sidecar[0] or counters.raw_decodes.append("json"),
+        lambda: getattr(in_sidecar, "depth", 0) or counters.raw_decodes.append("json"),
     )
     from abicheck.buildsource import header_graph_projection_cache as _proj
 
     original_load = _proj.load_cached_projection
 
     def _load_sidecar(path: Path):  # type: ignore[no-untyped-def]
-        in_sidecar[0] += 1
+        in_sidecar.depth = getattr(in_sidecar, "depth", 0) + 1
         try:
             return original_load(path)
         finally:
-            in_sidecar[0] -= 1
+            in_sidecar.depth -= 1
 
     monkeypatch.setattr(_proj, "load_cached_projection", _load_sidecar)
     _count(header_ast_fields, "_normalize_header_ast_fields", _bump_normalize)
