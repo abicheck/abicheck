@@ -257,7 +257,9 @@ def _snapshot_stats(path: Path) -> dict[str, object]:
 def _join_child(path: str) -> int:
     """Child entry: time the evidence-entity-model Phase 2 joins over one
     stored snapshot and print their per-side state counts as JSON. A checkout
-    that predates the joins prints ``{}``."""
+    that predates the joins prints ``{}``. Imports this script's own checkout,
+    as :func:`_child` does, so the counts belong to the benchmarked tree."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     try:
         from abicheck.compare.debug_type_join import join_debug_types
         from abicheck.compare.export_join import join_exports

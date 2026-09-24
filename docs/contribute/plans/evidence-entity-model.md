@@ -71,8 +71,10 @@ export may have no known public declaration. Both are valid.
   `unresolved` node, never an approximate one that silently collides.
 - **I2 — joins are evidence, not name equality.** A declaration's mangled
   name is never treated as proof of an observed export. Every cross-layer
-  edge records its join state: `matched`, `ambiguous` (with candidates) or
-  `unmatched`.
+  edge records its join state: `matched`, `ambiguous` (with candidates),
+  `unmatched`, or `unknown` -- the other side was never observed (no export
+  table, no debug section), which is incomplete evidence, never a failed
+  match.
 - **I3 — every edge kind declares its evidence class:** `observed` (an
   extractor saw it), `resolved_join` (two observations were joined under a
   stated rule) or `derived` (a projection of snapshot records). Each class
