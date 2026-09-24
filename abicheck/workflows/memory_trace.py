@@ -179,7 +179,10 @@ def gc_census_is_safe() -> bool:
     with ``_PyTuple_Resize``; CPython checks the eval breaker after a
     ``CALL``, so the GIL can pass to the builder while the census list is
     alive, and the builder then fails with ``tupleobject.c:...: bad argument
-    to internal function`` (a ``SystemError``). It can also hand the caller
+    to internal function`` (a ``SystemError``) -- reproduced on CPython
+    3.10-3.13; 3.14 no longer grows an allocated tuple there, but the guard
+    stays unconditional, since a census still exposes objects other threads
+    are mid-way through building. It can also hand the caller
     a half-built tuple whose unfilled slots are ``NULL``. This is how the
     release fan-out's members ended ``ERROR`` under the benchmark harness,
     whose attach hook took a census from inside a worker thread.

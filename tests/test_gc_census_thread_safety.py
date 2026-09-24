@@ -20,7 +20,11 @@ Bug class ``gc-census-concurrent-thread``: ``gc.get_objects()`` /
 GC-tracked object, including a tuple another thread is still building in
 ``PySequence_Tuple``. That builder requires refcount 1 when it grows the
 tuple, so it fails with ``tupleobject.c: bad argument to internal
-function``. The oneDAL release fan-out lost a different member to this in
+function``. Reproduced on CPython 3.10-3.13; 3.14 builds ``tuple(iterable)``
+without growing an allocated tuple, so the negative control below is skipped
+there, while the guard stays unconditional (a census still hands out
+references to objects other threads are mid-way through building). The
+oneDAL release fan-out lost a different member to this in
 three of four benchmark runs, because the benchmark's attach hook took a
 census inside a worker thread.
 
@@ -72,6 +76,11 @@ def _raw_census():  # type: ignore[no-untyped-def]
 
 
 class TestMechanism:
+    @pytest.mark.skipif(
+        sys.version_info >= (3, 14),
+        reason="CPython 3.14 no longer grows an allocated tuple in place in "
+        "tuple(iterable); reproduced on 3.10-3.13 only",
+    )
     @pytest.mark.parametrize("n", _SIZES)
     def test_a_live_raw_census_breaks_tuple_construction(self, n: int) -> None:
         """Negative control: without the guard the class reproduces exactly."""

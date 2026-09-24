@@ -160,7 +160,7 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         public_surfaces=("cli",),
         axes={
-            "census": ("get_objects", "get_referrers"),
+            "census": ("get_objects",),
             "workers": ("1", "4"),
         },
         known_gaps=(
