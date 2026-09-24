@@ -79,6 +79,21 @@ class DwarfMetadata:
     # under -mlong-double-64/-mabi=ibmlongdouble (G23 D2, same-mangling case).
     base_types: dict[str, int] = field(default_factory=dict)
     has_dwarf: bool = False  # False = binary had no DWARF info
+    # ODR conflicts (evidence-entity-model Phase 2): further, *layout-distinct*
+    # definitions of a name already in ``structs``/``enums`` -- another CU
+    # defined it differently. ``structs``/``enums`` keep the first definition
+    # (their long-standing behaviour); these keep the rest, so the debug-type
+    # join can report the name as ambiguous instead of silently trusting the
+    # first. An identical repeat is one type, not a conflict, and is not
+    # recorded. Empty for a format that cannot observe one (BTF/CTF/PDB
+    # reduce to one definition per name before reaching this shape).
+    struct_odr_conflicts: dict[str, list[StructLayout]] = field(default_factory=dict)
+    enum_odr_conflicts: dict[str, list[EnumInfo]] = field(default_factory=dict)
+    # Whether the producer looked for ODR conflicts at all. Only the DWARF
+    # CU walk does; a converted BTF/CTF/PDB shape and a snapshot stored
+    # before schema v51 leave it False, so empty conflict maps there mean
+    # "not looked for", never "none exist".
+    odr_conflicts_observed: bool = False
 
     # TypeMetadataSource protocol methods
     @property

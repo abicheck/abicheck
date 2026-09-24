@@ -6,8 +6,6 @@ the join's own layout comparison.
 
 from __future__ import annotations
 
-import pytest
-
 from abicheck.model import AbiSnapshot, EnumType, RecordType, TypeField
 from abicheck.model.dwarf_facts import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
 from abicheck.model.entities import EnumMember
@@ -70,7 +68,6 @@ def _debug(name, n=1, kind="record"):
     return base if n == 1 else f"{base}#{n}"
 
 
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 class TestDebugTypeJoinStates:
     def test_struct_joins_header_record_by_qualified_name_and_layout(self):
         j = _join(
@@ -211,7 +208,6 @@ class TestDebugTypeJoinStates:
         assert j.join.right[_debug("Kind", kind="enum")].state is JoinState.UNMATCHED
 
 
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 class TestDebugTypeJoinIncompleteEvidence:
     def test_no_debug_info_is_unknown_not_unmatched(self):
         j = _join(_snap([_rec("Foo")]))

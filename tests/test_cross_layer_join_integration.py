@@ -162,7 +162,6 @@ class TestExportJoinOnStoredDump:
         assert checked >= 4
 
 
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 class TestDebugTypeJoinOnStoredDump:
     def test_join_states_match_the_fixture(self, dumps: dict[str, Path]) -> None:
         from abicheck.compare.debug_type_join import join_debug_types
@@ -245,7 +244,6 @@ class TestCompareUsesTheJoins:
             assert entry["record"]["reason_code"] == "unmatched_exports"
 
 
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 class TestOdrConflictOnRealDwarf:
     """Two CUs define ``Dup`` differently; the DWARF walk records the second
     definition, and the debug-type join refuses to pick one when the header

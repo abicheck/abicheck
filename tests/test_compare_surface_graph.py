@@ -33,6 +33,7 @@ from abicheck.compare.surface_graph import (
     build_public_surface_facts,
 )
 from abicheck.model.declarations import Function, Variable
+from abicheck.model.dwarf_facts import DwarfMetadata, StructLayout
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
 from abicheck.model.entities import RecordType, TypeField
 from abicheck.model.graph_evidence_class import EdgeEvidenceClass
@@ -346,6 +347,13 @@ def _rich_snapshot(**extra: object) -> AbiSnapshot:
         Function(name="g", mangled="", return_type="void"),
     ]
     var = Variable(name="v", mangled="v", type="S", source_header="inc/s.h")
+    extra.setdefault("elf", ElfMetadata(symbols=[ElfSymbol(name="_Z1fv")]))
+    extra.setdefault(
+        "dwarf",
+        DwarfMetadata(
+            structs={"S": StructLayout(name="S", byte_size=4)}, has_dwarf=True
+        ),
+    )
     return _snapshot(functions=fns, variables=[var], types=[rec], **extra)
 
 
@@ -372,7 +380,26 @@ class TestEdgeEvidenceClass:
             EDGE_EVIDENCE_CLASS[EDGE_KIND_DECLARES_LINKER_NAME]
             is EdgeEvidenceClass.DERIVED
         )
-        assert "exports" not in EDGE_EVIDENCE_CLASS
+
+    def test_observed_join_edges_are_resolved_joins(self) -> None:
+        # Phase 2 filled the `exports` name Phase 0 reserved: the observed
+        # export-table join, never the linker-name projection.
+        assert EDGE_EVIDENCE_CLASS["exports"] is EdgeEvidenceClass.RESOLVED_JOIN
+        assert EDGE_EVIDENCE_CLASS["debug_type_of"] is EdgeEvidenceClass.RESOLVED_JOIN
+
+    def test_exports_edges_follow_the_table_not_the_linker_name(self) -> None:
+        graph = SourceGraphSummary()
+        build_public_surface_facts(_rich_snapshot(), graph)
+        exports = {(e.src, e.dst) for e in graph.edges if e.kind == "exports"}
+        # `v` declares linker name `v`, but the table does not list it.
+        assert exports == {("binary_symbol://elf/_Z1fv", "decl://_Z1fv")}
+        states = {
+            n.id: n.attrs.get("export_join_state")
+            for n in graph.nodes
+            if n.kind == NODE_KIND_DECLARATION
+        }
+        assert states["decl://_Z1fv"] == "matched"
+        assert states["decl://v"] == "unmatched"
 
     @pytest.mark.parametrize(
         "exported",

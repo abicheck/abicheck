@@ -9,8 +9,6 @@ helpers or ``model/export_index.py``'s projections.
 
 from __future__ import annotations
 
-import pytest
-
 import random
 
 from hypothesis import given, settings, strategies as st
@@ -210,7 +208,6 @@ def _expected_header_state(header, debug, hsize, dsize, odr_size):
     return JoinState.MATCHED if len(compatible) == 1 else JoinState.AMBIGUOUS
 
 
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 @settings(max_examples=150, deadline=None)
 @given(_debug_world(), st.randoms(use_true_random=False))
 def test_debug_join_matches_ground_truth(world, rng):
@@ -229,7 +226,6 @@ def test_debug_join_matches_ground_truth(world, rng):
 @given(
     _debug_world(), st.randoms(use_true_random=False), st.randoms(use_true_random=False)
 )
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 def test_debug_join_is_independent_of_input_order(world, rng_a, rng_b):
     a = join_debug_types(_debug_snap(world, rng_a))
     b = join_debug_types(_debug_snap(world, rng_b))
@@ -237,7 +233,6 @@ def test_debug_join_is_independent_of_input_order(world, rng_a, rng_b):
     assert dict(a.join.right) == dict(b.join.right)
 
 
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 @settings(max_examples=150, deadline=None)
 @given(_debug_world(), st.randoms(use_true_random=False))
 def test_no_debug_join_without_identical_qualified_spelling(world, rng):
@@ -247,7 +242,6 @@ def test_no_debug_join_without_identical_qualified_spelling(world, rng):
         assert header_id == f"type://{debug_name}"
 
 
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 @settings(max_examples=150, deadline=None)
 @given(_debug_world(), st.randoms(use_true_random=False))
 def test_debug_join_states_are_exhaustive_and_odr_never_merges(world, rng):
@@ -266,7 +260,6 @@ def test_debug_join_states_are_exhaustive_and_odr_never_merges(world, rng):
             assert f"debug_type://debug/record/{name}#2" in j.join.right
 
 
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 def test_generated_worlds_are_not_vacuous():
     """Guard the oracle itself: across a fixed sample the generators reach
     every state on both joins."""
