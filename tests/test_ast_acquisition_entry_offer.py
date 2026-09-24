@@ -74,3 +74,22 @@ def test_no_derived_scope_returns_retained_tree_unchanged() -> None:
         a = run_ast_acquisition_offering_entry("clang", "k", ENTRY, _tree)
         b = run_ast_acquisition_offering_entry("clang", "k", ENTRY, _tree)
     assert a is b
+
+
+def test_entry_path_can_depend_on_the_result() -> None:
+    """clang's C->C++ self-heal caches under the retry key: the offer must
+    name the entry the producer actually wrote, which only the result tells."""
+    offers: list[Path] = []
+    retry_entry = Path("/nonexistent/retry.json")
+
+    def loader(path: Path, *, tree_in_hand: bool = False) -> None:
+        offers.append(path)
+
+    def resolve(result: tuple[object, str, bool]) -> Path:
+        return retry_entry if result[2] else ENTRY
+
+    with ast_acquisition_scope():
+        run_ast_acquisition_offering_entry("clang", "k", resolve, _tree)
+        with derived_ast_scope(loader) as art:
+            run_ast_acquisition_offering_entry("clang", "k", resolve, _tree)
+    assert offers == [retry_entry] and art.cache_path == retry_entry

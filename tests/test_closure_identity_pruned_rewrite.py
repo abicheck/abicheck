@@ -113,6 +113,10 @@ def _snapshots(draw: st.DrawFn) -> AbiSnapshot:
         f"type:{draw(_spelling)}": {"source": draw(_spelling)}
         for _ in range(draw(st.integers(0, 2)))
     }
+    # A non-str key the walk leaves as-is even when it holds a marker
+    # (CodeRabbit review): the pruned path must not rewrite it either.
+    for _ in range(draw(st.integers(0, 2))):
+        snap.fact_provenance[(draw(_spelling),)] = {"source": draw(_spelling)}  # type: ignore[index]
     return snap
 
 

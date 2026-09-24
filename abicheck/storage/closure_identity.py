@@ -613,9 +613,14 @@ def _rewrite_marked_subtrees(
         rewritten: dict[object, object] = {}
         changed = False
         for k, v in value.items():
+            # Only the key types the walk itself rewrites (a flag is a
+            # superset, so a flagged tuple key must still stay as-is).
+            key_walked = (isinstance(k, str) and not isinstance(k, _Enum)) or (
+                _dataclasses.is_dataclass(k) and not isinstance(k, type)
+            )
             new_k = (
                 _walk_rewrite_strings(k, rewrite, field_name=field_name)
-                if id(k) in flagged
+                if key_walked and id(k) in flagged
                 else k
             )
             if _handoff_dataclass(v) or isinstance(v, list) or type(v) is dict:

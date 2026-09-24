@@ -328,6 +328,14 @@ def _clang_header_dump(
         frontend_context if dpcpp_multi_context or dpcpp_host_context else None
     )
     cached = _cache_path(key, backend="clang")
+
+    def _cpp_retry_mode() -> tuple[bool, bool, tuple[str, ...]]:  # C->C++ self-heal
+        return True, _detect_cpp20_headers(headers), cpp_system_includes
+
+    def _entry_path(acquired: tuple[Any, str | None, bool]) -> Path:  # its cache entry
+        retry_key = None if acquired[2] == force_cpp else _make_key(*_cpp_retry_mode())
+        return cached if retry_key is None else _cache_path(retry_key, backend="clang")
+
     if not _coordinated and dumper_cache.ast_acquisition_active():
         # A warm disk hit is an acquisition too, so it is read on the
         # `_coordinated=True` re-entry below, never ahead of this call --
@@ -335,7 +343,7 @@ def _clang_header_dump(
         return dumper_cache.run_ast_acquisition_offering_entry(
             "clang",
             key,
-            cached,
+            _entry_path,
             lambda: _clang_header_dump(
                 headers,
                 extra_includes,
@@ -420,11 +428,7 @@ def _clang_header_dump(
             and _is_missing_cpp_stdlib_header_error(result.stderr or "")
         ):
             _log_c_to_cpp_selfheal(explicit_c_request)
-            cur_fcpp, cur_fcpp20, cur_sysinc = (
-                True,
-                _detect_cpp20_headers(headers),
-                cpp_system_includes,
-            )
+            cur_fcpp, cur_fcpp20, cur_sysinc = _cpp_retry_mode()
             result = _run_clang(cur_fcpp, cur_fcpp20, cur_sysinc)
         else:
             cur_fcpp, cur_fcpp20, cur_sysinc = force_cpp, force_cpp20, system_includes

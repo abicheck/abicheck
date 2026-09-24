@@ -471,7 +471,10 @@ def run_ast_acquisition(
 
 
 def run_ast_acquisition_offering_entry(
-    backend: str, key: str, entry_path: Path, producer: Callable[[], _T]
+    backend: str,
+    key: str,
+    entry_path: Path | Callable[[_T], Path],
+    producer: Callable[[], _T],
 ) -> _T:
     """:func:`run_ast_acquisition` for a producer whose result is ``(ast, ...)``.
 
@@ -494,9 +497,11 @@ def run_ast_acquisition_offering_entry(
     result = run_ast_acquisition(backend, key, _tracked)
     if ran:
         return result
-    superseded = offer_derived_ast_source(
-        entry_path, is_cache_entry=True, tree_in_hand=True
-    )
+    # The entry the producer actually wrote, which a result can determine:
+    # clang's C->C++ self-heal caches under the retry mode's key, not the
+    # requested one, and a sidecar must sit beside the real entry.
+    path = entry_path(result) if callable(entry_path) else entry_path
+    superseded = offer_derived_ast_source(path, is_cache_entry=True, tree_in_hand=True)
     if superseded is None:
         return result
     return cast("_T", (superseded, *cast("tuple[Any, ...]", result)[1:]))
