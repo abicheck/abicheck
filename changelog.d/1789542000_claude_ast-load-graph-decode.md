@@ -14,8 +14,8 @@
   classifies each header path once and adds each header node once. The clang
   walker now builds a `_Decl` only for nodes it actually keeps, and looks up
   the anonymous-ordinal state only for scopes that have an anonymous child.
-  Snapshots and reports are byte-identical to before when the hash seed is
-  fixed.
+  Findings, verdicts, and graph nodes, edges and facts are unchanged. The
+  stored graph's node order changes once, to AST document order (see Fixed).
 
 ### Fixed
 

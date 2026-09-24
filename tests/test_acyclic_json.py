@@ -87,3 +87,36 @@ def test_nested_pauses_restore_outermost_setting() -> None:
             assert not gc.isenabled()
         assert not gc.isenabled()
     assert gc.isenabled()
+
+
+def test_overlapping_pauses_on_two_threads_restore_once_the_last_ends() -> None:
+    # A enters, B enters, A leaves, B leaves: collection must stay paused
+    # until B leaves, and must be back on afterwards. Restoring per pause
+    # re-enabled it under B, then left it disabled for good once B restored
+    # the "disabled" state it had recorded on entry.
+    import threading
+
+    gc.enable()
+    a_in, b_in, a_out = threading.Event(), threading.Event(), threading.Event()
+    seen: list[bool] = []
+
+    def first() -> None:
+        with gc_paused():
+            a_in.set()
+            b_in.wait(5)
+        a_out.set()
+
+    def second() -> None:
+        a_in.wait(5)
+        with gc_paused():
+            b_in.set()
+            a_out.wait(5)
+            seen.append(gc.isenabled())
+
+    threads = [threading.Thread(target=first), threading.Thread(target=second)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    assert seen == [False]
+    assert gc.isenabled()

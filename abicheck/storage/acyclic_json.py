@@ -28,8 +28,9 @@ running and 0.83-0.87 s with it paused -- the same objects, the same
 result. Pausing it is purely a scheduling decision.
 
 The pause is process-wide (``gc.disable`` has no per-thread form), bounded
-by the parse, and restores the caller's own setting on the way out, so a
-caller that had already disabled collection keeps it disabled. Another
+by the parse, and restores the setting in effect before the first
+overlapping pause once the last one ends, so a caller that had already
+disabled collection keeps it disabled. Another
 thread that allocates during the pause loses nothing but timeliness: its
 cyclic garbage is collected at the next collection after the pause ends.
 """
@@ -38,6 +39,7 @@ from __future__ import annotations
 
 import gc
 import json
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -45,17 +47,32 @@ from typing import Any
 __all__ = ["gc_paused", "loads_acyclic"]
 
 
+#: Overlapping pauses (two dumps parsing on two threads) share one pause:
+#: the setting in effect when the first began is restored when the last
+#: ends. Restoring per pause would let an inner pause record "disabled" as
+#: its prior state and leave collection off for the rest of the process.
+_lock = threading.Lock()
+_active = 0
+_restore_enabled = False
+
+
 @contextmanager
 def gc_paused() -> Iterator[None]:
     """Pause cyclic garbage collection for the ``with`` body, then restore
-    whatever setting was in effect before it."""
-    was_enabled = gc.isenabled()
-    gc.disable()
+    whatever setting was in effect before the outermost overlapping pause."""
+    global _active, _restore_enabled
+    with _lock:
+        if _active == 0:
+            _restore_enabled = gc.isenabled()
+            gc.disable()
+        _active += 1
     try:
         yield
     finally:
-        if was_enabled:
-            gc.enable()
+        with _lock:
+            _active -= 1
+            if _active == 0 and _restore_enabled:
+                gc.enable()
 
 
 def loads_acyclic(document: str | bytes | bytearray, **kwargs: Any) -> Any:
