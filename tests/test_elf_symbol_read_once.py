@@ -141,3 +141,24 @@ def test_a_walk_that_fails_is_not_cached() -> None:
         with pytest.raises(ValueError):
             list(symbols_of(sec))
     assert sec.calls == 2
+
+
+def test_short_section_data_is_declined() -> None:
+    class _Sec:
+        header = {"sh_entsize": 2, "sh_size": 8}
+
+        def data(self) -> bytes:
+            return b"\x00\x00"  # header claims 4 entries, bytes hold 1
+
+    assert decode_versym(_Sec(), 4) is None
+
+
+def test_parse_falls_back_to_the_per_entry_read_with_identical_output(
+    monkeypatch: pytest.MonkeyPatch, hidden_version_lib: Path | None
+) -> None:
+    import abicheck.elf_metadata as elf_metadata
+
+    lib = hidden_version_lib or _libs(None)[0]
+    fast = repr(elf_metadata.parse_elf_metadata(lib))
+    monkeypatch.setattr(elf_metadata, "decode_versym", lambda _s, _n: None)
+    assert repr(elf_metadata.parse_elf_metadata(lib)) == fast
