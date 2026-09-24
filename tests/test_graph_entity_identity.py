@@ -218,3 +218,76 @@ class TestGraphAliasTable:
         g.add_node(GraphNode(id="decl://x", kind="source_decl", label="x"))
         with pytest.raises(ValueError):
             g.add_identity_alias("decl://x", "decl://y")
+
+
+class TestEdgeBranches:
+    """Branches a normal dump rarely reaches, each with its own oracle."""
+
+    def test_formatters_pass_an_unresolved_id_through(self) -> None:
+        from abicheck.model.graph_identity import _decl_node_id, _type_node_id
+
+        un = unresolved_identity("decl", "x").node_id
+        assert _decl_node_id(un) == un
+        assert _type_node_id(un) == un
+
+    def test_nameless_record_and_enum_are_unresolved_and_distinct(self) -> None:
+        from abicheck.model import EnumType, RecordType
+        from abicheck.model.graph_entity_identity import (
+            identity_for_enum,
+            identity_for_record,
+        )
+
+        rec = identity_for_record(
+            RecordType(name="", kind="struct", source_header="a.h")
+        )
+        en = identity_for_enum(EnumType(name="", source_header="b.h"))
+        assert not rec.resolved and not en.resolved
+        assert rec.node_id != en.node_id
+        assert not type_identity("").resolved
+
+    def test_register_identity_alias_refuses_a_taken_spelling(self) -> None:
+        from abicheck.model.graph_entity_identity import register_identity_alias
+
+        g = SourceGraphSummary()
+        g.add_node(GraphNode(id="decl://_x", kind="source_decl", label="_x"))
+        assert register_identity_alias(g, "decl://_x", "decl://x") is False
+        assert register_identity_alias(g, "decl://__y", "decl://_y") is True
+        assert g.resolve_node_id("decl://__y") == "decl://_y"
+
+    def test_endpoint_key_round_trips_to_the_node_id(self) -> None:
+        from abicheck.model.graph_entity_identity import endpoint_key
+        from abicheck.model.graph_identity import _decl_node_id
+
+        for ident in (
+            declaration_identity(linker_name="_Z1fv"),
+            unresolved_identity("decl", "q"),
+        ):
+            assert _decl_node_id(endpoint_key(ident)) == ident.node_id
+
+
+def test_l4_conflicting_legacy_alias_joins_neither() -> None:
+    """Two L4 entities sharing one legacy identity() spelling but distinct
+    linker names: the shared spelling is ambiguous, so it aliases neither."""
+    from abicheck.buildsource.source_abi import SourceEntity
+    from abicheck.buildsource.source_graph_build_source_abi import (
+        source_entity_decl_node_id,
+    )
+
+    g = SourceGraphSummary()
+    a = SourceEntity(
+        id="a",
+        kind="function",
+        qualified_name="f",
+        signature_hash="sha256:1",
+        names={"linker": "f_a"},
+    )
+    b = SourceEntity(
+        id="b",
+        kind="function",
+        qualified_name="f",
+        signature_hash="sha256:1",
+        names={"linker": "f_b"},
+    )
+    assert source_entity_decl_node_id(g, a) == "decl://f_a"
+    assert source_entity_decl_node_id(g, b) == "decl://f_b"
+    assert "decl://f#sha256:1" not in g.identity_aliases
