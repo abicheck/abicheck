@@ -79,6 +79,33 @@ _IMMUTABLE_LEAF_TYPES: frozenset[type] = frozenset(
 )
 
 
+#: ``type -> its dataclass field names``, or ``None`` for a non-dataclass.
+#: ``dataclasses.fields()``/``is_dataclass()`` answer the same thing for
+#: every instance of a class, and calling them per value was the largest
+#: single cost of encoding a snapshot (one pair per model object). A class
+#: object is a dataclass instance of nothing, so ``type(obj)`` of a class
+#: (its metaclass) maps to ``None`` -- matching the former
+#: ``not isinstance(obj, type)`` guard.
+_FIELD_NAMES: dict[type, tuple[str, ...] | None] = {}
+
+
+def _dataclass_field_names(cls: type) -> tuple[str, ...] | None:
+    try:
+        return _FIELD_NAMES[cls]
+    except KeyError:
+        names = (
+            tuple(f.name for f in dataclass_fields(cls)) if is_dataclass(cls) else None
+        )
+        _FIELD_NAMES[cls] = names
+        return names
+
+
+#: Checked inline at each recursive call site, so the common leaf value costs
+#: a set lookup rather than a function call; the same rule the top of
+#: :func:`_encode_value` applies.
+_LEAF = _IMMUTABLE_LEAF_TYPES
+
+
 def _encode_value(obj: Any) -> Any:
     """Project one model value into its JSON-shaped, detached equivalent.
 
@@ -103,26 +130,31 @@ def _encode_value(obj: Any) -> Any:
     * any other leaf is shared when provably immutable, and deep-copied
       otherwise.
     """
-    if is_dataclass(obj) and not isinstance(obj, type):
+    cls = type(obj)
+    if cls in _IMMUTABLE_LEAF_TYPES:
+        return obj
+    names = _dataclass_field_names(cls)
+    if names is not None:
         return {
-            f.name: _encode_value(getattr(obj, f.name)) for f in dataclass_fields(obj)
+            name: v if type(v := getattr(obj, name)) in _LEAF else _encode_value(v)
+            for name in names
         }
     # ``Enum`` stays an ``isinstance`` test: a member's type is its own enum
     # class, never ``Enum`` itself, so exact matching cannot express it -- and
     # sharing one is safe regardless of what the enum subclasses, because
     # members are singletons that ``deepcopy`` returns unchanged anyway.
-    if type(obj) in _IMMUTABLE_LEAF_TYPES or isinstance(obj, enum.Enum):
+    if isinstance(obj, enum.Enum):
         return obj
     if isinstance(obj, (set, frozenset)):
         return sorted(obj)
     if isinstance(obj, dict):
-        return {k: _encode_value(v) for k, v in obj.items()}
+        return {k: v if type(v) in _LEAF else _encode_value(v) for k, v in obj.items()}
     if isinstance(obj, tuple):
         if hasattr(obj, "_fields"):  # namedtuple, as asdict special-cases it
             return type(obj)(*[_encode_value(v) for v in obj])
-        return tuple(_encode_value(v) for v in obj)
+        return tuple(v if type(v) in _LEAF else _encode_value(v) for v in obj)
     if isinstance(obj, list):
-        return [_encode_value(v) for v in obj]
+        return [v if type(v) in _LEAF else _encode_value(v) for v in obj]
     return copy.deepcopy(obj)
 
 
@@ -164,6 +196,10 @@ _SNAPSHOT_SKIP_FIELDS = frozenset(
         # OccurrenceId-keyed mapping is also exactly the shape ``asdict``
         # could not walk at all.
         "semantic_ir",
+        # Owned by BuildSourcePack.to_embedded_dict() below, which replaces
+        # the walked value (or the key is dropped when nothing is embedded):
+        # walking it first was most of a snapshot's encode time, discarded.
+        "build_source",
     }
 )
 
@@ -230,8 +266,6 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
         converted["build_source"] = snap.build_source.to_embedded_dict(
             include_source_graph=not shared
         )
-    else:
-        converted.pop("build_source", None)
     encode_surface_graph(converted, snap)  # storage/surface_graph_codec.py
     encode_semantic_ir(converted, snap)  # storage/semantic_ir_codec.py (v38)
 
@@ -344,7 +378,41 @@ def same_persisted_content(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     """
     if old is new:
         return True
+    if persisted_content_provably_differs(old, new):
+        return False
     try:
         return snapshot_content_digest(old) == snapshot_content_digest(new)
     except Exception:
         return False
+
+
+#: Scalar ``AbiSnapshot`` fields the serializer writes verbatim, as a JSON
+#: string under their own key. Two snapshots holding different strings in
+#: any of them therefore serialize differently, with no need to serialize
+#: either. ``tests/test_snapshot_digest_prefilter.py`` checks each against
+#: the real serializer rather than trusting this list.
+_VERBATIM_STR_FIELDS = (
+    "created_at",
+    "source_path",
+    "library",
+    "version",
+    "git_commit",
+    "build_id",
+)
+
+
+def persisted_content_provably_differs(old: AbiSnapshot, new: AbiSnapshot) -> bool:
+    """``True`` only when *old* and *new* certainly serialize differently.
+
+    A cheap, one-directional check ahead of :func:`snapshot_content_digest`:
+    the digest's only consumers ask whether two snapshots are the *same*
+    content, and two snapshots from different runs differ in ``created_at``
+    alone. Answering "different" here skips two whole-snapshot
+    serializations, the most expensive step of a stored-snapshot compare.
+    ``False`` means only "not decided" -- the digest still answers it.
+    """
+    for name in _VERBATIM_STR_FIELDS:
+        a, b = getattr(old, name, None), getattr(new, name, None)
+        if type(a) is str and type(b) is str and a != b:
+            return True
+    return False

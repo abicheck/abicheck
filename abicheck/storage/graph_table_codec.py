@@ -410,4 +410,90 @@ def decode_graph_table(payload: Mapping[str, Any]) -> SourceGraphSummary:
     from ..model.source_graph import SourceGraphSummary
 
     with identity_normalization_memo():
-        return SourceGraphSummary.from_dict(graph_table_to_legacy_dict(payload))
+        return SourceGraphSummary.from_parts(*_decode_entities(payload))
+
+
+def _decode_entities(
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, Any], list[Any], list[Any]]:
+    """The graph-level fields, nodes and edges *payload* encodes, built
+    directly rather than through :func:`graph_table_to_legacy_dict`'s
+    per-entity dicts.
+
+    Equal by construction to ``from_dict(graph_table_to_legacy_dict(p))``
+    (``tests/test_graph_table_codec.py`` checks it on generated graphs):
+
+    * each interned fact row is validated and decoded **once** -- a real
+      graph has tens of distinct facts across ~10^5 entities -- and every
+      entity still gets its own :class:`GraphFact` and its own ``attrs``
+      dict (a non-scalar value deep-copied, as :meth:`_Reader.attrs` does),
+      since ``ensure_facts_and_resolve`` normalizes a decl/type node's fact
+      attrs in place;
+    * an edge is not resolved here: :meth:`SourceGraphSummary.add_edge`
+      resolves every edge unconditionally, and ``GraphEdge.from_dict``'s
+      earlier resolve was overwritten by it. A node keeps its resolve,
+      because ``add_node`` merges a coalesced duplicate's facts as given.
+    """
+    from ..model.graph_facts import (
+        GraphEdge,
+        GraphFact,
+        GraphNode,
+        ensure_facts_and_resolve,
+    )
+    from ..model.graph_identity import _normalize_if_decl_or_type
+
+    if not is_graph_table(payload):
+        raise ValueError(
+            f"graph table: unsupported encoding {payload.get('encoding')!r}"
+        )
+    read = _Reader(payload)
+    node_cols = _columns(payload, "nodes", _NODE_COLUMNS)
+    edge_cols = _columns(payload, "edges", _EDGE_COLUMNS)
+    decoded: dict[int, tuple[str, str, dict[str, Any], bool]] = {}
+
+    def fact_row(index: Any, where: str) -> tuple[str, str, dict[str, Any], bool]:
+        hit = decoded.get(index) if type(index) is int else None
+        if hit is None:
+            raw = read.fact(index, where)
+            attrs = raw["attrs"]
+            flat = all(type(v) in _SCALARS for v in attrs.values())
+            hit = decoded[index] = (raw["producer"], raw["confidence"], attrs, flat)
+        return hit
+
+    def facts(entry: Any, where: str) -> list[Any]:
+        if type(entry) is list:
+            if not entry:
+                raise ValueError(f"graph table: {where} entry has no facts")
+            rows = [fact_row(i, where) for i in entry]
+        else:
+            rows = [fact_row(entry, where)]
+        return [
+            GraphFact(
+                producer=producer,
+                confidence=confidence,
+                attrs=dict(attrs) if flat else copy.deepcopy(attrs),
+            )
+            for producer, confidence, attrs, flat in rows
+        ]
+
+    nodes = []
+    for i, k, lb, f in zip(*node_cols):
+        node = GraphNode(
+            id=_normalize_if_decl_or_type(read.string(i, "nodes.id")),
+            kind=read.string(k, "nodes.kind"),
+            label=read.string(lb, "nodes.label"),
+            facts=facts(f, "nodes.facts"),
+        )
+        ensure_facts_and_resolve(node)
+        nodes.append(node)
+    edges = [
+        GraphEdge(
+            src=_normalize_if_decl_or_type(read.string(src, "edges.src")),
+            dst=_normalize_if_decl_or_type(read.string(d, "edges.dst")),
+            kind=read.string(k, "edges.kind"),
+            facts=facts(f, "edges.facts"),
+        )
+        for src, d, k, f in zip(*edge_cols)
+    ]
+    fields = {name: payload[name] for name in _SCALAR_FIELDS if name in payload}
+    return fields, nodes, edges

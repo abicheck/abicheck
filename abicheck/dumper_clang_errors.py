@@ -44,6 +44,7 @@ from .dumper_cache import (
 from .dumper_clang_streaming import load_pruned_clang_ast, streaming_prune_suppressed
 from .errors import SnapshotError
 from .extract.env_flags import env_flag
+from .storage.acyclic_json import gc_paused
 from .storage.ast_size_observer import report_ast_size
 from .storage.derived_ast import offer_derived_ast_source
 from .storage.json_chunked_write import _atomic_write_json
@@ -721,7 +722,13 @@ def _parse_clang_ast_result(
             return cast("dict[str, Any]", superseded)
         prune_enabled = _streaming_prune_enabled()
         try:
-            with open(ast_path, "rb") as fh:  # bytes: json detects encoding
+            # The collector is paused for the parse: the tree has no cycles,
+            # and letting it run over millions of fresh containers roughly
+            # doubled this step (`storage.acyclic_json`).
+            with (
+                open(ast_path, "rb") as fh,
+                gc_paused(),
+            ):  # bytes: json detects encoding
                 if prune_enabled:
                     root, pruned_count = load_pruned_clang_ast(
                         fh, header_roots=header_roots

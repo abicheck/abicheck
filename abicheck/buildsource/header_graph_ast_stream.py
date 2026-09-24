@@ -183,6 +183,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+from ..storage.acyclic_json import loads_acyclic
 from .call_graph import (
     _dedupe_edges as _dedupe_call_edges,
     _fill_callee_files,
@@ -578,7 +579,7 @@ def stream_top_level_decls(
             if depth == 0:
                 if record_extents is not None:
                     record_extents.append((base, base + pos))
-                yield json.loads(buf[:pos])
+                yield loads_acyclic(buf[:pos])
                 yielded_any = True
                 del buf[:pos]
                 base += pos
@@ -601,7 +602,7 @@ def stream_recorded_decls(
     with path.open("rb") as fh:
         for start, end in extents:
             fh.seek(start)
-            yield json.loads(fh.read(end - start))
+            yield loads_acyclic(fh.read(end - start))
 
 
 def project_header_graph_ast_file(path: Path) -> HeaderGraphAstProjection:
@@ -664,7 +665,8 @@ def project_header_graph_ast_file(path: Path) -> HeaderGraphAstProjection:
     needs_entity_files = any(e.kind == "DECL_REFERENCES_DECL" for e in type_edges)
     type_qnames = {qname for qnames in idx.name_index.values() for qname in qnames}
     return HeaderGraphAstProjection(
-        type_files={q: idx.decl_file[q] for q in type_qnames if q in idx.decl_file},
+        # Document order, as `type_graph.index_declared_type_files` gives it.
+        type_files={q: f for q, f in idx.decl_file.items() if q in type_qnames},
         type_edges=type_edges,
         call_edges=_dedupe_call_edges(_fill_callee_files(call_edges, decl_files)),
         entity_files=dict(idx.decl_file) if needs_entity_files else {},

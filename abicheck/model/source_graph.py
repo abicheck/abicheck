@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -594,6 +595,25 @@ class SourceGraphSummary:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> SourceGraphSummary:
+        return cls.from_parts(
+            d,
+            (GraphNode.from_dict(raw) for raw in d.get("nodes", [])),
+            (GraphEdge.from_dict(raw) for raw in d.get("edges", [])),
+        )
+
+    @classmethod
+    def from_parts(
+        cls,
+        d: dict[str, Any],
+        nodes: Iterable[GraphNode],
+        edges: Iterable[GraphEdge],
+    ) -> SourceGraphSummary:
+        """:meth:`from_dict` with the entities already built: *d* supplies
+        only the graph-level fields (its ``nodes``/``edges`` are ignored).
+        Lets a decoder that builds :class:`GraphNode`/:class:`GraphEdge`
+        directly (``storage.graph_table_codec``) share every load-time step
+        after entity construction -- coalescing, resolver rebuild, finalize.
+        """
         # Defensive ``.get`` parsing so a newer/hand-edited summary never aborts
         # a load (evidence/CLAUDE.md forward-compat rule); ``indexes`` are
         # derived and intentionally not read back. ``extractor_passes``
@@ -626,10 +646,10 @@ class SourceGraphSummary:
             },
         )
         # add_node/add_edge coalesce migration-colliding ids (Codex review).
-        for raw_node in d.get("nodes", []):
-            obj.add_node(GraphNode.from_dict(raw_node))
-        for raw_edge in d.get("edges", []):
-            obj.add_edge(GraphEdge.from_dict(raw_edge))
+        for node in nodes:
+            obj.add_node(node)
+        for edge in edges:
+            obj.add_edge(edge)
         if _raw_entity_resolver:
             obj.resolve_entities()  # rebuild from coalesced facts (Codex review)
         obj.finalize()  # recomputes graph_id + coverage post-migration

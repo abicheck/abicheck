@@ -134,6 +134,9 @@ NON_ADR062_MODULES = frozenset(
         "snapshot_reliability_flags",
         "snapshot_digest_cache",
         "json_stream",
+        # A GC-paused `json.loads` for AST/projection documents: a parse
+        # helper beside json_stream, not an ADR-062 Phase 0 primitive.
+        "acyclic_json",
         "json_chunked_write",
         "snapshot_stream_write",
         # The incremental gzip/zstd encoder `snapshot_stream_write` feeds:
