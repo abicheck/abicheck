@@ -410,3 +410,14 @@ class TestLazyFieldGuards:
 
         with pytest.raises(RuntimeError):
             _no_decoder()
+
+
+def test_a_flat_input_document_mutated_after_load_does_not_change_the_graph() -> None:
+    from abicheck.serialization import snapshot_to_dict
+
+    d = snapshot_to_dict(_snapshot())
+    snap = snapshot_from_dict(d)
+    d["surface_graph"]["strings"][:] = ["mutated"] * len(d["surface_graph"]["strings"])
+    graph = snap.surface_graph
+    assert isinstance(graph, SourceGraphSummary)
+    assert graph.has_node("header:///inc/a.h")

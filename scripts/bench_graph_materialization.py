@@ -75,10 +75,6 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-# Measure *this checkout's* abicheck, not whichever one the interpreter's
-# editable install points at: comparing two revisions means running this
-# script from two worktrees, and each child must import its own tree.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 VARIANTS = ("none", "graph", "graph+facts")
 
@@ -89,6 +85,10 @@ VARIANTS = ("none", "graph", "graph+facts")
 
 
 def _child(variant: str, argv: list[str]) -> int:
+    # Measure *this checkout's* abicheck, not whichever one the interpreter's
+    # editable install points at: comparing two revisions means running this
+    # script from two worktrees, and each child must import its own tree.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from abicheck import service_dump_native as native
     from abicheck.compare.surface_graph import build_public_surface_facts
     from abicheck.workflows import memory_trace
@@ -258,6 +258,26 @@ def _dump_argv(lib: str, header: str, includes: list[str], out: Path) -> list[st
     return [*argv, "-o", str(out)]
 
 
+_LIBRARY_SUFFIXES = (".so", ".dll", ".dylib")
+
+
+def _release_members(lib_dir: Path) -> list[Path]:
+    """The shared libraries in *lib_dir* (versioned ``libfoo.so.3`` too);
+    headers, metadata and subdirectories are not members."""
+    members = sorted(
+        p
+        for p in lib_dir.iterdir()
+        if p.is_file()
+        and (
+            p.suffix in _LIBRARY_SUFFIXES
+            or any(f"{sfx}." in p.name for sfx in _LIBRARY_SUFFIXES)
+        )
+    )
+    if not members:
+        raise SystemExit(f"{lib_dir}: no shared library to measure")
+    return members
+
+
 def _release_steps(args: argparse.Namespace, wd: Path) -> dict[str, list[str]]:
     """Release mode: one ``dump`` per member and side into ``wd/old`` and
     ``wd/new``, a stored/stored directory ``compare`` of those (the path a
@@ -268,7 +288,7 @@ def _release_steps(args: argparse.Namespace, wd: Path) -> dict[str, list[str]]:
         ("new", args.new_lib, args.new_header, args.new_inc),
     ):
         (wd / side).mkdir(parents=True, exist_ok=True)
-        for member in sorted(Path(lib_dir).iterdir()):
+        for member in _release_members(Path(lib_dir)):
             steps[f"dump_{side}_{member.name}"] = _dump_argv(
                 str(member), header, incs, wd / side / f"{member.name}.json"
             )
@@ -333,6 +353,69 @@ def _summary(rows: list[dict[str, object]]) -> dict[str, object]:
     return out
 
 
+def _run_tracemalloc(
+    args: argparse.Namespace,
+    variants: list[str],
+    base_env: dict[str, str],
+    results: dict[str, object],
+) -> None:
+    """One allocation-attribution dump per variant, never mixed with the
+    timing runs (tracemalloc perturbs the time and RSS it sits beside)."""
+    for variant in variants:
+        wd = args.work / variant.replace("+", "_") / "tracemalloc"
+        wd.mkdir(parents=True, exist_ok=True)
+        env = dict(base_env)
+        env["ABICHECK_CACHE_DIR"] = str(wd / "cache")
+        env["XDG_CACHE_HOME"] = str(wd / "xdg")
+        env["ABICHECK_MEMORY_TRACE"] = str(wd / "dump_old.trace.jsonl")
+        env["ABICHECK_MEMORY_TRACE_TRACEMALLOC"] = "1"
+        traced_lib = (
+            str(_release_members(Path(args.old_lib))[0])
+            if Path(args.old_lib).is_dir()
+            else args.old_lib
+        )
+        row = _run(
+            variant,
+            _dump_argv(traced_lib, args.old_header, args.old_inc, wd / "old.json"),
+            env,
+        )
+        samples = [
+            json.loads(line)
+            for line in (wd / "dump_old.trace.jsonl").read_text().splitlines()
+            if line.strip()
+        ]
+        results["tracemalloc"][variant] = {  # type: ignore[index]
+            "seconds": row["seconds"],
+            "marks": [
+                {
+                    "event": s["event"],
+                    "t": s.get("t"),
+                    "tracemalloc_current_mib": _mib(s.get("tracemalloc_current_bytes")),
+                    "tracemalloc_phase_peak_mib": _mib(
+                        s.get("tracemalloc_phase_peak_bytes")
+                    ),
+                    "counts": s.get("counts"),
+                }
+                for s in samples
+                if "tracemalloc_current_bytes" in s or s.get("kind") == "counts"
+            ],
+        }
+        print(f"tracemalloc {variant} {row['seconds']}s", flush=True)
+        args.out.write_text(json.dumps(results, indent=2), encoding="utf-8")
+
+
+def _summaries(runs: list[dict[str, object]], variants: list[str]) -> dict[str, object]:
+    """Per variant and step, in the order the steps ran (release mode names
+    one step per member plus the two compares)."""
+    summary: dict[str, object] = {}
+    for variant in variants:
+        steps_seen = dict.fromkeys(r["step"] for r in runs if r["variant"] == variant)
+        for step in steps_seen:
+            rows = [r for r in runs if r["variant"] == variant and r["step"] == step]
+            summary[f"{variant}/{step}"] = _summary(rows)
+    return summary
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv[:1] == ["--_child"]:
@@ -394,6 +477,9 @@ def main(argv: list[str] | None = None) -> int:
                 env["XDG_CACHE_HOME"] = str(wd / f"xdg_{step}")
                 env["ABICHECK_MEMORY_TRACE"] = str(wd / f"{step}.trace.jsonl")
                 env["BENCH_SIDECAR"] = str(wd / f"{step}.attach.json")
+                # The child appends one line per attach; start from empty so a
+                # reused --work directory never mixes in an earlier run.
+                (wd / f"{step}.attach.json").unlink(missing_ok=True)
                 row = _run(variant, step_argv, env)
                 side = wd / f"{step}.attach.json"
                 if side.exists():
@@ -415,60 +501,23 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 if row["exit_code"] not in (0, 2, 4):
                     print(row["stderr_tail"], file=sys.stderr)
-            if rep == 0 and not release:
+            if rep == 0:
                 results["snapshots"][variant] = {  # type: ignore[index]
-                    side: _snapshot_stats(wd / f"{side}.json")
-                    for side in ("old", "new")
+                    str(path.relative_to(wd)): _snapshot_stats(path)
+                    for path in (
+                        sorted((wd / "old").glob("*.json"))
+                        + sorted((wd / "new").glob("*.json"))
+                        if release
+                        else [wd / "old.json", wd / "new.json"]
+                    )
+                    if path.is_file()
                 }
             args.out.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
     if args.tracemalloc:
-        for variant in variants:
-            wd = args.work / variant.replace("+", "_") / "tracemalloc"
-            wd.mkdir(parents=True, exist_ok=True)
-            env = dict(base_env)
-            env["ABICHECK_CACHE_DIR"] = str(wd / "cache")
-            env["XDG_CACHE_HOME"] = str(wd / "xdg")
-            env["ABICHECK_MEMORY_TRACE"] = str(wd / "dump_old.trace.jsonl")
-            env["ABICHECK_MEMORY_TRACE_TRACEMALLOC"] = "1"
-            row = _run(
-                variant,
-                _dump_argv(
-                    args.old_lib, args.old_header, args.old_inc, wd / "old.json"
-                ),
-                env,
-            )
-            samples = [
-                json.loads(line)
-                for line in (wd / "dump_old.trace.jsonl").read_text().splitlines()
-                if line.strip()
-            ]
-            results["tracemalloc"][variant] = {  # type: ignore[index]
-                "seconds": row["seconds"],
-                "marks": [
-                    {
-                        "event": s["event"],
-                        "t": s.get("t"),
-                        "tracemalloc_current_mib": _mib(
-                            s.get("tracemalloc_current_bytes")
-                        ),
-                        "tracemalloc_phase_peak_mib": _mib(
-                            s.get("tracemalloc_phase_peak_bytes")
-                        ),
-                        "counts": s.get("counts"),
-                    }
-                    for s in samples
-                    if "tracemalloc_current_bytes" in s or s.get("kind") == "counts"
-                ],
-            }
-            print(f"tracemalloc {variant} {row['seconds']}s", flush=True)
-            args.out.write_text(json.dumps(results, indent=2), encoding="utf-8")
+        _run_tracemalloc(args, variants, base_env, results)
 
-    summary: dict[str, object] = {}
-    for variant in variants:
-        for step in ("dump_old", "dump_new", "compare"):
-            rows = [r for r in runs if r["variant"] == variant and r["step"] == step]
-            summary[f"{variant}/{step}"] = _summary(rows)
+    summary = _summaries(runs, variants)
     results["summary"] = summary
     args.out.write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=1))

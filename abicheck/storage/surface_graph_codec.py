@@ -55,6 +55,7 @@ snapshot predating this field.
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -140,7 +141,9 @@ def decode_surface_graph(d: dict[str, Any], snap: AbiSnapshot) -> None:
     if isinstance(raw, DeferredGraphPayload):
         load_payload = raw.load
     elif isinstance(raw, dict):
-        load_payload = _constant(raw)
+        # Detached: the graph decodes later, and a caller may reuse or
+        # mutate the document it handed in after the load returns.
+        load_payload = _constant(copy.deepcopy(raw))
     else:
         return
     cell = PendingGraph(_graph_decoder(load_payload))
