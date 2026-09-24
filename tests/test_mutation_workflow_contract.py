@@ -509,6 +509,38 @@ def _reached_mutated_modules(path: Path, mutated: set[str]) -> frozenset[str]:
 #: gate, which may report a survivor that one of these tests would in fact
 #: have killed.
 _ACCEPTED_KILL_LOSS = {
+    # Only ONE test of this file is deselected (it runs
+    # `python -m abicheck.frontends.action.cli` as a real subprocess, which
+    # re-enters the mutated tree with no mutmut config); every other test in
+    # it still runs and still kills. This sweep reads reachability per file,
+    # so the entry records the file's whole reach, an over-statement of the
+    # real loss rather than an under-statement. Surfaced by PR #1356.
+    "tests/test_action_analysis_context.py": frozenset(
+        {
+            "abicheck.diff_filtering",
+            "abicheck.diff_platform",
+            "abicheck.diff_symbols",
+            "abicheck.diff_types",
+            "abicheck.diff_vtable_layout",
+            "abicheck.finding_identity",
+            "abicheck.idioms",
+            "abicheck.name_classification",
+            "abicheck.pattern_verdicts",
+            "abicheck.policy.classification",
+            "abicheck.policy.evidence_status",
+            "abicheck.policy.selectors",
+            "abicheck.policy.selectors_namespace_glob",
+            "abicheck.serialization",
+            "abicheck.snapshot_io",
+            "abicheck.storage.snapshot_codec",
+            "abicheck.storage.snapshot_decode_declarations",
+            "abicheck.storage.snapshot_encode",
+            "abicheck.storage.snapshot_reliability_flags",
+            "abicheck.storage.snapshot_schema_versions",
+            "abicheck.suppression",
+            "abicheck.surface_graph",
+        }
+    ),
     # Drives `actions/check-target/run.sh`, which re-enters the mutated tree
     # from a subprocess that has no mutmut config, so the import of any
     # mutated module raises there. Reaches policy.classification via

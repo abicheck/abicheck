@@ -552,6 +552,15 @@ pytest_add_cli_args = [
     # `_ACCEPTED_KILL_LOSS` entry needed -- the file imports no `abicheck`
     # module at all, `only_mutate` or otherwise (confirmed by grep).
     "--ignore=tests/test_action_aggregate.py",
+    # Same re-entrant-subprocess class as the entry above: this one test runs
+    # `python -m abicheck.frontends.action.cli` as a real subprocess, which
+    # re-enters the mutated tree and cannot find `[tool.mutmut]` from its cwd
+    # ("Could not figure out where the code to mutate is."), aborting the
+    # baseline run. Surfaced by the evidence-entity-model Phase 5 PR (#1356),
+    # whose `tests/` changes tripped `--scope-run-to-diff`'s full-run
+    # fallback; its diff does not touch the Action. Deselected, not ignored,
+    # so the rest of the file still runs.
+    "--deselect=tests/test_action_analysis_context.py::TestTheProducerWritesWhatTheConsumerReads::test_the_block_survives_into_the_aggregate_document",
     "--ignore=tests/test_action_check_target.py",
     # Split out of the file directly above for a `no_growth` file-size
     # reason (its own docstring), inheriting the identical re-entrant-
