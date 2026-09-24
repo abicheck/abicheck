@@ -156,7 +156,8 @@ def run_measured(argv: list[str], stdout_path: Path | None) -> dict[str, object]
     errfile = tempfile.TemporaryFile()  # noqa: SIM115
     proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=errfile)
     written = 0
-    assert proc.stdout is not None
+    if proc.stdout is None:  # Popen(stdout=PIPE) always sets it
+        raise RuntimeError("no stdout pipe")
     for chunk in iter(lambda: proc.stdout.read(1 << 20), b""):  # type: ignore[union-attr]
         written += len(chunk)
         if sink:

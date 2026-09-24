@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -142,6 +143,29 @@ def test_separate_value_flags_travel_with_their_value(
     assert emulation_arguments(arguments, cc_bin=cc_bin, cc_id="gnu") == expected
 
 
+@pytest.mark.parametrize("cc_bin", ["g++", "clang++"])
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        (["-mllvm", "-inline-threshold=100", "-std=c++20"], ["-std=c++20"]),
+        (["-Xclang", "-mllvm", "-Xclang", "-x", "-mavx2"], ["-mavx2"]),
+        (["-Xclang", "-fno-validate-pch", "-O2"], ["-O2"]),
+        (["-mllvm=-foo", "-O2"], ["-O2"]),
+        (["-O2", "-mllvm"], ["-O2"]),
+    ],
+)
+def test_parser_only_value_flags_never_reach_the_emulated_compiler(
+    arguments: list[str], expected: list[str], cc_bin: str
+) -> None:
+    """``-mllvm``/``-Xclang`` and their operand stay with castxml's parser.
+
+    ``-mllvm`` would otherwise match the ``-m*`` rule and reach GCC without
+    its operand, and an operand behind ``-Xclang`` (including a nested
+    ``-mllvm`` or ``-x``) must not be read as a flag of its own.
+    """
+    assert emulation_arguments(arguments, cc_bin=cc_bin, cc_id="gnu") == expected
+
+
 def test_group_form_only_when_something_is_kept() -> None:
     assert emulated_compiler_command("g++", "gnu", ["-I", "inc", "-DX"]) == ["g++"]
     assert emulated_compiler_command("g++", "gnu", ["-I", "inc", "-std=c++20"]) == [
@@ -237,11 +261,37 @@ def _macros(text: str) -> dict[str, str]:
     return out
 
 
+def _gxx_output(flag: str | None) -> subprocess.CompletedProcess[str]:
+    """``g++ [flag] -dM -E`` over an empty C++ file (never ``/dev/null``,
+    which Windows does not have)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        empty = Path(tmp) / "empty.cpp"
+        empty.write_text("\n")
+        argv = ["g++", *([flag] if flag else []), "-dM", "-E", "-x", "c++", str(empty)]
+        return subprocess.run(argv, capture_output=True, text=True)
+
+
 def _gxx_macros(flag: str | None) -> dict[str, str]:
-    argv = ["g++", *([flag] if flag else []), "-dM", "-E", "-x", "c++", "/dev/null"]
-    return _macros(
-        subprocess.run(argv, capture_output=True, text=True, check=True).stdout
-    )
+    """The host compiler's watched macros under *flag*.
+
+    Skips when the host compiler rejects *flag*: that is a capability the
+    host lacks (Apple clang on arm64 has no ``-mavx2``/``-fopenmp``), not
+    a defect in the code under test. With no flag, a failure is a failure.
+    """
+    result = _gxx_output(flag)
+    if result.returncode != 0:
+        if flag is None:
+            raise AssertionError(
+                f"host g++ failed with no flags: {result.stderr[-500:]}"
+            )
+        pytest.skip(f"host g++ rejects {flag}: {result.stderr.strip()[-200:]}")
+    return _macros(result.stdout)
+
+
+def _effective_on_host(flag: str) -> bool:
+    """Whether the host compiler accepts *flag* and it changes a watched macro."""
+    result = _gxx_output(flag)
+    return result.returncode == 0 and _macros(result.stdout) != _gxx_macros(None)
 
 
 def _castxml_macros(castxml: str, flag: str, tmp_path: Path) -> dict[str, str]:
@@ -275,12 +325,19 @@ needs_castxml_and_gxx = pytest.mark.skipif(
 @pytest.mark.integration
 @needs_castxml_and_gxx
 def test_oracle_flags_really_change_a_watched_macro() -> None:
-    """Vacuity guard: a flag that changes nothing proves nothing below."""
-    baseline = _gxx_macros(None)
-    for flag in _ORACLE_FLAGS:
-        assert _gxx_macros(flag) != baseline, flag
+    """Vacuity guard: a flag that changes nothing proves nothing below.
+
+    Which flags are effective depends on the host compiler (Apple clang's
+    default standard, a PIE-by-default GCC, no AVX on arm64), so this
+    asserts on the host's own answer: the standard-selection flags -- the
+    reported bug -- must be effective everywhere, and most of the list must
+    be effective on any one host.
+    """
+    effective = [flag for flag in _ORACLE_FLAGS if _effective_on_host(flag)]
+    assert "-std=c++20" in effective
+    assert len(effective) >= len(_ORACLE_FLAGS) // 2, effective
     for pair in _HOST_DEFAULT_PAIRS:
-        assert any(_gxx_macros(flag) != baseline for flag in pair), pair
+        assert any(_effective_on_host(flag) for flag in pair), pair
 
 
 @pytest.mark.integration
@@ -291,7 +348,10 @@ def test_oracle_flags_really_change_a_watched_macro() -> None:
 def test_castxml_reports_the_real_compilers_macros(flag: str, tmp_path: Path) -> None:
     castxml = _castxml_bin()
     assert castxml is not None
-    assert _castxml_macros(castxml, flag, tmp_path) == _gxx_macros(flag)
+    expected = _gxx_macros(flag)  # skips a flag the host compiler rejects
+    if expected == _gxx_macros(None):
+        pytest.skip(f"{flag} changes no watched macro on this host")
+    assert _castxml_macros(castxml, flag, tmp_path) == expected
 
 
 @pytest.mark.integration

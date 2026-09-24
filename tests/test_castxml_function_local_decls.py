@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -129,6 +130,10 @@ def _tools_available() -> bool:
 
 @pytest.mark.integration
 @pytest.mark.skipif(not _tools_available(), reason="needs castxml, clang++ and g++")
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="builds and dumps an ELF shared library",
+)
 def test_castxml_and_clang_backends_agree_on_local_declarations(tmp_path: Path) -> None:
     from abicheck.serialization import load_snapshot
 

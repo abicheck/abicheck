@@ -96,6 +96,15 @@ _CLANG_ONLY_PREFIXES: tuple[str, ...] = ("--target=", "-stdlib=")
 
 #: Flags that take their value as the *next* argument.
 _SEPARATE_VALUE_FLAGS: frozenset[str] = frozenset({"-x", "--sysroot", "-isysroot"})
+#: The subset of those GCC rejects (Apple/Clang spelling).
+_CLANG_ONLY_VALUE_FLAGS: frozenset[str] = frozenset({"-isysroot"})
+
+#: Clang-driver flags whose operand is the *next* argument and which only
+#: castxml's parser should see: ``-mllvm <backend-option>`` (it would
+#: otherwise match the ``-m*`` target-flag rule and reach GCC without its
+#: operand) and ``-Xclang <cc1-option>`` (whose operand may itself be
+#: ``-mllvm``). The pair is consumed together and never copied.
+_PARSER_ONLY_VALUE_FLAGS: frozenset[str] = frozenset({"-mllvm", "-Xclang"})
 
 
 def _is_clang_family(cc_bin: str) -> bool:
@@ -108,7 +117,7 @@ def _gnu_argument_kept(token: str, *, clang_family: bool) -> bool:
         return True
     if token in ("-nostdinc", "-nostdinc++", "-ansi", "-pthread"):
         return True
-    if token.startswith("-m") and len(token) > 2:
+    if token.startswith("-m") and len(token) > 2 and not token.startswith("-mllvm"):
         # -m32, -m64, -march=..., -mavx2, -mno-sse4.2 ... ; excludes -MD/-MF
         # (upper case, dependency output) by construction.
         return True
@@ -151,8 +160,13 @@ def emulation_arguments(
     index = 0
     while index < len(tokens):
         token = tokens[index]
+        if token in _PARSER_ONLY_VALUE_FLAGS:
+            index += 2
+            continue
         if token in _SEPARATE_VALUE_FLAGS and index + 1 < len(tokens):
-            if cc_id != "msvc" and (token != "-isysroot" or clang_family):
+            if cc_id != "msvc" and (
+                token not in _CLANG_ONLY_VALUE_FLAGS or clang_family
+            ):
                 kept += [token, tokens[index + 1]]
             index += 2
             continue

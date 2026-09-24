@@ -329,7 +329,19 @@ One new snapshot field, `AbiSnapshot.extraction_scope` (schema bump):
   which findings moved.
 - A snapshot without the field loads as `unknown` — never as `full` — the
   same "unprovable is not native" rule `header_exclusion_record.py`
-  applies.
+  applies. Comparisons involving `unknown`, stated explicitly:
+  - `unknown` vs a side with `dependency_evidence: referenced` or any
+    `prefilter`: **refused**. Nothing proves the `unknown` side kept the
+    same declarations, and a difference would read as additions or
+    removals.
+  - `unknown` vs `full` with no prefilter: **compared, with a report
+    line** naming the unrecorded side. Every snapshot written before the
+    field existed was produced without any narrowing (the capability did
+    not exist), which is the precedent `comparability.py` already applies
+    to `dependency_scope`: refuse only on two explicit, differing values.
+    Refusing here would reject every existing baseline on upgrade, for a
+    difference that cannot exist.
+  - `unknown` vs `unknown`: compared as today.
 - **Per entity**: `owner` (`target` / `dependency:<name>` / `toolchain` /
   `unresolved`) and `contract` (`public` / `private` / `unresolved`) as
   `Fact[...]` fields next to `model/surface_facts.py`'s three existing
