@@ -267,3 +267,15 @@ def test_ids_do_not_depend_on_input_order(rnd: random.Random) -> None:
     rnd.shuffle(types)
     shuffled = {n.id for n in _graph(_snap(functions=fns, types=types)).nodes}
     assert shuffled == baseline
+
+
+def test_clang_extractor_records_the_c_linkage_linker_name() -> None:
+    """The L4 join above needs the linker name the clang extractor observed;
+    it keeps it only where ``mangledName == name`` (C linkage)."""
+    from abicheck.buildsource.source_extractors.clang_nodes import _entity_names
+
+    c_fn = {"name": "c_fn", "mangledName": "c_fn"}
+    cxx = {"name": "f", "mangledName": "_Z1fv"}
+    assert _entity_names("c_fn", "", c_fn)["linker"] == "c_fn"
+    assert "linker" not in _entity_names("ns::f", "_Z1fv", cxx)
+    assert "linker" not in _entity_names("x", "")

@@ -108,9 +108,10 @@ class TestEntityResolverSerialization:
 
 
 class TestSourceGraphSummaryEntityResolution:
-    def test_schema_version_is_2(self) -> None:
-        assert SOURCE_GRAPH_VERSION == 2
-        assert SourceGraphSummary().schema_version == 2
+    def test_schema_version_is_3(self) -> None:
+        # 2: ADR-046 D4 resolver; 3: evidence-entity-model I1 node ids.
+        assert SOURCE_GRAPH_VERSION == 3
+        assert SourceGraphSummary().schema_version == 3
 
     def test_resolve_entities_is_opt_in(self) -> None:
         g = SourceGraphSummary()

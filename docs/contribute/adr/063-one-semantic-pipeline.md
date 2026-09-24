@@ -481,7 +481,7 @@ spelling of a proven-same entity (Mach-O decoration) is a persisted
 `SourceGraphSummary.identity_aliases` entry, never a second node. This
 changes persisted graph ids: snapshot schema v49 /
 `SourceGraphSummary.schema_version` 3, with a pre-v3/v3 graph pair
-reported as not compared (`comparability.source_graph_identity_mismatch`)
+reported as not compared (`compare/source_graph_identity_scheme.py`)
 because the old ids cannot be rewritten from evidence a stored graph
 carries. PDB/BTF/CTF function/variable identity (Phase 6's documented gap)
 stays `unresolved`. D5's "public-surface node and L5 node remain two

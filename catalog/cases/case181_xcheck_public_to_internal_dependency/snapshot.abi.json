@@ -74,7 +74,7 @@
       ],
       "external_graph_refs": [],
       "extractor_passes": {},
-      "graph_id": "sha256:d3d9e7e70efd12f6cebee86dac1c631b8e28f01290805a8c6cf681b7e47b7e43",
+      "graph_id": "sha256:caa1a7f2ab5ab5c2b8b129185a6db2cb96cbc7429736b1ee444fcd452452f734",
       "indexes": {
         "by_binary_symbol": {},
         "by_file": {},
@@ -147,7 +147,7 @@
           "resolved": {}
         }
       ],
-      "schema_version": 2
+      "schema_version": 3
     }
   },
   "build_source_pack": null,
@@ -192,7 +192,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 48,
+  "schema_version": 49,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

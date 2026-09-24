@@ -23,7 +23,7 @@
   ],
   "external_graph_refs": [],
   "extractor_passes": {},
-  "graph_id": "sha256:e1a615ed8b57cb0187d2f49b2bef2abbc41e70ef0dbd241a95b4f61c2bb0c315",
+  "graph_id": "sha256:35114f06ddfd14c94cb7ef594c906bca185d5321b5f7d253fe258795ceb3d67b",
   "indexes": {
     "by_binary_symbol": {},
     "by_file": {},
@@ -72,5 +72,5 @@
       "resolved": {}
     }
   ],
-  "schema_version": 2
+  "schema_version": 3
 }

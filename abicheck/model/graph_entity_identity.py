@@ -66,7 +66,7 @@ import enum
 import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from .graph_identity import (
     _UNRESOLVED_PREFIX,
@@ -80,7 +80,6 @@ from .mangled_name import strip_macho_itanium_decoration
 if TYPE_CHECKING:
     from .declarations import Function, Variable
     from .entities import EnumType, RecordType
-    from .snapshot import AbiSnapshot
 
 __all__ = [
     "UNRESOLVED_PREFIX",
@@ -374,6 +373,18 @@ def identity_for_typedef(
     return type_identity(alias)
 
 
+class SnapshotLike(Protocol):
+    """The parts of an ``AbiSnapshot`` the identity table reads -- structural,
+    so this leaf module never imports ``model.snapshot`` (which sits on the
+    ``buildsource.pack -> model.source_graph`` import path)."""
+
+    functions: list[Function]
+    variables: list[Variable]
+    types: list[RecordType]
+    enums: list[EnumType]
+    typedefs: dict[str, str]
+
+
 @dataclass(frozen=True)
 class SnapshotIdentities:
     """Every declaration/type identity of one ``AbiSnapshot``, computed once.
@@ -390,7 +401,7 @@ class SnapshotIdentities:
     typedefs: dict[str, GraphEntityIdentity]
 
 
-def snapshot_identities(snap: AbiSnapshot) -> SnapshotIdentities:
+def snapshot_identities(snap: SnapshotLike) -> SnapshotIdentities:
     """Build the table. A record/enum qualified spelling shared by more than
     one declaration (two ODR-distinct occurrences, or a scope-less legacy
     snapshot naming two different types ``Impl``) proves nothing about which

@@ -87,7 +87,7 @@ EVIDENCE_TIER_L5 = "L5_SOURCE_GRAPH"
 #:     type is keyed on its qualified name (was its bare leaf), and
 #:     ``identity_aliases`` is persisted. A *real* id-scheme change: a v2 and a
 #:     v3 graph name the same entity differently, so
-#:     ``comparability.source_graph_identity_mismatch`` refuses to diff them
+#:     ``compare.source_graph_identity_scheme.source_graph_identity_mismatch`` refuses to diff them
 #:     (the L5 layer is reported not compared) rather than read every renamed
 #:     node as added/removed.
 SOURCE_GRAPH_VERSION: int = 3

@@ -616,7 +616,9 @@ def diff_embedded_build_source(
     new_graph = _side_source_graph(new_snapshot, new_pack)
     graph_not_compared: str | None = None
     if old_graph is not None and new_graph is not None:
-        from ..comparability import source_graph_identity_mismatch
+        from ..compare.source_graph_identity_scheme import (
+            source_graph_identity_mismatch,
+        )
 
         graph_not_compared = source_graph_identity_mismatch(
             old_graph.schema_version, new_graph.schema_version

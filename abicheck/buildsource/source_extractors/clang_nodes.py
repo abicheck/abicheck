@@ -434,10 +434,13 @@ def _qualified(scope: list[str], name: str) -> str:
     return "::".join([*scope, name]) if scope else name
 
 
-def _entity_names(name: str, mangled: str = "", linker: str = "") -> dict[str, str]:
+def _entity_names(
+    name: str, mangled: str = "", node: dict[str, Any] | None = None
+) -> dict[str, str]:
     names = {"source_qualified": name}
     if mangled:
         names["mangled"] = mangled
+    linker = _c_linkage_name(node) if node is not None else ""
     if linker:
         names["linker"] = linker
     return names

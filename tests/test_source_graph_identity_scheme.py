@@ -23,7 +23,9 @@ from hypothesis import given, strategies as st
 
 from abicheck.buildsource.evidence_report import diff_embedded_build_source
 from abicheck.buildsource.pack import BuildSourcePack
-from abicheck.comparability import source_graph_identity_mismatch
+from abicheck.compare.source_graph_identity_scheme import (
+    source_graph_identity_mismatch,
+)
 from abicheck.model import AbiSnapshot
 from abicheck.model.graph_facts import GraphEdge, GraphNode
 from abicheck.model.source_graph import (

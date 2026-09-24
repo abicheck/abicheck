@@ -20,8 +20,6 @@ no compiler is required; the live subprocess path is integration-only."""
 
 from __future__ import annotations
 
-import hashlib
-
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.buildsource.type_graph import (
@@ -2061,15 +2059,14 @@ def test_augment_graph_with_types_carries_resolution_into_edge_attrs() -> None:
     assert edge.attrs["role"] == "field"
 
 
-def test_extern_c_function_identity_matches_source_entity_fallback() -> None:
-    # ADR-041 P1 #5 (Codex review): clang reports mangledName == name for an
-    # extern "C"/C-linkage function (no real Itanium mangling), and
-    # SourceEntity.identity() treats that as "no distinguishing mangled name"
-    # -- falling back to qualified_name#signature_hash. The AST-replay layer
-    # used to key this same function's DECL_HAS_TYPE src on the bare
-    # mangled-or-name (identical to the bare name here), landing on a
-    # different decl:// node than the L4 surface's own SOURCE_DECLARES node
-    # for the same declaration.
+def test_extern_c_function_identity_is_its_linker_name() -> None:
+    # Evidence-entity-model I1: clang reports mangledName == name for an
+    # extern "C"/C-linkage function, and that is the observed linker symbol
+    # -- the one key the L2 header graph (castxml/clang report the same
+    # linker name), this AST-replay layer and the L4 fold
+    # (SourceEntity.names["linker"]) all share. It replaces the
+    # qualified_name#signature_hash key ADR-041 P1 #5 had aligned with L4
+    # only, which no L2 producer can compute.
     ast = _tu(
         {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Config")]},
         {
@@ -2083,8 +2080,7 @@ def test_extern_c_function_identity_matches_source_entity_fallback() -> None:
     edges = parse_clang_ast_types(ast)
     param_edges = [e for e in edges if e.role == "param"]
     assert len(param_edges) == 1
-    expected_hash = hashlib.sha256(b"sig\x00int (detail::Config)").hexdigest()
-    assert param_edges[0].src == f"api#sha256:{expected_hash}"
+    assert param_edges[0].src == "api"
 
 
 def test_real_mangled_function_identity_stays_the_mangled_name() -> None:
@@ -2104,16 +2100,14 @@ def test_real_mangled_function_identity_stays_the_mangled_name() -> None:
     assert param_edges[0].src == "_ZN6Widget3barE"
 
 
-def test_extern_c_variable_type_edge_source_is_scope_qualified() -> None:
-    # Codex review: namespace api { extern "C" detail::Impl *g; } -- clang
-    # reports mangledName == name for the extern "C" variable (no real
-    # Itanium mangling), and SourceEntity.identity() for a variable (which
-    # never sets signature_hash) falls back to the bare qualified name
-    # "api::g". The AST-replay layer used to key this VarDecl's own
-    # DECL_HAS_TYPE edge on the unqualified bare name "g", landing on a
-    # different decl:// node than the public SOURCE_DECLARES node for the
-    # same declaration -- so reachability from the public variable never
-    # reached the private pointee type.
+def test_extern_c_variable_type_edge_source_is_its_linker_name() -> None:
+    # namespace api { extern "C" detail::Impl *g; } -- clang reports
+    # mangledName == name for the extern "C" variable: its linker symbol is
+    # the bare "g", whatever namespace declares it. Under I1 the edge source
+    # is that linker name, the key the header graph's own seed node and the
+    # L4 fold (names["linker"], with the legacy "api::g" identity() spelling
+    # recorded as an alias of it) share -- so reachability from the public
+    # variable still reaches the private pointee type, now through one node.
     ast = _tu(
         {"kind": "NamespaceDecl", "name": "detail", "inner": [_record("Impl")]},
         {
@@ -2132,5 +2126,5 @@ def test_extern_c_variable_type_edge_source_is_scope_qualified() -> None:
     edges = parse_clang_ast_types(ast)
     var_edges = [e for e in edges if e.role == "var"]
     assert var_edges == [
-        TypeEdge("api::g", "detail::Impl", "DECL_HAS_TYPE", CONF_HIGH, "var")
+        TypeEdge("g", "detail::Impl", "DECL_HAS_TYPE", CONF_HIGH, "var")
     ]
