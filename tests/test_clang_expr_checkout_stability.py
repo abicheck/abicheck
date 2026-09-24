@@ -129,3 +129,17 @@ def test_real_clang_lambda_initializer_fingerprint_is_checkout_stable(tmp_path) 
         idx = _index_decl_id_qualified_names(root)
         prints.append(_expr_fingerprint(find(root)["inner"][0], lambda idx=idx: idx))
     assert prints[0] == prints[1]
+
+
+def test_unnamed_referenced_decl_keeps_type_only_stub() -> None:
+    # A referenced decl without "name" (e.g. an implicit one) still fingerprints by type.
+    def ref(t: str) -> dict:
+        return {
+            "kind": "DeclRefExpr",
+            "referencedDecl": {"kind": "VarDecl", "type": {"qualType": t}},
+        }
+
+    assert _expr_fingerprint(ref("int")) != _expr_fingerprint(ref("long"))
+    assert _expr_fingerprint(ref("(lambda at /a/h.h:1:2)")) == _expr_fingerprint(
+        ref("(lambda at /b/h.h:1:2)")
+    )
