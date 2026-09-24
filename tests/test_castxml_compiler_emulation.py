@@ -409,3 +409,31 @@ def test_cpp20_concepts_header_parses_through_the_builder(tmp_path: Path) -> Non
     result = subprocess.run(cmd, capture_output=True, text=True)  # nosec B603 - fixed argv, no shell
     assert result.returncode == 0, result.stderr[-2000:]
     assert out.stat().st_size > 0
+
+
+@pytest.mark.parametrize(
+    ("changed", "unchanged"),
+    [
+        ("_CASTXML_CACHE_SCHEMA_VERSION", "clang"),
+        ("_CLANG_CACHE_SCHEMA_VERSION", "castxml"),
+    ],
+)
+def test_each_backend_schema_constant_salts_only_its_own_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, changed: str, unchanged: str
+) -> None:
+    """Bumping a backend's schema constant must change that backend's key,
+    read at key time (a copy taken at import would ignore the bump), and
+    leave the other backend's key alone."""
+    from abicheck import dumper_ast_config
+    from abicheck.dumper_ast_config import _cache_key
+
+    header = tmp_path / "h.h"
+    header.write_text("void f(void);\n")
+    own = "castxml" if unchanged == "clang" else "clang"
+    kwargs = dict(headers=[header], extra_includes=[], compiler="c++", force_cpp=True)
+    before = {b: _cache_key(**kwargs, backend=b) for b in ("clang", "castxml")}
+    monkeypatch.setattr(
+        dumper_ast_config, changed, getattr(dumper_ast_config, changed) + 1
+    )
+    assert _cache_key(**kwargs, backend=own) != before[own]
+    assert _cache_key(**kwargs, backend=unchanged) == before[unchanged]

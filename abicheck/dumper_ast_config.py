@@ -45,10 +45,11 @@ _CLANG_CACHE_SCHEMA_VERSION = 3
 #: same key inputs, so it must not be served afterwards.
 _CASTXML_CACHE_SCHEMA_VERSION = 2
 
-#: Per-backend cache-format salt, folded into every header-parse cache key.
-_CACHE_SCHEMA_VERSIONS: dict[str, int] = {
-    "clang": _CLANG_CACHE_SCHEMA_VERSION,
-    "castxml": _CASTXML_CACHE_SCHEMA_VERSION,
+#: Which module constant salts each backend's header-parse cache key. Named,
+#: not copied, so the key always reads the constant's current value.
+_CACHE_SCHEMA_VERSION_NAMES: dict[str, str] = {
+    "clang": "_CLANG_CACHE_SCHEMA_VERSION",
+    "castxml": "_CASTXML_CACHE_SCHEMA_VERSION",
 }
 
 
@@ -75,8 +76,9 @@ def _cache_key(
 ) -> str:
     h = hashlib.sha256()
     h.update(f"backend={backend}".encode())
-    schema = _CACHE_SCHEMA_VERSIONS.get(backend)
-    if schema is not None:
+    schema_name = _CACHE_SCHEMA_VERSION_NAMES.get(backend)
+    if schema_name is not None:
+        schema = globals()[schema_name]
         h.update(f"{backend}_cache_schema={schema}".encode())
     # `force_cpp` is `None` only for a handful of call sites (e.g.
     # `_ast_compile_provenance`'s own probing helpers) that never resolve a
