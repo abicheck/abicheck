@@ -37,6 +37,7 @@ from .compare.spelling_pattern import (
     compile_spelling_pattern,
     finditer_allow_nested,
     spelling_matches as spelling_matches,
+    spellings_possible_in as spellings_possible_in,
 )
 from .diff_cxx_rules import itanium_qualified_name, msvc_qualified_name
 from .model import ScopeOrigin

@@ -753,7 +753,28 @@ def acquisition_counters(monkeypatch: pytest.MonkeyPatch) -> _AcquisitionCounter
     _count(dumper, "run_clang_to_ast_file", _bump_compiler)
     _count(dumper, "_run_castxml_attempt", _bump_compiler)
     _count(dumper, "_read_castxml_cache", lambda: counters.raw_decodes.append("xml"))
-    _count(dumper_cache.json, "loads", lambda: counters.raw_decodes.append("json"))
+    # A projection sidecar is a derived artifact, not a raw AST decode: a
+    # retained-table hit offers the cache entry to the header-graph attach
+    # (`run_ast_acquisition_offering_entry`), which then reads the sidecar
+    # instead of re-projecting the tree. Those reads are not counted here.
+    in_sidecar = [0]
+    _count(
+        dumper_cache.json,
+        "loads",
+        lambda: in_sidecar[0] or counters.raw_decodes.append("json"),
+    )
+    from abicheck.buildsource import header_graph_projection_cache as _proj
+
+    original_load = _proj.load_cached_projection
+
+    def _load_sidecar(path: Path):  # type: ignore[no-untyped-def]
+        in_sidecar[0] += 1
+        try:
+            return original_load(path)
+        finally:
+            in_sidecar[0] -= 1
+
+    monkeypatch.setattr(_proj, "load_cached_projection", _load_sidecar)
     _count(header_ast_fields, "_normalize_header_ast_fields", _bump_normalize)
     return counters
 
@@ -871,7 +892,9 @@ def test_directory_l2_compare_acquires_one_ast_per_key(
         if b.endswith("-normalized")
     }
     assert acquisition_counters.compiler == 0
-    assert len(acquisition_counters.raw_decodes) == len(warm_raw_keys)
+    # At most one decode per key: a key whose final consumer takes a stored
+    # derived artifact (the header-graph projection sidecar) decodes nothing.
+    assert len(acquisition_counters.raw_decodes) <= len(warm_raw_keys)
     assert acquisition_counters.normalizations == len(warm_normalized_keys)
     assert warm_raw_keys == raw_keys
 

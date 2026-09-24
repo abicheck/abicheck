@@ -121,6 +121,7 @@ from .type_reachability_spelling import (
     _typedef_candidate_spellings as _typedef_candidate_spellings,
     _typedef_spelling_targets as _typedef_spelling_targets,
     spelling_matches as spelling_matches,
+    spellings_possible_in as spellings_possible_in,
     type_string_references_name as type_string_references_name,
 )
 

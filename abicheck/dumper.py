@@ -332,9 +332,10 @@ def _clang_header_dump(
         # A warm disk hit is an acquisition too, so it is read on the
         # `_coordinated=True` re-entry below, never ahead of this call --
         # `dumper_cache.run_ast_acquisition`'s own docstring has the rule.
-        return dumper_cache.run_ast_acquisition(
+        return dumper_cache.run_ast_acquisition_offering_entry(
             "clang",
             key,
+            cached,
             lambda: _clang_header_dump(
                 headers,
                 extra_includes,

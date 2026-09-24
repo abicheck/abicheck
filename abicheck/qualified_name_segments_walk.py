@@ -205,6 +205,41 @@ def _legacy_sibling_is_payload_excluded(field_name: str | None) -> bool:
     return field_name[: -len("_fact")] in _PAYLOAD_FIELD_EXCLUSIONS
 
 
+#: Exact leaf types that can hold no string -- checked by identity before
+#: any plan lookup, since they are most of the nodes a snapshot walk visits.
+_SCALAR_TYPES = frozenset({int, float, bool, type(None)})
+
+#: Per-type answer to "how does :func:`_walk_rewrite_strings` treat a
+#: dataclass of this type": ``(frozen, Fact-shaped, ((field, excluded,
+#: init), ...))``. Every input is fixed per type, and computing it per
+#: *instance* (``dataclasses.fields`` plus a set build) was most of the
+#: walk's own cost on a real snapshot.
+_WALK_PLAN: dict[type, tuple[bool, bool, tuple[tuple[str, bool, bool], ...]]] = {}
+
+
+def _walk_plan(tp: type) -> tuple[bool, bool, tuple[tuple[str, bool, bool], ...]]:
+    plan = _WALK_PLAN.get(tp)
+    if plan is None:
+        params = getattr(tp, "__dataclass_params__", None)
+        is_frozen = bool(getattr(params, "frozen", False))
+        fields = _dataclasses.fields(tp)
+        is_fact_shape = (
+            tp.__name__ == "Fact"
+            and is_frozen
+            and {f.name for f in fields}
+            == {"status", "value", "diagnostics", "producer"}
+        )
+        plan = (
+            is_frozen,
+            is_fact_shape,
+            tuple(
+                (f.name, f.name in _PAYLOAD_FIELD_EXCLUSIONS, f.init) for f in fields
+            ),
+        )
+        _WALK_PLAN[tp] = plan
+    return plan
+
+
 def _walk_rewrite_strings(
     value: object, rewrite: _Callable[[str], str], *, field_name: str | None = None
 ) -> object:
@@ -249,11 +284,12 @@ def _walk_rewrite_strings(
     path/line-tainted content even though the dataclass it belongs to was
     otherwise correctly rebuilt.
     """
+    if type(value) in _SCALAR_TYPES:
+        return value
     if isinstance(value, str) and not isinstance(value, _Enum):
         return rewrite(value)
     if _dataclasses.is_dataclass(value) and not isinstance(value, type):
-        params = getattr(value, "__dataclass_params__", None)
-        is_frozen = bool(getattr(params, "frozen", False))
+        is_frozen, is_fact_shape, plan = _walk_plan(type(value))
         # ADR-063 Phase 5 (Codex review): `_PAYLOAD_FIELD_EXCLUSIONS`'s
         # "value" entry exists for `Variable.value` (a compile-time
         # constant, not identity-bearing text) — but `model.fact.Fact[T]`'s
@@ -267,30 +303,24 @@ def _walk_rewrite_strings(
         # closure-marker-embedded qualified_name/source_header gets
         # renumbered on the legacy field but left stale inside its own
         # Fact sibling, persisting two conflicting spellings.
-        is_fact_value_field = (
-            type(value).__name__ == "Fact"
-            and is_frozen
-            and {f.name for f in _dataclasses.fields(value)}
-            == {"status", "value", "diagnostics", "producer"}
-            and not _legacy_sibling_is_payload_excluded(field_name)
+        is_fact_value_field = is_fact_shape and not _legacy_sibling_is_payload_excluded(
+            field_name
         )
         replacements: dict[str, object] = {}
         frozen_field_updates: dict[str, object] = {}
-        for f in _dataclasses.fields(value):
-            if f.name in _PAYLOAD_FIELD_EXCLUSIONS and not (
-                is_fact_value_field and f.name == "value"
-            ):
+        for name, excluded, init in plan:
+            if excluded and not (is_fact_value_field and name == "value"):
                 continue
-            old = getattr(value, f.name)
-            new = _walk_rewrite_strings(old, rewrite, field_name=f.name)
+            old = getattr(value, name)
+            new = _walk_rewrite_strings(old, rewrite, field_name=name)
             if new is old:
                 continue
             if not is_frozen:
-                setattr(value, f.name, new)
-            elif f.init:
-                replacements[f.name] = new
+                setattr(value, name, new)
+            elif init:
+                replacements[name] = new
             else:
-                frozen_field_updates[f.name] = new
+                frozen_field_updates[name] = new
         if replacements or frozen_field_updates:
             value = _dataclasses.replace(value, **replacements)
         for name, new in frozen_field_updates.items():
@@ -341,3 +371,111 @@ def _walk_rewrite_strings(
             for k, v in value.items()
         }
     return value
+
+
+#: Per-type field plan for :func:`subtree_may_hold_text` -- a *superset* of
+#: the fields :func:`_walk_rewrite_strings` can visit on an instance of that
+#: type. Unlike :func:`_collect_plan` it keeps a ``<x>_fact`` sibling of a
+#: payload-excluded field (the walk descends into it and rewrites its
+#: ``diagnostics``/``producer``) and a ``Fact``'s own ``value`` (the walk
+#: rewrites it for every non-excluded sibling).
+_REWRITE_PLAN: dict[type, tuple[str, ...] | None] = {}
+
+
+def _rewrite_plan(tp: type) -> tuple[str, ...] | None:
+    plan = _REWRITE_PLAN.get(tp, _MISSING)
+    if plan is not _MISSING:
+        return plan  # type: ignore[return-value]
+    if not _dataclasses.is_dataclass(tp):
+        _REWRITE_PLAN[tp] = None
+        return None
+    fields = _dataclasses.fields(tp)
+    is_fact = tp.__name__ == "Fact" and {f.name for f in fields} == {
+        "status",
+        "value",
+        "diagnostics",
+        "producer",
+    }
+    computed = tuple(
+        f.name
+        for f in fields
+        if (f.name not in _PAYLOAD_FIELD_EXCLUSIONS or (is_fact and f.name == "value"))
+        and not (is_fact and f.name == "status")
+    )
+    _REWRITE_PLAN[tp] = computed
+    return computed
+
+
+#: Per-type ``((field, also_collected), ...)`` for :func:`collect_and_flag`:
+#: the :func:`_rewrite_plan` fields, each marked with whether
+#: :func:`_collect_plan` visits it too. ``None`` for a non-dataclass type.
+_FLAG_PLAN: dict[type, tuple[tuple[str, bool], ...] | None] = {}
+
+
+def _flag_plan(tp: type) -> tuple[tuple[str, bool], ...] | None:
+    plan = _FLAG_PLAN.get(tp, _MISSING)
+    if plan is _MISSING:
+        rewrite = _rewrite_plan(tp)
+        collected = set(_collect_plan(tp) or ())
+        plan = (
+            None
+            if rewrite is None
+            else tuple((name, name in collected) for name in rewrite)
+        )
+        _FLAG_PLAN[tp] = plan
+    return plan  # type: ignore[return-value]
+
+
+def collect_and_flag(
+    value: object, out: list[str], pred: _Callable[[str], bool], *, collect: bool = True
+) -> bool:
+    """:func:`_collect_strings` and a rewrite prefilter in one traversal.
+
+    Appends to *out* exactly what ``_collect_strings(value, out)`` would
+    (nothing when *collect* is false), and returns whether any string
+    :func:`_walk_rewrite_strings` could hand its ``rewrite`` callback under
+    *value* satisfies *pred*. The second answer is conservative -- it visits
+    a superset of the walk's strings (:func:`_rewrite_plan`), which is wider
+    than the collection's -- so ``False`` proves the walk would leave
+    *value* unchanged for any ``rewrite`` that is the identity on strings
+    failing *pred*. One traversal instead of two because on a real snapshot
+    each walk is millions of nodes.
+    """
+    tp = type(value)
+    if tp is str:
+        if collect:
+            out.append(value)  # type: ignore[arg-type]
+        return pred(value)  # type: ignore[arg-type]
+    if tp in _SCALAR_TYPES:
+        return False
+    if isinstance(value, str):
+        if isinstance(value, _Enum):
+            return False
+        if collect:
+            out.append(value)
+        return pred(value)
+    fields = _flag_plan(tp)
+    if fields is not None:
+        hit = False
+        for name, collected in fields:
+            if collect_and_flag(
+                getattr(value, name), out, pred, collect=collect and collected
+            ):
+                hit = True
+        return hit
+    hit = False
+    if tp is list or tp is tuple or isinstance(value, (list, tuple)):
+        for item in value:  # type: ignore[attr-defined]
+            if collect_and_flag(item, out, pred, collect=collect):
+                hit = True
+    elif isinstance(value, _Mapping):
+        for k, v in value.items():
+            key_collected = collect and (
+                (isinstance(k, str) and not isinstance(k, _Enum))
+                or (_dataclasses.is_dataclass(k) and not isinstance(k, type))
+            )
+            if collect_and_flag(k, out, pred, collect=key_collected):
+                hit = True
+            if collect_and_flag(v, out, pred, collect=collect):
+                hit = True
+    return hit

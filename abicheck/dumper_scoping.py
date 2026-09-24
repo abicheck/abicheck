@@ -116,6 +116,7 @@ from .type_reachability import (
     _namespace_suffix_spellings,
     _stripped_signature_spelling,
     spelling_matches,
+    spellings_possible_in,
 )
 
 
@@ -165,7 +166,9 @@ def _typedef_alias_reachability(
         return {}
 
     typedef_keys = set(typedefs)
-    combined_pattern = _compile_spelling_pattern(typedef_keys | interesting_keys)
+    combined_pattern = _compile_spelling_pattern(
+        spellings_possible_in(typedef_keys | interesting_keys, typedefs.values())
+    )
     if combined_pattern is None:
         return {alias: frozenset() for alias in typedefs}
 
@@ -593,7 +596,9 @@ def _referenced_from_haystack(
     match's alias resolution incorrectly pulled in the typedef's unrelated
     target alongside the correctly-resolved tag.
     """
-    pattern = _compile_spelling_pattern(spelling_index)
+    pattern = _compile_spelling_pattern(
+        spellings_possible_in(spelling_index, (haystack,))
+    )
     if pattern is None:
         return set()
     matches = spelling_matches(pattern, haystack)

@@ -470,6 +470,38 @@ def run_ast_acquisition(
     return scope.run(backend, key, producer, group=group)
 
 
+def run_ast_acquisition_offering_entry(
+    backend: str, key: str, entry_path: Path, producer: Callable[[], _T]
+) -> _T:
+    """:func:`run_ast_acquisition` for a producer whose result is ``(ast, ...)``.
+
+    A producer that runs reaches :func:`load_cached_ast`, which offers the
+    cache entry to an open ``derived_ast_scope``. A result served from the
+    request's retained table skips that call -- so the final derived-AST
+    consumer (the header-graph attach) was never told the entry path, could
+    not take a stored sidecar, and had nowhere to store the projection it
+    then computed. This makes the same offer the memo-slot hit makes, and
+    substitutes the superseded marker for the tree when the consumer took it.
+    """
+
+    ran = False
+
+    def _tracked() -> _T:
+        nonlocal ran
+        ran = True
+        return producer()
+
+    result = run_ast_acquisition(backend, key, _tracked)
+    if ran:
+        return result
+    superseded = offer_derived_ast_source(
+        entry_path, is_cache_entry=True, tree_in_hand=True
+    )
+    if superseded is None:
+        return result
+    return cast("_T", (superseded, *cast("tuple[Any, ...]", result)[1:]))
+
+
 def resolve_request_memoization(memoize: bool | None) -> bool:
     """Whether a header-AST parse should write this thread's memo slot.
 
