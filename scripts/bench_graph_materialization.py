@@ -68,6 +68,7 @@ import argparse
 import gc
 import json
 import os
+import shutil
 import statistics
 import subprocess
 import sys
@@ -287,7 +288,10 @@ def _release_steps(args: argparse.Namespace, wd: Path) -> dict[str, list[str]]:
         ("old", args.old_lib, args.old_header, args.old_inc),
         ("new", args.new_lib, args.new_header, args.new_inc),
     ):
-        (wd / side).mkdir(parents=True, exist_ok=True)
+        # A reused --work may hold a member that no longer exists; the stored
+        # compare and the size scan must see only this run's snapshots.
+        shutil.rmtree(wd / side, ignore_errors=True)
+        (wd / side).mkdir(parents=True)
         for member in _release_members(Path(lib_dir)):
             steps[f"dump_{side}_{member.name}"] = _dump_argv(
                 str(member), header, incs, wd / side / f"{member.name}.json"
