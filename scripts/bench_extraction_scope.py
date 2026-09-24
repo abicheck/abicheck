@@ -155,6 +155,21 @@ def prune_to(root: ET.Element, keep: set[str]) -> None:
 # ── process measurement ───────────────────────────────────────────────────
 
 
+def _wait_for_peak_rss_mb(proc: subprocess.Popen[bytes]) -> int | None:
+    """Reap *proc*, setting its return code, and return its own peak RSS in
+    MB -- or ``None`` where the platform cannot report one (no ``os.wait4``
+    on Windows). Unknown is never reported as zero."""
+    wait4 = getattr(os, "wait4", None)
+    if wait4 is None:
+        proc.wait()
+        return None
+    _, status, usage = wait4(proc.pid, 0)
+    proc.returncode = os.waitstatus_to_exitcode(status)
+    # ru_maxrss is kilobytes on Linux and bytes on macOS.
+    per_mb = 1 << 20 if sys.platform == "darwin" else 1 << 10
+    return round(usage.ru_maxrss / per_mb)
+
+
 def run_measured(argv: list[str]) -> dict[str, object]:
     """Run *argv*; wall time, the child's own peak RSS, and stdout bytes.
 
@@ -176,14 +191,14 @@ def run_measured(argv: list[str]) -> dict[str, object]:
             written = sum(
                 len(chunk) for chunk in iter(lambda: stdout.read(1 << 20), b"")
             )
-            _, status, usage = os.wait4(proc.pid, 0)
-            proc.returncode = os.waitstatus_to_exitcode(status)
+            peak_rss_mb = _wait_for_peak_rss_mb(proc)
         errfile.seek(0)
         stderr = errfile.read()
+    status = proc.returncode
     return {
         "returncode": proc.returncode,
         "seconds": round(time.monotonic() - start, 1),
-        "peak_rss_mb": round(usage.ru_maxrss / 1024),
+        "peak_rss_mb": peak_rss_mb,
         "stdout_mb": round(written / 1e6, 1),
         "stderr_tail": stderr.decode(errors="replace")[-400:] if status else "",
     }
@@ -419,7 +434,8 @@ def _markdown(result: dict[str, object]) -> str:
         r = result[key]  # type: ignore[index]
         size = r.get("xml_mb", r.get("stdout_mb"))  # type: ignore[union-attr]
         lost = r.get("owned", {}).get("target_lost", "—")  # type: ignore[union-attr]
-        rss = r.get("peak_rss_mb", "—")  # type: ignore[union-attr]
+        rss = r.get("peak_rss_mb")  # type: ignore[union-attr]
+        rss = "—" if rss is None else rss
         rows.append(f"| {key} | {r['seconds']} s | {rss} MB | {size} MB | {lost} |")  # type: ignore[index]
     return "\n".join(rows)
 

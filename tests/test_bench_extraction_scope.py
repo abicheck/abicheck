@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import xml.etree.ElementTree as ET  # nosec B405 - trusted test data
 from pathlib import Path
@@ -154,3 +155,28 @@ def test_a_failed_castxml_run_is_an_error_not_a_stale_measurement(
     with pytest.raises(RuntimeError, match="castxml failed"):
         bench._run_castxml([sys.executable, "-c", "import sys; sys.exit(1)"], out)
     assert not out.exists()
+
+
+@pytest.mark.parametrize("exit_code", [0, 3])
+def test_a_platform_without_wait4_reports_unknown_memory_not_zero(
+    monkeypatch: pytest.MonkeyPatch, exit_code: int
+) -> None:
+    """Windows has no ``os.wait4``: the run still completes with its real
+    exit code, and peak memory is unknown (``None``), never ``0``."""
+    monkeypatch.delattr(bench.os, "wait4", raising=False)
+    code = f"import sys; sys.stdout.write('x' * 10); sys.exit({exit_code})"
+    result = bench.run_measured([sys.executable, "-c", code])
+    assert result["returncode"] == exit_code
+    assert result["peak_rss_mb"] is None
+    assert result["stdout_mb"] == 0.0
+
+
+@pytest.mark.skipif(not hasattr(os, "wait4"), reason="needs os.wait4")
+def test_peak_memory_is_in_megabytes_on_every_posix_platform() -> None:
+    """ru_maxrss is KB on Linux and bytes on macOS; either way a child that
+    touches 64 MB reports roughly 64-2048 MB, not 1024x off in either
+    direction."""
+    code = "b = bytearray(64 << 20); b[::4096] = b'x' * len(b[::4096])"
+    result = bench.run_measured([sys.executable, "-c", code])
+    assert result["returncode"] == 0
+    assert 64 <= result["peak_rss_mb"] <= 2048
