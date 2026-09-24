@@ -323,11 +323,22 @@ def _normalize_if_decl_or_type(node_id: str) -> str:
     )
 
 
+#: ``model.graph_entity_identity.UNRESOLVED_PREFIX``, repeated here because
+#: that module imports this one. An identity already minted as an explicit
+#: ``unresolved`` node id is passed through unchanged, so a producer that
+#: threads string keys through its edge tuples can carry one.
+_UNRESOLVED_PREFIX = "unresolved://"
+
+
 def _decl_node_id(identity: str) -> str:
+    if identity.startswith(_UNRESOLVED_PREFIX):
+        return identity
     return f"decl://{_normalize_graph_identity(identity)}"
 
 
 def _type_node_id(identity: str) -> str:
+    if identity.startswith(_UNRESOLVED_PREFIX):
+        return identity
     return f"type://{_normalize_graph_identity(identity)}"
 
 
