@@ -64,8 +64,12 @@ def test_every_block_subkey_has_a_resolved_type_or_is_flagged_unspecified():
         INT_SUBKEYS as _INT_SUBKEYS,
         LIST_SUBKEYS as _LIST_SUBKEYS,
         STR_SUBKEYS as _STR_SUBKEYS,
+        STRUCTURED_SUBKEY_TYPES,
     )
 
+    structured = {
+        t for types in STRUCTURED_SUBKEY_TYPES.values() for t in types.values()
+    }
     gen = _load_gen()
     for block, subkeys in BuildConfig._KNOWN_BLOCK_KEYS.items():
         for subkey in subkeys:
@@ -85,6 +89,7 @@ def test_every_block_subkey_has_a_resolved_type_or_is_flagged_unspecified():
                 "list[str] (or a single str)",
                 "mapping[str, str]",
                 "unspecified",
+                *structured,
             }
 
 
