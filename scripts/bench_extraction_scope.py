@@ -57,11 +57,11 @@ import json
 import os
 import shlex
 import shutil
-import subprocess
+import subprocess  # nosec B404 - runs the compilers being measured
 import sys
 import tempfile
 import time
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405 - parses castxml output this script wrote
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
@@ -155,34 +155,33 @@ def prune_to(root: ET.Element, keep: set[str]) -> None:
 # ── process measurement ───────────────────────────────────────────────────
 
 
-def run_measured(argv: list[str], stdout_path: Path | None) -> dict[str, object]:
+def run_measured(argv: list[str]) -> dict[str, object]:
     """Run *argv*; wall time, the child's own peak RSS, and stdout bytes.
 
-    Stdout is streamed into *stdout_path* (or counted and discarded), so a
-    multi-GB clang JSON never has to fit in this process.
+    Stdout is counted and discarded chunk by chunk, so a multi-GB clang JSON
+    never has to fit in this process.
     """
     start = time.monotonic()
-    sink = open(stdout_path, "wb") if stdout_path else None  # noqa: SIM115
     # stderr goes to a file, never a second pipe: only stdout is drained
     # below, and a child that fills an undrained stderr pipe (castxml's
     # warnings do) blocks forever.
-    errfile = tempfile.TemporaryFile()  # noqa: SIM115
-    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=errfile)
-    written = 0
-    if proc.stdout is None:  # Popen(stdout=PIPE) always sets it
-        raise RuntimeError("no stdout pipe")
-    for chunk in iter(lambda: proc.stdout.read(1 << 20), b""):  # type: ignore[union-attr]
-        written += len(chunk)
-        if sink:
-            sink.write(chunk)
-    _, status, usage = os.wait4(proc.pid, 0)
-    errfile.seek(0)
-    stderr = errfile.read()
-    errfile.close()
-    if sink:
-        sink.close()
+    with tempfile.TemporaryFile() as errfile:
+        # argv is built by this script from its own arguments, never a shell.
+        with subprocess.Popen(  # nosec B603
+            argv, stdout=subprocess.PIPE, stderr=errfile
+        ) as proc:
+            stdout = proc.stdout
+            if stdout is None:  # Popen(stdout=PIPE) always sets it
+                raise RuntimeError("no stdout pipe")
+            written = sum(
+                len(chunk) for chunk in iter(lambda: stdout.read(1 << 20), b"")
+            )
+            _, status, usage = os.wait4(proc.pid, 0)
+            proc.returncode = os.waitstatus_to_exitcode(status)
+        errfile.seek(0)
+        stderr = errfile.read()
     return {
-        "returncode": os.waitstatus_to_exitcode(status),
+        "returncode": proc.returncode,
         "seconds": round(time.monotonic() - start, 1),
         "peak_rss_mb": round(usage.ru_maxrss / 1024),
         "stdout_mb": round(written / 1e6, 1),
@@ -204,7 +203,7 @@ def owned_counts(xml_path: Path, owners: list[tuple[str, str]]) -> dict[str, obj
     """Functions and types per owner, via abicheck's own castxml parser."""
     from abicheck.dumper_castxml import _CastxmlParser
 
-    root = ET.parse(xml_path).getroot()
+    root = ET.parse(xml_path).getroot()  # nosec B314 - local castxml output
     target_dirs = [prefix for _, prefix in owners[:1]]
     parser = _CastxmlParser(
         root, set(), set(), public_dir_paths=target_dirs, no_binary_evidence=True
@@ -248,22 +247,22 @@ def measure(args: argparse.Namespace) -> dict[str, object]:
     result: dict[str, object] = {"tu": tu, "flags": flags}
 
     clang = [args.clang, *flags, "-fsyntax-only", "-Xclang", "-ast-dump=json", tu]
-    result["clang_full"] = run_measured(clang, None)
+    result["clang_full"] = run_measured(clang)
     filtered = clang[:-1] + ["-Xclang", f"-ast-dump-filter={args.start}::", tu]
-    result["clang_filter"] = run_measured(filtered, None)
+    result["clang_filter"] = run_measured(filtered)
 
     xml_full = work / "full.xml"
     base = [castxml, "--castxml-output=1", *emulate, *flags]
-    result["castxml_full"] = run_measured([*base, tu, "-o", str(xml_full)], None)
+    result["castxml_full"] = run_measured([*base, tu, "-o", str(xml_full)])
     xml_start = work / "start.xml"
     result["castxml_start"] = run_measured(
-        [*base, "--castxml-start", args.start, tu, "-o", str(xml_start)], None
+        [*base, "--castxml-start", args.start, tu, "-o", str(xml_start)]
     )
     for key, path in (("castxml_full", xml_full), ("castxml_start", xml_start)):
         result[key]["xml_mb"] = round(path.stat().st_size / 1e6, 1)  # type: ignore[index]
 
     t0 = time.monotonic()
-    tree = ET.parse(xml_full)
+    tree = ET.parse(xml_full)  # nosec B314 - local castxml output
     keep, seeds = ownership_closure(tree.getroot(), [owners[0][1]])
     prune_to(tree.getroot(), keep)
     xml_closure = work / "closure.xml"
@@ -319,13 +318,15 @@ def _dump(args: argparse.Namespace, frontend: str, work: Path) -> dict[str, obje
     env_cache = work / f"cache-{frontend}"
     shutil.rmtree(env_cache, ignore_errors=True)
     os.environ["ABICHECK_CACHE_DIR"] = str(env_cache)
-    measured = run_measured([*argv, "-o", str(out)], None)
+    measured = run_measured([*argv, "-o", str(out)])
     if out.exists():
         measured.update(_read_back(out, args.owner))
     return measured
 
 
 def _read_back(out: Path, owner_args: list[str]) -> dict[str, object]:
+    from abicheck.errors import AbicheckError
+
     size = out.stat().st_size
     result: dict[str, object] = {
         "snapshot_mb": round(size / 1e6, 1),
@@ -341,7 +342,7 @@ def _read_back(out: Path, owner_args: list[str]) -> dict[str, object]:
     owners = [tuple(o.split("=", 1)) for o in owner_args]
     try:
         result.update(_snapshot_summary(out, owners))
-    except Exception as exc:  # a measurement, not a gate: record and go on
+    except (OSError, ValueError, AbicheckError) as exc:  # record and go on
         result["summary_error"] = f"{type(exc).__name__}: {exc}"[:300]
     return result
 
