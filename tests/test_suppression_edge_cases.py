@@ -12,6 +12,7 @@ Tests:
 
 from __future__ import annotations
 
+import os
 from datetime import date, timedelta
 
 from abicheck.checker import ChangeKind, Verdict, compare
@@ -573,11 +574,18 @@ class TestNamespaceGlobstarSemantics:
             reason="x",
         )
         non_matching = "::".join(["a"] * 1200 + ["y"])
+        # Under mutmut every call into `suppression.py`/`policy/selectors.py`
+        # goes through its dispatcher (and the stats phase traces it), which
+        # measured 3.4s here against well under 0.1s normally. Scale the budget
+        # there rather than skip the test: the cubic regression this guards
+        # against took ~4s *untraced* at half this size, so it still lands far
+        # past the scaled budget. Keyed on presence, as in conftest.py.
+        budget = 60.0 if "MUTANT_UNDER_TEST" in os.environ else 3.0
         t0 = time.monotonic()
         result = s.matches(self._change(non_matching))
         elapsed = time.monotonic() - t0
         assert result is False
-        assert elapsed < 3.0, (
+        assert elapsed < budget, (
             f"namespace match took {elapsed:.2f}s — not backtracking-safe"
         )
 
