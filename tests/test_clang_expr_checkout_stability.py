@@ -123,7 +123,9 @@ def test_real_clang_lambda_initializer_fingerprint_is_checkout_stable(tmp_path) 
             check=True,
         ).stdout
         root = json.loads(out)
-        assert f"{side}/inc/h.h" in out  # the leak source really is present
+        assert (
+            json.dumps(str(h))[1:-1] in out
+        )  # leak source present (JSON-escaped, so Windows too)
         idx = _index_decl_id_qualified_names(root)
         prints.append(_expr_fingerprint(find(root)["inner"][0], lambda idx=idx: idx))
     assert prints[0] == prints[1]
