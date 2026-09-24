@@ -708,6 +708,37 @@ listing/report, even where no resolution graph can place it.
 Lazy loading, streaming encode, cache migration, indexes, transport, and
 the measurement work that sets D8's chunk size and D12's level table.
 
+**Status: A2.1 partially implemented — the `graph` section only**
+(evidence-entity-model Phase 5a, with 5b/5c's compact encoding of the same
+section). Implemented *here*, as this plan's A2.1, not as a parallel
+mechanism:
+
+- `snapshot_from_dict`/`decode_snapshot` read a sectioned document with
+  `defer_graph=True` (`storage/sectioned_document.py`,
+  `storage/import_v1.export_legacy_sections`): the `graph` section's
+  `SectionDTO` validation, migration and `SourceGraphSummary` construction
+  run on first read of `AbiSnapshot.surface_graph` or its
+  `build_source.source_graph` alias (one shared
+  `model/lazy_graph.PendingGraph`), once and under a lock. The undecoded
+  payload is the parsed section JSON, held until then; the whole document
+  is still one `json.loads`.
+- Equality, pickling, deep and shallow copies, snapshot-cache round trips
+  and dump→load→save bytes behave as with eager decoding; a decode failure
+  raises the eager error at access, never an empty graph.
+- The section itself is now the compact graph table
+  (`storage/graph_table_codec.py`, schema v49), holding observed evidence
+  only: on real oneDAL `libonedal_core` it is ~10 MB instead of 79 MB.
+
+**Not implemented:** lazy loading of any other section, chunking (D8's
+bounded section size), per-library-pair release of sections in a project
+comparison, A2.2 streaming object encoding, A2.3/A2.4, and the A2.5
+measurement for a *project* comparison. A default stored-vs-stored
+`compare` still reads both graphs (the L5 source-graph diff, cross-source
+checks, assurance and the content digest all do), so on that path lazy
+loading saves no decode; ADR-062 D8's implementation note records why the
+L5 diff was not gated. Measurements: the evidence-entity-model plan's
+"Phase 5 follow-up measurements".
+
 ---
 
 ## Validation corpus

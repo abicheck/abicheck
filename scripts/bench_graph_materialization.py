@@ -44,9 +44,11 @@ allocation-attribution run per variant (never mixed with the timing runs).
 
 ``--old-lib``/``--new-lib`` may instead name two release *directories*
 (e.g. each holding ``libonedal.so.3`` and ``libonedal_dpc.so.3``): each
-variant/repeat then runs one live directory/package ``compare`` (the release
-fan-out dumps every member itself), with ``--old-header``/``--new-header``
-and ``-I``/``-J`` passed as ``old=``/``new=`` values.
+variant/repeat then dumps every member of each side, runs a stored/stored
+directory ``compare`` of those snapshots (the path that pays for a persisted
+graph), and a live directory/package ``compare`` (the release fan-out dumps
+every member itself and never serializes a graph), with ``--old-header``/
+``--new-header`` and ``-I``/``-J`` passed as ``old=``/``new=`` values there.
 
 The child imports the ``abicheck`` of the checkout this script lives in, so
 comparing two revisions means running it from two worktrees.
@@ -256,6 +258,31 @@ def _dump_argv(lib: str, header: str, includes: list[str], out: Path) -> list[st
     return [*argv, "-o", str(out)]
 
 
+def _release_steps(args: argparse.Namespace, wd: Path) -> dict[str, list[str]]:
+    """Release mode: one ``dump`` per member and side into ``wd/old`` and
+    ``wd/new``, a stored/stored directory ``compare`` of those (the path a
+    persisted graph is paid for), then the live directory ``compare``."""
+    steps: dict[str, list[str]] = {}
+    for side, lib_dir, header, incs in (
+        ("old", args.old_lib, args.old_header, args.old_inc),
+        ("new", args.new_lib, args.new_header, args.new_inc),
+    ):
+        (wd / side).mkdir(parents=True, exist_ok=True)
+        for member in sorted(Path(lib_dir).iterdir()):
+            steps[f"dump_{side}_{member.name}"] = _dump_argv(
+                str(member), header, incs, wd / side / f"{member.name}.json"
+            )
+    steps["compare_stored"] = [
+        "compare",
+        str(wd / "old"),
+        str(wd / "new"),
+        "-o",
+        f"json={wd / 'report_stored.json'}",
+    ]
+    steps["compare_release"] = _release_argv(args, wd)
+    return steps
+
+
 def _release_argv(args: argparse.Namespace, wd: Path) -> list[str]:
     """A live directory/package ``compare`` of two release directories: the
     release fan-out dumps every member itself, so there is no separate dump
@@ -340,7 +367,7 @@ def main(argv: list[str] | None = None) -> int:
             wd.mkdir(parents=True, exist_ok=True)
             release = Path(args.old_lib).is_dir()
             steps = (
-                {"compare_release": _release_argv(args, wd)}
+                _release_steps(args, wd)
                 if release
                 else {
                     "dump_old": _dump_argv(
