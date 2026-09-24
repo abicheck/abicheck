@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Storage compatibility of the invariant-I1 graph ids (snapshot schema v49,
+"""Storage compatibility of the invariant-I1 graph ids (snapshot schema v50,
 ``SourceGraphSummary.schema_version`` 3): a pre-I1 graph still loads, and a
 pre-I1/I1 pair is reported *not compared* -- never silently diffed."""
 
@@ -123,3 +123,25 @@ def test_straddling_pair_is_reported_not_compared() -> None:
     l5 = [r for r in rows if r["layer"] == "L5_source_graph"]
     assert l5 and "not compared" in l5[0]["detail"]
     assert any("not compared" in line for line in lines)
+
+
+def test_identity_aliases_survive_the_graph_table_encoding() -> None:
+    """The compact v49+ graph encoding carries the alias map; dropping it
+    would split a Mach-O-decorated or legacy-L4 spelling back into a second
+    node on every stored snapshot."""
+    from abicheck.model.graph_facts import GraphNode
+    from abicheck.model.source_graph import SourceGraphSummary
+    from abicheck.storage.graph_table_codec import (
+        decode_graph_table,
+        encode_graph_table,
+    )
+
+    graph = SourceGraphSummary()
+    graph.add_node(GraphNode(id="decl://exit", kind="source_decl", label="exit"))
+    graph.add_identity_alias("decl://_exit_decorated", "decl://exit")
+    graph.add_identity_alias("decl://legacy#sig", "decl://exit")
+
+    back = decode_graph_table(encode_graph_table(graph))
+
+    assert back.identity_aliases == graph.identity_aliases
+    assert back.resolve_node_id("decl://_exit_decorated") == "decl://exit"

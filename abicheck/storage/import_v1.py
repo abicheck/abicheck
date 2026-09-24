@@ -165,6 +165,7 @@ from .sparse_section_codec import (
     LayoutSection,
     ProvenanceSection,
 )
+from .surface_graph_codec import DeferredGraphPayload
 from .types_section_codec import TypesSection
 from .versioning import StorageVersions
 
@@ -464,13 +465,50 @@ def export_legacy_snapshot(
     )
 
 
+def _check_section_kind(
+    dto: SectionDTO, section_kind: str, artifact_id: str, locator: str
+) -> None:
+    if dto.section_kind != section_kind:
+        raise ValueError(
+            f"artifact {artifact_id!r} section {section_kind!r} "
+            f"-> {locator!r} stores a SectionDTO for kind "
+            f"{dto.section_kind!r} instead -- the package is corrupted "
+            "or was hand-edited"
+        )
+
+
+def _graph_section_loader(
+    raw: Any, artifact_id: str, locator: str
+) -> Callable[[], dict[str, Any]]:
+    """The deferred half of `export_legacy_sections` for the `graph` section:
+    the same `SectionDTO` validation and `graph_from_dto` decode an eager
+    read performs, run on first access."""
+
+    def load() -> dict[str, Any]:
+        dto = SectionDTO.from_dict(raw)
+        _check_section_kind(dto, GRAPH_SECTION_KIND, artifact_id, locator)
+        graph = graph_from_dto(dto).to_document()["surface_graph"]
+        if not isinstance(graph, dict):  # GraphSection guarantees a mapping
+            raise ValueError("a 'graph' section decoded to a non-mapping graph")
+        return graph
+
+    return load
+
+
 def export_legacy_sections(
     sections: Iterable[tuple[str, str, Any]],
     *,
     artifact_id: str,
     source_schema_version: int,
+    defer_graph: bool = False,
 ) -> dict[str, Any]:
     """`export_legacy_snapshot`'s body, over already-fetched section objects.
+
+    *defer_graph* (storage-format-v2 Phase 2, A2.1): leave the `graph`
+    section's DTO decode for first access. Its `surface_graph` value becomes
+    a `surface_graph_codec.DeferredGraphPayload` whose `load()` runs exactly
+    the eager decode below (same checks, same errors), so only a caller that
+    hands the document straight to `decode_surface_graph` may set it.
 
     Each *sections* entry is ``(section_kind, locator, raw_section_dto)``;
     *locator* only names the object in error messages (a digest for a real
@@ -501,14 +539,13 @@ def export_legacy_sections(
     legacy_sections: dict[str, dict[str, Any]] = {}
     document: dict[str, Any] = {}
     for section_kind, locator, raw in sections:
-        dto = SectionDTO.from_dict(raw)
-        if dto.section_kind != section_kind:
-            raise ValueError(
-                f"artifact {artifact_id!r} section {section_kind!r} "
-                f"-> {locator!r} stores a SectionDTO for kind "
-                f"{dto.section_kind!r} instead -- the package is corrupted "
-                "or was hand-edited"
+        if defer_graph and section_kind == GRAPH_SECTION_KIND:
+            document["surface_graph"] = DeferredGraphPayload(
+                _graph_section_loader(raw, artifact_id, locator)
             )
+            continue
+        dto = SectionDTO.from_dict(raw)
+        _check_section_kind(dto, section_kind, artifact_id, locator)
         if section_kind == SEMANTIC_IR_SECTION_KIND:
             ir, conflicts = semantic_ir_from_dto(dto)
             document.update(semantic_ir_to_document(ir, conflicts))

@@ -1,0 +1,3095 @@
+{
+  "schema_version": 48,
+  "sections": {
+    "binary": {
+      "payload": {
+        "build_id": null,
+        "build_mode": null,
+        "elf": {
+          "abi_flags": [],
+          "bind_now": false,
+          "dynamic_flags": [],
+          "dynamic_flags_fact": {
+            "diagnostics": [],
+            "status": "present",
+            "value": []
+          },
+          "e_flags": 0,
+          "ei_data": "LSB",
+          "elf_class": 64,
+          "gnu_properties": [
+            "IBT",
+            "SHSTK"
+          ],
+          "has_dt_relr": false,
+          "has_executable_stack": false,
+          "has_fini": true,
+          "has_fini_fact": {
+            "diagnostics": [],
+            "status": "present",
+            "value": true
+          },
+          "has_fortify_source": false,
+          "has_init": true,
+          "has_init_fact": {
+            "diagnostics": [],
+            "status": "present",
+            "value": true
+          },
+          "has_stack_canary": false,
+          "has_static_tls": false,
+          "has_textrel": false,
+          "has_tls_symbols": false,
+          "has_writable_executable_segment": false,
+          "hash_styles": [
+            "gnu"
+          ],
+          "imports": [
+            {
+              "binding": "weak",
+              "is_default": true,
+              "name": "__cxa_finalize",
+              "sym_type": "func",
+              "version": "GLIBC_2.2.5",
+              "version_soname": "libc.so.6"
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "memset",
+              "sym_type": "func",
+              "version": "GLIBC_2.2.5",
+              "version_soname": "libc.so.6"
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "_Znwm",
+              "sym_type": "func",
+              "version": "GLIBCXX_3.4",
+              "version_soname": "libstdc++.so.6"
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "_ZdlPvm",
+              "sym_type": "func",
+              "version": "CXXABI_1.3.9",
+              "version_soname": "libstdc++.so.6"
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "__gxx_personality_v0",
+              "sym_type": "func",
+              "version": "CXXABI_1.3",
+              "version_soname": "libstdc++.so.6"
+            },
+            {
+              "binding": "weak",
+              "is_default": true,
+              "name": "_ITM_deregisterTMCloneTable",
+              "sym_type": "notype",
+              "version": "",
+              "version_soname": ""
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "_Unwind_Resume",
+              "sym_type": "func",
+              "version": "GCC_3.0",
+              "version_soname": "libgcc_s.so.1"
+            },
+            {
+              "binding": "weak",
+              "is_default": true,
+              "name": "__gmon_start__",
+              "sym_type": "notype",
+              "version": "",
+              "version_soname": ""
+            },
+            {
+              "binding": "weak",
+              "is_default": true,
+              "name": "_ITM_registerTMCloneTable",
+              "sym_type": "notype",
+              "version": "",
+              "version_soname": ""
+            }
+          ],
+          "interpreter": "",
+          "is_pie": false,
+          "is_symbolic": false,
+          "machine": "EM_X86_64",
+          "min_kernel_version": "",
+          "needed": [
+            "libstdc++.so.6",
+            "libgcc_s.so.1",
+            "libc.so.6"
+          ],
+          "osabi": "ELFOSABI_SYSV",
+          "pointer_size": 8,
+          "relro": "partial",
+          "rpath": "",
+          "runpath": "",
+          "soname": "",
+          "symbols": [
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "_ZN6BufferC1Ev",
+              "origin_lib": null,
+              "size": 41,
+              "sym_type": "func",
+              "value_alignment": 2,
+              "version": "",
+              "visibility": "default"
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "_ZN6BufferC2Ev",
+              "origin_lib": null,
+              "size": 41,
+              "sym_type": "func",
+              "value_alignment": 2,
+              "version": "",
+              "visibility": "default"
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "_ZN6Buffer4sizeEv",
+              "origin_lib": null,
+              "size": 19,
+              "sym_type": "func",
+              "value_alignment": 4,
+              "version": "",
+              "visibility": "default"
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "make_buffer",
+              "origin_lib": null,
+              "size": 96,
+              "sym_type": "func",
+              "value_alignment": 1,
+              "version": "",
+              "visibility": "default"
+            }
+          ],
+          "versions_defined": [],
+          "versions_required": {
+            "libc.so.6": [
+              "GLIBC_2.2.5"
+            ],
+            "libgcc_s.so.1": [
+              "GCC_3.0"
+            ],
+            "libstdc++.so.6": [
+              "CXXABI_1.3",
+              "CXXABI_1.3.9",
+              "GLIBCXX_3.4"
+            ]
+          }
+        },
+        "elf_only_mode": false,
+        "kabi": null,
+        "macho": null,
+        "pe": null,
+        "platform": "elf",
+        "source_mtime": 1790225157.1639283,
+        "source_mtime_epoch": false,
+        "source_path": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/libcase14_cpp_class_size.so",
+        "source_size": 18576
+      },
+      "section_kind": "binary",
+      "section_schema_version": 1
+    },
+    "build": {
+      "payload": {
+        "build_source": {
+          "manifest": {
+            "abicheck_version": "",
+            "artifacts": [],
+            "build_source_pack_version": 1,
+            "coverage": [
+              {
+                "compile_units": null,
+                "confidence": "unknown",
+                "detail": "",
+                "elapsed_s": 0,
+                "layer": "L3_build",
+                "link_units": null,
+                "requested_roots": [],
+                "resolved_roots": [],
+                "status": "not_collected",
+                "transitive_targets": null
+              },
+              {
+                "compile_units": null,
+                "confidence": "unknown",
+                "detail": "",
+                "elapsed_s": 0,
+                "layer": "L4_source_abi",
+                "link_units": null,
+                "requested_roots": [],
+                "resolved_roots": [],
+                "status": "not_collected",
+                "transitive_targets": null
+              },
+              {
+                "compile_units": null,
+                "confidence": "reduced",
+                "detail": "",
+                "elapsed_s": 0,
+                "layer": "L5_source_graph",
+                "link_units": null,
+                "requested_roots": [],
+                "resolved_roots": [],
+                "status": "present",
+                "transitive_targets": null
+              }
+            ],
+            "created_at": "",
+            "extractors": [],
+            "inputs": {},
+            "redaction": {},
+            "source_root": {
+              "path_redacted": true,
+              "repo_hash": ""
+            }
+          }
+        },
+        "build_source_pack": null
+      },
+      "section_kind": "build",
+      "section_schema_version": 1
+    },
+    "debug": {
+      "payload": {
+        "ast_compile_args": [],
+        "ast_cplusplus_macro": "201703L",
+        "ast_fallback_reason": null,
+        "ast_producer": "castxml",
+        "ast_resolved_standard": "probed:__cplusplus=201703L",
+        "ast_resolved_standard_fact": {
+          "diagnostics": [],
+          "status": "present",
+          "value": "probed:__cplusplus=201703L"
+        },
+        "ast_sysroot": null,
+        "ast_toolchain": {
+          "abi_dialect": "gnu",
+          "castxml_bundled_clang_version": "20.1",
+          "castxml_version": "0.7.0",
+          "compiler_mtime_ns": "1766091591000000000",
+          "compiler_realpath": "/usr/bin/x86_64-linux-gnu-g++-13",
+          "compiler_selected": "/usr/bin/g++",
+          "compiler_sha256": "1353e9bdd29a7295c7226bf6c63abccce056d8cac31f112e5cdbecc3f28c2769",
+          "compiler_size": "1027128",
+          "compiler_target_triple": "x86_64-linux-gnu",
+          "compiler_version": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+          "language_standard_explicit": "0",
+          "mtime_ns": "1772089430000000000",
+          "producer": "castxml",
+          "realpath": "/root/.cache/abicheck-castxml-conda/castxml=0.7.0=hde8d07d_0-pinset1/bin/castxml",
+          "resolved_lang_mode": "c++",
+          "selected": "/root/.cache/abicheck-castxml-conda/castxml=0.7.0=hde8d07d_0-pinset1/bin/castxml",
+          "sha256": "6d233e87fea856e8f76cdb69d687a73025771f35cd9f83a3f978d607c5153a0d",
+          "size": "271544",
+          "target_triple": "x86_64-conda-linux-gnu",
+          "version": "castxml version 0.7.0\nCastXML project maintained and supported by Kitware (kitware.com).\nclang version 20.1.8 (https://github.com/conda-forge/clangdev-feedstock 4bb8e6c8a8e30a94c55be92d093c63f0d8fa92ae)\nTarget: x86_64-conda-linux-gnu\nThread model: posix\nInstalledDir:"
+        },
+        "ast_toolchain_supported": true,
+        "ast_toolchain_unsupported_reasons": [],
+        "build_context_defines": [],
+        "castxml_var_access_facts_reliable": true,
+        "clang_deprecation_facts_reliable": true,
+        "clang_field_initializer_facts_reliable": true,
+        "clang_restrict_facts_reliable": true,
+        "clang_va_list_facts_reliable": true,
+        "clang_vtable_facts_reliable": true,
+        "dwarf": {
+          "base_types": {
+            "char": 1,
+            "int": 4,
+            "long unsigned int": 8,
+            "short unsigned int": 2
+          },
+          "enums": {},
+          "has_dwarf": true,
+          "structs": {
+            "Buffer": {
+              "alignment": 0,
+              "byte_size": 64,
+              "decl_file": null,
+              "fields": [
+                {
+                  "bit_offset": 0,
+                  "bit_size": 0,
+                  "byte_offset": 0,
+                  "byte_size": 0,
+                  "name": "data",
+                  "type_name": "char[]"
+                }
+              ],
+              "is_union": false,
+              "name": "Buffer"
+            }
+          }
+        },
+        "dwarf_advanced": {
+          "all_struct_names": [
+            "Buffer"
+          ],
+          "callee_saved_regs": {},
+          "calling_conventions": {
+            "_ZN6Buffer4sizeEv": "normal",
+            "_ZN6BufferC4Ev": "normal",
+            "make_buffer": "normal",
+            "memchr": "normal",
+            "memset": "normal",
+            "strchr": "normal",
+            "strcoll": "normal",
+            "strerror": "normal",
+            "strpbrk": "normal",
+            "strrchr": "normal",
+            "strstr": "normal",
+            "strtok": "normal",
+            "strxfrm": "normal"
+          },
+          "frame_registers": {},
+          "has_dwarf": true,
+          "packed_structs": [],
+          "return_memory_classified": [],
+          "return_value_sizes": {},
+          "target_arch": "x64",
+          "toolchain": {
+            "abi_flags": [],
+            "compiler": "GCC",
+            "producer_string": "GNU C++17 13.3.0 -mtune=generic -march=x86-64 -g -O0 -fPIC -fasynchronous-unwind-tables -fstack-protector-strong -fstack-clash-protection -fcf-protection",
+            "vector_abi_flags": [],
+            "version": "13.3.0",
+            "wchar_flags": []
+          },
+          "value_abi_traits": {}
+        },
+        "fact_provenance": {},
+        "from_headers": true,
+        "frontend_context_kind": null,
+        "header_cv_facts_reliable": true,
+        "param_kind_facts_reliable": true,
+        "parsed_with_build_context": false
+      },
+      "section_kind": "debug",
+      "section_schema_version": 1
+    },
+    "declarations": {
+      "payload": {
+        "constant_entity_ids": {},
+        "constants": {},
+        "enums": [],
+        "functions": [
+          {
+            "access": "public",
+            "binary_exported_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "contract_attributes": [],
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "declared_in_headers_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "elf_binding": "global",
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "global"
+            },
+            "elf_visibility": "default",
+            "entity_id": {
+              "extra": [
+                "extern_c"
+              ],
+              "kind": "function",
+              "leaf_name": "make_buffer",
+              "schema_version": 2,
+              "scope": []
+            },
+            "exception_spec": "",
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": ""
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "in_public_contract_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "is_compiler_generated": false,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_extern_c": true,
+            "is_hidden_friend": false,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_inline": false,
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": false,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "make_buffer",
+            "name": "make_buffer",
+            "origin": "public_header",
+            "params": [],
+            "ref_qualifier": "",
+            "return_pointer_depth": 1,
+            "return_type": "Buffer*",
+            "source_header": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h",
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            "source_location": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h:8",
+            "visibility": "public",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": false
+            },
+            "contract_attributes": [],
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "declared_in_headers_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "entity_id": {
+              "extra": [
+                "extern_c"
+              ],
+              "kind": "function",
+              "leaf_name": "__builtin_memcpy",
+              "schema_version": 2,
+              "scope": []
+            },
+            "exception_spec": "",
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": ""
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "in_public_contract_fact": {
+              "diagnostics": [
+                "declared in a supplied public header"
+              ],
+              "status": "present",
+              "value": true
+            },
+            "is_compiler_generated": true,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": true
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_extern_c": true,
+            "is_hidden_friend": false,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_inline": false,
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": false,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "__builtin_memcpy",
+            "name": "__builtin_memcpy",
+            "origin": "public_header",
+            "params": [
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "unsupported",
+                  "value": null
+                },
+                "kind": "pointer",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "pointer"
+                },
+                "name": "",
+                "pointer_depth": 1,
+                "type": "void*"
+              },
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "unsupported",
+                  "value": null
+                },
+                "kind": "pointer",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "pointer"
+                },
+                "name": "",
+                "pointer_depth": 1,
+                "type": "const void*"
+              },
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "unsupported",
+                  "value": null
+                },
+                "kind": "value",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "value"
+                },
+                "name": "",
+                "pointer_depth": 0,
+                "type": "long unsigned int"
+              }
+            ],
+            "ref_qualifier": "",
+            "return_pointer_depth": 1,
+            "return_type": "void*",
+            "source_header": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h",
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            "source_location": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h:1",
+            "visibility": "hidden",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": {
+              "diagnostics": [
+                "no binary in this dump"
+              ],
+              "producer": "castxml",
+              "status": "not_collected",
+              "value": null
+            },
+            "contract_attributes": [],
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "declared_in_headers_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "entity_id": {
+              "extra": [
+                "mangled",
+                "__abicheck_ctor__Buffer()"
+              ],
+              "kind": "function",
+              "leaf_name": "",
+              "schema_version": 2,
+              "scope": []
+            },
+            "exception_spec": "",
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": ""
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "in_public_contract_fact": {
+              "diagnostics": [
+                "declared in a supplied public header"
+              ],
+              "status": "present",
+              "value": true
+            },
+            "is_compiler_generated": false,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": false,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_extern_c": false,
+            "is_hidden_friend": false,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_inline": false,
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": false,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "__abicheck_ctor__Buffer()",
+            "name": "Buffer",
+            "origin": "public_header",
+            "params": [],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "void",
+            "source_header": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h",
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            "source_location": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h:3",
+            "visibility": "public",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "contract_attributes": [],
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "declared_in_headers_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "elf_binding": "global",
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "global"
+            },
+            "elf_visibility": "default",
+            "entity_id": {
+              "extra": [
+                "mangled",
+                "_ZN6Buffer4sizeEv"
+              ],
+              "kind": "function",
+              "leaf_name": "",
+              "schema_version": 2,
+              "scope": []
+            },
+            "exception_spec": "",
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": ""
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "in_public_contract_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "is_compiler_generated": false,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_extern_c": false,
+            "is_hidden_friend": false,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_inline": false,
+            "is_noexcept": false,
+            "is_override": false,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": false,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "_ZN6Buffer4sizeEv",
+            "name": "size",
+            "origin": "public_header",
+            "params": [],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "int",
+            "source_header": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h",
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            "source_location": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h:4",
+            "visibility": "public",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": {
+              "diagnostics": [
+                "no binary in this dump"
+              ],
+              "producer": "castxml",
+              "status": "not_collected",
+              "value": null
+            },
+            "contract_attributes": [],
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "declared_in_headers_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "entity_id": {
+              "extra": [
+                "mangled",
+                "__abicheck_ctor__Buffer(const Buffer&)"
+              ],
+              "kind": "function",
+              "leaf_name": "",
+              "schema_version": 2,
+              "scope": []
+            },
+            "exception_spec": "",
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": ""
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "in_public_contract_fact": {
+              "diagnostics": [
+                "declared in a supplied public header"
+              ],
+              "status": "present",
+              "value": true
+            },
+            "is_compiler_generated": true,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": true
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": false,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_extern_c": false,
+            "is_hidden_friend": false,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_inline": true,
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": false,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "__abicheck_ctor__Buffer(const Buffer&)",
+            "name": "Buffer",
+            "origin": "public_header",
+            "params": [
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "unsupported",
+                  "value": null
+                },
+                "kind": "reference",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "reference"
+                },
+                "name": "",
+                "pointer_depth": 0,
+                "type": "const Buffer&"
+              }
+            ],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "void",
+            "source_header": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h",
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            "source_location": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h:1",
+            "visibility": "hidden",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": false
+            },
+            "contract_attributes": [],
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "declared_in_headers_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "entity_id": {
+              "extra": [
+                "mangled",
+                "_ZN6BufferaSERKS_"
+              ],
+              "kind": "function",
+              "leaf_name": "",
+              "schema_version": 2,
+              "scope": []
+            },
+            "exception_spec": "",
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": ""
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "in_public_contract_fact": {
+              "diagnostics": [
+                "declared in a supplied public header"
+              ],
+              "status": "present",
+              "value": true
+            },
+            "is_compiler_generated": true,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": true
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_extern_c": false,
+            "is_hidden_friend": false,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_inline": true,
+            "is_noexcept": false,
+            "is_override": false,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": false,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "_ZN6BufferaSERKS_",
+            "name": "operator=",
+            "origin": "public_header",
+            "params": [
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "unsupported",
+                  "value": null
+                },
+                "kind": "reference",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "reference"
+                },
+                "name": "",
+                "pointer_depth": 0,
+                "type": "const Buffer&"
+              }
+            ],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "Buffer&",
+            "source_header": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h",
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            "source_location": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h:1",
+            "visibility": "hidden",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": {
+              "diagnostics": [
+                "no binary in this dump"
+              ],
+              "producer": "castxml",
+              "status": "not_collected",
+              "value": null
+            },
+            "contract_attributes": [],
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "declared_in_headers_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "entity_id": {
+              "extra": [
+                "mangled",
+                "__abicheck_ctor__Buffer(Buffer&&)"
+              ],
+              "kind": "function",
+              "leaf_name": "",
+              "schema_version": 2,
+              "scope": []
+            },
+            "exception_spec": "",
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": ""
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "in_public_contract_fact": {
+              "diagnostics": [
+                "declared in a supplied public header"
+              ],
+              "status": "present",
+              "value": true
+            },
+            "is_compiler_generated": true,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": true
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": false,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_extern_c": false,
+            "is_hidden_friend": false,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_inline": true,
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": false,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "__abicheck_ctor__Buffer(Buffer&&)",
+            "name": "Buffer",
+            "origin": "public_header",
+            "params": [
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "unsupported",
+                  "value": null
+                },
+                "kind": "rvalue_ref",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "rvalue_ref"
+                },
+                "name": "",
+                "pointer_depth": 0,
+                "type": "Buffer&&"
+              }
+            ],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "void",
+            "source_header": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h",
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            "source_location": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h:1",
+            "visibility": "hidden",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": false
+            },
+            "contract_attributes": [],
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "declared_in_headers_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "entity_id": {
+              "extra": [
+                "mangled",
+                "_ZN6BufferaSEOS_"
+              ],
+              "kind": "function",
+              "leaf_name": "",
+              "schema_version": 2,
+              "scope": []
+            },
+            "exception_spec": "",
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": ""
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "in_public_contract_fact": {
+              "diagnostics": [
+                "declared in a supplied public header"
+              ],
+              "status": "present",
+              "value": true
+            },
+            "is_compiler_generated": true,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": true
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_extern_c": false,
+            "is_hidden_friend": false,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_inline": true,
+            "is_noexcept": false,
+            "is_override": false,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": false,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "_ZN6BufferaSEOS_",
+            "name": "operator=",
+            "origin": "public_header",
+            "params": [
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "unsupported",
+                  "value": null
+                },
+                "kind": "rvalue_ref",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "rvalue_ref"
+                },
+                "name": "",
+                "pointer_depth": 0,
+                "type": "Buffer&&"
+              }
+            ],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "Buffer&",
+            "source_header": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h",
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            "source_location": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h:1",
+            "visibility": "hidden",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": {
+              "diagnostics": [
+                "no binary in this dump"
+              ],
+              "producer": "castxml",
+              "status": "not_collected",
+              "value": null
+            },
+            "contract_attributes": [],
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "declared_in_headers_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "entity_id": {
+              "extra": [
+                "mangled",
+                "~Buffer"
+              ],
+              "kind": "function",
+              "leaf_name": "",
+              "schema_version": 2,
+              "scope": []
+            },
+            "exception_spec": "",
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": ""
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "in_public_contract_fact": {
+              "diagnostics": [
+                "declared in a supplied public header"
+              ],
+              "status": "present",
+              "value": true
+            },
+            "is_compiler_generated": true,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": true
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_extern_c": false,
+            "is_hidden_friend": false,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_inline": true,
+            "is_noexcept": false,
+            "is_override": false,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": false,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "~Buffer",
+            "name": "~Buffer",
+            "origin": "public_header",
+            "params": [],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "void",
+            "source_header": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h",
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            "source_location": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h:1",
+            "visibility": "hidden",
+            "vtable_index": null
+          }
+        ],
+        "numpy_capi": {
+          "capi_target_version": null,
+          "consumes_array_api": false,
+          "consumes_ufunc_api": false
+        },
+        "python_api": null,
+        "python_ext": null,
+        "sycl": null,
+        "typedef_entity_ids": {},
+        "typedefs": {},
+        "typedefs_qualified": {},
+        "variables": []
+      },
+      "section_kind": "declarations",
+      "section_schema_version": 1
+    },
+    "graph": {
+      "payload": {
+        "surface_graph": {
+          "coverage": {
+            "binary_symbol_mappings": 0,
+            "call_edges": {
+              "collected": false,
+              "count": 0
+            },
+            "compile_units": 0,
+            "edge_kinds": {
+              "DECL_HAS_TYPE": 1,
+              "SOURCE_DECLARES": 11,
+              "TYPE_HAS_FIELD_TYPE": 4
+            },
+            "include_edges": {
+              "collected": true,
+              "count": 0
+            },
+            "node_kinds": {
+              "header": 1,
+              "record_type": 10,
+              "source_decl": 10
+            },
+            "reference_edges": {
+              "collected": false,
+              "count": 0
+            },
+            "source_decls": 10,
+            "targets": 0,
+            "type_edges": {
+              "collected": true,
+              "count": 5
+            }
+          },
+          "degraded_passes": {},
+          "edges": [
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "decl://make_buffer",
+              "edge": "SOURCE_DECLARES",
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "header_ast_l2",
+              "resolved": {},
+              "src": "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "decl://__builtin_memcpy",
+              "edge": "SOURCE_DECLARES",
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "header_ast_l2",
+              "resolved": {},
+              "src": "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "decl://__abicheck_ctor__Buffer()",
+              "edge": "SOURCE_DECLARES",
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "header_ast_l2",
+              "resolved": {},
+              "src": "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "decl://_ZN6Buffer4sizeEv",
+              "edge": "SOURCE_DECLARES",
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "header_ast_l2",
+              "resolved": {},
+              "src": "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "decl://__abicheck_ctor__Buffer(const Buffer&)",
+              "edge": "SOURCE_DECLARES",
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "header_ast_l2",
+              "resolved": {},
+              "src": "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "decl://_ZN6BufferaSERKS_",
+              "edge": "SOURCE_DECLARES",
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "header_ast_l2",
+              "resolved": {},
+              "src": "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "decl://__abicheck_ctor__Buffer(Buffer&&)",
+              "edge": "SOURCE_DECLARES",
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "header_ast_l2",
+              "resolved": {},
+              "src": "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "decl://_ZN6BufferaSEOS_",
+              "edge": "SOURCE_DECLARES",
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "header_ast_l2",
+              "resolved": {},
+              "src": "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "decl://~Buffer",
+              "edge": "SOURCE_DECLARES",
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "header_ast_l2",
+              "resolved": {},
+              "src": "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "type://Buffer::Buffer",
+              "edge": "SOURCE_DECLARES",
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "header_ast_l2",
+              "resolved": {},
+              "src": "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "type://Buffer",
+              "edge": "SOURCE_DECLARES",
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "header_ast_l2",
+              "resolved": {},
+              "src": "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            {
+              "attrs": {
+                "resolution": "unresolved",
+                "role": "alias"
+              },
+              "confidence": "reduced",
+              "conflicts": [],
+              "dst": "type://__int128",
+              "edge": "TYPE_HAS_FIELD_TYPE",
+              "facts": [
+                {
+                  "attrs": {
+                    "resolution": "unresolved",
+                    "role": "alias"
+                  },
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "type_graph",
+              "resolved": {
+                "resolution": "unresolved",
+                "role": "alias"
+              },
+              "src": "type://__int128_t"
+            },
+            {
+              "attrs": {
+                "resolution": "unresolved",
+                "role": "alias"
+              },
+              "confidence": "reduced",
+              "conflicts": [],
+              "dst": "type://unsigned __int128",
+              "edge": "TYPE_HAS_FIELD_TYPE",
+              "facts": [
+                {
+                  "attrs": {
+                    "resolution": "unresolved",
+                    "role": "alias"
+                  },
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "type_graph",
+              "resolved": {
+                "resolution": "unresolved",
+                "role": "alias"
+              },
+              "src": "type://__uint128_t"
+            },
+            {
+              "attrs": {
+                "resolution": "unresolved",
+                "role": "alias"
+              },
+              "confidence": "reduced",
+              "conflicts": [],
+              "dst": "type://__NSConstantString_tag",
+              "edge": "TYPE_HAS_FIELD_TYPE",
+              "facts": [
+                {
+                  "attrs": {
+                    "resolution": "unresolved",
+                    "role": "alias"
+                  },
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "type_graph",
+              "resolved": {
+                "resolution": "unresolved",
+                "role": "alias"
+              },
+              "src": "type://__NSConstantString"
+            },
+            {
+              "attrs": {
+                "resolution": "unresolved",
+                "role": "alias"
+              },
+              "confidence": "reduced",
+              "conflicts": [],
+              "dst": "type://__va_list_tag",
+              "edge": "TYPE_HAS_FIELD_TYPE",
+              "facts": [
+                {
+                  "attrs": {
+                    "resolution": "unresolved",
+                    "role": "alias"
+                  },
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "type_graph",
+              "resolved": {
+                "resolution": "unresolved",
+                "role": "alias"
+              },
+              "src": "type://__builtin_va_list"
+            },
+            {
+              "attrs": {
+                "resolution": "scope",
+                "role": "return"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "type://Buffer",
+              "edge": "DECL_HAS_TYPE",
+              "facts": [
+                {
+                  "attrs": {
+                    "resolution": "scope",
+                    "role": "return"
+                  },
+                  "confidence": "high",
+                  "producer": "type_graph"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "type_graph",
+              "resolved": {
+                "resolution": "scope",
+                "role": "return"
+              },
+              "src": "decl://make_buffer#sha256:3f9d7fc8f5c7b5c96f287497fb6b90a779ae534f7e778cd6445e87401fef4a5f"
+            }
+          ],
+          "external_graph_refs": [],
+          "extractor_passes": {
+            "header_call_graph": true,
+            "header_include_graph": true,
+            "header_type_graph": true,
+            "header_type_graph:DECL_HAS_TYPE:default_template_arg": true,
+            "header_type_graph:DECL_HAS_TYPE:param": true,
+            "header_type_graph:DECL_HAS_TYPE:return": true,
+            "header_type_graph:DECL_HAS_TYPE:template_param": true,
+            "header_type_graph:DECL_HAS_TYPE:var": true,
+            "header_type_graph:DECL_REFERENCES_DECL:ref": true,
+            "header_type_graph:TYPE_HAS_FIELD_TYPE:alias": true,
+            "header_type_graph:TYPE_HAS_FIELD_TYPE:default_template_arg": true,
+            "header_type_graph:TYPE_HAS_FIELD_TYPE:enum_underlying": true,
+            "header_type_graph:TYPE_HAS_FIELD_TYPE:field": true,
+            "header_type_graph:TYPE_HAS_FIELD_TYPE:template_param": true,
+            "header_type_graph:TYPE_INHERITS:base": true
+          },
+          "graph_id": "sha256:72e03f6fc8cf5814cde773ba5ac39fe7f96ee11bdba2e8981fa6ab74938e629b",
+          "indexes": {
+            "by_binary_symbol": {},
+            "by_file": {},
+            "by_source_decl": {
+              "decl://_ZN6Buffer4sizeEv": [
+                "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+              ],
+              "decl://_ZN6BufferaSEOS_": [
+                "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+              ],
+              "decl://_ZN6BufferaSERKS_": [
+                "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+              ],
+              "decl://__abicheck_ctor__Buffer()": [
+                "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+              ],
+              "decl://__abicheck_ctor__Buffer(Buffer&&)": [
+                "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+              ],
+              "decl://__abicheck_ctor__Buffer(const Buffer&)": [
+                "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+              ],
+              "decl://__builtin_memcpy": [
+                "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+              ],
+              "decl://make_buffer": [
+                "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+              ],
+              "decl://make_buffer#sha256:3f9d7fc8f5c7b5c96f287497fb6b90a779ae534f7e778cd6445e87401fef4a5f": [
+                "type://Buffer"
+              ],
+              "decl://~Buffer": [
+                "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+              ]
+            },
+            "by_target": {}
+          },
+          "narrowed_passes": {},
+          "narrowed_scope": {},
+          "nodes": [
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "header:///tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h",
+              "kind": "header",
+              "label": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "decl://make_buffer",
+              "kind": "source_decl",
+              "label": "make_buffer",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "decl://__builtin_memcpy",
+              "kind": "source_decl",
+              "label": "__builtin_memcpy",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "decl://__abicheck_ctor__Buffer()",
+              "kind": "source_decl",
+              "label": "Buffer",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "decl://_ZN6Buffer4sizeEv",
+              "kind": "source_decl",
+              "label": "size",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "decl://__abicheck_ctor__Buffer(const Buffer&)",
+              "kind": "source_decl",
+              "label": "Buffer",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "decl://_ZN6BufferaSERKS_",
+              "kind": "source_decl",
+              "label": "operator=",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "decl://__abicheck_ctor__Buffer(Buffer&&)",
+              "kind": "source_decl",
+              "label": "Buffer",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "decl://_ZN6BufferaSEOS_",
+              "kind": "source_decl",
+              "label": "operator=",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "decl://~Buffer",
+              "kind": "source_decl",
+              "label": "~Buffer",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "type://Buffer::Buffer",
+              "kind": "record_type",
+              "label": "Buffer::Buffer",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "type://Buffer",
+              "kind": "record_type",
+              "label": "Buffer",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {},
+              "confidence": "reduced",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "type://__int128_t",
+              "kind": "record_type",
+              "label": "__int128_t",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "reduced",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "type://__int128",
+              "kind": "record_type",
+              "label": "__int128",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "reduced",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "type://__uint128_t",
+              "kind": "record_type",
+              "label": "__uint128_t",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "reduced",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "type://unsigned __int128",
+              "kind": "record_type",
+              "label": "unsigned __int128",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "reduced",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "type://__NSConstantString",
+              "kind": "record_type",
+              "label": "__NSConstantString",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "reduced",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "type://__NSConstantString_tag",
+              "kind": "record_type",
+              "label": "__NSConstantString_tag",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "reduced",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "type://__builtin_va_list",
+              "kind": "record_type",
+              "label": "__builtin_va_list",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "reduced",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "type://__va_list_tag",
+              "kind": "record_type",
+              "label": "__va_list_tag",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "decl://make_buffer#sha256:3f9d7fc8f5c7b5c96f287497fb6b90a779ae534f7e778cd6445e87401fef4a5f",
+              "kind": "source_decl",
+              "label": "make_buffer#sha256:3f9d7fc8f5c7b5c96f287497fb6b90a779ae534f7e778cd6445e87401fef4a5f",
+              "provenance": "type_graph",
+              "resolved": {}
+            }
+          ],
+          "schema_version": 2
+        }
+      },
+      "section_kind": "graph",
+      "section_schema_version": 1
+    },
+    "layout": {
+      "payload": {
+        "conditional_fields": {},
+        "contract": {
+          "compiler_identity_status": "present",
+          "profile_fields": {
+            "abi_dialect": "gnu",
+            "compiler_family": "gnu",
+            "compiler_version": "[\"castxml\", \"castxml version 0.7.0\\nCastXML project maintained and supported by Kitware (kitware.com).\\nclang version 20.1.8 (https://github.com/conda-forge/clangdev-feedstock 4bb8e6c8a8e30a94c55be92d093c63f0d8fa92ae)\\nTarget: x86_64-conda-linux-gnu\\nThread model: posix\\nInstalledDir:\", \"g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\\nCopyright (C) 2023 Free Software Foundation, Inc.\\nThis is free software; see the source for copying conditions.  There is NO\\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\"]",
+            "endianness": "",
+            "frontend_context_kind": "",
+            "header_sequence": "[\"<single-header>\"]",
+            "include_sequence": "[\"0:hdrs:<single-header>\"]",
+            "language_standard": "probed:__cplusplus=201703L",
+            "macro_ops": "[]",
+            "pass_through_flags": "[]",
+            "pointer_width": "",
+            "target_triple": ""
+          },
+          "profile_fingerprint": "sha256:db5815d52c742d69d385765a89f7a35388d1f2d1ce2f27805c38cd18cd7cf123",
+          "scope_fields": {
+            "headers": "[\"<single-header>\"]",
+            "public_header_dirs": "[]",
+            "translation_units": "[]"
+          },
+          "scope_fingerprint": "sha256:0758e2c146f837acd76eb608384b65c91d5b9ae0701d4297fb099008342e6798"
+        },
+        "dependency_scope": "filtered",
+        "dwarf_layout_coherence": null,
+        "dwarf_layout_coherence_mismatches": [],
+        "excluded_header_matching": "glob",
+        "excluded_header_patterns": [],
+        "header_only": false,
+        "scope_fallback": null
+      },
+      "section_kind": "layout",
+      "section_schema_version": 1
+    },
+    "provenance": {
+      "payload": {
+        "created_at": "2026-09-24T04:45:58.237417+00:00",
+        "dependency_info": null,
+        "dump_provenance": {
+          "ast_fallback_reason": null,
+          "ast_toolchain": {
+            "abi_dialect": "gnu",
+            "castxml_bundled_clang_version": "20.1",
+            "castxml_version": "0.7.0",
+            "compiler_mtime_ns": "1766091591000000000",
+            "compiler_realpath": "/usr/bin/x86_64-linux-gnu-g++-13",
+            "compiler_selected": "/usr/bin/g++",
+            "compiler_sha256": "1353e9bdd29a7295c7226bf6c63abccce056d8cac31f112e5cdbecc3f28c2769",
+            "compiler_size": "1027128",
+            "compiler_target_triple": "x86_64-linux-gnu",
+            "compiler_version": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+            "language_standard_explicit": "0",
+            "mtime_ns": "1772089430000000000",
+            "producer": "castxml",
+            "realpath": "/root/.cache/abicheck-castxml-conda/castxml=0.7.0=hde8d07d_0-pinset1/bin/castxml",
+            "resolved_lang_mode": "c++",
+            "selected": "/root/.cache/abicheck-castxml-conda/castxml=0.7.0=hde8d07d_0-pinset1/bin/castxml",
+            "sha256": "6d233e87fea856e8f76cdb69d687a73025771f35cd9f83a3f978d607c5153a0d",
+            "size": "271544",
+            "target_triple": "x86_64-conda-linux-gnu",
+            "version": "castxml version 0.7.0\nCastXML project maintained and supported by Kitware (kitware.com).\nclang version 20.1.8 (https://github.com/conda-forge/clangdev-feedstock 4bb8e6c8a8e30a94c55be92d093c63f0d8fa92ae)\nTarget: x86_64-conda-linux-gnu\nThread model: posix\nInstalledDir:"
+          },
+          "degraded": false,
+          "effective_depth": "headers",
+          "frontend": "castxml",
+          "requested_depth": null,
+          "source_scope": null
+        },
+        "git_commit": "ebb9b09f65509d4de169131276c2a6a481be14a1",
+        "git_tag": null,
+        "language_profile": null,
+        "library": "libcase14_cpp_class_size.so",
+        "version": "unknown"
+      },
+      "section_kind": "provenance",
+      "section_schema_version": 1
+    },
+    "semantic_ir": {
+      "payload": {
+        "semantic_ir": {
+          "occurrences": [
+            {
+              "entity": {
+                "canonical_spelling": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "Buffer"
+                },
+                "cv_qualification": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "producer": "castxml",
+                "template_arguments": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": []
+                }
+              },
+              "occurrence": {
+                "disambiguator": "",
+                "entity_id": {
+                  "extra": [],
+                  "kind": "type",
+                  "leaf_name": "Buffer",
+                  "schema_version": 2,
+                  "scope": []
+                }
+              }
+            },
+            {
+              "entity": {
+                "canonical_spelling": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "Buffer &(Buffer & &)"
+                },
+                "cv_qualification": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": []
+                },
+                "producer": "castxml",
+                "template_arguments": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                }
+              },
+              "occurrence": {
+                "disambiguator": "",
+                "entity_id": {
+                  "extra": [
+                    "mangled",
+                    "_ZN6BufferaSEOS_"
+                  ],
+                  "kind": "function",
+                  "leaf_name": "",
+                  "schema_version": 2,
+                  "scope": []
+                }
+              }
+            },
+            {
+              "entity": {
+                "canonical_spelling": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "int()"
+                },
+                "cv_qualification": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": []
+                },
+                "producer": "castxml",
+                "template_arguments": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                }
+              },
+              "occurrence": {
+                "disambiguator": "",
+                "entity_id": {
+                  "extra": [
+                    "mangled",
+                    "_ZN6Buffer4sizeEv"
+                  ],
+                  "kind": "function",
+                  "leaf_name": "",
+                  "schema_version": 2,
+                  "scope": []
+                }
+              }
+            },
+            {
+              "entity": {
+                "canonical_spelling": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "Buffer &(Buffer const &)"
+                },
+                "cv_qualification": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": []
+                },
+                "producer": "castxml",
+                "template_arguments": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                }
+              },
+              "occurrence": {
+                "disambiguator": "",
+                "entity_id": {
+                  "extra": [
+                    "mangled",
+                    "_ZN6BufferaSERKS_"
+                  ],
+                  "kind": "function",
+                  "leaf_name": "",
+                  "schema_version": 2,
+                  "scope": []
+                }
+              }
+            },
+            {
+              "entity": {
+                "canonical_spelling": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "void()"
+                },
+                "cv_qualification": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": []
+                },
+                "producer": "castxml",
+                "template_arguments": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                }
+              },
+              "occurrence": {
+                "disambiguator": "",
+                "entity_id": {
+                  "extra": [
+                    "mangled",
+                    "__abicheck_ctor__Buffer()"
+                  ],
+                  "kind": "function",
+                  "leaf_name": "",
+                  "schema_version": 2,
+                  "scope": []
+                }
+              }
+            },
+            {
+              "entity": {
+                "canonical_spelling": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "void(Buffer & &)"
+                },
+                "cv_qualification": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": []
+                },
+                "producer": "castxml",
+                "template_arguments": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                }
+              },
+              "occurrence": {
+                "disambiguator": "",
+                "entity_id": {
+                  "extra": [
+                    "mangled",
+                    "__abicheck_ctor__Buffer(Buffer&&)"
+                  ],
+                  "kind": "function",
+                  "leaf_name": "",
+                  "schema_version": 2,
+                  "scope": []
+                }
+              }
+            },
+            {
+              "entity": {
+                "canonical_spelling": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "void(Buffer const &)"
+                },
+                "cv_qualification": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": []
+                },
+                "producer": "castxml",
+                "template_arguments": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                }
+              },
+              "occurrence": {
+                "disambiguator": "",
+                "entity_id": {
+                  "extra": [
+                    "mangled",
+                    "__abicheck_ctor__Buffer(const Buffer&)"
+                  ],
+                  "kind": "function",
+                  "leaf_name": "",
+                  "schema_version": 2,
+                  "scope": []
+                }
+              }
+            },
+            {
+              "entity": {
+                "canonical_spelling": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "void()"
+                },
+                "cv_qualification": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": []
+                },
+                "producer": "castxml",
+                "template_arguments": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                }
+              },
+              "occurrence": {
+                "disambiguator": "",
+                "entity_id": {
+                  "extra": [
+                    "mangled",
+                    "~Buffer"
+                  ],
+                  "kind": "function",
+                  "leaf_name": "",
+                  "schema_version": 2,
+                  "scope": []
+                }
+              }
+            },
+            {
+              "entity": {
+                "canonical_spelling": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "Buffer *()"
+                },
+                "cv_qualification": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": []
+                },
+                "producer": "castxml",
+                "template_arguments": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                }
+              },
+              "occurrence": {
+                "disambiguator": "",
+                "entity_id": {
+                  "extra": [
+                    "extern_c"
+                  ],
+                  "kind": "function",
+                  "leaf_name": "make_buffer",
+                  "schema_version": 2,
+                  "scope": []
+                }
+              }
+            },
+            {
+              "entity": {
+                "canonical_spelling": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "void *(void *, void const *, long unsigned int)"
+                },
+                "cv_qualification": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": []
+                },
+                "producer": "castxml",
+                "template_arguments": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                }
+              },
+              "occurrence": {
+                "disambiguator": "",
+                "entity_id": {
+                  "extra": [
+                    "extern_c"
+                  ],
+                  "kind": "function",
+                  "leaf_name": "__builtin_memcpy",
+                  "schema_version": 2,
+                  "scope": []
+                }
+              }
+            }
+          ]
+        }
+      },
+      "section_kind": "semantic_ir",
+      "section_schema_version": 1
+    },
+    "types": {
+      "payload": {
+        "types": [
+          {
+            "alignment_bits": 8,
+            "base_offsets": {},
+            "bases": [],
+            "bases_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "data_size_bits": null,
+            "data_size_bits_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "entity_id": {
+              "extra": [],
+              "kind": "type",
+              "leaf_name": "Buffer",
+              "schema_version": 2,
+              "scope": []
+            },
+            "fields": [
+              {
+                "access": "private",
+                "bitfield_bits": null,
+                "default": null,
+                "default_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": null
+                },
+                "deprecated": null,
+                "deprecated_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": null
+                },
+                "is_bitfield": false,
+                "is_const": false,
+                "is_const_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_mutable": false,
+                "is_mutable_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_volatile": false,
+                "is_volatile_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "name": "data",
+                "offset_bits": 0,
+                "type": "char[63]"
+              }
+            ],
+            "has_anonymous_aggregate_fields": false,
+            "is_abstract": false,
+            "is_abstract_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_final": false,
+            "is_final_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_opaque": false,
+            "is_standard_layout": null,
+            "is_standard_layout_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_template_pattern": false,
+            "is_trivially_copyable": null,
+            "is_trivially_copyable_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_union": false,
+            "kind": "class",
+            "name": "Buffer",
+            "origin": "public_header",
+            "qualified_name": null,
+            "qualified_name_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "size_bits": 512,
+            "source_header": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h",
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h"
+            },
+            "source_location": "/tmp/claude-0/hgfix/case14_cpp_class_size/v1/v1.h:1",
+            "virtual_bases": [],
+            "virtual_bases_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "vptr_offset_bits": null,
+            "vptr_offset_bits_fact": {
+              "diagnostics": [],
+              "status": "partial",
+              "value": null
+            },
+            "vtable": [],
+            "vtable_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            }
+          }
+        ]
+      },
+      "section_kind": "types",
+      "section_schema_version": 1
+    }
+  },
+  "section_schema_versions": {
+    "binary": 1,
+    "build": 1,
+    "debug": 1,
+    "declarations": 1,
+    "graph": 1,
+    "layout": 1,
+    "provenance": 1,
+    "semantic_ir": 1,
+    "types": 1
+  }
+}

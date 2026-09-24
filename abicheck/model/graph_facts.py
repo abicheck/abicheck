@@ -443,7 +443,9 @@ def ensure_facts_and_resolve(entity: GraphNode | GraphEdge) -> None:
             _normalize_identity_attrs(fact.attrs)
     entity.resolved, entity.conflicts = resolve_entity_attrs(entity.facts)
     entity.attrs = entity.resolved
-    top = min(entity.facts, key=_precedence_key)
+    # One fact is its own minimum; skip the JSON-dumping sort key for it.
+    facts = entity.facts
+    top = facts[0] if len(facts) == 1 else min(facts, key=_precedence_key)
     entity.confidence = top.confidence
     entity.provenance = top.producer
     if is_decl_or_type_node and isinstance(entity, GraphNode):

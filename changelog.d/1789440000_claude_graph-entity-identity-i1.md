@@ -10,9 +10,9 @@
   `declaration`/`type` nodes no longer duplicate the header graph's
   `source_decl`/`record_type` nodes (29,109 duplicate pairs on oneDAL), and
   the `declaration::`/`type::`/`typedef::` fallback ids are gone.
-- Snapshot schema is now **v49** (`SourceGraphSummary.schema_version` 3,
-  plus a persisted `identity_aliases` map). A pre-v49 snapshot still loads;
-  comparing its graph against a v49 one reports the L5 layer as *not
+- Snapshot schema is now **v50** (`SourceGraphSummary.schema_version` 3,
+  plus a persisted `identity_aliases` map, carried by the compact graph-table encoding). A pre-v50 snapshot still loads;
+  comparing its graph against a v50 one reports the L5 layer as *not
   compared* on the coverage row (`abicheck/compare/source_graph_identity_scheme.py`) and as a warning, instead of diffing ids
   that name entities differently. Re-dump the older side to restore it.
 

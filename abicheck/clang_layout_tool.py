@@ -78,6 +78,7 @@ from .dumper_sysinc import _resolve_clang_system_includes
 from .errors import SnapshotError, ValidationError
 from .header_utils import iter_directory_headers, resolve_inferred_header_roots
 from .model import AbiSnapshot, RecordType, replace_with_fact_sync
+from .name_classification import strip_anonymous_type_location
 
 log = logging.getLogger(__name__)
 
@@ -347,7 +348,10 @@ def _bare_base_name(qualified: str) -> str:
             i += 2
             continue
         i += 1
-    return qualified[last_split:]
+    # An anonymous/lambda base carries its declaring path; strip the
+    # checkout-dependent directory the same way castxml/DWARF record
+    # identities are, or the key never matches across checkouts.
+    return strip_anonymous_type_location(qualified[last_split:])
 
 
 def _apply_record_facts(t: RecordType, facts: dict[str, Any]) -> RecordType:

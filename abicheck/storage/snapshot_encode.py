@@ -221,7 +221,15 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     # models asdict() cannot faithfully serialize; replace the raw asdict output
     # with the pack's canonical inline form, or drop the key when nothing was embedded.
     if snap.build_source is not None:
-        converted["build_source"] = snap.build_source.to_embedded_dict()
+        # The shared header graph is written once, at the top level, by
+        # encode_surface_graph(); encoding it here too only to pop it again
+        # doubled the graph's encode cost on every save.
+        shared = snap.surface_graph is not None and (
+            snap.build_source.source_graph is snap.surface_graph
+        )
+        converted["build_source"] = snap.build_source.to_embedded_dict(
+            include_source_graph=not shared
+        )
     else:
         converted.pop("build_source", None)
     encode_surface_graph(converted, snap)  # storage/surface_graph_codec.py

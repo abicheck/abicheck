@@ -140,7 +140,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # would read as absent and the Mach-O missing-imports safeguard could
     # never see the real `macho` block.
     if is_sectioned_document(d):
-        d = from_sectioned_document(d)
+        d = from_sectioned_document(d, defer_graph=True)
     # `SCHEMA_VERSION` here is *this module's own* (patchable) global -- see
     # `storage.snapshot_codec.decode_snapshot`'s own `max_known_schema_version`
     # docstring note for why it must be threaded through explicitly rather

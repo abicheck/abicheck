@@ -63,7 +63,10 @@ from ..model.graph_entity_identity import (
     register_identity_alias,
     snapshot_identities,
 )
-from ..model.graph_evidence_class import EdgeEvidenceClass
+from ..model.graph_evidence_class import (
+    PUBLIC_SURFACE_FACTS_PRODUCER,
+    EdgeEvidenceClass,
+)
 from ..model.graph_facts import GraphEdge, GraphNode
 
 if TYPE_CHECKING:
@@ -182,8 +185,22 @@ def _add_header_declares(
     if not source_header:
         return
     header_id = _header_node_id(source_header)
-    graph.add_node(GraphNode(id=header_id, kind=NODE_KIND_HEADER, label=source_header))
-    graph.add_edge(GraphEdge(src=header_id, dst=decl_node_id, kind=EDGE_KIND_DECLARES))
+    graph.add_node(
+        GraphNode(
+            provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
+            id=header_id,
+            kind=NODE_KIND_HEADER,
+            label=source_header,
+        )
+    )
+    graph.add_edge(
+        GraphEdge(
+            provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
+            src=header_id,
+            dst=decl_node_id,
+            kind=EDGE_KIND_DECLARES,
+        )
+    )
 
 
 def _add_references(
@@ -201,7 +218,12 @@ def _add_references(
             dst = type_index.get(ident)
             if dst is not None and dst != src_node_id:
                 graph.add_edge(
-                    GraphEdge(src=src_node_id, dst=dst, kind=EDGE_KIND_REFERENCES)
+                    GraphEdge(
+                        provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
+                        src=src_node_id,
+                        dst=dst,
+                        kind=EDGE_KIND_REFERENCES,
+                    )
                 )
 
 
@@ -364,6 +386,7 @@ def _build_type_index(
         node_id = ident.node_id
         graph.add_node(
             GraphNode(
+                provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
                 id=node_id,
                 kind=kind,
                 label=qname or node_id,
@@ -405,10 +428,20 @@ def _add_linker_name_edges(
     symbol was observed exported."""
     for mangled, decl_node_id in decl_node_ids.items():
         symbol_id = f"symbol://{mangled}"
-        graph.add_node(GraphNode(id=symbol_id, kind=NODE_KIND_SYMBOL, label=mangled))
+        graph.add_node(
+            GraphNode(
+                provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
+                id=symbol_id,
+                kind=NODE_KIND_SYMBOL,
+                label=mangled,
+            )
+        )
         graph.add_edge(
             GraphEdge(
-                src=symbol_id, dst=decl_node_id, kind=EDGE_KIND_DECLARES_LINKER_NAME
+                provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
+                src=symbol_id,
+                dst=decl_node_id,
+                kind=EDGE_KIND_DECLARES_LINKER_NAME,
             )
         )
 
@@ -433,6 +466,7 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
             register_identity_alias(graph, alias, node_id)
         graph.add_node(
             GraphNode(
+                provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
                 id=node_id,
                 kind=NODE_KIND_DECLARATION,
                 label=label,

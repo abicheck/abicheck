@@ -31,6 +31,7 @@ from .entities import EnumType, RecordType
 from .extraction_contract import DependencyInfo, ExtractionContract
 from .fact import Fact, bridge_legacy_and_fact
 from .graph_facts import SurfaceGraphLike
+from .lazy_graph import install_lazy_graph_field
 from .snapshot_index import build_snapshot_indexes
 
 if TYPE_CHECKING:
@@ -545,12 +546,9 @@ class AbiSnapshot:
     # such a snapshot goes through `policy.public_surface.
     # resolve_public_surface()`'s lazy, in-memory approximate backfill
     # instead — never through `PublicSurfaceQuery.resolve()` directly, and
-    # never persisted back onto the loaded object. `SurfaceGraphLike`
-    # (`model/graph_facts.py`), not the concrete `SourceGraphSummary`, so
-    # this module needs no `buildsource` import — `build_source.
-    # source_graph` stays a live alias to the identical object whenever both
-    # are populated (one graph, two attribute paths), never a second,
-    # independently-built copy.
+    # never persisted back onto the loaded object. `build_source.source_graph`
+    # stays a live alias to the identical object whenever both are populated.
+    # A stored graph is decoded on first read (`model/lazy_graph.py`).
     surface_graph: SurfaceGraphLike | None = field(default=None, kw_only=True)
 
     # ADR-029 — True when this snapshot's public-header AST was parsed using the
@@ -797,3 +795,6 @@ class AbiSnapshot:
             self.index()
         assert self._type_by_name is not None
         return self._type_by_name.get(name)
+
+
+install_lazy_graph_field(AbiSnapshot, "surface_graph")  # decoded on first read
