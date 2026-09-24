@@ -167,6 +167,7 @@ from .sparse_section_codec import (
     LayoutSection,
     ProvenanceSection,
 )
+from .surface_graph_codec import DeferredGraphPayload
 from .types_section_codec import TypesSection
 from .versioning import StorageVersions
 
@@ -491,13 +492,68 @@ def export_legacy_snapshot(
     )
 
 
+def _check_section_kind(
+    dto: SectionDTO, section_kind: str, artifact_id: str, locator: str
+) -> None:
+    if dto.section_kind != section_kind:
+        raise ValueError(
+            f"artifact {artifact_id!r} section {section_kind!r} "
+            f"-> {locator!r} stores a SectionDTO for kind "
+            f"{dto.section_kind!r} instead -- the package is corrupted "
+            "or was hand-edited"
+        )
+
+
+def _owned_document(document_codec: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    """``document_codec.from_document(payload).to_document()`` for a payload
+    `current_section_payload` returned: fresh, owned and canonical, so the
+    codec runs under `canonical_input_trusted` (as `_decode_current` does),
+    and a codec that can skip its own copy (`document_from_owned`) does."""
+    with canonical_input_trusted():
+        owned = getattr(document_codec, "document_from_owned", None)
+        if owned is not None:
+            return dict(owned(payload))
+        return dict(document_codec.from_document(payload).to_document())
+
+
+def _graph_section_loader(
+    raw: Any, artifact_id: str, locator: str
+) -> Callable[[], dict[str, Any]]:
+    """The deferred half of `export_legacy_sections` for the `graph` section:
+    the same `SectionDTO` validation and `graph_from_dto` decode an eager
+    read performs, run on first access."""
+
+    def load() -> dict[str, Any]:
+        current = current_section_payload(raw)
+        if current is not None and current[0] == GRAPH_SECTION_KIND:
+            # The eager path's fast decode (`_owned_document`): same checks,
+            # same document, no throwaway DTO copies.
+            graph = _owned_document(GraphSection, current[1])["surface_graph"]
+        else:
+            dto = SectionDTO.from_dict(raw)
+            _check_section_kind(dto, GRAPH_SECTION_KIND, artifact_id, locator)
+            graph = graph_from_dto(dto).to_document()["surface_graph"]
+        if not isinstance(graph, dict):  # GraphSection guarantees a mapping
+            raise ValueError("a 'graph' section decoded to a non-mapping graph")
+        return graph
+
+    return load
+
+
 def export_legacy_sections(
     sections: Iterable[tuple[str, str, Any]],
     *,
     artifact_id: str,
     source_schema_version: int,
+    defer_graph: bool = False,
 ) -> dict[str, Any]:
     """`export_legacy_snapshot`'s body, over already-fetched section objects.
+
+    *defer_graph* (storage-format-v2 Phase 2, A2.1): leave the `graph`
+    section's DTO decode for first access. Its `surface_graph` value becomes
+    a `surface_graph_codec.DeferredGraphPayload` whose `load()` runs exactly
+    the eager decode below (same checks, same errors), so only a caller that
+    hands the document straight to `decode_surface_graph` may set it.
 
     Each *sections* entry is ``(section_kind, locator, raw_section_dto)``;
     *locator* only names the object in error messages (a digest for a real
@@ -528,6 +584,11 @@ def export_legacy_sections(
     legacy_sections: dict[str, dict[str, Any]] = {}
     document: dict[str, Any] = {}
     for section_kind, locator, raw in sections:
+        if defer_graph and section_kind == GRAPH_SECTION_KIND:
+            document["surface_graph"] = DeferredGraphPayload(
+                _graph_section_loader(raw, artifact_id, locator)
+            )
+            continue
         document_codec = _LEGACY_SECTION_DOCUMENT_CODECS.get(section_kind)
         current = current_section_payload(raw) if document_codec is not None else None
         if (
@@ -540,22 +601,10 @@ def export_legacy_sections(
             # (`current_section_payload`). `_decode_current` runs the codec
             # under `canonical_input_trusted` for the identical reason: the
             # payload is fresh, owned and already canonical.
-            with canonical_input_trusted():
-                owned = getattr(document_codec, "document_from_owned", None)
-                document.update(
-                    owned(current[1])
-                    if owned is not None
-                    else document_codec.from_document(current[1]).to_document()
-                )
+            document.update(_owned_document(document_codec, current[1]))
             continue
         dto = SectionDTO.from_dict(raw)
-        if dto.section_kind != section_kind:
-            raise ValueError(
-                f"artifact {artifact_id!r} section {section_kind!r} "
-                f"-> {locator!r} stores a SectionDTO for kind "
-                f"{dto.section_kind!r} instead -- the package is corrupted "
-                "or was hand-edited"
-            )
+        _check_section_kind(dto, section_kind, artifact_id, locator)
         if section_kind == SEMANTIC_IR_SECTION_KIND:
             ir, conflicts = semantic_ir_from_dto(dto)
             document.update(semantic_ir_to_document(ir, conflicts))

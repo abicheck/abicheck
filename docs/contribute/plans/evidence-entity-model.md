@@ -99,7 +99,11 @@ Ordered by how many incorrect conclusions each phase prevents, not by size.
 | **2 — Explicit cross-layer joins** | An observed `exports` join (export table → entity, via `model/export_index.py`'s projection) and an L1 debug-type → entity join, each carrying I2 join states. Replaces the per-query reconciliation readers do today. | M–L | 1 |
 | **3 — Ownership in the graph** | Expose `model/release_surface.py` providers and contract inputs (public roots, namespace selection) as graph-level owner relations. Wiring, not new design. | M | 1 |
 | **4 — Coverage-aware queries** | A query API returning I4's three-valued answer per edge kind and scope, built on the existing per-pass coverage records and `Fact` statuses. | M | 0, 2 |
-| **5 — Measure, then decide materialization** | Profile a real large-product (oneDAL-class) dump with `ABICHECK_MEMORY_TRACE` and `scripts/bench_release_memory.py`: snapshot vs. graph vs. index cost. Decide which views to persist, which to compute on demand, and whether to use compact tables or lazy section loading (storage v2 Phase 2). | S to measure; follow-up TBD | — (can run in parallel) |
+| **5 — Measure, then decide materialization** (**landed**: measured in "Phase 5 measurements"; its Recommendations 2–4 landed as 5a–5d below) | Profile a real large-product (oneDAL-class) dump with `ABICHECK_MEMORY_TRACE` and `scripts/bench_release_memory.py`: snapshot vs. graph vs. index cost. Decide which views to persist, which to compute on demand, and whether to use compact tables or lazy section loading (storage v2 Phase 2). | S to measure; follow-up TBD | — (can run in parallel) |
+| **5a — Lazy graph-section loading** (**landed**) | storage-format-v2 Phase 2 A2.1 for the `graph` section: decoded on first read of `surface_graph` / `build_source.source_graph` (`model/lazy_graph.py`). A default compare still reads the graph; the L5 diff was deliberately not gated (ADR-062 D8 note). | S | 5 |
+| **5b — Compact graph tables** (**landed**, schema v49) | `storage/graph_table_codec.py`: interned, columnar node/edge tables; pre-v49 graphs still load. ADR-063 D5 amended. | M | 5 |
+| **5c — Persist observed, derive the rest** (**landed**) | No loader-rederived field and no public-surface-builder projection (`RECOMPUTABLE_FACT_PRODUCERS`) is stored; projections are rebuilt on demand. | S | 5b |
+| **5d — Re-measure, incl. the multi-library release** (**landed**) | `scripts/bench_graph_materialization.py` per item and on `libonedal.so` + `libonedal_dpc.so` (release mode). Results in "Phase 5 follow-up measurements". | S | 5a–5c |
 
 Phases 0 and 5 are independent and small, so they can start now. Phase 5's
 numbers should inform Phases 1–2 before those choose what to materialize.
@@ -228,3 +232,100 @@ declaration the header graph already holds as a `source_decl` (gap 1).
 4. **Re-measure before any unconditional change** with the same script on
    the multi-library oneDAL release (`libonedal.so`, `libonedal_dpc.so`),
    where member count multiplies these figures.
+
+## Phase 5 follow-up measurements (5a–5d)
+
+Measured 2026-09-24 with `scripts/bench_graph_materialization.py` on the
+same operands and invocation as "Phase 5 measurements" (PyPI
+`daal`/`daal-include` 2025.10.0 vs 2025.11.0, `daal.h` through
+`daal_all.hpp`, `-I include -I include/dal`), on a host of the same shape
+(4 vCPU, 15 GiB, Python 3.13, castxml 0.7.0). One run per cell; every cell
+was re-measured for the base commit on this host, so compare rows with each
+other rather than with the earlier section's means. The script now imports
+the checkout it lives in, so "base" is the script run from a worktree of the
+pre-change commit.
+
+### Single library (`libonedal_core.so.3`)
+
+| Build | Variant | Dump s (old / new) | Dump parent RSS | Dump tree PSS | Compare s | Compare parent RSS | Compare tree PSS |
+|---|---|---|---|---|---|---|---|
+| base | `graph` | 161.1 / 162.6 | 1,481 MiB | 1,474 / 1,477 MiB | 301.2 | 1,757 MiB | 1,753 MiB |
+| 5a | `graph` | 154.6 / 156.3 | 1,446 / 1,478 MiB | 1,441 / 1,473 MiB | 283.3 | 1,753 MiB | 1,748 MiB |
+| 5b | `graph` | 125.9 / 123.6 | 961 / 958 MiB | 956 / 954 MiB | 176.8 | 1,002 MiB | 997 MiB |
+| 5c | `graph` | 126.6 / 126.5 | 938 MiB | 934 / 933 MiB | 178.4 | 971 MiB | 966 MiB |
+| base | `graph+facts` | 210.4 / 210.5 | 2,215 / 2,213 MiB | 2,210 / 2,208 MiB | 450.8 | 2,707 MiB | 2,702 MiB |
+| 5c | `graph+facts` | 136.5 / 143.0 | 1,001 / 1,005 MiB | 997 / 1,001 MiB | 181.5 | 981 MiB | 976 MiB |
+
+| Build | Variant | Snapshot raw | Snapshot zstd-3 | Graph section (compact / zstd-3) | Nodes / edges stored |
+|---|---|---|---|---|---|
+| base | `graph` | 250.6 MB | 4.59 MB¹ | 79.1 MB / 2.81 MB¹ | 49,872 / 102,388 |
+| 5b | `graph` | 134.2 MB | 2.54 MB | 11.2 MB / 1.00 MB | 49,872 / 102,388 |
+| 5c | `graph` | 125.9 MB | 2.46 MB | 9.8 MB / 0.95 MB | 49,872 / 102,388 |
+| base | `graph+facts` | 356.2 MB | 6.97 MB | 138.3 MB / 4.81 MB | 111,232 / 180,151 |
+| 5c | `graph+facts` | 125.9 MB | 2.46 MB | 9.8 MB / 0.95 MB | 49,872 / 102,388 |
+
+¹ From the earlier "Phase 5 measurements" run (same operands); this host's
+base snapshots were lost before their zstd size was read.
+
+- **5a alone** saves ~4% of dump time (the shared graph is no longer
+  encoded twice on save) and ~6% of compare time, with no RSS change. As
+  the reader inventory predicted, a default compare still reads both graphs
+  (L5 `diff_source_graph_findings`, the `private_header_leak` and
+  `public_to_internal_dependency` cross-source checks, assurance
+  `_graph_completeness`, the content digest), so it saves no decode on that
+  path; a `--depth binary`/`debug` compare decodes nothing
+  (`tests/test_lazy_graph_loading.py` observes this with a decoder spy).
+- **5b** is the step change: the graph section shrinks 8× (79 → 11 MB) and
+  the graph decode itself from 7.6 s to 4.7 s (interned tables plus a
+  load-scoped identity-normalization memo). Dump time −22%, dump RSS −35%,
+  compare time −41%, compare RSS −43% against base.
+- **5c** removes the rest of the derived data (9.8 MB section). Its main
+  effect is on `graph+facts`: the builder's projections are no longer
+  persisted, so a graph with them saves to the same bytes as one without,
+  and `graph+facts` compare falls from 451 s / 2.7 GiB to 182 s / 981 MiB.
+- **Verdict and findings unchanged.** The base and 5c compare reports are
+  identical after removing wall-clock fields and work-directory paths
+  (2,675 findings, verdict `COMPATIBLE`), for `graph` and `graph+facts`.
+
+### Multi-library release (`libonedal.so.3` + `libonedal_dpc.so.3`)
+
+Header `oneapi/dal.hpp` through a one-line `dal_all.hpp` wrapper,
+`-I include`, for both members (no SYCL macro, so the DPC library is
+compared against the host API). Release mode dumps each member, compares
+the stored directories, then runs the live directory compare.
+
+| Build | Step | Seconds | Parent RSS | Tree PSS |
+|---|---|---|---|---|
+| base | `dump` per member (4) | 153.5–159.5 | 1,483–1,486 MiB | 1,479–1,481 MiB |
+| 5c | `dump` per member (4) | 114.1–117.8 | 835–837 MiB | 831–833 MiB |
+| base | stored/stored directory `compare` | 426.5 | 3,090 MiB | 3,085 MiB |
+| 5c | stored/stored directory `compare` | 126.1 | 1,049 MiB | 1,044 MiB |
+| base | live directory `compare` | 370.4 / 410.2² | 1,797 / 1,792 MiB | 1,792 / 1,787 MiB |
+| 5c | live directory `compare` | 374.7 / 351.3² | 1,815 / 1,470 MiB | 1,811 / 1,465 MiB |
+
+² Two runs each (the first release run of each build had no stored step).
+
+- The stored release compare is where the member count multiplies the old
+  cost: 3.4× faster and 2.9× less memory. Its report is identical to the
+  base build's (both members `COMPATIBLE_WITH_RISK`, 1,993 and 2,928 risk
+  findings).
+- The **live** fan-out never serializes a graph, so 5a–5c cannot change it;
+  the spread above is run-to-run noise.
+- **Pre-existing defect found, not fixed here:** in three of the four live
+  runs, one member (a different one each time, in base and in this branch
+  alike) ended `ERROR` with CPython's `../Objects/tupleobject.c:911: bad
+  argument to internal function`, while the same members compare cleanly
+  when stored and compared serially. That points at a thread-safety bug in
+  the parallel release workers, independent of the graph work.
+
+### Outcome against the recommendations
+
+1. `build_public_surface_facts` stays opt-in and is never persisted (5c);
+   I6 holds.
+2. Lazy loading (5a) and compact tables (5b) landed for the `graph`
+   section. With 5c, a `graph` dump on this host went from 162 s to 127 s
+   and 1,481 to 938 MiB, and the graph section is 9.8 MB compact instead
+   of 79 MB.
+3. Observed evidence is persisted; derived fields and projections are
+   recomputed (5c).
+4. Re-measured on the multi-library release (5d, above).

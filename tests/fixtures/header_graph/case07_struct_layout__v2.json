@@ -1,0 +1,2199 @@
+{
+  "schema_version": 48,
+  "sections": {
+    "binary": {
+      "payload": {
+        "build_id": null,
+        "build_mode": null,
+        "elf": {
+          "abi_flags": [],
+          "bind_now": false,
+          "dynamic_flags": [],
+          "dynamic_flags_fact": {
+            "diagnostics": [],
+            "status": "present",
+            "value": []
+          },
+          "e_flags": 0,
+          "ei_data": "LSB",
+          "elf_class": 64,
+          "gnu_properties": [
+            "IBT",
+            "SHSTK"
+          ],
+          "has_dt_relr": false,
+          "has_executable_stack": false,
+          "has_fini": true,
+          "has_fini_fact": {
+            "diagnostics": [],
+            "status": "present",
+            "value": true
+          },
+          "has_fortify_source": false,
+          "has_init": true,
+          "has_init_fact": {
+            "diagnostics": [],
+            "status": "present",
+            "value": true
+          },
+          "has_stack_canary": false,
+          "has_static_tls": false,
+          "has_textrel": false,
+          "has_tls_symbols": false,
+          "has_writable_executable_segment": false,
+          "hash_styles": [
+            "gnu"
+          ],
+          "imports": [
+            {
+              "binding": "weak",
+              "is_default": true,
+              "name": "__cxa_finalize",
+              "sym_type": "notype",
+              "version": "",
+              "version_soname": ""
+            },
+            {
+              "binding": "weak",
+              "is_default": true,
+              "name": "_ITM_registerTMCloneTable",
+              "sym_type": "notype",
+              "version": "",
+              "version_soname": ""
+            },
+            {
+              "binding": "weak",
+              "is_default": true,
+              "name": "_ITM_deregisterTMCloneTable",
+              "sym_type": "notype",
+              "version": "",
+              "version_soname": ""
+            },
+            {
+              "binding": "weak",
+              "is_default": true,
+              "name": "__gmon_start__",
+              "sym_type": "notype",
+              "version": "",
+              "version_soname": ""
+            }
+          ],
+          "interpreter": "",
+          "is_pie": false,
+          "is_symbolic": false,
+          "machine": "EM_X86_64",
+          "min_kernel_version": "",
+          "needed": [],
+          "osabi": "ELFOSABI_SYSV",
+          "pointer_size": 8,
+          "relro": "partial",
+          "rpath": "",
+          "runpath": "",
+          "soname": "",
+          "symbols": [
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "get_x",
+              "origin_lib": null,
+              "size": 20,
+              "sym_type": "func",
+              "value_alignment": 1,
+              "version": "",
+              "visibility": "default"
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "init_point",
+              "origin_lib": null,
+              "size": 47,
+              "sym_type": "func",
+              "value_alignment": 1,
+              "version": "",
+              "visibility": "default"
+            }
+          ],
+          "versions_defined": [],
+          "versions_required": {}
+        },
+        "elf_only_mode": false,
+        "kabi": null,
+        "macho": null,
+        "pe": null,
+        "platform": "elf",
+        "source_mtime": 1790225153.3160768,
+        "source_mtime_epoch": false,
+        "source_path": "/tmp/claude-0/hgfix/case07_struct_layout/v2/libcase07_struct_layout.so",
+        "source_size": 16312
+      },
+      "section_kind": "binary",
+      "section_schema_version": 1
+    },
+    "build": {
+      "payload": {
+        "build_source": {
+          "manifest": {
+            "abicheck_version": "",
+            "artifacts": [],
+            "build_source_pack_version": 1,
+            "coverage": [
+              {
+                "compile_units": null,
+                "confidence": "unknown",
+                "detail": "",
+                "elapsed_s": 0,
+                "layer": "L3_build",
+                "link_units": null,
+                "requested_roots": [],
+                "resolved_roots": [],
+                "status": "not_collected",
+                "transitive_targets": null
+              },
+              {
+                "compile_units": null,
+                "confidence": "unknown",
+                "detail": "",
+                "elapsed_s": 0,
+                "layer": "L4_source_abi",
+                "link_units": null,
+                "requested_roots": [],
+                "resolved_roots": [],
+                "status": "not_collected",
+                "transitive_targets": null
+              },
+              {
+                "compile_units": null,
+                "confidence": "reduced",
+                "detail": "",
+                "elapsed_s": 0,
+                "layer": "L5_source_graph",
+                "link_units": null,
+                "requested_roots": [],
+                "resolved_roots": [],
+                "status": "present",
+                "transitive_targets": null
+              }
+            ],
+            "created_at": "",
+            "extractors": [],
+            "inputs": {},
+            "redaction": {},
+            "source_root": {
+              "path_redacted": true,
+              "repo_hash": ""
+            }
+          }
+        },
+        "build_source_pack": null
+      },
+      "section_kind": "build",
+      "section_schema_version": 1
+    },
+    "debug": {
+      "payload": {
+        "ast_compile_args": [],
+        "ast_cplusplus_macro": null,
+        "ast_fallback_reason": null,
+        "ast_producer": "castxml",
+        "ast_resolved_standard": "gnu11",
+        "ast_resolved_standard_fact": {
+          "diagnostics": [],
+          "status": "present",
+          "value": "gnu11"
+        },
+        "ast_sysroot": null,
+        "ast_toolchain": {
+          "abi_dialect": "gnu",
+          "castxml_bundled_clang_version": "20.1",
+          "castxml_version": "0.7.0",
+          "compiler_mtime_ns": "1766091591000000000",
+          "compiler_realpath": "/usr/bin/x86_64-linux-gnu-gcc-13",
+          "compiler_selected": "/usr/bin/gcc",
+          "compiler_sha256": "1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26",
+          "compiler_size": "1023032",
+          "compiler_target_triple": "x86_64-linux-gnu",
+          "compiler_version": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+          "language_standard_explicit": "0",
+          "mtime_ns": "1772089430000000000",
+          "producer": "castxml",
+          "realpath": "/root/.cache/abicheck-castxml-conda/castxml=0.7.0=hde8d07d_0-pinset1/bin/castxml",
+          "resolved_lang_mode": "c",
+          "selected": "/root/.cache/abicheck-castxml-conda/castxml=0.7.0=hde8d07d_0-pinset1/bin/castxml",
+          "sha256": "6d233e87fea856e8f76cdb69d687a73025771f35cd9f83a3f978d607c5153a0d",
+          "size": "271544",
+          "target_triple": "x86_64-conda-linux-gnu",
+          "version": "castxml version 0.7.0\nCastXML project maintained and supported by Kitware (kitware.com).\nclang version 20.1.8 (https://github.com/conda-forge/clangdev-feedstock 4bb8e6c8a8e30a94c55be92d093c63f0d8fa92ae)\nTarget: x86_64-conda-linux-gnu\nThread model: posix\nInstalledDir:"
+        },
+        "ast_toolchain_supported": true,
+        "ast_toolchain_unsupported_reasons": [],
+        "build_context_defines": [],
+        "castxml_var_access_facts_reliable": true,
+        "clang_deprecation_facts_reliable": true,
+        "clang_field_initializer_facts_reliable": true,
+        "clang_restrict_facts_reliable": true,
+        "clang_va_list_facts_reliable": true,
+        "clang_vtable_facts_reliable": true,
+        "dwarf": {
+          "base_types": {
+            "int": 4
+          },
+          "enums": {},
+          "has_dwarf": true,
+          "structs": {
+            "Point": {
+              "alignment": 0,
+              "byte_size": 12,
+              "decl_file": null,
+              "fields": [
+                {
+                  "bit_offset": 0,
+                  "bit_size": 0,
+                  "byte_offset": 0,
+                  "byte_size": 4,
+                  "name": "x",
+                  "type_name": "int"
+                },
+                {
+                  "bit_offset": 0,
+                  "bit_size": 0,
+                  "byte_offset": 4,
+                  "byte_size": 4,
+                  "name": "y",
+                  "type_name": "int"
+                },
+                {
+                  "bit_offset": 0,
+                  "bit_size": 0,
+                  "byte_offset": 8,
+                  "byte_size": 4,
+                  "name": "z",
+                  "type_name": "int"
+                }
+              ],
+              "is_union": false,
+              "name": "Point"
+            }
+          }
+        },
+        "dwarf_advanced": {
+          "all_struct_names": [
+            "Point"
+          ],
+          "callee_saved_regs": {},
+          "calling_conventions": {
+            "get_x": "normal",
+            "init_point": "normal"
+          },
+          "frame_registers": {},
+          "has_dwarf": true,
+          "packed_structs": [],
+          "return_memory_classified": [],
+          "return_value_sizes": {},
+          "target_arch": "x64",
+          "toolchain": {
+            "abi_flags": [],
+            "compiler": "GCC",
+            "producer_string": "GNU C17 13.3.0 -mtune=generic -march=x86-64 -g -O0 -fPIC -fasynchronous-unwind-tables -fstack-protector-strong -fstack-clash-protection -fcf-protection",
+            "vector_abi_flags": [],
+            "version": "13.3.0",
+            "wchar_flags": []
+          },
+          "value_abi_traits": {}
+        },
+        "fact_provenance": {},
+        "from_headers": true,
+        "frontend_context_kind": null,
+        "header_cv_facts_reliable": true,
+        "param_kind_facts_reliable": true,
+        "parsed_with_build_context": false
+      },
+      "section_kind": "debug",
+      "section_schema_version": 1
+    },
+    "declarations": {
+      "payload": {
+        "constant_entity_ids": {},
+        "constants": {},
+        "enums": [],
+        "functions": [
+          {
+            "access": "public",
+            "binary_exported_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "contract_attributes": [],
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "declared_in_headers_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "elf_binding": "global",
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "global"
+            },
+            "elf_visibility": "default",
+            "entity_id": {
+              "extra": [
+                "extern_c"
+              ],
+              "kind": "function",
+              "leaf_name": "get_x",
+              "schema_version": 2,
+              "scope": []
+            },
+            "exception_spec": "",
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": ""
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "in_public_contract_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "is_compiler_generated": false,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_extern_c": true,
+            "is_hidden_friend": false,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_inline": false,
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": false,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "get_x",
+            "name": "get_x",
+            "origin": "public_header",
+            "params": [
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "unsupported",
+                  "value": null
+                },
+                "kind": "pointer",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "pointer"
+                },
+                "name": "p",
+                "pointer_depth": 1,
+                "type": "Point*"
+              }
+            ],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "int",
+            "source_header": "/tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h",
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "/tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h"
+            },
+            "source_location": "/tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h:2",
+            "visibility": "public",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": false
+            },
+            "contract_attributes": [],
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "declared_in_headers_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "entity_id": {
+              "extra": [
+                "extern_c"
+              ],
+              "kind": "function",
+              "leaf_name": "get_y",
+              "schema_version": 2,
+              "scope": []
+            },
+            "exception_spec": "",
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": ""
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "in_public_contract_fact": {
+              "diagnostics": [
+                "declared in a supplied public header"
+              ],
+              "status": "present",
+              "value": true
+            },
+            "is_compiler_generated": false,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_extern_c": true,
+            "is_hidden_friend": false,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_inline": false,
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": false,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "get_y",
+            "name": "get_y",
+            "origin": "public_header",
+            "params": [
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "unsupported",
+                  "value": null
+                },
+                "kind": "pointer",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "pointer"
+                },
+                "name": "p",
+                "pointer_depth": 1,
+                "type": "Point*"
+              }
+            ],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "int",
+            "source_header": "/tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h",
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "/tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h"
+            },
+            "source_location": "/tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h:3",
+            "visibility": "hidden",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": false
+            },
+            "contract_attributes": [],
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "declared_in_headers_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "entity_id": {
+              "extra": [
+                "extern_c"
+              ],
+              "kind": "function",
+              "leaf_name": "get_z",
+              "schema_version": 2,
+              "scope": []
+            },
+            "exception_spec": "",
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": ""
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "in_public_contract_fact": {
+              "diagnostics": [
+                "declared in a supplied public header"
+              ],
+              "status": "present",
+              "value": true
+            },
+            "is_compiler_generated": false,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_extern_c": true,
+            "is_hidden_friend": false,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_inline": false,
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": false,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "get_z",
+            "name": "get_z",
+            "origin": "public_header",
+            "params": [
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "unsupported",
+                  "value": null
+                },
+                "kind": "pointer",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "pointer"
+                },
+                "name": "p",
+                "pointer_depth": 1,
+                "type": "Point*"
+              }
+            ],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "int",
+            "source_header": "/tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h",
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "/tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h"
+            },
+            "source_location": "/tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h:4",
+            "visibility": "hidden",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "contract_attributes": [],
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "declared_in_headers_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "elf_binding": "global",
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "global"
+            },
+            "elf_visibility": "default",
+            "entity_id": {
+              "extra": [
+                "extern_c"
+              ],
+              "kind": "function",
+              "leaf_name": "init_point",
+              "schema_version": 2,
+              "scope": []
+            },
+            "exception_spec": "",
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": ""
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "in_public_contract_fact": {
+              "diagnostics": [],
+              "producer": "castxml",
+              "status": "present",
+              "value": true
+            },
+            "is_compiler_generated": false,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_extern_c": true,
+            "is_hidden_friend": false,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_inline": false,
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_applicable",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": false,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "init_point",
+            "name": "init_point",
+            "origin": "public_header",
+            "params": [
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "unsupported",
+                  "value": null
+                },
+                "kind": "pointer",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "pointer"
+                },
+                "name": "p",
+                "pointer_depth": 1,
+                "type": "Point*"
+              }
+            ],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "void",
+            "source_header": "/tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h",
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "/tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h"
+            },
+            "source_location": "/tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h:5",
+            "visibility": "public",
+            "vtable_index": null
+          }
+        ],
+        "numpy_capi": {
+          "capi_target_version": null,
+          "consumes_array_api": false,
+          "consumes_ufunc_api": false
+        },
+        "python_api": null,
+        "python_ext": null,
+        "sycl": null,
+        "typedef_entity_ids": {
+          "Point": {
+            "extra": [],
+            "kind": "typedef",
+            "leaf_name": "Point",
+            "schema_version": 2,
+            "scope": []
+          }
+        },
+        "typedefs": {
+          "Point": "Point"
+        },
+        "typedefs_qualified": {
+          "Point": "Point"
+        },
+        "variables": []
+      },
+      "section_kind": "declarations",
+      "section_schema_version": 1
+    },
+    "graph": {
+      "payload": {
+        "surface_graph": {
+          "coverage": {
+            "binary_symbol_mappings": 0,
+            "call_edges": {
+              "collected": false,
+              "count": 0
+            },
+            "compile_units": 0,
+            "edge_kinds": {
+              "DECL_HAS_TYPE": 4,
+              "SOURCE_DECLARES": 5,
+              "TYPE_HAS_FIELD_TYPE": 5
+            },
+            "include_edges": {
+              "collected": true,
+              "count": 0
+            },
+            "node_kinds": {
+              "header": 1,
+              "record_type": 9,
+              "source_decl": 8
+            },
+            "reference_edges": {
+              "collected": false,
+              "count": 0
+            },
+            "source_decls": 8,
+            "targets": 0,
+            "type_edges": {
+              "collected": true,
+              "count": 9
+            }
+          },
+          "degraded_passes": {},
+          "edges": [
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "decl://get_x",
+              "edge": "SOURCE_DECLARES",
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "header_ast_l2",
+              "resolved": {},
+              "src": "header:///tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h"
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "decl://get_y",
+              "edge": "SOURCE_DECLARES",
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "header_ast_l2",
+              "resolved": {},
+              "src": "header:///tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h"
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "decl://get_z",
+              "edge": "SOURCE_DECLARES",
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "header_ast_l2",
+              "resolved": {},
+              "src": "header:///tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h"
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "decl://init_point",
+              "edge": "SOURCE_DECLARES",
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "header_ast_l2",
+              "resolved": {},
+              "src": "header:///tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h"
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "type://Point",
+              "edge": "SOURCE_DECLARES",
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "header_ast_l2",
+              "resolved": {},
+              "src": "header:///tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h"
+            },
+            {
+              "attrs": {
+                "resolution": "unresolved",
+                "role": "alias"
+              },
+              "confidence": "reduced",
+              "conflicts": [],
+              "dst": "type://__int128",
+              "edge": "TYPE_HAS_FIELD_TYPE",
+              "facts": [
+                {
+                  "attrs": {
+                    "resolution": "unresolved",
+                    "role": "alias"
+                  },
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "type_graph",
+              "resolved": {
+                "resolution": "unresolved",
+                "role": "alias"
+              },
+              "src": "type://__int128_t"
+            },
+            {
+              "attrs": {
+                "resolution": "unresolved",
+                "role": "alias"
+              },
+              "confidence": "reduced",
+              "conflicts": [],
+              "dst": "type://unsigned __int128",
+              "edge": "TYPE_HAS_FIELD_TYPE",
+              "facts": [
+                {
+                  "attrs": {
+                    "resolution": "unresolved",
+                    "role": "alias"
+                  },
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "type_graph",
+              "resolved": {
+                "resolution": "unresolved",
+                "role": "alias"
+              },
+              "src": "type://__uint128_t"
+            },
+            {
+              "attrs": {
+                "resolution": "unresolved",
+                "role": "alias"
+              },
+              "confidence": "reduced",
+              "conflicts": [],
+              "dst": "type://__NSConstantString_tag",
+              "edge": "TYPE_HAS_FIELD_TYPE",
+              "facts": [
+                {
+                  "attrs": {
+                    "resolution": "unresolved",
+                    "role": "alias"
+                  },
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "type_graph",
+              "resolved": {
+                "resolution": "unresolved",
+                "role": "alias"
+              },
+              "src": "type://__NSConstantString"
+            },
+            {
+              "attrs": {
+                "resolution": "unresolved",
+                "role": "alias"
+              },
+              "confidence": "reduced",
+              "conflicts": [],
+              "dst": "type://__va_list_tag",
+              "edge": "TYPE_HAS_FIELD_TYPE",
+              "facts": [
+                {
+                  "attrs": {
+                    "resolution": "unresolved",
+                    "role": "alias"
+                  },
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "type_graph",
+              "resolved": {
+                "resolution": "unresolved",
+                "role": "alias"
+              },
+              "src": "type://__builtin_va_list"
+            },
+            {
+              "attrs": {
+                "resolution": "scope",
+                "role": "alias"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "type://Point",
+              "edge": "TYPE_HAS_FIELD_TYPE",
+              "facts": [
+                {
+                  "attrs": {
+                    "resolution": "scope",
+                    "role": "alias"
+                  },
+                  "confidence": "high",
+                  "producer": "type_graph"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "type_graph",
+              "resolved": {
+                "resolution": "scope",
+                "role": "alias"
+              },
+              "src": "type://Point"
+            },
+            {
+              "attrs": {
+                "resolution": "scope",
+                "role": "param"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "type://Point",
+              "edge": "DECL_HAS_TYPE",
+              "facts": [
+                {
+                  "attrs": {
+                    "resolution": "scope",
+                    "role": "param"
+                  },
+                  "confidence": "high",
+                  "producer": "type_graph"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "type_graph",
+              "resolved": {
+                "resolution": "scope",
+                "role": "param"
+              },
+              "src": "decl://get_x#sha256:8215ef3f84f4647192814f558fff2fd7517a890b6a6e214ebf50fa395b49000b"
+            },
+            {
+              "attrs": {
+                "resolution": "scope",
+                "role": "param"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "type://Point",
+              "edge": "DECL_HAS_TYPE",
+              "facts": [
+                {
+                  "attrs": {
+                    "resolution": "scope",
+                    "role": "param"
+                  },
+                  "confidence": "high",
+                  "producer": "type_graph"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "type_graph",
+              "resolved": {
+                "resolution": "scope",
+                "role": "param"
+              },
+              "src": "decl://get_y#sha256:8215ef3f84f4647192814f558fff2fd7517a890b6a6e214ebf50fa395b49000b"
+            },
+            {
+              "attrs": {
+                "resolution": "scope",
+                "role": "param"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "type://Point",
+              "edge": "DECL_HAS_TYPE",
+              "facts": [
+                {
+                  "attrs": {
+                    "resolution": "scope",
+                    "role": "param"
+                  },
+                  "confidence": "high",
+                  "producer": "type_graph"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "type_graph",
+              "resolved": {
+                "resolution": "scope",
+                "role": "param"
+              },
+              "src": "decl://get_z#sha256:8215ef3f84f4647192814f558fff2fd7517a890b6a6e214ebf50fa395b49000b"
+            },
+            {
+              "attrs": {
+                "resolution": "scope",
+                "role": "param"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "dst": "type://Point",
+              "edge": "DECL_HAS_TYPE",
+              "facts": [
+                {
+                  "attrs": {
+                    "resolution": "scope",
+                    "role": "param"
+                  },
+                  "confidence": "high",
+                  "producer": "type_graph"
+                }
+              ],
+              "occurrences": [],
+              "provenance": "type_graph",
+              "resolved": {
+                "resolution": "scope",
+                "role": "param"
+              },
+              "src": "decl://init_point#sha256:0f739827da64ba65946b22be922f5f38ed1be2430de4d3738a00aca16672385c"
+            }
+          ],
+          "external_graph_refs": [],
+          "extractor_passes": {
+            "header_call_graph": true,
+            "header_include_graph": true,
+            "header_type_graph": true,
+            "header_type_graph:DECL_HAS_TYPE:default_template_arg": true,
+            "header_type_graph:DECL_HAS_TYPE:param": true,
+            "header_type_graph:DECL_HAS_TYPE:return": true,
+            "header_type_graph:DECL_HAS_TYPE:template_param": true,
+            "header_type_graph:DECL_HAS_TYPE:var": true,
+            "header_type_graph:DECL_REFERENCES_DECL:ref": true,
+            "header_type_graph:TYPE_HAS_FIELD_TYPE:alias": true,
+            "header_type_graph:TYPE_HAS_FIELD_TYPE:default_template_arg": true,
+            "header_type_graph:TYPE_HAS_FIELD_TYPE:enum_underlying": true,
+            "header_type_graph:TYPE_HAS_FIELD_TYPE:field": true,
+            "header_type_graph:TYPE_HAS_FIELD_TYPE:template_param": true,
+            "header_type_graph:TYPE_INHERITS:base": true
+          },
+          "graph_id": "sha256:49b371803abb560c0cea11af70713b5861df59fbb2f202c5c740024e34cd0984",
+          "indexes": {
+            "by_binary_symbol": {},
+            "by_file": {},
+            "by_source_decl": {
+              "decl://get_x": [
+                "header:///tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h"
+              ],
+              "decl://get_x#sha256:8215ef3f84f4647192814f558fff2fd7517a890b6a6e214ebf50fa395b49000b": [
+                "type://Point"
+              ],
+              "decl://get_y": [
+                "header:///tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h"
+              ],
+              "decl://get_y#sha256:8215ef3f84f4647192814f558fff2fd7517a890b6a6e214ebf50fa395b49000b": [
+                "type://Point"
+              ],
+              "decl://get_z": [
+                "header:///tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h"
+              ],
+              "decl://get_z#sha256:8215ef3f84f4647192814f558fff2fd7517a890b6a6e214ebf50fa395b49000b": [
+                "type://Point"
+              ],
+              "decl://init_point": [
+                "header:///tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h"
+              ],
+              "decl://init_point#sha256:0f739827da64ba65946b22be922f5f38ed1be2430de4d3738a00aca16672385c": [
+                "type://Point"
+              ]
+            },
+            "by_target": {}
+          },
+          "narrowed_passes": {},
+          "narrowed_scope": {},
+          "nodes": [
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "header:///tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h",
+              "kind": "header",
+              "label": "/tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "decl://get_x",
+              "kind": "source_decl",
+              "label": "get_x",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "decl://get_y",
+              "kind": "source_decl",
+              "label": "get_y",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "decl://get_z",
+              "kind": "source_decl",
+              "label": "get_z",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "decl://init_point",
+              "kind": "source_decl",
+              "label": "init_point",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {
+                "visibility": "public_header"
+              },
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {
+                    "visibility": "public_header"
+                  },
+                  "confidence": "high",
+                  "producer": "header_ast_l2"
+                }
+              ],
+              "id": "type://Point",
+              "kind": "record_type",
+              "label": "Point",
+              "provenance": "header_ast_l2",
+              "resolved": {
+                "visibility": "public_header"
+              }
+            },
+            {
+              "attrs": {},
+              "confidence": "reduced",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "type://__int128_t",
+              "kind": "record_type",
+              "label": "__int128_t",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "reduced",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "type://__int128",
+              "kind": "record_type",
+              "label": "__int128",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "reduced",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "type://__uint128_t",
+              "kind": "record_type",
+              "label": "__uint128_t",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "reduced",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "type://unsigned __int128",
+              "kind": "record_type",
+              "label": "unsigned __int128",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "reduced",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "type://__NSConstantString",
+              "kind": "record_type",
+              "label": "__NSConstantString",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "reduced",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "type://__NSConstantString_tag",
+              "kind": "record_type",
+              "label": "__NSConstantString_tag",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "reduced",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "type://__builtin_va_list",
+              "kind": "record_type",
+              "label": "__builtin_va_list",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "reduced",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "reduced",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "type://__va_list_tag",
+              "kind": "record_type",
+              "label": "__va_list_tag",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "decl://get_x#sha256:8215ef3f84f4647192814f558fff2fd7517a890b6a6e214ebf50fa395b49000b",
+              "kind": "source_decl",
+              "label": "get_x#sha256:8215ef3f84f4647192814f558fff2fd7517a890b6a6e214ebf50fa395b49000b",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "decl://get_y#sha256:8215ef3f84f4647192814f558fff2fd7517a890b6a6e214ebf50fa395b49000b",
+              "kind": "source_decl",
+              "label": "get_y#sha256:8215ef3f84f4647192814f558fff2fd7517a890b6a6e214ebf50fa395b49000b",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "decl://get_z#sha256:8215ef3f84f4647192814f558fff2fd7517a890b6a6e214ebf50fa395b49000b",
+              "kind": "source_decl",
+              "label": "get_z#sha256:8215ef3f84f4647192814f558fff2fd7517a890b6a6e214ebf50fa395b49000b",
+              "provenance": "type_graph",
+              "resolved": {}
+            },
+            {
+              "attrs": {},
+              "confidence": "high",
+              "conflicts": [],
+              "facts": [
+                {
+                  "attrs": {},
+                  "confidence": "high",
+                  "producer": "type_graph"
+                }
+              ],
+              "id": "decl://init_point#sha256:0f739827da64ba65946b22be922f5f38ed1be2430de4d3738a00aca16672385c",
+              "kind": "source_decl",
+              "label": "init_point#sha256:0f739827da64ba65946b22be922f5f38ed1be2430de4d3738a00aca16672385c",
+              "provenance": "type_graph",
+              "resolved": {}
+            }
+          ],
+          "schema_version": 2
+        }
+      },
+      "section_kind": "graph",
+      "section_schema_version": 1
+    },
+    "layout": {
+      "payload": {
+        "conditional_fields": {},
+        "contract": {
+          "compiler_identity_status": "present",
+          "profile_fields": {
+            "abi_dialect": "gnu",
+            "compiler_family": "gnu",
+            "compiler_version": "[\"castxml\", \"castxml version 0.7.0\\nCastXML project maintained and supported by Kitware (kitware.com).\\nclang version 20.1.8 (https://github.com/conda-forge/clangdev-feedstock 4bb8e6c8a8e30a94c55be92d093c63f0d8fa92ae)\\nTarget: x86_64-conda-linux-gnu\\nThread model: posix\\nInstalledDir:\", \"gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\\nCopyright (C) 2023 Free Software Foundation, Inc.\\nThis is free software; see the source for copying conditions.  There is NO\\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\"]",
+            "endianness": "",
+            "frontend_context_kind": "",
+            "header_sequence": "[\"<single-header>\"]",
+            "include_sequence": "[\"0:hdrs:<single-header>\"]",
+            "language_standard": "gnu11",
+            "macro_ops": "[]",
+            "pass_through_flags": "[]",
+            "pointer_width": "",
+            "target_triple": ""
+          },
+          "profile_fingerprint": "sha256:7f6af272800c68ef32dc211dc76c2ee944c4ed9bbcd34a63199304cd0e8c06af",
+          "scope_fields": {
+            "headers": "[\"<single-header>\"]",
+            "public_header_dirs": "[]",
+            "translation_units": "[]"
+          },
+          "scope_fingerprint": "sha256:0758e2c146f837acd76eb608384b65c91d5b9ae0701d4297fb099008342e6798"
+        },
+        "dependency_scope": "filtered",
+        "dwarf_layout_coherence": null,
+        "dwarf_layout_coherence_mismatches": [],
+        "excluded_header_matching": "glob",
+        "excluded_header_patterns": [],
+        "header_only": false,
+        "scope_fallback": null
+      },
+      "section_kind": "layout",
+      "section_schema_version": 1
+    },
+    "provenance": {
+      "payload": {
+        "created_at": "2026-09-24T04:45:54.339906+00:00",
+        "dependency_info": null,
+        "dump_provenance": {
+          "ast_fallback_reason": null,
+          "ast_toolchain": {
+            "abi_dialect": "gnu",
+            "castxml_bundled_clang_version": "20.1",
+            "castxml_version": "0.7.0",
+            "compiler_mtime_ns": "1766091591000000000",
+            "compiler_realpath": "/usr/bin/x86_64-linux-gnu-gcc-13",
+            "compiler_selected": "/usr/bin/gcc",
+            "compiler_sha256": "1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26",
+            "compiler_size": "1023032",
+            "compiler_target_triple": "x86_64-linux-gnu",
+            "compiler_version": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+            "language_standard_explicit": "0",
+            "mtime_ns": "1772089430000000000",
+            "producer": "castxml",
+            "realpath": "/root/.cache/abicheck-castxml-conda/castxml=0.7.0=hde8d07d_0-pinset1/bin/castxml",
+            "resolved_lang_mode": "c",
+            "selected": "/root/.cache/abicheck-castxml-conda/castxml=0.7.0=hde8d07d_0-pinset1/bin/castxml",
+            "sha256": "6d233e87fea856e8f76cdb69d687a73025771f35cd9f83a3f978d607c5153a0d",
+            "size": "271544",
+            "target_triple": "x86_64-conda-linux-gnu",
+            "version": "castxml version 0.7.0\nCastXML project maintained and supported by Kitware (kitware.com).\nclang version 20.1.8 (https://github.com/conda-forge/clangdev-feedstock 4bb8e6c8a8e30a94c55be92d093c63f0d8fa92ae)\nTarget: x86_64-conda-linux-gnu\nThread model: posix\nInstalledDir:"
+          },
+          "degraded": false,
+          "effective_depth": "headers",
+          "frontend": "castxml",
+          "requested_depth": null,
+          "source_scope": null
+        },
+        "git_commit": "ebb9b09f65509d4de169131276c2a6a481be14a1",
+        "git_tag": null,
+        "language_profile": null,
+        "library": "libcase07_struct_layout.so",
+        "version": "unknown"
+      },
+      "section_kind": "provenance",
+      "section_schema_version": 1
+    },
+    "semantic_ir": {
+      "payload": {
+        "semantic_ir": {
+          "occurrences": [
+            {
+              "entity": {
+                "canonical_spelling": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "Point"
+                },
+                "cv_qualification": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "producer": "castxml",
+                "template_arguments": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": []
+                }
+              },
+              "occurrence": {
+                "disambiguator": "",
+                "entity_id": {
+                  "extra": [],
+                  "kind": "type",
+                  "leaf_name": "Point",
+                  "schema_version": 2,
+                  "scope": []
+                }
+              }
+            },
+            {
+              "entity": {
+                "canonical_spelling": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "Point"
+                },
+                "cv_qualification": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "producer": "castxml",
+                "template_arguments": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                }
+              },
+              "occurrence": {
+                "disambiguator": "",
+                "entity_id": {
+                  "extra": [],
+                  "kind": "typedef",
+                  "leaf_name": "Point",
+                  "schema_version": 2,
+                  "scope": []
+                }
+              }
+            },
+            {
+              "entity": {
+                "canonical_spelling": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "void(Point *)"
+                },
+                "cv_qualification": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": []
+                },
+                "producer": "castxml",
+                "template_arguments": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                }
+              },
+              "occurrence": {
+                "disambiguator": "",
+                "entity_id": {
+                  "extra": [
+                    "extern_c"
+                  ],
+                  "kind": "function",
+                  "leaf_name": "init_point",
+                  "schema_version": 2,
+                  "scope": []
+                }
+              }
+            },
+            {
+              "entity": {
+                "canonical_spelling": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "int(Point *)"
+                },
+                "cv_qualification": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": []
+                },
+                "producer": "castxml",
+                "template_arguments": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                }
+              },
+              "occurrence": {
+                "disambiguator": "",
+                "entity_id": {
+                  "extra": [
+                    "extern_c"
+                  ],
+                  "kind": "function",
+                  "leaf_name": "get_x",
+                  "schema_version": 2,
+                  "scope": []
+                }
+              }
+            },
+            {
+              "entity": {
+                "canonical_spelling": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "int(Point *)"
+                },
+                "cv_qualification": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": []
+                },
+                "producer": "castxml",
+                "template_arguments": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                }
+              },
+              "occurrence": {
+                "disambiguator": "",
+                "entity_id": {
+                  "extra": [
+                    "extern_c"
+                  ],
+                  "kind": "function",
+                  "leaf_name": "get_y",
+                  "schema_version": 2,
+                  "scope": []
+                }
+              }
+            },
+            {
+              "entity": {
+                "canonical_spelling": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": "int(Point *)"
+                },
+                "cv_qualification": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": []
+                },
+                "producer": "castxml",
+                "template_arguments": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                }
+              },
+              "occurrence": {
+                "disambiguator": "",
+                "entity_id": {
+                  "extra": [
+                    "extern_c"
+                  ],
+                  "kind": "function",
+                  "leaf_name": "get_z",
+                  "schema_version": 2,
+                  "scope": []
+                }
+              }
+            }
+          ]
+        }
+      },
+      "section_kind": "semantic_ir",
+      "section_schema_version": 1
+    },
+    "types": {
+      "payload": {
+        "types": [
+          {
+            "alignment_bits": 32,
+            "base_offsets": {},
+            "bases": [],
+            "bases_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "data_size_bits": null,
+            "data_size_bits_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "entity_id": {
+              "extra": [],
+              "kind": "type",
+              "leaf_name": "Point",
+              "schema_version": 2,
+              "scope": []
+            },
+            "fields": [
+              {
+                "access": "public",
+                "bitfield_bits": null,
+                "default": null,
+                "default_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": null
+                },
+                "deprecated": null,
+                "deprecated_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": null
+                },
+                "is_bitfield": false,
+                "is_const": false,
+                "is_const_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_mutable": false,
+                "is_mutable_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_volatile": false,
+                "is_volatile_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "name": "x",
+                "offset_bits": 0,
+                "type": "int"
+              },
+              {
+                "access": "public",
+                "bitfield_bits": null,
+                "default": null,
+                "default_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": null
+                },
+                "deprecated": null,
+                "deprecated_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": null
+                },
+                "is_bitfield": false,
+                "is_const": false,
+                "is_const_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_mutable": false,
+                "is_mutable_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_volatile": false,
+                "is_volatile_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "name": "y",
+                "offset_bits": 32,
+                "type": "int"
+              },
+              {
+                "access": "public",
+                "bitfield_bits": null,
+                "default": null,
+                "default_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": null
+                },
+                "deprecated": null,
+                "deprecated_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": null
+                },
+                "is_bitfield": false,
+                "is_const": false,
+                "is_const_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_mutable": false,
+                "is_mutable_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "is_volatile": false,
+                "is_volatile_fact": {
+                  "diagnostics": [],
+                  "status": "present",
+                  "value": false
+                },
+                "name": "z",
+                "offset_bits": 64,
+                "type": "int"
+              }
+            ],
+            "has_anonymous_aggregate_fields": false,
+            "is_abstract": false,
+            "is_abstract_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_final": false,
+            "is_final_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": false
+            },
+            "is_opaque": false,
+            "is_standard_layout": null,
+            "is_standard_layout_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_template_pattern": false,
+            "is_trivially_copyable": null,
+            "is_trivially_copyable_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_union": false,
+            "kind": "struct",
+            "name": "Point",
+            "origin": "public_header",
+            "qualified_name": null,
+            "qualified_name_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": null
+            },
+            "size_bits": 96,
+            "source_header": "/tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h",
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "/tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h"
+            },
+            "source_location": "/tmp/claude-0/hgfix/case07_struct_layout/v2/v2.h:1",
+            "virtual_bases": [],
+            "virtual_bases_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            },
+            "vptr_offset_bits": null,
+            "vptr_offset_bits_fact": {
+              "diagnostics": [],
+              "status": "partial",
+              "value": null
+            },
+            "vtable": [],
+            "vtable_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": []
+            }
+          }
+        ]
+      },
+      "section_kind": "types",
+      "section_schema_version": 1
+    }
+  },
+  "section_schema_versions": {
+    "binary": 1,
+    "build": 1,
+    "debug": 1,
+    "declarations": 1,
+    "graph": 1,
+    "layout": 1,
+    "provenance": 1,
+    "semantic_ir": 1,
+    "types": 1
+  }
+}

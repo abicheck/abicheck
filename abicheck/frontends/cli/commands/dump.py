@@ -649,6 +649,7 @@ def dump_cmd(
     from ....service_dump_pipeline import DumpExecutionOptions
     from ..dump_build_context_preview import (
         add_execution_options_dry_run_section,
+        add_ownership_dry_run_section,
         dry_run_build_context_preview,
     )
 
@@ -722,6 +723,7 @@ def dump_cmd(
         # ADR-063 Track T4: the execution-options preview attached onto
         # `_resolved` above, rendered as its own section.
         add_execution_options_dry_run_section(_dry_result, _resolved)
+        add_ownership_dry_run_section(_dry_result, config_path, headers)
         emit_dry_run(_dry_result)
 
     # Source-only dump (no binary), or a headers-only dump (workstream F S1,

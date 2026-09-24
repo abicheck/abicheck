@@ -29,4 +29,24 @@ class EdgeEvidenceClass(str, Enum):
     DERIVED = "derived"
 
 
-__all__ = ["EdgeEvidenceClass"]
+#: Producers whose graph facts are *projections of the snapshot's own
+#: records* (evidence-entity-model Recommendation 3 / Phase 5c): everything
+#: ``compare/surface_graph.py``'s ``build_public_surface_facts`` writes --
+#: its ``declaration``/``type``/``symbol`` nodes and its ``declares``/
+#: ``references``/``declares_linker_name`` edges. Whatever evidence class an
+#: individual edge kind carries (``declares`` restates a record's own
+#: ``source_header``, ``references`` resolves its type spelling), the builder
+#: reads nothing but the records, so its output is recomputed from them on
+#: demand and never persisted: a stored copy could only go stale relative to
+#: the records it was projected from. Extractor facts (header, include,
+#: type and call passes) are observed and stay persisted, since recomputing
+#: them needs the clang AST.
+PUBLIC_SURFACE_FACTS_PRODUCER = "public_surface_facts"
+RECOMPUTABLE_FACT_PRODUCERS: frozenset[str] = frozenset({PUBLIC_SURFACE_FACTS_PRODUCER})
+
+
+__all__ = [
+    "PUBLIC_SURFACE_FACTS_PRODUCER",
+    "RECOMPUTABLE_FACT_PRODUCERS",
+    "EdgeEvidenceClass",
+]
