@@ -231,7 +231,11 @@ def _unseeded_decl_endpoints(
     including fields) — computed once, lazily, only if there is at least one
     such source to look up.
     """
-    ref_srcs = {e.src for e in type_edges if e.kind == "DECL_REFERENCES_DECL"}
+    # First-occurrence order, not a `set`'s: this order becomes node order,
+    # and a set of strings iterates in per-process hash order.
+    ref_srcs = dict.fromkeys(
+        e.src for e in type_edges if e.kind == "DECL_REFERENCES_DECL"
+    )
     return (
         *((e.dst, e.dst_file) for e in type_edges if e.kind == "DECL_REFERENCES_DECL"),
         *((src, entity_files.get(src, "")) for src in ref_srcs),

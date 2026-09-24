@@ -64,6 +64,8 @@ from typing import Any
 
 __all__ = [
     "counts",
+    "gc_object_count",
+    "gc_census_is_safe",
     "mark",
     "memory_trace_enabled",
     "memory_trace_path",
@@ -165,6 +167,46 @@ def memory_trace_path() -> Path | None:
     if not _resolved:
         _resolve()
     return _path
+
+
+def gc_census_is_safe() -> bool:
+    """Whether enumerating the whole GC heap cannot corrupt another thread.
+
+    ``gc.get_objects()`` (and ``gc.get_referrers()``) return a list holding a
+    new reference to *every* GC-tracked object -- including a tuple another
+    thread is still building inside ``PySequence_Tuple`` (``tuple(gen)``).
+    The builder needs that tuple's refcount to be exactly 1 when it grows it
+    with ``_PyTuple_Resize``; CPython checks the eval breaker after a
+    ``CALL``, so the GIL can pass to the builder while the census list is
+    alive, and the builder then fails with ``tupleobject.c:...: bad argument
+    to internal function`` (a ``SystemError``) -- reproduced on CPython
+    3.10-3.13; 3.14 no longer grows an allocated tuple there, but the guard
+    stays unconditional, since a census still exposes objects other threads
+    are mid-way through building. It can also hand the caller
+    a half-built tuple whose unfilled slots are ``NULL``. This is how the
+    release fan-out's members ended ``ERROR`` under the benchmark harness,
+    whose attach hook took a census from inside a worker thread.
+
+    So a census is safe only when this is the process's sole Python thread.
+    Thread *count* rather than "no thread is building a tuple": nothing
+    observable from Python can prove the latter.
+    """
+    return threading.active_count() == 1
+
+
+def gc_object_count() -> int | None:
+    """``len(gc.get_objects())``, or ``None`` when that would be unsafe.
+
+    ``None`` whenever another Python thread exists (see
+    :func:`gc_census_is_safe`) -- a missing number, per this module's rule,
+    never a guessed one. Every census in this repository goes through here;
+    ``tests/test_gc_census_thread_safety.py`` enforces that.
+    """
+    if not gc_census_is_safe():
+        return None
+    import gc
+
+    return len(gc.get_objects())
 
 
 # --------------------------------------------------------------------------

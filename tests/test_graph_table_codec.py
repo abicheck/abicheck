@@ -203,6 +203,70 @@ class TestRoundTripProperty:
         assert second == [1, {"q": 2}]
 
 
+def _containers(value: Any) -> list[Any]:
+    """Every dict/list reachable from *value*, itself included."""
+    out: list[Any] = []
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            out.append(item)
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            out.append(item)
+            stack.extend(item)
+    return out
+
+
+class TestDirectDecoder:
+    """``decode_graph_table`` builds entities directly and decodes each
+    interned fact row once. Its oracle is the per-entity legacy-dict path it
+    replaced, ``from_dict(graph_table_to_legacy_dict(payload))`` -- a
+    different construction route over the same payload."""
+
+    @settings(max_examples=250, deadline=None)
+    @given(_graphs())
+    def test_equals_the_legacy_dict_path_including_order(
+        self, graph: SourceGraphSummary
+    ) -> None:
+        payload = _through_storage(encode_graph_table(graph))
+        direct = decode_graph_table(payload)
+        legacy = SourceGraphSummary.from_dict(graph_table_to_legacy_dict(payload))
+        assert json.dumps(direct.to_dict(), default=str) == json.dumps(
+            legacy.to_dict(), default=str
+        )
+        assert [n.id for n in direct.nodes] == [n.id for n in legacy.nodes]
+        assert [e.relation_key() for e in direct.edges] == [
+            e.relation_key() for e in legacy.edges
+        ]
+
+    @settings(max_examples=150, deadline=None)
+    @given(_graphs())
+    def test_no_fact_or_container_is_shared_between_entities(
+        self, graph: SourceGraphSummary
+    ) -> None:
+        # Interned rows are decoded once, so a missed copy would alias one
+        # entity's mutable evidence into another's.
+        decoded = decode_graph_table(_through_storage(encode_graph_table(graph)))
+        owner: dict[int, int] = {}
+        for index, entity in enumerate([*decoded.nodes, *decoded.edges]):
+            for fact in entity.facts:
+                for obj in (fact, *_containers(fact.attrs)):
+                    assert owner.setdefault(id(obj), index) == index
+
+    def test_one_interned_fact_across_many_entities(self) -> None:
+        g = SourceGraphSummary()
+        for i in range(5):
+            g.add_node(
+                GraphNode(id=f"header://h{i}", kind="header", attrs={"v": [i % 1]})
+            )
+        payload = _through_storage(encode_graph_table(g.finalize()))
+        assert len(payload["facts"]) == 1  # the case the per-row memo serves
+        decoded = decode_graph_table(payload)
+        decoded.nodes[0].facts[0].attrs["v"].append("mutated")
+        assert [n.facts[0].attrs["v"] for n in decoded.nodes[1:]] == [[0]] * 4
+
+
 # ── the load-scoped normalization memo ──────────────────────────────────
 
 
@@ -420,3 +484,53 @@ def test_finalize_recomputes_every_coverage_entry_not_persisted(
     graph.coverage = _observed_coverage(graph.coverage)
     graph.finalize()
     assert json.loads(json.dumps(graph.coverage)) == full
+
+
+class TestDirectDecoderRejectsCorruption:
+    """Every malformed entity entry is a ``ValueError`` on the direct path,
+    exactly as it was on the legacy-dict path."""
+
+    def _payload(self) -> dict[str, Any]:
+        g = SourceGraphSummary()
+        g.add_node(GraphNode(id="decl://a", kind="k", attrs={"v": 1}))
+        g.add_edge(GraphEdge(src="decl://a", dst="decl://a", kind="X"))
+        return _through_storage(encode_graph_table(g.finalize()))
+
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            lambda p: p.update(encoding="graph-table/999"),
+            lambda p: p["nodes"]["facts"].__setitem__(0, []),
+            lambda p: p["edges"]["facts"].__setitem__(0, "0"),
+            lambda p: p["nodes"]["facts"].__setitem__(0, 10_000),
+            lambda p: p["edges"]["facts"].__setitem__(0, [0, 10_000]),
+        ],
+        ids=["encoding", "empty-list", "non-int", "out-of-range", "range-in-list"],
+    )
+    def test_corrupt_entry_raises(self, mutate: Any) -> None:
+        payload = self._payload()
+        mutate(payload)
+        with pytest.raises(ValueError, match="graph table"):
+            graph_table_to_legacy_dict(payload)
+        with pytest.raises(ValueError, match="graph table"):
+            decode_graph_table(payload)
+
+    def test_multi_fact_entries_and_occurrences_match_the_legacy_path(self) -> None:
+        g = SourceGraphSummary()
+        g.add_node(GraphNode(id="decl://a", kind="k"))
+        for site in ("s1", "s2"):
+            g.add_edge(
+                GraphEdge(
+                    src="decl://a",
+                    dst="decl://b",
+                    kind="DECL_CALLS_DECL",
+                    provenance=f"p{site}",
+                    attrs={"callsite_id": site},
+                )
+            )
+        payload = _through_storage(encode_graph_table(g.finalize()))
+        assert any(type(f) is list for f in payload["edges"]["facts"])
+        direct = decode_graph_table(payload)
+        legacy = SourceGraphSummary.from_dict(graph_table_to_legacy_dict(payload))
+        assert direct.to_dict() == legacy.to_dict()
+        assert len(direct.edges[0].occurrences) == 2

@@ -724,10 +724,9 @@ def _finalize_compare_result(
         and old_snapshot is not None
         and new_snapshot is not None
     ):
-        from ...workflows.gate import snapshot_identity_digest
+        from ...workflows.gate import snapshot_identity_digests
 
-        old_digest = snapshot_identity_digest(old_snapshot)
-        new_digest = snapshot_identity_digest(new_snapshot)
+        old_digest, new_digest = snapshot_identity_digests(old_snapshot, new_snapshot)
     note_if_same_binary_compared(
         result, old_snapshot_digest=old_digest, new_snapshot_digest=new_digest
     )

@@ -46,7 +46,11 @@ from elftools.elf.sections import SymbolTableSection
 # parses into them and re-exports them so the historical
 # ``from abicheck.elf_metadata import ElfImport`` spelling keeps resolving.
 from .extract.elf_string_table import buffered_string_table, string_table_of
-from .extract.elf_symbol_versions import apply_versions_to_symbols
+from .extract.elf_symbol_versions import (
+    apply_versions_to_symbols,
+    decode_versym,
+    symbols_of,
+)
 from .model.elf_facts import (
     ElfImport as ElfImport,
     ElfMetadata as ElfMetadata,
@@ -1033,7 +1037,7 @@ def _parse_dynsym_entries(section: SymbolTableSection, meta: ElfMetadata) -> Non
     Split from :func:`_parse_dynsym` only so the buffering wraps the whole
     walk in one ``with`` block; the classification logic is unchanged.
     """
-    for sym in section.iter_symbols():
+    for sym in symbols_of(section):
         binding_str = sym.entry.st_info.bind
         type_str = sym.entry.st_info.type
         vis_str = sym.entry.st_other.visibility
@@ -1183,7 +1187,9 @@ def _correlate_symbol_versions(
     except Exception:  # noqa: BLE001
         return
 
-    ver_entries = _parse_ver_entries(ver_sym_section, num_vers, so_path)
+    ver_entries = decode_versym(ver_sym_section, num_vers)
+    if ver_entries is None:
+        ver_entries = _parse_ver_entries(ver_sym_section, num_vers, so_path)
     if ver_entries is None:
         return
 

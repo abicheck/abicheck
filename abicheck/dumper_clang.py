@@ -1158,9 +1158,10 @@ class _ClangAstParser:
         # dict key -- no string-identity/objid fallback needed at all, and
         # none of the "no id available" edge cases the node-identity version
         # had to account for can arise here.
-        ordinal_state = self._anonymous_ordinal_state.setdefault(
-            child_scope_path, {"next": 0, "seen": {}}
-        )
+        # Looked up on the first anonymous child only: hashing a
+        # `ScopePath` runs each frozen segment's Python-level `__hash__`, and
+        # most scopes have no anonymous child at all.
+        ordinal_state: dict[str, Any] | None = None
         for child in node.get("inner", []) or []:
             if not isinstance(child, dict):
                 continue
@@ -1170,6 +1171,10 @@ class _ClangAstParser:
             child_anonymous_ordinal: int | None = None
             if _clang_scope.anonymous_scope_kind(child) is not None:
                 entity_key = _clang_scope.anonymous_scope_key(child)
+                if ordinal_state is None:
+                    ordinal_state = self._anonymous_ordinal_state.setdefault(
+                        child_scope_path, {"next": 0, "seen": {}}
+                    )
                 seen: dict[str, int] = ordinal_state["seen"]
                 already = seen.get(entity_key) if entity_key is not None else None
                 if already is not None:
@@ -1235,36 +1240,43 @@ class _ClangAstParser:
         template_param_kinds: tuple[str, ...] = (),
         template_type_param_names: tuple[str, ...] = (),
     ) -> None:
-        if self._skips_dependency_decl(node, kind, name, file):
-            return
-        entry = _Decl(
-            node=node,
-            scope=scope,
-            file=file,
-            access=access,
-            extern_c=extern_c,
-            in_friend=in_friend,
-            in_template=in_template,
-            scope_path=scope_path,
-            template_param_kinds=template_param_kinds,
-            template_type_param_names=template_type_param_names,
-        )
+        # The destination list is chosen before a `_Decl` is built: most
+        # walked nodes (fields, parameters, template arguments, ...) are kept
+        # by none of them, and building one per node was pure churn.
         if kind in _FUNCTION_NODE_KINDS and name:
-            self._functions.append(entry)
+            bucket = self._functions
         elif kind == "VarDecl" and name:
-            self._variables.append(entry)
+            bucket = self._variables
         elif kind in ("CXXRecordDecl", "RecordDecl"):
             # Anonymous records (name="") are kept too: a ``typedef struct {…}
             # Foo;`` emits an unnamed RecordDecl that carries the fields, recovered
             # under the typedef name in parse_types (Codex/CodeRabbit review).
-            self._records.append(entry)
+            bucket = self._records
         elif kind == "EnumDecl":
             # Anonymous enums are kept too: a ``typedef enum {…} Foo;`` emits an
             # unnamed EnumDecl that carries the enumerators, recovered under the
             # typedef name in parse_enums.
-            self._enums.append(entry)
+            bucket = self._enums
         elif kind in ("TypedefDecl", "TypeAliasDecl") and name:
-            self._typedefs.append(entry)
+            bucket = self._typedefs
+        else:
+            return
+        if self._skips_dependency_decl(node, kind, name, file):
+            return
+        bucket.append(
+            _Decl(
+                node=node,
+                scope=scope,
+                file=file,
+                access=access,
+                extern_c=extern_c,
+                in_friend=in_friend,
+                in_template=in_template,
+                scope_path=scope_path,
+                template_param_kinds=template_param_kinds,
+                template_type_param_names=template_type_param_names,
+            )
+        )
 
     # ── shared helpers ───────────────────────────────────────────────────────
 

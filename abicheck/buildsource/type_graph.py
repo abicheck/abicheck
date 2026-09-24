@@ -1683,7 +1683,8 @@ def index_declared_type_files(ast: dict[str, Any]) -> dict[str, str]:
     idx = _new_ast_indexes()
     _index_declared_entities(ast, [], "", idx)
     type_qnames = {qname for qnames in idx.name_index.values() for qname in qnames}
-    return {q: idx.decl_file[q] for q in type_qnames if q in idx.decl_file}
+    # decl_file's document order: a set's order follows per-process string hashing.
+    return {q: f for q, f in idx.decl_file.items() if q in type_qnames}
 
 
 def index_declared_entity_files(ast: dict[str, Any]) -> dict[str, str]:

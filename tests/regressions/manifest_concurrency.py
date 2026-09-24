@@ -142,4 +142,37 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="concurrency.gc_census_beside_live_thread",
+        invariant=(
+            "A whole-heap GC census (`gc.get_objects()`, "
+            "`gc.get_referrers()`) never runs while another Python thread "
+            "exists: its result list references a tuple another thread is "
+            "still building in `PySequence_Tuple`, whose `_PyTuple_Resize` "
+            "then fails its refcount-1 check (`tupleobject.c: bad argument "
+            "to internal function`). Every census goes through "
+            "`memory_trace.gc_object_count`, which reports `None` instead."
+        ),
+        fixed_by=(1361,),
+        seed_tests=(
+            "tests/test_gc_census_thread_safety.py",
+            "tests/test_compare_release_concurrency_integration.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "census": ("get_objects",),
+            "workers": ("1", "4"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The static gate matches `gc.<name>` and `from gc import "
+                    "<name>` spellings only; an aliased module (`import gc as "
+                    "g`) or a third-party library taking a census is not "
+                    "caught."
+                ),
+                reference="docs/contribute/plans/evidence-entity-model.md",
+            ),
+        ),
+    ),
 )
