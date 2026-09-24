@@ -11,12 +11,8 @@ from __future__ import annotations
 import pytest
 from hypothesis import given, settings, strategies as st
 
-from abicheck.storage.dto import (
-    GRAPH_SECTION_KIND,
-    SECTION_SCHEMA_VERSIONS,
-    SectionDTO,
-    current_section_payload,
-)
+from abicheck.storage.dto import GRAPH_SECTION_KIND, SECTION_SCHEMA_VERSIONS, SectionDTO
+from abicheck.storage.section_payload import current_section_payload
 
 _json = st.recursive(
     st.none()
@@ -121,7 +117,7 @@ def test_graph_document_from_owned_rejects_like_from_document(payload: object) -
 @settings(max_examples=200, deadline=None)
 @given(st.dictionaries(st.text(max_size=4), _json, max_size=5))
 def test_section_dto_dict_equals_dto_to_dict(payload: dict) -> None:
-    from abicheck.storage.dto import section_dto_dict
+    from abicheck.storage.section_payload import section_dto_dict
 
     expected = SectionDTO(
         section_kind=GRAPH_SECTION_KIND,

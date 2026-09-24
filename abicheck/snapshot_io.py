@@ -46,6 +46,7 @@ from typing import Any
 
 from .errors import SnapshotError
 from .storage.env_limits import env_byte_limit
+from .storage.zstd_compress import compress_zstd
 from .storage.zstd_frame_guard import (
     read_past_leading_skippable_frames,
     skip_leading_skippable_frames,
@@ -685,37 +686,8 @@ def _compress_gzip(data: bytes) -> bytes:
     return bytes(encoded)
 
 
-#: Inputs at least this large are compressed in zstd's multi-threaded mode.
-#: zstd documents that mode's output as independent of the worker count
-#: (any ``nbWorkers >= 1`` yields the same frame), so the stored bytes stay
-#: identical across machines with different core counts -- only the
-#: single-threaded mode (``threads=0``) differs, which is why a small input
-#: keeps it: its bytes are unchanged from earlier releases. Level 19 over
-#: oneDAL's 203 MB snapshot took 33.9 s single-threaded and 21.6 s with four
-#: workers on a four-core box already busy with a test run, 0.05% larger.
-ZSTD_MULTITHREAD_MIN_BYTES = 8 * 1024 * 1024
-
-#: Cap on zstd compression workers. Level-19 jobs are several window sizes
-#: each, so a ~200 MB input has only a handful of jobs to spread; more
-#: workers add memory, not speed.
-ZSTD_MAX_THREADS = 8
-
-
-def _zstd_threads(size: int) -> int:
-    if size < ZSTD_MULTITHREAD_MIN_BYTES:
-        return 0
-    return max(1, min(os.cpu_count() or 1, ZSTD_MAX_THREADS))
-
-
 def _compress_zstd(data: bytes, *, level: int) -> bytes:
-    zstandard = _zstd_module()
-    cctx = zstandard.ZstdCompressor(
-        level=level,
-        write_checksum=False,
-        write_content_size=True,
-        threads=_zstd_threads(len(data)),
-    )
-    return bytes(cctx.compress(data))
+    return compress_zstd(_zstd_module(), data, level=level)
 
 
 def encode_snapshot_bytes(

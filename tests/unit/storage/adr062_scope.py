@@ -139,6 +139,13 @@ NON_ADR062_MODULES = frozenset(
         # the same snapshot-envelope body of work, not an ADR-062 Phase 0
         # primitive.
         "incremental_encode",
+        # zstd's compressor call and worker policy, split out of
+        # `snapshot_io`'s write path: the same envelope body of work.
+        "zstd_compress",
+        # `SectionDTO` payloads without the DTO's freeze/thaw round trip,
+        # for the sectioned-snapshot loader/writer: a performance property
+        # of that codec, like `snapshot_digest_cache`, not a primitive.
+        "section_payload",
         # The derived-AST handoff: it lets a final AST consumer take a
         # cheap derived form (the header-graph projection) instead of a
         # parsed tree. It lives here because ADR-061 routes cache

@@ -131,7 +131,6 @@ from .dto import (
     binary_to_dto,
     build_from_dto,
     build_to_dto,
-    current_section_payload,
     debug_from_dto,
     debug_to_dto,
     declarations_from_dto,
@@ -144,7 +143,6 @@ from .dto import (
     legacy_section_to_dto,
     provenance_from_dto,
     provenance_to_dto,
-    section_dto_dict,
     semantic_ir_from_dto,
     semantic_ir_to_dto,
     types_from_dto,
@@ -159,6 +157,7 @@ from .legacy_sections import (
     split_legacy_document,
 )
 from .package import ArtifactRef, ObjectRef, ObjectStore, PackageManifest, VariantRef
+from .section_payload import current_section_payload, section_dto_dict
 from .semantic_ir_codec import semantic_ir_from_document, semantic_ir_to_document
 from .sparse_section_codec import (
     BinarySection,

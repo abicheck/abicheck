@@ -16,10 +16,11 @@ import pytest
 from abicheck import snapshot_io
 from abicheck.snapshot_io import (
     ZSTD_LEVEL_BASELINE,
-    ZSTD_MULTITHREAD_MIN_BYTES,
     SnapshotCompression,
     encode_snapshot_bytes,
 )
+from abicheck.storage import zstd_compress
+from abicheck.storage.zstd_compress import ZSTD_MULTITHREAD_MIN_BYTES
 
 zstandard = pytest.importorskip("zstandard")
 
@@ -50,7 +51,7 @@ def big() -> bytes:
 def test_frame_is_independent_of_core_count(
     big: bytes, cpus: int | None, monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    monkeypatch.setattr(snapshot_io.os, "cpu_count", lambda: cpus)
+    monkeypatch.setattr(zstd_compress.os, "cpu_count", lambda: cpus)
     frame = encode_snapshot_bytes(big, SnapshotCompression.ZSTD, zstd_level=3)
     oracle = zstandard.ZstdCompressor(
         level=3, write_checksum=False, write_content_size=True, threads=1
@@ -71,5 +72,5 @@ def test_small_input_keeps_the_single_threaded_frame() -> None:
 
 
 def test_threshold_boundary() -> None:
-    assert snapshot_io._zstd_threads(ZSTD_MULTITHREAD_MIN_BYTES - 1) == 0
-    assert snapshot_io._zstd_threads(ZSTD_MULTITHREAD_MIN_BYTES) >= 1
+    assert zstd_compress.zstd_threads(ZSTD_MULTITHREAD_MIN_BYTES - 1) == 0
+    assert zstd_compress.zstd_threads(ZSTD_MULTITHREAD_MIN_BYTES) >= 1
