@@ -66,7 +66,6 @@ def _export_snap(declared, exported, export_only, rng):
     )
 
 
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 @settings(max_examples=150, deadline=None)
 @given(_export_world(), st.randoms(use_true_random=False))
 def test_export_join_matches_ground_truth(world, rng):
@@ -89,7 +88,6 @@ def test_export_join_matches_ground_truth(world, rng):
     st.randoms(use_true_random=False),
     st.randoms(use_true_random=False),
 )
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 def test_export_join_is_independent_of_input_order(world, rng_a, rng_b):
     a = join_exports(_export_snap(*world, rng_a))
     b = join_exports(_export_snap(*world, rng_b))
@@ -97,7 +95,6 @@ def test_export_join_is_independent_of_input_order(world, rng_a, rng_b):
     assert dict(a.join.right) == dict(b.join.right)
 
 
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 @settings(max_examples=150, deadline=None)
 @given(_export_world(), st.randoms(use_true_random=False))
 def test_no_export_join_without_shared_spelling(world, rng):
@@ -110,7 +107,6 @@ def test_no_export_join_without_shared_spelling(world, rng):
         )
 
 
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 @settings(max_examples=150, deadline=None)
 @given(_export_world(), st.randoms(use_true_random=False), st.booleans())
 def test_export_join_states_are_exhaustive(world, rng, with_table):

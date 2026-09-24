@@ -126,7 +126,6 @@ def _load(path: Path):
     return load_snapshot(path)
 
 
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 class TestExportJoinOnStoredDump:
     def test_join_states_match_the_fixture(self, dumps: dict[str, Path]) -> None:
         from abicheck.compare.export_join import join_exports

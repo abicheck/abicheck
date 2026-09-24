@@ -75,6 +75,7 @@ __all__ = [
     "build_raw_export_index_from_elf",
     "build_raw_export_index_from_macho",
     "build_raw_export_index_from_pe",
+    "build_raw_export_indexes",
     "callable_export_names",
     "callable_visible_export_names",
     "default_versioned_names",
@@ -228,6 +229,26 @@ def build_raw_export_index(snap: AbiSnapshot) -> RawExportIndex | None:
     if snap.macho is not None:
         return build_raw_export_index_from_macho(snap.macho)
     return None
+
+
+def build_raw_export_indexes(snap: AbiSnapshot) -> tuple[RawExportIndex, ...]:
+    """Every platform export table *snap* carries, ELF/PE/Mach-O order.
+
+    :func:`build_raw_export_index` answers for the one table a real snapshot
+    carries; this is the same read for the rare snapshot carrying more than
+    one (a wheel-derived snapshot with ELF and Mach-O metadata), where a
+    symbol exported by any of them is a real export. ``()`` means no table
+    at all -- the same structural "missing" :func:`build_raw_export_index`
+    answers ``None`` for.
+    """
+    out: list[RawExportIndex] = []
+    if snap.elf is not None:
+        out.append(build_raw_export_index_from_elf(snap.elf))
+    if snap.pe is not None:
+        out.append(build_raw_export_index_from_pe(snap.pe))
+    if snap.macho is not None:
+        out.append(build_raw_export_index_from_macho(snap.macho))
+    return tuple(out)
 
 
 # ---------------------------------------------------------------------------

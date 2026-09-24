@@ -7,8 +7,6 @@ helpers -- so the oracle cannot share a bug with the implementation.
 
 from __future__ import annotations
 
-import pytest
-
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
 from abicheck.macho_metadata import MachoExport, MachoMetadata
 from abicheck.model import AbiSnapshot, Function, Param, Variable, Visibility
@@ -55,7 +53,6 @@ def _state(join, node):
     return join.declaration(node).state
 
 
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 class TestExportJoinStates:
     def test_exported_cpp_function_joins_its_declaration(self):
         j = _join(_snap([_fn("ns::run", "_ZN2ns3runEv")], elf=_elf("_ZN2ns3runEv")))
@@ -221,7 +218,6 @@ class TestExportJoinStates:
         assert _state(j, "decl://_Z3runv") is JoinState.UNMATCHED
 
 
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 class TestExportJoinIncompleteEvidence:
     def test_no_export_table_is_unknown_not_unmatched(self):
         j = _join(_snap([_fn("run", "_Z3runv")]))
@@ -245,13 +241,11 @@ class TestExportJoinSpec:
         assert spec.producer == "compare.export_join.join_exports"
         assert spec.inputs and spec.recompute_rule
 
-    @pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
     def test_edges_run_from_export_to_declaration(self):
         j = _join(_snap([_fn("cfunc", "cfunc")], elf=_elf("cfunc", "extra")))
         assert list(j.join.edges()) == [("binary_symbol://elf/cfunc", "decl://cfunc")]
 
 
-@pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
 class TestExportJoinAgreesWithBinaryExportedFact:
     """The join and ``binary_exported_fact`` answer the same question from the
     same table; a header-AST producer's recorded fact must never contradict
