@@ -114,6 +114,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+from .canonical import canonical_input_trusted
 from .dto import (
     BINARY_SECTION_KIND,
     BUILD_SECTION_KIND,
@@ -130,6 +131,7 @@ from .dto import (
     binary_to_dto,
     build_from_dto,
     build_to_dto,
+    current_section_payload,
     debug_from_dto,
     debug_to_dto,
     declarations_from_dto,
@@ -214,6 +216,19 @@ _LEGACY_SECTION_CODECS: Mapping[
         lambda payload: provenance_to_dto(ProvenanceSection.from_document(payload)),
         provenance_from_dto,
     ),
+}
+
+#: The codec class behind each `_LEGACY_SECTION_CODECS` entry, for
+#: `export_legacy_sections`' current-version fast path.
+_LEGACY_SECTION_DOCUMENT_CODECS: Mapping[str, Any] = {
+    TYPES_SECTION_KIND: TypesSection,
+    GRAPH_SECTION_KIND: GraphSection,
+    BINARY_SECTION_KIND: BinarySection,
+    DECLARATIONS_SECTION_KIND: DeclarationsSection,
+    LAYOUT_SECTION_KIND: LayoutSection,
+    DEBUG_SECTION_KIND: DebugSection,
+    BUILD_SECTION_KIND: BuildSection,
+    PROVENANCE_SECTION_KIND: ProvenanceSection,
 }
 
 __all__ = [
@@ -501,6 +516,26 @@ def export_legacy_sections(
     legacy_sections: dict[str, dict[str, Any]] = {}
     document: dict[str, Any] = {}
     for section_kind, locator, raw in sections:
+        document_codec = _LEGACY_SECTION_DOCUMENT_CODECS.get(section_kind)
+        current = current_section_payload(raw) if document_codec is not None else None
+        if (
+            document_codec is not None
+            and current is not None
+            and current[0] == section_kind
+        ):
+            # Same checks and the same decoded document as the codec branch
+            # below, minus the discarded DTO's freeze/unfreeze round trip
+            # (`current_section_payload`). `_decode_current` runs the codec
+            # under `canonical_input_trusted` for the identical reason: the
+            # payload is fresh, owned and already canonical.
+            with canonical_input_trusted():
+                owned = getattr(document_codec, "document_from_owned", None)
+                document.update(
+                    owned(current[1])
+                    if owned is not None
+                    else document_codec.from_document(current[1]).to_document()
+                )
+            continue
         dto = SectionDTO.from_dict(raw)
         if dto.section_kind != section_kind:
             raise ValueError(

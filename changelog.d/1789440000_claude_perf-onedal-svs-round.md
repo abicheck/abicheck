@@ -19,3 +19,9 @@
   identifier tokens occur in the text being scanned
   (`spellings_possible_in`); the two ~40k-spelling vocabularies cost ~14 s
   per oneDAL compare.
+- Loading a stored sectioned snapshot no longer freezes and re-thaws every
+  current-version section through a throwaway `SectionDTO`
+  (`current_section_payload`), and the graph section skips its own
+  freeze/thaw copy for an owned, canonical payload
+  (`GraphSection.document_from_owned`). oneDAL baseline load 31.4 s to
+  18.1 s, identical snapshot.

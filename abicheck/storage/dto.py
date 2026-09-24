@@ -336,6 +336,43 @@ class SectionDTO:
         )
 
 
+def current_section_payload(
+    raw: Mapping[str, Any],
+) -> tuple[str, dict[str, Any]] | None:
+    """``(kind, SectionDTO.from_dict(raw).to_dict()["payload"])`` for a
+    section already at its kind's current version, without building the
+    frozen DTO; ``None`` when a migration applies (use the DTO path then).
+
+    The same validation runs -- the header through `SectionDTO` itself, the
+    payload through `_mapping` and `canonical_form` -- and the result is the
+    same value: ``_unfreeze(_freeze(canonical_form(p)))`` is
+    ``canonical_form(p)`` for the ``dict``/``list``/scalar trees
+    `canonical_form` produces. What is skipped is the round trip itself, two
+    full copies of every section on every load (~6 s of a ~30 s oneDAL
+    baseline load) for a DTO the loader discards immediately. The returned
+    payload is a fresh copy the caller owns.
+    """
+    _mapping(raw, "a section DTO")
+    payload = _required_field(raw, "payload", "a section DTO")
+    header = SectionDTO.from_dict(
+        {
+            "section_kind": _required_field(raw, "section_kind", "a section DTO"),
+            "section_schema_version": _required_field(
+                raw, "section_schema_version", "a section DTO"
+            ),
+            "payload": {},
+        }
+    )
+    _mapping(payload, "payload")
+    if header.section_schema_version != SECTION_SCHEMA_VERSIONS.get(
+        header.section_kind
+    ):
+        return None
+    canonical = canonical_form(payload)
+    assert isinstance(canonical, dict)
+    return header.section_kind, canonical
+
+
 def migrate_section_dto(dto: SectionDTO) -> SectionDTO:
     """*dto*, advanced to its section kind's current version via the
     registered migration chain — a no-op if it is already current.
