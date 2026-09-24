@@ -26,13 +26,6 @@ from abicheck.model.source_graph import SourceGraphSummary
 
 PRESENT, ABSENT, UNKNOWN = "present", "proven_absent", "unknown"
 
-#: Strict xfail until the query API lands (tests-first, flipped per commit).
-_PENDING = pytest.mark.xfail(
-    strict=True,
-    raises=ImportError,
-    reason="I4 query API (compare/edge_query.py) not implemented yet",
-)
-
 
 def _evidence(snap, graph=None):
     from abicheck.compare.edge_query import EdgeEvidence
@@ -86,7 +79,6 @@ def _elf(*names, machine="EM_X86_64"):
 # ---------------------------------------------------------------------------
 
 
-@_PENDING
 class TestProducerDidNotRun:
     def test_no_export_table_makes_every_declaration_unknown(self):
         ev = _evidence(_snap([_fn("run", "run"), _fn("go", "go")]))
@@ -158,7 +150,6 @@ def _l5_graph(*, ran=(), narrowed=(), scope=(), degraded=(), edges=()):
     return graph
 
 
-@_PENDING
 class TestPartialCoverage:
     def test_narrowed_pass_covers_only_its_units(self):
         graph = _l5_graph(narrowed=["call_graph"], scope=["src/a.cpp"])
@@ -228,7 +219,6 @@ class TestPartialCoverage:
 # ---------------------------------------------------------------------------
 
 
-@_PENDING
 class TestFailedExtractor:
     def test_default_elf_block_is_not_an_empty_table(self):
         # A parse-failed / default ElfMetadata(): no symbols, no machine.
@@ -259,7 +249,6 @@ class TestFailedExtractor:
 # ---------------------------------------------------------------------------
 
 
-@_PENDING
 class TestStrippedBinary:
     @pytest.mark.parametrize(
         "dwarf",
@@ -348,7 +337,6 @@ def _export_case(producer, edge):
 
 
 @pytest.mark.parametrize("producer,edge,in_scope", sorted(TRUTH), ids=lambda v: str(v))
-@_PENDING
 def test_l5_matrix(producer, edge, in_scope):
     ev = _evidence(_snap(), _l5_case(producer, edge))
     scope = frozenset({"in.cpp" if in_scope else "out.cpp"})
@@ -373,7 +361,6 @@ EXPORT_TRUTH = {
 @pytest.mark.parametrize(
     "producer,edge,in_scope", sorted(EXPORT_TRUTH), ids=lambda v: str(v)
 )
-@_PENDING
 def test_export_matrix(producer, edge, in_scope):
     ev = _evidence(_export_case(producer, edge))
     scope = frozenset({"elf" if in_scope else "macho"})
@@ -386,7 +373,6 @@ def test_export_matrix(producer, edge, in_scope):
 # ---------------------------------------------------------------------------
 
 
-@_PENDING
 def test_every_surface_graph_edge_kind_is_queryable():
     from abicheck.compare.edge_query import QUERYABLE_EDGE_KINDS
 
@@ -394,20 +380,17 @@ def test_every_surface_graph_edge_kind_is_queryable():
     assert {"DECL_CALLS_DECL", "COMPILE_UNIT_INCLUDES_FILE"} <= QUERYABLE_EDGE_KINDS
 
 
-@_PENDING
 def test_unknown_edge_kind_is_rejected():
     with pytest.raises(KeyError):
         _evidence(_snap()).query("no_such_kind", "x")
 
 
-@_PENDING
 def test_unknown_subject_is_unknown_not_absent():
     ev = _evidence(_snap([_fn("run", "run")], elf=_elf("run")))
     assert _answer(ev, "exports", "decl://nope") == UNKNOWN
     assert ev.query("exports", "decl://nope").reason == "subject_unknown"
 
 
-@_PENDING
 def test_derived_linker_name_answers_from_its_records():
     snap = _snap([_fn("run", "_Z3runv"), _fn("c_fn", "")])
     ev = _evidence(snap)
@@ -420,7 +403,6 @@ def test_derived_linker_name_answers_from_its_records():
     assert _answer(ev, "declares_linker_name", c_node) == ABSENT
 
 
-@_PENDING
 def test_references_through_an_ambiguous_spelling_is_unknown():
     a = RecordType(
         name="Foo", qualified_name="a::Foo", kind="struct", source_header="api.h"
@@ -435,7 +417,6 @@ def test_references_through_an_ambiguous_spelling_is_unknown():
     assert res.records[0].reason.startswith("ambiguous_type_spelling")
 
 
-@_PENDING
 def test_result_serializes_its_records():
     ev = _evidence(_snap([_fn("run", "run")], elf=ElfMetadata()))
     d = ev.query("exports", "decl://run").to_dict()

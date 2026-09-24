@@ -17,20 +17,12 @@ from __future__ import annotations
 
 import random
 
-import pytest
 from hypothesis import given, settings, strategies as st
 
 from abicheck.model import AbiSnapshot
 from abicheck.model.edge_coverage import ALL_UNITS, CoverageRecord, ProducerRun
 from abicheck.model.graph_facts import GraphEdge, GraphNode
 from abicheck.model.source_graph import SourceGraphSummary
-
-#: Strict xfail until the query API lands (tests-first, flipped per commit).
-pytestmark = pytest.mark.xfail(
-    strict=True,
-    raises=ImportError,
-    reason="I4 query API (compare/edge_query.py) not implemented yet",
-)
 
 UNITS = ("u1", "u2", "u3")
 RUNS = ("ran", "partial", "not_run", "failed")
