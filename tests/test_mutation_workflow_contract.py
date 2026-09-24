@@ -28,6 +28,7 @@ pixi/pre-commit/CI all route through `scripts/verify.py`'s step catalog.
 from __future__ import annotations
 
 import ast
+import functools
 import importlib.util
 from pathlib import Path, PurePosixPath
 
@@ -433,18 +434,29 @@ def _package_of(path: Path) -> str:
     return ".".join(rel.parts[:-1])
 
 
-def _first_party_imports(path: Path) -> set[str]:
+def _first_party_imports(path: Path) -> frozenset[str]:
     """`abicheck.*` modules imported by *path*, relative imports resolved.
+
+    Memoized per resolved path: the reachability walk below starts once per
+    ignored test file and re-enters the same package modules each time, so an
+    unmemoized parse repeated most of the package's `ast.parse` work per
+    file -- ~24 s normally, and past the 600 s per-test timeout under
+    mutmut's traced stats run, which aborted the mutation lane.
 
     Resolving them is the whole point: inside the package almost every import
     is relative (`from .diff_types import ...`), so a walk that only followed
     absolute ones reported that `abicheck/checker.py` reaches nothing — and
     the reachability check built on it would have been vacuous.
     """
+    return _first_party_imports_of(path.resolve())
+
+
+@functools.cache
+def _first_party_imports_of(path: Path) -> frozenset[str]:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError):
-        return set()
+        return frozenset()
     package = _package_of(path)
     names: set[str] = set()
     for node in ast.walk(tree):
@@ -465,7 +477,7 @@ def _first_party_imports(path: Path) -> set[str]:
             names.add(f"{prefix}.{node.module}" if node.module else prefix)
             if node.module is None:
                 names |= {f"{prefix}.{a.name}" for a in node.names}
-    return {n for n in names if n == "abicheck" or n.startswith("abicheck.")}
+    return frozenset(n for n in names if n == "abicheck" or n.startswith("abicheck."))
 
 
 def _module_file(module: str) -> Path | None:
