@@ -151,6 +151,33 @@ unblocked: both join onto the one key this phase established.
   compared* (`compare/source_graph_identity_scheme.py`, on the L5 coverage row
   and as a warning) rather than diffed.
 
+### Measured on oneDAL
+
+Same setup as the Phase 5 measurements below (`libonedal_core.so.3`, PyPI
+`daal`/`daal-include` 2025.10.0 vs 2025.11.0, `scripts/bench_graph_materialization.py`),
+one repeat per variant, `main` at `87731bc` vs this phase:
+
+| Variant | Measure | Before | After |
+|---|---|---|---|
+| `graph+facts` | nodes | 110,907 | 69,288 |
+| `graph+facts` | graph section (compact / zstd-3) | 136.4 / 4.71 MB | 120.8 / 4.20 MB |
+| `graph+facts` | snapshot raw | 353.0 MB | 326.7 MB |
+| `graph+facts` | dump parent RSS | 2,157 MiB | 1,946 MiB |
+| `graph+facts` | compare | 367 s / 2,656 MiB | 331 s / 2,383 MiB |
+| `graph` (default) | nodes | 49,523 | 49,264 |
+| `graph` (default) | graph section (compact / zstd-3) | 74.4 / 2.70 MB | 75.6 / 2.81 MB |
+
+- The 29,109 `declaration` and 3,142 `type` duplicates are gone. `symbol`
+  nodes fall from 29,109 to 18,249, because only resolved declarations get a
+  linker-name node.
+- In the default graph, 259 C-linkage `decl://<name>`/`decl://<name>#sha256:…`
+  pairs merged into one node each.
+- The default graph section is 1.6% larger. About 11.6k castxml ctor/dtor
+  placeholder nodes are now explicit `unresolved://` nodes: a longer prefix
+  plus an `identity` attr. A first cut that also packed the `EntityId` key
+  into those ids measured 81.4 MB and was trimmed.
+- Both comparisons report the same 5,078 artifact-backed findings.
+
 ### Remaining documented gaps
 
 - PDB/BTF/CTF function/variable identity stays `unresolved` (ADR-063 Phase 6):
@@ -161,6 +188,8 @@ unblocked: both join onto the one key this phase established.
 - castxml drops an inline-namespace segment (`ns::S` vs clang `ns::v1::S`);
   per G15 the two stay separate without further evidence.
 - Kythe/CodeQL-ingested nodes keep their VName-signature ids.
+- The DWARF (L1) and export-table (L0) sides of I1 are Phase 2's joins onto
+  this key; this phase covers the L2 header-AST producers and L4/L5 replay.
 
 ## Tests
 
