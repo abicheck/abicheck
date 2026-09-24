@@ -58,6 +58,7 @@ error path would be faster *and* wrong, and the assertions catch it.
 
 from __future__ import annotations
 
+import statistics
 import subprocess
 import sys
 import time
@@ -130,9 +131,14 @@ def _run(runner: CliRunner, argv: list[str]) -> float:
 
 
 def _assert_measurement_is_meaningful(
-    per_size: dict[int, float], sizes: tuple[int, ...]
+    per_size: dict[int, list[float]], sizes: tuple[int, ...]
 ) -> None:
-    ratio = per_size[sizes[-1]] / per_size[sizes[0]]
+    # The median per size, as `measure_scaling_exponent` uses: comparing the
+    # *last* sample of each size let one stalled scheduler tick on either
+    # endpoint decide this guard on a shared runner (seen at 1.48x and 0.94x).
+    ratio = statistics.median(per_size[sizes[-1]]) / statistics.median(
+        per_size[sizes[0]]
+    )
     assert ratio >= _MIN_COST_RATIO, (
         f"the largest input ({sizes[-1]}) cost only {ratio:.2f}x the smallest "
         f"({sizes[0]}) — fixed per-invocation overhead is dominating, so the "
@@ -146,7 +152,7 @@ def test_compare_depth_binary_scaling_stays_subquadratic(tmp_path: Path) -> None
     """A 4x-larger export table must not take ~16x longer to compare."""
     runner = CliRunner()
     built: dict[int, tuple[Path, Path]] = {}
-    per_size: dict[int, float] = {}
+    per_size: dict[int, list[float]] = {}
 
     def _measure(n: int) -> float:
         pair = built.get(n)
@@ -160,7 +166,7 @@ def test_compare_depth_binary_scaling_stays_subquadratic(tmp_path: Path) -> None
             runner,
             ["compare", str(old), str(new), "--depth", "binary", "-o", "json=-"],
         )
-        per_size[n] = elapsed
+        per_size.setdefault(n, []).append(elapsed)
         return elapsed
 
     exponent = measure_scaling_exponent(_measure, _BINARY_SIZES)
@@ -177,7 +183,7 @@ def test_compare_depth_headers_scaling_stays_subquadratic(tmp_path: Path) -> Non
     per side — the layer the binary test above cannot observe at all."""
     runner = CliRunner()
     built: dict[int, tuple[Path, Path, Path, Path]] = {}
-    per_size: dict[int, float] = {}
+    per_size: dict[int, list[float]] = {}
 
     def _measure(n: int) -> float:
         parts = built.get(n)
@@ -206,7 +212,7 @@ def test_compare_depth_headers_scaling_stays_subquadratic(tmp_path: Path) -> Non
                 "json=-",
             ],
         )
-        per_size[n] = elapsed
+        per_size.setdefault(n, []).append(elapsed)
         return elapsed
 
     exponent = measure_scaling_exponent(_measure, _HEADER_SIZES)
@@ -225,12 +231,24 @@ def test_the_non_vacuity_precondition_can_actually_fire() -> None:
     assertion nobody has ever seen hold or fail.
     """
     sizes = (500, 900, 1400, 2000)
-    overhead_dominated = {500: 1.00, 900: 1.02, 1400: 1.05, 2000: 1.10}
+    overhead_dominated = {500: [1.00], 900: [1.02], 1400: [1.05], 2000: [1.10]}
     with pytest.raises(AssertionError, match="fixed per-invocation overhead"):
         _assert_measurement_is_meaningful(overhead_dominated, sizes)
 
     # And it accepts the shape actually measured when this was written, so
     # it cannot be satisfied by simply always raising.
     _assert_measurement_is_meaningful(
-        {500: 0.36, 900: 0.63, 1400: 1.02, 2000: 1.50}, sizes
+        {500: [0.36], 900: [0.63], 1400: [1.02], 2000: [1.50]}, sizes
     )
+
+    # One stalled sample at either endpoint must not decide it: the median
+    # of each size's samples does, as in `measure_scaling_exponent`.
+    _assert_measurement_is_meaningful(
+        {500: [0.36, 0.37, 1.60], 900: [0.63], 1400: [1.02], 2000: [1.50, 0.40, 1.52]},
+        sizes,
+    )
+    with pytest.raises(AssertionError, match="fixed per-invocation overhead"):
+        _assert_measurement_is_meaningful(
+            {500: [1.00, 0.20, 1.01], 900: [1.0], 1400: [1.0], 2000: [1.10, 3.0, 1.12]},
+            sizes,
+        )

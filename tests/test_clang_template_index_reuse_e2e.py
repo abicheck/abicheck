@@ -584,19 +584,12 @@ def test_the_header_graph_pass_is_unchanged_under_reuse(
     assert graph.get("nodes"), graph.keys()
     assert graph.get("edges"), graph.keys()
 
-    # `graph_id` is a digest over the graph's own pre-scrub content, which
-    # embeds each arm's absolute header paths -- so the two arms differ there
-    # by construction, exactly like the path-derived `finding_id` the sibling
-    # test excludes. Everything the digest summarises IS compared below, after
-    # scrubbing: nodes, edges, indexes, coverage and the pass lists. Dropping
-    # the digest therefore removes no claim, it only removes the paths.
-    reuse_graph = dict(reuse_doc["surface_graph"])
-    plain_graph = dict(plain_doc["surface_graph"])
-    assert reuse_graph.pop("graph_id") != plain_graph.pop("graph_id"), (
-        "the two arms unexpectedly share a graph digest, so this exclusion is "
-        "hiding something rather than accounting for differing paths"
-    )
-    reuse_doc = {**reuse_doc, "surface_graph": reuse_graph}
-    plain_doc = {**plain_doc, "surface_graph": plain_graph}
+    # `graph_id` is a digest the loader recomputes, so a stored graph no
+    # longer carries it (evidence-entity-model Phase 5c) -- and with it goes
+    # the only graph field that embedded each arm's absolute header paths in
+    # a form the scrub below could not reach. Everything else, scrubbed, is
+    # compared whole.
+    assert "graph_id" not in reuse_doc["surface_graph"]
+    assert "graph_id" not in plain_doc["surface_graph"]
 
     assert reuse_doc == plain_doc
