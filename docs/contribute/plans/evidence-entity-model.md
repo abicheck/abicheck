@@ -124,3 +124,107 @@ numbers should inform Phases 1–2 before those choose what to materialize.
 - Function/variable identity for PDB/BTF/CTF (ADR-063 Phase 6's documented
   gap). Phase 1 treats such entities as `unresolved` rather than inventing
   identity.
+
+## Phase 5 measurements
+
+Measured 2026-09-23/24 with `scripts/bench_graph_materialization.py`
+(instrumentation only; no production behavior changed).
+
+### What was measured
+
+- **Operands:** real oneDAL, `libonedal_core.so.3` (113 MB) from PyPI
+  `daal`/`daal-include` **2025.10.0 vs 2025.11.0**. Public header
+  `daal.h` through a one-line `daal_all.hpp` wrapper (the CLI has no
+  language flag and a `.h` root parses as C), `-I include -I include/dal`.
+  Default castxml backend; the header graph uses the separate clang pass.
+- **Host:** 4 vCPU, 15 GiB, Linux 6.18, Python 3.13, castxml 0.7.0.
+- **Variants:** `none` (`_HEADER_GRAPH_ENABLED`/`_INCLUDES_ENABLED` off),
+  `graph` (today's default attach), `graph+facts` (plus
+  `build_public_surface_facts`, the pass `_attach_header_graph` skips; the
+  populated graph is what gets serialized).
+- **Steps**, each in its own process with cold private `ABICHECK_CACHE_DIR`
+  and `XDG_CACHE_HOME`: `dump` OLD, `dump` NEW, stored/stored `compare`.
+  Three repeats. A fourth, separate run per variant used
+  `ABICHECK_MEMORY_TRACE_TRACEMALLOC` for attribution only.
+
+### Results (mean of 3; ± is max deviation from the mean)
+
+| Variant | Dump s (per side) | Dump parent RSS | Compare s | Compare parent RSS |
+|---|---|---|---|---|
+| `none` | 37.6 ± 0.7 | 683 MiB | 111.0 ± 0.6 | 738 MiB |
+| `graph` | 119.0 ± 8 | 1,481 MiB | 222.6 ± 5 | 1,756 MiB |
+| `graph+facts` | 147.6 ± 9 | 2,216 MiB | 312.2 ± 17 | 2,720 MiB |
+
+Peak RSS varied by < 6 MiB across repeats. Process-tree RSS and PSS equal
+parent RSS within 5 MiB in every run (tree PSS ≈ parent − 4 MiB): the cost
+is Python in the abicheck process, not a child compiler. Cgroup
+`memory.current` peak minus its launch value was 792 / 2,675 / 3,370 MiB
+for the three dumps in the first repeat, but drifted down by up to 1.6 GB
+in later repeats as the container's page cache grew. It is reported but
+not relied on. `memory.peak` is the cgroup's lifetime maximum and cannot
+be attributed to one run at all.
+
+| Variant | Nodes | Edges | Snapshot raw | Snapshot zstd-3 | Graph section (compact / zstd-3) |
+|---|---|---|---|---|---|
+| `none` | 0 | 0 | 110 MB | 1.46 MB | — |
+| `graph` | 49,872 | 102,388 | 251 MB | 4.59 MB | 79 MB / 2.81 MB |
+| `graph+facts` | 111,232 | 180,151 | 364 MB | 6.99 MB | 142 MB / 4.83 MB |
+
+`graph` nodes: 39,734 `source_decl`, 9,442 `record_type`, 532 `header`,
+164 `file`. The facts pass adds 29,109 `declaration`, 29,109 `symbol` and
+3,142 `type` nodes, plus 31,801 `declares`, 16,853 `references` and 29,109
+`exports` edges. That is one derived `symbol` node and `exports` edge per
+declaration with a linker name (gap 5), and a second node for each
+declaration the header graph already holds as a `source_decl` (gap 1).
+
+### Attribution (tracemalloc run, dump OLD)
+
+- The header-graph attach took ~55–57 s of the ~119 s `graph` dump. Of
+  that, ~220 s under tracemalloc (proportionally ~48 s untraced) is
+  streaming the clang AST, with a 677 MiB Python allocation peak inside
+  the streaming projection. The graph build itself is ~16 s.
+- The retained graph is **~132 MiB of Python allocations** (193 MiB phase
+  peak) and grows live objects from 0.95 M to 1.66 M.
+- `build_public_surface_facts` takes 3.8 s untraced and retains
+  **another ~78 MiB** (333 MiB phase peak), taking live objects to 2.36 M.
+- The rest of the RSS difference (~800 MiB per dump for `graph`, a further
+  ~735 MiB for `facts`) is the serialized JSON, whose raw size grows 2.3×
+  and 3.3×, plus allocator arenas that are not returned after the AST
+  stream. It is not held by the graph objects.
+- In `compare`, the graph is paid for twice: decoding two 79–142 MB graph
+  sections and diffing them. That doubles compare time (+112 s) and adds
+  ~1 GiB RSS; the facts add a further +90 s and ~960 MiB. The comparison
+  verdict came out the same (exit 0) in all three variants.
+
+### Recommendation
+
+1. **Do not make `build_public_surface_facts` unconditional, and do not
+   persist its output** (I6 fails for it). It adds 30% dump time,
+   +735 MiB dump RSS, +40% compare time and +960 MiB compare RSS, for data
+   that is a pure projection of snapshot records. By I3 such data must
+   be recomputed rather than trusted when persisted anyway. Compute it on
+   demand for the query that needs it, as
+   `policy.public_surface_closure` already does.
+2. **The persisted header graph is the real cost and should become a view,
+   not an always-on section.** On oneDAL it roughly triples dump time,
+   doubles dump RSS, and doubles compare time and RSS. Most of that is
+   JSON encode/decode of a 79 MB section, not the 132 MiB live graph.
+   Phases 1–2 should not add node kinds to it until the cost is cut:
+   - **Lazy section loading (storage v2 Phase 2) is warranted.** A
+     compare that does not query the graph should not decode it. That
+     alone removes most of the +112 s / +1 GiB compare delta.
+   - **Compact tables are warranted for the graph section.** It
+     compresses 28:1 (79 MB → 2.8 MB zstd), i.e. it is dominated by
+     repeated IDs and keys, which interned, columnar node/edge tables
+     remove.
+   - Phase 1 (one ID per entity) should *remove* the duplicate
+     `declaration`/`source_decl` nodes rather than add a third ID scheme.
+     That is also a size win.
+3. **Keep observed evidence persisted, derive the rest.** Persist nodes and
+   edges an extractor observed (header, include, type and call passes),
+   since recomputing them needs the clang AST, which costs ~50 s here.
+   Compute `derived` edges (`exports`-from-linker-name,
+   `declares`/`references` projections) on demand from the snapshot.
+4. **Re-measure before any unconditional change** with the same script on
+   the multi-library oneDAL release (`libonedal.so`, `libonedal_dpc.so`),
+   where member count multiplies these figures.
