@@ -64,7 +64,7 @@ happened to finish TUs in.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from functools import partial
 from typing import TYPE_CHECKING, Protocol, TypeVar
@@ -85,6 +85,7 @@ from .model import (
     replace_with_fact_sync,
 )
 from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
+from .model.declaration_headers import HeaderAttributedMap, declaring_header
 from .provenance import build_public_set
 from .tu_fragment import MergedTuFragments, TuFragment, entity_key
 from .tu_merge_provenance import (
@@ -683,12 +684,7 @@ def merge_fragments(
     # RecordType/EnumType gap documented on the `types`/`enums` key_fn above,
     # the same category of producer-side limitation).
     typedefs = _merge_scalar_group(
-        (
-            (f.tu_name, name, value)
-            for f in ordered
-            for name, value in f.typedefs.items()
-        ),
-        kind="typedef",
+        ((f.tu_name, f.typedefs) for f in ordered), kind="typedef"
     )
     # typedefs_qualified (schema v25, G31 Phase C): keyed by fully-qualified
     # name, so unlike `typedefs` above this does NOT inherit the bare-name
@@ -698,20 +694,10 @@ def merge_fragments(
     # `_merge_scalar_group`'s existing same-key/same-value dedup, so this
     # reuses that helper rather than a plain dict union.
     typedefs_qualified = _merge_scalar_group(
-        (
-            (f.tu_name, name, value)
-            for f in ordered
-            for name, value in f.typedefs_qualified.items()
-        ),
-        kind="typedef",
+        ((f.tu_name, f.typedefs_qualified) for f in ordered), kind="typedef"
     )
     constants = _merge_scalar_group(
-        (
-            (f.tu_name, name, value)
-            for f in ordered
-            for name, value in f.constants.items()
-        ),
-        kind="constant",
+        ((f.tu_name, f.constants) for f in ordered), kind="constant"
     )
     # `EntityId` sidecars (ADR-063 Phase 2): unioned by
     # `_merge_entity_id_sidecar`, not `_merge_scalar_group` -- the latter
@@ -933,17 +919,21 @@ def _flatten(grouped: dict[tuple[str, str], tuple[_T, ...]]) -> tuple[_T, ...]:
 
 
 def _merge_scalar_group(
-    items: Iterable[tuple[str, str, str]], *, kind: str
+    sources: Iterable[tuple[str, Mapping[str, str]]], *, kind: str
 ) -> dict[str, str]:
     """The typedef/constant analogue of :func:`_merge_group`: a bare
     ``name -> value`` mapping has no "richer declaration" to prefer, so a
     trivial merge only exists when every contributing TU agrees on the
     exact same value; any disagreement is an
-    :class:`~abicheck.errors.TuMergeError`.
+    :class:`~abicheck.errors.TuMergeError`. Keeps the first contributing
+    TU's declaring header (``model.declaration_headers``) with its value.
     """
     by_name: dict[str, list[tuple[str, str]]] = {}
-    for tu_name, name, value in items:
-        by_name.setdefault(name, []).append((tu_name, value))
+    headers: dict[str, str] = {}
+    for tu_name, mapping in sources:
+        for name, value in mapping.items():
+            by_name.setdefault(name, []).append((tu_name, value))
+            headers.setdefault(name, declaring_header(mapping, name))
 
     merged: dict[str, str] = {}
     for name, candidates in by_name.items():
@@ -960,7 +950,7 @@ def _merge_scalar_group(
                     tu_names=(acc_tu, tu_name),
                 )
         merged[name] = acc_value
-    return merged
+    return HeaderAttributedMap(merged, headers)
 
 
 def _merge_entity_id_sidecar(
