@@ -275,7 +275,38 @@ of I1 and states I2/I3 for both.
 
 ### Measured on oneDAL
 
-Pending: the `scripts/bench_graph_materialization.py` run (base vs. this phase, `graph` and `graph+facts`, join state counts per side) is in progress and lands in a follow-up commit on this PR.
+Same operands and invocation as "Phase 5 measurements" (`libonedal_core.so.3`,
+PyPI `daal`/`daal-include` 2025.10.0 vs 2025.11.0, `daal.h` through
+`daal_all.hpp`, `-I include -I include/dal`), 4 vCPU / 15 GiB, Python 3.13,
+castxml 0.7.0, one run per cell, `main` at `577d856` vs this phase:
+
+| Variant | Build | Dump s (old / new) | Dump parent RSS | Compare s | Compare parent RSS | Graph section (compact / zstd-3) |
+|---|---|---|---|---|---|---|
+| `graph` | base | 90.0 / 87.9 | 898 MiB | 125.0 | 951 MiB | 9.9 MB / 0.97 MB |
+| `graph` | Phase 2 | 92.2 / 93.4 | 896 MiB | 124.5 | 950 MiB | 9.9 MB / 0.97 MB |
+| `graph+facts` | base | 98.9 / 100.4 | 965 MiB | 124.4 | 946 MiB | 9.9 MB / 0.97 MB |
+| `graph+facts` | Phase 2 | 101.5 / 100.5 | 985 MiB | 123.4 | 949 MiB | 9.9 MB / 0.97 MB |
+
+Join cost and states on the stored snapshots (old / new):
+
+| Join | Time | Left (declarations / header types) | Right (exports / debug types) |
+|---|---|---|---|
+| `exports` | 0.20 / 0.23 s (+0.09 s identity table) | 2,494 / 2,495 matched, 11,687 unmatched, 0 ambiguous | 2,494 / 2,495 matched, 10,858 / 10,864 unmatched |
+| `debug_type_of` | 0.003 s | 1,618 `unknown` | none |
+
+- Nothing new is persisted for these operands: stored nodes/edges and the
+  graph section are unchanged, since join edges are recomputed on demand and
+  the PyPI wheels carry no DWARF (so no ODR observation is written either).
+  Dump/compare time and RSS are within run-to-run noise; the `graph+facts`
+  dump's +20 MiB is the builder materializing the join nodes/edges.
+- The debug join is honestly `unknown` for every header type: a stripped
+  wheel has no debug section, and the join never reports that as "all
+  unmatched" (I4-ready).
+- Of 14,181 declaration entities, 11,687 have no export: overwhelmingly
+  castxml ctor/dtor placeholders and inline/template members of a C++-heavy
+  header surface. The 10.9k unmatched exports are the binary's internal
+  and template-instantiation symbols no public header declares.
+- Both comparisons report the same 2,675 findings (verdict COMPATIBLE).
 
 ### Remaining documented gaps
 
