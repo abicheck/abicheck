@@ -1441,6 +1441,12 @@ def _clear_process_caches() -> None:
     over every live object would trigger side effects on objects with a dynamic
     ``__getattr__`` (e.g. pytest's mark objects synthesise attributes on access).
     """
+    from abicheck.workflows.memory_trace import gc_census_is_safe
+
+    # A heap census beside another live thread corrupts that thread's
+    # `tuple(...)` construction (`memory_trace.gc_census_is_safe`).
+    if not gc_census_is_safe():
+        raise RuntimeError("cannot reset lru_caches while other threads run")
     lru_type = type(functools.lru_cache(maxsize=1)(lambda: None))
     for obj in gc.get_objects():
         if isinstance(obj, lru_type):

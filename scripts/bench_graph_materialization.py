@@ -65,7 +65,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import gc
 import json
 import os
 import shutil
@@ -122,7 +121,10 @@ def _child(variant: str, argv: list[str]) -> int:
             "graph_edges_before_facts": before[1],
             "graph_nodes": after[0],
             "graph_edges": after[1],
-            "gc_objects": len(gc.get_objects()),
+            # `None` inside a release fan-out worker: a census taken while
+            # other workers run breaks their `tuple(...)` construction
+            # (`memory_trace.gc_census_is_safe`).
+            "gc_objects": memory_trace.gc_object_count(),
         }
         memory_trace.counts("bench.attach", **record)
         side = os.environ.get("BENCH_SIDECAR")
