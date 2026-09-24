@@ -8030,21 +8030,31 @@ Above the ~1.2 s fixed floor, the added cost grows with a marginal exponent of
 therefore close to quadratic, not linear, in the member count. Peak RSS stays
 flat (~230 → 365 MB), so this is time, not memory.
 
-Profile of the 16-library run: the per-member work is dominated by
-`workflows/bundle_symbol_status.build_bundle_signature_evidence` →
-`symbol_signature_statuses` → `qualified_name_segments_walk.collect_and_flag`
-(~2M calls), plus ~78k `Path.resolve` calls. Each member is dumped and walked
-against the release's **union** header set, so every member's cost grows with
-the total header count, which is proportional to N. This is the performance
-face of the "`-H`/`--header` set is applied to every member" entry below. Its
-steps 2/3 (giving each member only its own headers, or computing the
-release-scoped part once) would also remove the N² term.
+**Partly fixed (2026-09).** py-spy (the first cProfile reading misattributed
+worker-thread time to `bundle_symbol_status`) showed the per-member time
+going to work over the union header set. The two largest pieces are now
+memoized:
 
-The gate's library-axis budget is 2.0, which catches this getting worse
-without blessing it. Lower it to ~1.3 when the per-member walk is shared or
-scoped. The oneDAL receipts (`performance.md`, "oneDAL solo L2 compare")
-involve a handful of libraries with 125 header roots, which is where the same
-term would show up at real scale.
+- extraction-contract fingerprinting resolved paths on every dependency ×
+  header/include-root test, about 35% at 16 libraries. It now resolves each
+  path once per computation (`comparability_fields`).
+- the C++20 dialect scan ran several times per dump. It is now
+  content-validated and memoized in-process (`extract/header_scan_memo.py`).
+
+Result: 10 libraries 11.5 s → 8.6 s and 16 libraries 32.2 s → 19.1 s, with
+the marginal exponent over 1–10 falling from 1.64 to 1.39. The gate budget is
+now 1.7.
+
+**What remains** is many small per-member walks of the union set: header
+expansion, inferred include roots, dependency-scope roots, one `clang -M`
+include probe per header, and the include-graph gate's deliberate per-probe
+memory re-read. Each is linear per member, so the release is still
+super-linear. This is the performance face of the "`-H`/`--header` set is
+applied to every member" entry below. Its steps 2/3 remove all of these at
+once: give each member only its own headers, or compute the release-scoped
+part once. Lower the budget toward ~1.1 when that lands. The oneDAL receipts
+(`performance.md`, "oneDAL solo L2 compare") involve a handful of libraries
+with 125 header roots, which is where this term shows up at real scale.
 
 ### ~~`compare --format` repeated silently keeps only the last format~~ — CLOSED by the export grammar
 
@@ -8340,21 +8350,11 @@ it is a divergence waiting for a front-end change to expose it.
 
 **Update (2026-09-17), read this first.** The release product model landed:
 
-**Performance face of the same gap (2026-09).** Because every member is
-dumped against the union header/include set, per-member work that walks that
-set grows with the member count. The release total therefore grows
-super-linearly. On a generated fixture with 2 headers per library, 16
-libraries took 32.2 s against 6.9 s for 7. The two largest such walks
-are now shared or memoized:
-extraction-contract path resolution (`comparability_fields`) and the C++20
-dialect scan (`extract/header_scan_memo.py`). That brought 16 libraries to
-19.1 s and the marginal cost exponent over 1–10 libraries from 1.64 to 1.39.
-What remains is many small linear walks spread across the per-member dump:
-header expansion, inferred include roots, dependency-scope roots, one
-`clang -M` include probe per header, and the per-probe memory re-read the
-include-graph gate does on purpose. Steps 2/3 below remove all of them at
-once, by giving a member only its own headers or computing the
-release-scoped part once. Chasing each walk separately would not.
+**Performance face of the same gap (2026-09).** Every member walks the
+union header set, so the release cost grows super-linearly with its member
+count. See "Multi-library L2 compare scales quadratically with library count"
+above for the measurements, what has been memoized, and why steps 2/3 below
+are the complete fix.
 a directory/package comparison now judges **one** public contract backed by
 **several** binary providers (`docs/learn/products-not-libraries.md` § "One
 public surface, many providers"). Concretely, against the three steps this

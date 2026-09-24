@@ -508,7 +508,7 @@ sweeps two axes through the real CLI and gates how cost **grows**:
 | Axis | Operation | Sizes | Budget (marginal exponent) | Measured (2026-09, 4 CPUs) |
 |---|---|---|---:|---:|
 | `headers` | `compare --depth headers`, one library | 1 / 4 / 12 / 30 headers | 1.4 | 0.95 (1.3 s → 2.6 s) |
-| `libraries` | directory `compare` (release fan-out), 2 headers each | 1 / 3 / 6 / 10 libraries | 2.0 | 1.64 (1.3 s → 11.5 s) |
+| `libraries` | directory `compare` (release fan-out), 2 headers each | 1 / 3 / 6 / 10 libraries | 1.7 | 1.39 (1.2 s → 8.6 s); 1.64 (→ 11.5 s) before the fixes below |
 
 Peak process-tree RSS is gated at 1024 MB per point (observed ≤ 365 MB).
 The whole gate takes about 75 s at `--repeat 3`.
@@ -521,15 +521,25 @@ floor measures the work the axis *adds*: a linear step reads ~1.0, and a step
 that redoes all previous units' work reads ~2.0. If the largest point is less
 than 0.25 s above the floor, the sweep fails as unfittable rather than passing.
 
-**The library axis is super-linear today, and the budget does not bless
-that.** Measured further out: 1 → 1.25 s, 3 → 2.4 s, 7 → 6.9 s,
-16 → 32.2 s. Profiling the 16-library run puts the cost in
-`workflows/bundle_symbol_status.build_bundle_signature_evidence` →
-`qualified_name_segments_walk.collect_and_flag` (2M calls). Every member walks
-the release's *union* public header set, so per-member work grows with the
-member count and the total grows roughly quadratically. The 2.0 budget exists
-to catch it getting *worse*. Lower it to ~1.3 once the per-member walk is
-shared. Recorded in [Known gaps](known-gaps.md#multi-library-l2-compare-scales-quadratically-with-library-count).
+**The library axis is still super-linear, and the budget does not bless
+that.** Every member of a directory compare is dumped against the release's
+*union* header and include set, so any per-member step that walks that set
+grows with the member count. The total then grows faster than linearly. The
+two largest such steps are now memoized:
+
+- contract fingerprinting's path resolution (`comparability_fields`), about
+  35% of wall time at 16 libraries;
+- the C++20 dialect scan (`extract/header_scan_memo.py`), which ran several
+  times per dump over the identical set.
+
+The first measurement blamed `bundle_symbol_status` → `qualified_name_segments_walk`.
+That was a profiling artifact: cProfile attributed worker threads' time
+wrongly, and py-spy corrected it. Before → after, 4 CPUs, cold cache:
+6 libraries 5.0 s → 4.2 s, 10 libraries 11.5 s → 8.6 s,
+and 16 libraries 32.2 s → 19.1 s.
+The 1.7 budget catches regression; lower it toward ~1.1 once members stop
+receiving the union set. Recorded in
+[Known gaps](known-gaps.md#multi-library-l2-compare-scales-quadratically-with-library-count).
 
 ### Real-integration profiles (oneDAL, SVS, PVXS)
 
@@ -752,7 +762,8 @@ peak-memory tracking and PR-vs-base drift detection. Current status:
 | **Historical / PR-vs-base regression** | ✅ covered (now gating) | `--baseline`/`--regress-tolerance` + the `regression` workflow job measure the base branch and PR head on the same runner and flag scenarios that got slower by more than the tolerance — catching *gradual* drift the per-run exponent misses. `continue-on-error` is dropped, so it now blocks. See [Baseline regression](#baseline-regression). |
 | **Dump / snapshot creation (DWARF/PE/PDB)** | ⚠️ partial | The synthetic harness can't run the real parsers. The ELF **symbol-table** parse **and** the **DWARF** debug-info parse (`-g` build) are now guarded by `tests/test_perf_dump_scaling.py` (`integration`, gcc-only) — DWARF being the dominant real-library dump cost (ICU 18.6 MB snapshot, openblas 23 MB / 9.5 s). The `serialize` scenario proxies the rest of the pipeline. **PE/COFF + PDB parsing remains unbenchmarked** — those need a committed binary or a synthetic byte-stream generator (no Linux-only toolchain produces them). |
 | Appcompat HTML / stack analysis / appcompat filtering | ⚠️ not benchmarked | `stack_checker` runs one `compare()` per dependency (inherent). Appcompat filtering uses set-membership lookups (`appcompat.py` — O(1) per change, **likely already fine**) and `appcompat_html.py` is linear by inspection; neither is timed. |
-| Bundle / multi-library & environment-matrix compare | ⚠️ not benchmarked | O(libraries) compares; per-library cost is covered, cross-library orchestration is not. |
+| Directory multi-library compare (release fan-out) | ✅ covered (scaling) | `check_l2_scaling_perf.py`'s library axis: 1 / 3 / 6 / 10 libraries through the real CLI, marginal exponent gated at 1.7 (measured 1.39). |
+| Bundle / environment-matrix compare | ⚠️ not benchmarked | Per-library cost is covered; bundle and environment-matrix orchestration is not. |
 
 ### Recommended next steps (in priority order)
 
@@ -766,9 +777,10 @@ peak-memory tracking and PR-vs-base drift detection. Current status:
    gcc + `-g`); the PE/COFF and PDB parsers still need a committed binary or a
    synthetic byte-stream generator behind the `integration` marker (no Linux-only
    toolchain emits them).
-3. **Benchmark the cross-library orchestration** — bundle / environment-matrix
-   compares are O(libraries) over an already-covered per-library cost, but the
-   orchestration layer (and appcompat/stack fan-out) is still untimed.
+3. **Benchmark bundle / environment-matrix orchestration** — directory
+   multi-library scaling is covered by the L2 scaling gate. Bundle and
+   environment-matrix orchestration, including appcompat/stack fan-out, is
+   still untimed.
 4. ~~**Optimise the super-linear residuals**~~ — done: fix #8 linearized the
    enrichment (typedef/union/vtable/enum/opaque), fix #9 the opaque pointer-only
    check (`type_churn`). No quadratic `compare()` path remains at tracked sizes.

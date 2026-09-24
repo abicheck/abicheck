@@ -92,17 +92,26 @@ DEFAULT_SIZES: dict[str, tuple[int, ...]] = {
 LIBRARY_AXIS_HEADERS = 2
 DEFAULT_REPEAT = 3
 DEFAULT_TIMEOUT_SECONDS = 600.0
-#: Default marginal-exponent budgets, per axis. The header axis is linear today
-#: (~1.0). The library axis is *not*: every member of a release re-walks the
-#: whole release's union header set (see docs/contribute/performance.md,
-#: "Multi-library L2 scaling"), so it measures ~1.3-1.6 over these sizes and
-#: ~1.9 by 16 libraries. Its budget is set to catch that getting worse, not to
-#: bless it -- lower it when the product fix lands.
-DEFAULT_MAX_EXPONENT: dict[str, float] = {"headers": 1.4, "libraries": 2.0}
+#: Default marginal-exponent budgets, per axis. The header axis is linear
+#: (~1.0). The library axis is still super-linear: every member of a release
+#: is dumped against the whole release's union header set, so per-member work
+#: grows with the member count. It measures ~1.4 over these sizes (it was
+#: ~1.64 before contract path resolution and the C++20 scan were memoized).
+#: The budget catches it getting worse. Lower it toward ~1.1 when members stop
+#: receiving the union set (docs/contribute/known-gaps.md, "Multi-library L2
+#: compare scales quadratically with library count").
+DEFAULT_MAX_EXPONENT: dict[str, float] = {"headers": 1.4, "libraries": 1.7}
 DEFAULT_MAX_RSS_MB = 1024.0
 #: Below this marginal cost (seconds) the largest point is indistinguishable from
 #: the floor, and any exponent fitted through it is noise.
 MIN_MARGINAL_SECONDS = 0.25
+#: A point whose margin over the floor is positive but below this is left out
+#: of the fit as unresolved. Its log is dominated by timing noise: margins of
+#: 0.01 s, 0.10 s and 2.0 s at 3/6/10 libraries fit an exponent of ~3.4 purely
+#: through the first point. A point at or *below* the floor is different: it
+#: stays in (clamped), because a small n becoming faster than n=1 is itself a
+#: signal the fit must not drop.
+NOISE_MARGIN_SECONDS = 0.05
 
 
 @dataclass
@@ -261,11 +270,19 @@ def marginal_exponent(points: list[Point]) -> tuple[float | None, str | None]:
         )
     xs, ys = [], []
     for n, wall in rest:
+        margin = wall - floor
+        if 0 < margin < NOISE_MARGIN_SECONDS:
+            continue  # unresolved: see NOISE_MARGIN_SECONDS
         # A point at or under the floor carries no marginal signal; clamp it to
         # a tiny positive margin instead of dropping it, so a regression that
         # makes small n *faster* than n=1 cannot shrink the fit to two points.
         xs.append(math.log(n - 1))
-        ys.append(math.log(max(wall - floor, 1e-3)))
+        ys.append(math.log(max(margin, 1e-3)))
+    if len(xs) < 2:
+        return None, (
+            f"fewer than two points are resolvably above the floor (a margin "
+            f"under {NOISE_MARGIN_SECONDS}s is timing noise) -- enlarge the sweep"
+        )
     mean_x, mean_y = statistics.fmean(xs), statistics.fmean(ys)
     denom = sum((x - mean_x) ** 2 for x in xs)
     slope = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / denom
