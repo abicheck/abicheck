@@ -49,6 +49,7 @@ from .declarator_qualifiers import (
     _is_declarator_group,
     _split_at_trailing_param_list,
 )
+from .nesting_scan import _find_matching_paren, _split_top_level_commas
 
 __all__ = ["canonicalize_function_signature_param_type"]
 
@@ -242,49 +243,6 @@ def _decay_top_level_array(canonical_type: str) -> str:
         return canonical_type
     prefix = canonical_type[: bracket_positions[0]].rstrip()
     return f"{prefix} *"
-
-
-def _split_top_level_commas(s: str) -> list[str]:
-    """Split *s* on commas that sit at nesting depth 0 (outside any
-    ``<...>``/``(...)``/``[...]``) -- the boundaries between a parameter
-    list's own individual parameters, as opposed to a comma nested inside
-    one parameter's own type (a template-argument list, a nested callback's
-    own parameter list).
-    """
-    depth = 0
-    parts: list[str] = []
-    current: list[str] = []
-    for ch in s:
-        if ch in "<([":
-            depth += 1
-            current.append(ch)
-        elif ch in ">)]":
-            depth = max(0, depth - 1)
-            current.append(ch)
-        elif ch == "," and depth == 0:
-            parts.append("".join(current))
-            current = []
-        else:
-            current.append(ch)
-    parts.append("".join(current))
-    return parts
-
-
-def _find_matching_paren(s: str, open_idx: int) -> int:
-    """Index of the ``)`` matching the ``(`` at *open_idx* (which must
-    itself be ``"("``), tracking only paren nesting -- ``s[open_idx]`` is
-    always ``(`` at every call site. Defensively returns ``len(s)`` for a
-    malformed, unmatched string rather than raising.
-    """
-    depth = 0
-    for i in range(open_idx, len(s)):
-        if s[i] == "(":
-            depth += 1
-        elif s[i] == ")":
-            depth -= 1
-            if depth == 0:
-                return i
-    return len(s)
 
 
 def _normalize_param_list_contents(inner: str, depth: int) -> str:
