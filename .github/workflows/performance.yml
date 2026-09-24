@@ -883,6 +883,26 @@ jobs:
             cat base_l2.log >> reports/perf/l2_cli_regression.txt
           fi
 
+      # Growth-rate gate over the same real CLI: a header-count sweep on one
+      # library and a library-count sweep through a directory compare (the
+      # release fan-out). Head-only and absolute -- it gates the *marginal*
+      # cost exponent of each axis and a peak process-tree RSS ceiling, so it
+      # needs no base run and catches a change in shape (a per-library step
+      # that starts re-doing every other library's work) that a one-fixture
+      # PR-vs-base comparison cannot see. ~75s locally at --repeat 3. Runs
+      # even when the step above failed, so one lane's failure never hides
+      # the other's. Budgets and the measured library-axis superlinearity:
+      # docs/contribute/performance.md, "L2 scaling gate".
+      - name: L2 scaling gate (headers x libraries)
+        if: success() || failure()
+        run: |
+          set -euo pipefail
+          mkdir -p reports/perf
+          python scripts/check_l2_scaling_perf.py --require-toolchain \
+            --repeat 3 \
+            --json-out reports/perf/l2_cli_scaling.json \
+            --markdown | tee reports/perf/l2_cli_scaling.txt
+
       - name: Write job summary
         if: always()
         run: |
@@ -898,6 +918,10 @@ jobs:
             echo '```'
             cat reports/perf/l2_cli_regression.txt 2>/dev/null || echo "(not a pull_request run)"
             echo '```'
+            echo ""
+            echo "### Scaling (marginal cost exponent per axis)"
+            echo ""
+            cat reports/perf/l2_cli_scaling.txt 2>/dev/null || echo "(scaling gate did not run)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4

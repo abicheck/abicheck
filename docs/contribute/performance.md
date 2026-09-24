@@ -498,6 +498,39 @@ hundreds of milliseconds.
 Note also that `--no-spy` disables every extraction-count assertion, so it is a
 measurement aid, never a cheaper way to run the lane.
 
+### L2 scaling gate (headers x libraries)
+
+`scripts/check_l2_scaling_perf.py` runs in the `l2-cli-perf` PR job after the
+PR-vs-base comparison. That comparison measures one small fixture, so it
+catches a constant-factor regression but not a change in *shape*. This gate
+sweeps two axes through the real CLI and gates how cost **grows**:
+
+| Axis | Operation | Sizes | Budget (marginal exponent) | Measured (2026-09, 4 CPUs) |
+|---|---|---|---:|---:|
+| `headers` | `compare --depth headers`, one library | 1 / 4 / 12 / 30 headers | 1.4 | 0.95 (1.3 s → 2.6 s) |
+| `libraries` | directory `compare` (release fan-out), 2 headers each | 1 / 3 / 6 / 10 libraries | 2.0 | 1.64 (1.3 s → 11.5 s) |
+
+Peak process-tree RSS is gated at 1024 MB per point (observed ≤ 365 MB).
+The whole gate takes about 75 s at `--repeat 3`.
+
+The gated number is the **marginal** exponent: the slope of
+`log(wall(n) - wall(1))` against `log(n - 1)`. Every CLI run pays a ~1 s fixed
+floor (startup, imports, config, report writing), so a raw log-log slope at
+these sizes reads close to 0 whatever the product does. Subtracting the `n = 1`
+floor measures the work the axis *adds*: a linear step reads ~1.0, and a step
+that redoes all previous units' work reads ~2.0. If the largest point is less
+than 0.25 s above the floor, the sweep fails as unfittable rather than passing.
+
+**The library axis is super-linear today, and the budget does not bless
+that.** Measured further out: 1 → 1.25 s, 3 → 2.4 s, 7 → 6.9 s,
+16 → 32.2 s. Profiling the 16-library run puts the cost in
+`workflows/bundle_symbol_status.build_bundle_signature_evidence` →
+`qualified_name_segments_walk.collect_and_flag` (2M calls). Every member walks
+the release's *union* public header set, so per-member work grows with the
+member count and the total grows roughly quadratically. The 2.0 budget exists
+to catch it getting *worse*. Lower it to ~1.3 once the per-member walk is
+shared. Recorded in [Known gaps](known-gaps.md#multi-library-l2-compare-scales-quadratically-with-library-count).
+
 ### Real-integration profiles (oneDAL, SVS, PVXS)
 
 `scripts/l2_real_profiles.py` pins the live integrations declaratively: each
@@ -627,7 +660,8 @@ convention — root `AGENTS.md`):
   venvs in turn), then aggregates medians across rounds — a real, separate
   piece of orchestration, not a flag on the existing single-shot invocation.
 - **No scheduled real-scale lane.** Every gated lane is synthetic and small
-  (≤ 20k functions in-process, a handful of headers through the CLI). The
+  (≤ 20k functions in-process, ≤ 30 headers / 10 libraries through the CLI
+  — see "L2 scaling gate" above). The
   oneDAL receipts above — minutes of wall time, ~16 GB RSS, and a verdict that
   depends on path-independent identity — are reproducible only by hand via
   `scripts/l2_real_profiles.py`, and `scripts/bench_release_memory.py`,
