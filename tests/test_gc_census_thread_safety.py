@@ -237,3 +237,31 @@ def test_benchmark_cache_reset_still_clears_with_another_thread_alive() -> None:
     finally:
         release.set()
         t.join(10)
+
+
+def test_harness_copy_of_the_guard_agrees_with_memory_trace() -> None:
+    """`perf_cache_reset` restates the guard (it must run against an older
+    installed package); the two must answer alike with and without a thread."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_perf_cache_reset_under_test", _REPO / "scripts/perf_cache_reset.py"
+    )
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    started, release = threading.Event(), threading.Event()
+
+    def park() -> None:
+        started.set()
+        release.wait(10)
+
+    t = threading.Thread(target=park)
+    t.start()
+    try:
+        started.wait(10)
+        assert mod.gc_census_is_safe() is memory_trace.gc_census_is_safe() is False
+    finally:
+        release.set()
+        t.join(10)
+    assert mod.gc_census_is_safe() is memory_trace.gc_census_is_safe()

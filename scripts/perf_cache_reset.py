@@ -23,6 +23,16 @@ from __future__ import annotations
 import functools
 import gc
 import sys
+import threading
+
+
+def gc_census_is_safe() -> bool:
+    """``abicheck.workflows.memory_trace.gc_census_is_safe``, restated.
+
+    Not imported: CI's memory-regression job runs this harness against the
+    *base* revision's installed package, which may predate that function.
+    """
+    return threading.active_count() == 1
 
 
 def _lru_cache_candidates(*, heap_census: bool) -> list[object]:
@@ -67,8 +77,6 @@ def clear_process_caches() -> None:
     over every live object would trigger side effects on objects with a dynamic
     ``__getattr__`` (e.g. pytest's mark objects synthesise attributes on access).
     """
-    from abicheck.workflows.memory_trace import gc_census_is_safe
-
     lru_type = type(functools.lru_cache(maxsize=1)(lambda: None))
     for obj in _lru_cache_candidates(heap_census=gc_census_is_safe()):
         if isinstance(obj, lru_type):
