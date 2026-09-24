@@ -1516,3 +1516,30 @@ def dimension_assurance(
         dimension: ("unverified" if dimension in mismatch.dimensions else "trusted")
         for dimension in sorted(COMPARABILITY_DIMENSIONS)
     }
+
+
+def source_graph_identity_mismatch(old_version: int, new_version: int) -> str | None:
+    """Why two L5/header source graphs cannot be diffed node-by-node, or
+    ``None`` when they can (evidence-entity-model Phase 1, invariant I1).
+
+    Graphs written before ``SOURCE_GRAPH_VERSION`` 3 key some entities under
+    ids the I1 identity function no longer produces (a C-linkage function as
+    ``qualified#signature``, a flat-path type by its bare leaf, a castxml
+    constructor placeholder as ``decl://``). Diffing such a graph against a
+    v3 one would read every renamed node as removed-and-added. The old ids
+    cannot be rewritten on load without evidence the stored graph does not
+    carry (the AST ``qualType`` behind a signature hash, or which scope a
+    bare-leaf node stood for), so the L5 layer of such a pair is reported
+    *not compared* instead -- never silently mismatched. Two graphs on the
+    same side of the boundary compare as before. Re-dumping the older side
+    restores the comparison.
+    """
+    from .model.source_graph import GRAPH_IDENTITY_SCHEME_VERSION as v3
+
+    if (old_version >= v3) == (new_version >= v3):
+        return None
+    return (
+        f"source graph not compared: identity scheme v{old_version} vs "
+        f"v{new_version} (graphs before v{v3} use pre-I1 node ids; re-dump "
+        "the older side to compare)"
+    )
