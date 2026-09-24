@@ -480,6 +480,27 @@ def demangle_batch(
     return result
 
 
+def demangle_one_batched(symbol: str) -> str | None:
+    """``demangle_batch([symbol]).get(symbol)``, without the batch overhead
+    when the answer is already cached.
+
+    For a caller that asks one name at a time after the names were batched
+    up front (``compare.template_surface.qualified_declaration_name`` made
+    ~225k single-name ``demangle_batch`` calls over ~37k distinct names).
+    Same gate first (a Mach-O ``__Z`` spelling is never answered from a
+    permissive caller's entry), same cache, and the cache has no recency to
+    update on a hit, so the answer is identical by construction.
+    """
+    if not symbol or not _is_itanium_mangled(symbol):
+        return None
+    hit = _BATCH_CACHE_OK.get(symbol)
+    if hit is not None:
+        return hit
+    if symbol in _BATCH_CACHE_FAIL:
+        return None
+    return demangle_batch([symbol]).get(symbol)
+
+
 def _reset_demangle_batch_cache() -> None:
     """Test helper — clear the process-wide cache."""
     global _cppfilt_binary_confirmed_missing  # noqa: PLW0603
