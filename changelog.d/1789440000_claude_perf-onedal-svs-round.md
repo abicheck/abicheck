@@ -25,3 +25,11 @@
   freeze/thaw copy for an owned, canonical payload
   (`GraphSection.document_from_owned`). oneDAL baseline load 31.4 s to
   18.1 s, identical snapshot.
+- Writing a sectioned snapshot encodes each section once
+  (`section_dto_dict`, `GraphSection.validated_document`) and no longer
+  re-canonicalizes the finished sections: 28.4 s to 6.6 s for oneDAL's live
+  snapshot, byte-identical output.
+- zstd snapshots of 8 MiB or more are compressed in zstd's multi-threaded
+  mode (up to 8 workers). Its output does not depend on the worker count, so
+  stored bytes are the same on any machine; smaller snapshots keep their
+  existing bytes. Level 19 on oneDAL: 33.9 s to 21.6 s on four busy cores.

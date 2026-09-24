@@ -336,6 +336,30 @@ class SectionDTO:
         )
 
 
+def section_dto_dict(section_kind: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+    """``SectionDTO(section_kind, <current version>, payload).to_dict()``
+    without the freeze/thaw round trip -- the write-side counterpart of
+    `current_section_payload`.
+
+    Same validation (the header through `SectionDTO` itself, the payload
+    through `_mapping` and `canonical_form`) and the same value:
+    ``_unfreeze(_freeze(canonical_form(p)))`` is ``canonical_form(p)``. The
+    payload is a fresh canonical copy, so every value below the returned
+    dict's top level is already in canonical form.
+    """
+    header = SectionDTO(
+        section_kind=section_kind,
+        section_schema_version=SECTION_SCHEMA_VERSIONS[section_kind],
+        payload={},
+    )
+    _mapping(payload, "payload")
+    return {
+        "section_kind": header.section_kind,
+        "section_schema_version": header.section_schema_version,
+        "payload": canonical_form(payload),
+    }
+
+
 def current_section_payload(
     raw: Mapping[str, Any],
 ) -> tuple[str, dict[str, Any]] | None:

@@ -116,3 +116,63 @@ def test_graph_document_from_owned_rejects_like_from_document(payload: object) -
         GraphSection.from_document(payload)  # type: ignore[arg-type]
     with canonical_input_trusted(), pytest.raises(ValueError):
         GraphSection.document_from_owned(payload)  # type: ignore[arg-type]
+
+
+@settings(max_examples=200, deadline=None)
+@given(st.dictionaries(st.text(max_size=4), _json, max_size=5))
+def test_section_dto_dict_equals_dto_to_dict(payload: dict) -> None:
+    from abicheck.storage.dto import section_dto_dict
+
+    expected = SectionDTO(
+        section_kind=GRAPH_SECTION_KIND,
+        section_schema_version=SECTION_SCHEMA_VERSIONS[GRAPH_SECTION_KIND],
+        payload=payload,
+    ).to_dict()
+    got = section_dto_dict(GRAPH_SECTION_KIND, payload)
+    assert got == expected
+    assert list(got["payload"]) == list(expected["payload"])
+
+
+@settings(max_examples=200, deadline=None)
+@given(st.dictionaries(st.text(max_size=4), _json, max_size=5))
+def test_graph_validated_document_canonicalizes_to_round_trip(graph: dict) -> None:
+    from abicheck.storage.canonical import canonical_form
+    from abicheck.storage.graph_section_codec import GraphSection
+
+    payload = {"surface_graph": graph}
+    assert canonical_form(GraphSection.validated_document(payload)) == (
+        GraphSection.from_document(payload).to_document()
+    )
+
+
+def test_sectioned_document_round_trips_a_real_snapshot() -> None:
+    """End to end through both fast paths: write then read is lossless."""
+    from abicheck.model import AbiSnapshot, Function, Visibility
+    from abicheck.serialization import (
+        SCHEMA_VERSION,
+        snapshot_from_dict,
+        snapshot_to_dict,
+    )
+    from abicheck.storage.sectioned_document import (
+        from_sectioned_document,
+        to_sectioned_document,
+    )
+
+    snap = AbiSnapshot(
+        library="lib.so",
+        version="1",
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1fv",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+        ],
+    )
+    legacy = snapshot_to_dict(snap)
+    sectioned = to_sectioned_document(legacy, max_known_schema_version=SCHEMA_VERSION)
+    assert (
+        snapshot_to_dict(snapshot_from_dict(from_sectioned_document(sectioned)))
+        == legacy
+    )

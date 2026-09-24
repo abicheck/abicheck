@@ -144,6 +144,7 @@ from .dto import (
     legacy_section_to_dto,
     provenance_from_dto,
     provenance_to_dto,
+    section_dto_dict,
     semantic_ir_from_dto,
     semantic_ir_to_dto,
     types_from_dto,
@@ -419,12 +420,24 @@ def legacy_section_dtos(
         # its own dedicated DTO -- `_LEGACY_SECTION_CODECS` above -- instead
         # of the generic pass-through; the `else` branch is the fallback a
         # future, not-yet-specialized section kind would use.
-        codec = _LEGACY_SECTION_CODECS.get(section_kind)
-        if codec is not None:
-            to_dto_fn, _from_dto_fn = codec
-            section_dto = to_dto_fn(payload)
-        else:
-            section_dto = legacy_section_to_dto(section_kind, payload)
+        document_codec = _LEGACY_SECTION_DOCUMENT_CODECS.get(section_kind)
+        if document_codec is not None:
+            # `to_dto_fn(payload).to_dict()` (`_LEGACY_SECTION_CODECS`), minus
+            # the DTO's freeze/thaw copies: `section_dto_dict` returns the
+            # same dict. A codec that can validate without copying
+            # (`GraphSection.validated_document`) skips its own round trip
+            # too, since `section_dto_dict` canonicalizes the result anyway.
+            validated = getattr(document_codec, "validated_document", None)
+            document = (
+                validated(payload)
+                if validated is not None
+                else document_codec.from_document(payload).to_document()
+            )
+            section_dtos.append(
+                (section_kind, section_dto_dict(section_kind, document))
+            )
+            continue
+        section_dto = legacy_section_to_dto(section_kind, payload)
         section_dtos.append((section_kind, section_dto.to_dict()))
     if ir is not None or conflicts:
         section_dtos.append(

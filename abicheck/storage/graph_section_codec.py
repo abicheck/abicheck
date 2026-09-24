@@ -202,6 +202,16 @@ class GraphSection:
             return cls.from_document(payload).to_document()
         return {"surface_graph": dict(_validated_surface_graph(payload))}
 
+    @classmethod
+    def validated_document(cls, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """``cls.from_document(payload).to_document()`` up to
+        `canonical_form`: the same validation, returning the payload's own
+        ``surface_graph`` uncopied. For a caller that canonicalizes (and so
+        copies) the result next anyway -- `storage.dto.section_dto_dict` --
+        the codec's own canonicalize-freeze-thaw was a redundant pass over
+        the largest section a snapshot has."""
+        return {"surface_graph": _validated_surface_graph(payload)}
+
 
 def _validated_surface_graph(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     """`GraphSection.from_document`'s checks; returns ``surface_graph``.
