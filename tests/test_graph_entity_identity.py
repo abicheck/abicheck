@@ -291,3 +291,24 @@ def test_l4_conflicting_legacy_alias_joins_neither() -> None:
     assert source_entity_decl_node_id(g, a) == "decl://f_a"
     assert source_entity_decl_node_id(g, b) == "decl://f_b"
     assert "decl://f#sha256:1" not in g.identity_aliases
+
+
+def test_l4_unmangled_overloads_stay_distinct_by_signature() -> None:
+    """CodeRabbit asked whether L4 callables without a linker name merge:
+    they do not -- a present signature_hash is always part of the key."""
+    from abicheck.buildsource.source_abi import SourceEntity
+    from abicheck.buildsource.source_graph_build_source_abi import (
+        source_entity_decl_node_id,
+    )
+
+    g = SourceGraphSummary()
+    ids = {
+        source_entity_decl_node_id(
+            g,
+            SourceEntity(
+                id=h, kind="function", qualified_name="ns::W::W", signature_hash=h
+            ),
+        )
+        for h in ("sha256:aa", "sha256:bb")
+    }
+    assert len(ids) == 2
