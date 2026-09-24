@@ -49,6 +49,7 @@ from typing import Any, ClassVar
 
 from ..config_paths import discover_build_config as _discover_build_config
 from ..environment_matrix import EnvironmentMatrix
+from ..model.ownership_rules import OwnershipRules
 from ..policy.support_promise import (
     SUPPORT_PROMISE_POLICIES as _SUPPORT_PROMISE_POLICIES,
 )
@@ -60,6 +61,7 @@ from .build_config_schema import (
     parse_policy_overrides as _parse_policy_overrides,
     subkey_findings as _subkey_type_findings,
 )
+from .build_config_scope import parse_ownership_rules, scope_block as _scope_block
 from .compile_options_safety import (  # PR #1146 finding #2 (sibling leaf module)
     reject_plugin_loading_options as _reject_plugin_loading_options,
 )
@@ -231,6 +233,9 @@ class BuildConfig:
     #: set is the run's scope identity. Full rationale:
     #: ``docs/reference/config-file.md``'s ``scope:`` section.
     exclude_headers: list[str] = field(default_factory=list)
+    #: ``scope.dependencies``/``private_headers``/``private_namespaces``
+    #: (``extract.ownership``); see ``build_config_scope.py``.
+    ownership: OwnershipRules = field(default_factory=OwnershipRules)
     #: ``scope.show_redundant`` — a reporting/FP-tuning toggle demoted off the CLI
     #: (ADR-040 Lever 2). ``None`` = unset. The ``--show-filtered`` debugging view
     #: stays a visible CLI flag.
@@ -427,6 +432,9 @@ class BuildConfig:
                 "public_header_dirs",
                 "exclude_headers",
                 "on_incomplete",
+                "dependencies",
+                "private_headers",
+                "private_namespaces",
             }
         ),
         "suppression": frozenset({"strict", "require_justification"}),
@@ -609,6 +617,7 @@ class BuildConfig:
             scope_show_redundant=_opt_bool(scope, "show_redundant"),
             public_header_dirs=_strs(scope, "public_header_dirs"),
             exclude_headers=_strs(scope, "exclude_headers"),
+            ownership=parse_ownership_rules(scope),
             scope_on_incomplete=_one_of(
                 _opt_str(scope, "on_incomplete"),
                 ("warn", "block"),
@@ -733,25 +742,6 @@ class BuildConfig:
                 severity[key] = val
         return severity
 
-    def _scope_block(self) -> dict[str, Any]:
-        """Non-default ``scope:`` keys (public-surface FP tuning)."""
-        scope: dict[str, Any] = {}
-        if self.scope_public is not None:
-            scope["public"] = self.scope_public
-        if self.collapse_versioned_symbols is not None:
-            scope["collapse_versioned_symbols"] = self.collapse_versioned_symbols
-        if self.public_symbols:
-            scope["public_symbols"] = list(self.public_symbols)
-        if self.scope_show_redundant is not None:
-            scope["show_redundant"] = self.scope_show_redundant
-        if self.public_header_dirs:
-            scope["public_header_dirs"] = list(self.public_header_dirs)
-        if self.exclude_headers:
-            scope["exclude_headers"] = list(self.exclude_headers)
-        if self.scope_on_incomplete is not None:
-            scope["on_incomplete"] = self.scope_on_incomplete
-        return scope
-
     def _suppression_block(self) -> dict[str, Any]:
         """Non-default ``suppression:`` keys (hygiene policy)."""
         suppression: dict[str, Any] = {}
@@ -869,7 +859,7 @@ class BuildConfig:
             ("build", self._build_block()),
             ("sources", self._sources_block()),
             ("severity", self._severity_block()),
-            ("scope", self._scope_block()),
+            ("scope", _scope_block(self)),
             ("suppression", self._suppression_block()),
             ("source", self._source_block()),
             ("compile", self._compile_block()),

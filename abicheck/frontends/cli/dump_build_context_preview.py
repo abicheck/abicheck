@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING
 import click
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from ...dry_run import DryRunResult
@@ -48,6 +49,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "add_execution_options_dry_run_section",
+    "add_ownership_dry_run_section",
     "dry_run_build_context_preview",
 ]
 
@@ -120,3 +122,40 @@ def add_execution_options_dry_run_section(
         f"source frontend from folded context: "
         f"{opts.source_frontend_from_folded_context}",
     )
+
+
+def add_ownership_dry_run_section(
+    result: DryRunResult, config_path: Path | None, headers: Sequence[Path]
+) -> None:
+    """The ownership rules a real dump would apply, and each ``-H`` header's
+    owner and contract under them. Silent when no ownership key is set."""
+    from ...workflows.ownership_preview import is_unexpected, ownership_preview
+
+    preview = ownership_preview(config_path, headers)
+    if preview is None:
+        return
+    rules = preview.rules
+    result.add(
+        "Ownership",
+        f"project root: {preview.project_root}",
+        *(f"target root: {r}" for r in rules.target_roots),
+        *(
+            f"dependency {d.name}: {', '.join(d.header_roots)}"
+            for d in rules.dependencies
+        ),
+        *(f"private header: {p}" for p in rules.private_headers),
+        *(f"private namespace: {n}" for n in rules.private_namespaces),
+        *(
+            f"{h}: owner={d.owner} contract={d.contract} ({d.rule_id})"
+            for h, d in preview.headers
+        ),
+        "per-declaration ownership needs a parse; not shown by --dry-run",
+    )
+    if preview.error is not None:
+        result.block(f"scope ownership rules: {preview.error}")
+    for header, decision in preview.headers:
+        if is_unexpected(decision):
+            result.warn(
+                f"-H {header} is owner={decision.owner} contract={decision.contract}, "
+                "not public target API"
+            )

@@ -376,11 +376,31 @@ One new snapshot field, `AbiSnapshot.extraction_scope` (schema bump):
 | Phase | Scope | Size | Behaviour change |
 |---|---|---|---|
 | **0 — Record the numbers** | Done: `scripts/bench_extraction_scope.py` produced M1–M4 for SVS and oneDAL. Every later phase reruns it and updates those tables. | S | none |
-| **1 — Classify and preview** | `extract/ownership.py`: one pure function, file path + rules → (owner, contract, rule id, diagnostics). Parse `scope.dependencies`/`private_*` in `build_config.py` (not yet applied). The preview output. Property tests: rule-order independence, most-specific-root wins, `-I` never grants ownership, a system prefix never beats an explicit root. | M | none — report only |
+| **1 — Classify and preview** (landed) | `extract/ownership.py`: one pure function, file path + rules → (owner, contract, rule id, diagnostics). Parse `scope.dependencies`/`private_*` in `build_config.py` (not yet applied). The preview output. Property tests: rule-order independence, most-specific-root wins, `-I` never grants ownership, a system prefix never beats an explicit root. | M | none — report only |
 | **2 — Persist** | ADR. `extraction_scope` field, per-entity facts, comparability rule, digest fields. `dependency_evidence` accepted but only `full`. | M | new refusal between differently-configured snapshots |
 | **3 — `referenced` retention** | Apply the closure at parse time for both backends: the castxml parser (a linear seed-and-follow over the id map it already builds) and the clang streaming pruner (`dumper_clang_streaming.py`, which already skips system declarations at parse time). Same rule for the graph section. Gate: on SVS core and oneDAL, zero owned declarations lost against `full`, and the finding set on a real version pair unchanged except for dependency-internal kinds. | L | opt-in |
 | **4 — Prefilter accelerator** | Allow `--castxml-start <target namespaces>` only when Phase 1's classification, run on a cached full parse or on the first dump, shows zero owned declarations outside those namespaces. Otherwise ignore it with a diagnostic. Record `verified_lossless`. | S–M | opt-in |
 | **5 — Default** | Decide whether `referenced` becomes the default, using Phase 0 numbers on oneDAL and SVS. | S | possibly default |
+
+### Phase 1 as landed
+
+- Rules: `model/ownership_rules.py`. Classifier: `extract/ownership.py`
+  (`resolve_ownership_rules` + `classify`). Config: `scope.dependencies`,
+  `scope.private_headers`, `scope.private_namespaces`, parsed by
+  `buildsource/build_config_scope.py`. Preview: `workflows/ownership_preview.py`,
+  rendered by `dump --dry-run`.
+- The preview answers open question 3 for now: it rides `--dry-run` and
+  classifies the `-H` headers without parsing. Per-declaration counts
+  arrive with Phase 2, where each declaration records its owner, so no
+  `--explain-scope` flag was added.
+- `dependency_evidence` is not accepted yet. A key the run cannot act on
+  would be inert configuration; it arrives with the phase that honours it.
+- A dependency or toolchain declaration's contract is `external`, a fourth
+  value next to the three above: the target promises nothing about it, which
+  is different from "unknown".
+- Rule 7's diagnostic fires in one direction only: a target file declaring
+  into a namespace named like a configured dependency. The other direction
+  needs the target's namespaces, which no key states.
 
 ## Tests
 

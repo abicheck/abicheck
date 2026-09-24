@@ -93,8 +93,11 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 | Sub-key | Type |
 |---|---|
 | `collapse_versioned_symbols` | bool |
+| `dependencies` | list[{name: str, header_roots: list[str]}] |
 | `exclude_headers` | list[str] (or a single str) |
 | `on_incomplete` | str |
+| `private_headers` | list[str] (or a single str) |
+| `private_namespaces` | list[str] (or a single str) |
 | `public` | bool |
 | `public_header_dirs` | list[str] (or a single str) |
 | `public_symbols` | list[str] (or a single str) |

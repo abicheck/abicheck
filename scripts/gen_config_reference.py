@@ -89,7 +89,9 @@ def _subkey_type(
         return "list[str] (or a single str)"
     if subkey in dict_str_str_map.get(block, frozenset()):
         return "mapping[str, str]"
-    return "unspecified"
+    from abicheck.buildsource.build_config_schema import STRUCTURED_SUBKEY_TYPES
+
+    return STRUCTURED_SUBKEY_TYPES.get(block, {}).get(subkey, "unspecified")
 
 
 def render() -> str:

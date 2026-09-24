@@ -69,6 +69,7 @@
         "abicheck/buildsource/archive_graph.py",
         "abicheck/buildsource/build_config_io.py",
         "abicheck/buildsource/build_config_schema.py",
+        "abicheck/buildsource/build_config_scope.py",
         "abicheck/buildsource/build_query.py",
         "abicheck/buildsource/call_graph.py",
         "abicheck/buildsource/callback_graph.py",

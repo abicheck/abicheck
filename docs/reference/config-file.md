@@ -225,6 +225,51 @@ matches no header warns once for the whole run — including a
 directory/package comparison, where the rules are release-wide and are
 stated once rather than repeated per library.
 
+**Ownership keys** (`dependencies:`, `private_headers:`,
+`private_namespaces:`) say who owns each declaration a header parse sees:
+the target (this library), a named dependency, or the toolchain. **Today
+they are previewed, not applied**: `abicheck dump … --dry-run` prints the
+rules and the owner and contract of every `-H` header, and warns about a
+`-H` header that is not public target API. No dump keeps, drops or
+reclassifies a declaration because of them yet. The plan behind them is
+[Target ownership and extraction scope](../contribute/plans/target-ownership-and-extraction-scope.md).
+
+```yaml
+scope:
+  public_header_dirs: [include/svs/]      # the target's roots
+  dependencies:                           # named dependency roots
+    - name: fmt
+      header_roots: [include/svs/third-party/fmt/include/]
+  private_headers: [include/svs/*/detail/**]   # owned, not promised
+  private_namespaces: [svs::detail]
+```
+
+Roots are relative to the directory holding the config file. A `-H`
+directory is also a target root. The rules are applied in this order:
+
+1. An explicit root beats the system-path heuristic: a target installed
+   under `/usr/include/svs/` is still the target's.
+2. The most specific root wins: a dependency vendored inside a target root
+   belongs to the dependency. A root claimed by two owners is an error.
+3. A `-I` (include) directory is compile context. It never makes anything
+   target-owned.
+4. `private_headers` (fnmatch patterns, matched against the path relative
+   to the project root and the absolute path) and `private_namespaces`
+   narrow only target-owned declarations to `contract=private`.
+   `svs::detail` covers what is declared inside it (`svs::detail::X`), not
+   `svs::detailed`.
+5. A file no root claims, outside the system directories, is
+   `owner=unresolved`.
+6. A compiler builtin that castxml declares implicitly (`__atomic_*`,
+   `__builtin_*`, `__sync_*`) belongs to the toolchain, whichever file
+   castxml attributes it to.
+7. A declaration whose namespace disagrees with its file (a target file
+   declaring `fmt::formatter<svs::…>`) keeps the file's owner and gets a
+   diagnostic.
+
+There is deliberately no namespace-based ownership key: a namespace filter
+lost owned declarations on every real target measured (the plan's M2).
+
 `on_incomplete:` (`warn`, the default, or `block`) is Phase 7d's
 (one-comparison-product.md §4.1) CONFIG-only replacement for the former
 `compare --on-incomplete-scope` on the directory/package release fan-out —
