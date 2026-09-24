@@ -1422,6 +1422,29 @@ def _has_demangler() -> bool:
         return False
 
 
+def _lru_cache_candidates(*, heap_census: bool) -> list[object]:
+    """Objects that may be ``lru_cache`` wrappers.
+
+    The whole heap when that is safe. A heap census beside another live
+    thread breaks that thread's ``tuple(...)`` construction
+    (``memory_trace.gc_census_is_safe``), so with other threads alive this
+    falls back to every ``abicheck`` module's globals and their classes'
+    ``__dict__`` values. Every decorated function and method lives there;
+    only a cache created inside a closure is missed.
+    """
+    if heap_census:
+        return gc.get_objects()
+    found: list[object] = []
+    for name, module in list(sys.modules.items()):
+        if name != "abicheck" and not name.startswith("abicheck."):
+            continue
+        for value in list(getattr(module, "__dict__", {}).values()):
+            found.append(value)
+            if isinstance(value, type):
+                found.extend(list(value.__dict__.values()))
+    return found
+
+
 def _clear_process_caches() -> None:
     """Clear process-wide caches so the memory pass measures a *cold* run.
 
@@ -1443,12 +1466,8 @@ def _clear_process_caches() -> None:
     """
     from abicheck.workflows.memory_trace import gc_census_is_safe
 
-    # A heap census beside another live thread corrupts that thread's
-    # `tuple(...)` construction (`memory_trace.gc_census_is_safe`).
-    if not gc_census_is_safe():
-        raise RuntimeError("cannot reset lru_caches while other threads run")
     lru_type = type(functools.lru_cache(maxsize=1)(lambda: None))
-    for obj in gc.get_objects():
+    for obj in _lru_cache_candidates(heap_census=gc_census_is_safe()):
         if isinstance(obj, lru_type):
             try:
                 obj.cache_clear()

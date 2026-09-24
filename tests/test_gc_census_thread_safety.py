@@ -155,7 +155,7 @@ class TestGuard:
 _CENSUS_ALLOWLIST: dict[str, str] = {
     "abicheck/workflows/memory_trace.py": "the guard itself",
     "scripts/benchmark_scaling.py": (
-        "clears lru_caches before a traced run; asserts gc_census_is_safe() first"
+        "clears lru_caches before a traced run; heap census only when gc_census_is_safe(), else a namespace walk"
     ),
     "tests/test_gc_census_thread_safety.py": "the negative control above",
 }
@@ -202,3 +202,38 @@ class TestNoUnguardedCensus:
     def test_allowlisted_benchmark_still_checks_the_guard(self) -> None:
         text = (_REPO / "scripts/benchmark_scaling.py").read_text(encoding="utf-8")
         assert "gc_census_is_safe()" in text
+
+
+def test_benchmark_cache_reset_still_clears_with_another_thread_alive() -> None:
+    """The fallback path must still reach a module-level ``lru_cache``."""
+    import importlib.util
+
+    bench = sys.modules.get("benchmark_scaling")
+    if bench is None:
+        spec = importlib.util.spec_from_file_location(
+            "benchmark_scaling", _REPO / "scripts/benchmark_scaling.py"
+        )
+        assert spec and spec.loader
+        bench = importlib.util.module_from_spec(spec)
+        sys.modules["benchmark_scaling"] = bench  # dataclasses resolve via it
+        spec.loader.exec_module(bench)
+    from abicheck import demangle
+
+    demangle.demangle("x")  # a non-mangled name: cached without any subprocess
+    assert demangle.demangle.cache_info().currsize > 0
+    started, release = threading.Event(), threading.Event()
+
+    def park() -> None:
+        started.set()
+        release.wait(10)
+
+    t = threading.Thread(target=park)
+    t.start()
+    try:
+        started.wait(10)
+        assert not memory_trace.gc_census_is_safe()
+        bench._clear_process_caches()
+        assert demangle.demangle.cache_info().currsize == 0
+    finally:
+        release.set()
+        t.join(10)
