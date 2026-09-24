@@ -28,11 +28,20 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    # The fixture is an ELF shared object and the oracle names Itanium
+    # linker symbols (`_ZN2ns1fEi`); a PE/Mach-O build spells them otherwise.
+    pytest.mark.skipif(
+        not sys.platform.startswith("linux"),
+        reason="ELF/Itanium fixture: linker-name oracle is Linux-specific",
+    ),
+]
 
 HEADER = """\
 extern "C" int c_fn(int);
