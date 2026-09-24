@@ -64,7 +64,7 @@ from __future__ import annotations
 
 import enum
 import hashlib
-from collections.abc import Iterable
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
@@ -80,6 +80,7 @@ from .mangled_name import strip_macho_itanium_decoration
 if TYPE_CHECKING:
     from .declarations import Function, Variable
     from .entities import EnumType, RecordType
+    from .graph_facts import SurfaceGraphLike
 
 __all__ = [
     "UNRESOLVED_PREFIX",
@@ -96,6 +97,7 @@ __all__ = [
     "identity_for_variable",
     "is_linker_name",
     "is_unresolved_node_id",
+    "register_identity_alias",
     "SnapshotIdentities",
     "signature_key",
     "snapshot_identities",
@@ -273,6 +275,22 @@ def endpoint_key(identity: GraphEntityIdentity) -> str:
     return identity.node_id.split("://", 1)[1]
 
 
+def register_identity_alias(
+    graph: SurfaceGraphLike, alias: str, canonical: str
+) -> bool:
+    """Record *alias* -> *canonical* on *graph* unless the spelling already
+    names something else there (a node of its own, or an alias of another
+    entity). Such a spelling is ambiguous evidence, so it joins neither
+    entity and the build carries on; returns whether the alias was recorded.
+    The one registration path every producer uses, so none can abort a graph
+    build or merge two entities on a colliding spelling."""
+    try:
+        graph.add_identity_alias(alias, canonical)
+    except ValueError:
+        return False
+    return True
+
+
 class UnresolvedOccurrences:
     """Keeps repeated, *identical* unresolved evidence apart within one graph
     build: the n-th repeat (n >= 2) gets ``#<n>``. Resolved identities pass
@@ -374,7 +392,7 @@ def _strip_elaborated(spelling: str) -> str:
 
 
 def identity_for_typedef(
-    alias: str, target: str, tag_names: Iterable[str]
+    alias: str, target: str, tag_names: Collection[str]
 ) -> GraphEntityIdentity:
     """A typedef shares the ``type://`` space with records and enums -- the
     AST replay passes key a typedef'd name the same way. The one exception
@@ -382,7 +400,7 @@ def identity_for_typedef(
     and the typedef does *not* alias it (``typedef struct Foo Foo;`` does,
     and is then one node), the typedef gets its own discriminated id rather
     than merging with an unrelated tag."""
-    if alias in set(tag_names) and _strip_elaborated(target) != alias:
+    if alias in tag_names and _strip_elaborated(target) != alias:
         return type_identity(alias, discriminator="typedef")
     return type_identity(alias)
 
@@ -415,6 +433,15 @@ class SnapshotIdentities:
     typedefs: dict[str, GraphEntityIdentity]
 
 
+def _without_aliases_in(
+    ident: GraphEntityIdentity, taken: set[str]
+) -> GraphEntityIdentity:
+    kept = tuple(a for a in ident.aliases if a not in taken)
+    if kept == ident.aliases:
+        return ident
+    return GraphEntityIdentity(ident.node_id, ident.state, kept)
+
+
 def snapshot_identities(snap: SnapshotLike) -> SnapshotIdentities:
     """Build the table. A record/enum qualified spelling shared by more than
     one declaration (two ODR-distinct occurrences, or a scope-less legacy
@@ -424,6 +451,13 @@ def snapshot_identities(snap: SnapshotLike) -> SnapshotIdentities:
     occ = UnresolvedOccurrences()
     functions = tuple(occ.allocate(identity_for_function(f)) for f in snap.functions)
     variables = tuple(occ.allocate(identity_for_variable(v)) for v in snap.variables)
+    # An alias is only a second spelling of *this* entity while no other
+    # declaration owns that spelling as its canonical id (Mach-O: `exit`'s
+    # decorated `_exit` is also the plain name of a distinct `_exit`). Such an
+    # alias is ambiguous evidence, so it joins neither (CodeRabbit review).
+    canonical = {i.node_id for i in (*functions, *variables)}
+    functions = tuple(_without_aliases_in(i, canonical) for i in functions)
+    variables = tuple(_without_aliases_in(i, canonical) for i in variables)
     spellings: dict[str, int] = {}
     for name in (
         *(r.qualified_name or r.name for r in snap.types),

@@ -60,6 +60,7 @@ from ..model.graph_entity_identity import (
     IDENTITY_STATE_ATTR,
     GraphEntityIdentity,
     SnapshotIdentities,
+    register_identity_alias,
     snapshot_identities,
 )
 from ..model.graph_evidence_class import EdgeEvidenceClass
@@ -429,7 +430,7 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
     ) -> str:
         node_id = ident.node_id
         for alias in ident.aliases:
-            graph.add_identity_alias(alias, node_id)
+            register_identity_alias(graph, alias, node_id)
         graph.add_node(
             GraphNode(
                 id=node_id,

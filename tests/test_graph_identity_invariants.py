@@ -279,3 +279,56 @@ def test_clang_extractor_records_the_c_linkage_linker_name() -> None:
     assert _entity_names("c_fn", "", c_fn)["linker"] == "c_fn"
     assert "linker" not in _entity_names("ns::f", "_Z1fv", cxx)
     assert "linker" not in _entity_names("x", "")
+
+
+class TestAliasNeverCapturesAnotherEntity:
+    """CodeRabbit review: on Mach-O, ``exit``'s decorated linker spelling
+    ``_exit`` is the plain name of a distinct ``_exit`` function. The alias is
+    ambiguous evidence, so the two stay two nodes in either seed order and
+    the build never aborts."""
+
+    def _fns(self) -> list[Function]:
+        return [
+            Function(
+                name="exit", mangled="_exit", return_type="void", source_header="a.h"
+            ),
+            Function(
+                name="_exit", mangled="__exit", return_type="void", source_header="a.h"
+            ),
+        ]
+
+    def test_both_orders_keep_two_nodes(self) -> None:
+        for fns in (self._fns(), list(reversed(self._fns()))):
+            graph = _graph(_snap(functions=fns))
+            assert _decl_ids(graph) == {"decl://exit", "decl://_exit"}
+            assert "decl://_exit" not in graph.identity_aliases
+
+
+@settings(max_examples=60, deadline=None)
+@given(
+    st.lists(
+        st.tuples(
+            st.from_regex(r"_{0,2}[a-z]{1,3}", fullmatch=True),
+            st.from_regex(r"_{0,2}[a-z]{1,3}", fullmatch=True),
+        ),
+        min_size=1,
+        max_size=8,
+    ),
+    st.randoms(use_true_random=False),
+)
+def test_no_alias_is_another_declarations_canonical_id(
+    pairs: list[tuple[str, str]], rnd: random.Random
+) -> None:
+    """Oracle: the set of canonical ids the declarations themselves claim --
+    an alias equal to one of them would redirect that entity's node."""
+    from abicheck.model.graph_entity_identity import snapshot_identities
+
+    fns = [
+        Function(name=n, mangled=m, return_type="void", source_header="a.h")
+        for n, m in pairs
+    ]
+    rnd.shuffle(fns)
+    ids = snapshot_identities(_snap(functions=fns))
+    canonical = {i.node_id for i in ids.functions}
+    assert not any(a in canonical for i in ids.functions for a in i.aliases)
+    _graph(_snap(functions=fns))  # builds without raising

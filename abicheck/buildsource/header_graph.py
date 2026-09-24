@@ -99,6 +99,7 @@ from ..model.graph_entity_identity import (
     GraphEntityIdentity,
     SnapshotIdentities,
     endpoint_key,
+    register_identity_alias,
     snapshot_identities,
 )
 from ..model.graph_facts import (
@@ -493,7 +494,7 @@ def build_header_only_graph(
     def seed_decl(entity: Function | Variable, ident: GraphEntityIdentity) -> None:
         node_id = ident.node_id
         for alias in ident.aliases:
-            graph.add_identity_alias(alias, node_id)
+            register_identity_alias(graph, alias, node_id)
         attrs: dict[str, Any] = (
             {"visibility": entity.origin.value}
             if entity.origin != ScopeOrigin.UNKNOWN
