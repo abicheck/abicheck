@@ -1,0 +1,1837 @@
+{
+  "schema_version": 51,
+  "sections": {
+    "binary": {
+      "payload": {
+        "build_id": null,
+        "build_mode": null,
+        "elf": {
+          "abi_flags": [],
+          "bind_now": false,
+          "dynamic_flags": null,
+          "dynamic_flags_fact": {
+            "diagnostics": [],
+            "status": "not_collected",
+            "value": null
+          },
+          "e_flags": 0,
+          "ei_data": "",
+          "elf_class": 64,
+          "gnu_properties": [],
+          "has_dt_relr": false,
+          "has_executable_stack": false,
+          "has_fini": null,
+          "has_fini_fact": {
+            "diagnostics": [],
+            "status": "not_collected",
+            "value": null
+          },
+          "has_fortify_source": false,
+          "has_init": null,
+          "has_init_fact": {
+            "diagnostics": [],
+            "status": "not_collected",
+            "value": null
+          },
+          "has_stack_canary": false,
+          "has_static_tls": false,
+          "has_textrel": false,
+          "has_tls_symbols": false,
+          "has_writable_executable_segment": false,
+          "hash_styles": [],
+          "imports": [],
+          "interpreter": "",
+          "is_pie": false,
+          "is_symbolic": false,
+          "machine": "",
+          "min_kernel_version": "",
+          "needed": [],
+          "osabi": "",
+          "pointer_size": 8,
+          "relro": "none",
+          "rpath": "",
+          "runpath": "",
+          "soname": "",
+          "symbols": [
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "_ZN2ns3apiEPNS_6WidgetE",
+              "origin_lib": null,
+              "size": 0,
+              "sym_type": "func",
+              "value_alignment": 0,
+              "version": "",
+              "visibility": "default"
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "foo",
+              "origin_lib": null,
+              "size": 0,
+              "sym_type": "func",
+              "value_alignment": 0,
+              "version": "",
+              "visibility": "default"
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "mode_of",
+              "origin_lib": null,
+              "size": 0,
+              "sym_type": "func",
+              "value_alignment": 0,
+              "version": "",
+              "visibility": "default"
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "use_tag",
+              "origin_lib": null,
+              "size": 0,
+              "sym_type": "func",
+              "value_alignment": 0,
+              "version": "",
+              "visibility": "default"
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "g_count",
+              "origin_lib": null,
+              "size": 0,
+              "sym_type": "func",
+              "value_alignment": 0,
+              "version": "",
+              "visibility": "default"
+            },
+            {
+              "binding": "global",
+              "is_default": true,
+              "name": "gone",
+              "origin_lib": null,
+              "size": 0,
+              "sym_type": "func",
+              "value_alignment": 0,
+              "version": "",
+              "visibility": "default"
+            }
+          ],
+          "versions_defined": [],
+          "versions_required": {}
+        },
+        "elf_only_mode": false,
+        "kabi": null,
+        "macho": null,
+        "pe": null,
+        "platform": null,
+        "source_mtime": null,
+        "source_mtime_epoch": false,
+        "source_path": null,
+        "source_size": null
+      },
+      "section_kind": "binary",
+      "section_schema_version": 1
+    },
+    "build": {
+      "payload": {
+        "build_source_pack": null
+      },
+      "section_kind": "build",
+      "section_schema_version": 1
+    },
+    "debug": {
+      "payload": {
+        "ast_compile_args": [],
+        "ast_cplusplus_macro": null,
+        "ast_fallback_reason": null,
+        "ast_producer": null,
+        "ast_resolved_standard": null,
+        "ast_resolved_standard_fact": {
+          "diagnostics": [],
+          "status": "not_collected",
+          "value": null
+        },
+        "ast_sysroot": null,
+        "ast_toolchain": {},
+        "ast_toolchain_supported": null,
+        "ast_toolchain_unsupported_reasons": [],
+        "build_context_defines": [],
+        "castxml_var_access_facts_reliable": true,
+        "clang_deprecation_facts_reliable": true,
+        "clang_field_initializer_facts_reliable": true,
+        "clang_restrict_facts_reliable": true,
+        "clang_va_list_facts_reliable": true,
+        "clang_vtable_facts_reliable": true,
+        "dwarf": null,
+        "dwarf_advanced": null,
+        "fact_provenance": {},
+        "from_headers": false,
+        "frontend_context_kind": null,
+        "header_cv_facts_reliable": true,
+        "param_kind_facts_reliable": true,
+        "parsed_with_build_context": false
+      },
+      "section_kind": "debug",
+      "section_schema_version": 1
+    },
+    "declarations": {
+      "payload": {
+        "constant_entity_ids": {},
+        "constants": {},
+        "enums": [
+          {
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_scoped": null,
+            "is_scoped_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "members": [
+              {
+                "name": "A",
+                "value": 0
+              },
+              {
+                "name": "B",
+                "value": 1
+              }
+            ],
+            "name": "Mode",
+            "origin": "public_header",
+            "qualified_name": "ns::Mode",
+            "qualified_name_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "ns::Mode"
+            },
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "underlying_type": "int"
+          }
+        ],
+        "functions": [
+          {
+            "access": "public",
+            "binary_exported_fact": null,
+            "contract_attributes": null,
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "declared_in_headers_fact": null,
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "exception_spec": null,
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "in_public_contract_fact": null,
+            "is_compiler_generated": null,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_extern_c": false,
+            "is_hidden_friend": null,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_inline": false,
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": null,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "_ZN2ns3apiEPNS_6WidgetE",
+            "name": "ns::api",
+            "origin": "public_header",
+            "params": [
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "kind": "value",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "name": "w",
+                "pointer_depth": 0,
+                "type": "ns::Widget *"
+              }
+            ],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "int",
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "visibility": "public",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": null,
+            "contract_attributes": null,
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "declared_in_headers_fact": null,
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "exception_spec": null,
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "in_public_contract_fact": null,
+            "is_compiler_generated": null,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_extern_c": false,
+            "is_hidden_friend": null,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_inline": false,
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": null,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "",
+            "name": "over",
+            "origin": "public_header",
+            "params": [],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "int",
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "visibility": "public",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": null,
+            "contract_attributes": null,
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "declared_in_headers_fact": null,
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "exception_spec": null,
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "in_public_contract_fact": null,
+            "is_compiler_generated": null,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_extern_c": false,
+            "is_hidden_friend": null,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_inline": false,
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": null,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "",
+            "name": "over",
+            "origin": "private_header",
+            "params": [
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "kind": "value",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "name": "s",
+                "pointer_depth": 0,
+                "type": "Secret *"
+              }
+            ],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "int",
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "visibility": "hidden",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": null,
+            "contract_attributes": null,
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "declared_in_headers_fact": null,
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "exception_spec": null,
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "in_public_contract_fact": null,
+            "is_compiler_generated": null,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_extern_c": false,
+            "is_hidden_friend": null,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_inline": false,
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": null,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "foo",
+            "name": "foo",
+            "origin": "public_header",
+            "params": [
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "kind": "value",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "name": "d",
+                "pointer_depth": 0,
+                "type": "Dup *"
+              }
+            ],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "int",
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "visibility": "public",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": null,
+            "contract_attributes": null,
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "declared_in_headers_fact": null,
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "exception_spec": null,
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "in_public_contract_fact": null,
+            "is_compiler_generated": null,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_extern_c": false,
+            "is_hidden_friend": null,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_inline": false,
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": null,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "_ZN2ns3fooEv",
+            "name": "ns::foo",
+            "origin": "private_header",
+            "params": [],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "stat",
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "visibility": "hidden",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": null,
+            "contract_attributes": null,
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "declared_in_headers_fact": null,
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "exception_spec": null,
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "in_public_contract_fact": null,
+            "is_compiler_generated": null,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_extern_c": false,
+            "is_hidden_friend": null,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_inline": false,
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": null,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "mode_of",
+            "name": "mode_of",
+            "origin": "public_header",
+            "params": [],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "ns::Mode",
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "visibility": "public",
+            "vtable_index": null
+          },
+          {
+            "access": "public",
+            "binary_exported_fact": null,
+            "contract_attributes": null,
+            "contract_attributes_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "declared_in_headers_fact": null,
+            "deleted_from_dwarf": false,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "exception_spec": null,
+            "exception_spec_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "hidden_friend_owner": null,
+            "hidden_friend_owner_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "in_public_contract_fact": null,
+            "is_compiler_generated": null,
+            "is_compiler_generated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_const": false,
+            "is_deleted": false,
+            "is_explicit": null,
+            "is_explicit_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_extern_c": false,
+            "is_hidden_friend": null,
+            "is_hidden_friend_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_inline": false,
+            "is_noexcept": false,
+            "is_override": null,
+            "is_override_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_pure_virtual": false,
+            "is_static": false,
+            "is_variadic": null,
+            "is_variadic_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_virtual": false,
+            "is_volatile": false,
+            "mangled": "use_tag",
+            "name": "use_tag",
+            "origin": "public_header",
+            "params": [
+              {
+                "default": null,
+                "is_restrict": false,
+                "is_restrict_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_va_list": false,
+                "is_va_list_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "kind": "value",
+                "kind_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "name": "t",
+                "pointer_depth": 0,
+                "type": "Tag *"
+              }
+            ],
+            "ref_qualifier": "",
+            "return_pointer_depth": 0,
+            "return_type": "int",
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "visibility": "public",
+            "vtable_index": null
+          }
+        ],
+        "numpy_capi": null,
+        "python_api": null,
+        "python_ext": null,
+        "sycl": null,
+        "typedef_entity_ids": {},
+        "typedefs": {
+          "Tag": "struct Tag",
+          "stat": "int"
+        },
+        "typedefs_qualified": {},
+        "variables": [
+          {
+            "access": "public",
+            "access_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "alignment_bits": null,
+            "alignment_bits_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "binary_exported_fact": null,
+            "declared_in_headers_fact": null,
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_binding": null,
+            "elf_binding_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "elf_visibility": null,
+            "in_public_contract_fact": null,
+            "is_const": false,
+            "is_static": false,
+            "mangled": "g_count",
+            "name": "g_count",
+            "origin": "public_header",
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "type": "int",
+            "value": null,
+            "visibility": "public"
+          }
+        ]
+      },
+      "section_kind": "declarations",
+      "section_schema_version": 1
+    },
+    "layout": {
+      "payload": {
+        "conditional_fields": {},
+        "contract": null,
+        "dependency_scope": null,
+        "dwarf_layout_coherence": null,
+        "dwarf_layout_coherence_mismatches": [],
+        "excluded_header_matching": "glob",
+        "excluded_header_patterns": [],
+        "header_only": false,
+        "scope_fallback": null
+      },
+      "section_kind": "layout",
+      "section_schema_version": 1
+    },
+    "provenance": {
+      "payload": {
+        "created_at": null,
+        "dependency_info": null,
+        "git_commit": null,
+        "git_tag": null,
+        "language_profile": null,
+        "library": "libdemo.so.1",
+        "version": "2"
+      },
+      "section_kind": "provenance",
+      "section_schema_version": 1
+    },
+    "types": {
+      "payload": {
+        "types": [
+          {
+            "alignment_bits": null,
+            "base_offsets": {},
+            "bases": [],
+            "bases_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "data_size_bits": null,
+            "data_size_bits_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "fields": [
+              {
+                "access": "public",
+                "bitfield_bits": null,
+                "default": null,
+                "default_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "deprecated": null,
+                "deprecated_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_bitfield": false,
+                "is_const": false,
+                "is_const_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_mutable": false,
+                "is_mutable_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_volatile": false,
+                "is_volatile_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "name": "x",
+                "offset_bits": null,
+                "type": "int"
+              }
+            ],
+            "has_anonymous_aggregate_fields": false,
+            "is_abstract": null,
+            "is_abstract_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_final": null,
+            "is_final_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_opaque": false,
+            "is_standard_layout": null,
+            "is_standard_layout_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_template_pattern": false,
+            "is_trivially_copyable": null,
+            "is_trivially_copyable_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_union": false,
+            "kind": "struct",
+            "name": "Widget",
+            "origin": "public_header",
+            "qualified_name": "ns::Widget",
+            "qualified_name_fact": {
+              "diagnostics": [],
+              "status": "present",
+              "value": "ns::Widget"
+            },
+            "size_bits": 128,
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "virtual_bases": [],
+            "virtual_bases_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "vptr_offset_bits": null,
+            "vptr_offset_bits_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "vtable": [],
+            "vtable_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            }
+          },
+          {
+            "alignment_bits": null,
+            "base_offsets": {},
+            "bases": [],
+            "bases_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "data_size_bits": null,
+            "data_size_bits_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "fields": [
+              {
+                "access": "public",
+                "bitfield_bits": null,
+                "default": null,
+                "default_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "deprecated": null,
+                "deprecated_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_bitfield": false,
+                "is_const": false,
+                "is_const_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_mutable": false,
+                "is_mutable_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_volatile": false,
+                "is_volatile_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "name": "x",
+                "offset_bits": null,
+                "type": "int"
+              }
+            ],
+            "has_anonymous_aggregate_fields": false,
+            "is_abstract": null,
+            "is_abstract_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_final": null,
+            "is_final_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_opaque": false,
+            "is_standard_layout": null,
+            "is_standard_layout_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_template_pattern": false,
+            "is_trivially_copyable": null,
+            "is_trivially_copyable_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_union": false,
+            "kind": "struct",
+            "name": "Secret",
+            "origin": "private_header",
+            "qualified_name": null,
+            "qualified_name_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "size_bits": 128,
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "virtual_bases": [],
+            "virtual_bases_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "vptr_offset_bits": null,
+            "vptr_offset_bits_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "vtable": [],
+            "vtable_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            }
+          },
+          {
+            "alignment_bits": null,
+            "base_offsets": {},
+            "bases": [],
+            "bases_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "data_size_bits": null,
+            "data_size_bits_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "fields": [
+              {
+                "access": "public",
+                "bitfield_bits": null,
+                "default": null,
+                "default_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "deprecated": null,
+                "deprecated_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_bitfield": false,
+                "is_const": false,
+                "is_const_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_mutable": false,
+                "is_mutable_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_volatile": false,
+                "is_volatile_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "name": "x",
+                "offset_bits": null,
+                "type": "int"
+              }
+            ],
+            "has_anonymous_aggregate_fields": false,
+            "is_abstract": null,
+            "is_abstract_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_final": null,
+            "is_final_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_opaque": false,
+            "is_standard_layout": null,
+            "is_standard_layout_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_template_pattern": false,
+            "is_trivially_copyable": null,
+            "is_trivially_copyable_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_union": false,
+            "kind": "struct",
+            "name": "Dup",
+            "origin": "public_header",
+            "qualified_name": null,
+            "qualified_name_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "size_bits": 64,
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "virtual_bases": [],
+            "virtual_bases_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "vptr_offset_bits": null,
+            "vptr_offset_bits_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "vtable": [],
+            "vtable_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            }
+          },
+          {
+            "alignment_bits": null,
+            "base_offsets": {},
+            "bases": [],
+            "bases_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "data_size_bits": null,
+            "data_size_bits_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "fields": [
+              {
+                "access": "public",
+                "bitfield_bits": null,
+                "default": null,
+                "default_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "deprecated": null,
+                "deprecated_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_bitfield": false,
+                "is_const": false,
+                "is_const_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_mutable": false,
+                "is_mutable_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_volatile": false,
+                "is_volatile_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "name": "x",
+                "offset_bits": null,
+                "type": "int"
+              }
+            ],
+            "has_anonymous_aggregate_fields": false,
+            "is_abstract": null,
+            "is_abstract_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_final": null,
+            "is_final_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_opaque": false,
+            "is_standard_layout": null,
+            "is_standard_layout_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_template_pattern": false,
+            "is_trivially_copyable": null,
+            "is_trivially_copyable_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_union": false,
+            "kind": "struct",
+            "name": "Dup",
+            "origin": "private_header",
+            "qualified_name": null,
+            "qualified_name_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "size_bits": 128,
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "virtual_bases": [],
+            "virtual_bases_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "vptr_offset_bits": null,
+            "vptr_offset_bits_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "vtable": [],
+            "vtable_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            }
+          },
+          {
+            "alignment_bits": null,
+            "base_offsets": {},
+            "bases": [],
+            "bases_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "data_size_bits": null,
+            "data_size_bits_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "fields": [
+              {
+                "access": "public",
+                "bitfield_bits": null,
+                "default": null,
+                "default_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "deprecated": null,
+                "deprecated_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_bitfield": false,
+                "is_const": false,
+                "is_const_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_mutable": false,
+                "is_mutable_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_volatile": false,
+                "is_volatile_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "name": "x",
+                "offset_bits": null,
+                "type": "int"
+              }
+            ],
+            "has_anonymous_aggregate_fields": false,
+            "is_abstract": null,
+            "is_abstract_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_final": null,
+            "is_final_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_opaque": false,
+            "is_standard_layout": null,
+            "is_standard_layout_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_template_pattern": false,
+            "is_trivially_copyable": null,
+            "is_trivially_copyable_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_union": false,
+            "kind": "struct",
+            "name": "stat",
+            "origin": "public_header",
+            "qualified_name": null,
+            "qualified_name_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "size_bits": 128,
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "virtual_bases": [],
+            "virtual_bases_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "vptr_offset_bits": null,
+            "vptr_offset_bits_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "vtable": [],
+            "vtable_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            }
+          },
+          {
+            "alignment_bits": null,
+            "base_offsets": {},
+            "bases": [],
+            "bases_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "data_size_bits": null,
+            "data_size_bits_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "deprecated": null,
+            "deprecated_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "fields": [
+              {
+                "access": "public",
+                "bitfield_bits": null,
+                "default": null,
+                "default_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "deprecated": null,
+                "deprecated_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_bitfield": false,
+                "is_const": false,
+                "is_const_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_mutable": false,
+                "is_mutable_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "is_volatile": false,
+                "is_volatile_fact": {
+                  "diagnostics": [],
+                  "status": "not_collected",
+                  "value": null
+                },
+                "name": "x",
+                "offset_bits": null,
+                "type": "int"
+              }
+            ],
+            "has_anonymous_aggregate_fields": false,
+            "is_abstract": null,
+            "is_abstract_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_final": null,
+            "is_final_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_opaque": false,
+            "is_standard_layout": null,
+            "is_standard_layout_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_template_pattern": false,
+            "is_trivially_copyable": null,
+            "is_trivially_copyable_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "is_union": false,
+            "kind": "struct",
+            "name": "Tag",
+            "origin": "public_header",
+            "qualified_name": null,
+            "qualified_name_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "size_bits": 128,
+            "source_header": null,
+            "source_header_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "source_location": null,
+            "virtual_bases": [],
+            "virtual_bases_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "vptr_offset_bits": null,
+            "vptr_offset_bits_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            },
+            "vtable": [],
+            "vtable_fact": {
+              "diagnostics": [],
+              "status": "not_collected",
+              "value": null
+            }
+          }
+        ]
+      },
+      "section_kind": "types",
+      "section_schema_version": 1
+    }
+  },
+  "section_schema_versions": {
+    "binary": 1,
+    "build": 1,
+    "debug": 1,
+    "declarations": 1,
+    "layout": 1,
+    "provenance": 1,
+    "types": 1
+  }
+}
