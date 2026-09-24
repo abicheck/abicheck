@@ -44,170 +44,159 @@ Three separate questions are answered today by one value, `ScopeOrigin`
 | **Contract** — what does the target promise? | `ScopeOrigin.PUBLIC_HEADER` plus `policy.internal_namespaces`, applied at different stages. |
 | **Retention** — why is this fact in the snapshot at all? | `dependency_scope=filtered` drops only *system* declarations; nothing else is dropped. |
 
-Two consequences, both measured on SVS below:
+Measured on SVS and oneDAL below, this has two different consequences:
 
 1. **Named third-party dependencies are kept in full.** fmt, spdlog,
    toml++ and robin-map live under `-I` roots, classify as `unknown`, and
-   so survive dependency scoping. They account for **66% of the functions**
-   in the SVS core snapshot.
-2. **The L2 graph section dominates size.** 351 MB of the 425 MB of
-   snapshot section content is `graph` — built from the unfiltered AST,
-   so the flat snapshot's dependency filter does not reach it.
+   so survive dependency scoping. They are **65–66% of the functions** in
+   an SVS core snapshot, with either frontend.
+2. **The L2 graph section dominates size.** It is 54–93% of the section
+   content of every snapshot measured (M4). It is built from the
+   unfiltered AST, so the flat snapshot's dependency filter
+   does not reach it.
 
-A namespace filter looks like the obvious lever. The experiments show why
-it is the wrong one.
+The first matters for SVS and hardly at all for oneDAL, whose public
+headers pull in little beyond the standard library. The second matters for
+both. A namespace filter looks like the obvious lever for the first; the
+measurements show why it is the wrong one.
 
-## Experiments
+## Measurements
 
-All runs: SVS `main` (intel/ScalableVectorSearch, 2026-09-23), its pinned
-FetchContent dependencies (eve v2023.02.15, fmt 12.1.0, robin-map v1.4.0,
-spdlog v1.15.3, toml++ v3.3.0 with SVS's own patch), clang 18.1.3,
-castxml 0.7.0, libstdc++ 13, `-std=c++20`. Two translation units:
+All numbers come from `scripts/bench_extraction_scope.py` (this plan's
+Phase 0 harness), rerunnable unchanged by every later phase. Peak RSS is
+each child process's own `ru_maxrss` (the largest single process in its
+tree). Host: 4 CPUs, 15 GB RAM; clang 18.1.3, castxml 0.7.0, g++/libstdc++
+13, Python 3.13. Each `abicheck dump` is a cold-cache run against a stub
+`.so`, so it measures header extraction, not binary analysis.
 
-- **runtime** — the five `bindings/cpp/include/svs/runtime/*.h` headers
-  (the real `libsvs_runtime.so` public API).
-- **core** — `svs/orchestrators/{vamana,dynamic_vamana,exhaustive}.h` (the
-  header-only library; the heavy case).
-
-Peak RSS is the child process's `ru_maxrss`.
-
-### E1 — raw frontend output
-
-| TU | Mode | Time | Peak RSS | Output |
-|---|---|---|---|---|
-| runtime | clang `-ast-dump=json` | 1.6 s | 112 MB | 205.5 MB |
-| runtime | clang `+ -ast-dump-filter=svs::` | 0.6 s | 112 MB | 1.4 MB |
-| runtime | castxml | 1.2 s | 135 MB | 4.8 MB |
-| runtime | castxml `--castxml-start svs` | 0.5 s | 131 MB | 0.1 MB |
-| core | clang `-ast-dump=json` | 36.1 s | 479 MB | 3,019 MB |
-| core | clang `+ -ast-dump-filter=svs::` | 10.5 s | 473 MB | 208 MB |
-| core | castxml | 16.6 s | 805 MB | 107 MB |
-| core | castxml `--castxml-start svs` | 13.1 s | 725 MB | 11.5 MB |
-
-The frontend's own parse is a fixed cost: `--castxml-start` saves 3.5 s of
-16.6 s and barely moves RSS. **The win of every filter is output size,
-which is what abicheck's Python side pays for.**
-
-### E2 — abicheck today, end to end
-
-`abicheck dump` (clang frontend, default dependency scoping) over the core
-TU against a stub `.so`:
-
-| Time | Peak RSS | Snapshot | functions / variables / types |
+| Target | Revision | Translation unit | Flags |
 |---|---|---|---|
-| 370 s | 6.66 GB | 733 MB | 13,518 / 1,066 / 707 |
+| SVS runtime | ScalableVectorSearch `main`, 2026-09-23 | the five `bindings/cpp/include/svs/runtime/*.h` (the `libsvs_runtime.so` API) | `-std=c++20`, SVS's own defines, `-fsized-deallocation` |
+| SVS core | same | `svs/orchestrators/{vamana,dynamic_vamana,exhaustive}.h` (header-only) | same, plus the pinned FetchContent deps: eve v2023.02.15, fmt 12.1.0, robin-map v1.4.0, spdlog v1.15.3, toml++ v3.3.0 with SVS's patch |
+| oneDAL | uxlfoundation/oneDAL `main`, 2026-09-24 | `oneapi/dal.hpp` plus all 26 `oneapi/dal/algo/*.hpp` | `-std=c++17 -Icpp` (host API; no SYCL) |
+| DAAL | same | `daal.h` | `-std=c++17 -Icpp/daal/include -Icpp/daal` |
 
-Where the kept functions come from: SVS 4,568; fmt 4,204; toml++ 2,370;
-robin-map 1,457; spdlog 919. Section sizes: `graph` 351 MB,
-`declarations` 54 MB, `semantic_ir` 19 MB, `types` 2 MB.
+### M1 — frontend output
 
-The castxml frontend originally could not complete the same dump. castxml
-learns its predefined macros from the compiler it emulates, and abicheck
-passed `-std=c++20` to castxml's parser but not to that compiler. g++ then
-reported C++17, and libstdc++ declared no `std::integral`. Two parser bugs
-behind it, both fixed in the same PR as this plan, are described in that
-PR's changelog fragment. With them fixed, the castxml frontend completes:
+Time / peak RSS / output size.
 
-| Frontend | Time | Peak RSS | Snapshot |
+| Target | clang full | clang `-ast-dump-filter` | castxml full | castxml `--castxml-start` | ownership closure |
+|---|---|---|---|---|---|
+| SVS runtime | 1.7 s / 112 MB / 204 MB | 0.4 s / 112 MB / 1.4 MB | 0.6 s / 135 MB / 4.8 MB | 0.5 s / 131 MB / 0.1 MB | 0.2 s / 0.5 MB |
+| SVS core | 25.4 s / 478 MB / 2,935 MB | 7.8 s / 473 MB / 188 MB | 12.4 s / 806 MB / 107 MB | 10.4 s / 726 MB / 11.4 MB | 3.9 s / 19.2 MB |
+| oneDAL | 4.2 s / 151 MB / 502 MB | 1.6 s / 151 MB / 104 MB | 2.2 s / 234 MB / 20.4 MB | 1.9 s / 220 MB / 2.9 MB | 0.7 s / 3.4 MB |
+| DAAL | 4.7 s / 140 MB / 679 MB | 3.2 s / 140 MB / 409 MB | 1.4 s / 162 MB / 10.5 MB | 1.4 s / 159 MB / 5.4 MB | 0.6 s / 5.7 MB |
+
+The filters cut output, not the frontend's own cost: RSS barely moves, and
+castxml's parse is 1.4–12.4 s either way. The name filters are for a
+namespace (`svs`, `oneapi`, `daal`); the closure is seeded from the
+target's header root. The closure is a Python pass over the full XML, so
+its time is on top of castxml full's.
+
+### M2 — what each narrowing loses
+
+Target-owned functions and types present in the full castxml parse but
+missing after narrowing, counted through abicheck's own castxml parser.
+
+| Target | `--castxml-start` | ownership closure | What `--castxml-start` lost |
 |---|---|---|---|
-| clang | 370 s | 6.66 GB | 733 MB |
-| castxml | 508 s | 7.89 GB | 1,210 MB |
+| SVS runtime | 0 | 0 | — |
+| SVS core | **81** | 0 | `fmt::formatter<svs::…>` and `std::hash<svs::…>` specializations with their members, global `operator<<` |
+| oneDAL | **19** | 0 | oneDAL's `extern "C"` functions: `_onedal_new_mutex`, `_onedal_get_tls_ptr`, `_onedal_lock_mutex`, … |
+| DAAL | 4 (not API) | 0 | `__atomic_load_n`, `__atomic_add_fetch`, … — GCC builtins castxml declares implicitly (`artificial="1"`) and attributes to the DAAL header that first uses them |
 
-The castxml path is heavier because it has no parse-time dependency skip
-of the kind `dumper_clang_streaming.py` gives the clang path. Phase 3 of
-this plan covers both.
+Both real losses are the cases a name filter cannot express: target code
+declared in someone else's namespace (SVS), and a C API at global scope
+(oneDAL). `--castxml-start` takes names, and neither case has a name
+under the target's namespace to give it. The DAAL row is a classification
+finding rather than a loss: an implicitly declared compiler builtin must be
+toolchain-owned whichever file first uses it (Phase 1 rule).
 
-### E3 — what a name filter keeps and loses
+clang `-ast-dump-filter` was not run through a parser here; its output is a
+stream of unrelated per-declaration documents that abicheck's clang parser
+does not accept. On a fixture it lost the same two classes and also dropped
+the definitions of referenced types (`mpi::Comm`, the type of a public
+field), since it emits no closure — a size change there would be
+invisible. Clang takes one filter string, so there is no flag-level repair.
 
-A synthetic fixture with deliberate traps, then real SVS.
+### M3 — dependency declarations the closure would keep
 
-**clang `-ast-dump-filter`** matches a *substring of the qualified name*:
+Functions from each named dependency in the full castxml parse, and in the
+ownership closure (M2's zero-loss column).
 
-| Declaration | `svs::` | `svs` |
-|---|---|---|
-| `other::svs::nested_trap` (not ours) | kept | kept |
-| `svs_extra::not_ours` | dropped | kept |
-| `extern "C" svs_c_entry` (ours) | **dropped** | kept by accident of spelling |
-| `mpi::injected_by_svs` (ours, in a dependency namespace) | **dropped** | kept by accident of spelling |
-| definition of `mpi::Comm`, a public field's type | **absent** | **absent** |
+| Target | Dependency | Full parse | Closure |
+|---|---|---|---|
+| SVS core | fmt | 12,105 | 1,989 |
+| SVS core | toml++ | 3,449 | 1,171 |
+| SVS core | spdlog | 1,013 | 821 |
+| SVS core | robin-map | 928 | 619 |
+| SVS core | libstdc++ | 235,896 | 31,576 |
+| oneDAL | libstdc++ | 48,737 | 5,703 |
+| DAAL | libstdc++ | 13,527 | 1,789 |
 
-It also emits one JSON document per matching declaration with no closure:
-a public struct's fields still name `mpi::Comm`, but its layout is gone. A
-size change there would be invisible — a silent false negative. Clang
-accepts one filter string, so there is no flag-level repair.
+For SVS the closure keeps 4,600 of 17,495 named-dependency functions
+(26%). It still keeps whole referenced dependency classes, methods
+included; `referenced` retention (Phase 3) keeps fields and bases and would
+keep fewer.
 
-**castxml `--castxml-start`** matches exact qualified names and emits the
-**closure of referenced types**. On the fixture it kept `mpi::Comm` and
-`CGlobalCfg` with their fields and dropped all three look-alike traps.
+### M4 — abicheck dump today, end to end
 
-On real SVS, parsed through abicheck's own `_CastxmlParser` and bucketed by
-declaring file:
+| Target | Frontend | Time | Peak RSS | Snapshot file | `graph` share of section content | Functions: target / named deps |
+|---|---|---|---|---|---|---|
+| SVS runtime | clang | 20.0 s | 515 MB | 44 MB | 91% | 86 / 0 |
+| SVS runtime | castxml | 15.8 s | 484 MB | 55 MB | 93% | 187 / 0 |
+| SVS core | clang | 295 s | 6.50 GB | 728 MB | 83% | 4,568 / 8,950 |
+| SVS core | castxml | 498 s | 7.89 GB | **1,199 MB** | 82% | 9,616 / 17,495 |
+| oneDAL | clang | 68.6 s | 1.74 GB | 159 MB | 77% | 3,613 / 0 |
+| oneDAL | castxml | 84.3 s | 1.55 GB | 212 MB | 89% | 2,533 / 0 |
+| DAAL | clang | 79.4 s | 1.52 GB | 196 MB | 54% | 12,177 / 0 |
+| DAAL | castxml | 54.6 s | 1.33 GB | 191 MB | 62% | 10,067 / 0 |
 
-| Declaring file | runtime: full → start | core: full → start |
-|---|---|---|
-| SVS headers (functions) | 187 → **187** | 9,604 → **9,533** |
-| SVS headers (types) | 21 → **21** | 1,275 → **1,251** |
-| fmt (functions) | — | 11,831 → 1,293 |
-| toml++ (functions) | — | 3,418 → 813 |
-| libstdc++ (functions) | 11,494 → 46 | 233,434 → 14,691 |
+The snapshot file is indented JSON; the `graph` share is measured over the
+compact JSON of each section. The two frontends count functions
+differently (clang's walk drops some declarations castxml reports), so
+compare within a frontend, not across.
 
-The runtime API survives intact. The core does not: **71 SVS-owned
-functions and 24 SVS-owned types are lost**, and every one is SVS code
-declared in someone else's namespace:
+What this says:
 
-- `fmt::formatter<svs::DataType>`, `fmt::formatter<svs::lib::Version>`, …
-  (8 specializations and their `parse`/`format` members)
-- `std::hash<svs::float16::Float16>`, `std::hash<svs::bfloat16::BFloat16>`
-- global `operator<<` overloads
+- **The cost is abicheck's, not the compiler's.** For SVS core the
+  frontend emits its output in 12–25 s under 1 GB (M1); the dump takes
+  295–498 s and 6.5–7.9 GB. What abicheck materializes is the lever.
+- **For SVS, dependency retention is the lever.** Named dependencies are
+  65–66% of the functions with either frontend.
+- **For oneDAL, the graph is the lever.** No named dependency leaks in;
+  the `graph` section is 77–89% of the snapshot's content.
+- **A default dump can write a snapshot the default reader refuses.** SVS
+  core via castxml writes 1,199 MB, over the 1 GiB snapshot safety limit
+  (`ABICHECK_SNAPSHOT_MAX_STORED_BYTES`), so reading it back — and so any
+  `compare` against it as a baseline — fails unless the operator raises the
+  limit. Phase 3's acceptance criterion includes getting SVS core under it
+  with the default settings.
 
-Those are exactly the declarations whose ABI matters to a consumer that
-formats or hashes SVS types. `--castxml-start` takes a list of names, but
-a specialization of a dependency template cannot be named in advance
-without already having parsed the TU.
-
-### E4 — ownership-rooted pruning of the full castxml output
-
-A prototype pruner over the full core XML: seed with every element
-declared in a file under the target's header root, then follow `type`,
-`returns`, `context`, `members`, `bases` and argument references to a
-fixed point.
-
-| | Elements | XML | SVS functions kept | SVS types kept |
-|---|---|---|---|---|
-| full | 526,933 | 107 MB | 9,604 | 1,275 |
-| `--castxml-start svs` | — | 11.5 MB | 9,533 (−71) | 1,251 (−24) |
-| ownership-rooted closure | 95,557 | 19.3 MB | **9,604** | 1,261 (−14) |
-
-Zero owned functions lost, including every `fmt::formatter`/`std::hash`
-specialization. The 14 missing types are parser-synthesized `type`
-records inside owned templates. That is a prototype gap to close in Phase 3
-(most likely a reference kind the walk does not follow yet), not a property
-of the approach. The closure is 1.7× larger than `--castxml-start`'s,
-because following `members` of a referenced dependency class pulls in all
-its methods. Phase 3's `referenced` retention mode would keep fields and
-bases but not methods.
-
-The prototype ran in 297 s because it removed elements from a list one at
-a time (quadratic). A real implementation is one linear pass during the
-parse the dumper already does.
+The castxml frontend could complete SVS core only after two parser fixes
+that landed in the same PR as this plan. castxml asks the compiler it
+emulates for predefined macros, and abicheck passed `-std=c++20` to
+castxml's parser but not to that compiler, so libstdc++ saw C++17 and
+declared no `std::integral`. Once that parsed, function-local declarations
+castxml emits for deduced `auto` return types broke the dump.
 
 ## Decisions
 
 1. **Reject clang `-ast-dump-filter` as a user-facing option.** It loses
    owned declarations, keeps foreign ones, and drops referenced type
-   definitions with no recovery. The 3,019 → 208 MB saving is real, but
-   it buys an unsound snapshot.
+   definitions with no recovery. The 2,935 → 188 MB saving on SVS core is
+   real, but it buys an unsound snapshot (M1, M2).
 2. **Do not make `--castxml-start` the retention mechanism.** It is sound
    for a target whose whole API lives in its own namespace (SVS runtime:
-   0 lost), but unsound in general (SVS core: 95 owned declarations lost,
-   all of them the "our code in their namespace" case the original design
-   warned about). Keep it as an **optional accelerator** behind the
+   0 lost), but unsound in general: SVS core lost 81 owned declarations
+   declared in `fmt`/`std`, and oneDAL lost all 19 of its `extern "C"`
+   functions (M2). Keep it as an **optional accelerator** behind the
    ownership model: allowed only when the ownership pass can prove it lost
    nothing (Phase 4).
 3. **Ownership comes from files, not names.** A declaration is
    target-owned when its declaring file is under a target header root. A
    namespace list validates and refines contract; it never claims
-   ownership. This is what kept all 9,604 core functions in E4.
+   ownership. It lost nothing on any of the four targets (M2).
 4. **Dependency evidence is retained by reference, not by origin.** A
    dependency type stays when an owned declaration references it (field,
    base, parameter, return, template argument). The rest of the
@@ -273,7 +262,11 @@ Precedence rules (the ADR states these as normative):
    a public declaration exposes.
 5. A declaration in a file no root claims stays `owner=unresolved`. It is
    kept, reported, and never silently treated as private.
-6. A namespace mismatch — a target namespace declared in a dependency
+6. An implicitly declared compiler builtin (castxml's `artificial="1"`
+   `__atomic_*`/`__builtin_*`/`__sync_*` at global scope) is
+   toolchain-owned. castxml attributes it to the first file that uses it,
+   which on DAAL made four GCC builtins look like DAAL API (M2).
+7. A namespace mismatch — a target namespace declared in a dependency
    file, or a dependency namespace declared in a target file (the
    `fmt::formatter<svs::…>` case) — is a **diagnostic, not a
    reclassification**. The file decides.
@@ -351,9 +344,9 @@ One new snapshot field, `AbiSnapshot.extraction_scope` (schema bump):
 
 | Page | Change |
 |---|---|
-| `docs/reference/config-file.md` § `scope:` | New keys, the six precedence rules, and the "`-I` is not ownership" statement. |
+| `docs/reference/config-file.md` § `scope:` | New keys, the seven precedence rules, and the "`-I` is not ownership" statement. |
 | `docs/reference/config-keys-reference.md` | One row per new key (type, default, CLI: none). |
-| **New** `docs/use/target-ownership.md` | Task guide: "My library pulls in heavy dependencies". Walks the SVS shape end to end: declare roots, run the preview, read the diagnostics, switch `dependency_evidence` to `referenced`, what the report says afterwards. States plainly why there is no namespace filter, and links E3. |
+| **New** `docs/use/target-ownership.md` | Task guide: "My library pulls in heavy dependencies". Walks the SVS shape end to end: declare roots, run the preview, read the diagnostics, switch `dependency_evidence` to `referenced`, what the report says afterwards. States plainly why there is no namespace filter, citing M2. |
 | `docs/use/dump-compare-flags.md` | The preview output. |
 | `docs/reference/snapshot-format.md` | `extraction_scope` and the per-entity facts. |
 | `docs/learn/evidence-and-detectability.md` | What `referenced` retention can and cannot detect: a dependency type's *layout* change is still seen; a change to a dependency method no owned declaration calls is not. |
@@ -364,10 +357,10 @@ One new snapshot field, `AbiSnapshot.extraction_scope` (schema bump):
 
 | Phase | Scope | Size | Behaviour change |
 |---|---|---|---|
-| **0 — Record the numbers** | Commit the E1–E4 harness as `scripts/bench_extraction_scope.py`, parameterized over a TU and include flags, so every later phase reruns the same measurement. Run it on oneDAL. | S | none |
+| **0 — Record the numbers** | Done: `scripts/bench_extraction_scope.py` produced M1–M4 for SVS and oneDAL. Every later phase reruns it and updates those tables. | S | none |
 | **1 — Classify and preview** | `extract/ownership.py`: one pure function, file path + rules → (owner, contract, rule id, diagnostics). Parse `scope.dependencies`/`private_*` in `build_config.py` (not yet applied). The preview output. Property tests: rule-order independence, most-specific-root wins, `-I` never grants ownership, a system prefix never beats an explicit root. | M | none — report only |
 | **2 — Persist** | ADR. `extraction_scope` field, per-entity facts, comparability rule, digest fields. `dependency_evidence` accepted but only `full`. | M | new refusal between differently-configured snapshots |
-| **3 — `referenced` retention** | Apply the closure at parse time for both backends: the castxml parser (a linear seed-and-follow over the id map it already builds) and the clang streaming pruner (`dumper_clang_streaming.py`, which already skips system declarations at parse time). Same rule for the graph section. Close E4's 14-type gap. Gate: on SVS core and oneDAL, zero owned declarations lost against `full`, and the finding set on a real version pair unchanged except for dependency-internal kinds. | L | opt-in |
+| **3 — `referenced` retention** | Apply the closure at parse time for both backends: the castxml parser (a linear seed-and-follow over the id map it already builds) and the clang streaming pruner (`dumper_clang_streaming.py`, which already skips system declarations at parse time). Same rule for the graph section. Gate: on SVS core and oneDAL, zero owned declarations lost against `full`, and the finding set on a real version pair unchanged except for dependency-internal kinds. | L | opt-in |
 | **4 — Prefilter accelerator** | Allow `--castxml-start <target namespaces>` only when Phase 1's classification, run on a cached full parse or on the first dump, shows zero owned declarations outside those namespaces. Otherwise ignore it with a diagnostic. Record `verified_lossless`. | S–M | opt-in |
 | **5 — Default** | Decide whether `referenced` becomes the default, using Phase 0 numbers on oneDAL and SVS. | S | possibly default |
 
@@ -376,8 +369,8 @@ One new snapshot field, `AbiSnapshot.extraction_scope` (schema bump):
 - Phase 1: primitive-level property tests for the classifier, per
   `AGENTS.md`. The oracle is an independent table of (path, rules) →
   expected owner, not the function's own matching helpers.
-- Phase 3: the E3 fixture checked in as a regression corpus, covering each
-  trap row: `extern "C"`, a target declaration in a dependency namespace,
+- Phase 3: the fixture behind M2 checked in as a regression corpus,
+  covering each trap row: `extern "C"`, a target declaration in a dependency namespace,
   a dependency-template specialization for a target type, a look-alike
   namespace, a public field of a dependency type whose layout changes
   between old and new. The last must still produce a layout finding under
