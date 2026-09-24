@@ -396,3 +396,25 @@ def test_old_and_new_encodings_give_identical_compare_json(
     new_report = _compare_json(*table, tmp_path / "new.json")
     assert old_report["changes"]
     assert old_report == new_report
+
+
+@settings(max_examples=150, deadline=None)
+@given(
+    _graphs(),
+    st.dictionaries(
+        st.sampled_from(["future_key", "call_edges"]), st.just({"x": 1}), max_size=2
+    ),
+)
+def test_finalize_recomputes_every_coverage_entry_not_persisted(
+    graph: SourceGraphSummary, extra: dict[str, Any]
+) -> None:
+    from abicheck.storage.graph_table_codec import _observed_coverage
+
+    # Forward-compatible keys (top-level, and nested inside an owned section)
+    # must survive; everything else finalize must rebuild identically.
+    graph.coverage = {**graph.coverage, **extra}
+    graph.finalize()
+    full = json.loads(json.dumps(graph.coverage))
+    graph.coverage = _observed_coverage(graph.coverage)
+    graph.finalize()
+    assert json.loads(json.dumps(graph.coverage)) == full

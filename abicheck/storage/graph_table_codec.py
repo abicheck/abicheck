@@ -19,9 +19,8 @@ evidence-entity-model Phase 5b).
 Measured on real oneDAL (``libonedal_core``, 49,872 nodes / 102,388 edges),
 the ``SourceGraphSummary.to_dict()`` form was a 79 MB section that
 compressed 28:1: it is dominated by repeated ids, kinds, producer names and
-attribute keys, plus fields the decoder never reads (``indexes``,
-``resolved``, ``conflicts``, ``occurrences`` -- all recomputed on load). This
-encoding stores each distinct string once and refers to it by index:
+attribute keys, plus fields the loader always recomputes. This encoding
+stores each distinct string once and refers to it by index:
 
 ```json
 {
@@ -29,36 +28,46 @@ encoding stores each distinct string once and refers to it by index:
   "strings": ["decl://f", "source_decl", ...],
   "attrs":   [[<key>, <value>, ...], ...],
   "facts":   [[<producer>, <confidence>, <attrs>], ...],
-  "nodes": {"id": [...], "kind": [...], "label": [...], "attrs": [...],
-            "provenance": [...], "confidence": [...], "facts": [...]},
-  "edges": {"src": [...], "dst": [...], "kind": [...], "attrs": [...],
-            "provenance": [...], "confidence": [...], "facts": [...]},
-  "schema_version": 2, "graph_id": "...", "coverage": {...}, ...
+  "nodes": {"id": [...], "kind": [...], "label": [...], "facts": [...]},
+  "edges": {"src": [...], "dst": [...], "kind": [...], "facts": [...]},
+  "schema_version": 2, "coverage": {...}, ...
 }
 ```
 
 * Every column holds one entry per node/edge, in graph order, so row *i* of
   every column describes the same entity.
 * ``strings`` is the one string table. Every ``id``/``src``/``dst``/
-  ``kind``/``label``/``provenance``/``confidence`` entry, and every
-  ``producer``/``confidence`` in ``facts``, is an index into it.
+  ``kind``/``label`` entry, and every ``producer``/``confidence`` in
+  ``facts``, is an index into it.
 * ``attrs`` is the table of distinct attribute dicts, each a flat
-  ``[key, value, key, value, ...]`` list. A key is a string index. A value
-  that is a string is a string index; any other JSON value is wrapped in a
-  one-element list (``[3]``, ``[true]``, ``[null]``, ``[[...]]``), so the two
-  cases never collide.
+  ``[key, value, key, value, ...]`` list with keys sorted. A key is a string
+  index. A value that is a string is a string index; any other JSON value is
+  wrapped in a one-element list (``[3]``, ``[true]``, ``[null]``,
+  ``[[...]]``), so the two cases never collide.
 * ``facts`` is the table of distinct ``(producer, confidence, attrs)``
-  triples. An entity's ``facts`` entry is one fact index, or a list of them
-  when it carries several (or none).
+  triples. An entity's ``facts`` entry is one fact index, or a non-empty
+  list of them when it carries several.
 * The small graph-level fields are stored as ``to_dict()`` stores them.
 
-What is stored is exactly what ``SourceGraphSummary.from_dict`` reads, so
-:func:`decode_graph_table` returns the graph ``from_dict(graph.to_dict())``
-returns -- the property ``tests/test_graph_table_codec.py`` checks on
-generated graphs, with ``from_dict`` as the oracle. It is also how the
-decoder is built: it re-inflates the legacy per-entity dicts and hands them
-to ``from_dict``, so every load-time migration ``from_dict`` applies (id
-normalization, fact synthesis, coalescing) still applies.
+**Observed evidence only (Phase 5c).** Nothing the loader rederives is
+written: not ``indexes``/``graph_id``/``occurrences`` (recomputed by
+``finalize``), not an entity's ``resolved``/``conflicts``/``attrs``/
+``provenance``/``confidence`` (all rederived from its facts by
+``ensure_facts_and_resolve``). Nor is a fact whose producer is recomputable
+from the snapshot's own records
+(``model.graph_evidence_class.RECOMPUTABLE_FACT_PRODUCERS`` -- the
+public-surface builder's projections); a node or edge left with no other
+fact is not written at all. A reader needing those projections builds them
+on demand from the records, as ``policy.public_surface_closure`` already
+does.
+
+Decoding re-inflates the legacy per-entity dicts and hands them to
+``SourceGraphSummary.from_dict``, so every load-time migration ``from_dict``
+applies (id normalization, fact synthesis, coalescing) still applies, and
+for a graph without recomputable facts the result equals
+``from_dict(graph.to_dict())`` -- the property
+``tests/test_graph_table_codec.py`` checks on generated graphs, with
+``from_dict`` as the oracle.
 
 A document without the ``encoding`` key is the pre-v49 ``to_dict()`` form;
 :func:`is_graph_table` tells the two apart and the caller decodes that one
@@ -84,12 +93,14 @@ __all__ = [
 
 GRAPH_TABLE_ENCODING = "graph-table/1"
 
-_NODE_COLUMNS = ("id", "kind", "label", "attrs", "provenance", "confidence", "facts")
-_EDGE_COLUMNS = ("src", "dst", "kind", "attrs", "provenance", "confidence", "facts")
+#: The persisted columns. An entity's ``attrs``/``provenance``/``confidence``
+#: are not among them: ``ensure_facts_and_resolve`` rederives all three from
+#: ``facts`` on every load, so a stored copy was never read (Phase 5c).
+_NODE_COLUMNS = ("id", "kind", "label", "facts")
+_EDGE_COLUMNS = ("src", "dst", "kind", "facts")
 #: Graph-level fields stored verbatim, as ``to_dict()`` writes them.
 _SCALAR_FIELDS = (
     "schema_version",
-    "graph_id",
     "coverage",
     "external_graph_refs",
     "extractor_passes",
@@ -165,13 +176,47 @@ def _typed(value: Any) -> Any:
     return (type(value).__name__, value)
 
 
+#: The ``coverage`` entries ``SourceGraphSummary.finalize`` recomputes from
+#: the loaded nodes/edges and passes, overwriting whatever was stored: a
+#: top-level key maps to ``None``, a per-kind section to the sub-keys it
+#: owns. Only what finalize does *not* own (a forward-compatible unknown
+#: key) is persisted. ``tests/test_graph_table_codec.py`` checks that
+#: finalize over the stripped form reproduces the full one.
+_FINALIZE_OWNED_COVERAGE: dict[str, tuple[str, ...] | None] = {
+    "targets": None,
+    "compile_units": None,
+    "source_decls": None,
+    "binary_symbol_mappings": None,
+    "node_kinds": None,
+    "edge_kinds": None,
+    "include_edges": ("collected", "count"),
+    "call_edges": ("collected", "count"),
+    "type_edges": ("collected", "count"),
+    "reference_edges": ("collected", "count"),
+}
+
+
+def _observed_coverage(coverage: Mapping[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in coverage.items():
+        owned = _FINALIZE_OWNED_COVERAGE.get(key, ())
+        if owned is None:
+            continue
+        if owned and isinstance(value, Mapping):
+            rest = {k: v for k, v in value.items() if k not in owned}
+            if rest:
+                out[key] = rest
+            continue
+        out[key] = value
+    return out
+
+
 def _graph_fields(graph: SourceGraphSummary) -> dict[str, Any]:
     """The graph-level fields exactly as ``to_dict()`` writes them, without
     building its node/edge lists or its (never read back) ``indexes``."""
     out: dict[str, Any] = {
         "schema_version": graph.schema_version,
-        "graph_id": graph.graph_id or graph.compute_graph_id(),
-        "coverage": dict(graph.coverage),
+        "coverage": _observed_coverage(graph.coverage),
         "external_graph_refs": [dict(r) for r in graph.external_graph_refs],
         "extractor_passes": dict(graph.extractor_passes),
         "narrowed_passes": dict(graph.narrowed_passes),
@@ -184,31 +229,53 @@ def _graph_fields(graph: SourceGraphSummary) -> dict[str, Any]:
     return out
 
 
+def _persisted_facts(entity: Any) -> list[Any]:
+    """*entity*'s facts minus those a recomputable producer wrote
+    (``model.graph_evidence_class.RECOMPUTABLE_FACT_PRODUCERS``). An entity
+    constructed without facts is given the one fact ``ensure_facts_and_
+    resolve`` would synthesize for it on load, so nothing it carries is
+    lost by not storing its ``attrs``/``provenance``/``confidence``."""
+    from ..model.graph_evidence_class import RECOMPUTABLE_FACT_PRODUCERS
+    from ..model.graph_facts import GraphFact
+
+    facts = entity.facts or [
+        GraphFact(
+            producer=entity.provenance,
+            confidence=entity.confidence,
+            attrs=dict(entity.attrs),
+        )
+    ]
+    return [f for f in facts if f.producer not in RECOMPUTABLE_FACT_PRODUCERS]
+
+
 def encode_graph_table(graph: SourceGraphSummary) -> dict[str, Any]:
     """*graph* in this module's encoding (see the module docstring).
 
+    Persists observed evidence only (evidence-entity-model Phase 5c): a fact
+    from a recomputable producer -- a projection of the snapshot's own
+    records -- is dropped, and so is a node or edge left with no other fact.
     Reads the node/edge objects directly -- never ``graph.to_dict()``, whose
     per-entity dicts are the transient cost this encoding exists to avoid.
     """
     table = _Interner()
     nodes: dict[str, list[Any]] = {name: [] for name in _NODE_COLUMNS}
     for node in graph.nodes:
+        facts = _persisted_facts(node)
+        if not facts:
+            continue
         nodes["id"].append(table.string(node.id))
         nodes["kind"].append(table.string(node.kind))
         nodes["label"].append(table.string(node.label))
-        nodes["attrs"].append(table.attr_dict(node.attrs))
-        nodes["provenance"].append(table.string(node.provenance))
-        nodes["confidence"].append(table.string(node.confidence))
-        nodes["facts"].append(table.fact_list(node.facts))
+        nodes["facts"].append(table.fact_list(facts))
     edges: dict[str, list[Any]] = {name: [] for name in _EDGE_COLUMNS}
     for edge in graph.edges:
+        facts = _persisted_facts(edge)
+        if not facts:
+            continue
         edges["src"].append(table.string(edge.src))
         edges["dst"].append(table.string(edge.dst))
         edges["kind"].append(table.string(edge.kind))
-        edges["attrs"].append(table.attr_dict(edge.attrs))
-        edges["provenance"].append(table.string(edge.provenance))
-        edges["confidence"].append(table.string(edge.confidence))
-        edges["facts"].append(table.fact_list(edge.facts))
+        edges["facts"].append(table.fact_list(facts))
     out: dict[str, Any] = {"encoding": GRAPH_TABLE_ENCODING, **_graph_fields(graph)}
     out["strings"] = table.strings
     out["attrs"] = table.attrs
@@ -263,6 +330,10 @@ class _Reader:
 
     def facts(self, entry: Any, where: str) -> list[dict[str, Any]]:
         if type(entry) is list:
+            if not entry:
+                # The encoder always stores at least one fact; with none,
+                # the loader would synthesize one from empty defaults.
+                raise ValueError(f"graph table: {where} entry has no facts")
             return [self.fact(i, where) for i in entry]
         return [self.fact(entry, where)]
 
@@ -309,24 +380,18 @@ def graph_table_to_legacy_dict(payload: Mapping[str, Any]) -> dict[str, Any]:
             "id": read.string(i, "nodes.id"),
             "kind": read.string(k, "nodes.kind"),
             "label": read.string(lb, "nodes.label"),
-            "attrs": read.attrs(a, "nodes.attrs"),
-            "provenance": read.string(p, "nodes.provenance"),
-            "confidence": read.string(c, "nodes.confidence"),
             "facts": read.facts(f, "nodes.facts"),
         }
-        for i, k, lb, a, p, c, f in zip(*node_cols)
+        for i, k, lb, f in zip(*node_cols)
     ]
     edges = [
         {
-            "src": read.string(s, "edges.src"),
+            "src": read.string(src, "edges.src"),
             "dst": read.string(d, "edges.dst"),
             "edge": read.string(k, "edges.kind"),
-            "attrs": read.attrs(a, "edges.attrs"),
-            "provenance": read.string(p, "edges.provenance"),
-            "confidence": read.string(c, "edges.confidence"),
             "facts": read.facts(f, "edges.facts"),
         }
-        for s, d, k, a, p, c, f in zip(*edge_cols)
+        for src, d, k, f in zip(*edge_cols)
     ]
     out: dict[str, Any] = {
         name: payload[name] for name in _SCALAR_FIELDS if name in payload
