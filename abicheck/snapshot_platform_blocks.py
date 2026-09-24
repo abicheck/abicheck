@@ -217,8 +217,8 @@ def macho_from_dict(macho: dict[str, Any], schema_version: int) -> Any:
 def dwarf_from_dict(d: dict[str, Any]) -> Any:
     from .model.dwarf_facts import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
 
-    structs = {
-        name: StructLayout(
+    def _struct(name: str, s: dict[str, Any]) -> StructLayout:
+        return StructLayout(
             name=s.get("name", name),
             byte_size=s.get("byte_size", 0),
             alignment=s.get("alignment", 0),
@@ -235,23 +235,30 @@ def dwarf_from_dict(d: dict[str, Any]) -> Any:
             ],
             is_union=s.get("is_union", False),
         )
-        for name, s in d.get("structs", {}).items()
-    }
 
-    enums = {
-        name: EnumInfo(
+    def _enum(name: str, e: dict[str, Any]) -> EnumInfo:
+        return EnumInfo(
             name=e.get("name", name),
             underlying_byte_size=e.get("underlying_byte_size", 0),
             members=e.get("members", {}),
         )
-        for name, e in d.get("enums", {}).items()
-    }
 
     return DwarfMetadata(
-        structs=structs,
-        enums=enums,
+        structs={name: _struct(name, s) for name, s in d.get("structs", {}).items()},
+        enums={name: _enum(name, e) for name, e in d.get("enums", {}).items()},
         base_types={k: int(v) for k, v in d.get("base_types", {}).items()},
         has_dwarf=d.get("has_dwarf", False),
+        # Schema v51 (evidence-entity-model Phase 2). Absent on an older
+        # snapshot, which therefore reads "not looked for", never "none".
+        struct_odr_conflicts={
+            name: [_struct(name, s) for s in variants]
+            for name, variants in d.get("struct_odr_conflicts", {}).items()
+        },
+        enum_odr_conflicts={
+            name: [_enum(name, e) for e in variants]
+            for name, variants in d.get("enum_odr_conflicts", {}).items()
+        },
+        odr_conflicts_observed=bool(d.get("odr_conflicts_observed", False)),
     )
 
 
