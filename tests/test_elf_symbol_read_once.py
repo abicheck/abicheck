@@ -147,6 +147,9 @@ def test_short_section_data_is_declined() -> None:
     class _Sec:
         header = {"sh_entsize": 2, "sh_size": 8}
 
+        class elffile:  # noqa: N801 - mirrors the pyelftools attribute
+            little_endian = True
+
         def data(self) -> bytes:
             return b"\x00\x00"  # header claims 4 entries, bytes hold 1
 
@@ -172,3 +175,23 @@ def test_an_unreadable_section_is_declined_not_raised() -> None:
             raise ValueError("truncated file")
 
     assert decode_versym(_Sec(), 4) is None
+
+
+def test_a_truncated_version_table_stops_the_walk_instead_of_misaligning(
+    hidden_version_lib: Path | None,
+) -> None:
+    # Fewer `.gnu.version` entries than symbols: the walk stops at the last
+    # entry rather than pairing the remaining symbols with wrong versions.
+    from abicheck.extract.elf_symbol_versions import apply_versions_to_symbols
+    from abicheck.model.elf_facts import ElfMetadata
+
+    lib = hidden_version_lib or _libs(None)[0]
+    with open(lib, "rb") as fh:
+        elf = ELFFile(fh)
+        dynsym = elf.get_section_by_name(".dynsym")
+        assert isinstance(dynsym, SymbolTableSection)
+        meta = ElfMetadata()
+        truncated = [(1, False)]  # one entry for a table with several symbols
+        assert dynsym.num_symbols() > len(truncated)
+        apply_versions_to_symbols(dynsym, truncated, {}, meta)
+    assert meta.symbols == [] and meta.imports == []
