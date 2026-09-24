@@ -219,6 +219,12 @@ def _decay_top_level_array(canonical_type: str) -> str:
     evidence actually names" discipline ``_strip_cv_in_segment``'s own
     docstring already applies to the strict/non-strict split it makes.
     """
+    # Fast path: with no ``[`` anywhere there is no top-level bracket either,
+    # so the scan below would return the input unchanged. The vast majority
+    # of parameter spellings take this path, and the per-character loop was
+    # a measurable self-time hot spot on large header surfaces.
+    if "[" not in canonical_type:
+        return canonical_type
     depth = 0
     bracket_positions: list[int] = []
     has_top_level_paren = False
