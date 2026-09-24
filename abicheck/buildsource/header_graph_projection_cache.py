@@ -66,6 +66,7 @@ import os
 from dataclasses import fields
 from pathlib import Path
 
+from ..storage.acyclic_json import loads_acyclic
 from .call_graph import CallEdge
 from .header_graph_ast_projection import HeaderGraphAstProjection
 from .type_graph import TypeEdge
@@ -81,8 +82,10 @@ __all__ = [
 
 #: Bumped only for a change the field lists below cannot describe (a changed
 #: *meaning* for an unchanged field). Ordinary field additions/reorders are
-#: caught by the field lists themselves.
-PROJECTION_CACHE_SCHEMA = "abicheck-header-graph-projection/1"
+#: caught by the field lists themselves. ``/2``: ``type_files`` is in
+#: document order; a ``/1`` entry holds it in per-process string-hash order,
+#: which the header graph's node order inherited.
+PROJECTION_CACHE_SCHEMA = "abicheck-header-graph-projection/2"
 
 _TYPE_EDGE_FIELDS = [f.name for f in fields(TypeEdge)]
 _CALL_EDGE_FIELDS = [f.name for f in fields(CallEdge)]
@@ -127,7 +130,7 @@ def decode_projection(blob: str) -> HeaderGraphAstProjection | None:
     AST, which is what it would have done without this cache at all.
     """
     try:
-        doc = json.loads(blob)
+        doc = loads_acyclic(blob)
     except ValueError:
         return None
     if not isinstance(doc, dict):

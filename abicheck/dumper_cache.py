@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 from defusedxml import ElementTree as DefusedET
 
 from . import deadline
+from .storage.acyclic_json import gc_paused
 from .storage.ast_size_observer import report_ast_size
 from .storage.derived_ast import offer_derived_ast_source
 
@@ -673,7 +674,8 @@ def load_cached_ast(
     deadline.check()
     try:
         text = cache_path.read_text(encoding="utf-8")
-        root = json.loads(text)
+        with gc_paused():  # a tree has no cycles: storage.acyclic_json
+            root = json.loads(text)
     except (ValueError, OSError):
         cache_path.unlink(missing_ok=True)
         return None

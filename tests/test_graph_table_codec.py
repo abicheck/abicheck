@@ -203,6 +203,70 @@ class TestRoundTripProperty:
         assert second == [1, {"q": 2}]
 
 
+def _containers(value: Any) -> list[Any]:
+    """Every dict/list reachable from *value*, itself included."""
+    out: list[Any] = []
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            out.append(item)
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            out.append(item)
+            stack.extend(item)
+    return out
+
+
+class TestDirectDecoder:
+    """``decode_graph_table`` builds entities directly and decodes each
+    interned fact row once. Its oracle is the per-entity legacy-dict path it
+    replaced, ``from_dict(graph_table_to_legacy_dict(payload))`` -- a
+    different construction route over the same payload."""
+
+    @settings(max_examples=250, deadline=None)
+    @given(_graphs())
+    def test_equals_the_legacy_dict_path_including_order(
+        self, graph: SourceGraphSummary
+    ) -> None:
+        payload = _through_storage(encode_graph_table(graph))
+        direct = decode_graph_table(payload)
+        legacy = SourceGraphSummary.from_dict(graph_table_to_legacy_dict(payload))
+        assert json.dumps(direct.to_dict(), default=str) == json.dumps(
+            legacy.to_dict(), default=str
+        )
+        assert [n.id for n in direct.nodes] == [n.id for n in legacy.nodes]
+        assert [e.relation_key() for e in direct.edges] == [
+            e.relation_key() for e in legacy.edges
+        ]
+
+    @settings(max_examples=150, deadline=None)
+    @given(_graphs())
+    def test_no_fact_or_container_is_shared_between_entities(
+        self, graph: SourceGraphSummary
+    ) -> None:
+        # Interned rows are decoded once, so a missed copy would alias one
+        # entity's mutable evidence into another's.
+        decoded = decode_graph_table(_through_storage(encode_graph_table(graph)))
+        owner: dict[int, int] = {}
+        for index, entity in enumerate([*decoded.nodes, *decoded.edges]):
+            for fact in entity.facts:
+                for obj in (fact, *_containers(fact.attrs)):
+                    assert owner.setdefault(id(obj), index) == index
+
+    def test_one_interned_fact_across_many_entities(self) -> None:
+        g = SourceGraphSummary()
+        for i in range(5):
+            g.add_node(
+                GraphNode(id=f"header://h{i}", kind="header", attrs={"v": [i % 1]})
+            )
+        payload = _through_storage(encode_graph_table(g.finalize()))
+        assert len(payload["facts"]) == 1  # the case the per-row memo serves
+        decoded = decode_graph_table(payload)
+        decoded.nodes[0].facts[0].attrs["v"].append("mutated")
+        assert [n.facts[0].attrs["v"] for n in decoded.nodes[1:]] == [[0]] * 4
+
+
 # ── the load-scoped normalization memo ──────────────────────────────────
 
 

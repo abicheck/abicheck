@@ -462,15 +462,32 @@ def build_header_only_graph(
     # Threading the four context values instead let one call site drop
     # `compile_only_dir_segs` and quietly answer `PRIVATE_HEADER` where
     # `apply_provenance` answered `UNKNOWN` (CodeRabbit review).
-    classify = partial(
+    classify_path = partial(
         classify_origin,
         public_header_segs=header_segs,
         public_dir_segs=dir_segs,
         have_public_set=have_public_set,
         compile_only_dir_segs=compile_only_dir_segs,
     )
+    # A header's origin is a pure function of its path under this one bound
+    # context, and a real graph asks for the same few hundred headers once
+    # per declaration they declare -- so each path is classified once.
+    origins: dict[str, ScopeOrigin] = {}
+
+    def classify(path: str) -> ScopeOrigin:
+        origin = origins.get(path)
+        if origin is None:
+            origin = origins[path] = classify_path(path)
+        return origin
+
+    #: Header nodes already added. Re-adding one merges an identical fact --
+    #: a no-op beyond the re-resolve it costs -- so a repeat returns early.
+    header_ids: dict[str, str] = {}
 
     def header_node(path: str) -> str:
+        node_id = header_ids.get(path)
+        if node_id is not None:
+            return node_id
         node_id = _header_node_id(path)
         origin = classify(path)
         attrs = {"visibility": origin.value} if origin != ScopeOrigin.UNKNOWN else {}
@@ -484,6 +501,7 @@ def build_header_only_graph(
                 attrs=attrs,
             )
         )
+        header_ids[path] = node_id
         return node_id
 
     for h in header_paths or ():
