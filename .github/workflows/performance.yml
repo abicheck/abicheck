@@ -9,7 +9,7 @@ name: Performance
 # numbers, and writes them to the job summary.
 #
 # Now that every compare() scenario is linear, the lane is GATING: the scaling
-# step enforces `--max-exponent 1.4` (tail slope) and `--max-rss-mb 2048`, and
+# step enforces `--max-exponent 1.4` (tail slope) and `--max-rss-mb 1024`, and
 # the regression job blocks on a >50% PR-vs-base slowdown. The thresholds are
 # deliberately CLI flags so the budget lives in this workflow, not the script —
 # loosen a threshold rather than re-adding `continue-on-error` if normal drift
@@ -229,7 +229,7 @@ jobs:
             ${SIZES_ARG[@]+"${SIZES_ARG[@]}"} \
             --repeat "$REPEAT" \
             --max-exponent 1.4 \
-            --max-rss-mb 2048 \
+            --max-rss-mb 1024 \
             --json-out reports/perf/scaling.json \
             ${GATE[@]+"${GATE[@]}"} | tee reports/perf/scaling.txt
 
@@ -237,9 +237,11 @@ jobs:
         # tests/test_perf_binary_scan.py used to run here too -- deleted
         # with the `scan` command itself (ADR-068 Phase 6); it invoked the
         # CLI directly with `["scan", ...]` and asserted scan's own JSON
-        # `coverage`/`pattern_scan` shape. No `compare`-side equivalent
-        # perf guard exists yet for `compare --depth binary`/`--depth
-        # headers` staying fast -- a real, tracked capability gap.
+        # `coverage`/`pattern_scan` shape. Its `compare`-side successor is
+        # tests/test_perf_compare_depth_scaling.py (`--depth binary` and
+        # `--depth headers` through the real CLI), which is marked
+        # `integration` and therefore runs in ci.yml's integration lane
+        # rather than here.
         run: |
           pytest tests/test_performance.py -v --tb=short -m slow
 
@@ -387,7 +389,7 @@ jobs:
   # job above, and a separate job on purpose rather than another flag on it.
   #
   # Why it exists: `benchmark_scaling.py` has always *recorded* `peak_mb`, and
-  # the `scaling` job gates it against an absolute ceiling (--max-rss-mb 2048).
+  # the `scaling` job gates it against an absolute ceiling (--max-rss-mb 1024).
   # An absolute ceiling only catches a regression once it crosses the ceiling,
   # so a change that doubled a scenario's allocation from 200 MiB to 400 MiB
   # passed in silence. The gradual drift the timing side has had a base-branch

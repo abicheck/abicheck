@@ -199,7 +199,7 @@ runs the scaling benchmark and the `slow` performance tests. Now that every
   existing comment claiming otherwise); for a PR that touches neither, run
   it on demand with `workflow_dispatch`.
 - **Armed budgets:** the scaling step runs with `--max-exponent 1.4` (the tail,
-  largest-two-size slope) and `--max-rss-mb 2048`; the `regression` job blocks
+  largest-two-size slope) and `--max-rss-mb 1024`; the `regression` job blocks
   on a PR-vs-base slowdown exceeding `max(15%, 100ms)` per (scenario, size)
   point (`--regress-tolerance 0.15 --regress-min-delta-seconds 0.1` — the
   "stable synthetic PR scenario" tier; a flat 50 % tolerance is an emergency
@@ -559,6 +559,30 @@ project's name.** Five further constraints it encodes:
   alike risks reading correct detection of a build-induced ABI change as a
   scanner defect, or suppressing it to satisfy the wrong expectation.
 
+#### oneDAL solo L2 compare across the 2026-09 perf series
+
+User-supplied receipts for one identical command (solo run, 125 header roots,
+fresh cache) at four revisions. The operands are not in this repository and
+no CI lane reproduces this run, so these are **reference expectations for the
+manual real-integration profile**, not gated numbers:
+
+| Revision | Wall | Peak RSS | Exit | Verdict | `lambda at` spellings |
+|---|---:|---:|---:|---|---:|
+| 0.6.0 | 2:43:53 | 15,176,116 KB | 4 | BREAKING | 146 |
+| main `e9d820797` | 11:47.46 | 16,239,532 KB | 4 | BREAKING | 290 |
+| main `963138528` | 11:04.71 | 16,525,332 KB | 2 | API_BREAK | 0 |
+| main `577d856a4` | 7:49.88 | 16,525,160 KB | 0 | NO_CHANGE | 0 |
+
+Read it as three signals, not one. Wall time fell ~21x since 0.6.0 and ~33%
+across the last step. Peak RSS did **not** fall (15.2 → 16.5 GB) — the series
+bought time, not memory, and ~16 GB sits at the edge of a nominal 16 GB host
+(see [memory.md](memory.md)). And the verdict moved BREAKING → API_BREAK →
+NO_CHANGE as checkout-path-dependent `lambda at` spellings were stripped
+(#1343, #1355): at this scale, a correctness regression that re-introduces
+path-dependent identity shows up first as a spurious verdict, which no
+synthetic lane below would catch. A re-measurement should record all five
+columns, not wall time alone.
+
 ## Coverage gaps this workflow does not close
 
 An external performance audit (2026-08) found that `compare()`/dump/scan
@@ -602,6 +626,14 @@ convention — root `AGENTS.md`):
   alternately from the workflow (or a driver script that shells out to both
   venvs in turn), then aggregates medians across rounds — a real, separate
   piece of orchestration, not a flag on the existing single-shot invocation.
+- **No scheduled real-scale lane.** Every gated lane is synthetic and small
+  (≤ 20k functions in-process, a handful of headers through the CLI). The
+  oneDAL receipts above — minutes of wall time, ~16 GB RSS, and a verdict that
+  depends on path-independent identity — are reproducible only by hand via
+  `scripts/l2_real_profiles.py`, and `scripts/bench_release_memory.py`,
+  `bench_graph_materialization.py` and `bench_extraction_scope.py` are wired
+  into no workflow. A peak-RSS regression on a real multi-GB AST, or a
+  scale-only identity/verdict drift, therefore has no automated guard.
 - **A maintained end-to-end depth/backend matrix.** The `slow` perf tests and
   the scaling/header-graph harnesses cover `compare()` and the L2 attach cost
   well; there is no equivalent maintained CI matrix over binary / headers
@@ -691,7 +723,7 @@ peak-memory tracking and PR-vs-base drift detection. Current status:
 ### Recommended next steps (in priority order)
 
 1. ~~**Wire a budget gate**~~ — done: the lane now runs `--max-exponent 1.4`
-   (`nested_types` exempt via `gate_exponent=False`) and `--max-rss-mb 2048`, and
+   (`nested_types` exempt via `gate_exponent=False`) and `--max-rss-mb 1024`, and
    `continue-on-error` is dropped on both the scaling and `regression` jobs. The
    `--regress-tolerance 0.5` PR-vs-base check also blocks now; loosen a threshold
    rather than re-adding `continue-on-error` if runner variance flakes a lane.
@@ -778,7 +810,7 @@ and cancels; the timing tolerance there is explicitly neutralised
 checked only against the absolute ceilings `--max-memory-mb`/`--max-rss-mb`.
 An absolute ceiling catches a regression only once it crosses the ceiling, so
 a change doubling a scenario's allocation from 200 MiB to 400 MiB passed the
-2048 MiB ceiling in silence — exactly the gradual drift the timing side had
+then-2048 MiB ceiling in silence — exactly the gradual drift the timing side had
 had a base-branch comparison for since PR #768.
 
 Each point's reported/gated figure is the **median** of its timed repeats (plus
