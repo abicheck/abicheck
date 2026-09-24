@@ -82,16 +82,19 @@ Time / peak RSS / output size.
 
 | Target | clang full | clang `-ast-dump-filter` | castxml full | castxml `--castxml-start` | ownership closure |
 |---|---|---|---|---|---|
-| SVS runtime | 1.7 s / 112 MB / 204 MB | 0.4 s / 112 MB / 1.4 MB | 0.6 s / 135 MB / 4.8 MB | 0.5 s / 131 MB / 0.1 MB | 0.2 s / 0.5 MB |
-| SVS core | 25.4 s / 478 MB / 2,935 MB | 7.8 s / 473 MB / 188 MB | 12.4 s / 806 MB / 107 MB | 10.4 s / 726 MB / 11.4 MB | 3.9 s / 19.2 MB |
-| oneDAL | 4.2 s / 151 MB / 502 MB | 1.6 s / 151 MB / 104 MB | 2.2 s / 234 MB / 20.4 MB | 1.9 s / 220 MB / 2.9 MB | 0.7 s / 3.4 MB |
-| DAAL | 4.7 s / 140 MB / 679 MB | 3.2 s / 140 MB / 409 MB | 1.4 s / 162 MB / 10.5 MB | 1.4 s / 159 MB / 5.4 MB | 0.6 s / 5.7 MB |
+| SVS runtime | 1.7 s / 112 MB / 204 MB | 0.4 s / 112 MB / 1.4 MB | 0.6 s / 135 MB / 4.8 MB | 0.5 s / 131 MB / 0.1 MB | 0.2 s / 47 MB / 0.5 MB |
+| SVS core | 25.4 s / 478 MB / 2,935 MB | 7.8 s / 473 MB / 188 MB | 12.4 s / 806 MB / 107 MB | 10.4 s / 726 MB / 11.4 MB | 8.3 s / 677 MB / 19.2 MB |
+| oneDAL | 4.2 s / 151 MB / 502 MB | 1.6 s / 151 MB / 104 MB | 2.2 s / 234 MB / 20.4 MB | 1.9 s / 220 MB / 2.9 MB | 1.1 s / 144 MB / 3.4 MB |
+| DAAL | 4.7 s / 140 MB / 679 MB | 3.2 s / 140 MB / 409 MB | 1.4 s / 162 MB / 10.5 MB | 1.4 s / 159 MB / 5.4 MB | 0.9 s / 84 MB / 5.7 MB |
 
 The filters cut output, not the frontend's own cost: RSS barely moves, and
 castxml's parse is 1.4–12.4 s either way. The name filters are for a
 namespace (`svs`, `oneapi`, `daal`); the closure is seeded from the
-target's header root. The closure is a Python pass over the full XML, so
-its time is on top of castxml full's.
+target's header root. The closure is the harness's prototype: a separate
+Python process that parses castxml's full XML, walks it and writes the
+pruned document. Its time and RSS are on top of castxml full's, and are an
+upper bound for Phase 3, which would apply the same walk inside the parse
+abicheck already does.
 
 ### M2 — what each narrowing loses
 
@@ -274,8 +277,11 @@ Precedence rules (the ADR states these as normative):
 ### CLI surface
 
 None for the keys, following ADR-068 D5's direction and the `compile:`
-precedent: ownership is a property of the project, stated once, and must
-be identical on both sides of a comparison. Two exceptions:
+precedent: ownership is a property of the project, stated once. It must
+be identical on both sides of a comparison when either side uses
+`dependency_evidence: referenced`; when both use `full`, differing
+`ownership_rules` are compared with a warning (see Storage). Two
+exceptions to "no CLI spelling":
 
 - `-H` directories keep folding into the target roots, as today.
 - A preview is needed before anyone trusts the config (Phase 1). It rides

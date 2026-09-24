@@ -130,8 +130,8 @@ def test_msvc_keeps_standard_selection(
         (["--sysroot", "/sr", "-I", "inc"], "g++", ["--sysroot", "/sr"]),
         # A value that looks like a flag is still the previous flag's value.
         (["-x", "-std=c++20"], "g++", ["-x", "-std=c++20"]),
-        # -isysroot is an Apple/Clang spelling; GCC rejects it.
-        (["-isysroot", "/sdk"], "g++", []),
+        # GCC accepts -isysroot too, and it moves the system search path.
+        (["-isysroot", "/sdk"], "g++", ["-isysroot", "/sdk"]),
         (["-isysroot", "/sdk"], "clang++", ["-isysroot", "/sdk"]),
         # A trailing separate-value flag with no value is dropped, not paired.
         (["-x"], "g++", []),

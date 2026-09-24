@@ -8,9 +8,12 @@ needs kept, and a referenced namespace not dragging its siblings back in.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import xml.etree.ElementTree as ET  # nosec B405 - trusted test data
 from pathlib import Path
+
+import pytest
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "bench_extraction_scope.py"
 _spec = importlib.util.spec_from_file_location("bench_extraction_scope", _SCRIPT)
@@ -82,3 +85,72 @@ def test_no_target_root_keeps_nothing_but_files() -> None:
     keep, seeds = bench.ownership_closure(root, ["/elsewhere"])
     assert seeds == 0
     assert keep == {"f1", "f2"}
+
+
+@pytest.mark.parametrize(
+    ("path", "root", "inside"),
+    [
+        ("/proj/include/api.h", "/proj/include", True),
+        ("/proj/include/api.h", "/proj/include/", True),
+        ("/proj/include", "/proj/include", True),
+        ("/proj/include-private/api.h", "/proj/include", False),
+        ("/proj/includes/api.h", "/proj/include", False),
+        ("/proj/inc", "/proj/include", False),
+    ],
+)
+def test_ownership_roots_match_at_directory_boundaries(
+    path: str, root: str, inside: bool
+) -> None:
+    assert bench.under_root(path, root) is inside
+
+
+def test_a_sibling_directory_sharing_the_root_prefix_is_not_a_seed() -> None:
+    xml = _XML.replace(
+        '<File id="f2" name="/usr/include/c++/13/string"/>',
+        '<File id="f2" name="/proj/include-private/string"/>',
+    )
+    keep, seeds = bench.ownership_closure(ET.fromstring(xml), ["/proj/include"])  # nosec B314 - fixture XML built in this test
+    assert seeds == 3
+    assert "_11" not in keep  # declared in the look-alike sibling directory
+
+
+@pytest.mark.parametrize(
+    ("flags", "includes", "defines"),
+    [
+        (["-Ia", "-DX=1"], ["a"], ["X=1"]),
+        (["-I", "a", "-D", "X=1"], ["a"], ["X=1"]),
+        (["-I", "a", "-Ib", "-D", "Y", "-DZ=2"], ["a", "b"], ["Y", "Z=2"]),
+        (["-std=c++20", "-O2"], [], []),
+    ],
+)
+def test_include_and_define_operands_survive_both_spellings(
+    flags: list[str], includes: list[str], defines: list[str]
+) -> None:
+    assert bench._stripped(flags, "-I") == includes
+    assert bench._stripped(flags, "-D") == defines
+
+
+def test_closure_child_process_writes_the_pruned_document(tmp_path: Path) -> None:
+    """The measured closure runs through the script's own child entry point."""
+    xml_in = tmp_path / "full.xml"
+    xml_in.write_text(_XML)
+    xml_out, seeds = tmp_path / "closure.xml", tmp_path / "seeds.json"
+    assert (
+        bench.main(
+            ["--closure-only", str(xml_in), str(xml_out), "/proj/include", str(seeds)]
+        )
+        == 0
+    )
+    assert json.loads(seeds.read_text()) == {"seeds": 3}
+    kept = {el.get("id") for el in ET.parse(xml_out).getroot()}  # nosec B314 - written by this test
+    assert kept == _closure()[0]
+
+
+def test_a_failed_castxml_run_is_an_error_not_a_stale_measurement(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "full.xml"
+    out.write_text("<CastXML/>")  # left over from an earlier run
+    with pytest.raises(RuntimeError, match="castxml failed"):
+        bench._run_castxml([sys.executable, "-c", "import sys; sys.exit(1)"], out)
+    assert not out.exists()

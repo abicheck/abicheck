@@ -124,7 +124,7 @@ def _seed_ids(root: ET.Element, target_roots: list[str]) -> list[str]:
         el.get("id", "")
         for el in root
         if el.tag == "File"
-        and any(el.get("name", "").startswith(r) for r in target_roots)
+        and any(under_root(el.get("name", ""), r) for r in target_roots)
     }
     return [el.get("id", "") for el in root if el.get("file") in owned_files]
 
@@ -192,9 +192,16 @@ def run_measured(argv: list[str]) -> dict[str, object]:
 # ── owned-declaration accounting ──────────────────────────────────────────
 
 
+def under_root(path: str, root: str) -> bool:
+    """Whether *path* is *root* or inside it -- ``/proj/include-private`` is
+    not under ``/proj/include``."""
+    root = root.rstrip("/\\")
+    return path == root or path.startswith((root + "/", root + "\\"))
+
+
 def _owner(path: str, owners: list[tuple[str, str]]) -> str:
     for name, prefix in owners:
-        if path.startswith(prefix):
+        if under_root(path, prefix):
             return name
     return "other"
 
@@ -253,26 +260,26 @@ def measure(args: argparse.Namespace) -> dict[str, object]:
 
     xml_full = work / "full.xml"
     base = [castxml, "--castxml-output=1", *emulate, *flags]
-    result["castxml_full"] = run_measured([*base, tu, "-o", str(xml_full)])
+    result["castxml_full"] = _run_castxml([*base, tu], xml_full)
     xml_start = work / "start.xml"
-    result["castxml_start"] = run_measured(
-        [*base, "--castxml-start", args.start, tu, "-o", str(xml_start)]
+    result["castxml_start"] = _run_castxml(
+        [*base, "--castxml-start", args.start, tu], xml_start
     )
-    for key, path in (("castxml_full", xml_full), ("castxml_start", xml_start)):
-        result[key]["xml_mb"] = round(path.stat().st_size / 1e6, 1)  # type: ignore[index]
 
-    t0 = time.monotonic()
-    tree = ET.parse(xml_full)  # nosec B314 - local castxml output
-    keep, seeds = ownership_closure(tree.getroot(), [owners[0][1]])
-    prune_to(tree.getroot(), keep)
+    # The closure runs in its own process so its time and peak RSS are
+    # measured the same way as the frontends'.
     xml_closure = work / "closure.xml"
-    tree.write(xml_closure)
-    result["closure"] = {
-        "seconds": round(time.monotonic() - t0, 1),
-        "seeds": seeds,
-        "xml_mb": round(xml_closure.stat().st_size / 1e6, 1),
-    }
-    del tree
+    seeds_file = work / "closure-seeds.json"
+    for stale in (xml_closure, seeds_file):
+        stale.unlink(missing_ok=True)
+    closure_argv = [sys.executable, str(Path(__file__).resolve()), "--closure-only"]
+    closure_argv += [str(xml_full), str(xml_closure), owners[0][1], str(seeds_file)]
+    closure = run_measured(closure_argv)
+    if closure["returncode"] != 0:
+        raise RuntimeError(f"closure failed: {closure['stderr_tail']}")
+    closure["seeds"] = json.loads(seeds_file.read_text())["seeds"]
+    closure["xml_mb"] = round(xml_closure.stat().st_size / 1e6, 1)
+    result["closure"] = closure
 
     full_counts = owned_counts(xml_full, owners)
     result["castxml_full"]["owned"] = full_counts  # type: ignore[index]
@@ -285,6 +292,27 @@ def measure(args: argparse.Namespace) -> dict[str, object]:
     if args.dump:
         result["dump"] = {fe: _dump(args, fe, work) for fe in ("clang", "castxml")}
     return result
+
+
+def _run_castxml(argv: list[str], out: Path) -> dict[str, object]:
+    """Run castxml into a fresh *out*; a failed run is an error, never a
+    measurement of whatever an earlier run left behind."""
+    out.unlink(missing_ok=True)
+    measured = run_measured([*argv, "-o", str(out)])
+    if measured["returncode"] != 0 or not out.exists():
+        raise RuntimeError(f"castxml failed: {measured['stderr_tail']}")
+    measured["xml_mb"] = round(out.stat().st_size / 1e6, 1)
+    return measured
+
+
+def _closure_only(xml_in: str, xml_out: str, root: str, seeds_out: str) -> int:
+    """Child-process entry point for the measured closure step."""
+    tree = ET.parse(xml_in)  # nosec B314 - local castxml output
+    keep, seeds = ownership_closure(tree.getroot(), [root])
+    prune_to(tree.getroot(), keep)
+    tree.write(xml_out)
+    Path(seeds_out).write_text(json.dumps({"seeds": seeds}))
+    return 0
 
 
 def _dump_config(flags: list[str], frontend: str) -> str:
@@ -300,7 +328,18 @@ def _dump_config(flags: list[str], frontend: str) -> str:
 
 
 def _stripped(flags: list[str], prefix: str) -> list[str]:
-    return [f[len(prefix) :] for f in flags if f.startswith(prefix)]
+    """Operands of *prefix* in both spellings: ``-Idir`` and ``-I dir``."""
+    values: list[str] = []
+    operand_next = False
+    for flag in flags:
+        if operand_next:
+            values.append(flag)
+            operand_next = False
+        elif flag == prefix:
+            operand_next = True
+        elif flag.startswith(prefix):
+            values.append(flag[len(prefix) :])
+    return values
 
 
 def _yaml_list(key: str, values: list[str]) -> list[str]:
@@ -330,15 +369,10 @@ def _read_back(out: Path, owner_args: list[str]) -> dict[str, object]:
     size = out.stat().st_size
     result: dict[str, object] = {
         "snapshot_mb": round(size / 1e6, 1),
-        # Recorded, then lifted for this read-back only: a default dump can
-        # write a snapshot larger than the default reader will accept.
+        # A default dump can write a snapshot larger than the default
+        # reader accepts; _snapshot_summary reads it directly regardless.
         "exceeds_default_read_limit": size > (1 << 30),
     }
-    for var in (
-        "ABICHECK_SNAPSHOT_MAX_STORED_BYTES",
-        "ABICHECK_SNAPSHOT_MAX_DECODED_BYTES",
-    ):
-        os.environ[var] = str(16 << 30)
     owners = [tuple(o.split("=", 1)) for o in owner_args]
     try:
         result.update(_snapshot_summary(out, owners))
@@ -348,12 +382,18 @@ def _read_back(out: Path, owner_args: list[str]) -> dict[str, object]:
 
 
 def _snapshot_summary(path: Path, owners: list[tuple[str, str]]) -> dict[str, object]:
-    from abicheck.serialization import load_snapshot
+    from abicheck.serialization import snapshot_from_dict
 
+    # One parse serves both the section sizes and the snapshot. Reading the
+    # file directly also bypasses the default snapshot size limit, which a
+    # benchmark must not trip over (M4 records when a dump exceeds it).
     with open(path, encoding="utf-8") as fh:
-        sections = json.load(fh).get("sections", {})
-    section_mb = {k: round(len(json.dumps(v)) / 1e6, 1) for k, v in sections.items()}
-    snap = load_snapshot(path)
+        document = json.load(fh)
+    section_mb = {
+        k: round(len(json.dumps(v)) / 1e6, 1)
+        for k, v in document.get("sections", {}).items()
+    }
+    snap = snapshot_from_dict(document)
     out: dict[str, object] = {
         "section_mb": dict(sorted(section_mb.items(), key=lambda kv: -kv[1])[:5])
     }
@@ -386,20 +426,15 @@ def _markdown(result: dict[str, object]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--tu", required=True, help="translation unit of #include lines")
+    ap.add_argument("--tu", help="translation unit of #include lines")
     ap.add_argument("--flags", default="", help="compile flags, one shell string")
-    ap.add_argument(
-        "--start", required=True, help="target namespace for the name filters"
-    )
+    ap.add_argument("--start", help="target namespace for the name filters")
     ap.add_argument(
         "--owner",
         action="append",
-        required=True,
         help="NAME=PATH_PREFIX; the first one is the target, the rest named dependencies",
     )
-    ap.add_argument(
-        "--work", required=True, help="scratch directory for XML and snapshots"
-    )
+    ap.add_argument("--work", help="scratch directory for XML and snapshots")
     ap.add_argument("--clang", default="clang++")
     ap.add_argument("--castxml", default=None)
     ap.add_argument(
@@ -410,11 +445,17 @@ def main(argv: list[str] | None = None) -> int:
         "-H", "--header", action="append", default=[], help="public header for --dump"
     )
     ap.add_argument("--markdown", action="store_true")
+    ap.add_argument("--closure-only", nargs=4, help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
+    if args.closure_only:
+        return _closure_only(*args.closure_only)
+    missing = [
+        f"--{n}" for n in ("tu", "start", "owner", "work") if not getattr(args, n)
+    ]
+    if missing:
+        ap.error(f"required: {', '.join(missing)}")
     result = measure(args)
-    print(json.dumps(result, indent=2))
-    if args.markdown:
-        print(_markdown(result))
+    print(_markdown(result) if args.markdown else json.dumps(result, indent=2))
     return 0
 
 

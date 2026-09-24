@@ -96,8 +96,6 @@ _CLANG_ONLY_PREFIXES: tuple[str, ...] = ("--target=", "-stdlib=")
 
 #: Flags that take their value as the *next* argument.
 _SEPARATE_VALUE_FLAGS: frozenset[str] = frozenset({"-x", "--sysroot", "-isysroot"})
-#: The subset of those GCC rejects (Apple/Clang spelling).
-_CLANG_ONLY_VALUE_FLAGS: frozenset[str] = frozenset({"-isysroot"})
 
 #: Clang-driver flags whose operand is the *next* argument and which only
 #: castxml's parser should see: ``-mllvm <backend-option>`` (it would
@@ -174,7 +172,7 @@ def emulation_arguments(
         if token in _PARSER_ONLY_VALUE_FLAGS:
             index += 2
         elif token in _SEPARATE_VALUE_FLAGS and index + 1 < len(tokens):
-            if _value_flag_kept(token, cc_id=cc_id, clang_family=clang_family):
+            if _value_flag_kept(cc_id):
                 kept += [token, tokens[index + 1]]
             index += 2
         else:
@@ -184,10 +182,10 @@ def emulation_arguments(
     return kept
 
 
-def _value_flag_kept(token: str, *, cc_id: str, clang_family: bool) -> bool:
-    if cc_id == "msvc":
-        return False
-    return token not in _CLANG_ONLY_VALUE_FLAGS or clang_family
+def _value_flag_kept(cc_id: str) -> bool:
+    # GCC and Clang both accept all three (GCC's -isysroot moves the
+    # system search path just as Clang's does); MSVC accepts none.
+    return cc_id != "msvc"
 
 
 def _single_argument_kept(token: str, *, cc_id: str, clang_family: bool) -> bool:
