@@ -39,6 +39,7 @@ from xml.etree.ElementTree import Element
 from defusedxml import ElementTree as DefusedET
 
 from ... import deadline
+from ...extract.castxml_compiler_emulation import emulated_compiler_command
 from ..build_evidence import CompileUnit
 from ..source_abi import SourceAbiTu, coverage_state_for_family, default_fact_set
 from ._argv import (
@@ -275,7 +276,12 @@ def build_castxml_command(
     cc_bin = pick_compiler_binary(compile_unit, compiler_binary)
     cc_id = "msvc" if is_msvc_mode(cc_bin) else "gnu"
 
-    cmd = [castxml_bin, "--castxml-output=1", f"--castxml-cc-{cc_id}", cc_bin]
+    # The compile unit's own arguments, as castxml's parser sees them. The
+    # emulated compiler gets the subset that changes its predefined macros
+    # or system search path (`extract.castxml_compiler_emulation`) -- a
+    # unit's `-std=c++20` or `--sysroot` otherwise reaches the parser but
+    # not the macro/include query, and the two disagree.
+    cmd: list[str] = []
     cmd += _std_flag(compile_unit.standard, cc_id)
     for key, value in compile_unit.defines.items():
         cmd.append(f"-D{key}={value}" if value else f"-D{key}")
@@ -311,8 +317,16 @@ def build_castxml_command(
     if compile_unit.target_triple and cc_id != "msvc":
         cmd.append(f"--target={compile_unit.target_triple}")
     cmd += _replay_extra_flags(compile_unit, cmd, cc_id)
-    cmd += ["-o", str(out_xml), str(source)]
-    return cmd
+    return [
+        castxml_bin,
+        "--castxml-output=1",
+        f"--castxml-cc-{cc_id}",
+        *emulated_compiler_command(cc_bin, cc_id, cmd),
+        *cmd,
+        "-o",
+        str(out_xml),
+        str(source),
+    ]
 
 
 class CastxmlSourceExtractor:

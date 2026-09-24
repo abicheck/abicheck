@@ -51,6 +51,7 @@ from .manifest_classification import CLASSIFICATION_BUG_CLASSES
 from .manifest_concurrency import CONCURRENCY_BUG_CLASSES
 from .manifest_config import CONFIG_BUG_CLASSES
 from .manifest_evidence import EVIDENCE_BUG_CLASSES
+from .manifest_extraction import EXTRACTION_BUG_CLASSES
 from .manifest_guards import GUARD_BUG_CLASSES
 from .manifest_integration import INTEGRATION_BUG_CLASSES
 from .manifest_performance import PERFORMANCE_BUG_CLASSES
@@ -487,6 +488,10 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_gha_expr.py",
             "tests/test_consumer_compile_full_chain_propagation.py",
             "tests/test_explicit_source_extractor_propagation.py",
+            # castxml compiler emulation: a -std/--sysroot/-m*/feature -f
+            # flag reached castxml's parser but not the emulated compiler's
+            # macro/include query. Oracle: the real compiler's -dM output.
+            "tests/test_castxml_compiler_emulation.py",
         ),
         known_gaps=(
             KnownGap(
@@ -1452,6 +1457,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     + CACHING_BUG_CLASSES
     + CLASSIFICATION_BUG_CLASSES
     + CONFIG_BUG_CLASSES
+    + EXTRACTION_BUG_CLASSES
     + EVIDENCE_BUG_CLASSES
     + PERFORMANCE_BUG_CLASSES
     + CONCURRENCY_BUG_CLASSES
