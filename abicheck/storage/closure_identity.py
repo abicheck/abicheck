@@ -215,6 +215,10 @@ def _quoted_spans(text: str) -> list[tuple[int, int]]:
     *looks* like our marker shape (``Tag<"(lambda:a.h:1:2)">``) is never
     mistaken for a real one.
     """
+    if '"' not in text:
+        # No quote, no span: the common case, answered by one C-level scan
+        # instead of the character loop below.
+        return []
     spans: list[tuple[int, int]] = []
     start: int | None = None
     i = 0

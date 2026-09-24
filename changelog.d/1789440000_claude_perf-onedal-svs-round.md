@@ -33,3 +33,5 @@
   mode (up to 8 workers). Its output does not depend on the worker count, so
   stored bytes are the same on any machine; smaller snapshots keep their
   existing bytes. Level 19 on oneDAL: 33.9 s to 21.6 s on four busy cores.
+- `_quoted_spans` returns immediately for a name with no `"` (almost every
+  name): its per-character loop ran over ~470k names per oneDAL load.

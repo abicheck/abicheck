@@ -116,6 +116,12 @@ _STARRED_CALL_ALLOWLIST: dict[tuple[str, str], str] = {
         "rewritten together; the `replace()` here only runs for a FROZEN "
         "dataclass, and no Fact[T]-bearing model dataclass is frozen."
     ),
+    ("abicheck/storage/closure_identity.py", "_rewrite_marked_subtrees"): (
+        "The marker-pruned twin of _walk_rewrite_strings (entry above), "
+        "mirroring its dataclass branch field for field: `replace()` runs "
+        "only for a FROZEN dataclass (SemanticIR), with the fields the "
+        "pruned walk rewrote; no Fact[T]-bearing model dataclass is frozen."
+    ),
     ("abicheck/extract/semantic_ir_merge.py", "_merge_entity"): (
         "ADR-063 Phase 6's SemanticEntity holds its Fact[...] fields "
         "DIRECTLY -- there is no legacy/sibling pair on it, so there is no "
