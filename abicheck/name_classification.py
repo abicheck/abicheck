@@ -639,6 +639,10 @@ def _quoted_spans(name: str) -> list[tuple[int, int]]:
     the kind of spurious same-identity collision this whole module exists to
     avoid introducing.
     """
+    if '"' not in name:
+        # No quote, no span: the common case, answered by one C-level scan
+        # instead of the character loop below.
+        return []
     spans: list[tuple[int, int]] = []
     start: int | None = None
     i = 0
@@ -749,6 +753,11 @@ def strip_anonymous_type_location(name: str) -> str:
     same-identity collision between two distinct literal values. See
     :func:`_quoted_spans` for the quote-tracking this relies on.
     """
+    if _ANON_TYPE_LOCATION_PATH_ONLY_RE.search(name) is None:
+        # Nothing to rewrite, so the quote scan -- a per-character Python
+        # loop, and ~3 s of a oneDAL snapshot load over 470k names that
+        # almost never hold a marker -- has nothing to protect.
+        return name
     quoted_spans = _quoted_spans(name)
 
     def _inside_quotes(pos: int) -> bool:

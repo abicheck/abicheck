@@ -46,6 +46,7 @@ from typing import Any
 
 from .errors import SnapshotError
 from .storage.env_limits import env_byte_limit
+from .storage.zstd_compress import compress_zstd
 from .storage.zstd_frame_guard import (
     read_past_leading_skippable_frames,
     skip_leading_skippable_frames,
@@ -686,13 +687,7 @@ def _compress_gzip(data: bytes) -> bytes:
 
 
 def _compress_zstd(data: bytes, *, level: int) -> bytes:
-    zstandard = _zstd_module()
-    cctx = zstandard.ZstdCompressor(
-        level=level,
-        write_checksum=False,
-        write_content_size=True,
-    )
-    return bytes(cctx.compress(data))
+    return compress_zstd(_zstd_module(), data, level=level)
 
 
 def encode_snapshot_bytes(

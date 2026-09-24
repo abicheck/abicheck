@@ -50,12 +50,47 @@ __all__ = [
     "BOUNDARY_CHARS",
     "compile_spelling_pattern",
     "finditer_allow_nested",
+    "spellings_possible_in",
     "spelling_matches",
 ]
 
 #: Boundary character class shared by the single-name check and the
 #: compiled multi-spelling pattern.
 BOUNDARY_CHARS = "_:"
+
+
+_WORD_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
+
+
+def spellings_possible_in(
+    spellings: Collection[str], haystacks: Collection[str]
+) -> set[str]:
+    """The subset of *spellings* that can match somewhere in *haystacks*.
+
+    Exact for :func:`compile_spelling_pattern`'s matching, not a heuristic:
+    a match's left/right lookarounds reject a neighbouring ``[A-Za-z0-9_:]``
+    character, so every maximal word run (``[A-Za-z0-9_]+``) of a matched
+    spelling is also a maximal word run of the haystack at that position.
+    A spelling with a word run the haystack does not contain can therefore
+    never match, and dropping it changes no other spelling's matches (the
+    trie selects among spellings that match at a position; see
+    :func:`_build_spelling_pattern`). A spelling with no word run at all is
+    always kept.
+
+    Worth calling when the vocabulary is much larger than what the scanned
+    text can name -- dependency scoping's vocabulary is every
+    toolchain-header type spelling (~40k, 3 MB of regex on oneDAL), while
+    the kept declarations name a small fraction; compiling that regex was
+    ~14 s of a ~110 s compare.
+    """
+    present: set[str] = set()
+    for haystack in haystacks:
+        present.update(_WORD_TOKEN_RE.findall(haystack))
+    return {
+        spelling
+        for spelling in spellings
+        if all(token in present for token in _WORD_TOKEN_RE.findall(spelling))
+    }
 
 
 def compile_spelling_pattern(spellings: Collection[str]) -> re.Pattern[str] | None:

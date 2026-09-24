@@ -260,8 +260,17 @@ _RULES: tuple[_Rule, ...] = (
         # bodies (`struct D { void f() override; };`). The suffix accepts common
         # cv/ref/noexcept/virt-specifier orderings such as `final override`,
         # `& noexcept override`, and `&& final`.
+        #
+        # The leading whitespace is matched atomically (`(?=(\s*))\1`, the
+        # pre-3.11 spelling of `\s*+`): `\s*` followed by `[^\n;{}()]*`
+        # could split an indentation run every possible way, so each failing
+        # line cost O(indent x length) retries -- 13.4 s over oneDAL's 604
+        # headers, 0.25 s atomic, with the identical match set. No split can
+        # change a match: the start is fixed by the delimiter, the rest of the
+        # line is re-read either way, and the `virtual` lookahead sees the
+        # same line from any split point.
         re.compile(
-            r"(?m)(?:^|[;{}])\s*(?![^\n;{}]*\bvirtual\b)"
+            r"(?m)(?:^|[;{}])(?=(\s*))\1(?![^\n;{}]*\bvirtual\b)"
             r"[^\n;{}()]*\([^;\n{}]*\)\s*"
             r"(?:const\s*)?(?:volatile\s*)?(?:&{1,2}\s*)?"
             r"(?:noexcept(?:\s*\([^)]*\))?\s*)?"

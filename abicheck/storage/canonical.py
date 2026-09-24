@@ -314,6 +314,11 @@ def canonical_input_trusted() -> Iterator[None]:
         _INPUT_IS_CANONICAL.reset(token)
 
 
+def canonical_input_is_trusted() -> bool:
+    """Whether the caller is inside :func:`canonical_input_trusted`."""
+    return _INPUT_IS_CANONICAL.get()
+
+
 def canonical_form_unless_trusted(value: Any) -> Any:
     """`canonical_form(value)`, or *value* itself inside
     :func:`canonical_input_trusted` (see there for when that is sound).

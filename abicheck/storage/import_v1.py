@@ -114,6 +114,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+from .canonical import canonical_input_trusted
 from .dto import (
     BINARY_SECTION_KIND,
     BUILD_SECTION_KIND,
@@ -156,6 +157,7 @@ from .legacy_sections import (
     split_legacy_document,
 )
 from .package import ArtifactRef, ObjectRef, ObjectStore, PackageManifest, VariantRef
+from .section_payload import current_section_payload, section_dto_dict
 from .semantic_ir_codec import semantic_ir_from_document, semantic_ir_to_document
 from .sparse_section_codec import (
     BinarySection,
@@ -215,6 +217,19 @@ _LEGACY_SECTION_CODECS: Mapping[
         lambda payload: provenance_to_dto(ProvenanceSection.from_document(payload)),
         provenance_from_dto,
     ),
+}
+
+#: The codec class behind each `_LEGACY_SECTION_CODECS` entry, for
+#: `export_legacy_sections`' current-version fast path.
+_LEGACY_SECTION_DOCUMENT_CODECS: Mapping[str, Any] = {
+    TYPES_SECTION_KIND: TypesSection,
+    GRAPH_SECTION_KIND: GraphSection,
+    BINARY_SECTION_KIND: BinarySection,
+    DECLARATIONS_SECTION_KIND: DeclarationsSection,
+    LAYOUT_SECTION_KIND: LayoutSection,
+    DEBUG_SECTION_KIND: DebugSection,
+    BUILD_SECTION_KIND: BuildSection,
+    PROVENANCE_SECTION_KIND: ProvenanceSection,
 }
 
 __all__ = [
@@ -405,12 +420,24 @@ def legacy_section_dtos(
         # its own dedicated DTO -- `_LEGACY_SECTION_CODECS` above -- instead
         # of the generic pass-through; the `else` branch is the fallback a
         # future, not-yet-specialized section kind would use.
-        codec = _LEGACY_SECTION_CODECS.get(section_kind)
-        if codec is not None:
-            to_dto_fn, _from_dto_fn = codec
-            section_dto = to_dto_fn(payload)
-        else:
-            section_dto = legacy_section_to_dto(section_kind, payload)
+        document_codec = _LEGACY_SECTION_DOCUMENT_CODECS.get(section_kind)
+        if document_codec is not None:
+            # `to_dto_fn(payload).to_dict()` (`_LEGACY_SECTION_CODECS`), minus
+            # the DTO's freeze/thaw copies: `section_dto_dict` returns the
+            # same dict. A codec that can validate without copying
+            # (`GraphSection.validated_document`) skips its own round trip
+            # too, since `section_dto_dict` canonicalizes the result anyway.
+            validated = getattr(document_codec, "validated_document", None)
+            document = (
+                validated(payload)
+                if validated is not None
+                else document_codec.from_document(payload).to_document()
+            )
+            section_dtos.append(
+                (section_kind, section_dto_dict(section_kind, document))
+            )
+            continue
+        section_dto = legacy_section_to_dto(section_kind, payload)
         section_dtos.append((section_kind, section_dto.to_dict()))
     if ir is not None or conflicts:
         section_dtos.append(
@@ -477,6 +504,18 @@ def _check_section_kind(
         )
 
 
+def _owned_document(document_codec: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    """``document_codec.from_document(payload).to_document()`` for a payload
+    `current_section_payload` returned: fresh, owned and canonical, so the
+    codec runs under `canonical_input_trusted` (as `_decode_current` does),
+    and a codec that can skip its own copy (`document_from_owned`) does."""
+    with canonical_input_trusted():
+        owned = getattr(document_codec, "document_from_owned", None)
+        if owned is not None:
+            return dict(owned(payload))
+        return dict(document_codec.from_document(payload).to_document())
+
+
 def _graph_section_loader(
     raw: Any, artifact_id: str, locator: str
 ) -> Callable[[], dict[str, Any]]:
@@ -485,9 +524,15 @@ def _graph_section_loader(
     read performs, run on first access."""
 
     def load() -> dict[str, Any]:
-        dto = SectionDTO.from_dict(raw)
-        _check_section_kind(dto, GRAPH_SECTION_KIND, artifact_id, locator)
-        graph = graph_from_dto(dto).to_document()["surface_graph"]
+        current = current_section_payload(raw)
+        if current is not None and current[0] == GRAPH_SECTION_KIND:
+            # The eager path's fast decode (`_owned_document`): same checks,
+            # same document, no throwaway DTO copies.
+            graph = _owned_document(GraphSection, current[1])["surface_graph"]
+        else:
+            dto = SectionDTO.from_dict(raw)
+            _check_section_kind(dto, GRAPH_SECTION_KIND, artifact_id, locator)
+            graph = graph_from_dto(dto).to_document()["surface_graph"]
         if not isinstance(graph, dict):  # GraphSection guarantees a mapping
             raise ValueError("a 'graph' section decoded to a non-mapping graph")
         return graph
@@ -543,6 +588,20 @@ def export_legacy_sections(
             document["surface_graph"] = DeferredGraphPayload(
                 _graph_section_loader(raw, artifact_id, locator)
             )
+            continue
+        document_codec = _LEGACY_SECTION_DOCUMENT_CODECS.get(section_kind)
+        current = current_section_payload(raw) if document_codec is not None else None
+        if (
+            document_codec is not None
+            and current is not None
+            and current[0] == section_kind
+        ):
+            # Same checks and the same decoded document as the codec branch
+            # below, minus the discarded DTO's freeze/unfreeze round trip
+            # (`current_section_payload`). `_decode_current` runs the codec
+            # under `canonical_input_trusted` for the identical reason: the
+            # payload is fresh, owned and already canonical.
+            document.update(_owned_document(document_codec, current[1]))
             continue
         dto = SectionDTO.from_dict(raw)
         _check_section_kind(dto, section_kind, artifact_id, locator)

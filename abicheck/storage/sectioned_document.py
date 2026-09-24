@@ -58,7 +58,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .canonical import strip_capture_metadata
+from .canonical import CAPTURE_METADATA_KEY
 from .dto import SECTION_SCHEMA_VERSIONS
 from .import_v1 import export_legacy_sections, legacy_section_dtos
 
@@ -137,7 +137,16 @@ def to_sectioned_document(
         # Popped, so each raw DTO is released as soon as its normalized
         # copy exists -- never both forms of the whole document at once.
         kind, dto_dict = section_dtos.pop()
-        sections[kind] = strip_capture_metadata(dto_dict)
+        # `strip_capture_metadata(dto_dict)`, without re-canonicalizing a
+        # payload `legacy_section_dtos` already emitted in canonical form
+        # (every one comes out of `canonical_form`): only this top level can
+        # still be out of order. A second full pass over the document was
+        # ~6 s of a oneDAL dump's write.
+        sections[kind] = {
+            key: dto_dict[key]
+            for key in sorted(dto_dict)
+            if key != CAPTURE_METADATA_KEY
+        }
         del dto_dict
     return {
         "schema_version": source_schema_version,
