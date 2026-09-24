@@ -125,7 +125,7 @@ class TestPendingGraphContract:
 
     def test_pickle_carries_the_decoded_value_not_the_decoder(self) -> None:
         cell = PendingGraph(lambda: {"v": 1})
-        clone = pickle.loads(pickle.dumps(cell))
+        clone = pickle.loads(pickle.dumps(cell))  # nosec B301 - round-trips bytes this test just produced
         assert clone.decoded and clone.resolve() == {"v": 1}
 
 
@@ -175,7 +175,7 @@ class TestLoadedSnapshotIsLazy:
 
     def test_pickle_round_trip_resolves(self, tmp_path: Path) -> None:
         lazy = load_snapshot(_stored(tmp_path))
-        clone = pickle.loads(pickle.dumps(lazy))
+        clone = pickle.loads(pickle.dumps(lazy))  # nosec B301 - round-trips bytes this test just produced
         assert is_graph_decoded(clone, "surface_graph")
         assert clone.build_source is not None
         assert clone.build_source.source_graph is clone.surface_graph
