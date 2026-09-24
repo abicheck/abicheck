@@ -304,6 +304,22 @@ def _entity_key(entity_id: object) -> str:
     return key if isinstance(key, str) else ""
 
 
+def _unresolved_declaration(
+    spelling: str, name: str, entity_id: object
+) -> GraphEntityIdentity:
+    """A snapshot declaration with no linker name, keyed on the least
+    evidence that still tells it apart. A producer's own non-linker spelling
+    (castxml's ``__abicheck_ctor__ns::W(int)``/``~ns::W`` placeholder) already
+    carries the qualified name and signature, so it alone is the key -- the
+    ``EntityId`` key would only repeat it (measured on oneDAL: the repeat made
+    the persisted graph section ~9% larger). With no such spelling, the name
+    plus the ``EntityId`` key (which carries the scope and signature tag) is
+    the evidence."""
+    if spelling:
+        return unresolved_identity("decl", spelling)
+    return unresolved_identity("decl", name, _entity_key(entity_id))
+
+
 def identity_for_function(fn: Function) -> GraphEntityIdentity:
     """A snapshot function. No signature spelling is available at L2 in the
     form the AST/L4 producers hash, so an unmangled callable is
@@ -311,7 +327,7 @@ def identity_for_function(fn: Function) -> GraphEntityIdentity:
     ident = declaration_identity(linker_name=fn.mangled, plain_name=fn.name)
     if ident.resolved:
         return ident
-    return unresolved_identity("decl", fn.mangled, fn.name, _entity_key(fn.entity_id))
+    return _unresolved_declaration(fn.mangled, fn.name, fn.entity_id)
 
 
 def identity_for_variable(var: Variable) -> GraphEntityIdentity:
@@ -321,9 +337,7 @@ def identity_for_variable(var: Variable) -> GraphEntityIdentity:
     ident = declaration_identity(linker_name=var.mangled, plain_name=var.name)
     if ident.resolved:
         return ident
-    return unresolved_identity(
-        "decl", var.mangled, var.name, _entity_key(var.entity_id)
-    )
+    return _unresolved_declaration(var.mangled, var.name, var.entity_id)
 
 
 def _type_name(qualified_name: str | None, name: str) -> str:
