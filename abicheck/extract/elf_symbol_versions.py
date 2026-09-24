@@ -85,16 +85,21 @@ def decode_versym(section: Any, count: int) -> list[tuple[int, bool]] | None:
     The same mapping the per-entry pyelftools read gave: a named value is
     ``(0, False)`` for ``VER_NDX_LOCAL`` and ``(1, False)`` for every other
     name; an unnamed one splits into its index and hidden bit. ``None`` when
-    the section is not a plain array of 2-byte entries covering *count*,
-    for the caller's per-entry path to handle.
+    the section is not a plain array of 2-byte entries covering *count*, or
+    cannot be read at all, for the caller's per-entry path to handle.
     """
-    header = section.header
-    if header["sh_entsize"] not in (0, 2) or header["sh_size"] < 2 * count:
+    try:
+        header = section.header
+        if header["sh_entsize"] not in (0, 2) or header["sh_size"] < 2 * count:
+            return None
+        data = section.data()
+        order = "<" if section.elffile.little_endian else ">"
+    except Exception:  # noqa: BLE001 - a truncated/corrupt section
+        # Declined, not raised: the per-entry path reads it again and owns
+        # the warning-and-skip a malformed `.gnu.version` has always got.
         return None
-    data = section.data()
     if len(data) < 2 * count:
         return None
-    order = "<" if section.elffile.little_endian else ">"
     out: list[tuple[int, bool]] = []
     for raw in struct.unpack_from(f"{order}{count}H", data):
         name = _NAMED_VERSYM.get(raw)

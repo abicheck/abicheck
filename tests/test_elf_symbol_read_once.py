@@ -162,3 +162,13 @@ def test_parse_falls_back_to_the_per_entry_read_with_identical_output(
     fast = repr(elf_metadata.parse_elf_metadata(lib))
     monkeypatch.setattr(elf_metadata, "decode_versym", lambda _s, _n: None)
     assert repr(elf_metadata.parse_elf_metadata(lib)) == fast
+
+
+def test_an_unreadable_section_is_declined_not_raised() -> None:
+    class _Sec:
+        header = {"sh_entsize": 2, "sh_size": 8}
+
+        def data(self) -> bytes:
+            raise ValueError("truncated file")
+
+    assert decode_versym(_Sec(), 4) is None
