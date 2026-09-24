@@ -433,12 +433,27 @@ class TestPendingGraphEdgeBranches:
 
         calls: list[int] = []
         cell = PendingGraph(lambda: calls.append(1) or "decoded")
+        real = cell._lock
+        waiting = threading.Event()
+
+        class _SignallingLock:
+            """Signals once a reader *attempts* the lock, then blocks as usual."""
+
+            def __enter__(self) -> bool:
+                if threading.current_thread() is not threading.main_thread():
+                    waiting.set()
+                return real.__enter__()
+
+            def __exit__(self, *exc: object) -> None:
+                real.__exit__(*exc)
+
         out: list[object] = []
-        with cell._lock:  # the "other" decoder holds the lock ...
+        with real:  # the "other" decoder holds the lock ...
+            cell._lock = _SignallingLock()  # type: ignore[assignment]
             reader = threading.Thread(target=lambda: out.append(cell.resolve()))
             reader.start()
-            while reader.is_alive() and not cell._lock.locked():
-                pass
+            assert waiting.wait(5), "reader never reached the lock"
+            assert not cell.decoded  # it passed the unlocked fast path while pending
             cell._value, cell._done = "by-the-other-thread", True  # ... and finishes
         reader.join(5)
         assert out == ["by-the-other-thread"]
