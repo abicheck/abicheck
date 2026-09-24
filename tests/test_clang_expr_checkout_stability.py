@@ -76,3 +76,54 @@ def test_layout_tool_base_key_independent_of_checkout_root(
     kb = _bare_base_name("ns::" + spelling.format(r=b))
     assert ka == kb
     assert a not in ka
+
+
+@pytest.mark.integration
+def test_real_clang_lambda_initializer_fingerprint_is_checkout_stable(tmp_path) -> None:
+    """Real ``clang -ast-dump=json`` output, the same header under two roots."""
+    import json
+    import shutil
+    import subprocess
+
+    from abicheck.dumper_clang_expr import _index_decl_id_qualified_names
+
+    clang = shutil.which("clang++") or shutil.which("clang")
+    if clang is None:
+        pytest.skip("clang not available")
+    src = "namespace spy { namespace detail {\nstatic constexpr int width = []() { int n = 0; for (int i = 0; i < 3; ++i) n += i; return n; }();\n}}\n"
+
+    def find(n):
+        if isinstance(n, dict):
+            if n.get("kind") == "VarDecl" and n.get("name") == "width":
+                return n
+            for c in n.get("inner") or []:
+                r = find(c)
+                if r:
+                    return r
+        return None
+
+    prints = []
+    for side in ("old", "new"):
+        h = tmp_path / side / "inc" / "h.h"
+        h.parent.mkdir(parents=True)
+        h.write_text(src)
+        out = subprocess.run(
+            [
+                clang,
+                "-std=c++20",
+                "-x",
+                "c++",
+                "-fsyntax-only",
+                "-Xclang",
+                "-ast-dump=json",
+                str(h),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        root = json.loads(out)
+        assert f"{side}/inc/h.h" in out  # the leak source really is present
+        idx = _index_decl_id_qualified_names(root)
+        prints.append(_expr_fingerprint(find(root)["inner"][0], lambda idx=idx: idx))
+    assert prints[0] == prints[1]
