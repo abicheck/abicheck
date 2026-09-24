@@ -229,15 +229,18 @@ def test_fact_provenance_with_no_matching_key_leaves_attr_absent() -> None:
 
 def test_fact_provenance_with_no_mangled_name_leaves_attr_absent() -> None:
     """A declaration with no recorded mangled symbol still seeds a node --
-    _decl_identity falls back to the bare name -- but there's no mangled key
-    to look up in fact_provenance, so the lookup must be skipped entirely
-    rather than raising or matching on an empty string."""
+    an explicit ``unresolved`` one, since a bare name is no identity
+    (evidence-entity-model I1) -- but there's no mangled key to look up in
+    fact_provenance, so the lookup must be skipped entirely rather than
+    raising or matching on an empty string."""
     fn = Function(name="f", mangled="", return_type="void")
     graph = build_header_only_graph(
         _snapshot(functions=[fn]),
         fact_provenance={func_fact_key("", "visibility"): "clang"},
     )
-    node = next(n for n in graph.nodes if n.id == "decl://f")
+    node = next(n for n in graph.nodes if n.kind == "source_decl")
+    assert node.id.startswith("unresolved://")
+    assert node.attrs["identity"] == "unresolved"
     assert "visibility_provenance" not in node.attrs
 
 
@@ -476,13 +479,14 @@ def test_flat_model_resolves_qualified_spelling_to_seeded_bare_node() -> None:
     assert "type://detail::Impl" not in node_by_id
 
 
-def test_flat_model_ambiguous_source_record_edges_skipped() -> None:
+def test_flat_model_ambiguous_source_record_edges_stay_on_their_own_node() -> None:
     # Codex review: the *emitting* record's own bare name can be just as
     # ambiguous as an edge target's. A public "Foo" and an unrelated private
-    # "Foo" collapse to the same type://Foo node; the private Foo's own
-    # private-typed field must not get attributed to the shared node and
-    # read as a (nonexistent) public-to-internal dependency of the public
-    # Foo.
+    # "Foo" used to collapse to one type://Foo node, so the private Foo's own
+    # private-typed field read as a (nonexistent) public-to-internal
+    # dependency of the public Foo. Under I1 the two are separate explicit
+    # unresolved nodes, so the edge is kept -- on the private Foo's own node,
+    # never on the public one's.
     foo_public = RecordType(name="Foo", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER)
     priv = RecordType(name="Priv", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
     foo_private = RecordType(
@@ -492,7 +496,14 @@ def test_flat_model_ambiguous_source_record_edges_skipped() -> None:
         origin=ScopeOrigin.PRIVATE_HEADER,
     )
     graph = build_header_only_graph(_snapshot(types=[foo_public, priv, foo_private]))
-    assert not any(e.kind == "TYPE_HAS_FIELD_TYPE" for e in graph.edges)
+    foo_nodes = {
+        n.attrs.get("visibility"): n.id for n in graph.nodes if n.label == "Foo"
+    }
+    assert len(foo_nodes) == 2
+    field_edges = [e for e in graph.edges if e.kind == "TYPE_HAS_FIELD_TYPE"]
+    assert [(e.src, e.dst) for e in field_edges] == [
+        (foo_nodes["private_header"], "type://Priv")
+    ]
 
 
 def test_flat_model_ambiguous_bare_name_across_struct_and_enum() -> None:

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from ..model.graph_entity_identity import declaration_identity, type_identity
 from ..model.graph_facts import (
     CONF_HIGH,
     CONF_REDUCED,
@@ -53,6 +54,40 @@ from ..model.source_graph import (
 
 if TYPE_CHECKING:
     from .source_abi import SourceAbiSurface, SourceEntity
+
+
+def source_entity_decl_node_id(graph: SourceGraphSummary, ent: SourceEntity) -> str:
+    """The graph node of an L4 declaration, through the one identity function
+    every graph producer shares (evidence-entity-model invariant I1).
+
+    Keyed on the linker name whenever the extractor observed one -- the
+    mangled name, or ``names["linker"]`` for C linkage, which
+    ``SourceEntity.identity()`` does not see -- so the node is the same one
+    the L2 header graph and the AST replay passes key the declaration on.
+    When that key differs from ``identity()`` (the spelling ``source_edges``
+    rows and the ``source_decl_to_binary_symbol`` mapping still use), the
+    ``identity()`` spelling is recorded as an alias of it, so a row naming
+    the entity that way lands on the same node instead of minting another.
+    """
+    leaf = ent.qualified_name.rsplit("::", 1)[-1]
+    ident = declaration_identity(
+        linker_name=ent.mangled_name or ent.names.get("linker", ""),
+        plain_name=leaf,
+        qualified_name=ent.qualified_name,
+        signature=ent.signature_hash,
+        callable=False,
+    )
+    legacy = _decl_node_id(ent.identity())
+    for alias in (*ident.aliases, legacy):
+        if alias == ident.node_id or graph.has_node(alias):
+            continue
+        try:
+            graph.add_identity_alias(alias, ident.node_id)
+        except ValueError:
+            # The spelling already aliases a *different* entity: the evidence
+            # is ambiguous, so it joins neither (no merge without evidence).
+            graph.identity_aliases.pop(alias, None)
+    return ident.node_id
 
 
 def _file_in_project(caller_file: str, project_files: frozenset[str]) -> bool:
@@ -222,7 +257,7 @@ def _augment_with_source_abi(
         for ent in (*surface.reachable_templates, *surface.reachable_inline_bodies)
     }
     for ent in declarations:
-        did = _decl_node_id(ent.identity())
+        did = source_entity_decl_node_id(graph, ent)
         conf = ent.confidence.value
         graph.add_node(
             GraphNode(
@@ -257,7 +292,7 @@ def _augment_with_source_abi(
             )
 
     for ent in surface.reachable_types:
-        tid = _type_node_id(ent.identity())
+        tid = type_identity(ent.identity()).node_id
         conf = ent.confidence.value
         graph.add_node(
             GraphNode(

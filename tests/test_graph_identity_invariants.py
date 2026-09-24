@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import random
 
-import pytest
 from hypothesis import given, settings, strategies as st
 
 from abicheck.buildsource.header_graph import build_header_only_graph
@@ -117,20 +116,12 @@ def _rec(qname: str, scope) -> RecordType:
 
 
 class TestSurfaceAndHeaderGraphAgree:
-    @pytest.mark.xfail(
-        strict=True,
-        reason="I1 not yet implemented: surface builder keys on EntityId.key, header graph on decl://<linker>",
-    )
     def test_one_node_per_declaration(self) -> None:
         """Four distinct functions (one C-linkage, two overloads, one
         method) -> four declaration nodes, not one per producer."""
         graph = _graph(_snap(functions=_real_functions()))
         assert len(_decl_ids(graph)) == 4
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="I1 not yet implemented: surface builder falls back to declaration::<name>",
-    )
     def test_variable_joins_across_producers(self) -> None:
         var = Variable(
             name="ns::g", mangled="_ZN2ns1gE", type="int", source_header="a.h"
@@ -138,10 +129,6 @@ class TestSurfaceAndHeaderGraphAgree:
         graph = _graph(_snap(variables=[var]))
         assert len(_decl_ids(graph)) == 1
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="I1 not yet implemented: flat header graph keys types by bare name",
-    )
     def test_same_named_types_in_different_namespaces_stay_apart(self) -> None:
         """``ns::W`` and ``other::W`` are two entities; an enum is a third."""
         types = [
@@ -152,10 +139,6 @@ class TestSurfaceAndHeaderGraphAgree:
         graph = _graph(_snap(types=types, enums=enums))
         assert len(_type_ids(graph)) == 3
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="I1 not yet implemented: flat header graph keys types by bare name",
-    )
     def test_inline_namespace_spellings_stay_apart_without_evidence(self) -> None:
         """castxml spells an inline-namespace member without the inline
         segment (``ns::S``), clang with it (``ns::v1::S``). Nothing in the
@@ -190,20 +173,12 @@ class TestUnresolved:
             Function(name="~W", mangled="~ns::W", return_type="", source_header="a.h"),
         ]
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="I1 not yet implemented: castxml placeholders are keyed as decl:// linker names",
-    )
     def test_placeholders_become_explicit_unresolved_nodes(self) -> None:
         graph = _graph(_snap(functions=self._ctors()))
         decls = [n for n in graph.nodes if n.kind in DECL_KINDS]
         assert len(decls) == 3
         assert all(n.attrs.get("identity") == "unresolved" for n in decls)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="I1 not yet implemented: no unresolved state; producers disagree on ids",
-    )
     def test_unresolved_never_collides_with_resolved(self) -> None:
         fns = [*self._ctors(), *_real_functions()]
         graph = _graph(_snap(functions=fns))
@@ -213,10 +188,6 @@ class TestUnresolved:
         }
         assert len(unresolved) == 3
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="I1 not yet implemented: header graph collapses unmangled overloads onto decl://<name>",
-    )
     def test_overloads_without_linker_names_never_merge(self) -> None:
         """Two overloads with no linker name at all (no evidence they are
         the same entity) stay two nodes in *every* producer -- the header
@@ -243,10 +214,6 @@ class TestUnresolved:
 
 
 class TestAlias:
-    @pytest.mark.xfail(
-        strict=True,
-        reason="I1 not yet implemented: no alias table; decorated spelling mints a second node",
-    )
     def test_macho_decorated_spelling_is_an_alias_not_a_node(self) -> None:
         """clang reports the Mach-O decorated ``__Z...`` spelling; the AST
         replay passes strip it. One entity, one node, and the decorated
@@ -258,10 +225,6 @@ class TestAlias:
 
 
 class TestL4Join:
-    @pytest.mark.xfail(
-        strict=True,
-        reason="I1 not yet implemented: L4 C-linkage entity keyed qualified#signature",
-    )
     def test_source_entity_joins_the_snapshot_declaration(self) -> None:
         """An L4 ``SourceEntity`` for the same declarations (a C++ overload by
         mangled name; a C-linkage function whose extractor recorded the

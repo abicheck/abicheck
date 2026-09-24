@@ -103,9 +103,6 @@ from typing import TYPE_CHECKING
 from ..compare.surface_graph import (
     ReferencedIdentifiers,
     fact_list,
-    node_id_for_declaration,
-    node_id_for_type,
-    node_id_for_typedef,
     referenced_identifiers_by_node,
 )
 from ..diff_cxx_rules import owner_class_of
@@ -278,7 +275,7 @@ def _seed_public_roots(
             if fn.params or _is_real_type(fn.return_type):
                 surface.has_typed_roots = True
             seed_types |= _referenced_identifiers_for_function(
-                refs, node_id_for_declaration(fn.entity_id, fn.name), fn
+                refs, refs.node_id(fn), fn
             )
             # A public *method* makes its enclosing class directly public even
             # when the method's own signature carries no class-typed return/
@@ -302,7 +299,7 @@ def _seed_public_roots(
             if _is_real_type(var.type):
                 surface.has_typed_roots = True
             seed_types |= _referenced_identifiers_for_variable(
-                refs, node_id_for_declaration(var.entity_id, var.name), var
+                refs, refs.node_id(var), var
             )
     return seed_types, has_public
 
@@ -411,7 +408,7 @@ def _walk_type_closure(
         target = snap.typedefs.get(name)
         if target:
             surface.public_typedefs.add(name)
-            for ident in _referenced_identifiers(refs, node_id_for_typedef(name)):
+            for ident in _referenced_identifiers(refs, refs.typedef_node_id(name)):
                 if ident not in seen:
                     queue.append(ident)
         # A short/qualified enum alias (``Mode``) reached from a public signature
@@ -436,9 +433,7 @@ def _walk_type_closure(
             surface.public_types.add(rec_node.name)
             if rec_node.qualified_name:
                 surface.public_types.add(rec_node.qualified_name)
-            rec_node_id = node_id_for_type(
-                rec_node.entity_id, rec_node.qualified_name or rec_node.name
-            )
+            rec_node_id = refs.node_id(rec_node)
             for ident in _referenced_identifiers_for_record(
                 refs, rec_node_id, rec_node
             ):
@@ -514,7 +509,7 @@ def _walk_exact_type_closure(
             # invariant, only ever happens via an already-all-exact chain)
             # makes the alias name itself exact too.
             surface.exact_type_identities.add(name)
-            for ident in _referenced_identifiers(refs, node_id_for_typedef(name)):
+            for ident in _referenced_identifiers(refs, refs.typedef_node_id(name)):
                 if ident not in seen:
                     queue.append(ident)
         en_nodes = enum_by_name.get(name, ())
@@ -533,9 +528,7 @@ def _walk_exact_type_closure(
         _mark_identity_forms_if_unambiguous(
             surface, rec_node, record_by_name, enum_by_name
         )
-        rec_node_id = node_id_for_type(
-            rec_node.entity_id, rec_node.qualified_name or rec_node.name
-        )
+        rec_node_id = refs.node_id(rec_node)
         for ident in _referenced_identifiers_for_record(refs, rec_node_id, rec_node):
             if ident not in seen:
                 queue.append(ident)

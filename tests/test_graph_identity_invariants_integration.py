@@ -112,11 +112,6 @@ def _decl_node_ids(path: Path) -> set[str]:
     return {n.id for n in graph.nodes if n.kind in {"source_decl", "declaration"}}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="I1 not yet implemented: surface builder keys EntityId.key; the AST "
-    "path keys C-linkage functions as qualified#signature",
-)
 def test_one_node_per_declaration_and_one_id_across_frontends(
     dumps: dict[str, Path],
 ) -> None:

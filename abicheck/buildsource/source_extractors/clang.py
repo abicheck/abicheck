@@ -85,6 +85,7 @@ from ._argv_shortopts import rebase_structured_path as _rebase_structured_path
 from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError
 from .clang_nodes import (
+    _c_linkage_name,
     _default_arg_repr,
     _entity_names,
     _entity_ownership,
@@ -1243,7 +1244,7 @@ def _emit_function(
             mangled_name=mangled,
             signature_hash=_hash("sig", sig),
             value=_default_arg_repr(node),
-            names=_entity_names(name, mangled),
+            names=_entity_names(name, mangled, _c_linkage_name(node)),
             relations=relations,
             ownership=_entity_ownership(visibility, origin),
             source_location=loc,
@@ -1271,7 +1272,7 @@ def _emit_function(
                 qualified_name=name,
                 mangled_name=mangled,
                 signature_hash=_hash("sig", sig),
-                names=_entity_names(name, mangled),
+                names=_entity_names(name, mangled, _c_linkage_name(node)),
                 relations=relations,
                 ownership=_entity_ownership(visibility, origin),
                 # Alpha-rename the function's parameters together with the body so
@@ -1396,7 +1397,7 @@ def _emit_constexpr(
             qualified_name=name,
             mangled_name=mangled,
             value=value,
-            names=_entity_names(name, mangled),
+            names=_entity_names(name, mangled, _c_linkage_name(node)),
             ownership=_entity_ownership(visibility, origin),
             source_location=_location(file, _node_line(node), origin),
             visibility=visibility,
@@ -1433,7 +1434,7 @@ def _emit_variable(
             qualified_name=name,
             mangled_name=mangled,
             type_hash=_hash("type", type_repr),
-            names=_entity_names(name, mangled),
+            names=_entity_names(name, mangled, _c_linkage_name(node)),
             ownership=_entity_ownership(visibility, origin),
             source_location=_location(file, _node_line(node), origin),
             visibility=visibility,
