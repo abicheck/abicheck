@@ -27,24 +27,26 @@ zstandard = pytest.importorskip("zstandard")
 
 _POSIX_ONLY = pytest.mark.skipif(
     sys.platform == "win32",
-    reason="multi-threaded zstd is disabled on Windows (it crashed CI workers there)",
+    reason="multi-threaded zstd is disabled on Windows (see zstd_compress docstring)",
 )
 
 
 def _document(size: int) -> bytes:
+    """Deterministic snapshot-shaped JSON of at least *size* bytes."""
     rng = random.Random(1234)
-    rows = []
-    while sum(map(len, rows)) < size:
-        rows.append(
-            json.dumps(
-                {
-                    "name": f"ns{rng.randrange(50)}::fn_{rng.randrange(10**6)}",
-                    "params": [
-                        f"T{rng.randrange(40)} const&" for _ in range(rng.randrange(4))
-                    ],
-                }
-            )
+    rows: list[str] = []
+    total = 0
+    while total < size:
+        row = json.dumps(
+            {
+                "name": f"ns{rng.randrange(50)}::fn_{rng.randrange(10**6)}",
+                "params": [
+                    f"T{rng.randrange(40)} const&" for _ in range(rng.randrange(4))
+                ],
+            }
         )
+        rows.append(row)
+        total += len(row) + 1
     return ("[" + ",".join(rows) + "]").encode()
 
 

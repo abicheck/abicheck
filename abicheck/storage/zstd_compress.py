@@ -19,10 +19,12 @@ Split out of `snapshot_io` (at its ADR-061 no-growth line baseline).
 
 zstd's multi-threaded mode is **opt-in**, via ``ABICHECK_ZSTD_THREADS=N``.
 Its frame is independent of the worker count (any ``nbWorkers >= 1`` yields
-the same frame) but differs from the single-threaded frame. So enabling it
-by default would make snapshot bytes depend on whether a machine enabled it,
-and it crashed the test worker process outright on the Windows CI runners
-(``python-zstandard`` 0.25). Level 19 over oneDAL's 203 MB snapshot: 33.9 s
+the same frame) but differs from the single-threaded frame, so enabling it
+by default would make snapshot bytes depend on whether a machine took the
+multi-threaded path. It stays off on Windows: the first Windows CI run of
+its tests lost its xdist workers, most likely to a (since fixed) quadratic
+fixture hitting pytest-timeout rather than to zstd, but that was never
+isolated. Level 19 over oneDAL's 203 MB snapshot: 33.9 s
 single-threaded, 21.6 s with four workers on a busy four-core Linux box,
 0.05% larger -- worth it for a large-snapshot publisher that opts in.
 """
