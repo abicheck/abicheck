@@ -488,7 +488,8 @@ def _graph_section_loader(
         dto = SectionDTO.from_dict(raw)
         _check_section_kind(dto, GRAPH_SECTION_KIND, artifact_id, locator)
         graph = graph_from_dto(dto).to_document()["surface_graph"]
-        assert isinstance(graph, dict)
+        if not isinstance(graph, dict):  # GraphSection guarantees a mapping
+            raise ValueError("a 'graph' section decoded to a non-mapping graph")
         return graph
 
     return load

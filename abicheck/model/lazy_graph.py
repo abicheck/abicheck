@@ -97,7 +97,8 @@ class PendingGraph:
         with self._lock:
             if not self._done:
                 decoder = self._decoder
-                assert decoder is not None
+                if decoder is None:  # unreachable: _done is set with it cleared
+                    raise RuntimeError("PendingGraph lost its decoder")
                 # Raises through; the cell stays pending so the next access
                 # raises the same way rather than reading as empty.
                 self._value = decoder()
@@ -116,7 +117,8 @@ class PendingGraph:
             if self._done:
                 return PendingGraph.resolved(copy.deepcopy(self._value, memo))
             decoder = self._decoder
-        assert decoder is not None
+        if decoder is None:  # unreachable: _done is set with it cleared
+            raise RuntimeError("PendingGraph lost its decoder")
         return PendingGraph(decoder)
 
     def __reduce__(self) -> tuple[Any, ...]:
@@ -128,7 +130,7 @@ class PendingGraph:
 
 
 def _no_decoder() -> Any:
-    raise AssertionError("an already-resolved PendingGraph has no decoder")
+    raise RuntimeError("an already-resolved PendingGraph has no decoder")
 
 
 class LazyGraphField:

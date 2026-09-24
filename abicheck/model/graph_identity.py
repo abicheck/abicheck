@@ -242,7 +242,7 @@ def _normalize_graph_identity(identity: str) -> str:
     """
     if "at" not in identity:
         return identity
-    memo = _NORMALIZE_MEMO
+    memo = _NORMALIZE_MEMO_STATE.memo
     if memo is not None:
         cached = memo.get(identity)
         if cached is not None:
@@ -263,9 +263,19 @@ def _normalize_graph_identity(identity: str) -> str:
 #: of times. A pure function of its argument, so memoizing cannot change a
 #: result; scoped rather than a module-lifetime cache so nothing is retained
 #: after the load.
-_NORMALIZE_MEMO: dict[str, str] | None = None
-_NORMALIZE_MEMO_DEPTH = 0
-_NORMALIZE_MEMO_LOCK = threading.Lock()
+class _NormalizeMemoState:
+    """The memo and its scope depth; a holder rather than module globals so
+    entering and leaving a scope needs no ``global`` rebinding."""
+
+    __slots__ = ("depth", "lock", "memo")
+
+    def __init__(self) -> None:
+        self.memo: dict[str, str] | None = None
+        self.depth = 0
+        self.lock = threading.Lock()
+
+
+_NORMALIZE_MEMO_STATE = _NormalizeMemoState()
 
 
 @contextlib.contextmanager
@@ -273,18 +283,18 @@ def identity_normalization_memo() -> Iterator[None]:
     """Memoize :func:`_normalize_graph_identity` for the duration of the
     block (re-entrant and thread-safe; the memo is dropped when the last
     open scope exits)."""
-    global _NORMALIZE_MEMO, _NORMALIZE_MEMO_DEPTH
-    with _NORMALIZE_MEMO_LOCK:
-        _NORMALIZE_MEMO_DEPTH += 1
-        if _NORMALIZE_MEMO is None:
-            _NORMALIZE_MEMO = {}
+    state = _NORMALIZE_MEMO_STATE
+    with state.lock:
+        state.depth += 1
+        if state.memo is None:
+            state.memo = {}
     try:
         yield
     finally:
-        with _NORMALIZE_MEMO_LOCK:
-            _NORMALIZE_MEMO_DEPTH -= 1
-            if _NORMALIZE_MEMO_DEPTH == 0:
-                _NORMALIZE_MEMO = None
+        with state.lock:
+            state.depth -= 1
+            if state.depth == 0:
+                state.memo = None
 
 
 #: ``attrs`` keys carrying a raw declaration/qualified-name spelling that can

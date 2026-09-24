@@ -374,3 +374,39 @@ def test_eager_and_lazy_compare_json_are_identical(
     lazy = _report(tmp_path, case, "lazy", monkeypatch)
     assert _stable(json.loads(eager)) == _stable(json.loads(lazy))
     assert json.loads(lazy)["changes"]  # a real diff, not two empty reports
+
+
+class TestLazyFieldGuards:
+    def test_install_refuses_a_field_with_a_non_none_default(self) -> None:
+        from dataclasses import dataclass
+
+        from abicheck.model.lazy_graph import install_lazy_graph_field
+
+        @dataclass
+        class Holder:
+            graph: object = 1
+
+        with pytest.raises(TypeError, match="must default to None"):
+            install_lazy_graph_field(Holder, "graph")
+
+    def test_pending_cell_only_goes_on_a_lazy_field(self) -> None:
+        from abicheck.model.lazy_graph import set_pending_graph
+
+        snap = AbiSnapshot(library="l.so", version="1")
+        with pytest.raises(TypeError, match="not a lazy graph field"):
+            set_pending_graph(snap, "functions", PendingGraph(lambda: None))
+
+    def test_repr_names_the_state_without_decoding(self) -> None:
+        calls: list[int] = []
+        cell = PendingGraph(lambda: calls.append(1))
+        assert repr(cell) == "<PendingGraph pending>"
+        cell.resolve()
+        assert repr(cell) == "<PendingGraph decoded>" and calls == [1]
+
+    def test_a_resolved_cell_never_runs_a_decoder(self) -> None:
+        cell = PendingGraph.resolved("g")
+        assert cell.decoded and cell.resolve() == "g"
+        from abicheck.model.lazy_graph import _no_decoder
+
+        with pytest.raises(RuntimeError):
+            _no_decoder()

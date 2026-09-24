@@ -509,12 +509,9 @@ def _reached_mutated_modules(path: Path, mutated: set[str]) -> frozenset[str]:
 #: gate, which may report a survivor that one of these tests would in fact
 #: have killed.
 _ACCEPTED_KILL_LOSS = {
-    # Only ONE test of this file is deselected (it runs
-    # `python -m abicheck.frontends.action.cli` as a real subprocess, which
-    # re-enters the mutated tree with no mutmut config); every other test in
-    # it still runs and still kills. This sweep reads reachability per file,
-    # so the entry records the file's whole reach, an over-statement of the
-    # real loss rather than an under-statement. Surfaced by PR #1356.
+    # Its producer/consumer tests run `python -m abicheck.frontends.action.cli`
+    # as a real subprocess, which re-enters the mutated tree with no mutmut
+    # config -- the same class as the entries above. Surfaced by PR #1356.
     "tests/test_action_analysis_context.py": frozenset(
         {
             "abicheck.diff_filtering",

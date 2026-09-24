@@ -123,7 +123,7 @@ abicheck, rather than round-tripped.
 ## Schema version history
 
 `schema_version` is a single integer, not `MAJOR.MINOR`.
-The current value is **`48`**. See
+The current value is **`49`**. See
 `abicheck/storage/snapshot_schema_versions.py`'s `SCHEMA_VERSION` for the
 authoritative, up-to-date value and the full per-version comment.
 
@@ -314,7 +314,10 @@ assuming fnmatch for a mode-less snapshot would let a baseline holding
 `include/foo.h` compare clean against a native glob snapshot that excluded a
 different set of headers. An unrecorded rule is refused rather than guessed.
 A mode-less snapshot carrying no patterns is unaffected — there is nothing
-for a rule to have matched.
+for a rule to have matched. Then (v49) `AbiSnapshot.surface_graph` is
+written in the compact graph-table encoding (`storage/graph_table_codec.py`,
+see "Fields" below) and holds observed evidence only; a pre-v49 graph still
+loads.
 
 (v47) `AbiSnapshot.excluded_header_patterns` persisted — the
 `--exclude-header PATTERN` values a snapshot was dumped under. The parsed
@@ -341,7 +344,7 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 48`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Older or equal** to this build (`<= 49`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
 | **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 | **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
