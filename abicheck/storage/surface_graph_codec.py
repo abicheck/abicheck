@@ -55,12 +55,37 @@ snapshot predating this field.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
+
+from ..model.lazy_graph import PendingGraph, set_pending_graph
 
 if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
 
-__all__ = ["decode_surface_graph", "encode_surface_graph"]
+__all__ = ["DeferredGraphPayload", "decode_surface_graph", "encode_surface_graph"]
+
+
+class DeferredGraphPayload:
+    """A ``surface_graph`` document value whose section decode has not run.
+
+    Placed in the flat document by ``storage.import_v1`` when a sectioned
+    document is read with ``defer_graph=True``: the ``graph`` section's own
+    DTO validation, migration and thaw run inside :meth:`load`, which
+    :func:`decode_surface_graph` only calls on first access to the graph
+    (storage-format-v2 Phase 2, A2.1). Not a ``dict``, so no other reader of
+    the flat document can mistake it for a decoded payload.
+    """
+
+    __slots__ = ("_load",)
+
+    def __init__(self, load: Callable[[], dict[str, Any]]) -> None:
+        self._load = load
+
+    def load(self) -> dict[str, Any]:
+        """The section's ``surface_graph`` payload, validated as an eager
+        read validates it (same errors)."""
+        return self._load()
 
 
 def encode_surface_graph(d: dict[str, Any], snap: AbiSnapshot) -> None:
@@ -101,17 +126,38 @@ def decode_surface_graph(d: dict[str, Any], snap: AbiSnapshot) -> None:
     ``snap.surface_graph`` stays whatever the caller already set (``None``,
     by construction), and ``snap.build_source.source_graph`` keeps whatever
     it already decoded from its own nested key.
+
+    The graph itself is decoded on first access, not here (storage-format-v2
+    Phase 2, A2.1): both attributes receive one shared
+    :class:`~abicheck.model.lazy_graph.PendingGraph`, so they still resolve
+    to the identical object, and a decode error surfaces at that access.
     """
     raw = d.get("surface_graph")
-    if not isinstance(raw, dict):
+    load_payload: Callable[[], Any]
+    if isinstance(raw, DeferredGraphPayload):
+        load_payload = raw.load
+    elif isinstance(raw, dict):
+        load_payload = _constant(raw)
+    else:
         return
-    from ..model.source_graph import SourceGraphSummary
-
-    graph = SourceGraphSummary.from_dict(raw)
-    snap.surface_graph = graph
+    cell = PendingGraph(_graph_decoder(load_payload))
+    set_pending_graph(snap, "surface_graph", cell)
     bs_dict = d.get("build_source")
     nested_source_graph_present = (
         isinstance(bs_dict, dict) and "source_graph" in bs_dict
     )
     if snap.build_source is not None and not nested_source_graph_present:
-        snap.build_source.source_graph = graph
+        set_pending_graph(snap.build_source, "source_graph", cell)
+
+
+def _constant(value: Any) -> Callable[[], Any]:
+    return lambda: value
+
+
+def _graph_decoder(load_payload: Callable[[], Any]) -> Callable[[], Any]:
+    def decode() -> Any:
+        from ..model.source_graph import SourceGraphSummary
+
+        return SourceGraphSummary.from_dict(load_payload())
+
+    return decode

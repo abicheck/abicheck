@@ -415,6 +415,31 @@ releasing each pair's sections before the next. **Peak memory must scale
 with the largest active section or library pair, not with the total decoded
 size of the release.**
 
+**Implementation note (2026-09-24, evidence-entity-model Phase 5a; the first
+landed slice of storage-format-v2 Phase 2 A2.1).** The `graph` section of a
+single-file sectioned snapshot is now loaded lazily: `snapshot_from_dict`
+leaves the section's DTO validation, migration and graph construction for
+the first read of `AbiSnapshot.surface_graph` (or of the
+`build_source.source_graph` alias, which shares one pending cell;
+`model/lazy_graph.py`). A decode failure raises at that access, with the same
+error an eager load raised, and never reads as an empty graph. The rest of
+D8 (chunking, per-pair release of sections) is not implemented.
+
+*Decision: the L5 graph diff is not gated.* A default stored-vs-stored
+`compare` of two header-graph snapshots still reads the graph: the L5
+`diff_source_graph_findings` diff, the `private_header_leak` and
+`public_to_internal_dependency` cross-source checks, the assurance
+`_graph_completeness` pass and the snapshot content digest all run on every
+such compare. Gating the L5 diff to runs that ask for it would remove its
+RISK-tier findings from default output, which changes findings; nothing in
+the Phase 5 measurements justifies that (the verdict was identical in every
+variant, but the findings are part of what a default run reports), so lazy
+loading ships without it. Lazy loading therefore saves the decode only on
+runs that never read the graph (a `--depth binary`/`debug` compare, which
+strips the header graph before anything reads it, and other
+snapshot-metadata-only readers); the compare-side cost is addressed by the compact
+graph encoding instead (Phase 5b).
+
 ### D9 — Variant identity is created at capture time
 
 The capture pipeline is told which variant it is producing. A package

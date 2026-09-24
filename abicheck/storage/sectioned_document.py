@@ -148,7 +148,9 @@ def to_sectioned_document(
     }
 
 
-def from_sectioned_document(document: Mapping[str, Any]) -> dict[str, Any]:
+def from_sectioned_document(
+    document: Mapping[str, Any], *, defer_graph: bool = False
+) -> dict[str, Any]:
     """The inverse of `to_sectioned_document`: *document*'s sections
     reassembled into the flat `snapshot_to_dict()`-shaped document
     `serialization.snapshot_from_dict` already knows how to read.
@@ -168,6 +170,10 @@ def from_sectioned_document(document: Mapping[str, Any]) -> dict[str, Any]:
     unaccounted-for content -- mirroring the identical missing/extra pair
     `read_legacy_snapshot_document` already checks for the directory
     format).
+
+    *defer_graph*: see `import_v1.export_legacy_sections` -- only for a
+    caller that hands the result straight to `snapshot_from_dict`/
+    `decode_snapshot`, which decode the graph on first access.
     """
     sections_raw = document.get(SECTIONS_KEY)
     if not isinstance(sections_raw, Mapping):
@@ -221,4 +227,5 @@ def from_sectioned_document(document: Mapping[str, Any]) -> dict[str, Any]:
         ),
         artifact_id=_ARTIFACT_ID,
         source_schema_version=schema_version,
+        defer_graph=defer_graph,
     )

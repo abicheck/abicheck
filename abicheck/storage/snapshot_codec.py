@@ -147,7 +147,7 @@ def decode_snapshot(
     # checks for a `"sections"` key, never a real `AbiSnapshot` field, so a
     # flat document from any schema version cannot collide with it.
     if is_sectioned_document(d):
-        d = from_sectioned_document(d)
+        d = from_sectioned_document(d, defer_graph=True)
     # Inspect schema version for future migration hooks.
     # Snapshots without schema_version are treated as v1 (pre-versioning format).
     # Currently only v1 and v2 exist and have the same on-disk layout, so no
