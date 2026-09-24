@@ -130,6 +130,7 @@ import copy
 from typing import TYPE_CHECKING
 
 from ..buildsource.model import CoverageStatus, DataLayer, LayerCoverage
+from ..compare.debug_type_scope import debug_layout_scope
 from ..evidence_depth import DEPTH_RANK
 from ..model import ScopeOrigin, Visibility
 from ..model.export_index import build_raw_export_index, default_versioned_names
@@ -218,35 +219,22 @@ def _exported_symbol_names(snap: AbiSnapshot) -> frozenset[str] | None:
     return default_versioned_names(index)
 
 
-def _allow_dwarf_name(name: str, allowed: frozenset[str]) -> bool:
-    """Match *name* against *allowed* by full name or unqualified (last
-    ``::`` component) -- mirrors ``diff_platform._diff_dwarf``'s own
-    ``_allow_name`` matching exactly, so the pre-scoping below and that
-    detector's later re-derivation of the identical scope agree.
-    """
-    return name in allowed or name.split("::")[-1] in allowed
-
-
 def _public_dwarf_scope(
     old: AbiSnapshot, new: AbiSnapshot
-) -> tuple[frozenset[str], frozenset[str]]:
+) -> tuple[frozenset[str] | None, frozenset[str] | None]:
     """The joint struct/enum name scope ``diff_platform._diff_dwarf`` would
-    derive from *old*/*new*'s own (pre-projection) ``types``/``enums``.
+    derive from *old*/*new*'s own (pre-projection) header model -- the same
+    :func:`~abicheck.compare.debug_type_scope.debug_layout_scope` call, so
+    the pre-scoping below and that detector agree by construction.
 
     Computed from the ORIGINAL, un-stripped snapshots, before either side's
     ``types``/``enums`` are cleared -- see :func:`_strip_header_and_above_
     evidence`'s own use of this for why a joint, non-DWARF-sourced
     projection needs it precomputed rather than left to be re-derived from
-    the (by then empty) projected snapshots.
+    the (by then empty) projected snapshots. ``None`` for a kind neither
+    side's headers declare: nothing to scope by.
     """
-    old_opaque = {t.name for t in old.types if getattr(t, "is_opaque", False)}
-    new_opaque = {t.name for t in new.types if getattr(t, "is_opaque", False)}
-    both_opaque = old_opaque & new_opaque
-    struct_scope = ({t.name for t in old.types} | {t.name for t in new.types}) - (
-        both_opaque
-    )
-    enum_scope = {e.name for e in old.enums} | {e.name for e in new.enums}
-    return frozenset(struct_scope), frozenset(enum_scope)
+    return debug_layout_scope(old, new)
 
 
 def _strip_header_and_above_evidence(
@@ -398,17 +386,15 @@ def _strip_header_and_above_evidence(
         # `types`/`enums` on both sides) falls back to a pool that was
         # already reduced, not the raw, unscoped DWARF universe.
         if snap.dwarf is not None:
-            if dwarf_struct_scope:
+            if dwarf_struct_scope is not None:
                 snap.dwarf.structs = {
                     k: v
                     for k, v in snap.dwarf.structs.items()
-                    if _allow_dwarf_name(k, dwarf_struct_scope)
+                    if k in dwarf_struct_scope
                 }
-            if dwarf_enum_scope:
+            if dwarf_enum_scope is not None:
                 snap.dwarf.enums = {
-                    k: v
-                    for k, v in snap.dwarf.enums.items()
-                    if _allow_dwarf_name(k, dwarf_enum_scope)
+                    k: v for k, v in snap.dwarf.enums.items() if k in dwarf_enum_scope
                 }
 
     snap.constants = {}

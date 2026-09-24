@@ -100,6 +100,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from ..compare.export_join import join_exports
 from ..compare.surface_graph import (
     ReferencedIdentifiers,
     fact_list,
@@ -107,7 +108,7 @@ from ..compare.surface_graph import (
 )
 from ..diff_cxx_rules import owner_class_of
 from ..model.cxx_artifact_symbols import is_cxx_class_artifact_symbol
-from ..model.export_index import build_raw_export_index, default_versioned_names
+from ..model.graph_join import JoinState
 from ..model.surface_facts import in_public_surface
 from ..model.vocabulary import ScopeOrigin
 from .public_surface import (
@@ -123,6 +124,7 @@ from .public_surface import (
 if TYPE_CHECKING:
     from ..model.declarations import Function, Variable
     from ..model.entities import EnumType, RecordType
+    from ..model.graph_entity_identity import SnapshotIdentities
     from ..model.snapshot import AbiSnapshot
 
 __all__ = [
@@ -304,7 +306,9 @@ def _seed_public_roots(
     return seed_types, has_public
 
 
-def _seed_undeclared_exports(snap: AbiSnapshot, surface: PublicSurface) -> None:
+def _seed_undeclared_exports(
+    snap: AbiSnapshot, surface: PublicSurface, ids: SnapshotIdentities
+) -> None:
     """Add export-table-only symbols to ``all_symbols`` -- not ``public_symbols``.
 
     ``all_symbols`` was built purely from *modeled declarations*, so a
@@ -342,16 +346,22 @@ def _seed_undeclared_exports(snap: AbiSnapshot, surface: PublicSurface) -> None:
     """
     if not surface.has_provenance:
         return
-    index = build_raw_export_index(snap)
-    if index is None:
+    join = join_exports(snap, ids)
+    if not join.complete:
         return
-    # The same projection ``buildsource.cross_source_checks_base.
-    # _exported_symbol_names`` uses -- default/unversioned ELF exports only,
-    # Mach-O names normalized the way the dumper normalizes
-    # ``Function.mangled``. Sharing the projection is what keeps this set
-    # and the ``exported_not_public`` obligation set talking about the same
+    # The Phase 2 ``exports`` join over the same projection
+    # ``buildsource.cross_source_checks_base._exported_symbol_names`` uses --
+    # default/unversioned exports only (``ExportEntry.default_version``).
+    # Sharing the projection is what keeps this set and the
+    # ``exported_not_public`` obligation set talking about the same
     # spellings; a private re-read would let one demote a symbol the other
     # never reported.
+    #
+    # "Undeclared" is the join's own ``unmatched`` state: no declaration's
+    # linker spelling is in the table entry. It used to be "not among any
+    # declaration's lookup keys", which let a C export ``foo`` count as
+    # declared merely because an unrelated ``ns::foo`` shares its bare tail --
+    # name equality, not evidence (I2).
     #
     # Minus the compiler-emitted class artifacts, and for exactly the reason
     # ``exported_not_public`` exempts them too: a ``_ZTV``/``_ZTI``/structor
@@ -361,16 +371,17 @@ def _seed_undeclared_exports(snap: AbiSnapshot, surface: PublicSurface) -> None:
     # the artifact is absent from the declaration list for a reason that
     # says nothing about the contract. Demoting one made an identical binary
     # pair report BREAKING without ``-H`` and clean with it.
-    seeded = {
-        name
-        for name in default_versioned_names(index)
-        if not is_cxx_class_artifact_symbol(name)
+    exported = {
+        e.spelling
+        for e in join.entries.values()
+        if e.default_version and not is_cxx_class_artifact_symbol(e.spelling)
     }
-    # Exactly the names no declaration provided, captured before the union
-    # so a symbol that *is* declared (privately) keeps its existing,
-    # pre-existing treatment rather than acquiring this one.
-    surface.undeclared_export_symbols |= seeded - surface.all_symbols
-    surface.all_symbols |= seeded
+    surface.undeclared_export_symbols |= {
+        e.spelling
+        for e in join.entries_in_state(JoinState.UNMATCHED)
+        if e.spelling in exported
+    }
+    surface.all_symbols |= exported
 
 
 def _walk_type_closure(
@@ -686,7 +697,7 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
         o != ScopeOrigin.UNKNOWN for o in surface.origin_by_key.values()
     )
 
-    _seed_undeclared_exports(snap, surface)
+    _seed_undeclared_exports(snap, surface, refs.ids)
 
     # Scoping only makes sense when we actually have header-derived public
     # visibility -- see ``surface.py``'s original docstring (preserved in

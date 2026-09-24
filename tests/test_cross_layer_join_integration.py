@@ -199,7 +199,6 @@ class TestCompareUsesTheJoins:
         assert proc.returncode in (0, 2, 4), proc.stderr
         return json.loads(proc.stdout)
 
-    @pytest.mark.xfail(strict=True, reason="evidence-entity-model Phase 2: producer not landed yet")
     def test_private_type_sharing_a_bare_name_is_not_diffed(
         self, dumps: dict[str, Path]
     ) -> None:
