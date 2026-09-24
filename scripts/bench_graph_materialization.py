@@ -42,6 +42,15 @@ separate figures, never folded), and reads node/edge counts and raw/zstd
 sizes from the written snapshots. ``--tracemalloc`` adds one separate
 allocation-attribution run per variant (never mixed with the timing runs).
 
+``--old-lib``/``--new-lib`` may instead name two release *directories*
+(e.g. each holding ``libonedal.so.3`` and ``libonedal_dpc.so.3``): each
+variant/repeat then runs one live directory/package ``compare`` (the release
+fan-out dumps every member itself), with ``--old-header``/``--new-header``
+and ``-I``/``-J`` passed as ``old=``/``new=`` values.
+
+The child imports the ``abicheck`` of the checkout this script lives in, so
+comparing two revisions means running it from two worktrees.
+
 Usage::
 
     python scripts/bench_graph_materialization.py \\
@@ -115,7 +124,9 @@ def _child(variant: str, argv: list[str]) -> int:
         memory_trace.counts("bench.attach", **record)
         side = os.environ.get("BENCH_SIDECAR")
         if side:
-            Path(side).write_text(json.dumps(record), encoding="utf-8")
+            # One line per attach: a release fan-out attaches once per member.
+            with open(side, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record) + "\n")
         return snap
 
     native._attach_header_graph = attach  # type: ignore[assignment]
@@ -245,6 +256,26 @@ def _dump_argv(lib: str, header: str, includes: list[str], out: Path) -> list[st
     return [*argv, "-o", str(out)]
 
 
+def _release_argv(args: argparse.Namespace, wd: Path) -> list[str]:
+    """A live directory/package ``compare`` of two release directories: the
+    release fan-out dumps every member itself, so there is no separate dump
+    step (and no stored snapshot to size)."""
+    argv = [
+        "compare",
+        args.old_lib,
+        args.new_lib,
+        "--header",
+        f"old={args.old_header}",
+        "--header",
+        f"new={args.new_header}",
+    ]
+    for inc in args.old_inc:
+        argv += ["-I", f"old={inc}"]
+    for inc in args.new_inc:
+        argv += ["-I", f"new={inc}"]
+    return [*argv, "-o", f"json={wd / 'report.json'}"]
+
+
 def _mib(v: object) -> float | None:
     return None if v is None else round(int(v) / 2**20, 1)  # type: ignore[call-overload]
 
@@ -307,21 +338,26 @@ def main(argv: list[str] | None = None) -> int:
         for variant in variants:
             wd = args.work / variant.replace("+", "_") / f"r{rep}"
             wd.mkdir(parents=True, exist_ok=True)
-            steps = {
-                "dump_old": _dump_argv(
-                    args.old_lib, args.old_header, args.old_inc, wd / "old.json"
-                ),
-                "dump_new": _dump_argv(
-                    args.new_lib, args.new_header, args.new_inc, wd / "new.json"
-                ),
-                "compare": [
-                    "compare",
-                    str(wd / "old.json"),
-                    str(wd / "new.json"),
-                    "-o",
-                    f"json={wd / 'report.json'}",
-                ],
-            }
+            release = Path(args.old_lib).is_dir()
+            steps = (
+                {"compare_release": _release_argv(args, wd)}
+                if release
+                else {
+                    "dump_old": _dump_argv(
+                        args.old_lib, args.old_header, args.old_inc, wd / "old.json"
+                    ),
+                    "dump_new": _dump_argv(
+                        args.new_lib, args.new_header, args.new_inc, wd / "new.json"
+                    ),
+                    "compare": [
+                        "compare",
+                        str(wd / "old.json"),
+                        str(wd / "new.json"),
+                        "-o",
+                        f"json={wd / 'report.json'}",
+                    ],
+                }
+            )
             for step, step_argv in steps.items():
                 env = dict(base_env)
                 # Both cache roots: `ABICHECK_CACHE_DIR` and the XDG root the
@@ -334,7 +370,12 @@ def main(argv: list[str] | None = None) -> int:
                 row = _run(variant, step_argv, env)
                 side = wd / f"{step}.attach.json"
                 if side.exists():
-                    row["attach"] = json.loads(side.read_text(encoding="utf-8"))
+                    attaches = [
+                        json.loads(line)
+                        for line in side.read_text(encoding="utf-8").splitlines()
+                        if line.strip()
+                    ]
+                    row["attach"] = attaches[0] if len(attaches) == 1 else attaches
                 row.update(variant=variant, step=step, repeat=rep)
                 runs.append(row)
                 print(
@@ -347,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 if row["exit_code"] not in (0, 2, 4):
                     print(row["stderr_tail"], file=sys.stderr)
-            if rep == 0:
+            if rep == 0 and not release:
                 results["snapshots"][variant] = {  # type: ignore[index]
                     side: _snapshot_stats(wd / f"{side}.json")
                     for side in ("old", "new")
