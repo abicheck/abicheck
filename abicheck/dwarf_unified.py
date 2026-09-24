@@ -65,6 +65,7 @@ from .dwarf_advanced import (
 )
 from .dwarf_metadata import DwarfMetadata, _process_cu_impl as _meta_process_cu
 from .dwarf_utils import dwarf_low_memory_mode, free_cu_die_cache, has_real_dwarf_info
+from .extract.progress import timed
 
 log = logging.getLogger(__name__)
 
@@ -167,7 +168,7 @@ def parse_dwarf_from_session(
     the whole binary's DIE tree still resident from this one. Output is
     unaffected either way -- see ``free_cu_die_cache``'s docstring.
     """
-    meta = DwarfMetadata(has_dwarf=True)
+    meta = DwarfMetadata(has_dwarf=True, odr_conflicts_observed=True)
     adv = AdvancedDwarfMetadata(has_dwarf=True)
     adv.target_arch = session.arch
     low_memory = dwarf_low_memory_mode(session.dwarf)
@@ -196,6 +197,7 @@ def parse_dwarf_from_session(
 # ---------------------------------------------------------------------------
 
 
+@timed("DWARF debug info")
 def parse_dwarf(
     so_path: Path,
     *,

@@ -362,9 +362,12 @@ def exclude_header_option(func: F) -> F:
         "sides. Use it when a header *directory* contains headers that "
         "cannot be parsed together -- two vendored copies of a third-party "
         "API declaring conflicting typedefs, for example -- which otherwise "
-        "makes the whole directory unusable as a -H operand. Anything only "
-        "an excluded header declared is simply not observed, and is "
-        "reported as reduced evidence rather than as a removal.",
+        "makes the whole directory unusable as a -H operand. A matching "
+        "header reached through another header's #include is scoped out "
+        "like a toolchain header: what only it declares is not observed "
+        "(reported as reduced evidence, not a removal), while types the "
+        "library's own API uses are still checked. Requires dependency "
+        "scoping (off under --include-system-declarations).",
     )(func)
 
 
@@ -1183,9 +1186,10 @@ def merge_compile_config(
     — otherwise an L2-only dump/scan with no ``--sources`` would silently drop the
     intended ``compile:`` settings and still exit 0 — but best-effort (warn +
     CLI-only fallback) for an **auto-discovered** config the user didn't bind to.
-    This parse-error-loudness question is governed by ``build_config is not
-    None`` alone, unaffected by ``config_explicit`` below — every existing
-    caller already relies on it exactly as documented here.
+    Loudness follows ``config_explicit`` when the caller states it (a
+    front end that already selected the config through
+    ``config_paths.resolve_project_config`` knows whether it was named or
+    discovered), else ``build_config is not None``.
 
     ``config_explicit`` narrowly overrides only the ``compile.compiler``
     trust gate documented below, for a caller that has *already* resolved
@@ -1215,11 +1219,8 @@ def merge_compile_config(
         # config-defines list rather than returning the raw context, which would
         # silently drop every -D on a project with no .abicheck.yml.
         return apply_cli_defines(cli_ctx, ()), cli_includes
-    # Only the `compile.compiler` trust gate below is overridable via
-    # `config_explicit` -- parse-error loudness above stays tied to
-    # `explicit_config` unconditionally, matching every pre-existing
-    # caller's expectation that a malformed *explicit* --config here fails
-    # loud regardless of this narrower override.
+    # An operator-named config: trusted to select `compile.compiler`, and
+    # fails loud when malformed. `config_explicit` states it when known.
     trust_compiler_selection = (
         explicit_config if config_explicit is None else config_explicit
     )
@@ -1227,7 +1228,7 @@ def merge_compile_config(
     try:
         bc = load_build_config(cfg)
     except ValueError as exc:
-        if explicit_config:
+        if trust_compiler_selection:
             # An *explicit* --config the user pointed at must fail loudly: for an
             # L2-only dump/scan (no --sources/--build-info) nothing reloads it
             # downstream, so a warn-and-fallback would silently drop the intended
@@ -1391,72 +1392,6 @@ from .frontends.cli.options.contract import (  # noqa: E402
 )
 
 
-def _shared_frontend_explicit(ctx: click.Context) -> bool:
-    """Did the command line state a *shared* ``--ast-frontend`` value?
-
-    Click reports one parameter source for the whole ``--ast-frontend``
-    parameter, so a side-aware command marks it ``COMMANDLINE`` as soon as
-    *any* occurrence is given -- including a purely side-qualified
-    ``new=castxml``, for which :func:`_split_sided_frontend` then synthesizes
-    the shared value ``"auto"`` that nobody typed. Reading the parameter
-    source alone would hand that synthesized default to
-    :func:`merge_compile_config` as an explicit override and suppress a
-    configured ``compile.frontend`` for the side the user never mentioned --
-    so a one-sided override would silently discard the project's setting for
-    the other side (Codex review). The raw pairs are still on ``ctx.params``
-    here (``normalize_sided_options`` rewrites the command's own kwargs, not
-    the context), so the shared value's own explicitness is recoverable:
-    it was stated exactly when some pair carries the ``both`` side.
-
-    A command composing the unsided ``@compile_context_options()`` has a
-    plain string here and keeps the parameter-source answer unchanged.
-    """
-    if (
-        ctx.get_parameter_source("header_backend")
-        != click.core.ParameterSource.COMMANDLINE
-    ):
-        return False
-    raw = ctx.params.get("header_backend")
-    if isinstance(raw, (tuple, list)):
-        return any(
-            isinstance(pair, tuple) and len(pair) == 2 and pair[0] == "both"
-            for pair in raw
-        )
-    return True
-
-
-def sided_frontend_explicit(ctx: click.Context) -> bool:
-    """Did the command line state a *sided* ``--ast-frontend old=/new=`` value?
-
-    The inverse-shaped sibling of :func:`_shared_frontend_explicit`, for a
-    caller that needs to know whether a per-side override was given (as
-    opposed to a bare/``both=`` value) -- e.g. a directory/package compare,
-    which threads the both-sides compile context to its release fan-out but
-    has no per-library-pair-within-a-release meaning for "parse the old
-    library's headers with a different frontend than the new one" (see
-    ``cli_resolve._reject_compile_context_for_set_inputs``). Reads the same
-    raw ``(side, frontend)`` pairs off ``ctx.params`` that
-    :func:`_shared_frontend_explicit` does, for the same reason (normalize_
-    sided_options rewrites the command's own kwargs dict, not the context).
-
-    A command composing the unsided ``@compile_context_options()`` has a
-    plain string on ``ctx.params["header_backend"]``, never a pair list, so
-    this always answers ``False`` for it.
-    """
-    if (
-        ctx.get_parameter_source("header_backend")
-        != click.core.ParameterSource.COMMANDLINE
-    ):
-        return False
-    raw = ctx.params.get("header_backend")
-    if isinstance(raw, (tuple, list)):
-        return any(
-            isinstance(pair, tuple) and len(pair) == 2 and pair[0] != "both"
-            for pair in raw
-        )
-    return False
-
-
 def resolve_compile_context(
     ctx: click.Context,
     *,
@@ -1535,7 +1470,7 @@ def resolve_compile_context(
         tuple(includes),
         build_config,
         sources=sources,
-        frontend_explicit=_shared_frontend_explicit(ctx),
+        frontend_explicit=False,
         nostdinc_explicit=_explicit("nostdinc"),
         # `_explicit` reads `ctx.get_parameter_source`, which safely answers
         # "not COMMANDLINE" for a parameter name a command no longer

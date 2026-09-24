@@ -37,7 +37,7 @@
       "edges": [],
       "external_graph_refs": [],
       "extractor_passes": {},
-      "graph_id": "sha256:2cefb5223f79d6062c2f8c6c987ee4dda3a19102e1db2268ebea8966844df325",
+      "graph_id": "sha256:c57c4fa865b2bf362d05b1be8ecd79827bdd18bafcf2993ba417608d2ff9562b",
       "indexes": {
         "by_binary_symbol": {},
         "by_file": {},
@@ -94,7 +94,7 @@
           }
         }
       ],
-      "schema_version": 2
+      "schema_version": 3
     }
   },
   "build_source_pack": null,
@@ -320,7 +320,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 48,
+  "schema_version": 51,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

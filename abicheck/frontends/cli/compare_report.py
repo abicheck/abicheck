@@ -58,7 +58,6 @@ from ...cli_helpers_compare import (
     _apply_used_by_scoping,
 )
 from ...cli_resolve import (
-    _reject_compile_context_for_set_inputs,
     _reject_evidence_flags_for_set_inputs,
 )
 from .runtime import _render_output
@@ -273,5 +272,4 @@ def _reject_flags_unsupported_for_set_inputs(
         budget=budget,
         pdb_path=pdb_path,
     )
-    _reject_compile_context_for_set_inputs(ctx)
     return _reject_evidence_flags_for_set_inputs(ctx)

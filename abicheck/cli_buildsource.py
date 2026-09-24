@@ -83,6 +83,7 @@ def embed_build_source(
     sources: Path | None,
     *,
     build_config: Path | None = None,
+    build_config_explicit: bool = True,
     clang_bin: str = "clang",
     collect_mode: str = "source-target",
     build_query: str | None = None,
@@ -116,6 +117,7 @@ def embed_build_source(
             build_info,
             sources,
             build_config=build_config,
+            build_config_explicit=build_config_explicit,
             clang_bin=clang_bin,
             collect_mode=collect_mode,
             build_query=build_query,
@@ -155,6 +157,7 @@ def dump_source_only(
     gcc_path: str | None = None,
     gcc_prefix: str | None = None,
     snapshot_compression: str = "auto",
+    build_config_explicit: bool = True,
 ) -> None:
     """Write a binary-less snapshot carrying only the embedded build/source facts.
 
@@ -208,6 +211,7 @@ def dump_source_only(
             gcc_path, gcc_prefix, exclude_cl_style=False
         ),
         snapshot_compression=snapshot_compression,
+        build_config_explicit=build_config_explicit,
     )
 
 
@@ -349,6 +353,7 @@ def _write_snapshot_output(
     snapshot_compression: str = "auto",
     public_headers: tuple[Path, ...] = (),
     public_header_dirs: tuple[Path, ...] = (),
+    build_config_explicit: bool = True,
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
@@ -427,6 +432,7 @@ def _write_snapshot_output(
             build_info,
             sources,
             build_config=build_config,
+            build_config_explicit=build_config_explicit,
             collect_mode=collect_mode,
             build_query=build_query,
             build_compile_db=build_compile_db,

@@ -25,7 +25,10 @@ compat facade) re-exports them transitively.
 
 from __future__ import annotations
 
+import contextlib
 import re
+import threading
+from collections.abc import Iterator
 from typing import Any
 
 from ..name_classification import (
@@ -239,7 +242,59 @@ def _normalize_graph_identity(identity: str) -> str:
     """
     if "at" not in identity:
         return identity
-    return _strip_bare_anonymous_type_location(strip_anonymous_type_location(identity))
+    memo = _NORMALIZE_MEMO_STATE.memo
+    if memo is not None:
+        cached = memo.get(identity)
+        if cached is not None:
+            return cached
+    result = _strip_bare_anonymous_type_location(
+        strip_anonymous_type_location(identity)
+    )
+    if memo is not None:
+        memo[identity] = result
+    return result
+
+
+#: Per-scope memo for :func:`_normalize_graph_identity`, live only inside
+#: :func:`identity_normalization_memo`. Loading a stored graph normalizes
+#: every id, label and identity attr again (``GraphNode``/``GraphEdge.
+#: from_dict`` and ``SourceGraphSummary.add_node``/``add_edge`` each do), so
+#: a real graph repeats the same few distinct strings hundreds of thousands
+#: of times. A pure function of its argument, so memoizing cannot change a
+#: result; scoped rather than a module-lifetime cache so nothing is retained
+#: after the load.
+class _NormalizeMemoState:
+    """The memo and its scope depth; a holder rather than module globals so
+    entering and leaving a scope needs no ``global`` rebinding."""
+
+    __slots__ = ("depth", "lock", "memo")
+
+    def __init__(self) -> None:
+        self.memo: dict[str, str] | None = None
+        self.depth = 0
+        self.lock = threading.Lock()
+
+
+_NORMALIZE_MEMO_STATE = _NormalizeMemoState()
+
+
+@contextlib.contextmanager
+def identity_normalization_memo() -> Iterator[None]:
+    """Memoize :func:`_normalize_graph_identity` for the duration of the
+    block (re-entrant and thread-safe; the memo is dropped when the last
+    open scope exits)."""
+    state = _NORMALIZE_MEMO_STATE
+    with state.lock:
+        state.depth += 1
+        if state.memo is None:
+            state.memo = {}
+    try:
+        yield
+    finally:
+        with state.lock:
+            state.depth -= 1
+            if state.depth == 0:
+                state.memo = None
 
 
 #: ``attrs`` keys carrying a raw declaration/qualified-name spelling that can
@@ -323,11 +378,22 @@ def _normalize_if_decl_or_type(node_id: str) -> str:
     )
 
 
+#: ``model.graph_entity_identity.UNRESOLVED_PREFIX``, repeated here because
+#: that module imports this one. An identity already minted as an explicit
+#: ``unresolved`` node id is passed through unchanged, so a producer that
+#: threads string keys through its edge tuples can carry one.
+_UNRESOLVED_PREFIX = "unresolved://"
+
+
 def _decl_node_id(identity: str) -> str:
+    if identity.startswith(_UNRESOLVED_PREFIX):
+        return identity
     return f"decl://{_normalize_graph_identity(identity)}"
 
 
 def _type_node_id(identity: str) -> str:
+    if identity.startswith(_UNRESOLVED_PREFIX):
+        return identity
     return f"type://{_normalize_graph_identity(identity)}"
 
 

@@ -77,7 +77,7 @@
   ],
   "external_graph_refs": [],
   "extractor_passes": {},
-  "graph_id": "sha256:2248ec8fbf3e56d1f8ddc55def558c9041d395e1a93f02e691ec63119e92991d",
+  "graph_id": "sha256:f401bfdeb6d14b97c14d4cc026021f704f24786e79e2a07ee3bcd1edf81f3e2f",
   "indexes": {
     "by_binary_symbol": {
       "sym:_ZN4demo5parseEv": [
@@ -175,5 +175,5 @@
       "resolved": {}
     }
   ],
-  "schema_version": 2
+  "schema_version": 3
 }

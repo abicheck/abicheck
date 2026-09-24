@@ -45,7 +45,13 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "31"
+_SNAPSHOT_CACHE_VERSION: str = "32"
+# v32: castxml's emulated compiler now receives the run's language standard,
+# sysroot, target and feature-macro flags (extract/castxml_compiler_emulation.py).
+# Before, `--castxml-cc-gnu g++ -std=c++20` parsed with g++'s *default*
+# standard's predefined macros, so a cached snapshot built that way can hold
+# declarations from the wrong preprocessor branch (or none at all, for a
+# header libstdc++ gated on __cpp_concepts) under unchanged key inputs.
 # v31: DWARF snapshots now carry a per-translation-unit vtable-evidence
 # completeness signal (ADR-063 Phase 5B / T9 third slice,
 # extract/dwarf_vtable_completeness.py) -- a record whose retained

@@ -244,7 +244,11 @@ _BUILD_CONTEXT_FIELDS = frozenset({"language_standard", "macro_ops"})
 # claims authority over ``symbol`` (the binary's own exported-symbol-table
 # identity, L0/L1, wholly independent of header/compile-context evidence) or
 # ``source`` (L4/L5 build-source-graph evidence, a separate comparability
-# axis this module's contract does not cover at all).
+# axis this module's contract does not cover at all) -- with one exception:
+# a header-AST *producer* difference (castxml vs. clang) also marks
+# ``source`` unverified, since the source graph's declaration nodes are
+# seeded from that producer's surface (see
+# ``comparability_profile.header_ast_producer_dimensions``).
 COMPARABILITY_DIMENSIONS = frozenset(
     {"symbol", "declaration", "layout", "runtime", "source"}
 )

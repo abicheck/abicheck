@@ -44,6 +44,8 @@ from .dumper_cache import (
 from .dumper_clang_streaming import load_pruned_clang_ast, streaming_prune_suppressed
 from .errors import SnapshotError
 from .extract.env_flags import env_flag
+from .storage.acyclic_json import gc_paused
+from .storage.ast_size_observer import report_ast_size
 from .storage.derived_ast import offer_derived_ast_source
 from .storage.json_chunked_write import _atomic_write_json
 from .sycl_context import decode_and_select_frontend_context_from_path
@@ -667,6 +669,7 @@ def _parse_clang_ast_result(
             f"clang produced no AST for the header(s) (exit {result.returncode}): "
             f"{result.stderr[:1000].strip()}"
         )
+    report_ast_size(ast_size)
     # A pathological header's AST can be hundreds of MB to multiple GB, so
     # loading and walking it costs real time on its own, on top of the
     # subprocess wall-clock run_bounded already bounded. Re-check here (before
@@ -719,7 +722,13 @@ def _parse_clang_ast_result(
             return cast("dict[str, Any]", superseded)
         prune_enabled = _streaming_prune_enabled()
         try:
-            with open(ast_path, "rb") as fh:  # bytes: json detects encoding
+            # The collector is paused for the parse: the tree has no cycles,
+            # and letting it run over millions of fresh containers roughly
+            # doubled this step (`storage.acyclic_json`).
+            with (
+                open(ast_path, "rb") as fh,
+                gc_paused(),
+            ):  # bytes: json detects encoding
                 if prune_enabled:
                     root, pruned_count = load_pruned_clang_ast(
                         fh, header_roots=header_roots
@@ -774,5 +783,12 @@ def _parse_clang_ast_result(
                 _atomic_copy(ast_path, cached)
         except OSError:
             pass
+    # After the cache write: the cache keeps clang's own (sticky) encoding,
+    # and every reader of the tree -- this one, or `load_cached_ast` on a
+    # later hit -- sees explicit locations. See that module for why the
+    # walker cannot track clang's sticky file itself.
+    from .extract.headers.clang.locations import materialize_locations
+
+    materialize_locations(root)
     deadline.check()
     return root

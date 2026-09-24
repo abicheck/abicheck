@@ -799,16 +799,11 @@ def test_parse_uses_name_when_no_mangled() -> None:
     assert e.caller == "caller" and e.callee == "callee"
 
 
-def test_parse_extern_c_caller_identity_matches_source_entity_fallback() -> None:
-    # ADR-041 P1 #5 (Codex review): clang reports mangledName == name for an
-    # extern "C"/C-linkage function -- SourceEntity.identity() treats that as
-    # "no distinguishing mangled name" and falls back to
-    # qualified_name#signature_hash instead of the bare name, so the
-    # AST-replay caller identity must match rather than keying on the bare
-    # name (which used to land the call edge on a different decl:// node
-    # than the L4 surface's own SOURCE_DECLARES node for the same function).
-    import hashlib
-
+def test_parse_extern_c_caller_identity_is_its_linker_name() -> None:
+    # Evidence-entity-model I1: clang's mangledName == name for C linkage *is*
+    # the linker symbol -- the key the L2 header graph and the L4 fold
+    # (SourceEntity.names["linker"]) share. qualified_name#signature_hash,
+    # which no L2 producer can compute, left the edge on a second node.
     ast = {
         "kind": "TranslationUnitDecl",
         "inner": [
@@ -827,39 +822,42 @@ def test_parse_extern_c_caller_identity_matches_source_entity_fallback() -> None
         ],
     }
     e = parse_clang_ast_calls(ast)[0]
-    expected_hash = hashlib.sha256(b"sig\x00void (void)").hexdigest()
-    assert e.caller == f"api#sha256:{expected_hash}"
+    assert e.caller == "api"
 
 
-def test_parse_namespaced_extern_c_style_caller_is_qualified() -> None:
-    # Scope tracking (new in this fix) must qualify the fallback identity the
-    # same way type_graph.py's own scope walk already does for types.
-    import hashlib
-
-    ast = {
-        "kind": "TranslationUnitDecl",
+def _namespaced_api(mangled: str | None) -> dict:
+    fn: dict = {
+        "kind": "FunctionDecl",
+        "name": "api",
+        "type": {"qualType": "void (void)"},
         "inner": [
             {
-                "kind": "NamespaceDecl",
-                "name": "detail",
-                "inner": [
-                    {
-                        "kind": "FunctionDecl",
-                        "name": "api",
-                        "mangledName": "api",
-                        "type": {"qualType": "void (void)"},
-                        "inner": [
-                            {
-                                "kind": "CompoundStmt",
-                                "inner": [_direct_call(_ref("FunctionDecl", "helper"))],
-                            }
-                        ],
-                    }
-                ],
-            },
+                "kind": "CompoundStmt",
+                "inner": [_direct_call(_ref("FunctionDecl", "helper"))],
+            }
         ],
     }
-    e = parse_clang_ast_calls(ast)[0]
+    if mangled is not None:
+        fn["mangledName"] = mangled
+    return {
+        "kind": "TranslationUnitDecl",
+        "inner": [{"kind": "NamespaceDecl", "name": "detail", "inner": [fn]}],
+    }
+
+
+def test_parse_namespaced_c_linkage_caller_keys_on_the_linker_name() -> None:
+    # An extern "C" function declared inside a namespace still has the bare
+    # linker symbol, so the namespace does not enter its identity (I1).
+    e = parse_clang_ast_calls(_namespaced_api("api"))[0]
+    assert e.caller == "api"
+
+
+def test_parse_namespaced_unmangled_caller_fallback_is_qualified() -> None:
+    # With no linker name at all, the source-qualified fallback is still
+    # scope-qualified the same way type_graph.py's own scope walk is.
+    import hashlib
+
+    e = parse_clang_ast_calls(_namespaced_api(None))[0]
     expected_hash = hashlib.sha256(b"sig\x00void (void)").hexdigest()
     assert e.caller == f"detail::api#sha256:{expected_hash}"
 

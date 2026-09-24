@@ -54,11 +54,20 @@ lower-precedence location in the *same* directory; see
 `abicheck/config_paths.py` for the exact, shared candidate list every
 discovery entry point below draws from.
 
-| Command | Discovery | Code |
-|---------|-----------|------|
-| `compare` | Walks up from the current directory to the filesystem root, checking all three locations in each directory, and uses the first one found. | `discover_project_config()` in `cli_helpers_compare.py` |
-| `dump --sources` / `--build-info` | Checks all three locations at the **source-tree root** only — no parent walk. | `discover_build_config()` in `buildsource/inline.py` |
-| any | An explicit `--config <path>` overrides discovery. | `cli_options.py` (`--config`) |
+Every command selects its config with one rule
+(`resolve_project_config()` in `abicheck/config_paths.py`), first match wins:
+
+1. An explicit `--config <path>`.
+2. The **`--sources` tree root** (all three locations, no parent walk), when
+   `--sources` is given -- a source tree carries its own contract.
+3. The nearest config at or above the **current directory**, walking up to
+   the filesystem root and checking all three locations in each directory.
+
+So `dump` and `compare` run from inside a project checkout pick up the same
+`.abicheck.yml` with or without `--config`. (`dump` used to consult only the
+`--sources` root and silently ignore a config above the current directory.)
+The typed Python API does not walk up from the process's working directory:
+pass `build_config` explicitly there.
 
 > **Note:** an auto-discovered (untrusted) `.abicheck.yml` never causes a build
 > command in `build.query` to run — it is skipped with a diagnostic. A
@@ -189,9 +198,12 @@ nothing), list each symbol. See
 **parsed** surface, so a header *directory* containing two headers that
 cannot be parsed in one translation unit stays usable as a `-H` operand
 (the reported case is Intel MKL's `include/`, which ships FFTW2 and FFTW3
-headers declaring conflicting typedefs). Anything only an excluded header
-declared is simply not observed, and is reported as reduced evidence rather
-than as a removal. Both sides of a comparison are narrowed by the same
+headers declaring conflicting typedefs). A matching header is also scoped
+out when it is only reached through another header's `#include`, exactly
+like a toolchain header: anything only it declares is not observed (reported
+as reduced evidence rather than as a removal), while a type the library's own
+public API uses is still checked. This needs dependency scoping, so it does
+not apply under `--include-system-declarations`. Both sides of a comparison are narrowed by the same
 rules, and a pair whose two sides were narrowed differently is refused
 rather than compared.
 
@@ -212,6 +224,51 @@ would make the run narrower than the command line says it is. A rule that
 matches no header warns once for the whole run — including a
 directory/package comparison, where the rules are release-wide and are
 stated once rather than repeated per library.
+
+**Ownership keys** (`dependencies:`, `private_headers:`,
+`private_namespaces:`) say who owns each declaration a header parse sees:
+the target (this library), a named dependency, or the toolchain. **Today
+they are previewed, not applied**: `abicheck dump … --dry-run` prints the
+rules and the owner and contract of every `-H` header, and warns about a
+`-H` header that is not public target API. No dump keeps, drops or
+reclassifies a declaration because of them yet. The plan behind them is
+[Target ownership and extraction scope](../contribute/plans/target-ownership-and-extraction-scope.md).
+
+```yaml
+scope:
+  public_header_dirs: [include/svs/]      # the target's roots
+  dependencies:                           # named dependency roots
+    - name: fmt
+      header_roots: [include/svs/third-party/fmt/include/]
+  private_headers: [include/svs/*/detail/**]   # owned, not promised
+  private_namespaces: [svs::detail]
+```
+
+Roots are relative to the directory holding the config file. A `-H`
+directory is also a target root. The rules are applied in this order:
+
+1. An explicit root beats the system-path heuristic: a target installed
+   under `/usr/include/svs/` is still the target's.
+2. The most specific root wins: a dependency vendored inside a target root
+   belongs to the dependency. A root claimed by two owners is an error.
+3. A `-I` (include) directory is compile context. It never makes anything
+   target-owned.
+4. `private_headers` (fnmatch patterns, matched against the path relative
+   to the project root and the absolute path) and `private_namespaces`
+   narrow only target-owned declarations to `contract=private`.
+   `svs::detail` covers what is declared inside it (`svs::detail::X`), not
+   `svs::detailed`.
+5. A file no root claims, outside the system directories, is
+   `owner=unresolved`.
+6. A compiler builtin that castxml declares implicitly (`__atomic_*`,
+   `__builtin_*`, `__sync_*`) belongs to the toolchain, whichever file
+   castxml attributes it to.
+7. A declaration whose namespace disagrees with its file (a target file
+   declaring `fmt::formatter<svs::…>`) keeps the file's owner and gets a
+   diagnostic.
+
+There is deliberately no namespace-based ownership key: a namespace filter
+lost owned declarations on every real target measured (the plan's M2).
 
 `on_incomplete:` (`warn`, the default, or `block`) is Phase 7d's
 (one-comparison-product.md §4.1) CONFIG-only replacement for the former

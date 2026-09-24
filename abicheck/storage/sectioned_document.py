@@ -42,11 +42,13 @@ independently versioned sections, structural completeness checking
 
 **Why this duplicates almost no logic.** `to_sectioned_document`/
 `from_sectioned_document` are thin wrappers over `storage.import_v1
-.import_legacy_snapshot`/`export_legacy_snapshot` -- the same split/DTO-
+.import_legacy_snapshot`/`export_legacy_sections` -- the same split/DTO-
 encode/decode, schema-version validation, semantic_ir handling, and
 completeness checking those functions already implement and this package's
-own tests already exercise -- routed through a throwaway
-`InMemoryObjectStore` instead of a real directory. Only the *packaging* step
+own tests already exercise. Writing encodes each section through
+`legacy_section_dtos` (the import's own validation and codecs, minus the
+object store); reading hands the inline sections to the decoder directly,
+since neither side has anything to address them by. Only the *packaging* step
 (collect each section's DTO dict inline instead of publishing it to a
 content-addressed store) is new here.
 """
@@ -56,8 +58,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .import_v1 import export_legacy_snapshot, import_legacy_snapshot
-from .package import ArtifactRef, InMemoryObjectStore, ObjectRef
+from .canonical import CAPTURE_METADATA_KEY
+from .dto import SECTION_SCHEMA_VERSIONS
+from .import_v1 import export_legacy_sections, legacy_section_dtos
 
 __all__ = [
     "SECTION_SCHEMA_VERSIONS_KEY",
@@ -118,27 +121,45 @@ def to_sectioned_document(
     every real caller (this function is always packaging a document this
     same build just produced, or one already validated readable by it).
     """
-    store = InMemoryObjectStore()
-    manifest = import_legacy_snapshot(
-        legacy_document,
-        store=store,
-        artifact_id=_ARTIFACT_ID,
-        max_known_schema_version=max_known_schema_version,
-        variant_id=_VARIANT_ID,
+    # Encoded directly, not through a throwaway object store: the store
+    # canonicalized, hashed and deep-copied every section only for this
+    # function to fetch each one back by digest (measured on a 76-root SVS
+    # snapshot: 424 -> 283 MiB peak, 81 -> 28 s). `strip_capture_metadata`
+    # is exactly the normalization the store applied, and sections are
+    # emitted in the sorted order `ArtifactRef.sections` gave them.
+    source_schema_version, section_dtos = legacy_section_dtos(
+        legacy_document, max_known_schema_version=max_known_schema_version
     )
-    artifact = manifest.artifact_refs[0]
-    sections = {
-        section_kind: store.get(ref.digest)
-        for section_kind, ref in artifact.sections.items()
-    }
+    section_dtos.sort(key=lambda item: item[0])
+    section_dtos.reverse()
+    sections: dict[str, Any] = {}
+    while section_dtos:
+        # Popped, so each raw DTO is released as soon as its normalized
+        # copy exists -- never both forms of the whole document at once.
+        kind, dto_dict = section_dtos.pop()
+        # `strip_capture_metadata(dto_dict)`, without re-canonicalizing a
+        # payload `legacy_section_dtos` already emitted in canonical form
+        # (every one comes out of `canonical_form`): only this top level can
+        # still be out of order. A second full pass over the document was
+        # ~6 s of a oneDAL dump's write.
+        sections[kind] = {
+            key: dto_dict[key]
+            for key in sorted(dto_dict)
+            if key != CAPTURE_METADATA_KEY
+        }
+        del dto_dict
     return {
-        "schema_version": manifest.versions.source_schema_version,
+        "schema_version": source_schema_version,
         SECTIONS_KEY: sections,
-        SECTION_SCHEMA_VERSIONS_KEY: dict(manifest.versions.section_schema_versions),
+        SECTION_SCHEMA_VERSIONS_KEY: {
+            kind: SECTION_SCHEMA_VERSIONS[kind] for kind in sections
+        },
     }
 
 
-def from_sectioned_document(document: Mapping[str, Any]) -> dict[str, Any]:
+def from_sectioned_document(
+    document: Mapping[str, Any], *, defer_graph: bool = False
+) -> dict[str, Any]:
     """The inverse of `to_sectioned_document`: *document*'s sections
     reassembled into the flat `snapshot_to_dict()`-shaped document
     `serialization.snapshot_from_dict` already knows how to read.
@@ -158,6 +179,10 @@ def from_sectioned_document(document: Mapping[str, Any]) -> dict[str, Any]:
     unaccounted-for content -- mirroring the identical missing/extra pair
     `read_legacy_snapshot_document` already checks for the directory
     format).
+
+    *defer_graph*: see `import_v1.export_legacy_sections` -- only for a
+    caller that hands the result straight to `snapshot_from_dict`/
+    `decode_snapshot`, which decode the graph on first access.
     """
     sections_raw = document.get(SECTIONS_KEY)
     if not isinstance(sections_raw, Mapping):
@@ -199,17 +224,17 @@ def from_sectioned_document(document: Mapping[str, Any]) -> dict[str, Any]:
             "the document is truncated or was hand-edited; refusing to merge "
             "unaccounted-for section content"
         )
-    store = InMemoryObjectStore()
-    sections: dict[str, ObjectRef] = {}
-    for section_kind, dto_dict in sections_raw.items():
-        digest = store.put(dto_dict)
-        sections[section_kind] = ObjectRef(kind=section_kind, digest=digest)
-    artifact = ArtifactRef(
+    # Straight to the section decoder, not through a content-addressed
+    # store: every section is already in hand, so hashing each one only to
+    # fetch it back by that digest bought nothing and cost a full
+    # canonicalization, surrogate walk, serialization and deep copy of the
+    # whole document (the largest single term of a stored-baseline load).
+    return export_legacy_sections(
+        (
+            (section_kind, f"{SECTIONS_KEY}[{section_kind!r}]", dto_dict)
+            for section_kind, dto_dict in sections_raw.items()
+        ),
         artifact_id=_ARTIFACT_ID,
-        variant_id=_VARIANT_ID,
-        kind="elf",
-        sections=sections,
-    )
-    return export_legacy_snapshot(
-        artifact, store=store, source_schema_version=schema_version
+        source_schema_version=schema_version,
+        defer_graph=defer_graph,
     )

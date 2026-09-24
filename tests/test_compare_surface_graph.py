@@ -17,20 +17,30 @@
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.compare.surface_graph import (
+    EDGE_EVIDENCE_CLASS,
     EDGE_KIND_DECLARES,
-    EDGE_KIND_EXPORTS,
+    EDGE_KIND_DECLARES_LINKER_NAME,
     EDGE_KIND_REFERENCES,
     NODE_KIND_DECLARATION,
+    NODE_KIND_ENUM_TYPE,
     NODE_KIND_HEADER,
+    NODE_KIND_RECORD_TYPE,
     NODE_KIND_SYMBOL,
-    NODE_KIND_TYPE,
+    NODE_KIND_TYPEDEF,
     build_public_surface_facts,
 )
 from abicheck.model.declarations import Function, Variable
+from abicheck.model.dwarf_facts import DwarfMetadata, StructLayout
+from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
 from abicheck.model.entities import RecordType, TypeField
+from abicheck.model.graph_evidence_class import EdgeEvidenceClass
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.model.source_graph import SourceGraphSummary
+
+TYPE_KINDS = frozenset({NODE_KIND_RECORD_TYPE, NODE_KIND_ENUM_TYPE, NODE_KIND_TYPEDEF})
 
 
 def _snapshot(**kwargs: object) -> AbiSnapshot:
@@ -102,7 +112,7 @@ class TestReferencesEdges:
         build_public_surface_facts(snap, graph)
         refs = [e for e in graph.edges if e.kind == EDGE_KIND_REFERENCES]
         assert len(refs) == 1
-        type_node_ids = {n.id for n in graph.nodes if n.kind == NODE_KIND_TYPE}
+        type_node_ids = {n.id for n in graph.nodes if n.kind in TYPE_KINDS}
         assert refs[0].dst in type_node_ids
 
     def test_record_field_references_another_record(self) -> None:
@@ -176,17 +186,24 @@ class TestReferencesEdges:
         assert len(refs) == 1
 
 
-class TestExportsEdges:
-    def test_symbol_node_and_exports_edge(self) -> None:
+class TestLinkerNameEdges:
+    def test_symbol_node_and_linker_name_edge(self) -> None:
         fn = Function(name="f", mangled="_Z1fv", return_type="void")
         snap = _snapshot(functions=[fn])
         graph = SourceGraphSummary()
         build_public_surface_facts(snap, graph)
         symbol_nodes = [n for n in graph.nodes if n.kind == NODE_KIND_SYMBOL]
         assert [n.label for n in symbol_nodes] == ["_Z1fv"]
-        exports = [e for e in graph.edges if e.kind == EDGE_KIND_EXPORTS]
-        assert len(exports) == 1
-        assert exports[0].src == symbol_nodes[0].id
+        linked = [e for e in graph.edges if e.kind == EDGE_KIND_DECLARES_LINKER_NAME]
+        assert len(linked) == 1
+        assert linked[0].src == symbol_nodes[0].id
+
+    def test_exports_kind_is_not_emitted(self) -> None:
+        # "exports" is reserved for a future observed export-table join.
+        fn = Function(name="f", mangled="_Z1fv", return_type="void")
+        graph = SourceGraphSummary()
+        build_public_surface_facts(_snapshot(functions=[fn]), graph)
+        assert "exports" not in {e.kind for e in graph.edges}
 
     def test_no_mangled_name_means_no_symbol_node(self) -> None:
         fn = Function(name="f", mangled="", return_type="void")
@@ -215,7 +232,7 @@ class TestIdempotence:
 
         graph = SourceGraphSummary()
         graph.add_node(
-            GraphNode(id="decl://preexisting", kind="declaration", label="pre")
+            GraphNode(id="decl://preexisting", kind=NODE_KIND_DECLARATION, label="pre")
         )
         fn = Function(name="f", mangled="_Z1fv", return_type="void")
         snap = _snapshot(functions=[fn])
@@ -224,12 +241,12 @@ class TestIdempotence:
         assert len([n for n in graph.nodes if n.kind == NODE_KIND_DECLARATION]) == 2
 
 
-class TestApproximateFallbackWhenEntityIdUnpopulated:
+class TestIdentityWithoutEntityId:
     """Every declaration constructed above has ``entity_id=None`` (the test
-    fixtures never set it) -- this whole test module is therefore already
-    exercising the approximate-fallback path exclusively; this class just
-    makes that coverage explicit and pins the collision-avoidance property
-    the fallback itself promises."""
+    fixtures never set it). Node ids come from the linker name / qualified
+    type name (``model.graph_entity_identity``), not from ``entity_id``, so
+    this pins the collision-avoidance properties that identity promises
+    without one."""
 
     def test_two_same_leaf_names_in_different_namespaces_do_not_collide(self) -> None:
         a = Function(name="ns_a::f", mangled="_ZN4ns_a1fEv", return_type="void")
@@ -244,16 +261,15 @@ class TestApproximateFallbackWhenEntityIdUnpopulated:
         self,
     ) -> None:
         # Legal C: `struct stat { ... };` alongside a function `int stat(...)`.
-        # Both share the qualified name "stat"; without a per-kind namespace
-        # in the approximate-fallback id, both would resolve to the same
-        # node id and silently merge into one (Codex review, PR #962).
+        # Both share the qualified name "stat"; the decl:// and type:// id
+        # spaces keep them apart (Codex review, PR #962).
         fn = Function(name="stat", mangled="stat", return_type="int")
         rec = RecordType(name="stat", kind="struct", qualified_name="stat")
         snap = _snapshot(functions=[fn], types=[rec])
         graph = SourceGraphSummary()
         build_public_surface_facts(snap, graph)
         decl_nodes = [n for n in graph.nodes if n.kind == NODE_KIND_DECLARATION]
-        type_nodes = [n for n in graph.nodes if n.kind == NODE_KIND_TYPE]
+        type_nodes = [n for n in graph.nodes if n.kind in TYPE_KINDS]
         assert len(decl_nodes) == 1
         assert len(type_nodes) == 1
         assert decl_nodes[0].id != type_nodes[0].id
@@ -285,23 +301,133 @@ class TestReferencedIdentifiersAttr:
         snap = _snapshot(types=[rec])
         graph = SourceGraphSummary()
         build_public_surface_facts(snap, graph)
-        type_node = next(n for n in graph.nodes if n.kind == NODE_KIND_TYPE)
+        type_node = next(n for n in graph.nodes if n.kind in TYPE_KINDS)
         assert {"Inner", "Base"} <= set(type_node.attrs["referenced_identifiers"])
 
-    def test_colliding_approximate_declarations_union_rather_than_drop(self) -> None:
-        # Two overloads sharing one demangled name with no resolved
-        # entity_id collide onto the same approximate declaration node id
-        # (this module's own documented fallback). Each references a
-        # different, otherwise-unrelated type; the merged node's
-        # referenced_identifiers must carry BOTH, not silently keep only
-        # whichever registration's fact won the generic cross-producer
-        # merge tie-break (the anti-hiding regression this precomputed
-        # union step exists to prevent).
+    def test_overloads_sharing_a_name_never_collide(self) -> None:
+        # Evidence-entity-model I1: two overloads sharing one demangled name
+        # are two entities (their linker names differ), so they are two
+        # nodes, each carrying only its own references. The retired
+        # approximate-name fallback used to collapse them.
         overload_a = Function(name="f", mangled="_Z1fi", return_type="Alpha*")
         overload_b = Function(name="f", mangled="_Z1fd", return_type="Beta*")
         snap = _snapshot(functions=[overload_a, overload_b])
         graph = SourceGraphSummary()
         build_public_surface_facts(snap, graph)
+        refs = {
+            n.id: n.attrs["referenced_identifiers"]
+            for n in graph.nodes
+            if n.kind == NODE_KIND_DECLARATION
+        }
+        assert refs == {"decl://_Z1fi": ["Alpha"], "decl://_Z1fd": ["Beta"]}
+
+    def test_same_identity_declarations_union_rather_than_drop(self) -> None:
+        # Two records of one entity (the same linker name, e.g. a declaration
+        # parsed through two headers) *are* one node. Each references a
+        # different type; the node's referenced_identifiers must carry BOTH,
+        # not silently keep only whichever registration's fact won the
+        # generic cross-producer merge tie-break (the anti-hiding regression
+        # this precomputed union step exists to prevent), and the node is
+        # flagged as a collision for a per-declaration reader.
+        first = Function(name="f", mangled="_Z1fv", return_type="Alpha*")
+        second = Function(name="f", mangled="_Z1fv", return_type="Beta*")
+        snap = _snapshot(functions=[first, second])
+        graph = SourceGraphSummary()
+        build_public_surface_facts(snap, graph)
         decl_nodes = [n for n in graph.nodes if n.kind == NODE_KIND_DECLARATION]
-        assert len(decl_nodes) == 1  # confirms the collision actually occurred
+        assert len(decl_nodes) == 1
         assert {"Alpha", "Beta"} <= set(decl_nodes[0].attrs["referenced_identifiers"])
+        assert decl_nodes[0].attrs["identifiers_collision"] is True
+
+
+def _rich_snapshot(**extra: object) -> AbiSnapshot:
+    rec = RecordType(name="S", kind="struct", fields=[TypeField(name="x", type="int")])
+    fns = [
+        Function(name="f", mangled="_Z1fv", return_type="S*", source_header="inc/s.h"),
+        Function(name="g", mangled="", return_type="void"),
+    ]
+    var = Variable(name="v", mangled="v", type="S", source_header="inc/s.h")
+    extra.setdefault("elf", ElfMetadata(symbols=[ElfSymbol(name="_Z1fv")]))
+    extra.setdefault(
+        "dwarf",
+        DwarfMetadata(
+            structs={"S": StructLayout(name="S", byte_size=4)}, has_dwarf=True
+        ),
+    )
+    return _snapshot(functions=fns, variables=[var], types=[rec], **extra)
+
+
+class TestEdgeEvidenceClass:
+    def test_every_emitted_edge_kind_has_exactly_one_class(self) -> None:
+        graph = SourceGraphSummary()
+        build_public_surface_facts(_rich_snapshot(), graph)
+        emitted = {e.kind for e in graph.edges}
+        # The fixture must actually exercise every declared kind, or this
+        # check would pass vacuously for a kind it never saw.
+        assert emitted == set(EDGE_EVIDENCE_CLASS)
+        for kind in emitted:
+            assert isinstance(EDGE_EVIDENCE_CLASS[kind], EdgeEvidenceClass)
+
+    def test_every_evidence_class_value_is_known(self) -> None:
+        assert {c.value for c in EdgeEvidenceClass} == {
+            "observed",
+            "resolved_join",
+            "derived",
+        }
+
+    def test_linker_name_edge_is_derived(self) -> None:
+        assert (
+            EDGE_EVIDENCE_CLASS[EDGE_KIND_DECLARES_LINKER_NAME]
+            is EdgeEvidenceClass.DERIVED
+        )
+
+    def test_observed_join_edges_are_resolved_joins(self) -> None:
+        # Phase 2 filled the `exports` name Phase 0 reserved: the observed
+        # export-table join, never the linker-name projection.
+        assert EDGE_EVIDENCE_CLASS["exports"] is EdgeEvidenceClass.RESOLVED_JOIN
+        assert EDGE_EVIDENCE_CLASS["debug_type_of"] is EdgeEvidenceClass.RESOLVED_JOIN
+
+    def test_exports_edges_follow_the_table_not_the_linker_name(self) -> None:
+        graph = SourceGraphSummary()
+        build_public_surface_facts(_rich_snapshot(), graph)
+        exports = {(e.src, e.dst) for e in graph.edges if e.kind == "exports"}
+        # `v` declares linker name `v`, but the table does not list it.
+        assert exports == {("binary_symbol://elf/_Z1fv", "decl://_Z1fv")}
+        states = {
+            n.id: n.attrs.get("export_join_state")
+            for n in graph.nodes
+            if n.kind == NODE_KIND_DECLARATION
+        }
+        assert states["decl://_Z1fv"] == "matched"
+        assert states["decl://v"] == "unmatched"
+
+    @pytest.mark.parametrize(
+        "exported",
+        [
+            [],
+            ["_Z1fv"],
+            ["_Z1fv", "v", "_Z5otherv", "unrelated_export"],
+            ["only_unrelated"],
+        ],
+    )
+    def test_derived_edges_do_not_depend_on_export_table(
+        self, exported: list[str]
+    ) -> None:
+        """No derived edge is produced from export-table data: adding,
+        removing, or matching exports never changes the derived edge set."""
+
+        def derived(snap: AbiSnapshot) -> set[tuple[str, str, str]]:
+            graph = SourceGraphSummary()
+            build_public_surface_facts(snap, graph)
+            return {
+                (e.src, e.dst, e.kind)
+                for e in graph.edges
+                if EDGE_EVIDENCE_CLASS[e.kind] is EdgeEvidenceClass.DERIVED
+            }
+
+        baseline = derived(_rich_snapshot())
+        elf = ElfMetadata(symbols=[ElfSymbol(name=n) for n in exported])
+        assert derived(_rich_snapshot(elf=elf)) == baseline
+        # Oracle independent of the builder: one edge per declaration that
+        # carries its own mangled name, regardless of the export table.
+        assert {src for src, _dst, _k in baseline} == {"symbol://_Z1fv", "symbol://v"}

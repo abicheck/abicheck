@@ -150,6 +150,9 @@ READERS: dict[str, Callable[[], bool]] = {
     "ABICHECK_COLLECT_COMDAT": build_evidence.comdat_scan_requested,
     "ABICHECK_PARALLEL_EXTRACTION": _parallel_extraction_enabled,
     "ABICHECK_PREPROCESSOR_SCAN": preprocessor_facts.preprocessor_scan_enabled,
+    "ABICHECK_PROGRESS": lambda: __import__(
+        "abicheck.extract.progress", fromlist=["enabled_by_env"]
+    ).enabled_by_env(),
 }
 
 

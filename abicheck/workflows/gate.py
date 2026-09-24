@@ -237,6 +237,19 @@ def snapshot_identity_digest(snap: AbiSnapshot) -> str:
     return snapshot_content_digest(snap)
 
 
+def snapshot_identity_digests(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[str | None, str | None]:
+    """Both sides' :func:`snapshot_identity_digest`, or ``(None, None)`` when
+    the two provably serialize differently -- which is what the digests would
+    have said, since their one consumer only asks whether they are equal."""
+    from ..storage.snapshot_encode import persisted_content_provably_differs
+
+    if persisted_content_provably_differs(old, new):
+        return None, None
+    return snapshot_identity_digest(old), snapshot_identity_digest(new)
+
+
 def effective_gate_for_resolved_compare_config(
     cfg: Any,
     *,

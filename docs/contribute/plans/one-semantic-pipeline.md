@@ -12964,7 +12964,7 @@ sibling:
   graph directly. A pre-Phase-3 document's nested `build_source.
   source_graph` is an L3-L5 evidence graph that predates the public-
   surface builder entirely — it was never populated with the `includes`/
-  `declares`/`references`/`exports` edges `PublicSurfaceQuery.resolve()`
+  `declares`/`references`/`exports` (since renamed `declares_linker_name`, evidence-entity-model Phase 0) edges `PublicSurfaceQuery.resolve()`
   actually traverses, so aliasing it forward makes `surface_graph`
   non-`None` while still lacking exactly the edges the query needs,
   silently skipping the intentional approximate-backfill path in favor of

@@ -476,8 +476,8 @@ def _clang_context_args(
                 "way to correctly represent that pass under a different "
                 "compiler, so this translation unit degrades to partial "
                 "coverage rather than being silently replayed under the "
-                "wrong compilation context -- pass --compiler pointing at "
-                "the real icx/icpx/dpcpp driver to extract it."
+                "wrong compilation context -- set compile.compiler in "
+                ".abicheck.yml to the real icx/icpx/dpcpp driver to extract it."
             )
     if _needs_sycl_host_only(clang_bin, [*cmd, *extra]):
         extra = [*extra, "-fsycl-host-only"]
@@ -1243,7 +1243,7 @@ def _emit_function(
             mangled_name=mangled,
             signature_hash=_hash("sig", sig),
             value=_default_arg_repr(node),
-            names=_entity_names(name, mangled),
+            names=_entity_names(name, mangled, node),
             relations=relations,
             ownership=_entity_ownership(visibility, origin),
             source_location=loc,
@@ -1271,7 +1271,7 @@ def _emit_function(
                 qualified_name=name,
                 mangled_name=mangled,
                 signature_hash=_hash("sig", sig),
-                names=_entity_names(name, mangled),
+                names=_entity_names(name, mangled, node),
                 relations=relations,
                 ownership=_entity_ownership(visibility, origin),
                 # Alpha-rename the function's parameters together with the body so
@@ -1396,7 +1396,7 @@ def _emit_constexpr(
             qualified_name=name,
             mangled_name=mangled,
             value=value,
-            names=_entity_names(name, mangled),
+            names=_entity_names(name, mangled, node),
             ownership=_entity_ownership(visibility, origin),
             source_location=_location(file, _node_line(node), origin),
             visibility=visibility,
@@ -1433,7 +1433,7 @@ def _emit_variable(
             qualified_name=name,
             mangled_name=mangled,
             type_hash=_hash("type", type_repr),
-            names=_entity_names(name, mangled),
+            names=_entity_names(name, mangled, node),
             ownership=_entity_ownership(visibility, origin),
             source_location=_location(file, _node_line(node), origin),
             visibility=visibility,
@@ -1588,7 +1588,7 @@ class ClangSourceExtractor:
             raise SourceExtractionError(
                 f"{self.clang_bin} not found in PATH; source ABI replay (L4) requires "
                 "clang. Install clang to enable source-only checks (macros, default "
-                "arguments, inline/template/constexpr bodies), or omit --source-abi."
+                "arguments, inline/template/constexpr bodies), or use --depth build."
             )
         directory = unredact_home(compile_unit.directory)
         source = Path(unredact_home(compile_unit.source))

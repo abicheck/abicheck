@@ -123,28 +123,83 @@ class CastxmlParserContext:
         self.vtable_slot_extra_roots: dict[str, list[int | str]] = {}
 
     def build_id_map(self) -> None:
-        """Single pass building the id map, the virtual-method index, and
-        the tag-grouped element lists ``parse_functions()``/``parse_types()``/
-        etc. use."""
+        """Build the id map, the virtual-method index, and the tag-grouped
+        element lists ``parse_functions()``/``parse_types()``/etc. use.
+
+        A declaration local to a function body is left out of every grouped
+        list (it stays in ``id_map``, so a signature naming it still
+        resolves). castxml emits one whenever an emitted signature refers to
+        it -- a deduced ``auto`` return type that is a local alias, enum or
+        class (``inline auto f() { struct V {int x;}; return V{}; }``) -- and
+        its ``context`` is the function. It has no linkage and cannot be
+        named outside that body, and the clang backend never emits one (its
+        walk stops at a function). Grouping it would give it a namespace-
+        level identity (``scope_path`` has no function segment to offer),
+        colliding with a real ``q::V`` and disagreeing with ``SemanticIR``,
+        which rejects the whole dump.
+        """
         for el in self.root:
             eid = el.get("id")
             if eid:
                 self.id_map[eid] = el
-            tag = el.tag
-            if tag in ("Method", "Destructor") and el.get("virtual") == "1":
-                ctx = el.get("context")
-                if ctx:
-                    self.virtual_methods_by_class.setdefault(ctx, []).append(el)
-            if tag in FUNCTION_TAGS:
-                self.function_els.append(el)
-            elif tag == "Variable":
-                self.variable_els.append(el)
-            elif tag in ("Struct", "Class", "Union"):
-                self.record_els.append(el)
-            elif tag == "Enumeration":
-                self.enum_els.append(el)
-            elif tag == "Typedef":
-                self.typedef_els.append(el)
+        local: dict[str, bool] = {}
+        groups = self._groups_by_tag()
+        for el in self.root:
+            if self._is_function_local(el, local):
+                continue
+            self._group(el, groups)
+
+    def _group(self, el: Element, groups: dict[str, list[Element]]) -> None:
+        """Add *el* to the virtual-method index and its tag's grouped list."""
+        tag = el.tag
+        if tag in ("Method", "Destructor") and el.get("virtual") == "1":
+            ctx = el.get("context")
+            if ctx:
+                self.virtual_methods_by_class.setdefault(ctx, []).append(el)
+        group = groups.get(tag)
+        if group is not None:
+            group.append(el)
+
+    def _groups_by_tag(self) -> dict[str, list[Element]]:
+        groups = {tag: self.function_els for tag in FUNCTION_TAGS}
+        groups.update(
+            Variable=self.variable_els,
+            Struct=self.record_els,
+            Class=self.record_els,
+            Union=self.record_els,
+            Enumeration=self.enum_els,
+            Typedef=self.typedef_els,
+        )
+        return groups
+
+    def _is_function_local(self, el: Element, memo: dict[str, bool]) -> bool:
+        """Whether *el*'s ``context`` chain reaches a function-like element.
+
+        Memoized per context id, so the whole pass stays linear in the
+        document size. A cycle (malformed input) answers ``False``: that is
+        the pre-existing behaviour, and :func:`.scope.scope_path` guards the
+        same chain the same way.
+        """
+        chain: list[str] = []
+        ctx_id = el.get("context", "") or ""
+        answer = False
+        while ctx_id:
+            if ctx_id in memo:
+                answer = memo[ctx_id]
+                break
+            if ctx_id in chain:
+                break
+            parent = self.id_map.get(ctx_id)
+            if parent is None:
+                break
+            chain.append(ctx_id)
+            if parent.tag in FUNCTION_TAGS:
+                answer = True
+                break
+            ctx_id = parent.get("context", "") or ""
+        for visited in chain:
+            memo[visited] = answer
+        return answer
 
     def resolve(self, id_: str) -> Element | None:
         return self.id_map.get(id_)

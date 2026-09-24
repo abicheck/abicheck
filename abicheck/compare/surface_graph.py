@@ -22,8 +22,16 @@ plan's "don't attempt a change with no real caller" discipline).
 **Edge kinds populated this slice**: ``declares`` (header → declaration/
 type), ``references`` (declaration/type → type, from field/base/signature
 type references resolvable to another declared type in this same
-snapshot), ``exports`` (symbol → declaration, from the observed export
-table). **Not populated**: ``includes`` (header → header) — every
+snapshot), ``declares_linker_name`` (symbol → declaration, projected from
+the declaration's own mangled name -- evidence class ``derived``, *not* an
+observed export-table join; ``EDGE_EVIDENCE_CLASS`` records each kind's
+class), and the two Phase 2 ``resolved_join`` kinds (evidence-entity-model
+plan): ``exports`` (``binary_symbol`` -> declaration, from
+``compare/export_join.py``'s observed export-table join) and
+``debug_type_of`` (``debug_type`` -> header type, from
+``compare/debug_type_join.py``). Every observed export/debug occurrence is a
+node carrying its join state, so an orphan on either side stays visible.
+**Not populated**: ``includes`` (header → header) — every
 function/variable's ``Visibility.PUBLIC`` is already resolved
 per-declaration at parse time (ADR-016), so this phase's own relevance
 query does not need a transitive header-inclusion walk to seed roots (see
@@ -31,78 +39,99 @@ query does not need a transitive header-inclusion walk to seed roots (see
 same decision); ``instantiates`` (template-specific, ADR-053/057
 territory); ``owned_by_target``.
 
-Declaration/type node ids are ``canonical_key(occurrence_id)`` with an
-empty disambiguator — this phase's own L0-L2 builder carries no TU-context
-signal to populate one with (see ``model.occurrence``'s own module
-docstring), which is exactly what makes that key reduce to plain
-``entity_id.key``. When a declaration's parse-time ``entity_id`` carrier
-is unpopulated (a pre-ADR-063-Phase-2 snapshot, or a kind the header-AST
-backends don't resolve one for yet — see AGENTS.md's own "exhaustive
-``entity_id`` population" open item), this builder falls back to a plain
-string node id derived from the flattened qualified-name string, namespaced
-by entity kind (``declaration::``/``type::``/``typedef::``) so a function
-and an unrelated record/enum/typedef sharing one bare spelling never
-collide onto one node — **not** a synthesized ``EntityId``: ``entity_id_for_*`` may only be called
-by a header-AST producer, the only place a real, typed ``ScopePath``
-exists to build one from (``tests/test_entity_id_carrier.py::
-TestResolverIsOnlyCalledByAProducer`` enforces this repo-wide), and a
-post-parse module recomputing one from a bare string could only ever
-approximate it, which that invariant exists specifically to rule out.
-
-**Known gap, deliberately not closed this slice**: ``buildsource.
-header_graph.build_header_only_graph`` (the pre-existing L2/L5 builder this
-module's own facts now share one ``SourceGraphSummary`` instance with —
-see ``service_header_graph_attach.py``'s assembly step) mints its own
-``source_decl``/``record_type``/``enum_type`` nodes under a *different* id
-scheme entirely: ``decl://<normalized identity>``/``type://<normalized
-identity>`` (``model.graph_facts._decl_node_id``/``_type_node_id``, a
-mangled-or-qualified-name string), never this module's
-``canonical_key(occurrence_id)``/``declaration::``/``type::``/``typedef::``
-ids. Sharing one graph instance is real (both builders' nodes/edges coexist
-in it, verified by
-``tests/test_service_header_graph_attach_surface_graph.py``), but the two
-id namespaces do not currently collide or dedup onto one node for a
-declaration both builders happen to see — reconciling them is a real,
-separate, deeper migration (either this module adopts ``header_graph.py``'s
-``decl://``/``type://`` scheme, or that already-multi-round-hardened,
-mangled-identity-based module adopts this one), left for a later phase
-rather than attempted reactively here.
+Declaration/type node ids come from ``model.graph_entity_identity``'s
+:func:`~abicheck.model.graph_entity_identity.snapshot_identities` table --
+the one identity function every graph producer shares (evidence-entity-model
+invariant I1). ``buildsource.header_graph.build_header_only_graph`` reads the
+same table, so when the two builders write into one shared
+``SourceGraphSummary`` (``service_header_graph_attach.py``'s assembly step)
+a declaration both see is one node, not a ``declaration``/``source_decl``
+pair: this builder emits the header graph's own node kinds
+(``source_decl``/``record_type``/``enum_type``/``typedef``) and adds its
+attrs to the existing node. An entity with no resolvable identity is an
+explicit ``unresolved`` node (``attrs["identity"] == "unresolved"``), never
+an approximate name-string id. The earlier ``declaration::``/``type::``/
+``typedef::`` fallback scheme and the ``canonical_key(occurrence_id)`` ids
+(which no other producer could compute) are retired.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import TYPE_CHECKING, NamedTuple
 
+from ..model.graph_entity_identity import (
+    IDENTITY_STATE_ATTR,
+    GraphEntityIdentity,
+    SnapshotIdentities,
+    register_identity_alias,
+    snapshot_identities,
+)
+from ..model.graph_evidence_class import (
+    PUBLIC_SURFACE_FACTS_PRODUCER,
+    EdgeEvidenceClass,
+)
 from ..model.graph_facts import GraphEdge, GraphNode
-from ..model.occurrence import OccurrenceId, canonical_key
+from ..model.graph_join import (
+    EDGE_KIND_DEBUG_TYPE_OF,
+    EDGE_KIND_EXPORTS,
+    CrossLayerJoin,
+)
+from .debug_type_join import join_debug_types
+from .export_join import join_exports
 
 if TYPE_CHECKING:
-    from ..model.declarations import Function, Variable
-    from ..model.entities import EnumType, RecordType
     from ..model.fact import Fact
     from ..model.graph_facts import SurfaceGraphLike
-    from ..model.identity import EntityId
     from ..model.snapshot import AbiSnapshot
 
 __all__ = [
+    "EDGE_EVIDENCE_CLASS",
     "ReferencedIdentifiers",
     "build_public_surface_facts",
     "fact_list",
-    "node_id_for_declaration",
-    "node_id_for_type",
-    "node_id_for_typedef",
     "referenced_identifiers_by_node",
 ]
 
 NODE_KIND_HEADER = "header"
-NODE_KIND_DECLARATION = "declaration"
-NODE_KIND_TYPE = "type"
+#: The header graph's own node kinds (I1: one node per entity, so one kind
+#: vocabulary for it too).
+NODE_KIND_DECLARATION = "source_decl"
+NODE_KIND_RECORD_TYPE = "record_type"
+NODE_KIND_ENUM_TYPE = "enum_type"
+NODE_KIND_TYPEDEF = "typedef"
 NODE_KIND_SYMBOL = "symbol"
+#: An observed export-table entry / debug-info type occurrence -- the other
+#: side of a Phase 2 join (``model/graph_join.py``).
+NODE_KIND_BINARY_SYMBOL = "binary_symbol"
+NODE_KIND_DEBUG_TYPE = "debug_type"
+#: The node/edge attr a join's per-subject state is stamped under.
+JOIN_STATE_ATTR = "join_state"
+#: The declaration-node attr carrying its ``exports`` join state, so an
+#: orphan declaration (a public inline function) is visible in the graph.
+EXPORT_JOIN_STATE_ATTR = "export_join_state"
 
 EDGE_KIND_DECLARES = "declares"
 EDGE_KIND_REFERENCES = "references"
-EDGE_KIND_EXPORTS = "exports"
+#: A declaration's *own* mangled linker name, projected from the record
+#: itself -- never matched against the observed export table. The observed
+#: join is ``exports`` (``model.graph_join.EDGE_KIND_EXPORTS``, Phase 2).
+EDGE_KIND_DECLARES_LINKER_NAME = "declares_linker_name"
+
+#: The evidence class of every edge kind this builder can emit. A new edge
+#: kind must be added here too (``tests/test_compare_surface_graph.py``
+#: checks exhaustiveness against what the builder actually emits).
+EDGE_EVIDENCE_CLASS: Mapping[str, EdgeEvidenceClass] = MappingProxyType(
+    {
+        EDGE_KIND_DECLARES: EdgeEvidenceClass.OBSERVED,
+        EDGE_KIND_REFERENCES: EdgeEvidenceClass.RESOLVED_JOIN,
+        EDGE_KIND_DECLARES_LINKER_NAME: EdgeEvidenceClass.DERIVED,
+        EDGE_KIND_EXPORTS: EdgeEvidenceClass.RESOLVED_JOIN,
+        EDGE_KIND_DEBUG_TYPE_OF: EdgeEvidenceClass.RESOLVED_JOIN,
+    }
+)
 
 _TYPE_NOISE: frozenset[str] = frozenset(
     {
@@ -154,24 +183,6 @@ def _type_identifiers(type_str: str | None) -> set[str]:
     return out
 
 
-def _approximate_node_id(qualified_name: str, *, kind: str) -> str:
-    """Plain string node id for a declaration/type with no parse-time
-    ``entity_id`` -- the flattened qualified-name string itself, never a
-    synthesized ``EntityId`` (see this module's own docstring for why).
-    *kind* (``"declaration"``/``"type"``/``"typedef"``) namespaces the
-    fallback id space per entity kind, so a function and an unrelated
-    record/enum/typedef sharing one bare spelling (legal C: ``struct stat``
-    alongside a function named ``stat``, or the ``typedef struct Foo Foo;``
-    idiom) never collide onto the same node id when neither side has a
-    resolved ``entity_id`` -- confirmed to fail without this discriminator
-    (Codex review, PR #962)."""
-    return f"{kind}::{qualified_name}"
-
-
-def _declaration_entity_id(decl: Function | Variable) -> EntityId | None:
-    return decl.entity_id
-
-
 def fact_list(fact: Fact[list[str]] | None) -> list[str]:
     """``rec.bases``/``.virtual_bases``' ``Fact[T]`` sibling, unwrapped —
     never the legacy field directly (ADR-063 Phase 0's `fact-field-readers`
@@ -184,44 +195,8 @@ def fact_list(fact: Fact[list[str]] | None) -> list[str]:
     return fact.value
 
 
-def _node_id(entity_id: EntityId) -> str:
-    return canonical_key(OccurrenceId(entity_id))
-
-
-def _node_id_for(entity_id: EntityId | None, qualified_name: str, *, kind: str) -> str:
-    """A declaration/type's node id: its real, parse-time ``entity_id`` when
-    populated, else the plain-string approximate fallback (never a
-    synthesized ``EntityId`` -- see this module's own docstring). *kind* is
-    forwarded to :func:`_approximate_node_id` and ignored when a real
-    ``entity_id`` is present (that id is already kind-disambiguated)."""
-    return (
-        _node_id(entity_id)
-        if entity_id is not None
-        else _approximate_node_id(qualified_name, kind=kind)
-    )
-
-
-def node_id_for_declaration(entity_id: EntityId | None, name: str) -> str:
-    """Public wrapper over :func:`_node_id_for` for a function/variable
-    declaration -- the same id :func:`build_public_surface_facts` gives its
-    own declaration nodes, exposed so ``policy/public_surface.py`` (the
-    ADR-063 Phase 3 D5 query side) can look one up by the same key without
-    reaching into this module's private helpers."""
-    return _node_id_for(entity_id, name, kind="declaration")
-
-
-def node_id_for_type(entity_id: EntityId | None, qualified_name: str) -> str:
-    """Public wrapper over :func:`_node_id_for` for a record/enum type node
-    -- see :func:`node_id_for_declaration`."""
-    return _node_id_for(entity_id, qualified_name, kind="type")
-
-
-def node_id_for_typedef(alias: str) -> str:
-    """Public wrapper over :func:`_approximate_node_id` for a typedef alias
-    node -- see :func:`node_id_for_declaration`. A typedef has no
-    ``entity_id`` carrier at all (``snap.typedefs`` is a bare ``dict[str,
-    str]``), so this is always the approximate string form."""
-    return _approximate_node_id(alias, kind="typedef")
+def _identity_attrs(ident: GraphEntityIdentity) -> dict[str, object]:
+    return {} if ident.resolved else {IDENTITY_STATE_ATTR: ident.state.value}
 
 
 def _header_node_id(header: str) -> str:
@@ -234,8 +209,22 @@ def _add_header_declares(
     if not source_header:
         return
     header_id = _header_node_id(source_header)
-    graph.add_node(GraphNode(id=header_id, kind=NODE_KIND_HEADER, label=source_header))
-    graph.add_edge(GraphEdge(src=header_id, dst=decl_node_id, kind=EDGE_KIND_DECLARES))
+    graph.add_node(
+        GraphNode(
+            provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
+            id=header_id,
+            kind=NODE_KIND_HEADER,
+            label=source_header,
+        )
+    )
+    graph.add_edge(
+        GraphEdge(
+            provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
+            src=header_id,
+            dst=decl_node_id,
+            kind=EDGE_KIND_DECLARES,
+        )
+    )
 
 
 def _add_references(
@@ -253,13 +242,33 @@ def _add_references(
             dst = type_index.get(ident)
             if dst is not None and dst != src_node_id:
                 graph.add_edge(
-                    GraphEdge(src=src_node_id, dst=dst, kind=EDGE_KIND_REFERENCES)
+                    GraphEdge(
+                        provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
+                        src=src_node_id,
+                        dst=dst,
+                        kind=EDGE_KIND_REFERENCES,
+                    )
                 )
 
 
 class ReferencedIdentifiers(NamedTuple):
     by_node: dict[str, list[str]]
     collided_nodes: frozenset[str]
+    #: The snapshot's identity table these node ids were computed from --
+    #: readers look an entity's node id up here (:meth:`node_id`) rather than
+    #: recomputing it, so a lookup can never disagree with the producer.
+    ids: SnapshotIdentities
+    #: ``id(entity object) -> node id`` for every function/variable/record/
+    #: enum of the snapshot this was computed from.
+    node_ids: dict[int, str]
+
+    def node_id(self, entity: object) -> str:
+        """The node id of *entity* -- one of the snapshot's own
+        function/variable/record/enum objects."""
+        return self.node_ids[id(entity)]
+
+    def typedef_node_id(self, alias: str) -> str:
+        return self.ids.typedefs[alias].node_id
 
 
 def referenced_identifiers_by_node(snap: AbiSnapshot) -> ReferencedIdentifiers:
@@ -308,10 +317,14 @@ def referenced_identifiers_by_node(snap: AbiSnapshot) -> ReferencedIdentifiers:
     rather than either silently trusting a blurred union or (worse) an
     arbitrary single contributor's value.
     """
+    ids = snapshot_identities(snap)
+    node_ids: dict[int, str] = {}
     acc: dict[str, set[str]] = {}
     contributor_counts: dict[str, int] = {}
 
-    def _add(node_id: str, *type_strs: str | None) -> None:
+    def _add(entity: object, node_id: str, *type_strs: str | None) -> None:
+        if entity is not None:
+            node_ids[id(entity)] = node_id
         idents: set[str] = set()
         for s in type_strs:
             idents |= _type_identifiers(s)
@@ -319,28 +332,29 @@ def referenced_identifiers_by_node(snap: AbiSnapshot) -> ReferencedIdentifiers:
             acc.setdefault(node_id, set()).update(idents)
         contributor_counts[node_id] = contributor_counts.get(node_id, 0) + 1
 
-    for fn in snap.functions:
-        node_id = node_id_for_declaration(_declaration_entity_id(fn), fn.name)
-        _add(node_id, fn.return_type, *(p.type for p in fn.params))
-    for var in snap.variables:
-        node_id = node_id_for_declaration(_declaration_entity_id(var), var.name)
-        _add(node_id, var.type)
-    for rec in snap.types:
-        qname = rec.qualified_name or rec.name
-        node_id = node_id_for_type(rec.entity_id, qname)
+    for fn, ident in zip(snap.functions, ids.functions):
+        _add(fn, ident.node_id, fn.return_type, *(p.type for p in fn.params))
+    for var, ident in zip(snap.variables, ids.variables):
+        _add(var, ident.node_id, var.type)
+    for rec, ident in zip(snap.types, ids.records):
         _add(
-            node_id,
+            rec,
+            ident.node_id,
             *(f.type for f in rec.fields),
             *fact_list(rec.bases_fact),
             *fact_list(rec.virtual_bases_fact),
         )
+    for en, ident in zip(snap.enums, ids.enums):
+        node_ids[id(en)] = ident.node_id
     for alias, target in snap.typedefs.items():
-        _add(node_id_for_typedef(alias), target)
+        _add(None, ids.typedefs[alias].node_id, target)
     by_node = {node_id: sorted(idents) for node_id, idents in acc.items()}
     collided = frozenset(
         node_id for node_id, count in contributor_counts.items() if count > 1
     )
-    return ReferencedIdentifiers(by_node=by_node, collided_nodes=collided)
+    return ReferencedIdentifiers(
+        by_node=by_node, collided_nodes=collided, ids=ids, node_ids=node_ids
+    )
 
 
 def _node_attrs(refs: ReferencedIdentifiers, node_id: str) -> dict[str, object]:
@@ -375,120 +389,169 @@ def _node_attrs(refs: ReferencedIdentifiers, node_id: str) -> dict[str, object]:
 
 def _build_type_index(
     graph: SurfaceGraphLike,
-    types: list[RecordType],
-    enums: list[EnumType],
-    typedefs: dict[str, str],
-    referenced_by_node: ReferencedIdentifiers,
+    snap: AbiSnapshot,
+    refs: ReferencedIdentifiers,
 ) -> dict[str, str]:
-    """Register every declared record/enum/typedef as a ``type`` node,
-    returning a name → node-id index (both the bare leaf and the qualified
-    spelling, mirroring ``surface.py``'s own alias-index convention -- bare
-    names included, but never a silent first-wins pick: a bare name shared
-    by more than one type (``ns1::Foo``/``ns2::Foo``) is ambiguous, exactly
-    what ``surface.py``'s own ``ambiguous_type_names`` tracks and every one
-    of its consumers checks before trusting a bare match, so this index
-    drops that bare key entirely rather than resolving it arbitrarily) for
+    """Register every declared record/enum/typedef as a type node, returning
+    a name → node-id index (both the bare leaf and the qualified spelling,
+    mirroring ``surface.py``'s own alias-index convention -- bare names
+    included, but never a silent first-wins pick: a bare name shared by more
+    than one type (``ns1::Foo``/``ns2::Foo``) is ambiguous, exactly what
+    ``surface.py``'s own ``ambiguous_type_names`` tracks and every one of its
+    consumers checks before trusting a bare match, so this index drops that
+    bare key entirely rather than resolving it arbitrarily; a qualified
+    spelling shared by two declarations is dropped the same way) for
     :func:`_add_references` to resolve a signature/field type string
     against."""
     index: dict[str, str] = {}
-    ambiguous_bare: set[str] = set()
+    ambiguous: set[str] = set()
 
-    def _register(qname: str, bare: str, node_id: str, label: str) -> None:
+    def _register(qname: str, bare: str, ident: GraphEntityIdentity, kind: str) -> None:
+        node_id = ident.node_id
         graph.add_node(
             GraphNode(
+                provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
                 id=node_id,
-                kind=NODE_KIND_TYPE,
-                label=label,
-                attrs=_node_attrs(referenced_by_node, node_id),
+                kind=kind,
+                label=qname or node_id,
+                attrs={**_node_attrs(refs, node_id), **_identity_attrs(ident)},
             )
         )
-        index.setdefault(qname, node_id)
-        if bare in index and index[bare] != node_id:
-            ambiguous_bare.add(bare)
-        else:
-            index.setdefault(bare, node_id)
+        for key in {qname, bare}:
+            if not key:
+                continue
+            if key in index and index[key] != node_id:
+                ambiguous.add(key)
+            else:
+                index.setdefault(key, node_id)
 
-    for rec in types:
+    ids = refs.ids
+    for rec, ident in zip(snap.types, ids.records):
         qname = rec.qualified_name or rec.name
-        node_id = _node_id_for(rec.entity_id, qname, kind="type")
-        _register(qname, rec.name, node_id, qname)
-    for en in enums:
+        _register(qname, rec.name, ident, NODE_KIND_RECORD_TYPE)
+    for en, ident in zip(snap.enums, ids.enums):
         qname = en.qualified_name or en.name
-        node_id = _node_id_for(en.entity_id, qname, kind="type")
-        _register(qname, en.name, node_id, qname)
-    for alias in typedefs:
-        node_id = _approximate_node_id(alias, kind="typedef")
-        _register(alias, alias.rsplit("::", 1)[-1], node_id, alias)
-    for bare in ambiguous_bare:
-        index.pop(bare, None)
+        _register(qname, en.name, ident, NODE_KIND_ENUM_TYPE)
+    for alias in snap.typedefs:
+        _register(
+            alias, alias.rsplit("::", 1)[-1], ids.typedefs[alias], NODE_KIND_TYPEDEF
+        )
+    for key in ambiguous:
+        index.pop(key, None)
     return index
 
 
-def _add_export_edges(graph: SurfaceGraphLike, decl_node_ids: dict[str, str]) -> None:
-    """``exports`` edges from a ``symbol`` node to its declaration, for
-    every declaration this builder resolved a mangled linker name for.
-    Deliberately not export-table-matched (that is `export_surface.py`'s
-    own, more precise root-seeding logic) — this is a straightforward
-    "this declaration's own linker identity is a symbol" edge, useful graph
-    data independent of whether it was actually observed exported."""
+def _add_linker_name_edges(
+    graph: SurfaceGraphLike, decl_node_ids: dict[str, str]
+) -> None:
+    """``declares_linker_name`` edges (evidence class ``derived``) from a
+    ``symbol`` node to its declaration, for every declaration this builder
+    resolved a mangled linker name for. Deliberately not export-table-matched
+    (that is `export_surface.py`'s own root-seeding logic): the edge says
+    "this declaration's own linker identity is this symbol", never that the
+    symbol was observed exported."""
     for mangled, decl_node_id in decl_node_ids.items():
         symbol_id = f"symbol://{mangled}"
-        graph.add_node(GraphNode(id=symbol_id, kind=NODE_KIND_SYMBOL, label=mangled))
+        graph.add_node(
+            GraphNode(
+                provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
+                id=symbol_id,
+                kind=NODE_KIND_SYMBOL,
+                label=mangled,
+            )
+        )
         graph.add_edge(
-            GraphEdge(src=symbol_id, dst=decl_node_id, kind=EDGE_KIND_EXPORTS)
+            GraphEdge(
+                provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
+                src=symbol_id,
+                dst=decl_node_id,
+                kind=EDGE_KIND_DECLARES_LINKER_NAME,
+            )
+        )
+
+
+def _add_join_edges(
+    graph: SurfaceGraphLike,
+    join: CrossLayerJoin,
+    node_kind: str,
+    labels: Mapping[str, str],
+) -> None:
+    """One node per observed subject of *join* (its state in
+    :data:`JOIN_STATE_ATTR`, orphans included) and one edge, of the join's own
+    ``resolved_join`` kind, per candidate relation."""
+    for subject, rec in join.right.items():
+        graph.add_node(
+            GraphNode(
+                provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
+                id=subject,
+                kind=node_kind,
+                label=labels[subject],
+                attrs={JOIN_STATE_ATTR: rec.state.value, "join_reason": rec.reason},
+            )
+        )
+    for src, dst in join.edges():
+        graph.add_edge(
+            GraphEdge(
+                provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
+                src=src,
+                dst=dst,
+                kind=join.spec.edge_kind,
+                attrs={JOIN_STATE_ATTR: join.right[src].state.value},
+            )
         )
 
 
 def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> None:
     """Populate *graph* with declaration/type/header/symbol nodes and
-    declares/references/exports edges for *snap*, from L0-L2 facts alone.
+    declares/references/declares_linker_name edges for *snap*, from L0-L2 facts alone.
     Idempotent — ``add_node``/``add_edge`` already dedup by id/relation
     key, so calling this twice on the same graph (or on a graph another
     builder already wrote into) is safe.
     """
-    referenced_by_node = referenced_identifiers_by_node(snap)
-    type_index = _build_type_index(
-        graph, snap.types, snap.enums, snap.typedefs, referenced_by_node
-    )
+    refs = referenced_identifiers_by_node(snap)
+    ids = refs.ids
+    type_index = _build_type_index(graph, snap, refs)
     decl_node_ids: dict[str, str] = {}
+    exports = join_exports(snap, ids)
 
-    for fn in snap.functions:
-        node_id = _node_id_for(_declaration_entity_id(fn), fn.name, kind="declaration")
+    def _declaration(
+        ident: GraphEntityIdentity, label: str, source_header: str | None
+    ) -> str:
+        node_id = ident.node_id
+        for alias in ident.aliases:
+            register_identity_alias(graph, alias, node_id)
         graph.add_node(
             GraphNode(
+                provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
                 id=node_id,
                 kind=NODE_KIND_DECLARATION,
-                label=fn.name,
-                attrs=_node_attrs(referenced_by_node, node_id),
+                label=label,
+                attrs={
+                    **_node_attrs(refs, node_id),
+                    **_identity_attrs(ident),
+                    EXPORT_JOIN_STATE_ATTR: exports.declaration(node_id).state.value,
+                },
             )
         )
-        _add_header_declares(graph, fn.source_header, node_id)
+        _add_header_declares(graph, source_header, node_id)
+        return node_id
+
+    for fn, ident in zip(snap.functions, ids.functions):
+        node_id = _declaration(ident, fn.name, fn.source_header)
         _add_references(
             graph, node_id, type_index, fn.return_type, *(p.type for p in fn.params)
         )
-        if fn.mangled:
+        if fn.mangled and ident.resolved:
             decl_node_ids[fn.mangled] = node_id
 
-    for var in snap.variables:
-        node_id = _node_id_for(
-            _declaration_entity_id(var), var.name, kind="declaration"
-        )
-        graph.add_node(
-            GraphNode(
-                id=node_id,
-                kind=NODE_KIND_DECLARATION,
-                label=var.name,
-                attrs=_node_attrs(referenced_by_node, node_id),
-            )
-        )
-        _add_header_declares(graph, var.source_header, node_id)
+    for var, ident in zip(snap.variables, ids.variables):
+        node_id = _declaration(ident, var.name, var.source_header)
         _add_references(graph, node_id, type_index, var.type)
-        if var.mangled:
+        if var.mangled and ident.resolved:
             decl_node_ids[var.mangled] = node_id
 
-    for rec in snap.types:
-        qname = rec.qualified_name or rec.name
-        node_id = _node_id_for(rec.entity_id, qname, kind="type")
+    for rec, ident in zip(snap.types, ids.records):
+        node_id = ident.node_id
         _add_header_declares(graph, rec.source_header, node_id)
         _add_references(
             graph,
@@ -499,13 +562,23 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
             *fact_list(rec.virtual_bases_fact),
         )
 
-    for en in snap.enums:
-        qname = en.qualified_name or en.name
-        node_id = _node_id_for(en.entity_id, qname, kind="type")
-        _add_header_declares(graph, en.source_header, node_id)
+    for en, ident in zip(snap.enums, ids.enums):
+        _add_header_declares(graph, en.source_header, ident.node_id)
 
     for alias, target in snap.typedefs.items():
-        node_id = _approximate_node_id(alias, kind="typedef")
-        _add_references(graph, node_id, type_index, target)
+        _add_references(graph, ids.typedefs[alias].node_id, type_index, target)
 
-    _add_export_edges(graph, decl_node_ids)
+    _add_linker_name_edges(graph, decl_node_ids)
+    _add_join_edges(
+        graph,
+        exports.join,
+        NODE_KIND_BINARY_SYMBOL,
+        {eid: e.spelling for eid, e in exports.entries.items()},
+    )
+    debug = join_debug_types(snap, ids)
+    _add_join_edges(
+        graph,
+        debug.join,
+        NODE_KIND_DEBUG_TYPE,
+        {oid: o.name for oid, o in debug.occurrences.items()},
+    )

@@ -746,3 +746,83 @@ def test_module_declares_no_dependency_above_model() -> None:
     for name in imported_names:
         bare = name.lstrip(".")
         assert not bare.startswith(banned_prefixes), name
+
+
+class TestDecayTopLevelArrayFastPath:
+    """The ``"[" not in`` fast path must be observationally identical to the
+    full scan for every input -- checked against an independent reference
+    copy of the scan (no fast path) over an exhaustive small-alphabet domain.
+    """
+
+    @staticmethod
+    def _reference(canonical_type: str) -> str:
+        depth = 0
+        brackets: list[int] = []
+        paren = False
+        for i, ch in enumerate(canonical_type):
+            if ch == "(" and depth == 0:
+                paren = True
+            if ch in "<(":
+                depth += 1
+            elif ch in ">)":
+                depth = max(0, depth - 1)
+            elif ch == "[" and depth == 0:
+                brackets.append(i)
+        if len(brackets) != 1 or paren:
+            return canonical_type
+        return f"{canonical_type[: brackets[0]].rstrip()} *"
+
+    def test_matches_reference_on_exhaustive_small_domain(self) -> None:
+        import itertools
+
+        from abicheck.model.signature_normalization import _decay_top_level_array
+
+        alphabet = "a <>()[]3*"
+        mismatches = [
+            s
+            for n in range(0, 6)
+            for s in ("".join(t) for t in itertools.product(alphabet, repeat=n))
+            if _decay_top_level_array(s) != self._reference(s)
+        ]
+        assert mismatches == []
+
+    def test_bracketless_input_is_returned_identically(self) -> None:
+        from abicheck.model.signature_normalization import _decay_top_level_array
+
+        for s in ("int", "const char *", "std::vector<int>", "void (*)(int)", ""):
+            assert _decay_top_level_array(s) is s
+
+
+class TestCanonicalizeParamTypeMemoization:
+    """The top-level cache must be observationally identical to the uncached
+    body, including on repeated and nested (callback) spellings."""
+
+    def test_cached_equals_uncached_over_varied_spellings(self) -> None:
+        import itertools
+
+        from abicheck.model.signature_normalization import (
+            _canonicalize_param_type_uncached,
+            _canonicalize_top_level_param_type,
+            canonicalize_function_signature_param_type,
+        )
+
+        bases = ["int", "char", "std::vector<const int>", "(anonymous namespace)::Foo"]
+        decorations = [
+            "{b}",
+            "const {b}",
+            "{b} *",
+            "const {b} *",
+            "{b} * const",
+            "{b} [3]",
+            "const {b} [3][4]",
+            "void (*)(const {b})",
+            "void (C::* const)({b}) &&",
+        ]
+        spellings = [d.format(b=b) for b, d in itertools.product(bases, decorations)]
+        _canonicalize_top_level_param_type.cache_clear()
+        for _ in range(2):  # second pass is served from the cache
+            for s in spellings:
+                assert canonicalize_function_signature_param_type(s) == (
+                    _canonicalize_param_type_uncached(s, 0)
+                ), s
+        assert _canonicalize_top_level_param_type.cache_info().hits >= len(spellings)

@@ -457,6 +457,59 @@ constructor) are explicitly **not** persisted identity; `EntityId` is
 produced once, downstream of backend-specific extraction, not re-derived
 from a backend-specific string at comparison time.
 
+**Amendment (2026-09-24, accepted): graph node identity (evidence-entity-model
+Phase 1, invariant I1).** `EntityId` stays the identity primitive for diff
+matching and persisted declarations, but it is **not** the graph node key.
+Only a header-AST producer may construct an `EntityId`
+(`tests/test_entity_id_carrier.py`), and the other graph producers -- the
+AST replay passes (call/type/override/macro/template graphs), the L4
+source extractors, and later the L0 export and L1 debug joins -- never can.
+Keying graph nodes on it left the public-surface builder and the header
+graph with two ids for one declaration (29,109 duplicate `declaration`/
+`source_decl` pairs on oneDAL). One function,
+`abicheck/model/graph_entity_identity.py`, now mints every declaration and
+type node id: a declaration's **linker name** when any producer observed
+one (the mangled name, or the plain symbol for C linkage -- the
+`("mangled", ...)`/`("extern_c",)` tiers of `EntityId`, which it is in
+bijection with, and the one signal every evidence layer carries), else the
+source-qualified `qualified#signature` the AST/L4 producers already share;
+a type's qualified name. An entity with no such evidence -- the castxml
+synthetic ctor/dtor key this section already rules out as persisted
+identity, an unmangled overload, a qualified spelling two declarations
+share -- is an explicit `unresolved://` node, never merged. A second
+spelling of a proven-same entity (Mach-O decoration) is a persisted
+`SourceGraphSummary.identity_aliases` entry, never a second node. This
+changes persisted graph ids: snapshot schema v50 /
+`SourceGraphSummary.schema_version` 3, with a pre-v3/v3 graph pair
+reported as not compared (`compare/source_graph_identity_scheme.py`)
+because the old ids cannot be rewritten from evidence a stored graph
+carries. PDB/BTF/CTF function/variable identity (Phase 6's documented gap)
+stays `unresolved`. D5's "public-surface node and L5 node remain two
+separate, unreconciled nodes" limitation is closed by this amendment.
+
+**Amendment (2026-09-24, accepted): explicit cross-layer joins
+(evidence-entity-model Phase 2, invariants I2/I3).** The L0 export table and
+the L1 debug types join onto the node identity above through two producers,
+never through name equality: `compare/export_join.py` (an export joins the
+declarations whose linker spelling the *observed* table contains -- on a
+Mach-O table, also through the one-underscore decoration alias, refused when
+another declaration owns the spelling exactly) and
+`compare/debug_type_join.py` (a debug type joins the same-kind header entity
+with the identical qualified name whose layout it does not contradict; an
+inline-namespace spelling castxml dropped stays separate). Each subject on
+each side records one state -- `matched`, `ambiguous` with its candidates,
+`unmatched`, or `unknown` when the other side was never observed -- in the
+shared vocabulary `model/graph_join.py`, whose `JoinSpec` names each edge
+kind's producer, inputs and recompute rule. The edges (`exports`,
+`debug_type_of`) are `resolved_join`; like every other public-surface
+builder output they are recomputed from the snapshot on demand and never
+persisted. The one new *observation* the debug join needs -- a
+layout-distinct second definition of a debug type another CU gave
+(`DwarfMetadata.struct_odr_conflicts`/`enum_odr_conflicts`, with
+`odr_conflicts_observed` saying whether anyone looked) -- is persisted:
+snapshot schema v51, written only when the DWARF walk ran, so a snapshot
+without one encodes exactly as v50.
+
 ### D4 — `AnalysisPlan` resolved before any extraction runs
 
 Before a single collector or backend is invoked, an immutable `AnalysisPlan`
@@ -657,6 +710,21 @@ declarations is tracked under Phase 6B (SemanticIR checker cutover) in
 the implementation plan, not as a residual of this decision. The
 twelve-L5-call-site node-id-collision gap above is unaffected by this
 amendment — it was never about this closure walk.
+
+**Amendment (2026-09-24, evidence-entity-model Phase 5b/5c): how the
+persisted graph is stored.** D5's graph is persisted as
+`AbiSnapshot.surface_graph` (schema v29). From schema v49 it is stored in
+`storage/graph_table_codec.py`'s compact, interned, columnar encoding (one
+string table; per-node and per-edge index columns; deduplicated attrs and
+fact tables) instead of `SourceGraphSummary.to_dict()`'s per-entity objects,
+and without the fields the loader always recomputed (`indexes`, `resolved`,
+`conflicts`, `occurrences`). The in-memory graph a load produces is unchanged:
+the table decoder re-inflates the old per-entity shape and hands it to
+`SourceGraphSummary.from_dict`, so every load-time migration still applies,
+and a pre-v49 document still loads through `from_dict` directly. On real
+oneDAL the section shrank from 79 MB to under 10 MB (measurements in the
+evidence-entity-model plan's Phase 5 section). Persisting only *observed*
+evidence (Phase 5c) is recorded against the same plan.
 
 ### D6 — `RunOutcome` as independent axes; no `exit_code` inside the domain
 

@@ -11,7 +11,7 @@ concrete return value or raised exception:
 - ``check_dump_debug_format_error``'s PE/Mach-O rejection
 - ``resolve_dump_collect_context``'s warning and ``--depth binary`` branches
 - ``resolve_dump_compile_context``'s pre-resolved-context verbatim return
-- ``dumper_scoping.dump_manifest_header_roots``' ownership set
+- ``extract.dump_manifest_roots.dump_manifest_header_roots``' ownership set
 
 The ``perform_elf_dump``/``handle_non_elf_dump`` execution tests this file
 used to hold went away with those functions (ADR-063 Track 1 -- they had no
@@ -29,9 +29,9 @@ from pathlib import Path
 from abicheck.cli_dump_helpers import (
     check_dump_debug_format_error,
     resolve_dump_collect_context,
-    resolve_dump_compile_context,
     resolve_dump_debug_format,
 )
+from abicheck.frontends.cli.dump_debug_config import resolve_dump_compile_context
 from abicheck.header_conditionals import compile_db_from_build_info
 
 # Canonical home (``dumper_scoping``), not ``cli_dump_helpers``'s former
@@ -123,10 +123,10 @@ def test_compile_db_from_build_info_is_none_without_headers(tmp_path: Path) -> N
 
 def test_check_debug_format_error_only_for_pe_macho() -> None:
     assert check_dump_debug_format_error("dwarf", "pe") == (
-        "--debug-format dwarf is only supported for ELF binaries, not PE."
+        "debug.format 'dwarf' is only supported for ELF binaries, not PE."
     )
     assert check_dump_debug_format_error("btf", "macho") == (
-        "--debug-format btf is only supported for ELF binaries, not MACHO."
+        "debug.format 'btf' is only supported for ELF binaries, not MACHO."
     )
     assert check_dump_debug_format_error("dwarf", "elf") is None
     assert check_dump_debug_format_error(None, "pe") is None

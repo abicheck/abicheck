@@ -99,9 +99,14 @@ def test_merge_l3_compile_context_conflicting_sysroot_explicit_wins_in_rendered_
         gcc_option_tokens=merged.gcc_option_tokens,
         force_cpp=True,
     )
-    sysroot_tokens = [tok for tok in cmd if tok.startswith("--sysroot=")]
-    assert sysroot_tokens == ["--sysroot=/derived", "--sysroot=/explicit"]
-    assert sysroot_tokens[-1] == "--sysroot=/explicit"  # last-flag-wins: explicit
+    # The sysroot pair appears twice: inside the emulated-compiler group
+    # (which system directories castxml is told about) and in the parser's
+    # own arguments. Both must keep the same order, so the explicit one wins
+    # in each (last-flag-wins).
+    group_end = cmd.index(")")
+    for part in (cmd[:group_end], cmd[group_end:]):
+        sysroot_tokens = [tok for tok in part if tok.startswith("--sysroot=")]
+        assert sysroot_tokens == ["--sysroot=/derived", "--sysroot=/explicit"]
 
 
 def test_merge_l3_compile_context_explicit_include_search_wins_first_match() -> None:

@@ -52,6 +52,7 @@ from .checker_types import Change
 from .compare.template_surface import (
     qualified_declaration_name as _qualified_function_name,
     reconciled_abi_visible_functions,
+    strip_template_args as _callable_stem,  # noqa: F401
 )
 from .diff_helpers import make_change
 
@@ -69,7 +70,6 @@ from .diff_serialization import (  # noqa: F401
 )
 from .diff_templates import (  # noqa: F401
     _looks_like_template_instantiation,
-    _strip_template_args as _callable_stem,
     detect_missing_instantiations,
 )
 from .model import AccessLevel, resolved_fact_value

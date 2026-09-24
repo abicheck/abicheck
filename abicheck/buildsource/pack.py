@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..model.lazy_graph import install_lazy_graph_field
 from .build_evidence import BuildEvidence
 from .model import BuildSourceManifest
 from .source_abi import SourceAbiSurface
@@ -91,7 +92,7 @@ class BuildSourcePack:
 
     # -- inline embedding (single-artifact UX) ------------------------------
 
-    def to_embedded_dict(self) -> dict[str, Any]:
+    def to_embedded_dict(self, *, include_source_graph: bool = True) -> dict[str, Any]:
         """Serialize the normalized facts for embedding *inline* in a snapshot.
 
         This is the single-artifact path: instead of leaving the pack as an
@@ -99,13 +100,17 @@ class BuildSourcePack:
         ride inside the ``.abi.json`` so ``compare old.json new.json`` works with
         no pack directories. Raw provenance under ``raw/`` is never embedded
         (ADR-028 D4) — only the normalized facts that feed comparison.
+
+        ``include_source_graph=False`` omits the graph without encoding it;
+        the snapshot encoder passes it when the graph is the snapshot's own
+        ``surface_graph``, which it writes once at the top level instead.
         """
         out: dict[str, Any] = {"manifest": self.manifest.to_dict()}
         if self.build_evidence is not None:
             out["build_evidence"] = self.build_evidence.to_dict()
         if self.source_abi is not None:
             out["source_abi"] = self.source_abi.to_dict()
-        if self.source_graph is not None:
+        if include_source_graph and self.source_graph is not None:
             out["source_graph"] = self.source_graph.to_dict()
         return out
 
@@ -134,3 +139,8 @@ class BuildSourcePack:
             source_abi=SourceAbiSurface.from_dict(sa) if sa else None,
             source_graph=source_graph,
         )
+
+
+# Aliases AbiSnapshot.surface_graph's lazily decoded graph on load
+# (storage/surface_graph_codec.py); see model/lazy_graph.py.
+install_lazy_graph_field(BuildSourcePack, "source_graph")

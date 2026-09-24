@@ -73,7 +73,7 @@
     "call_graph": true,
     "type_graph": true
   },
-  "graph_id": "sha256:cb50bd3a6c6ba905fd4afc25a54fe85f386ee4c31d8344e8ff78db93abca884d",
+  "graph_id": "sha256:9d69accb9021cad206514b1a4b3ef33c4516c0e4b7675edf24f44660d601159d",
   "indexes": {
     "by_binary_symbol": {},
     "by_file": {},
@@ -224,5 +224,5 @@
       }
     }
   ],
-  "schema_version": 2
+  "schema_version": 3
 }

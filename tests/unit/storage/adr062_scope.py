@@ -120,6 +120,7 @@ NON_ADR062_MODULES = frozenset(
         "enum_codec",
         "entity_id_codec",
         "surface_graph_codec",
+        "graph_table_codec",
         "semantic_ir_codec",
         "types_section_codec",
         "graph_section_codec",
@@ -133,12 +134,22 @@ NON_ADR062_MODULES = frozenset(
         "snapshot_reliability_flags",
         "snapshot_digest_cache",
         "json_stream",
+        # A GC-paused `json.loads` for AST/projection documents: a parse
+        # helper beside json_stream, not an ADR-062 Phase 0 primitive.
+        "acyclic_json",
         "json_chunked_write",
         "snapshot_stream_write",
         # The incremental gzip/zstd encoder `snapshot_stream_write` feeds:
         # the same snapshot-envelope body of work, not an ADR-062 Phase 0
         # primitive.
         "incremental_encode",
+        # zstd's compressor call and worker policy, split out of
+        # `snapshot_io`'s write path: the same envelope body of work.
+        "zstd_compress",
+        # `SectionDTO` payloads without the DTO's freeze/thaw round trip,
+        # for the sectioned-snapshot loader/writer: a performance property
+        # of that codec, like `snapshot_digest_cache`, not a primitive.
+        "section_payload",
         # The derived-AST handoff: it lets a final AST consumer take a
         # cheap derived form (the header-graph projection) instead of a
         # parsed tree. It lives here because ADR-061 routes cache

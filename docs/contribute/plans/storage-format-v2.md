@@ -708,6 +708,37 @@ listing/report, even where no resolution graph can place it.
 Lazy loading, streaming encode, cache migration, indexes, transport, and
 the measurement work that sets D8's chunk size and D12's level table.
 
+**Status: A2.1 partially implemented — the `graph` section only**
+(evidence-entity-model Phase 5a, with 5b/5c's compact encoding of the same
+section). Implemented *here*, as this plan's A2.1, not as a parallel
+mechanism:
+
+- `snapshot_from_dict`/`decode_snapshot` read a sectioned document with
+  `defer_graph=True` (`storage/sectioned_document.py`,
+  `storage/import_v1.export_legacy_sections`): the `graph` section's
+  `SectionDTO` validation, migration and `SourceGraphSummary` construction
+  run on first read of `AbiSnapshot.surface_graph` or its
+  `build_source.source_graph` alias (one shared
+  `model/lazy_graph.PendingGraph`), once and under a lock. The undecoded
+  payload is the parsed section JSON, held until then; the whole document
+  is still one `json.loads`.
+- Equality, pickling, deep and shallow copies, snapshot-cache round trips
+  and dump→load→save bytes behave as with eager decoding; a decode failure
+  raises the eager error at access, never an empty graph.
+- The section itself is now the compact graph table
+  (`storage/graph_table_codec.py`, schema v49), holding observed evidence
+  only: on real oneDAL `libonedal_core` it is ~10 MB instead of 79 MB.
+
+**Not implemented:** lazy loading of any other section, chunking (D8's
+bounded section size), per-library-pair release of sections in a project
+comparison, A2.2 streaming object encoding, A2.3/A2.4, and the A2.5
+measurement for a *project* comparison. A default stored-vs-stored
+`compare` still reads both graphs (the L5 source-graph diff, cross-source
+checks, assurance and the content digest all do), so on that path lazy
+loading saves no decode; ADR-062 D8's implementation note records why the
+L5 diff was not gated. Measurements: the evidence-entity-model plan's
+"Phase 5 follow-up measurements".
+
 ---
 
 ## Validation corpus
@@ -799,6 +830,7 @@ satisfies for the one domain type it actually sections today
 |---|---|
 | `abicheck/storage/package.py` | `MANIFEST_RELPATH`, `SECTION_KINDS`, `ObjectRef`, `VariantRef`, `ArtifactRef`, `PackageManifest`, `ObjectStore`, `InMemoryObjectStore`, `object_relpath`, `variant_ref_relpath`, `artifact_ref_relpath` (A1.1) |
 | `abicheck/storage/env_limits.py` | `env_byte_limit` — the one parser behind the snapshot envelope's decompression-bomb ceilings (`snapshot_io.py`'s decoded/stored caps and the public ABICHECK_SNAPSHOT_MAX_DECODED_BYTES / ABICHECK_SNAPSHOT_MAX_STORED_BYTES environment knobs, plus their legacy underscore spellings). A leaf reading only `os.environ`, so the rule that a malformed or non-positive value is *ignored* — rather than honoured as a ceiling that would reject every read — has one implementation rather than one per limit; internal, not re-exported by the package |
+| `abicheck/storage/ast_size_observer.py` | `observe_ast_sizes`, `report_ast_size` — carries the byte size of each header AST a dump acquires (cold clang parse or AST-cache load) to an observer in the same context, which is how the release fan-out's memory admission (`workflows/release_admission.py`) costs a member by measured AST size. A context-variable leaf with no other state; internal, not re-exported by the package |
 | `abicheck/storage/ref_ids.py` | `REF_SUFFIX`, `safe_ref_id`, `reject_filesystem_collisions` — cross-platform ref-id path safety, split out of `package.py`'s own 800-line production cap (ADR-063 Track C 8B); `resolve_ref_ids` — name-to-safe-artifact-id resolver the two bundle/baseline-set import adapters use for a library name they don't control -- internal, not re-exported by the package |
 | `abicheck/storage/dto.py` | `BASELINE_SET_SECTION_KIND`, `BINARY_SECTION_KIND`, `BUILD_SECTION_KIND`, `BUNDLE_COMPOSITION_SECTION_KIND`, `DEBUG_SECTION_KIND`, `DECLARATIONS_SECTION_KIND`, `GRAPH_SECTION_KIND`, `LAYOUT_SECTION_KIND`, `PROVENANCE_SECTION_KIND`, `SECTION_SCHEMA_VERSIONS`, `SEMANTIC_IR_SECTION_KIND`, `TYPES_SECTION_KIND`, `SectionDTO`, `baseline_set_metadata_from_dto`, `baseline_set_metadata_to_dto`, `binary_from_dto`, `binary_to_dto`, `build_from_dto`, `build_to_dto`, `bundle_composition_from_dto`, `bundle_composition_to_dto`, `debug_from_dto`, `debug_to_dto`, `declarations_from_dto`, `declarations_to_dto`, `graph_from_dto`, `graph_to_dto`, `layout_from_dto`, `layout_to_dto`, `legacy_section_from_dto`, `legacy_section_to_dto`, `migrate_section_dto`, `provenance_from_dto`, `provenance_to_dto`, `semantic_ir_from_dto`, `semantic_ir_to_dto`, `types_from_dto`, `types_to_dto` (A1.1's per-section DTO envelope, jointly ADR-063 Phase 8's D8 constraint; `TYPES_SECTION_KIND`/`types_from_dto`/`types_to_dto` are ADR-063 Track 4 (8B)'s first typed-DTO promotion beyond semantic_ir, see types_section_codec.py; `GRAPH_SECTION_KIND`/`graph_from_dto`/`graph_to_dto` are its second, see graph_section_codec.py; the remaining six `*_SECTION_KIND`/`*_from_dto`/`*_to_dto` triples are its third slice, see sparse_section_codec.py -- every D8 legacy section kind now has a dedicated DTO; `BUNDLE_COMPOSITION_SECTION_KIND`/`BASELINE_SET_SECTION_KIND` and their `*_from_dto`/`*_to_dto` pairs are A1.4's own two variant-level section kinds, ADR-063 Track C 8B, see `import_bundle_facts.py`/`import_baseline_set.py` below) |
 | `abicheck/storage/legacy_sections.py` | `LEGACY_SECTION_KINDS`, `SCHEMA_VERSION_KEY`, `join_legacy_document`, `missing_required_section_fields`, `split_legacy_document` (D8's full legacy-document section partition) |

@@ -62,7 +62,7 @@ delegating call to ``handle_non_elf_dump``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -212,6 +212,7 @@ def execute_and_write_dump_cli_run(
     *,
     notify: Callable[[str], None],
     build_config: Path | None,
+    build_config_explicit: bool = True,
     stamp_provenance: Callable[..., None],
     write_snapshot_output: Callable[..., None],
     git_tag: str | None,
@@ -259,7 +260,8 @@ def execute_and_write_dump_cli_run(
     ``exec_resolved.execution_options.build_config`` (the caller already
     attached the identical value there for execution's own use).
     """
-    snap = execute_dump_cli_run(exec_resolved, notify=notify)
+    with _exclusion_scope(include_dependencies, header_roots):
+        snap = execute_dump_cli_run(exec_resolved, notify=notify)
 
     stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     write_snapshot_output(
@@ -277,6 +279,7 @@ def execute_and_write_dump_cli_run(
         snapshot_compression=snapshot_compression,
         public_headers=public_headers,
         public_header_dirs=public_header_dirs,
+        build_config_explicit=build_config_explicit,
     )
 
 
@@ -285,6 +288,7 @@ def execute_and_write_header_only_dump_cli_run(
     *,
     notify: Callable[[str], None],
     build_config: Path | None,
+    build_config_explicit: bool = True,
     stamp_provenance: Callable[..., None],
     write_snapshot_output: Callable[..., None],
     git_tag: str | None,
@@ -324,19 +328,30 @@ def execute_and_write_header_only_dump_cli_run(
     from dataclasses import replace as _replace
 
     from ...service_dump_pipeline import DumpExecutionOptions
-    from ...workflows.extraction import resolve_source_frontend_clang_bin
+    from ...workflows.extraction import (
+        dump_manifest_header_roots,
+        resolve_source_frontend_clang_bin,
+    )
 
     exec_resolved = _replace(
         resolved,
         requested_depth=None,
         execution_options=DumpExecutionOptions(
             build_config=build_config,
+            build_config_explicit=build_config_explicit,
             allow_build_query=True,
             seed_collect_mode=resolved.collect_mode,
             source_frontend_from_folded_context=True,
         ),
     )
-    snap = execute_dump_cli_run(exec_resolved, notify=notify)
+    scoping_roots = (
+        headers
+        + dump_manifest_header_roots(resolved.evidence.dump_manifest)
+        + tuple(resolved.public_headers)
+        + tuple(resolved.public_header_dirs)
+    )
+    with _exclusion_scope(include_dependencies, scoping_roots):
+        snap = execute_dump_cli_run(exec_resolved, notify=notify)
 
     stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     write_snapshot_output(
@@ -349,11 +364,30 @@ def execute_and_write_header_only_dump_cli_run(
         extractor=resolved.header_backend,
         depth=resolved.requested_depth,
         include_dependencies=include_dependencies,
-        header_roots=headers,
+        # Same root set the binary path scopes with (`commands/dump.py`):
+        # a pathless `--dump-manifest` dump has no `-H` headers at all, and
+        # scoping with an empty set falls back to "anything under a system
+        # prefix is a dependency" -- which deletes a project staged under
+        # `usr/include` (Codex review).
+        header_roots=scoping_roots,
         clang_bin=resolve_source_frontend_clang_bin(
             gcc_path, gcc_prefix, exclude_cl_style=False
         ),
         snapshot_compression=snapshot_compression,
         public_headers=resolved.public_headers,
         public_header_dirs=resolved.public_header_dirs,
+        build_config_explicit=build_config_explicit,
     )
+
+
+def _exclusion_scope(include_dependencies: bool, header_roots: Any) -> Any:
+    """Declare, around extraction, the dependency scoping the write step will
+    apply with *header_roots* -- so the parse can skip what scoping drops
+    (``extract.dependency_exclusion``). A full dump declares nothing."""
+    from contextlib import nullcontext
+
+    from ...workflows.extraction import dependency_exclusion_scope
+
+    if include_dependencies:
+        return nullcontext()
+    return dependency_exclusion_scope(header_roots)

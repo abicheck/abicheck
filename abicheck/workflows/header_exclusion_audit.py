@@ -39,6 +39,7 @@ def record_achieved_header_exclusions(
     exclude_headers: Sequence[str],
     *,
     extracted_now: bool,
+    scope_inputs: Mapping[str, Any] | None = None,
 ) -> AbiSnapshot:
     """*snapshot* stamped with the narrowing that was **achieved**, not requested.
 
@@ -62,14 +63,54 @@ def record_achieved_header_exclusions(
     ``model.header_exclusion_record.record_header_exclusions``, which owns
     the "a loaded snapshot keeps its own provenance" rule.
     """
+    from ..dumper_scoping import scope_snapshot_excluding_dependencies
+    from ..extract.dump_manifest_roots import dump_manifest_header_roots
     from ..extract.header_exclusions import matched_exclusion_patterns
     from ..model.header_exclusion_record import record_header_exclusions
 
-    return record_header_exclusions(
-        snapshot,
-        matched_exclusion_patterns(headers, exclude_headers),
-        extracted_now=extracted_now,
+    achieved = set(matched_exclusion_patterns(headers, exclude_headers))
+    if extracted_now and exclude_headers and snapshot.dependency_scope == "filtered":
+        # A header reached only through another header's `#include` is still
+        # excluded: its declarations are scoped out like a toolchain header's
+        # (kept only where the library's own surface references them).
+        achieved |= _patterns_matching_declarations(snapshot, exclude_headers)
+    stamped = record_header_exclusions(
+        snapshot, sorted(achieved), extracted_now=extracted_now
     )
+    if not (extracted_now and achieved and stamped.dependency_scope == "filtered"):
+        return stamped
+    # The same roots the dump's own dependency scope honoured
+    # (``dumper_scoping.apply_dependency_scope_to_run_dump_result``).
+    extra = scope_inputs or {}
+    roots = [
+        *headers,
+        *dump_manifest_header_roots(extra.get("dump_manifest")),
+        *(extra.get("public_headers") or ()),
+        *(extra.get("public_header_dirs") or ()),
+    ]
+    return scope_snapshot_excluding_dependencies(stamped, roots)
+
+
+def _patterns_matching_declarations(
+    snapshot: AbiSnapshot, patterns: Sequence[str]
+) -> set[str]:
+    """The *patterns* matching the declaring header of anything extracted."""
+    from ..extract.header_exclusions import header_matches_exclusion
+
+    declaring = {
+        d.source_header
+        for group in (
+            snapshot.functions,
+            snapshot.variables,
+            snapshot.types,
+            snapshot.enums,
+        )
+        for d in group
+        if d.source_header
+    }
+    return {
+        p for p in patterns if any(header_matches_exclusion(h, [p]) for h in declaring)
+    }
 
 
 def unmatched_exclusion_warning(
@@ -102,11 +143,11 @@ def unmatched_exclusion_warning(
     if not unmatched:
         return None
     return (
-        "Warning: --exclude-header matched no header for: "
+        "Warning: --exclude-header matched no header under -H for: "
         + ", ".join(unmatched)
-        + ". Those rules narrowed nothing, but are still recorded as this "
-        "run's exclusion configuration -- check the pattern against the "
-        "header names actually under -H."
+        + ". Those rules only take effect if a header they match is reached "
+        "through #include; otherwise they narrow nothing -- check the "
+        "pattern against the header names actually in use."
     )
 
 

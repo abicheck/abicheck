@@ -233,6 +233,19 @@ def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatc
 
 
 @pytest.fixture(autouse=True)
+def _silence_progress_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the CLI's default-on progress lines (``abicheck/progress.py``) out
+    of every test's captured output.
+
+    ``CliRunner`` folds stderr into ``result.output``, which a large share of
+    this suite parses as the command's JSON; a progress line there would
+    break those tests for a reason unrelated to what they check. Tests of the
+    progress output itself set ``ABICHECK_PROGRESS=1`` explicitly.
+    """
+    monkeypatch.setenv("ABICHECK_PROGRESS", "0")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_ast_memo() -> Iterator[None]:
     """Clear the in-process clang-AST memo slot (``dumper_cache._ast_memo_slot``,
     G31 Phase C AST reuse) before and after every test.
@@ -525,7 +538,35 @@ def _materialize_generated_skill_trees() -> None:
         _write_if_stale()
 
 
+def _keep_mutmut_stats_out_of_child_processes() -> None:
+    """Stop a real subprocess inheriting mutmut's ``stats`` phase.
+
+    Under ``mutmut run``'s stats phase every mutated function records its hit
+    through ``mutmut.configuration.config()``, which locates ``[tool.mutmut]``
+    from the *current directory*. A test that runs ``python -m abicheck...``
+    in a temp directory inherits ``MUTANT_UNDER_TEST=stats``, finds no config
+    and dies ("Could not figure out where the code to mutate is"), aborting
+    the whole run -- which is why ``[tool.mutmut]`` had grown one
+    ``--ignore`` per such file. A child's hits never reach this process's
+    stats anyway, so the child loses nothing by running unmutated-stats.
+    The phase is pinned in mutmut's process-local copy first, so this process
+    keeps recording after the environment entry is removed.
+    """
+    if os.environ.get("MUTANT_UNDER_TEST") != "stats":
+        return
+    try:
+        from mutmut.mutation import trampoline
+    except ImportError:
+        return
+    setter = getattr(trampoline, "set_mutant_under_test", None)
+    if setter is None:
+        return  # an older mutmut with no process-local copy: leave it alone
+    setter("stats")
+    os.environ.pop("MUTANT_UNDER_TEST", None)
+
+
 def pytest_configure(config: pytest.Config) -> None:
+    _keep_mutmut_stats_out_of_child_processes()
     _materialize_generated_skill_trees()
     config.addinivalue_line(
         "markers",

@@ -443,7 +443,9 @@ def ensure_facts_and_resolve(entity: GraphNode | GraphEdge) -> None:
             _normalize_identity_attrs(fact.attrs)
     entity.resolved, entity.conflicts = resolve_entity_attrs(entity.facts)
     entity.attrs = entity.resolved
-    top = min(entity.facts, key=_precedence_key)
+    # One fact is its own minimum; skip the JSON-dumping sort key for it.
+    facts = entity.facts
+    top = facts[0] if len(facts) == 1 else min(facts, key=_precedence_key)
     entity.confidence = top.confidence
     entity.provenance = top.producer
     if is_decl_or_type_node and isinstance(entity, GraphNode):
@@ -541,6 +543,9 @@ OCCURRENCE_ATTR_KEYS = (
 )
 
 
+_OCCURRENCE_ATTR_KEY_SET = frozenset(OCCURRENCE_ATTR_KEYS)
+
+
 def edge_occurrence_id(
     relation_key: tuple[str, str, str, str], attrs: dict[str, Any]
 ) -> str | None:
@@ -560,7 +565,7 @@ def edge_occurrence_id(
     :class:`GraphEdge`'s ``occurrences`` list rather than a spurious
     all-``None`` id.
     """
-    if not any(k in attrs for k in OCCURRENCE_ATTR_KEYS):
+    if _OCCURRENCE_ATTR_KEY_SET.isdisjoint(attrs):
         return None
     blob = json.dumps(
         {
@@ -581,6 +586,8 @@ def _compute_occurrences(edge: GraphEdge) -> list[str]:
     ``conflicts`` — always derived fresh from ``facts``, never trusted from a
     loaded pack, matching that function's self-healing convention.
     """
+    if all(_OCCURRENCE_ATTR_KEY_SET.isdisjoint(f.attrs) for f in edge.facts):
+        return []  # the common case: no fact carries occurrence-level attrs
     rk = edge.relation_key()
     seen: list[str] = []
     for fact in edge.facts:
@@ -637,5 +644,9 @@ class SurfaceGraphLike(Protocol):
     def add_node(self, node: GraphNode) -> None: ...
 
     def add_edge(self, edge: GraphEdge) -> None: ...
+
+    def add_identity_alias(self, alias: str, canonical: str) -> None: ...
+
+    def resolve_node_id(self, node_id: str) -> str: ...
 
     def to_dict(self) -> dict[str, Any]: ...

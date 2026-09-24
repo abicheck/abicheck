@@ -134,9 +134,10 @@ def resolve_dump_collect_context(
     ):
         click.echo(
             f"Warning: evidence depth '{collect_mode}' was requested but no "
-            "--sources/--build-info/--inputs was given; the snapshot will carry "
-            "only L0-L2 data (no build/source/graph facts). Pass --sources, "
-            "--build-info, or --inputs, or use --depth headers for an L2-only dump.",
+            "--sources/--build-info was given; the snapshot will carry "
+            "only L0-L2 data (no build/source/graph facts). Pass --sources, or "
+            "--build-info (a build dir, compile DB, or abicheck_inputs/ pack), "
+            "or use --depth headers for an L2-only dump.",
             err=True,
         )
     return collect_mode, headers

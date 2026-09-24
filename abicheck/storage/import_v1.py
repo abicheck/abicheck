@@ -111,9 +111,10 @@ adapter can close from a document alone.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+from .canonical import canonical_input_trusted
 from .dto import (
     BINARY_SECTION_KIND,
     BUILD_SECTION_KIND,
@@ -156,6 +157,7 @@ from .legacy_sections import (
     split_legacy_document,
 )
 from .package import ArtifactRef, ObjectRef, ObjectStore, PackageManifest, VariantRef
+from .section_payload import current_section_payload, section_dto_dict
 from .semantic_ir_codec import semantic_ir_from_document, semantic_ir_to_document
 from .sparse_section_codec import (
     BinarySection,
@@ -165,6 +167,7 @@ from .sparse_section_codec import (
     LayoutSection,
     ProvenanceSection,
 )
+from .surface_graph_codec import DeferredGraphPayload
 from .types_section_codec import TypesSection
 from .versioning import StorageVersions
 
@@ -214,6 +217,19 @@ _LEGACY_SECTION_CODECS: Mapping[
         lambda payload: provenance_to_dto(ProvenanceSection.from_document(payload)),
         provenance_from_dto,
     ),
+}
+
+#: The codec class behind each `_LEGACY_SECTION_CODECS` entry, for
+#: `export_legacy_sections`' current-version fast path.
+_LEGACY_SECTION_DOCUMENT_CODECS: Mapping[str, Any] = {
+    TYPES_SECTION_KIND: TypesSection,
+    GRAPH_SECTION_KIND: GraphSection,
+    BINARY_SECTION_KIND: BinarySection,
+    DECLARATIONS_SECTION_KIND: DeclarationsSection,
+    LAYOUT_SECTION_KIND: LayoutSection,
+    DEBUG_SECTION_KIND: DebugSection,
+    BUILD_SECTION_KIND: BuildSection,
+    PROVENANCE_SECTION_KIND: ProvenanceSection,
 }
 
 __all__ = [
@@ -269,6 +285,56 @@ def import_legacy_snapshot(
     refused" section for why this module cannot default or derive it itself.
     Raises `ValueError` if the document's own `schema_version` exceeds it.
     """
+    if artifact_kind is None:
+        stated_platform = (
+            legacy_document.get("platform")
+            if isinstance(legacy_document, Mapping)
+            else None
+        )
+        artifact_kind = (
+            stated_platform
+            if isinstance(stated_platform, str) and stated_platform
+            else "elf"
+        )
+    source_schema_version, section_dtos = legacy_section_dtos(
+        legacy_document, max_known_schema_version=max_known_schema_version
+    )
+    sections: dict[str, ObjectRef] = {}
+    section_schema_versions: dict[str, int] = {}
+    for section_kind, dto_dict in section_dtos:
+        sections[section_kind] = ObjectRef(
+            kind=section_kind, digest=store.put(dto_dict)
+        )
+        section_schema_versions[section_kind] = SECTION_SCHEMA_VERSIONS[section_kind]
+
+    artifact = ArtifactRef(
+        artifact_id=artifact_id,
+        variant_id=variant_id,
+        kind=artifact_kind,
+        sections=sections,
+    )
+    variant = VariantRef(variant_id=variant_id, artifact_ids=(artifact_id,))
+    versions = StorageVersions(
+        section_schema_versions=section_schema_versions,
+        source_schema_version=source_schema_version,
+    )
+    return PackageManifest(
+        versions=versions, variant_refs=(variant,), artifact_refs=(artifact,)
+    )
+
+
+def legacy_section_dtos(
+    legacy_document: Mapping[str, Any], *, max_known_schema_version: int
+) -> tuple[int, list[tuple[str, dict[str, Any]]]]:
+    """`import_legacy_snapshot`'s validation and section encoding, without
+    the object store: ``(source_schema_version, [(section_kind, dto_dict)])``.
+
+    Every check `import_legacy_snapshot` documents runs here (it is that
+    function's body), and each section goes through its dedicated DTO codec.
+    Split out so `sectioned_document.to_sectioned_document`, which inlines
+    the sections anyway, does not hash, canonicalize and deep-copy the whole
+    document through a throwaway store only to read each section back.
+    """
     _mapping(legacy_document, "legacy_document")
     # This value gates the "too new to interpret" refusal below, so -- the
     # same as the document's own schema_version just below -- it is not
@@ -291,13 +357,6 @@ def import_legacy_snapshot(
         raise ValueError(
             "max_known_schema_version must be a positive int, not "
             f"{max_known_schema_version!r}"
-        )
-    if artifact_kind is None:
-        stated_platform = legacy_document.get("platform")
-        artifact_kind = (
-            stated_platform
-            if isinstance(stated_platform, str) and stated_platform
-            else "elf"
         )
     if "schema_version" in legacy_document:
         raw_schema_version = legacy_document["schema_version"]
@@ -355,48 +414,36 @@ def import_legacy_snapshot(
         )
 
     ir, conflicts = semantic_ir_from_document(legacy_document)
-    legacy_sections = split_legacy_document(legacy_document)
-
-    sections: dict[str, ObjectRef] = {}
-    section_schema_versions: dict[str, int] = {}
-    for section_kind, payload in legacy_sections.items():
+    section_dtos: list[tuple[str, dict[str, Any]]] = []
+    for section_kind, payload in split_legacy_document(legacy_document).items():
         # ADR-063 Track 4 (8B): every `LEGACY_SECTION_KINDS` member now has
         # its own dedicated DTO -- `_LEGACY_SECTION_CODECS` above -- instead
         # of the generic pass-through; the `else` branch is the fallback a
         # future, not-yet-specialized section kind would use.
-        codec = _LEGACY_SECTION_CODECS.get(section_kind)
-        if codec is not None:
-            to_dto_fn, _from_dto_fn = codec
-            section_dto = to_dto_fn(payload)
-        else:
-            section_dto = legacy_section_to_dto(section_kind, payload)
-        sections[section_kind] = ObjectRef(
-            kind=section_kind, digest=store.put(section_dto.to_dict())
-        )
-        section_schema_versions[section_kind] = SECTION_SCHEMA_VERSIONS[section_kind]
+        document_codec = _LEGACY_SECTION_DOCUMENT_CODECS.get(section_kind)
+        if document_codec is not None:
+            # `to_dto_fn(payload).to_dict()` (`_LEGACY_SECTION_CODECS`), minus
+            # the DTO's freeze/thaw copies: `section_dto_dict` returns the
+            # same dict. A codec that can validate without copying
+            # (`GraphSection.validated_document`) skips its own round trip
+            # too, since `section_dto_dict` canonicalizes the result anyway.
+            validated = getattr(document_codec, "validated_document", None)
+            document = (
+                validated(payload)
+                if validated is not None
+                else document_codec.from_document(payload).to_document()
+            )
+            section_dtos.append(
+                (section_kind, section_dto_dict(section_kind, document))
+            )
+            continue
+        section_dto = legacy_section_to_dto(section_kind, payload)
+        section_dtos.append((section_kind, section_dto.to_dict()))
     if ir is not None or conflicts:
-        dto = semantic_ir_to_dto(ir, conflicts)
-        sections[SEMANTIC_IR_SECTION_KIND] = ObjectRef(
-            kind=SEMANTIC_IR_SECTION_KIND, digest=store.put(dto.to_dict())
+        section_dtos.append(
+            (SEMANTIC_IR_SECTION_KIND, semantic_ir_to_dto(ir, conflicts).to_dict())
         )
-        section_schema_versions[SEMANTIC_IR_SECTION_KIND] = SECTION_SCHEMA_VERSIONS[
-            SEMANTIC_IR_SECTION_KIND
-        ]
-
-    artifact = ArtifactRef(
-        artifact_id=artifact_id,
-        variant_id=variant_id,
-        kind=artifact_kind,
-        sections=sections,
-    )
-    variant = VariantRef(variant_id=variant_id, artifact_ids=(artifact_id,))
-    versions = StorageVersions(
-        section_schema_versions=section_schema_versions,
-        source_schema_version=source_schema_version,
-    )
-    return PackageManifest(
-        versions=versions, variant_refs=(variant,), artifact_refs=(artifact,)
-    )
+    return source_schema_version, section_dtos
 
 
 def export_legacy_snapshot(
@@ -435,6 +482,91 @@ def export_legacy_snapshot(
     review) rather than failing loudly on the corrupted/hand-edited manifest
     that produced it.
     """
+    return export_legacy_sections(
+        (
+            (section_kind, ref.digest, store.get(ref.digest))
+            for section_kind, ref in artifact.sections.items()
+        ),
+        artifact_id=artifact.artifact_id,
+        source_schema_version=source_schema_version,
+    )
+
+
+def _check_section_kind(
+    dto: SectionDTO, section_kind: str, artifact_id: str, locator: str
+) -> None:
+    if dto.section_kind != section_kind:
+        raise ValueError(
+            f"artifact {artifact_id!r} section {section_kind!r} "
+            f"-> {locator!r} stores a SectionDTO for kind "
+            f"{dto.section_kind!r} instead -- the package is corrupted "
+            "or was hand-edited"
+        )
+
+
+def _owned_document(document_codec: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    """``document_codec.from_document(payload).to_document()`` for a payload
+    `current_section_payload` returned: fresh, owned and canonical, so the
+    codec runs under `canonical_input_trusted` (as `_decode_current` does),
+    and a codec that can skip its own copy (`document_from_owned`) does."""
+    with canonical_input_trusted():
+        owned = getattr(document_codec, "document_from_owned", None)
+        if owned is not None:
+            return dict(owned(payload))
+        return dict(document_codec.from_document(payload).to_document())
+
+
+def _graph_section_loader(
+    raw: Any, artifact_id: str, locator: str
+) -> Callable[[], dict[str, Any]]:
+    """The deferred half of `export_legacy_sections` for the `graph` section:
+    the same `SectionDTO` validation and `graph_from_dto` decode an eager
+    read performs, run on first access."""
+
+    def load() -> dict[str, Any]:
+        current = current_section_payload(raw)
+        if current is not None and current[0] == GRAPH_SECTION_KIND:
+            # The eager path's fast decode (`_owned_document`): same checks,
+            # same document, no throwaway DTO copies.
+            graph = _owned_document(GraphSection, current[1])["surface_graph"]
+        else:
+            dto = SectionDTO.from_dict(raw)
+            _check_section_kind(dto, GRAPH_SECTION_KIND, artifact_id, locator)
+            graph = graph_from_dto(dto).to_document()["surface_graph"]
+        if not isinstance(graph, dict):  # GraphSection guarantees a mapping
+            raise ValueError("a 'graph' section decoded to a non-mapping graph")
+        return graph
+
+    return load
+
+
+def export_legacy_sections(
+    sections: Iterable[tuple[str, str, Any]],
+    *,
+    artifact_id: str,
+    source_schema_version: int,
+    defer_graph: bool = False,
+) -> dict[str, Any]:
+    """`export_legacy_snapshot`'s body, over already-fetched section objects.
+
+    *defer_graph* (storage-format-v2 Phase 2, A2.1): leave the `graph`
+    section's DTO decode for first access. Its `surface_graph` value becomes
+    a `surface_graph_codec.DeferredGraphPayload` whose `load()` runs exactly
+    the eager decode below (same checks, same errors), so only a caller that
+    hands the document straight to `decode_surface_graph` may set it.
+
+    Each *sections* entry is ``(section_kind, locator, raw_section_dto)``;
+    *locator* only names the object in error messages (a digest for a real
+    store, a document path for an inline sectioned document).
+
+    Split out so a caller that already holds every section's decoded JSON --
+    `sectioned_document.from_sectioned_document` -- need not content-hash
+    each one into a throwaway in-memory store only to fetch it straight back
+    out by that digest. The hash was never read; on a large snapshot it cost
+    a full canonicalization, a surrogate-pair walk and a serialization of
+    every section, then a deep copy on `get`. Every check below still runs
+    on exactly the same content.
+    """
     if not isinstance(source_schema_version, int) or isinstance(
         source_schema_version, bool
     ):
@@ -451,16 +583,28 @@ def export_legacy_snapshot(
         )
     legacy_sections: dict[str, dict[str, Any]] = {}
     document: dict[str, Any] = {}
-    for section_kind, ref in artifact.sections.items():
-        raw = store.get(ref.digest)
-        dto = SectionDTO.from_dict(raw)
-        if dto.section_kind != section_kind:
-            raise ValueError(
-                f"artifact {artifact.artifact_id!r} section {section_kind!r} "
-                f"-> {ref.digest!r} stores a SectionDTO for kind "
-                f"{dto.section_kind!r} instead -- the package is corrupted "
-                "or was hand-edited"
+    for section_kind, locator, raw in sections:
+        if defer_graph and section_kind == GRAPH_SECTION_KIND:
+            document["surface_graph"] = DeferredGraphPayload(
+                _graph_section_loader(raw, artifact_id, locator)
             )
+            continue
+        document_codec = _LEGACY_SECTION_DOCUMENT_CODECS.get(section_kind)
+        current = current_section_payload(raw) if document_codec is not None else None
+        if (
+            document_codec is not None
+            and current is not None
+            and current[0] == section_kind
+        ):
+            # Same checks and the same decoded document as the codec branch
+            # below, minus the discarded DTO's freeze/unfreeze round trip
+            # (`current_section_payload`). `_decode_current` runs the codec
+            # under `canonical_input_trusted` for the identical reason: the
+            # payload is fresh, owned and already canonical.
+            document.update(_owned_document(document_codec, current[1]))
+            continue
+        dto = SectionDTO.from_dict(raw)
+        _check_section_kind(dto, section_kind, artifact_id, locator)
         if section_kind == SEMANTIC_IR_SECTION_KIND:
             ir, conflicts = semantic_ir_from_dto(dto)
             document.update(semantic_ir_to_document(ir, conflicts))
@@ -490,8 +634,8 @@ def export_legacy_snapshot(
             missing = missing_required_section_fields(section_kind, payload)
             if missing:
                 raise ValueError(
-                    f"artifact {artifact.artifact_id!r} section "
-                    f"{section_kind!r} -> {ref.digest!r} is missing "
+                    f"artifact {artifact_id!r} section "
+                    f"{section_kind!r} -> {locator!r} is missing "
                     f"field(s) {sorted(missing)} a real write always "
                     "includes -- the section's stored content is truncated "
                     "or was hand-edited"

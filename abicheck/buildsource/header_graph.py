@@ -94,13 +94,19 @@ from typing import TYPE_CHECKING, Any
 
 from ..fact_provenance import func_fact_key, var_fact_key
 from ..model import AbiSnapshot, ScopeOrigin, resolved_fact_value
+from ..model.graph_entity_identity import (
+    IDENTITY_STATE_ATTR,
+    GraphEntityIdentity,
+    SnapshotIdentities,
+    endpoint_key,
+    register_identity_alias,
+    snapshot_identities,
+)
 from ..model.graph_facts import (
     CONF_HIGH,
     CONF_REDUCED,
     GraphEdge,
     GraphNode,
-    _decl_node_id,
-    _type_node_id,
 )
 from ..model.source_graph import SourceGraphSummary, _header_node_id
 from ..provenance import (
@@ -138,12 +144,10 @@ if TYPE_CHECKING:
 HEADER_INCLUDE_GRAPH_PASS = "header_include_graph"
 
 
-def _decl_identity(fn_or_var: Function | Variable) -> str:
-    """Mirror ``type_graph._decl_identity``/``call_graph._identity``: mangled
-    name when present, else the bare name — the same fallback both AST-side
-    parsers use, so a pre-seeded node id matches an edge the AST parsers
-    create for the identical declaration."""
-    return str(getattr(fn_or_var, "mangled", "") or getattr(fn_or_var, "name", ""))
+def _identity_attrs(ident: GraphEntityIdentity) -> dict[str, Any]:
+    """``{"identity": "unresolved"}`` for an explicit unresolved node, so a
+    reader need not parse the id; nothing for a resolved one."""
+    return {} if ident.resolved else {IDENTITY_STATE_ATTR: ident.state.value}
 
 
 #: Provenance tag for nodes/edges built straight from the flat
@@ -156,6 +160,7 @@ _FLAT_PROVENANCE = "header_flat_l2"
 def _seed_flat_type_node(
     graph: SourceGraphSummary,
     header_node: Callable[[str], str],
+    ident: GraphEntityIdentity,
     name: str,
     kind: str,
     origin: ScopeOrigin,
@@ -169,8 +174,11 @@ def _seed_flat_type_node(
     public-header inputs) — no
     ``classify_origin`` re-derivation needed here.
     """
-    node_id = _type_node_id(name)
-    attrs = {"visibility": origin.value} if origin != ScopeOrigin.UNKNOWN else {}
+    node_id = ident.node_id
+    attrs: dict[str, Any] = (
+        {"visibility": origin.value} if origin != ScopeOrigin.UNKNOWN else {}
+    )
+    attrs.update(_identity_attrs(ident))
     graph.add_node(
         GraphNode(
             id=node_id,
@@ -194,60 +202,65 @@ def _seed_flat_type_node(
         )
 
 
-def _flat_type_name_counts(snapshot: AbiSnapshot) -> dict[str, int]:
-    """How many declared record/enum types in *snapshot* share each bare name.
+class _FlatTypeIndex:
+    """The snapshot's declared records/enums, by qualified spelling and by
+    leaf -- what a flat (AST-less) type reference is resolved against.
 
-    The flat model has no namespace/scope info to disambiguate two
-    same-named types declared in different scopes (``dumper_castxml.
-    _CastxmlParser._type_name`` returns the bare name for a
-    ``Struct``/``Class``/``Union``/``Enumeration``, same for the clang L2
-    frontend) — a count is the cheapest way to tell "this name is unique in
-    the snapshot" (safe to trust) from "this name is ambiguous" (must not
-    guess which declaration a reference to it means).
-    """
-    counts: dict[str, int] = {}
-    for rt in snapshot.types:
-        counts[rt.name] = counts.get(rt.name, 0) + 1
-    for en in snapshot.enums:
-        counts[en.name] = counts.get(en.name, 0) + 1
-    return counts
+    Each entry maps to the type's own graph endpoint key (from the shared
+    :func:`~abicheck.model.graph_entity_identity.snapshot_identities`
+    table), so an edge lands on exactly the node the type was seeded under,
+    and two same-leaf types in different scopes (``ns::W``/``other::W``)
+    stay two nodes."""
+
+    def __init__(self, snapshot: AbiSnapshot, ids: SnapshotIdentities) -> None:
+        self.by_leaf: dict[str, list[tuple[str, str]]] = {}
+        entries: list[tuple[str, GraphEntityIdentity]] = [
+            *(
+                (r.qualified_name or r.name, i)
+                for r, i in zip(snapshot.types, ids.records)
+            ),
+            *(
+                (e.qualified_name or e.name, i)
+                for e, i in zip(snapshot.enums, ids.enums)
+            ),
+        ]
+        for qname, ident in entries:
+            if qname:
+                leaf = qname.rsplit("::", 1)[-1]
+                self.by_leaf.setdefault(leaf, []).append((qname, endpoint_key(ident)))
+
+    def resolve(self, raw: str) -> tuple[str, str]:
+        """``(endpoint key, resolution)`` for a type spelling -- mirroring
+        ``type_graph._resolve_type_name``'s contract, without a scope walk.
+
+        A declared type whose qualified name equals the spelling wins;
+        otherwise one whose name is consistent with it up to a missing scope
+        prefix on either side (clang's ``qualType`` is "as written", so a
+        sibling-namespace reference prints ``detail::Impl`` for
+        ``ns::detail::Impl``; a scope-less legacy record is just ``Impl``).
+        Exactly one such entity resolves. None: an external name, kept as
+        spelled (unresolved). Several: ambiguous, ``""`` -- the reference
+        must not join any of them."""
+        base = _base_type_name(raw)
+        if not base or _is_excluded_type(base):
+            return "", RESOLUTION_UNRESOLVED
+        candidates = self.by_leaf.get(base.rsplit("::", 1)[-1], [])
+        exact = {k for q, k in candidates if q == base}
+        keys = exact or {
+            k
+            for q, k in candidates
+            if q.endswith("::" + base) or base.endswith("::" + q)
+        }
+        if len(keys) == 1:
+            return next(iter(keys)), RESOLUTION_UNIQUE_CANDIDATE
+        if keys:
+            return "", RESOLUTION_UNRESOLVED
+        return base, RESOLUTION_UNRESOLVED
 
 
-def _resolve_flat_type_name(raw: str, counts: dict[str, int]) -> tuple[str, str]:
-    """Best-effort bare-name resolution with no AST/scope index available.
-
-    Mirrors ``type_graph._resolve_type_name``'s (raw, resolution) contract,
-    but ``RESOLUTION_SCOPE`` is never reachable here: the flat
-    :class:`~abicheck.model.AbiSnapshot` model records only a bare,
-    unqualified type name, with no enclosing-namespace/scope information at
-    all, so there is no scope to walk. A name matching exactly one declared
-    record/enum anywhere in the snapshot is trusted as that type
-    (:data:`~abicheck.buildsource.type_graph.RESOLUTION_UNIQUE_CANDIDATE`); a
-    name matching zero or more than one declaration is left unresolved
-    (:data:`~abicheck.buildsource.type_graph.RESOLUTION_UNRESOLVED`) rather
-    than guessed — the same "never guess an ambiguous bare name" rule the AST
-    path already follows.
-    """
-    base = _base_type_name(raw)
-    if not base or _is_excluded_type(base):
-        return "", RESOLUTION_UNRESOLVED
-    # The flat model's own type nodes are keyed by *bare* (unqualified) name
-    # only — but a spelling reaching here is not guaranteed bare: clang's
-    # `qualType` (the alternative `--ast-frontend clang` L2 backend's own
-    # field/base-type extraction) is "as written", so a type referenced from
-    # a sibling namespace prints qualified (e.g. "detail::Impl") even though
-    # the flat model has no scope to resolve it against. Without stripping
-    # to the bare leaf first, such a spelling never matches its own
-    # already-seeded bare-named node and instead creates a brand new,
-    # unclassified one — silently losing the classification the seeded node
-    # already has (Codex review).
-    leaf = base.rsplit("::", 1)[-1]
-    if counts.get(leaf, 0) == 1:
-        return leaf, RESOLUTION_UNIQUE_CANDIDATE
-    return leaf, RESOLUTION_UNRESOLVED
-
-
-def _flat_structural_type_edges(snapshot: AbiSnapshot) -> list[TypeEdge]:
+def _flat_structural_type_edges(
+    snapshot: AbiSnapshot, ids: SnapshotIdentities
+) -> list[TypeEdge]:
     """Derive ``TYPE_INHERITS``/``TYPE_HAS_FIELD_TYPE``/``DECL_HAS_TYPE`` edges
     straight from the already-parsed flat :class:`~abicheck.model.AbiSnapshot`
     — no clang AST needed at all. Every L2 backend (castxml, the default, or
@@ -258,8 +271,13 @@ def _flat_structural_type_edges(snapshot: AbiSnapshot) -> list[TypeEdge]:
     :data:`~abicheck.model.graph_facts.CONF_REDUCED` — even a
     :data:`~abicheck.buildsource.type_graph.RESOLUTION_UNIQUE_CANDIDATE` match
     here is a weaker guess than the AST path's scope-walk resolution.
+
+    Every endpoint is keyed through the shared identity table (I1): a record
+    by its qualified name, a declaration by its linker name (or its explicit
+    ``unresolved`` id), so these edges meet the nodes the header graph and the
+    public-surface builder seed for the same entities.
     """
-    counts = _flat_type_name_counts(snapshot)
+    index = _FlatTypeIndex(snapshot, ids)
     edges: list[TypeEdge] = []
 
     def emit(src: str, raw: str, kind: str, role: str) -> None:
@@ -270,69 +288,42 @@ def _flat_structural_type_edges(snapshot: AbiSnapshot) -> list[TypeEdge]:
         # (the same pure, AST-independent string walk the clang path already
         # uses) also surfaces the private template argument itself, the
         # actual dependency a public-to-internal-dependency check cares about
-        # (Codex review: an earlier version only resolved the outer name,
-        # creating an unresolved edge to the literal "std::vector<Private>"
-        # string and missing the real "Private" edge entirely).
+        # (Codex review).
         seen: set[str] = set()
         for candidate in _resolve_nested_type_names(raw):
-            name, resolution = _resolve_flat_type_name(candidate, counts)
+            name, resolution = index.resolve(candidate)
             if not name or name in seen:
-                continue
-            # An *ambiguous* name (more than one declared type/enum shares
-            # it — count() > 1, as opposed to 0 for a genuinely external
-            # name like "std::vector") must not join the shared, collapsed
-            # `type://<name>` node at all: that node's visibility is
-            # whichever of the same-named declarations happened to be
-            # seeded first, so an edge to it can misattribute a reference to
-            # the wrong one's visibility — reporting (or hiding) a
-            # public-to-internal dependency that may not actually exist
-            # (Codex review). A genuinely external/unresolved name is safe
-            # to still emit: nothing was seeded for it, so its node stays
-            # unclassified (origin unknown) rather than borrowing a wrong
-            # declaration's visibility.
-            if resolution == RESOLUTION_UNRESOLVED and counts.get(name, 0) > 1:
                 continue
             seen.add(name)
             edges.append(TypeEdge(src, name, kind, CONF_REDUCED, role, "", resolution))
 
-    for rt in snapshot.types:
-        # The emitting record's *own* bare name can be just as ambiguous as
-        # an edge target's (two distinct records sharing one bare name
-        # collapse to the same `type://<name>` node) — skip base/field
-        # edges from it entirely rather than attribute them to whichever
-        # same-named node was seeded first. If a public `Foo` and an
-        # unrelated private `Foo` both exist and only the private one has a
-        # private-typed field, that field edge must not land on the public
-        # node and read as a public-to-internal dependency that isn't real
-        # (Codex review) — the same "never guess an ambiguous bare name"
-        # rule already applied to edge targets.
-        if counts.get(rt.name, 0) > 1:
-            continue
+    for rt, ident in zip(snapshot.types, ids.records):
+        src = endpoint_key(ident)
         # Fact[T]-bridged read (ADR-063 Phase 0): value-preserving, see
         # `model.resolved_fact_value`'s own docstring. ADR-063 Phase 5B audit
-        # note (kept short — see this repo's own line-count cap; full
-        # reasoning in docs/contribute/plans/one-semantic-pipeline.md's 5B
-        # section): stays on the plain collapse deliberately — a
-        # single-snapshot graph (never an old/new pair), and this package's
-        # own governing rule already caps everything it feeds at
-        # API_BREAK_KINDS/RISK_KINDS, so a gap here can only omit an edge,
-        # never fabricate a BREAKING finding.
+        # note: stays on the plain collapse deliberately — a single-snapshot
+        # graph (never an old/new pair), and this package's governing rule
+        # caps everything it feeds at API_BREAK_KINDS/RISK_KINDS, so a gap
+        # here can only omit an edge, never fabricate a BREAKING finding.
         for base in resolved_fact_value(rt.bases_fact, []):
-            emit(rt.name, base, EDGE_TYPE_INHERITS, "base")
+            emit(src, base, EDGE_TYPE_INHERITS, "base")
         for fld in rt.fields:
-            emit(rt.name, fld.type, EDGE_TYPE_HAS_FIELD_TYPE, "field")
-    for fn in snapshot.functions:
-        identity = _decl_identity(fn)
-        emit(identity, fn.return_type, EDGE_DECL_HAS_TYPE, "return")
+            emit(src, fld.type, EDGE_TYPE_HAS_FIELD_TYPE, "field")
+    for fn, ident in zip(snapshot.functions, ids.functions):
+        src = endpoint_key(ident)
+        emit(src, fn.return_type, EDGE_DECL_HAS_TYPE, "return")
         for p in fn.params:
-            emit(identity, p.type, EDGE_DECL_HAS_TYPE, "param")
-    for var in snapshot.variables:
-        emit(_decl_identity(var), var.type, EDGE_DECL_HAS_TYPE, "var")
+            emit(src, p.type, EDGE_DECL_HAS_TYPE, "param")
+    for var, ident in zip(snapshot.variables, ids.variables):
+        emit(endpoint_key(ident), var.type, EDGE_DECL_HAS_TYPE, "var")
     return edges
 
 
 def _seed_flat_graph(
-    graph: SourceGraphSummary, snapshot: AbiSnapshot, header_node: Callable[[str], str]
+    graph: SourceGraphSummary,
+    snapshot: AbiSnapshot,
+    header_node: Callable[[str], str],
+    ids: SnapshotIdentities,
 ) -> None:
     """Recover structural edges from the flat snapshot when no clang AST exists.
 
@@ -344,15 +335,27 @@ def _seed_flat_graph(
     ``.params``/``Variable.type`` identically (see
     :func:`_flat_structural_type_edges`).
     """
-    for rt in snapshot.types:
+    for rt, ident in zip(snapshot.types, ids.records):
         _seed_flat_type_node(
-            graph, header_node, rt.name, "record_type", rt.origin, rt.source_header
+            graph,
+            header_node,
+            ident,
+            rt.qualified_name or rt.name,
+            "record_type",
+            rt.origin,
+            rt.source_header,
         )
-    for en in snapshot.enums:
+    for en, ident in zip(snapshot.enums, ids.enums):
         _seed_flat_type_node(
-            graph, header_node, en.name, "enum_type", en.origin, en.source_header
+            graph,
+            header_node,
+            ident,
+            en.qualified_name or en.name,
+            "enum_type",
+            en.origin,
+            en.source_header,
         )
-    augment_graph_with_types(graph, _flat_structural_type_edges(snapshot))
+    augment_graph_with_types(graph, _flat_structural_type_edges(snapshot, ids))
     # Only the structural pass ran — no bodies were ever visible to the flat
     # model, in any circumstance, so ``HEADER_CALL_GRAPH_PASS`` must never be
     # stamped here (that would falsely vouch for a project-wide zero on
@@ -459,15 +462,32 @@ def build_header_only_graph(
     # Threading the four context values instead let one call site drop
     # `compile_only_dir_segs` and quietly answer `PRIVATE_HEADER` where
     # `apply_provenance` answered `UNKNOWN` (CodeRabbit review).
-    classify = partial(
+    classify_path = partial(
         classify_origin,
         public_header_segs=header_segs,
         public_dir_segs=dir_segs,
         have_public_set=have_public_set,
         compile_only_dir_segs=compile_only_dir_segs,
     )
+    # A header's origin is a pure function of its path under this one bound
+    # context, and a real graph asks for the same few hundred headers once
+    # per declaration they declare -- so each path is classified once.
+    origins: dict[str, ScopeOrigin] = {}
+
+    def classify(path: str) -> ScopeOrigin:
+        origin = origins.get(path)
+        if origin is None:
+            origin = origins[path] = classify_path(path)
+        return origin
+
+    #: Header nodes already added. Re-adding one merges an identical fact --
+    #: a no-op beyond the re-resolve it costs -- so a repeat returns early.
+    header_ids: dict[str, str] = {}
 
     def header_node(path: str) -> str:
+        node_id = header_ids.get(path)
+        if node_id is not None:
+            return node_id
         node_id = _header_node_id(path)
         origin = classify(path)
         attrs = {"visibility": origin.value} if origin != ScopeOrigin.UNKNOWN else {}
@@ -481,21 +501,24 @@ def build_header_only_graph(
                 attrs=attrs,
             )
         )
+        header_ids[path] = node_id
         return node_id
 
     for h in header_paths or ():
         header_node(h)
 
-    def seed_decl(entity: Function | Variable) -> None:
-        identity = _decl_identity(entity)
-        if not identity:
-            return
-        node_id = _decl_node_id(identity)
+    ids = snapshot_identities(snapshot)
+
+    def seed_decl(entity: Function | Variable, ident: GraphEntityIdentity) -> None:
+        node_id = ident.node_id
+        for alias in ident.aliases:
+            register_identity_alias(graph, alias, node_id)
         attrs: dict[str, Any] = (
             {"visibility": entity.origin.value}
             if entity.origin != ScopeOrigin.UNKNOWN
             else {}
         )
+        attrs.update(_identity_attrs(ident))
         if fact_provenance:
             mangled = getattr(entity, "mangled", "")
             if mangled:
@@ -513,7 +536,7 @@ def build_header_only_graph(
             GraphNode(
                 id=node_id,
                 kind="source_decl",
-                label=entity.name or identity,
+                label=entity.name or node_id,
                 provenance=_PROVENANCE,
                 confidence=CONF_HIGH,
                 attrs=attrs,
@@ -531,17 +554,17 @@ def build_header_only_graph(
                 )
             )
 
-    for fn in snapshot.functions:
-        seed_decl(fn)
-    for var in snapshot.variables:
-        seed_decl(var)
+    for fn, ident in zip(snapshot.functions, ids.functions):
+        seed_decl(fn, ident)
+    for var, ident in zip(snapshot.variables, ids.variables):
+        seed_decl(var, ident)
 
     if ast_projection is not None:
         seed_ast_graph(graph, ast_projection, header_node, classify)
     elif ast_root is not None:
         seed_ast_graph(graph, project_header_graph_ast(ast_root), header_node, classify)
     else:
-        _seed_flat_graph(graph, snapshot, header_node)
+        _seed_flat_graph(graph, snapshot, header_node, ids)
 
     return graph.finalize()
 

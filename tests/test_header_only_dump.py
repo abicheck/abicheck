@@ -37,6 +37,7 @@ convention (root ``AGENTS.md``). Marked ``integration`` throughout.
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -152,6 +153,241 @@ class TestHeaderOnlyDumpBasics:
         assert any("has no path" in e for e in errors)
         with pytest.raises(ValidationError, match="has no path"):
             request.validate()
+
+
+_STD_INCLUDE_SETS = {
+    "vector": ("<vector>",),
+    "string+map": ("<string>", "<map>"),
+    "memory+functional": ("<memory>", "<functional>"),
+    "c-stdio": ("<cstdio>",),
+}
+
+
+def _backend_available(backend: str) -> bool:
+    return shutil.which(backend) is not None
+
+
+class TestHeaderOnlyDependencyScoping:
+    """A header-only dump must apply the same default toolchain-declaration
+    exclusion an ordinary binary dump does.
+
+    Regression: `execute_header_only_dump_request` never ran
+    `provenance.apply_provenance`, so `source_header` stayed `None` on every
+    declaration and `dumper_scoping`'s header-origin filter kept the whole
+    transitive toolchain surface -- a 5-header SVS root wrote 32,643
+    functions, 304 of them its own. Oracle, independent of the scoping
+    code: after a default dump, no kept function or variable is *located*
+    outside the library's own directory (types are exempt -- a dependency
+    type a kept signature names is deliberately retained).
+    """
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason=(
+            "MinGW's sysroot headers (<prefix>/<triple>/include) are not yet "
+            "recognised as toolchain headers, and clang cannot parse MinGW's "
+            "libstdc++ -- docs/contribute/known-gaps.md, 'MinGW toolchain "
+            "headers are not classified as dependencies'"
+        ),
+    )
+    @pytest.mark.parametrize("backend", ["castxml", "clang"])
+    @pytest.mark.parametrize("includes", sorted(_STD_INCLUDE_SETS))
+    def test_default_dump_keeps_only_the_librarys_own_functions(
+        self, tmp_path: Path, backend: str, includes: str
+    ):
+        import json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.serialization import snapshot_from_dict
+
+        if not _backend_available(backend):
+            pytest.skip(f"no {backend} on PATH")
+        lib = tmp_path / "lib"
+        lib.mkdir()
+        header = lib / "api.hpp"
+        header.write_text(
+            "".join(f"#include {inc}\n" for inc in _STD_INCLUDE_SETS[includes])
+            + "namespace mylib {\n"
+            "struct Item { int v; };\n"
+            "int count(const Item* xs, unsigned n);\n"
+            "extern int mylib_global;\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        config = tmp_path / "cfg.yml"
+        config.write_text(
+            f"compile:\n  frontend: {backend}\n  std: c++17\n", encoding="utf-8"
+        )
+        out = tmp_path / "snap.json"
+        result = CliRunner().invoke(
+            main, ["dump", "--config", str(config), "-H", str(header), "-o", str(out)]
+        )
+        assert result.exit_code == 0, result.output
+        snap = snapshot_from_dict(json.loads(out.read_text(encoding="utf-8")))
+
+        # The library's own declarations survive (castxml also records
+        # `Item`'s implicit members, which are the library's too) ...
+        assert "count" in {f.name for f in snap.functions}
+        assert "mylib_global" in {v.name for v in snap.variables}
+        # ... and nothing located outside the library does.
+        for decl in [*snap.functions, *snap.variables]:
+            assert decl.source_header is not None, decl.name
+            assert str(lib) in (decl.source_location or ""), decl.name
+
+    @pytest.mark.parametrize("operand", ["manifest", "header"])
+    def test_project_staged_under_a_system_prefix_is_kept(
+        self, tmp_path: Path, operand: str
+    ):
+        """A project whose own headers sit under a system-looking path
+        (a staged `usr/include`) must keep its API, however its roots were
+        named. Regression (Codex review): a pathless `--dump-manifest` dump
+        was scoped with the empty `-H` set, whose fallback treats every
+        system-prefixed header as a dependency -- two differing APIs both
+        dumped empty and compared `NO_CHANGE`."""
+        import json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.serialization import snapshot_from_dict
+
+        _skip_if_no_header_ast_toolchain()
+        inc = tmp_path / "stage" / "usr" / "include" / "mylib"
+        inc.mkdir(parents=True)
+        header = inc / "api.hpp"
+        header.write_text("int exposed_api(int value);\n", encoding="utf-8")
+        if operand == "manifest":
+            manifest = tmp_path / "m.yaml"
+            manifest.write_text(
+                f"roots:\n  - {header}\ntranslation_units:\n"
+                f"  - name: main\n    forced_includes:\n      - {header}\n",
+                encoding="utf-8",
+            )
+            args = ["--dump-manifest", str(manifest)]
+        else:
+            args = ["-H", str(header)]
+        out = tmp_path / "snap.json"
+        result = CliRunner().invoke(main, ["dump", *args, "-o", str(out)])
+        assert result.exit_code == 0, result.output
+        snap = snapshot_from_dict(json.loads(out.read_text(encoding="utf-8")))
+        assert [f.name for f in snap.functions] == ["exposed_api"]
+
+    def test_manifest_public_dir_classifies_its_headers_public(self, tmp_path: Path):
+        """A header covered only by a manifest `public_header_dirs` entry --
+        not itself a root -- is `public_header`. Regression (CodeRabbit
+        review): the manifest's directories were passed to provenance as
+        header *files*, which match nothing by containment."""
+        import json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.serialization import snapshot_from_dict
+
+        _skip_if_no_header_ast_toolchain()
+        root_dir = tmp_path / "root"
+        root_dir.mkdir()
+        pub = tmp_path / "pub"
+        pub.mkdir()
+        (pub / "extra.hpp").write_text("int extra_api(int);\n", encoding="utf-8")
+        umbrella = root_dir / "api.hpp"
+        umbrella.write_text(
+            f'#include "{pub / "extra.hpp"}"\nint root_api(int);\n',
+            encoding="utf-8",
+        )
+        manifest = tmp_path / "m.yaml"
+        manifest.write_text(
+            f"roots:\n  - {umbrella}\npublic_header_dirs:\n  - {pub}\n"
+            f"translation_units:\n  - name: main\n    forced_includes:\n"
+            f"      - {umbrella}\n",
+            encoding="utf-8",
+        )
+        out = tmp_path / "snap.json"
+        result = CliRunner().invoke(
+            main, ["dump", "--dump-manifest", str(manifest), "-o", str(out)]
+        )
+        assert result.exit_code == 0, result.output
+        snap = snapshot_from_dict(json.loads(out.read_text(encoding="utf-8")))
+        origins = {f.name: f.origin.value for f in snap.functions}
+        assert origins == {"root_api": "public_header", "extra_api": "public_header"}
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="clang cannot parse MinGW's libstdc++ headers -- see known-gaps.md",
+    )
+    def test_clang_sticky_file_does_not_misattribute_library_declarations(
+        self, tmp_path: Path
+    ):
+        """clang omits a location's file when it equals the last one it
+        wrote, and the walker skips function bodies, so a file change inside
+        one leaked into the next declaration. Every declaration below was
+        recorded under `<concepts>` and the default dump came out empty --
+        the Intel SVS shape (`CACHE_LINE_BYTES` at `concepts:55`)."""
+        import json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.serialization import snapshot_from_dict
+
+        if shutil.which("clang") is None:
+            pytest.skip("no clang on PATH")
+        header = tmp_path / "api.hpp"
+        header.write_text(
+            "#include <concepts>\n#include <cstddef>\n#include <memory>\n"
+            "namespace n {\n"
+            "template <std::integral T> T twice(T t) { return t * 2; }\n"
+            "inline int use() { return twice(3); }\n"
+            "const std::size_t K = 64;\n"
+            "struct Box { int v; };\n"
+            "int after(Box b);\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        config = tmp_path / "cfg.yml"
+        config.write_text(
+            "compile:\n  frontend: clang\n  std: c++20\n", encoding="utf-8"
+        )
+        # Twice: the first run parses fresh, the second is an AST disk-cache
+        # hit -- two different producers, and both must make locations explicit.
+        located_runs = []
+        for run in ("fresh", "cached"):
+            out = tmp_path / f"snap-{run}.json"
+            result = CliRunner().invoke(
+                main,
+                ["dump", "--config", str(config), "-H", str(header), "-o", str(out)],
+            )
+            assert result.exit_code == 0, result.output
+            snap = snapshot_from_dict(json.loads(out.read_text(encoding="utf-8")))
+            located_runs.append(
+                {
+                    d.name: (d.source_location or "").rsplit("/", 1)[-1]
+                    for d in [*snap.functions, *snap.variables, *snap.types]
+                }
+            )
+        located = located_runs[0]
+        assert located_runs[1] == located
+        assert located == {
+            "twice": "api.hpp:5",
+            "use": "api.hpp:6",
+            "K": "api.hpp:7",
+            "Box": "api.hpp:8",
+            "after": "api.hpp:9",
+        }
+
+    def test_typed_api_populates_source_header(self, tmp_path: Path):
+        """The typed API reaches the same executor, so it must carry the
+        same provenance -- checked before any scoping runs."""
+        _skip_if_no_header_ast_toolchain()
+        header = tmp_path / "api.hpp"
+        header.write_text(
+            "#include <vector>\nint add(int a, int b);\n", encoding="utf-8"
+        )
+        snap = _dump_header_only(header, "1.0")
+        assert snap.functions
+        assert all(f.source_header is not None for f in snap.functions)
 
 
 @pytest.fixture()
@@ -301,13 +537,15 @@ class TestHeaderOnlyReportContract:
             "enum Color { RED, GREEN, BLUE };\nint add(int a, int b);\n",
         )
         result = checker.compare(old, new)
-        # The unreferenced enum's own member addition is real, detected
-        # evidence -- but out of the public-API-reachable surface, so it is
-        # recorded (never dropped) in the out-of-surface ledger with its
-        # own reason, exactly the "record before disposing" principle.
-        assert result.out_of_surface_count >= 1
-        reasons = {c.surface_exclusion_reason for c in result.out_of_surface_changes}
-        assert "non-public-type" in reasons
+        # An enum declared in the `-H` header is public API whether or not a
+        # function references it: provenance classifies it PUBLIC_HEADER,
+        # exactly as the binary+headers path does, so the addition is an
+        # in-surface finding. (Before header-only dumps ran
+        # `apply_provenance` every origin was UNKNOWN and this addition was
+        # pushed to the out-of-surface ledger instead.)
+        assert {e.origin.value for e in old.enums} == {"public_header"}
+        assert "enum_member_added" in _kinds(result)
+        assert result.out_of_surface_count == 0
 
 
 class TestHeaderOnlyBinaryPathUnaffected:

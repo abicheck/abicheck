@@ -556,9 +556,9 @@ def merge_fragments(
     if len(producers) > 1:
         raise TuMergeError(
             "translation units were extracted by different AST producers "
-            f"({sorted(producers)!r}) -- likely --ast-frontend auto falling "
+            f"({sorted(producers)!r}) -- likely compile.frontend: auto falling "
             "back to a different backend for only some TUs (see "
-            "--allow-ast-frontend-fallback). A manifest-driven dump requires "
+            "compile.ast_frontend_fallback / ABICHECK_ALLOW_AST_FALLBACK). A manifest-driven dump requires "
             "every TU to share one AST producer, the same way it already "
             "requires one compiler/target triple, since downstream layout "
             "backfill/coherence logic trusts a single producer for the "

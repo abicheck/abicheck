@@ -572,13 +572,27 @@ class TestNamespaceGlobstarSemantics:
             reachability="any",
             reason="x",
         )
-        non_matching = "::".join(["a"] * 1200 + ["y"])
-        t0 = time.monotonic()
-        result = s.matches(self._change(non_matching))
-        elapsed = time.monotonic() - t0
-        assert result is False
-        assert elapsed < 3.0, (
-            f"namespace match took {elapsed:.2f}s — not backtracking-safe"
+
+        # Asserted as a growth rate, not a wall-clock budget: the cubic
+        # regression grows ~8x per doubling of the name, the fixed matcher
+        # ~4x (measured). A fixed 3s budget also failed under instrumented
+        # runs (mutmut's traced baseline slowed this ~66x) with no change
+        # in complexity, while a ratio is the same on any machine. The best
+        # of a few runs per size keeps scheduler noise out of the ratio.
+        def best_time(segments: int) -> float:
+            name = "::".join(["a"] * segments + ["y"])
+            times = []
+            for _ in range(3):
+                t0 = time.perf_counter()
+                assert s.matches(self._change(name)) is False
+                times.append(time.perf_counter() - t0)
+            return min(times)
+
+        small, large = best_time(600), best_time(1200)
+        assert large / small < 6.0, (
+            f"doubling the name grew the match time {large / small:.1f}x "
+            f"({small:.3f}s -> {large:.3f}s) — super-quadratic, not "
+            "backtracking-safe"
         )
 
         # Correctness: a genuinely matching long name still matches, and

@@ -23,6 +23,10 @@ responsibility instead of raising the baseline").
 surviving override, matching §4.1's identical treatment of the same four
 knobs on ``compare``): ``.abicheck.yml``'s ``debug:`` block is each field's
 only source now.
+
+It also owns the rest of ``dump``'s project-config resolution
+(:func:`resolve_dump_project_config`, :func:`resolve_dump_compile_context`),
+so every config-sourced ``dump`` field is read from one selected file.
 """
 
 from __future__ import annotations
@@ -30,9 +34,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
+
+if TYPE_CHECKING:
+    from ...dry_run_estimate import CompileContext
 
 
 @dataclass(frozen=True)
@@ -320,4 +327,125 @@ def reject_debug_package_operands(debug_roots: tuple[Path, ...]) -> None:
         "Extract it yourself and pass the directory (or the detached debug "
         "file) instead, or use `compare --debug-info` on the release "
         "directories/packages, which does unpack it."
+    )
+
+
+@dataclass(frozen=True)
+class DumpProjectConfig:
+    """Every ``dump`` setting that comes from the project config, resolved
+    from one config selection (:func:`abicheck.config_paths.
+    resolve_project_config`) so no field can read a different file."""
+
+    path: Path | None
+    explicit: bool
+    lang: str
+    lang_explicit: bool
+    compile_db_filter: Any
+    exclude_headers: tuple[str, ...]
+    debug: DumpDebugConfig
+
+
+def resolve_dump_project_config(
+    ctx: click.Context,
+    *,
+    build_config: Path | None,
+    sources: Path | None,
+    lang: str | None,
+    lang_default: str,
+    apply_env_toggles: Callable[[click.Context, Any], None],
+    exclude_headers: tuple[str, ...],
+    resolved_debug: DumpDebugConfig | None,
+    debug_roots: tuple[Path, ...],
+) -> DumpProjectConfig:
+    """Select ``dump``'s project config once and resolve every config-sourced
+    field from it.
+
+    The selection is the one rule every command shares: ``--config``, else
+    the ``--sources`` tree root, else the nearest config at or above the
+    current directory -- so a project's ``.abicheck.yml`` applies to ``dump``
+    run from its checkout exactly as it does to ``compare``. Only an explicit
+    ``--config`` is *trusted* (``explicit``): a discovered one contributes
+    passive settings but never runs ``build.query``.
+    """
+    from ...config_paths import resolve_project_config
+
+    ref = resolve_project_config(build_config, sources=sources, search_from=Path.cwd())
+    lang, lang_explicit = resolve_dump_lang_and_env_toggles(
+        ctx,
+        build_config=ref.path,
+        sources=sources,
+        lang=lang,
+        lang_default=lang_default,
+        apply_env_toggles=apply_env_toggles,
+    )
+    return DumpProjectConfig(
+        path=ref.path,
+        explicit=ref.explicit,
+        lang=lang,
+        lang_explicit=lang_explicit,
+        # §4.2's CONFIG row: `build.compile_db_filter` replaces
+        # `--compile-db-filter`.
+        compile_db_filter=resolve_dump_build_compile_db_filter(ref.path, sources),
+        # `scope.exclude_headers` -- `--exclude-header`'s config spelling; see
+        # the resolver's docstring for why `dump` must honor it too.
+        exclude_headers=resolve_dump_scope_exclude_headers(
+            ref.path, sources, exclude_headers
+        ),
+        debug=resolve_dump_debug_fields(
+            resolved_debug,
+            build_config=ref.path,
+            sources=sources,
+            debug_roots=debug_roots,
+        ),
+    )
+
+
+def resolve_dump_compile_context(
+    resolved_compile_context: CompileContext | None,
+    *,
+    gcc_options: str | None,
+    sysroot: Path | None,
+    nostdinc: bool,
+    header_backend: str,
+    includes: tuple[Path, ...],
+    build_config: Path | None,
+    sources: Path | None,
+    frontend_context: str = "host",
+    compiler_path: str | None = None,
+    compiler_prefix: str | None = None,
+    compiler_option_tokens: tuple[str, ...] = (),
+    defines: tuple[str, ...] = (),
+    config_explicit: bool | None = None,
+) -> tuple[CompileContext, tuple[Path, ...]]:
+    """Resolve the L2 compile context for a dump, folding the config compile: block.
+
+    Returns ``(compile_context, includes)``. When the caller (compare's inline
+    source-tree embed) already resolved the context it is used verbatim; do NOT
+    re-discover/re-merge the tree's .abicheck.yml here. *defines* is ADR-074's
+    ``-D/--define``, folded with ``compile.defines`` by macro name downstream."""
+    if resolved_compile_context is not None:
+        # Caller (compare's inline source-tree embed) already resolved the compile
+        # context with CLI-over-config explicitness honored; use it verbatim and do
+        # NOT re-discover/re-merge the tree's .abicheck.yml here — re-running the
+        # resolver under ctx.invoke would lose that explicitness (the kwargs are not
+        # COMMANDLINE param-sources), clobbering e.g. --no-nostdinc / --ast-frontend
+        # auto on the source-tree path only (Codex review).
+        return resolved_compile_context, includes
+    from ...cli_options import resolve_compile_context
+
+    return resolve_compile_context(
+        click.get_current_context(),
+        gcc_options=gcc_options,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        header_backend=header_backend,
+        includes=includes,
+        build_config=build_config,
+        sources=sources,
+        frontend_context=frontend_context,
+        compiler_path=compiler_path,
+        compiler_prefix=compiler_prefix,
+        compiler_option_tokens=compiler_option_tokens,
+        defines=defines,
+        config_explicit=config_explicit,
     )

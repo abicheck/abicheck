@@ -88,8 +88,6 @@ Usage
 from __future__ import annotations
 
 import argparse
-import functools
-import gc
 import importlib.util
 import json
 import math
@@ -150,6 +148,7 @@ from perf_baseline import (  # noqa: E402
     matched_baseline_points,
     total_memory_points_compared,
 )
+from perf_cache_reset import clear_process_caches as _clear_process_caches  # noqa: E402
 from perf_measurement import (  # noqa: E402
     SampleStats,
     finite_nonnegative_float_arg,
@@ -1420,40 +1419,6 @@ def _has_demangler() -> bool:
         return True
     except Exception:  # noqa: BLE001
         return False
-
-
-def _clear_process_caches() -> None:
-    """Clear process-wide caches so the memory pass measures a *cold* run.
-
-    Some scenarios fill input-scaled process-wide caches during the timing loop
-    (e.g. the ``functools.lru_cache`` demanglers in ``abicheck/demangle.py``).
-    Those allocations happen *before* ``tracemalloc`` starts, so a warm memory
-    pass would not see them and cache-driven space growth could slip past the
-    ``--max-memory-mb`` gate (Codex review, #336). Clearing every live
-    ``lru_cache`` (plus the demangle batch cache) before the traced run forces
-    it to repopulate them, so their allocation is counted and each size is
-    measured from the same cold baseline.
-
-    Caches are found via an ``isinstance`` check against the ``lru_cache``
-    wrapper type — obtained without naming the private ``functools`` symbol by
-    taking ``type()`` of a throwaway cache. ``isinstance`` is used rather than
-    duck-typing ``getattr(obj, "cache_clear")`` because a bare ``getattr`` scan
-    over every live object would trigger side effects on objects with a dynamic
-    ``__getattr__`` (e.g. pytest's mark objects synthesise attributes on access).
-    """
-    lru_type = type(functools.lru_cache(maxsize=1)(lambda: None))
-    for obj in gc.get_objects():
-        if isinstance(obj, lru_type):
-            try:
-                obj.cache_clear()
-            except Exception:  # noqa: BLE001 — best-effort cache reset  # nosec B110
-                pass
-    try:
-        from abicheck.demangle import _reset_demangle_batch_cache
-
-        _reset_demangle_batch_cache()
-    except Exception:  # noqa: BLE001 — optional internal helper  # nosec B110
-        pass
 
 
 def measure(

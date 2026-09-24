@@ -8144,54 +8144,37 @@ resolved both operands knows which side this package is;
 side-correct example. That is the same engine-error/CLI-wrapper split
 `AmbiguousLibraryMatchError` already uses.
 
-**What is not closed.** An AST sweep of non-docstring string literals under
-`abicheck/` against every spelling in `scripts/retired_surfaces.py`'s
-`RETIRED_SURFACES` reports **44 hits across 25 modules**, and several read
-like the same defect already sitting in the tree:
+**Repo-wide sweep: closed, one residue.** The deferral reason above no longer
+holds: `scan` was deleted (ADR-068 Phase 6), so a flag retired from
+`compare`/`dump` is no longer live anywhere, and the question became
+mechanically decidable. Every diagnostic that named a removed flag was
+migrated -- the compile-context family now points at `compile.*` keys (or
+`ABICHECK_AST_FRONTEND`/`ABICHECK_ALLOW_AST_FALLBACK`), `--dwarf-only`/
+`--debug-format`/`--pdb-path` at `debug.*`, `--show-only` at `--view show=`,
+`--format`/`--write`/`--output-dir` at `-o FORMAT=DEST` -- and the guards that
+read options no command registers any more were deleted
+(`cli_resolve._reject_compile_context_for_set_inputs`,
+`cli_options.sided_frontend_explicit`/`_shared_frontend_explicit`, and two
+stored-bundle rejections; `compile.lang` folded into
+`reject_explicit_compile_config_for_stored_pair`).
 
-- `pdb_utils.py:129` — `"locate_pdb: skipping network path %s (use
-  --pdb-path to override)"` (`--pdb-path` left `compare` in Phase 7i and
-  `dump` in Phase 7c)
-- `reporter_markdown.py:297` — `"Unknown --show-only token: "`
-  (`--show-only` folded into `--view` in Phase 5)
-- `dumper.py:1527`, `dumper_elf_fallback.py:145` — `--dwarf-only`
-- `cli_dump_helpers.py:133`, `frontends/cli/commands/dump.py` —
-  `--debug-format`
-- `cli_audit.py:77` — `--reconcile-build-context` (removed in Phase 7i)
+The gate is `tests/test_diagnostics_name_live_flags.py`. Its oracle is the
+live Click tree, not `RETIRED_SURFACES` (a retired-spelling list only catches
+the retirements someone recorded), and its scope is *diagnostic sinks*
+(`raise`, click echo/fail, logging, warnings, `*Error` constructors), which
+excludes the categories listed above by construction: external-tool argv, the
+release engine's own option definitions, and catalog/ruling prose are not
+sinks. A `(was --old-flag)` migration hint is allowed.
 
-**Why this is not a mechanical sweep, and why it was not attempted in the
-same PR.** The hits are not decidable without reading each site against the
-command that emits it:
-
-1. A flag retired from `compare`/`dump` can still be **live on `scan`**,
-   which kept the whole L2 compile-context and debug-resolution families
-   (7a/7b/7c explicitly left `scan` untouched). A shared engine module's
-   message naming `--dwarf-only` may be correct for the caller that
-   actually reaches it.
-2. `cli_compare_release.py`'s **unregistered** release engine legitimately
-   still *defines* `--old-variant`/`--new-variant`/`--dso-only`/
-   `--support-promise`/`--include-private-dso` as its own options — those
-   are live option definitions, not stale advice, and account for 9 of the
-   44 hits on their own.
-3. Historical mentions in `model/change_catalog/` descriptions,
-   `contract_relevance_types.py`, and `options/rulings.py`'s own ruling
-   rationales are deliberate records of what a thing *used to* be called.
-
-So a sweep-turned-gate would need roughly 25 hand-judged allowlist entries —
-the shape AGENTS.md's own `IMPORT_CYCLE_ALLOWLIST` guidance warns is itself
-a smell, and precisely the "large unreviewed allowlist shipped as if it
-closed the class" outcome the bug-class discipline exists to prevent. It is
-also a separate change from PR #1184's CLI option audit.
-
-**Tractable when picked up:** go site by site, resolving each message
-against the command(s) that can actually emit it — the fix for a genuinely
-stale one is either naming the live spelling (as PR #1184 did) or scoping
-the message per front end. Only once the real hits are down to the
-legitimate three categories above is a gate in
-`scripts/check_docs_contract.py` worth adding, extending the existing
-`RETIRED_SURFACES` docs sweep to first-party Python with a *small*,
-reasoned allowlist. Doing the gate first would invert that order and bake
-today's 25 unexamined sites into an allowlist nobody revisits.
+**Residue:** `DEAD_CODE_ALLOWLIST` there excuses six functions that only tests
+reach -- `cli_buildsource_helpers.parse_from_specs`/`_run_adapters`/
+`_enforce_strict_mode`, `cli_buildsource_merge._merge_handle_conflicts`, and
+`bundle.discover_artifact_set`/`audit_bundle` -- kept alive by test-local
+re-implementations of the deleted `collect`/`merge` commands and
+`scan --artifact-set`. Their messages name those commands' flags. Deleting
+that code and its tests is the durable close; until then the allowlist test
+fails as soon as any of them gains a production caller, so it cannot hide
+live advice.
 
 ## `compare --depth binary` still performs a deep DWARF type walk the public evidence-depth contract says that rung skips
 
@@ -10365,8 +10348,19 @@ own (pre-existing) gap, not a property of the streaming write.
 
 ### `finditer_allow_nested` loses a shorter spelling that starts where a longer match does
 
-**Status: found and characterized, deliberately not fixed in the same change
-as the match-cache ownership work.** Present at `950efbc64`.
+**Status: fixed** in its own change, as this entry required (the
+under-report half only -- the scaling half below remains open). Present at
+`950efbc64` through `e9d820797`. `finditer_allow_nested` now probes every
+boundary-valid offset and, at each one, enumerates candidates longest first
+by re-matching with a lowered `endpos`, re-checking the right boundary
+against the real text so the `endpos`-as-end-of-string trap described below
+cannot accept `Foo` inside `Foobar`. It still uses the compiled alternation,
+so it needs no second index and no change to any caller.
+`tests/test_spelling_nested_same_offset.py` pins the table below and checks
+the new matcher against an independent brute-force oracle (every substring,
+both boundaries judged on the real text), plus the strict-superset property
+against the previous implementation. The history below is kept for why the
+fix is shaped this way.
 
 `compare/spelling_pattern.py`'s `finditer_allow_nested` finds nested matches
 by re-searching the window `(m.start() + 1, m.end())` after each match. That
@@ -10615,3 +10609,30 @@ comes from the in-process memo the primary pass wrote. The first version
 failed CI with `measured attach_retained_mib=-28.4 is not a gateable
 value`, i.e. on a *better* result than the baseline's. A metric whose
 domain does not match its gate's predicate cannot be gated at all.
+
+## MinGW toolchain headers are not classified as dependencies (2026-09-23)
+
+Found by `tests/test_header_only_dump.py::TestHeaderOnlyDependencyScoping` on
+the `windows-latest` integration lane. After #1347 made header-only dumps apply
+the default toolchain-declaration exclusion, a castxml dump on MinGW still kept
+`_mingw.h`'s `__debugbreak`. castxml reports that header as
+`C:/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/15.2.0/../../../../x86_64-w64-mingw32/include/_mingw.h`,
+which collapses to `<prefix>/x86_64-w64-mingw32/include/`: GCC's per-target
+sysroot include directory. `provenance._is_toolchain_compiler_include_dir`
+recognises `lib/gcc/<triple>/<version>/include` but not this layout, so it
+isn't treated as a system header. This affects binary+header dumps on MinGW too,
+not only header-only ones.
+
+Not fixed in #1347 because the obvious pattern, `<prefix>/<triple>/include`, is
+not safe on path shape alone. `_TARGET_TRIPLE_RE` accepts any 2-4 hyphenated
+components, so an ordinary project directory like `my-lib/include` would match
+and the project's own API would be dropped: exactly the failure this
+classifier must never cause. A sound fix needs positive evidence that the
+directory belongs to the toolchain. Options: a sibling `lib/gcc/<triple>/`
+under the same prefix, or the compiler's own reported search list
+(`-print-search-dirs` / `-v`).
+
+On the same lane, clang cannot parse MinGW's libstdc++ `<cstdio>` for a
+header-only dump (`__STRICT_ANSI__` warnings, then errors). This is an
+environment limitation of clang with MinGW headers, not something abicheck
+causes. That test is skipped on Windows until both are resolved.

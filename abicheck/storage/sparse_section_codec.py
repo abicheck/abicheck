@@ -79,7 +79,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, ClassVar, TypeVar
 
-from .canonical import canonical_form
+from .canonical import canonical_form_unless_trusted
 
 __all__ = [
     "BinarySection",
@@ -247,7 +247,9 @@ class _SparseSectionMixin:
             shape = self.REQUIRED_FIELD_SHAPES.get(name)
             if shape is not None:
                 _check_field_shape(self.SECTION_KIND, name, value, shape)
-            object.__setattr__(self, name, _freeze(canonical_form(value)))
+            object.__setattr__(
+                self, name, _freeze(canonical_form_unless_trusted(value))
+            )
 
     def _freeze_extra(self) -> None:
         extra = self.extra
@@ -267,7 +269,9 @@ class _SparseSectionMixin:
             shape = self.OPTIONAL_FIELD_SHAPES.get(name)
             if shape is not None:
                 _check_field_shape(self.SECTION_KIND, name, value, shape)
-        object.__setattr__(self, "extra", _freeze(canonical_form(dict(extra))))
+        object.__setattr__(
+            self, "extra", _freeze(canonical_form_unless_trusted(dict(extra)))
+        )
 
     def to_document(self) -> dict[str, Any]:
         """The full section payload -- every required field at the top

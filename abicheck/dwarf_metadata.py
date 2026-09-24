@@ -131,7 +131,7 @@ def parse_dwarf_metadata(so_path: Path) -> DwarfMetadata:
 
 
 def _parse(f: Any, so_path: Path) -> DwarfMetadata:
-    meta = DwarfMetadata()
+    meta = DwarfMetadata(odr_conflicts_observed=True)
     elf = ELFFile(f)  # type: ignore[no-untyped-call]
 
     if not has_real_dwarf_info(elf):
@@ -310,7 +310,8 @@ def _process_struct_named(
             if fi is not None:
                 layout.fields.append(fi)
 
-    # ODR: keep the first complete definition.
+    # ODR: keep the first complete definition; record a layout-distinct later
+    # one as a conflict (the debug-type join reports the name ambiguous).
     if name in meta.structs:
         existing = meta.structs[name]
         if existing.byte_size != layout.byte_size:
@@ -320,8 +321,22 @@ def _process_struct_named(
                 existing.byte_size,
                 layout.byte_size,
             )
+        _record_odr_conflict(meta.struct_odr_conflicts, existing, layout)
     else:
         meta.structs[name] = layout
+
+
+def _record_odr_conflict(
+    conflicts: dict[str, list[Any]], first: Any, candidate: Any
+) -> None:
+    """Keep *candidate* under its name when it differs from *first* and from
+    every conflict already recorded -- an identical repeat (the same header
+    included by two CUs) is one type, not a conflict."""
+    if candidate == first:
+        return
+    seen = conflicts.setdefault(candidate.name, [])
+    if candidate not in seen:
+        seen.append(candidate)
 
 
 def _expand_anonymous_member(
@@ -456,6 +471,8 @@ def _process_enum_named(
 
     if name not in meta.enums:
         meta.enums[name] = enum
+    else:
+        _record_odr_conflict(meta.enum_odr_conflicts, meta.enums[name], enum)
 
 
 # ---------------------------------------------------------------------------

@@ -17,9 +17,10 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
+from .compare.debug_type_scope import debug_layout_scope
 from .detector_registry import registry
 from .diff_helpers import _normalize_type_name, is_sentinel_enum_member, make_change
 from .diff_platform_elf_dynamic import (
@@ -1475,42 +1476,14 @@ def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             )
         ]
 
-    def _allow_name(name: str, allowed: set[str]) -> bool:
-        # Match by full name or by unqualified name (last component after ::)
-        return name in allowed or name.split("::")[-1] in allowed
-
-    # Collect opaque (forward-declared only) struct names from each side.
-    # If a struct is opaque in *both* snapshots, its layout is not part of
-    # the public ABI — callers never see the fields — so DWARF layout
-    # changes should be suppressed.
-    old_opaque = {t.name for t in old.types if getattr(t, "is_opaque", False)}
-    new_opaque = {t.name for t in new.types if getattr(t, "is_opaque", False)}
-    both_opaque = old_opaque & new_opaque
-
-    allowed_structs: set[str] = (
-        {t.name for t in old.types} | {t.name for t in new.types}
-    ) - both_opaque
-    allowed_enums: set[str] = {e.name for e in old.enums} | {e.name for e in new.enums}
-
-    # If the header model is absent (no castxml data), fall back to comparing
-    # all DWARF types — this preserves compatibility when running DWARF-only.
-    if allowed_structs:
-        o_structs = {
-            k: v for k, v in o.structs.items() if _allow_name(k, allowed_structs)
-        }
-        n_structs = {
-            k: v for k, v in n.structs.items() if _allow_name(k, allowed_structs)
-        }
-    else:
-        o_structs = o.structs
-        n_structs = n.structs
-
-    if allowed_enums:
-        o_enums = {k: v for k, v in o.enums.items() if _allow_name(k, allowed_enums)}
-        n_enums = {k: v for k, v in n.enums.items() if _allow_name(k, allowed_enums)}
-    else:
-        o_enums = o.enums
-        n_enums = n.enums
+    # Only the debug types that *are* header-declared ones are diffed, as the
+    # Phase 2 debug-type join decides (compare/debug_type_scope.py); a kind
+    # neither side's headers declare at all is diffed wholesale (DWARF-only).
+    struct_scope, enum_scope = debug_layout_scope(old, new)
+    o_structs = _in_scope(o.structs, struct_scope)
+    n_structs = _in_scope(n.structs, struct_scope)
+    o_enums = _in_scope(o.enums, enum_scope)
+    n_enums = _in_scope(n.enums, enum_scope)
 
     # Drop non-ABI types from the DWARF layout maps. The header-scoped branch
     # above only filters when a castxml model is present; in DWARF-only mode (no
@@ -1557,6 +1530,13 @@ def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes.extend(_diff_struct_layouts(filtered_old, filtered_new))
     changes.extend(_diff_enum_layouts(filtered_old, filtered_new))
     return changes
+
+
+_T = TypeVar("_T")
+
+
+def _in_scope(types: dict[str, _T], scope: frozenset[str] | None) -> dict[str, _T]:
+    return types if scope is None else {k: v for k, v in types.items() if k in scope}
 
 
 def _diff_struct_layouts(o: object, n: object) -> list[Change]:

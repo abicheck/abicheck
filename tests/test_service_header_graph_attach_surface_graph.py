@@ -170,7 +170,12 @@ def test_compare_surface_graph_facts_can_still_be_populated_on_the_shared_instan
 
     build_public_surface_facts(snap, graph)
 
-    assert any(node.label == "f" and node.kind == "declaration" for node in graph.nodes)
+    # I1: the facts land on the header graph's own node for `f`, not on a
+    # second `declaration` node beside it.
+    f_nodes = [node for node in graph.nodes if node.label == "f"]
+    assert len(f_nodes) == 1
+    assert f_nodes[0].kind == "source_decl"
+    assert "referenced_identifiers" in f_nodes[0].attrs
     # Still the same shared instance -- populating it explicitly doesn't
     # fork it away from AbiSnapshot.build_source.source_graph.
     assert snap.surface_graph is snap.build_source.source_graph

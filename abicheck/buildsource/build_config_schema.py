@@ -45,6 +45,7 @@ the concrete accounting.
 from __future__ import annotations
 
 from ..environment_matrix import EnvironmentMatrix
+from .build_config_scope import OWNERSHIP_LIST_KEYS, dependencies_findings
 
 #: Phase 7g (one-comparison-product.md §4.1/§3 #21): the calibrated JSON
 #: decode resource limit, demoted off the CLI (`--max-json-object-nodes`).
@@ -116,12 +117,24 @@ STR_SUBKEYS: dict[str, frozenset[str]] = {
 DICT_STR_STR_SUBKEYS: dict[str, frozenset[str]] = {
     "policy": frozenset({"overrides"}),
 }
+#: Sub-keys whose value is a structured YAML shape with its own validator
+#: (dispatched in `subkey_findings`), spelled as the reference docs show it.
+STRUCTURED_SUBKEY_TYPES: dict[str, dict[str, str]] = {
+    "scope": {"dependencies": "list[{name: str, header_roots: list[str]}]"},
+}
 # `_strs()` accepts either a list of strings or a single bare string (folded
 # to a 1-element list), so both shapes are valid here — anything else isn't.
 LIST_SUBKEYS: dict[str, frozenset[str]] = {
     "build": frozenset({"targets"}),  # P0.2: root target(s) scoping L3 collection
     "sources": frozenset({"public_headers", "exclude"}),
-    "scope": frozenset({"public_symbols", "public_header_dirs", "exclude_headers"}),
+    "scope": frozenset(
+        {
+            "public_symbols",
+            "public_header_dirs",
+            "exclude_headers",
+            *OWNERSHIP_LIST_KEYS,
+        }
+    ),
     "compile": frozenset({"include_dirs", "defines", "options"}),
     # CLI cleanup phase two, PR J: release/scan bundle topology, demoted off
     # the CLI from --bundle-system-providers/--bundle-cohort.
@@ -145,6 +158,8 @@ def subkey_findings(key: str, sub: str, sub_value: object) -> list[str]:
     thin delegator to this function (see module docstring for why the
     whole chain, not just the int/dict-of-str branches, lives here now).
     """
+    if key == "scope" and sub == "dependencies":
+        return dependencies_findings(sub_value)
     if sub in BOOL_SUBKEYS.get(key, ()) and not isinstance(sub_value, bool):
         return [
             f"{key}.{sub} must be a boolean, got "

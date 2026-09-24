@@ -43,10 +43,10 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Protocol, TypeVar
 
 from ..model.semantic_ir import SemanticIR
-from .canonical import canonical_form
+from .canonical import canonical_form, canonical_input_trusted
 from .graph_section_codec import GraphSection
 from .guards import (
     identity_text as _identity_text,
@@ -352,6 +352,13 @@ def migrate_section_dto(dto: SectionDTO) -> SectionDTO:
         raise ValueError(
             f"no DTO version is registered for section kind {dto.section_kind!r}"
         )
+    if dto.section_schema_version == current:
+        # Already current: *dto* itself, not a rebuilt copy. A `SectionDTO`
+        # is deeply frozen, so sharing it is safe -- and rebuilding one ran
+        # its whole payload through `canonical_form` + `_freeze` a second
+        # time (the frozen tree takes `canonical_form`'s slow generic
+        # `Mapping`/`Sequence` branches), on every section of every load.
+        return dto
     chain = _MIGRATIONS.get(dto.section_kind, {})
     payload: Mapping[str, Any] = dto.payload
     version = dto.section_schema_version
@@ -570,6 +577,34 @@ def types_to_dto(section: TypesSection) -> SectionDTO:
     )
 
 
+_S = TypeVar("_S", covariant=True)
+
+
+class _SectionCodec(Protocol[_S]):
+    def from_document(self, payload: Mapping[str, Any], /) -> _S: ...
+
+
+def _decode_current(dto: SectionDTO, kind: str, codec: _SectionCodec[_S]) -> _S:
+    """The shared body of every typed ``*_from_dto`` decoder below: check the
+    kind, migrate to current, and decode ``current.to_dict()["payload"]``.
+
+    Reads `to_dict()["payload"]`, never `current.payload` directly: the
+    payload is recursively frozen, so a section's nested lists would
+    otherwise round-trip as tuples while a freshly-dumped comparison side
+    holds plain lists (a spurious ``('Base',) != ['Base']`` change). That
+    unfrozen copy is fresh, exclusively owned and already canonical, so the
+    codec runs under `canonical_input_trusted` and does not canonicalize it
+    a second time.
+    """
+    if dto.section_kind != kind:
+        raise ValueError(f"expected section kind {kind!r}, got {dto.section_kind!r}")
+    current = migrate_section_dto(dto)
+    payload = current.to_dict()["payload"]
+    assert isinstance(payload, dict)
+    with canonical_input_trusted():
+        return codec.from_document(payload)
+
+
 def types_from_dto(dto: SectionDTO) -> TypesSection:
     """The inverse of `types_to_dto` — migrates *dto* to the current version
     first, then decodes via `TypesSection.from_document`.
@@ -589,14 +624,7 @@ def types_from_dto(dto: SectionDTO) -> TypesSection:
     reason, so this mirrors that rather than introducing a second,
     shallower unwrap.
     """
-    if dto.section_kind != TYPES_SECTION_KIND:
-        raise ValueError(
-            f"expected section kind {TYPES_SECTION_KIND!r}, got {dto.section_kind!r}"
-        )
-    current = migrate_section_dto(dto)
-    payload = current.to_dict()["payload"]
-    assert isinstance(payload, dict)
-    return TypesSection.from_document(payload)
+    return _decode_current(dto, TYPES_SECTION_KIND, TypesSection)
 
 
 def graph_to_dto(section: GraphSection) -> SectionDTO:
@@ -621,14 +649,7 @@ def graph_from_dto(dto: SectionDTO) -> GraphSection:
     would otherwise round-trip as tuples while a freshly-dumped comparison
     side holds plain lists.
     """
-    if dto.section_kind != GRAPH_SECTION_KIND:
-        raise ValueError(
-            f"expected section kind {GRAPH_SECTION_KIND!r}, got {dto.section_kind!r}"
-        )
-    current = migrate_section_dto(dto)
-    payload = current.to_dict()["payload"]
-    assert isinstance(payload, dict)
-    return GraphSection.from_document(payload)
+    return _decode_current(dto, GRAPH_SECTION_KIND, GraphSection)
 
 
 # ADR-063 Track 4 (8B), third slice: the six remaining sparse legacy
@@ -654,14 +675,7 @@ def binary_to_dto(section: BinarySection) -> SectionDTO:
 
 def binary_from_dto(dto: SectionDTO) -> BinarySection:
     """The inverse of `binary_to_dto`."""
-    if dto.section_kind != BINARY_SECTION_KIND:
-        raise ValueError(
-            f"expected section kind {BINARY_SECTION_KIND!r}, got {dto.section_kind!r}"
-        )
-    current = migrate_section_dto(dto)
-    payload = current.to_dict()["payload"]
-    assert isinstance(payload, dict)
-    return BinarySection.from_document(payload)
+    return _decode_current(dto, BINARY_SECTION_KIND, BinarySection)
 
 
 def declarations_to_dto(section: DeclarationsSection) -> SectionDTO:
@@ -676,15 +690,7 @@ def declarations_to_dto(section: DeclarationsSection) -> SectionDTO:
 
 def declarations_from_dto(dto: SectionDTO) -> DeclarationsSection:
     """The inverse of `declarations_to_dto`."""
-    if dto.section_kind != DECLARATIONS_SECTION_KIND:
-        raise ValueError(
-            f"expected section kind {DECLARATIONS_SECTION_KIND!r}, got "
-            f"{dto.section_kind!r}"
-        )
-    current = migrate_section_dto(dto)
-    payload = current.to_dict()["payload"]
-    assert isinstance(payload, dict)
-    return DeclarationsSection.from_document(payload)
+    return _decode_current(dto, DECLARATIONS_SECTION_KIND, DeclarationsSection)
 
 
 def layout_to_dto(section: LayoutSection) -> SectionDTO:
@@ -699,14 +705,7 @@ def layout_to_dto(section: LayoutSection) -> SectionDTO:
 
 def layout_from_dto(dto: SectionDTO) -> LayoutSection:
     """The inverse of `layout_to_dto`."""
-    if dto.section_kind != LAYOUT_SECTION_KIND:
-        raise ValueError(
-            f"expected section kind {LAYOUT_SECTION_KIND!r}, got {dto.section_kind!r}"
-        )
-    current = migrate_section_dto(dto)
-    payload = current.to_dict()["payload"]
-    assert isinstance(payload, dict)
-    return LayoutSection.from_document(payload)
+    return _decode_current(dto, LAYOUT_SECTION_KIND, LayoutSection)
 
 
 def debug_to_dto(section: DebugSection) -> SectionDTO:
@@ -721,14 +720,7 @@ def debug_to_dto(section: DebugSection) -> SectionDTO:
 
 def debug_from_dto(dto: SectionDTO) -> DebugSection:
     """The inverse of `debug_to_dto`."""
-    if dto.section_kind != DEBUG_SECTION_KIND:
-        raise ValueError(
-            f"expected section kind {DEBUG_SECTION_KIND!r}, got {dto.section_kind!r}"
-        )
-    current = migrate_section_dto(dto)
-    payload = current.to_dict()["payload"]
-    assert isinstance(payload, dict)
-    return DebugSection.from_document(payload)
+    return _decode_current(dto, DEBUG_SECTION_KIND, DebugSection)
 
 
 def build_to_dto(section: BuildSection) -> SectionDTO:
@@ -743,14 +735,7 @@ def build_to_dto(section: BuildSection) -> SectionDTO:
 
 def build_from_dto(dto: SectionDTO) -> BuildSection:
     """The inverse of `build_to_dto`."""
-    if dto.section_kind != BUILD_SECTION_KIND:
-        raise ValueError(
-            f"expected section kind {BUILD_SECTION_KIND!r}, got {dto.section_kind!r}"
-        )
-    current = migrate_section_dto(dto)
-    payload = current.to_dict()["payload"]
-    assert isinstance(payload, dict)
-    return BuildSection.from_document(payload)
+    return _decode_current(dto, BUILD_SECTION_KIND, BuildSection)
 
 
 def provenance_to_dto(section: ProvenanceSection) -> SectionDTO:
@@ -765,12 +750,4 @@ def provenance_to_dto(section: ProvenanceSection) -> SectionDTO:
 
 def provenance_from_dto(dto: SectionDTO) -> ProvenanceSection:
     """The inverse of `provenance_to_dto`."""
-    if dto.section_kind != PROVENANCE_SECTION_KIND:
-        raise ValueError(
-            f"expected section kind {PROVENANCE_SECTION_KIND!r}, got "
-            f"{dto.section_kind!r}"
-        )
-    current = migrate_section_dto(dto)
-    payload = current.to_dict()["payload"]
-    assert isinstance(payload, dict)
-    return ProvenanceSection.from_document(payload)
+    return _decode_current(dto, PROVENANCE_SECTION_KIND, ProvenanceSection)

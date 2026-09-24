@@ -48,14 +48,13 @@ implementation has been replaced by the real one.
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace as _dataclasses_replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import deadline, process_resources
+from . import deadline
 from .dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
 from .dumper_clang import _ClangAstParser
 from .dumper_clang_streaming import (
@@ -71,7 +70,9 @@ from .dumper_toolchain import (
 )
 from .extract.header_ast_fields import parse_header_ast_fields
 from .extract.manifest_semantic_ir import manifest_semantic_ir
+from .extract.progress import track
 from .extract.semantic_normalizer import normalize_header_ast
+from .extract.tu_jobs import _tu_jobs
 from .model import EnumType, Function, RecordType, Variable
 from .model.identity import EntityId
 from .model.semantic_ir import SemanticIR
@@ -86,87 +87,7 @@ if TYPE_CHECKING:
     from .dumper_castxml import _CastxmlParser
 
 log = logging.getLogger(__name__)
-
-#: Rough peak resident memory budget per concurrent per-TU worker (GiB) --
-#: same default as buildsource.source_replay's L4 pool
-#: (``_L4_JOB_MEM_BUDGET_GIB``), since both pools run the identical kind of
-#: work (one castxml/clang invocation, one heavy AST parse, per TU). Tunable
-#: via ``ABICHECK_TU_JOB_MEM_GIB``; the cap is skipped when RAM can't be read.
-_TU_JOB_MEM_BUDGET_GIB = 3.0
-
-
-def _tu_jobs(n_units: int) -> int:
-    """Worker count for the per-TU manifest-dump pool (ADR-050 D6, G32 Phase
-    E) -- ``run_tu_loop`` runs one castxml/clang invocation per translation
-    unit, instead of today's single aggregate-then-parse call, and this
-    function decides how many of those invocations run concurrently.
-
-    Ports ``buildsource.source_replay._l4_jobs``'s already-proven policy
-    verbatim (G32 Phase E's own "no new scheduling policy" note): auto ==
-    ``min(n_units, cpu_count, 8)``, clamped by available memory; an explicit
-    ``ABICHECK_TU_JOBS`` override (set ``1`` to force serial, e.g. for
-    deterministic tests) is clamped the same way. Uses this pool's own
-    ``ABICHECK_TU_JOBS``/``ABICHECK_TU_JOB_MEM_GIB`` env vars and log
-    messages rather than the L4 pool's ``ABICHECK_L4_*`` ones -- a
-    manifest dump and an L4 source replay are independent processes that
-    may run concurrently (e.g. ``compare --dump-manifest`` alongside a
-    separate ``--sources`` scan) and should be tunable independently.
-    Shares :mod:`abicheck.process_resources`'s RAM-probing/ceiling
-    primitives with the L4 pool rather than reimplementing them.
-    """
-    budget = process_resources.job_mem_budget_gib(
-        "ABICHECK_TU_JOB_MEM_GIB", _TU_JOB_MEM_BUDGET_GIB
-    )
-    cap = process_resources.mem_cap(budget)
-    env = os.environ.get("ABICHECK_TU_JOBS")
-    if env:
-        try:
-            requested = max(1, int(env))
-        except ValueError:
-            log.warning(
-                "ABICHECK_TU_JOBS=%r is not a valid integer; falling back to 1 "
-                "(serial) worker.",
-                env,
-            )
-            return 1
-        ceiling = process_resources.jobs_ceiling()
-        if requested > ceiling:
-            log.warning(
-                "ABICHECK_TU_JOBS=%d exceeds the oversubscription ceiling (%d "
-                "for %d CPUs); clamping to %d",
-                requested,
-                ceiling,
-                os.cpu_count() or 1,
-                ceiling,
-            )
-            requested = ceiling
-        if cap is not None and requested > cap:
-            log.warning(
-                "ABICHECK_TU_JOBS=%d may not fit in available memory (~%.1f GiB "
-                "at ~%.1f GiB/worker); clamping to %d to avoid an OOM-killed "
-                "manifest dump. Tune ABICHECK_TU_JOB_MEM_GIB, or split the "
-                "manifest into fewer translation units.",
-                requested,
-                process_resources.available_mem_gib() or 0.0,
-                budget,
-                cap,
-            )
-            return cap
-        return requested
-    auto = max(1, min(n_units, os.cpu_count() or 1, 8))
-    if cap is not None and cap < auto:
-        log.info(
-            "Per-TU manifest-dump workers reduced %d -> %d to fit available "
-            "memory (~%.1f GiB at ~%.1f GiB/worker); set ABICHECK_TU_JOBS / "
-            "ABICHECK_TU_JOB_MEM_GIB to override.",
-            auto,
-            cap,
-            process_resources.available_mem_gib() or 0.0,
-            budget,
-        )
-        return cap
-    return auto
-
+_TU_PROGRESS = "header AST (translation units)"
 
 #: Signature of ``dumper._header_ast_parser`` -- injected by the caller
 #: rather than imported, see this module's own docstring.
@@ -217,7 +138,7 @@ def run_tu_fragment(
     public surface, regardless of which TU happens to force-include them.
 
     ``pruning_header_roots`` (Codex review, PR #840): the streaming pruner's
-    root set must match ``dumper_scoping.dump_manifest_header_roots``'s own
+    root set must match ``extract.dump_manifest_roots.dump_manifest_header_roots``'s own
     computation exactly, or it can misclassify (and permanently drop) a
     declaration the authoritative post-hoc filter would have retained --
     that function folds in *every* TU's ``forced_includes`` and
@@ -383,7 +304,7 @@ def _run_tu_fragments(
 
     fragments: list[TuFragment] = []
     if jobs <= 1 or len(tus) <= 1:
-        for tu in tus:
+        for tu in track(tus, _TU_PROGRESS, len(tus)):
             try:
                 fragments.append(_run_one(tu))
             except Exception as exc:
@@ -439,7 +360,8 @@ def _run_tu_fragments(
     future_to_index = {
         pool.submit(_run_one_with_deadline, tu): i for i, tu in enumerate(tus)
     }
-    for fut in as_completed(future_to_index):
+    done = as_completed(future_to_index)
+    for fut in track(done, _TU_PROGRESS, len(tus)):
         idx = future_to_index[fut]
         tu = tus[idx]
         try:
@@ -535,7 +457,7 @@ def run_tu_loop(
     explicit_public_dirs = [str(d) for d in public_header_dirs]
 
     # Codex review, PR #840: the streaming pruner's root set must match
-    # `dumper_scoping.dump_manifest_header_roots`'s own computation exactly
+    # `extract.dump_manifest_roots.dump_manifest_header_roots`'s own computation exactly
     # -- the *manifest-wide* union across every TU's own `forced_includes`/
     # `project_owned` includes, not just the one TU currently being parsed.
     # A per-TU-only slice (this function's own siblings compute one, for

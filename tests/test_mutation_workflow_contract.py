@@ -28,6 +28,7 @@ pixi/pre-commit/CI all route through `scripts/verify.py`'s step catalog.
 from __future__ import annotations
 
 import ast
+import functools
 import importlib.util
 from pathlib import Path, PurePosixPath
 
@@ -433,18 +434,29 @@ def _package_of(path: Path) -> str:
     return ".".join(rel.parts[:-1])
 
 
-def _first_party_imports(path: Path) -> set[str]:
+def _first_party_imports(path: Path) -> frozenset[str]:
     """`abicheck.*` modules imported by *path*, relative imports resolved.
+
+    Memoized per resolved path: the reachability walk below starts once per
+    ignored test file and re-enters the same package modules each time, so an
+    unmemoized parse repeated most of the package's `ast.parse` work per
+    file -- ~24 s normally, and past the 600 s per-test timeout under
+    mutmut's traced stats run, which aborted the mutation lane.
 
     Resolving them is the whole point: inside the package almost every import
     is relative (`from .diff_types import ...`), so a walk that only followed
     absolute ones reported that `abicheck/checker.py` reaches nothing — and
     the reachability check built on it would have been vacuous.
     """
+    return _first_party_imports_of(path.resolve())
+
+
+@functools.cache
+def _first_party_imports_of(path: Path) -> frozenset[str]:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError):
-        return set()
+        return frozenset()
     package = _package_of(path)
     names: set[str] = set()
     for node in ast.walk(tree):
@@ -465,7 +477,7 @@ def _first_party_imports(path: Path) -> set[str]:
             names.add(f"{prefix}.{node.module}" if node.module else prefix)
             if node.module is None:
                 names |= {f"{prefix}.{a.name}" for a in node.names}
-    return {n for n in names if n == "abicheck" or n.startswith("abicheck.")}
+    return frozenset(n for n in names if n == "abicheck" or n.startswith("abicheck."))
 
 
 def _module_file(module: str) -> Path | None:
@@ -509,6 +521,40 @@ def _reached_mutated_modules(path: Path, mutated: set[str]) -> frozenset[str]:
 #: gate, which may report a survivor that one of these tests would in fact
 #: have killed.
 _ACCEPTED_KILL_LOSS = {
+    # tracemalloc peak assertions: under mutmut the trampoline's own
+    # bookkeeping is traced too (a 1.1 GB first-call peak aborted the stats
+    # run), so it measures the instrumentation, not snapshot_io. The
+    # behavioural snapshot_io tests stay in the run. Surfaced by PR #1356.
+    "tests/test_snapshot_read_allocation.py": frozenset({"abicheck.snapshot_io"}),
+    # Its producer/consumer (subprocess-spawning) tests run `python -m abicheck.frontends.action.cli`
+    # as a real subprocess, which re-enters the mutated tree with no mutmut
+    # config -- the same class as the entries above. Surfaced by PR #1356.
+    "tests/test_action_analysis_context.py": frozenset(
+        {
+            "abicheck.diff_filtering",
+            "abicheck.diff_platform",
+            "abicheck.diff_symbols",
+            "abicheck.diff_types",
+            "abicheck.diff_vtable_layout",
+            "abicheck.finding_identity",
+            "abicheck.idioms",
+            "abicheck.name_classification",
+            "abicheck.pattern_verdicts",
+            "abicheck.policy.classification",
+            "abicheck.policy.evidence_status",
+            "abicheck.policy.selectors",
+            "abicheck.policy.selectors_namespace_glob",
+            "abicheck.serialization",
+            "abicheck.snapshot_io",
+            "abicheck.storage.snapshot_codec",
+            "abicheck.storage.snapshot_decode_declarations",
+            "abicheck.storage.snapshot_encode",
+            "abicheck.storage.snapshot_reliability_flags",
+            "abicheck.storage.snapshot_schema_versions",
+            "abicheck.suppression",
+            "abicheck.surface_graph",
+        }
+    ),
     # Drives `actions/check-target/run.sh`, which re-enters the mutated tree
     # from a subprocess that has no mutmut config, so the import of any
     # mutated module raises there. Reaches policy.classification via

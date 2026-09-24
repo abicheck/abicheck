@@ -746,21 +746,17 @@ class TestCacheBookkeepingEdges:
         assert len(PATTERN_REGISTRY) == 0
 
 
-class TestNestedSearchLosesASameStartShorterSpelling:
-    """An executable pin on a *documented limitation*, not a passing feature.
+class TestNestedSearchReportsASameStartShorterSpelling:
+    """A shorter registered spelling beginning at the same offset as a longer
+    match is reported alongside it.
 
-    ``finditer_allow_nested`` re-searches ``(m.start() + 1, m.end())`` after
-    each match, a window that excludes ``m.start()``. So a shorter registered
-    spelling beginning at the same offset as a longer match is never
-    reported. These assertions state what the matcher does **today** so the
-    next reader finds the limitation instead of rediscovering it, and so the
-    change that fixes it fails here loudly rather than silently altering
-    findings inside some other patch.
-
-    Fixing it is a behaviour change -- it adds reachability edges, which can
-    change findings and release obligation counts -- so it is tracked in
-    ``docs/contribute/known-gaps.md`` and must land isolated, with its own
-    rebaseline. When it does, replace these with the superset expectation.
+    This class used to pin the opposite, as a documented limitation: the old
+    ``finditer_allow_nested`` re-searched ``(m.start() + 1, m.end())`` after
+    each match, a window that excludes ``m.start()``, so the shorter
+    spelling was lost. The fix landed isolated, with its own rebaseline, as
+    the pin required (``docs/contribute/known-gaps.md``); these are now the
+    superset expectation it asked for. The full contract, against a
+    brute-force oracle, lives in ``tests/test_spelling_nested_same_offset.py``.
     """
 
     @pytest.mark.parametrize(
@@ -783,7 +779,7 @@ class TestNestedSearchLosesASameStartShorterSpelling:
             (["A", "A&&"], "A&& r", "A&&", "A"),
         ],
     )
-    def test_the_shorter_same_start_spelling_is_not_reported(
+    def test_the_shorter_same_start_spelling_is_reported(
         self, vocabulary, text, reported, lost
     ) -> None:
         """Realistic C++ spellings, not randomized atoms.
@@ -796,16 +792,9 @@ class TestNestedSearchLosesASameStartShorterSpelling:
         assert pattern is not None
         found = {m.group(0) for m in _finditer_allow_nested(pattern, text)}
         assert reported in found
-        assert lost not in found, (
-            f"{lost!r} is now reported in {text!r} -- the known gap in "
-            "docs/contribute/known-gaps.md appears to be fixed. That change "
-            "adds reachability edges and needs a rebaseline; update this "
-            "test to the superset expectation rather than deleting it."
-        )
-        # The lost spelling really is a boundary-valid occurrence, so this
-        # is an under-report and not merely a boundary rule doing its job.
-        # Without this the test would pass for a vocabulary whose shorter
-        # entry was never legitimately present at all.
+        assert lost in found, f"{lost!r} missing from matches in {text!r}"
+        # The formerly-lost spelling really is a boundary-valid occurrence,
+        # so reporting it is correct and not a boundary rule being bypassed.
         start = text.index(lost)
         after = start + len(lost)
         boundary = set(

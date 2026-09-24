@@ -128,6 +128,7 @@ from .dumper_clang_qualifiers import (  # noqa: F401  (compatibility re-exports)
     _reduce_opaque_kind_set,
 )
 from .errors import AstContextMissingError, SnapshotError
+from .extract.dependency_exclusion import active_dependency_predicate
 from .extract.headers.clang import (
     context as _clang_context,
     enums as _clang_enums,
@@ -290,7 +291,7 @@ def _resolve_dpcpp_multi_context(
     is_dpcpp = _is_dpcpp_family_binary(clang_bin)
     if frontend_context != "host" and not is_dpcpp:
         raise AstContextMissingError(
-            f"--frontend-context {frontend_context!r} requires a DPC++-capable "
+            f"compile.frontend_context {frontend_context!r} requires a DPC++-capable "
             f"compiler (icx/icpx/dpcpp/dpcpp-cl); {clang_bin!r} is a plain "
             "clang/gcc invocation with no device AST context to select."
         )
@@ -300,10 +301,10 @@ def _resolve_dpcpp_multi_context(
     sycl_explicitly_off = is_dpcpp and _user_explicitly_disabled_sycl(user_tokens)
     if frontend_context != "host" and sycl_explicitly_off:
         raise AstContextMissingError(
-            f"--frontend-context {frontend_context!r} requires SYCL to be "
-            "enabled, but the given --compiler-option explicitly "
+            f"compile.frontend_context {frontend_context!r} requires SYCL to be "
+            "enabled, but the configured compile.options explicitly "
             "disable it (-fno-sycl) -- remove -fno-sycl or drop "
-            "--frontend-context device."
+            "compile.frontend_context: device."
         )
     return is_dpcpp and not sycl_explicitly_off
 
@@ -550,7 +551,8 @@ def _resolve_clang_bin(
         raise SnapshotError(
             f"{clang_bin} not found in PATH. The clang header backend needs clang/clang++ "
             "installed (apt install clang, brew install llvm, or conda install -c conda-forge "
-            "clang). Or use the castxml frontend (--ast-frontend castxml)."
+            "clang). Or use the castxml frontend (compile.frontend: castxml in "
+            ".abicheck.yml, or ABICHECK_AST_FRONTEND=castxml)."
         )
     return clang_bin
 
@@ -772,6 +774,9 @@ class _ClangAstParser:
         # Workstream F S1 ("Header-only comparison"): see
         # `extract.headers.clang.context.visibility`'s own docstring.
         self._no_binary_evidence = no_binary_evidence
+        # Set only when the caller has declared dependency scoping will run
+        # (`extract.dependency_exclusion`); see `_skips_dependency_decl`.
+        self._dependency_predicate = active_dependency_predicate()
         # Per-*logical-scope* (not per-walk-frame, and not per-AST-node
         # either) anonymous-ordinal state, keyed by `child_scope_path` --
         # the typed `ScopePath` a `_walk` call's children actually enter --
@@ -1153,9 +1158,10 @@ class _ClangAstParser:
         # dict key -- no string-identity/objid fallback needed at all, and
         # none of the "no id available" edge cases the node-identity version
         # had to account for can arise here.
-        ordinal_state = self._anonymous_ordinal_state.setdefault(
-            child_scope_path, {"next": 0, "seen": {}}
-        )
+        # Looked up on the first anonymous child only: hashing a
+        # `ScopePath` runs each frozen segment's Python-level `__hash__`, and
+        # most scopes have no anonymous child at all.
+        ordinal_state: dict[str, Any] | None = None
         for child in node.get("inner", []) or []:
             if not isinstance(child, dict):
                 continue
@@ -1165,6 +1171,10 @@ class _ClangAstParser:
             child_anonymous_ordinal: int | None = None
             if _clang_scope.anonymous_scope_kind(child) is not None:
                 entity_key = _clang_scope.anonymous_scope_key(child)
+                if ordinal_state is None:
+                    ordinal_state = self._anonymous_ordinal_state.setdefault(
+                        child_scope_path, {"next": 0, "seen": {}}
+                    )
                 seen: dict[str, int] = ordinal_state["seen"]
                 already = seen.get(entity_key) if entity_key is not None else None
                 if already is not None:
@@ -1190,6 +1200,31 @@ class _ClangAstParser:
             )
         return file
 
+    def _skips_dependency_decl(
+        self, node: dict[str, Any], kind: str | None, name: str, file: str
+    ) -> bool:
+        """Whether a function/variable is one dependency scoping will drop.
+
+        Only when a caller declared scoping will run, only for a declaration
+        in a dependency header, and only for a binary-less (header-only)
+        dump. With a binary, the pre-scoping surface graph also records
+        dependency declarations, so skipping would change it (measured:
+        ``tests/test_parse_time_dependency_exclusion.py``); a binary dump
+        also matches exported dependency symbols to these declarations.
+        Types are never skipped -- scoping keeps a dependency type a kept
+        signature names. The output is unchanged; the model objects scoping
+        would discard are simply never built (SVS, 76 roots: 106,815
+        skipped, -21% wall).
+        """
+        predicate = self._dependency_predicate
+        return (
+            predicate is not None
+            and self._no_binary_evidence
+            and bool(name)
+            and (kind in _FUNCTION_NODE_KINDS or kind == "VarDecl")
+            and predicate(file)
+        )
+
     def _categorize(
         self,
         node: dict[str, Any],
@@ -1205,34 +1240,43 @@ class _ClangAstParser:
         template_param_kinds: tuple[str, ...] = (),
         template_type_param_names: tuple[str, ...] = (),
     ) -> None:
-        entry = _Decl(
-            node=node,
-            scope=scope,
-            file=file,
-            access=access,
-            extern_c=extern_c,
-            in_friend=in_friend,
-            in_template=in_template,
-            scope_path=scope_path,
-            template_param_kinds=template_param_kinds,
-            template_type_param_names=template_type_param_names,
-        )
+        # The destination list is chosen before a `_Decl` is built: most
+        # walked nodes (fields, parameters, template arguments, ...) are kept
+        # by none of them, and building one per node was pure churn.
         if kind in _FUNCTION_NODE_KINDS and name:
-            self._functions.append(entry)
+            bucket = self._functions
         elif kind == "VarDecl" and name:
-            self._variables.append(entry)
+            bucket = self._variables
         elif kind in ("CXXRecordDecl", "RecordDecl"):
             # Anonymous records (name="") are kept too: a ``typedef struct {…}
             # Foo;`` emits an unnamed RecordDecl that carries the fields, recovered
             # under the typedef name in parse_types (Codex/CodeRabbit review).
-            self._records.append(entry)
+            bucket = self._records
         elif kind == "EnumDecl":
             # Anonymous enums are kept too: a ``typedef enum {…} Foo;`` emits an
             # unnamed EnumDecl that carries the enumerators, recovered under the
             # typedef name in parse_enums.
-            self._enums.append(entry)
+            bucket = self._enums
         elif kind in ("TypedefDecl", "TypeAliasDecl") and name:
-            self._typedefs.append(entry)
+            bucket = self._typedefs
+        else:
+            return
+        if self._skips_dependency_decl(node, kind, name, file):
+            return
+        bucket.append(
+            _Decl(
+                node=node,
+                scope=scope,
+                file=file,
+                access=access,
+                extern_c=extern_c,
+                in_friend=in_friend,
+                in_template=in_template,
+                scope_path=scope_path,
+                template_param_kinds=template_param_kinds,
+                template_type_param_names=template_type_param_names,
+            )
+        )
 
     # ── shared helpers ───────────────────────────────────────────────────────
 

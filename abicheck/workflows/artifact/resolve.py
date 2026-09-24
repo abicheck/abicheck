@@ -417,6 +417,7 @@ def _seeded_includes_and_compile_context(
     collect_mode: str | None = None,
     legacy_compile_db_tokens: tuple[str, ...] = (),
     legacy_compile_db_matched: bool = False,
+    build_config_explicit: bool = True,
 ) -> tuple[list[Path], CompileContext | None, bool, list[Callable[[], None]]]:
     """This input's L2 include-dir seed *and* its P0.3 L3->L2 compile-context
     fold, resolved together in one L3 collection (PR C, typed dump/scan
@@ -610,6 +611,7 @@ def _seeded_includes_and_compile_context(
             sources=side.sources,
             build_info=side.build_info,
             build_config=build_config,
+            build_config_explicit=build_config_explicit,
             build_query=build_query,
             build_compile_db=build_compile_db,
             build_targets=side.build_targets,

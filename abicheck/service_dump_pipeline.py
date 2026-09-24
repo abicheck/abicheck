@@ -475,6 +475,7 @@ def execute_dump_request(
         include_labels=dict(request.include_labels) or None,
         notify=notify,
         build_config=options.build_config,
+        build_config_explicit=options.build_config_explicit,
         build_query=options.build_query,
         build_compile_db=options.build_compile_db,
         changed_paths=options.changed_paths,

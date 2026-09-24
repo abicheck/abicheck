@@ -565,18 +565,18 @@ def _specialization_spelling(
     source is always already resolved in *args* by the time it's needed).
     Anything more complex (a default that only partially depends on an
     earlier parameter, e.g. ``std::vector<T>``) is conservatively left
-    unsubstituted, matching this module's "false negative over false
-    positive" degradation elsewhere: it just won't compare equal, so that
-    trailing argument stays rather than risking a wrong drop.
+    unsubstituted ("false negative over false positive"): it just won't
+    compare equal, so that trailing argument stays rather than risking a wrong drop.
     """
-    args: list[str] = []
-    idx = 0
+    from ....name_classification import strip_anonymous_type_location as strip_loc
+
+    args, idx = [], 0  # type args drop a lambda's checkout dir, like `_qualtype`
     for child in node.get("inner", []) or []:
         if not isinstance(child, dict) or child.get("kind") != "TemplateArgument":
             continue
         type_obj = child.get("type")
         if isinstance(type_obj, dict) and type_obj.get("qualType"):
-            args.append(str(type_obj["qualType"]))
+            args.append(strip_loc(str(type_obj["qualType"])))
             idx += 1
             continue
         if "value" in child:

@@ -672,7 +672,13 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         # that it exercises the invariant -- while sending a future
         # bug-class audit to a module with zero coverage of it (Codex
         # review).
-        seed_tests=("tests/test_cli_compare_variant_selection.py",),
+        seed_tests=(
+            "tests/test_cli_compare_variant_selection.py",
+            # The repo-wide half: every `--flag` any diagnostic sink names
+            # is checked against the live Click tree (not a list of retired
+            # spellings), with a self-checking dead-code allowlist.
+            "tests/test_diagnostics_name_live_flags.py",
+        ),
         public_surfaces=("cli",),
         axes={
             "error_path": (
@@ -687,28 +693,15 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "The seed test applies the oracle only to the variant "
-                    "family's own error paths. A repo-wide AST sweep run "
-                    "while fixing this (non-docstring string literals under "
-                    "`abicheck/` containing any spelling in "
-                    "`scripts/retired_surfaces.py`'s RETIRED_SURFACES) "
-                    "reports 44 hits across 25 modules, and several look "
-                    "like the same defect already sitting in the tree -- "
-                    "`pdb_utils.py`'s 'use --pdb-path to override', "
-                    "`reporter_markdown.py`'s 'Unknown --show-only token', "
-                    "`dumper.py`'s '--dwarf-only requested but ...'. They "
-                    "are NOT mechanically decidable: a flag retired from "
-                    "`compare`/`dump` can still be live on `scan` (which "
-                    "kept the whole compile-context and debug-resolution "
-                    "families), and `cli_compare_release.py`'s unregistered "
-                    "release engine legitimately still *defines* several of "
-                    "them, so a sweep-turned-gate would need ~25 "
-                    "hand-judged allowlist entries -- the shape AGENTS.md "
-                    "warns is itself a smell. Each site needs reading "
-                    "against the command that emits it. Deliberately not "
-                    "attempted in PR #1184: it is a separate change from "
-                    "the CLI option audit, and a hasty sweep would ship a "
-                    "large unreviewed allowlist rather than close the class."
+                    "The repo-wide sweep is enforced by "
+                    "`tests/test_diagnostics_name_live_flags.py` for messages "
+                    "reachable from the product. Its `DEAD_CODE_ALLOWLIST` "
+                    "still excuses a few functions only tests reach -- "
+                    "harnesses standing in for the deleted `collect`/`merge` "
+                    "commands and `scan --artifact-set` -- whose messages name "
+                    "those commands' flags. Deleting that dead code (and its "
+                    "tests) is the durable close; the allowlist test fails "
+                    "the moment any of them gains a production caller."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),

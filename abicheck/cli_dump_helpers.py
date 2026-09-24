@@ -71,7 +71,6 @@ from .workflows.extraction import (
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
-    from .dry_run_estimate import CompileContext
     from .model import AbiSnapshot
     from .service_dump_pipeline import ResolvedDumpRequest
 
@@ -118,7 +117,7 @@ def check_dump_debug_format_error(
     """
     if effective_debug_format is not None and binary_fmt in ("pe", "macho"):
         return (
-            f"--debug-format {effective_debug_format} is only supported for "
+            f"debug.format {effective_debug_format!r} is only supported for "
             f"ELF binaries, not {binary_fmt.upper()}."
         )
     return None
@@ -823,7 +822,6 @@ def render_dump_dry_run(
     disagree with the real run's actual exit code for the identical input
     (CodeRabbit review).
     """
-    from .cli_helpers_compare import discover_project_config
     from .dry_run import DryRunResult, tool_status
     from .model.macro_definition import defines_receipt_line
 
@@ -873,7 +871,7 @@ def render_dump_dry_run(
     result.add("Tools and frontends", *tool_status("castxml", "clang", "gcc", "g++"))
     if so_path is not None:
         _add_dump_data_layers(result, so_path, headers)
-    cfg_path = build_config or discover_project_config(sources)
+    cfg_path = build_config
     result.add(
         "Configuration and value origins",
         f".abicheck.yml: {cfg_path if cfg_path else '(none found)'}",
@@ -917,52 +915,3 @@ def render_dump_dry_run(
 # cleanup phase two) alongside `attach_build_context`/`user_define_flags` --
 # no longer re-exported from here (see this module's top-of-file comment).
 # See that module for the derivation logic.
-
-
-def resolve_dump_compile_context(
-    resolved_compile_context: CompileContext | None,
-    *,
-    gcc_options: str | None,
-    sysroot: Path | None,
-    nostdinc: bool,
-    header_backend: str,
-    includes: tuple[Path, ...],
-    build_config: Path | None,
-    sources: Path | None,
-    frontend_context: str = "host",
-    compiler_path: str | None = None,
-    compiler_prefix: str | None = None,
-    compiler_option_tokens: tuple[str, ...] = (),
-    defines: tuple[str, ...] = (),
-) -> tuple[CompileContext, tuple[Path, ...]]:
-    """Resolve the L2 compile context for a dump, folding the config compile: block.
-
-    Returns ``(compile_context, includes)``. When the caller (compare's inline
-    source-tree embed) already resolved the context it is used verbatim; do NOT
-    re-discover/re-merge the tree's .abicheck.yml here. *defines* is ADR-074's
-    ``-D/--define``, folded with ``compile.defines`` by macro name downstream."""
-    if resolved_compile_context is not None:
-        # Caller (compare's inline source-tree embed) already resolved the compile
-        # context with CLI-over-config explicitness honored; use it verbatim and do
-        # NOT re-discover/re-merge the tree's .abicheck.yml here — re-running the
-        # resolver under ctx.invoke would lose that explicitness (the kwargs are not
-        # COMMANDLINE param-sources), clobbering e.g. --no-nostdinc / --ast-frontend
-        # auto on the source-tree path only (Codex review).
-        return resolved_compile_context, includes
-    from .cli_options import resolve_compile_context
-
-    return resolve_compile_context(
-        click.get_current_context(),
-        gcc_options=gcc_options,
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        header_backend=header_backend,
-        includes=includes,
-        build_config=build_config,
-        sources=sources,
-        frontend_context=frontend_context,
-        compiler_path=compiler_path,
-        compiler_prefix=compiler_prefix,
-        compiler_option_tokens=compiler_option_tokens,
-        defines=defines,
-    )

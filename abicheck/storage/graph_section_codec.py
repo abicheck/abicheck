@@ -61,7 +61,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from .canonical import canonical_form
+from .canonical import canonical_form_unless_trusted, canonical_input_is_trusted
 
 __all__ = ["GraphSection"]
 
@@ -153,7 +153,9 @@ class GraphSection:
                 f"{type(self.surface_graph).__name__}"
             )
         object.__setattr__(
-            self, "surface_graph", _freeze(canonical_form(dict(self.surface_graph)))
+            self,
+            "surface_graph",
+            _freeze(canonical_form_unless_trusted(dict(self.surface_graph))),
         )
 
     def to_document(self) -> dict[str, Any]:
@@ -178,23 +180,59 @@ class GraphSection:
         other legacy section, made structural here instead of a separate
         post-hoc check (mirrors `TypesSection.from_document` exactly).
         """
-        if not isinstance(payload, Mapping):
-            raise ValueError(
-                f"a 'graph' section payload must be a mapping, not "
-                f"{type(payload).__name__}"
-            )
-        raw = payload.get("surface_graph")
-        if not isinstance(raw, Mapping):
-            raise ValueError(
-                "a 'graph' section payload must carry a 'surface_graph' "
-                f"mapping -- got {raw!r}"
-            )
-        extra = set(payload) - {"surface_graph"}
-        if extra:
-            raise ValueError(
-                "a 'graph' section payload may only carry 'surface_graph', "
-                f"not {sorted(extra)}"
-            )
         # `__post_init__` freezes this, so the constructor's own dict(...)
         # here need not defend against aliasing itself.
-        return cls(surface_graph=dict(raw))
+        return cls(surface_graph=dict(_validated_surface_graph(payload)))
+
+    @classmethod
+    def document_from_owned(cls, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """``cls.from_document(payload).to_document()`` for a payload that
+        is already `canonical_form`'s own output and exclusively owned by
+        the caller -- the precondition `canonical_input_trusted` declares,
+        and only honoured inside it.
+
+        Runs the identical validation, then hands back the payload's own
+        ``surface_graph`` instead of a freeze-then-thaw deep copy of it: for
+        a ``dict``/``list``/scalar tree that round trip is an identity, and
+        on a stored oneDAL baseline it was ~5 s of the load (the graph
+        section is ~136 MB of the ~188 MB document). Outside a trusted block
+        it takes the full path, since an unowned payload needs the copy.
+        """
+        if not canonical_input_is_trusted():
+            return cls.from_document(payload).to_document()
+        return {"surface_graph": dict(_validated_surface_graph(payload))}
+
+    @classmethod
+    def validated_document(cls, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """``cls.from_document(payload).to_document()`` up to
+        `canonical_form`: the same validation, returning the payload's own
+        ``surface_graph`` uncopied. For a caller that canonicalizes (and so
+        copies) the result next anyway -- `storage.dto.section_dto_dict` --
+        the codec's own canonicalize-freeze-thaw was a redundant pass over
+        the largest section a snapshot has."""
+        return {"surface_graph": _validated_surface_graph(payload)}
+
+
+def _validated_surface_graph(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    """`GraphSection.from_document`'s checks; returns ``surface_graph``.
+
+    Raises `ValueError` if `surface_graph` is missing or is not a
+    mapping, or if the payload carries any other key.
+    """
+    if not isinstance(payload, Mapping):
+        raise ValueError(
+            f"a 'graph' section payload must be a mapping, not {type(payload).__name__}"
+        )
+    raw = payload.get("surface_graph")
+    if not isinstance(raw, Mapping):
+        raise ValueError(
+            "a 'graph' section payload must carry a 'surface_graph' "
+            f"mapping -- got {raw!r}"
+        )
+    extra = set(payload) - {"surface_graph"}
+    if extra:
+        raise ValueError(
+            "a 'graph' section payload may only carry 'surface_graph', "
+            f"not {sorted(extra)}"
+        )
+    return raw

@@ -31,10 +31,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
 from .entity_resolver import EntityResolver
+from .graph_entity_identity import declaration_key, signature_key
 from .graph_facts import (
     CALLBACK_EDGE_KINDS,
     CONSUMER_EDGE_KINDS,
@@ -75,7 +77,24 @@ EVIDENCE_TIER_L5 = "L5_SOURCE_GRAPH"
 #:     unchanged, so a v1 pack (``schema_version: 1``, no ``entity_resolver``
 #:     key) still loads and compares correctly with no forced re-collection —
 #:     see ADR-046's "D4 implementation" section.
-SOURCE_GRAPH_VERSION: int = 2
+#:
+#: 3 — evidence-entity-model Phase 1, invariant I1 ("one ID per entity"):
+#:     every ``source_decl``/``record_type``/``enum_type``/``typedef`` node id
+#:     now comes from ``model.graph_entity_identity`` -- a C-linkage
+#:     declaration is keyed on its linker name (was ``qualified#signature`` on
+#:     the AST/L4 side and ``decl://<name>`` on the snapshot side), a castxml
+#:     constructor/destructor placeholder or any other identity-less entity is
+#:     an explicit ``unresolved://`` node (was a ``decl://`` id), a flat-path
+#:     type is keyed on its qualified name (was its bare leaf), and
+#:     ``identity_aliases`` is persisted. A *real* id-scheme change: a v2 and a
+#:     v3 graph name the same entity differently, so
+#:     ``compare.source_graph_identity_scheme.source_graph_identity_mismatch`` refuses to diff them
+#:     (the L5 layer is reported not compared) rather than read every renamed
+#:     node as added/removed.
+SOURCE_GRAPH_VERSION: int = 3
+
+#: The first :data:`SOURCE_GRAPH_VERSION` whose node ids follow invariant I1.
+GRAPH_IDENTITY_SCHEME_VERSION: int = 3
 
 #: Node kinds the graph schema understands (ADR-031 D2). Unknown kinds from a
 #: newer/hand-edited summary are preserved on load, never rejected.
@@ -247,6 +266,12 @@ class SourceGraphSummary:
     #: ``effect_transitions``) — nothing in the default graph-build path
     #: computes it automatically.
     entity_resolver: EntityResolver = field(default_factory=EntityResolver)
+    #: Evidence-entity-model I1: ``alias node id -> canonical node id`` for a
+    #: second spelling of a proven-same entity (``model.graph_entity_identity``
+    #: returns them). Every insertion resolves through it, so an alias never
+    #: becomes a second node. Unlike :attr:`entity_resolver` this is not an
+    #: opt-in reconciliation view: it is part of the graph's identity.
+    identity_aliases: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Re-register through add_node()/add_edge() rather than building the de-dup indexes
@@ -295,7 +320,7 @@ class SourceGraphSummary:
         path funnels through, catching a hand-built id even if its own producer forgot
         ``_decl_node_id``/``_type_node_id``. A no-op for every other id.
         """
-        node.id = _normalize_if_decl_or_type(node.id)
+        node.id = self.resolve_node_id(_normalize_if_decl_or_type(node.id))
         if node.id not in self._node_ids:
             ensure_facts_and_resolve(node)
             self.nodes.append(node)
@@ -320,8 +345,8 @@ class SourceGraphSummary:
 
         Normalizes ``edge.src``/``edge.dst`` first, same reasoning as :meth:`add_node`.
         """
-        edge.src = _normalize_if_decl_or_type(edge.src)
-        edge.dst = _normalize_if_decl_or_type(edge.dst)
+        edge.src = self.resolve_node_id(_normalize_if_decl_or_type(edge.src))
+        edge.dst = self.resolve_node_id(_normalize_if_decl_or_type(edge.dst))
         ensure_facts_and_resolve(edge)
         rkey = edge.relation_key()
         if rkey not in self._edge_keys:
@@ -332,8 +357,31 @@ class SourceGraphSummary:
         merge_entity_facts(self._edge_by_key[rkey], edge)
 
     def has_node(self, node_id: str) -> bool:
-        """Whether a node with ``node_id`` is already in the graph."""
-        return node_id in self._node_ids
+        """Whether a node with ``node_id`` (or an alias of it) is in the graph."""
+        return self.resolve_node_id(node_id) in self._node_ids
+
+    def resolve_node_id(self, node_id: str) -> str:
+        """The canonical node id *node_id* names -- itself unless it was
+        recorded as an identity alias."""
+        return self.identity_aliases.get(node_id, node_id)
+
+    def add_identity_alias(self, alias: str, canonical: str) -> None:
+        """Record *alias* as a second spelling of the entity *canonical*
+        names (evidence-entity-model I1). Must be recorded before anything
+        is added under *alias*; a conflicting second target is refused
+        rather than silently re-pointed."""
+        alias = _normalize_if_decl_or_type(alias)
+        canonical = self.resolve_node_id(_normalize_if_decl_or_type(canonical))
+        if alias == canonical:
+            return
+        existing = self.identity_aliases.get(alias)
+        if existing is not None and existing != canonical:
+            raise ValueError(
+                f"identity alias {alias!r} already names {existing!r}, not {canonical!r}"
+            )
+        if alias in self._node_ids:
+            raise ValueError(f"identity alias {alias!r} is already a node")
+        self.identity_aliases[alias] = canonical
 
     def indexes(self) -> dict[str, dict[str, list[str]]]:
         """Build the lookup indexes (ADR-031 D7) on demand.
@@ -392,6 +440,8 @@ class SourceGraphSummary:
             "nodes": sorted((n.id, n.kind) for n in self.nodes),
             "edges": sorted(e.relation_key() for e in self.edges),
         }
+        if self.identity_aliases:
+            canonical["identity_aliases"] = sorted(self.identity_aliases.items())
         blob = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode(
             "utf-8"
         )
@@ -539,10 +589,31 @@ class SourceGraphSummary:
         # opt-in-cost convention as occurrence_id/effect_transitions.
         if self.entity_resolver.aliases or self.entity_resolver.conflicts:
             d["entity_resolver"] = self.entity_resolver.to_dict()
+        if self.identity_aliases:
+            d["identity_aliases"] = dict(sorted(self.identity_aliases.items()))
         return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> SourceGraphSummary:
+        return cls.from_parts(
+            d,
+            (GraphNode.from_dict(raw) for raw in d.get("nodes", [])),
+            (GraphEdge.from_dict(raw) for raw in d.get("edges", [])),
+        )
+
+    @classmethod
+    def from_parts(
+        cls,
+        d: dict[str, Any],
+        nodes: Iterable[GraphNode],
+        edges: Iterable[GraphEdge],
+    ) -> SourceGraphSummary:
+        """:meth:`from_dict` with the entities already built: *d* supplies
+        only the graph-level fields (its ``nodes``/``edges`` are ignored).
+        Lets a decoder that builds :class:`GraphNode`/:class:`GraphEdge`
+        directly (``storage.graph_table_codec``) share every load-time step
+        after entity construction -- coalescing, resolver rebuild, finalize.
+        """
         # Defensive ``.get`` parsing so a newer/hand-edited summary never aborts
         # a load (evidence/CLAUDE.md forward-compat rule); ``indexes`` are
         # derived and intentionally not read back. ``extractor_passes``
@@ -570,12 +641,15 @@ class SourceGraphSummary:
                 str(k): bool(v) for k, v in dict(d.get("degraded_passes", {})).items()
             },
             entity_resolver=EntityResolver.from_dict(_raw_entity_resolver),
+            identity_aliases={
+                str(k): str(v) for k, v in dict(d.get("identity_aliases") or {}).items()
+            },
         )
         # add_node/add_edge coalesce migration-colliding ids (Codex review).
-        for raw_node in d.get("nodes", []):
-            obj.add_node(GraphNode.from_dict(raw_node))
-        for raw_edge in d.get("edges", []):
-            obj.add_edge(GraphEdge.from_dict(raw_edge))
+        for node in nodes:
+            obj.add_node(node)
+        for edge in edges:
+            obj.add_edge(edge)
         if _raw_entity_resolver:
             obj.resolve_entities()  # rebuild from coalesced facts (Codex review)
         obj.finalize()  # recomputes graph_id + coverage post-migration
@@ -611,38 +685,32 @@ def _vtable_node_id(identity: str) -> str:
 def function_decl_identity(
     mangled_name: str, name: str, qualified_name: str, type_qual: str
 ) -> str:
-    """Mirror ``SourceEntity.identity()``'s fallback chain for a function decl
-    node at the AST-replay layer (ADR-041 P1 #5, Codex review).
+    """The ``decl://`` key of a declaration walked by an AST replay pass
+    (call/type/override/macro/template graphs) -- routed through
+    :func:`abicheck.model.graph_entity_identity.declaration_key`, the one
+    identity function every graph producer shares (evidence-entity-model
+    invariant I1), so this node joins the header graph's and the
+    public-surface builder's node for the same declaration.
 
-    ``call_graph.py``/``type_graph.py`` used to key a function's graph-node
-    identity on the bare ``mangledName or name`` clang emits — but
-    ``SourceEntity.identity()`` (the identity the L4 surface's own
-    ``SOURCE_DECLARES`` node for the *same* declaration is keyed on) treats a
-    ``mangledName`` that equals the bare ``name`` as "no real mangling" (every
-    ``source_extractors/*`` mapper does this deliberately: extern "C"/C-linkage
-    functions report ``mangledName == name``, not absent) and falls back to
-    ``f"{qualified_name}#{signature_hash}"`` instead. A raw ``mangled or name``
-    fallback silently picks that same non-distinguishing bare name, so a
-    public C-linkage function's call/type-graph edges land on a *different*
-    ``decl://`` node than its own ``SOURCE_DECLARES`` node — the two never
-    merge, and dependency-reachability BFS starting from the public entry
-    never reaches edges keyed by this mismatched identity.
-
-    ``type_qual`` is the function's ``type.qualType`` spelling (the same value
-    :func:`abicheck.buildsource.source_extractors.clang._signature` reads) —
-    when non-empty, the ``signature_hash`` suffix is computed identically to
-    :func:`abicheck.buildsource.source_extractors.clang._hash`
-    (``"sha256:" + sha256("sig\\x00" + type_qual).hexdigest()``), so a
-    matching declaration walked by either producer resolves to the exact same
-    string. Falls back to the bare ``qualified_name`` when no type spelling is
-    available, matching ``SourceEntity.identity()``'s own final fallback.
+    A linker name wins whenever clang reported one -- including C linkage,
+    where ``mangledName == name`` is itself the observed linker symbol (this
+    used to fall through to ``qualified_name#signature``, which no L2
+    producer can compute, so a C function's AST edges never met its header
+    node). Otherwise ``qualified_name#<signature_key(type_qual)>`` -- the
+    same hash ``source_extractors.clang._hash`` computes, so an unmangled
+    overload (a castxml-sourced constructor) stays distinct -- or the bare
+    qualified name for a declaration with no type spelling (every
+    ``FunctionDecl`` carries one, so that is a variable/field/constant,
+    which cannot be overloaded).
     """
-    if mangled_name and mangled_name != name:
-        return mangled_name
-    if type_qual:
-        digest = hashlib.sha256(f"sig\x00{type_qual}".encode()).hexdigest()
-        return f"{qualified_name}#sha256:{digest}"
-    return qualified_name
+    key, _decorated = declaration_key(
+        linker_name=mangled_name,
+        plain_name=name,
+        qualified_name=qualified_name,
+        signature=signature_key(type_qual) if type_qual else "",
+        callable=False,
+    )
+    return key
 
 
 def _symbol_node_id(symbol: str) -> str:

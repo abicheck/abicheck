@@ -445,6 +445,78 @@ class TestTheWarmRunReallySkipsTheParse:
         )
         assert again == cold
 
+    @staticmethod
+    def _primary_clang_pass(tmp_path: Path, ast: dict) -> None:
+        """What a primary ``--ast-frontend clang`` pass leaves behind: the AST
+        cache entry on disk and the parsed tree in this thread's memo slot."""
+        import abicheck.dumper_cache as dumper_cache
+
+        entry = tmp_path / "cache" / "abcdef.json"
+        entry.write_text(json.dumps(ast))
+        dumper_cache.store_cached_ast("k", "clang", json.loads(json.dumps(ast)))
+
+    @pytest.mark.parametrize("threshold_mib", ["0", "4096"])
+    def test_a_clang_frontend_memo_handoff_warms_and_then_hits_the_cache(
+        self, monkeypatch, tmp_path: Path, threshold_mib: str
+    ) -> None:
+        """The clang-frontend path: the attach receives the primary pass's
+        tree through the in-process memo, not through a disk read.
+
+        It used to take that tree without ever being offered the cache
+        entry, so it projected cold on every run and never stored a sidecar
+        -- measured on oneDAL at 6.6 s per attach, every run. Now the first
+        run projects the tree it was handed and stores the sidecar; the next
+        run takes the sidecar and projects nothing. At no threshold may it
+        stream the document off disk while the parsed tree is in hand.
+        """
+        monkeypatch.setenv("ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB", threshold_mib)
+        import abicheck.dumper_cache as dumper_cache
+
+        ast = AST_CASES["call_edge"]
+        counts = self._install(monkeypatch, tmp_path, ast)
+        try:
+            self._primary_clang_pass(tmp_path, ast)
+            first = self._graph_shape(self._attach(self._snapshot()))
+            assert counts == {"ast_reads": 0, "projections": 1, "streams": 0}
+            assert list((tmp_path / "cache").glob("*.projection.json")), (
+                "the memo-handoff run must store a sidecar, or the cache never warms"
+            )
+
+            self._primary_clang_pass(tmp_path, ast)
+            second = self._graph_shape(self._attach(self._snapshot()))
+            assert counts == {"ast_reads": 0, "projections": 1, "streams": 0}, (
+                "a warm clang-frontend run projected again"
+            )
+            assert second == first
+        finally:
+            dumper_cache._ast_memo_slot.set(None)
+
+    def test_a_memo_handoff_warm_hit_equals_a_disk_path_cold_run(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """Independent oracle: the graph from a sidecar written on the memo
+        path equals the graph a plain disk-path cold run builds."""
+        import abicheck.dumper_cache as dumper_cache
+
+        for name, ast in AST_CASES.items():
+            base = tmp_path / name
+            (base / "cache").mkdir(parents=True)
+            with monkeypatch.context() as mp:
+                self._install(mp, base, ast)
+                reference = self._graph_shape(self._attach(self._snapshot()))
+            with monkeypatch.context() as mp:
+                other = tmp_path / (name + "-memo")
+                (other / "cache").mkdir(parents=True)
+                self._install(mp, other, ast)
+                try:
+                    self._primary_clang_pass(other, ast)
+                    self._attach(self._snapshot())
+                    self._primary_clang_pass(other, ast)
+                    warm = self._graph_shape(self._attach(self._snapshot()))
+                finally:
+                    dumper_cache._ast_memo_slot.set(None)
+            assert warm == reference, name
+
     @pytest.mark.parametrize(
         ("threshold_mib", "expect_stream"),
         [("0", True), ("4096", False)],

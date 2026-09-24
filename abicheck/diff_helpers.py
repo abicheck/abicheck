@@ -35,6 +35,7 @@ new policy.
 
 from __future__ import annotations
 
+import functools
 import re
 from collections.abc import Callable, ItemsView, Iterable, Iterator, Mapping, ValuesView
 from typing import Any, Protocol, TypeVar, cast
@@ -534,20 +535,16 @@ def fact_same_producer_qualified(
     )
 
 
+@functools.lru_cache(maxsize=65536)
 def depth_aware_bare_name(qualified: str) -> str:
     """The innermost, fully-unqualified leaf of a ``::``-qualified name.
 
-    Splits only on a top-level ``"::"`` -- via
-    :func:`~abicheck.model.qualified_name_split.iter_top_level_chars`,
-    which tracks a bracket-KIND-aware stack over ``()``/``[]``/``<>`` and
-    quoted literals -- so ``"Wrapper<dep::Tag>"``'s own ``::`` isn't
-    mistaken for the outer boundary, and neither is one inside a non-type
-    template argument's own parenthesized/bracketed/quoted expression
-    (Codex review on PR #1041, several rounds). A small, local caller of
-    that shared primitive rather than a second copy of the splitting loop
-    itself: ``type_reachability_spelling._bare_type_name`` would be the
-    natural sibling, but that module imports ``diff_cxx_rules``, which
-    imports this one, so importing it here would add a real cycle."""
+    Splits only on a top-level ``"::"`` (via ``qualified_name_split.
+    iter_top_level_chars``'s bracket-kind/quote-aware stack), so
+    ``"Wrapper<dep::Tag>"``'s own ``::`` isn't the outer boundary (PR #1041).
+    Local rather than ``type_reachability_spelling._bare_type_name``, whose
+    import chain comes back here (a real cycle). Memoized: pure, and a
+    oneDAL compare made 4.2M calls over 1,682 distinct inputs."""
     last_split = 0
     for i, ch in iter_top_level_chars(qualified):
         if ch == ":" and qualified[i + 1 : i + 2] == ":":

@@ -106,7 +106,7 @@ def echo_reconciled(result: DiffResult, *, contract_evaluation: bool = False) ->
     n = result.reconciled_count
     click.echo(
         f"\nReconciled as context-free header-parse artifacts ({n} "
-        f"{'finding' if n == 1 else 'findings'}, --reconcile-build-context):",
+        f"{'finding' if n == 1 else 'findings'}, build-context reconciliation):",
         err=True,
     )
     for c in result.reconciled_changes:
