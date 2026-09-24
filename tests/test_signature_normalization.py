@@ -791,3 +791,38 @@ class TestDecayTopLevelArrayFastPath:
 
         for s in ("int", "const char *", "std::vector<int>", "void (*)(int)", ""):
             assert _decay_top_level_array(s) is s
+
+
+class TestCanonicalizeParamTypeMemoization:
+    """The top-level cache must be observationally identical to the uncached
+    body, including on repeated and nested (callback) spellings."""
+
+    def test_cached_equals_uncached_over_varied_spellings(self) -> None:
+        import itertools
+
+        from abicheck.model.signature_normalization import (
+            _canonicalize_param_type_uncached,
+            _canonicalize_top_level_param_type,
+            canonicalize_function_signature_param_type,
+        )
+
+        bases = ["int", "char", "std::vector<const int>", "(anonymous namespace)::Foo"]
+        decorations = [
+            "{b}",
+            "const {b}",
+            "{b} *",
+            "const {b} *",
+            "{b} * const",
+            "{b} [3]",
+            "const {b} [3][4]",
+            "void (*)(const {b})",
+            "void (C::* const)({b}) &&",
+        ]
+        spellings = [d.format(b=b) for b, d in itertools.product(bases, decorations)]
+        _canonicalize_top_level_param_type.cache_clear()
+        for _ in range(2):  # second pass is served from the cache
+            for s in spellings:
+                assert canonicalize_function_signature_param_type(s) == (
+                    _canonicalize_param_type_uncached(s, 0)
+                ), s
+        assert _canonicalize_top_level_param_type.cache_info().hits >= len(spellings)

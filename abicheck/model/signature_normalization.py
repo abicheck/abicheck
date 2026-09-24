@@ -39,6 +39,7 @@ states.
 
 from __future__ import annotations
 
+import functools
 import re
 
 from ..name_classification import canonicalize_type_name
@@ -663,6 +664,24 @@ def canonicalize_function_signature_param_type(name: str, *, _depth: int = 0) ->
     >>> canonicalize_function_signature_param_type("(anonymous namespace)::Foo *")
     '(anonymous namespace)::Foo *'
     """
+    if _depth == 0:
+        return _canonicalize_top_level_param_type(name)
+    return _canonicalize_param_type_uncached(name, _depth)
+
+
+@functools.lru_cache(maxsize=1 << 16)
+def _canonicalize_top_level_param_type(name: str) -> str:
+    """Memoized top-level entry point. The canonicalization is a pure
+    function of its input string, and real header surfaces repeat the same
+    parameter spellings across thousands of declarations, so each distinct
+    spelling is scanned once instead of once per occurrence. Nested calls
+    (``_depth > 0``) bypass the cache; they only run on a top-level miss.
+    """
+    return _canonicalize_param_type_uncached(name, 0)
+
+
+def _canonicalize_param_type_uncached(name: str, _depth: int) -> str:
+    """The uncached body of :func:`canonicalize_function_signature_param_type`."""
     if _depth > _MAX_PARAM_TYPE_NESTING_DEPTH:
         return name
     canonical = canonicalize_type_name(
