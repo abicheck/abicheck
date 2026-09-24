@@ -39,7 +39,9 @@ private ``ABICHECK_CACHE_DIR``: ``dump`` OLD, ``dump`` NEW, and ``compare``
 of the two stored snapshots. The parent samples parent RSS, process-tree
 RSS/PSS and cgroup peak with ``bench_release_memory._Sampler`` (four
 separate figures, never folded), and reads node/edge counts and raw/zstd
-sizes from the written snapshots. ``--tracemalloc`` adds one separate
+sizes from the written snapshots, plus -- in a separate child per stored
+snapshot -- the evidence-entity-model Phase 2 join timings and state counts
+(``exports``/``debug_type_of``, per side). ``--tracemalloc`` adds one separate
 allocation-attribution run per variant (never mixed with the timing runs).
 
 ``--old-lib``/``--new-lib`` may instead name two release *directories*
@@ -252,6 +254,62 @@ def _snapshot_stats(path: Path) -> dict[str, object]:
     }
 
 
+def _join_child(path: str) -> int:
+    """Child entry: time the evidence-entity-model Phase 2 joins over one
+    stored snapshot and print their per-side state counts as JSON. A checkout
+    that predates the joins prints ``{}``."""
+    try:
+        from abicheck.compare.debug_type_join import join_debug_types
+        from abicheck.compare.export_join import join_exports
+        from abicheck.model.graph_entity_identity import snapshot_identities
+    except ImportError:
+        print("{}")
+        return 0
+    from abicheck.serialization import load_snapshot
+
+    snap = load_snapshot(Path(path))
+    t0 = time.perf_counter()
+    ids = snapshot_identities(snap)
+    t1 = time.perf_counter()
+    exports = join_exports(snap, ids)
+    t2 = time.perf_counter()
+    debug = join_debug_types(snap, ids)
+    t3 = time.perf_counter()
+    print(
+        json.dumps(
+            {
+                "identities_seconds": round(t1 - t0, 3),
+                "exports": {
+                    "seconds": round(t2 - t1, 3),
+                    "complete": exports.complete,
+                    "states": exports.join.state_counts(),
+                },
+                "debug_type_of": {
+                    "seconds": round(t3 - t2, 3),
+                    "complete": debug.complete,
+                    "odr_observed": debug.odr_observed,
+                    "states": debug.join.state_counts(),
+                },
+            }
+        )
+    )
+    return 0
+
+
+def _join_stats(path: Path) -> dict[str, object]:
+    """:func:`_join_child`'s answer for *path*, from a fresh interpreter so
+    loading the snapshot never inflates this parent's own memory."""
+    proc = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve()), "--_joins", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return {"error": proc.stderr[-2000:]}
+    return json.loads(proc.stdout.strip().splitlines()[-1] or "{}")
+
+
 def _dump_argv(lib: str, header: str, includes: list[str], out: Path) -> list[str]:
     argv = ["dump", lib, "-H", header]
     for inc in includes:
@@ -425,6 +483,8 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == ["--_child"]:
         variant, rest = argv[1], argv[3:]
         return _child(variant, rest)
+    if argv[:1] == ["--_joins"]:
+        return _join_child(argv[1])
 
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--old-lib", required=True)
@@ -507,7 +567,10 @@ def main(argv: list[str] | None = None) -> int:
                     print(row["stderr_tail"], file=sys.stderr)
             if rep == 0:
                 results["snapshots"][variant] = {  # type: ignore[index]
-                    str(path.relative_to(wd)): _snapshot_stats(path)
+                    str(path.relative_to(wd)): {
+                        **_snapshot_stats(path),
+                        "joins": _join_stats(path),
+                    }
                     for path in (
                         sorted((wd / "old").glob("*.json"))
                         + sorted((wd / "new").glob("*.json"))
