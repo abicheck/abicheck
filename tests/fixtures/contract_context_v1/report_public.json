@@ -1,0 +1,1571 @@
+{
+  "report_schema_version": "5.3",
+  "library": "libdemo.so.1",
+  "old_version": "1",
+  "new_version": "2",
+  "verdict": "BREAKING",
+  "old_file": null,
+  "new_file": null,
+  "summary": {
+    "breaking": 3,
+    "source_breaks": 0,
+    "risk_changes": 0,
+    "compatible_additions": 1,
+    "quality_issues": 0,
+    "total_changes": 6,
+    "binary_compatibility_pct": 57.1,
+    "affected_pct": 42.9,
+    "change_inventory": {
+      "compatibility_changes": 6,
+      "compatibility_breaking": 3,
+      "compatibility_source_breaks": 0,
+      "compatibility_risk": 0,
+      "compatibility_compatible": 1,
+      "hygiene_introduced": 0,
+      "hygiene_resolved": 0,
+      "hygiene_persistent": 0,
+      "hygiene_not_evaluated": 0
+    }
+  },
+  "release_recommendation": {
+    "version_bump": "major",
+    "possible_impact": "major",
+    "soname_action": "bump_required",
+    "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. Bump the SONAME (major) so old binaries do not silently load an incompatible library.",
+    "state": "actionable",
+    "policy_acceptance": null
+  },
+  "policy": "strict_abi",
+  "changes": [
+    {
+      "kind": "type_size_changed",
+      "symbol": "Widget",
+      "description": "Size changed: Widget (64 \u2192 128 bits)",
+      "old_value": "64",
+      "new_value": "128",
+      "review_evidence": null,
+      "severity": "breaking",
+      "operation": "modified",
+      "entity": "type",
+      "finding_id": "19f0820b65d618be",
+      "canonical_finding_id": "898731d0102ea528",
+      "recommended_action": "recompile_and_relink_required",
+      "evidence_status": "artifact_proven",
+      "impact": "Old code allocates or copies the type with the old size; heap/stack corruption, out-of-bounds access.",
+      "affected_symbols": [
+        "_ZN2ns3apiEPNS_6WidgetE",
+        "ns::api"
+      ],
+      "reachability_state": "unknown",
+      "contract_relevance": "IN_CONTRACT",
+      "contract_reason_code": "public_root_membership",
+      "contract_assurance": "complete",
+      "compatibility_evaluation_status": "EVALUATED",
+      "compatibility_decision": "BREAKING",
+      "gate_contribution": 4,
+      "contract_evidence_refs": [
+        "public_header:old",
+        "public_header:new"
+      ]
+    },
+    {
+      "kind": "type_size_changed",
+      "symbol": "Dup",
+      "description": "Size changed: Dup (64 \u2192 128 bits)",
+      "old_value": "64",
+      "new_value": "128",
+      "review_evidence": null,
+      "severity": "breaking",
+      "operation": "modified",
+      "entity": "type",
+      "finding_id": "4cd8b4d54af34ba1",
+      "canonical_finding_id": "250be70f18e2947a",
+      "recommended_action": "recompile_and_relink_required",
+      "evidence_status": "artifact_proven",
+      "impact": "Old code allocates or copies the type with the old size; heap/stack corruption, out-of-bounds access.",
+      "affected_symbols": [
+        "foo"
+      ],
+      "reachability_state": "unknown",
+      "contract_relevance": "UNKNOWN_UNRESOLVED",
+      "contract_reason_code": "required_evidence_incomplete",
+      "contract_assurance": "partial",
+      "compatibility_evaluation_status": "NOT_EVALUATED",
+      "compatibility_decision": null,
+      "gate_contribution": 0,
+      "contract_evidence_refs": [
+        "public_header:old"
+      ]
+    },
+    {
+      "kind": "type_size_changed",
+      "symbol": "Tag",
+      "description": "Size changed: Tag (64 \u2192 128 bits)",
+      "old_value": "64",
+      "new_value": "128",
+      "review_evidence": null,
+      "severity": "breaking",
+      "operation": "modified",
+      "entity": "type",
+      "finding_id": "d00db3bed61b0008",
+      "canonical_finding_id": "72bc9b8fd65d3f66",
+      "recommended_action": "recompile_and_relink_required",
+      "evidence_status": "artifact_proven",
+      "impact": "Old code allocates or copies the type with the old size; heap/stack corruption, out-of-bounds access.",
+      "affected_symbols": [
+        "use_tag"
+      ],
+      "reachability_state": "unknown",
+      "contract_relevance": "IN_CONTRACT",
+      "contract_reason_code": "public_root_membership",
+      "contract_assurance": "complete",
+      "compatibility_evaluation_status": "EVALUATED",
+      "compatibility_decision": "BREAKING",
+      "gate_contribution": 4,
+      "contract_evidence_refs": [
+        "public_header:old",
+        "public_header:new"
+      ]
+    },
+    {
+      "kind": "enum_member_added",
+      "symbol": "Mode::B",
+      "description": "Enum member added: Mode::B",
+      "old_value": null,
+      "new_value": "1",
+      "review_evidence": null,
+      "severity": "compatible",
+      "operation": "added",
+      "entity": "enum",
+      "finding_id": "8df4d5c60d7e5807",
+      "canonical_finding_id": "733465a0f21c2f2a",
+      "recommended_action": "no_action_required",
+      "reviewer_action": "review_exhaustive_switches",
+      "impact": "New enumerator may shift subsequent values in non-fixed enums; switch defaults may miss the new case.",
+      "reachability_state": "unknown",
+      "contract_relevance": "IN_CONTRACT",
+      "contract_reason_code": "public_root_membership",
+      "contract_assurance": "complete",
+      "compatibility_evaluation_status": "EVALUATED",
+      "compatibility_decision": "COMPATIBLE",
+      "gate_contribution": 0,
+      "contract_evidence_refs": [
+        "public_header:new",
+        "public_header:old"
+      ]
+    },
+    {
+      "kind": "func_removed",
+      "symbol": "gone",
+      "description": "Public function removed: gone",
+      "old_value": "gone",
+      "new_value": null,
+      "review_evidence": null,
+      "severity": "breaking",
+      "surface_facts": {
+        "declared_in_headers": "unknown",
+        "in_public_contract": "true",
+        "binary_exported": "true"
+      },
+      "operation": "removed",
+      "entity": "function",
+      "finding_id": "653fecb66e043f1b",
+      "canonical_finding_id": "16ddb64801c52693",
+      "recommended_action": "recompile_and_relink_required",
+      "evidence_status": "artifact_proven",
+      "impact": "Old binaries call a symbol that no longer exists; dynamic linker will refuse to load or crash at call site.",
+      "symbol_binding": "global",
+      "reachability_state": "unknown",
+      "contract_relevance": "IN_CONTRACT",
+      "contract_reason_code": "public_root_membership",
+      "contract_assurance": "complete",
+      "compatibility_evaluation_status": "EVALUATED",
+      "compatibility_decision": "BREAKING",
+      "gate_contribution": 4,
+      "contract_evidence_refs": [
+        "public_header:old",
+        "public_header:new"
+      ]
+    },
+    {
+      "kind": "public_surface_shrank",
+      "symbol": "<surface>",
+      "description": "public surface shrank: 12 \u2192 11 declarations (-1)",
+      "old_value": "12",
+      "new_value": "11",
+      "review_evidence": null,
+      "severity": "compatible",
+      "operation": "modified",
+      "entity": "analysis",
+      "finding_id": "a682680d7c900964",
+      "canonical_finding_id": "5db2477e20dab44c",
+      "recommended_action": "review_recommended",
+      "impact": "The aggregate count of public declarations decreased between versions. Informational roll-up only \u2014 individual removals are reported (and may be breaking) on their own. Computed unconditionally as of ADR-027 Phase 5's later default flip; --surface-metrics is accepted for compatibility but no longer changes whether this finding is emitted.",
+      "reachability_state": "unknown",
+      "contract_relevance": "UNKNOWN_UNRESOLVED",
+      "contract_reason_code": "required_evidence_incomplete",
+      "contract_assurance": "partial",
+      "compatibility_evaluation_status": "NOT_EVALUATED",
+      "compatibility_decision": null,
+      "gate_contribution": 0,
+      "contract_evidence_refs": [
+        "public_header:old"
+      ]
+    }
+  ],
+  "suppression": {
+    "file_provided": false,
+    "suppressed_count": 0,
+    "suppressed_changes": []
+  },
+  "disposition_audit": {
+    "detected_total": 8,
+    "effective_total": 3,
+    "counts": {
+      "gating": 3,
+      "non_gating": 1,
+      "suppressed": 0,
+      "out_of_contract": 2,
+      "unresolved_relevance": 2,
+      "deduplicated": 0
+    },
+    "rules": [],
+    "not_evaluated_detectors": [
+      {
+        "name": "fingerprint_renames",
+        "reason": "requires ELF metadata in elf_only_mode"
+      },
+      {
+        "name": "kabi",
+        "reason": "missing Module.symvers (kABI) metadata"
+      },
+      {
+        "name": "pe",
+        "reason": "missing PE metadata"
+      },
+      {
+        "name": "macho",
+        "reason": "missing Mach-O metadata"
+      },
+      {
+        "name": "dwarf",
+        "reason": "no DWARF debug info on either side"
+      },
+      {
+        "name": "python_ext",
+        "reason": "missing CPython extension metadata"
+      },
+      {
+        "name": "python_api",
+        "reason": "missing Python API surface (no .pyi stub recovered)"
+      },
+      {
+        "name": "sycl",
+        "reason": "missing SYCL metadata"
+      },
+      {
+        "name": "advanced_dwarf",
+        "reason": "missing DWARF advanced metadata"
+      }
+    ],
+    "policy_overlays": 0,
+    "reclassified_total": 0,
+    "reclassifications": [],
+    "scope_reasons": [
+      {
+        "reason_code": "required_evidence_incomplete",
+        "matched_count": 2
+      },
+      {
+        "reason_code": "terminal_authoritative_exclusion",
+        "matched_count": 2
+      }
+    ],
+    "acknowledged_total": 0,
+    "acknowledgments": [],
+    "unacknowledged_additions_review": null
+  },
+  "surface_changes": {
+    "total": 5,
+    "additions": [
+      {
+        "kind": "enum_member_added",
+        "symbol": "Mode::B",
+        "description": "Enum member added: Mode::B",
+        "verdict": "COMPATIBLE",
+        "category": "addition",
+        "old_declaration": null,
+        "new_declaration": "1",
+        "source_location": null
+      }
+    ],
+    "removals": [
+      {
+        "kind": "func_removed",
+        "symbol": "gone",
+        "description": "Public function removed: gone",
+        "verdict": "BREAKING",
+        "category": "abi_breaking",
+        "old_declaration": "gone",
+        "new_declaration": null,
+        "source_location": null
+      }
+    ],
+    "modifications": [
+      {
+        "kind": "type_size_changed",
+        "symbol": "Widget",
+        "description": "Size changed: Widget (64 \u2192 128 bits)",
+        "verdict": "BREAKING",
+        "category": "abi_breaking",
+        "old_declaration": "64",
+        "new_declaration": "128",
+        "source_location": null
+      },
+      {
+        "kind": "type_size_changed",
+        "symbol": "Dup",
+        "description": "Size changed: Dup (64 \u2192 128 bits)",
+        "verdict": "BREAKING",
+        "category": "abi_breaking",
+        "old_declaration": "64",
+        "new_declaration": "128",
+        "source_location": null
+      },
+      {
+        "kind": "type_size_changed",
+        "symbol": "Tag",
+        "description": "Size changed: Tag (64 \u2192 128 bits)",
+        "verdict": "BREAKING",
+        "category": "abi_breaking",
+        "old_declaration": "64",
+        "new_declaration": "128",
+        "source_location": null
+      }
+    ]
+  },
+  "review_groups": [
+    {
+      "group_id": "79b7bea9b2ea5429",
+      "library": null,
+      "entity": "type",
+      "operation": "modified",
+      "display_name": "Dup",
+      "transition": "modified",
+      "member_finding_ids": [
+        "4cd8b4d54af34ba1"
+      ],
+      "member_kinds": [
+        "type_size_changed"
+      ],
+      "exact_symbols": [
+        "Dup"
+      ],
+      "evidence": [],
+      "gating_findings": 1,
+      "consequence": "Size changed: Dup (64 \u2192 128 bits)",
+      "action": "Review the detailed finding and its evidence."
+    },
+    {
+      "group_id": "a6cc90788297b682",
+      "library": null,
+      "entity": "type",
+      "operation": "modified",
+      "display_name": "Tag",
+      "transition": "modified",
+      "member_finding_ids": [
+        "d00db3bed61b0008"
+      ],
+      "member_kinds": [
+        "type_size_changed"
+      ],
+      "exact_symbols": [
+        "Tag"
+      ],
+      "evidence": [],
+      "gating_findings": 1,
+      "consequence": "Size changed: Tag (64 \u2192 128 bits)",
+      "action": "Review the detailed finding and its evidence."
+    },
+    {
+      "group_id": "53cdefe3e000d237",
+      "library": null,
+      "entity": "function",
+      "operation": "removed",
+      "display_name": "gone",
+      "transition": "removed",
+      "member_finding_ids": [
+        "653fecb66e043f1b"
+      ],
+      "member_kinds": [
+        "func_removed"
+      ],
+      "exact_symbols": [
+        "gone"
+      ],
+      "evidence": [],
+      "gating_findings": 1,
+      "consequence": "Public function removed: gone",
+      "action": "Review the detailed finding and its evidence."
+    },
+    {
+      "group_id": "0bf48ffd0bc58e2e",
+      "library": null,
+      "entity": "type",
+      "operation": "modified",
+      "display_name": "ns::Widget",
+      "transition": "modified",
+      "member_finding_ids": [
+        "19f0820b65d618be"
+      ],
+      "member_kinds": [
+        "type_size_changed"
+      ],
+      "exact_symbols": [
+        "Widget"
+      ],
+      "evidence": [],
+      "gating_findings": 1,
+      "consequence": "Size changed: Widget (64 \u2192 128 bits)",
+      "action": "Review the detailed finding and its evidence."
+    },
+    {
+      "group_id": "66772458bca9767a",
+      "library": null,
+      "entity": "analysis",
+      "operation": "modified",
+      "display_name": "<surface>",
+      "transition": "modified",
+      "member_finding_ids": [
+        "a682680d7c900964"
+      ],
+      "member_kinds": [
+        "public_surface_shrank"
+      ],
+      "exact_symbols": [
+        "<surface>"
+      ],
+      "evidence": [],
+      "gating_findings": 0,
+      "consequence": "public surface shrank: 12 \u2192 11 declarations (-1)",
+      "action": "Review the detailed finding and its evidence."
+    },
+    {
+      "group_id": "52bf35e5f62798ac",
+      "library": null,
+      "entity": "enum",
+      "operation": "added",
+      "display_name": "Mode::B",
+      "transition": "added",
+      "member_finding_ids": [
+        "8df4d5c60d7e5807"
+      ],
+      "member_kinds": [
+        "enum_member_added"
+      ],
+      "exact_symbols": [
+        "Mode::B"
+      ],
+      "evidence": [],
+      "gating_findings": 0,
+      "consequence": "Enum member added: Mode::B",
+      "action": "Review the detailed finding and its evidence."
+    }
+  ],
+  "result_counts": {
+    "raw_detected": 8,
+    "retained": 6,
+    "gating": 3,
+    "non_gating": 3,
+    "review_groups": 6,
+    "gating_review_groups": 4,
+    "public_additions": 1,
+    "public_removals": 1,
+    "public_modifications": 3,
+    "detected_public_additions": 1,
+    "detected_public_removals": 1,
+    "detected_public_modifications": 5,
+    "runtime_dependency": 0,
+    "hygiene_introduced": 0,
+    "hygiene_resolved": 0,
+    "hygiene_persistent": 0,
+    "hygiene_not_evaluated": 0
+  },
+  "finding_evolution": {
+    "counts": {
+      "introduced": 0,
+      "resolved": 0,
+      "persistent": 0,
+      "not_evaluated": 6
+    },
+    "resolved": []
+  },
+  "pattern_preprocessor_scan": {
+    "version": 1,
+    "pattern": {
+      "old": {
+        "version": 1,
+        "files_scanned": 0,
+        "files_skipped": 0,
+        "sufficient": false,
+        "inputs": {
+          "licence": {
+            "permitted": false,
+            "origin": "stored_snapshot",
+            "reason": "stored snapshot: recorded source paths are provenance, not a licence to read the current filesystem for historical facts"
+          },
+          "sufficient": false,
+          "insufficiency_reason": "stored snapshot: recorded source paths are provenance, not a licence to read the current filesystem for historical facts",
+          "counts": {
+            "selected": 0,
+            "scanned": 0,
+            "missing": 0,
+            "unreadable": 0,
+            "unsupported": 0,
+            "excluded": 0,
+            "not_licensed": 0
+          },
+          "gaps": []
+        },
+        "facts": [],
+        "escalation_triggers": [],
+        "counts_by_kind": {}
+      },
+      "new": {
+        "version": 1,
+        "files_scanned": 0,
+        "files_skipped": 0,
+        "sufficient": false,
+        "inputs": {
+          "licence": {
+            "permitted": false,
+            "origin": "stored_snapshot",
+            "reason": "stored snapshot: recorded source paths are provenance, not a licence to read the current filesystem for historical facts"
+          },
+          "sufficient": false,
+          "insufficiency_reason": "stored snapshot: recorded source paths are provenance, not a licence to read the current filesystem for historical facts",
+          "counts": {
+            "selected": 0,
+            "scanned": 0,
+            "missing": 0,
+            "unreadable": 0,
+            "unsupported": 0,
+            "excluded": 0,
+            "not_licensed": 0
+          },
+          "gaps": []
+        },
+        "facts": [],
+        "escalation_triggers": [],
+        "counts_by_kind": {}
+      },
+      "escalation_evolution": {}
+    },
+    "preprocessor": {
+      "old": {
+        "version": 3,
+        "ran": false,
+        "skipped_reason": "S2 preprocessor pre-scan not possible: pre-captured build evidence: the pack's recorded compile-unit paths are provenance, not a licence to read the current filesystem for historical facts",
+        "tus_scanned": 0,
+        "headers_scanned": 0,
+        "attempted": 0,
+        "succeeded": 0,
+        "probes_truncated": 0,
+        "family_attempted": {},
+        "family_succeeded": {},
+        "family_truncated": {},
+        "all_failed": false,
+        "divergences": [],
+        "leaks": []
+      },
+      "new": {
+        "version": 3,
+        "ran": false,
+        "skipped_reason": "S2 preprocessor pre-scan not possible: pre-captured build evidence: the pack's recorded compile-unit paths are provenance, not a licence to read the current filesystem for historical facts",
+        "tus_scanned": 0,
+        "headers_scanned": 0,
+        "attempted": 0,
+        "succeeded": 0,
+        "probes_truncated": 0,
+        "family_attempted": {},
+        "family_succeeded": {},
+        "family_truncated": {},
+        "all_failed": false,
+        "divergences": [],
+        "leaks": []
+      },
+      "macro_divergence_evolution": {},
+      "header_leak_evolution": {}
+    },
+    "coverage": {
+      "pattern_escalation": {
+        "old": {
+          "established": false,
+          "reason": "stored snapshot: recorded source paths are provenance, not a licence to read the current filesystem for historical facts"
+        },
+        "new": {
+          "established": false,
+          "reason": "stored snapshot: recorded source paths are provenance, not a licence to read the current filesystem for historical facts"
+        }
+      },
+      "macro_divergence": {
+        "old": {
+          "established": false,
+          "reason": "S2 preprocessor pre-scan not possible: pre-captured build evidence: the pack's recorded compile-unit paths are provenance, not a licence to read the current filesystem for historical facts"
+        },
+        "new": {
+          "established": false,
+          "reason": "S2 preprocessor pre-scan not possible: pre-captured build evidence: the pack's recorded compile-unit paths are provenance, not a licence to read the current filesystem for historical facts"
+        }
+      },
+      "header_leak": {
+        "old": {
+          "established": false,
+          "reason": "S2 preprocessor pre-scan not possible: pre-captured build evidence: the pack's recorded compile-unit paths are provenance, not a licence to read the current filesystem for historical facts"
+        },
+        "new": {
+          "established": false,
+          "reason": "S2 preprocessor pre-scan not possible: pre-captured build evidence: the pack's recorded compile-unit paths are provenance, not a licence to read the current filesystem for historical facts"
+        }
+      }
+    }
+  },
+  "surface_scope": {
+    "enabled": true,
+    "confidence": "high",
+    "notes": [],
+    "out_of_surface_count": 2,
+    "out_of_surface_changes": [
+      {
+        "kind": "type_size_changed",
+        "symbol": "Secret",
+        "description": "Size changed: Secret (64 \u2192 128 bits)",
+        "source_location": null,
+        "reason": "private-header",
+        "finding_id": "25b24ff7139a62dd",
+        "canonical_finding_id": "4a568d4b2c7f3a7e",
+        "contract_relevance": "PROVEN_OUT_OF_CONTRACT",
+        "contract_reason_code": "terminal_authoritative_exclusion",
+        "contract_assurance": "complete",
+        "compatibility_evaluation_status": "NOT_EVALUATED",
+        "compatibility_decision": null,
+        "gate_contribution": 0,
+        "contract_evidence_refs": [
+          "public_header:old"
+        ]
+      },
+      {
+        "kind": "type_size_changed",
+        "symbol": "stat",
+        "description": "Size changed: stat (64 \u2192 128 bits)",
+        "source_location": null,
+        "reason": "non-public-type",
+        "finding_id": "6a9b7d92b6b95608",
+        "canonical_finding_id": "a08fe30902eedb51",
+        "contract_relevance": "PROVEN_OUT_OF_CONTRACT",
+        "contract_reason_code": "terminal_authoritative_exclusion",
+        "contract_assurance": "complete",
+        "compatibility_evaluation_status": "NOT_EVALUATED",
+        "compatibility_decision": null,
+        "gate_contribution": 0,
+        "contract_evidence_refs": [
+          "public_header:old"
+        ]
+      }
+    ]
+  },
+  "analysis_assurance": {
+    "schema_version": "1.2",
+    "status": "complete",
+    "requested_depth": "binary",
+    "requested_depth_source": "implicit",
+    "effective_depth": "binary",
+    "depth_satisfied": true,
+    "target_accounting": {
+      "requested": null,
+      "resolved": null,
+      "transitive_count": null
+    },
+    "translation_units": {
+      "selected": null,
+      "parsed": null,
+      "failed": null,
+      "skipped": null
+    },
+    "export_accounting": {
+      "total": null,
+      "source_linked": null,
+      "internal": null,
+      "unaccounted": null
+    },
+    "l0_context_status": "clean",
+    "header_context_status": "not_evaluated",
+    "dwarf_context_status": "not_evaluated",
+    "l3_context_status": "not_evaluated",
+    "schema_staleness_status": "clean",
+    "fact_set_comparability": "not_applicable",
+    "graph_completeness": "not_collected",
+    "layout_unverified_detectors": [
+      "dwarf",
+      "advanced_dwarf",
+      "layout_descriptor"
+    ],
+    "notes": [
+      "layout unverified: dwarf, advanced_dwarf, layout_descriptor"
+    ]
+  },
+  "analysis_assurance_exit_contribution": 0,
+  "exit": {
+    "code": 4,
+    "reasons": [
+      "compatibility_gate"
+    ],
+    "compatibility_contribution": 4,
+    "contract_coverage_contribution": 1,
+    "analysis_assurance_contribution": 0,
+    "crosscheck_promotion_contribution": 0,
+    "operational_error_contribution": 0,
+    "evidence_contract_error_contribution": 0,
+    "budget_overflow_contribution": 0,
+    "not_comparable_contribution": 0,
+    "removed_required_library_contribution": 0,
+    "incomplete_scope_contribution": 0,
+    "no_comparison_completed_contribution": 0,
+    "loadability_contribution": 0
+  },
+  "annotations": [
+    {
+      "level": "error",
+      "annotation": "::error title=ABI Break%3A type_size_changed::Size changed: Widget (64 \u2192 128 bits)",
+      "always_visible": true
+    },
+    {
+      "level": "error",
+      "annotation": "::error title=ABI Break%3A type_size_changed::Size changed: Tag (64 \u2192 128 bits)",
+      "always_visible": true
+    },
+    {
+      "level": "error",
+      "annotation": "::error title=ABI Break%3A func_removed::Public function removed: gone",
+      "always_visible": true
+    },
+    {
+      "level": "notice",
+      "annotation": "::notice title=Not evaluated (contract)%3A type_size_changed::Size changed: Dup (64 \u2192 128 bits)",
+      "always_visible": true
+    },
+    {
+      "level": "notice",
+      "annotation": "::notice title=ABI Addition%3A enum_member_added::Enum member added: Mode::B",
+      "always_visible": false
+    },
+    {
+      "level": "notice",
+      "annotation": "::notice title=Not evaluated (contract)%3A public_surface_shrank::public surface shrank: 12 \u2192 11 declarations (-1)",
+      "always_visible": true
+    }
+  ],
+  "effective_config_digest": "sha256:cee13d405440c8583a8e74adfaa7773b4e1bf6126e6ace677dd325f4ec70b3c6",
+  "effective_config_fields": {
+    "_tier": "contract",
+    "policy.base": "strict_abi@1:8c2f8c1d668ffd36c134c5829832cebaca70e6a53d9073867775a7f5db5adf71",
+    "policy.overrides": "",
+    "policy.reclassify": "[]",
+    "policy.frozen_namespaces": "[]",
+    "policy.pattern_verdicts": "True",
+    "policy.collapse_versioned_symbols": "False",
+    "policy.surface_metrics": "True",
+    "policy.env_matrix": "",
+    "policy.reconcile_build_context": "True",
+    "surface.internal_namespaces": "[]",
+    "surface.experimental_namespaces": "[]",
+    "surface.explicit_scope": "",
+    "surface.exclude_headers": "",
+    "surface.scope_to_public_surface": "True",
+    "surface.scope_to_public_surface_requested": "True",
+    "contract.mode": "public",
+    "contract.unresolved": "not_checkable",
+    "contract.overlays": "[]",
+    "gate.exit_code_scheme": "legacy",
+    "gate.require_complete_analysis": "False",
+    "gate.scope": "",
+    "gate.severity.abi_breaking": "",
+    "gate.severity.potential_breaking": "",
+    "gate.severity.quality_issues": "",
+    "gate.severity.addition": "",
+    "gate.on_incomplete_scope": "",
+    "gate.fail_on_removed_library": "",
+    "assurance.require_evidence": "True",
+    "suppressions": "",
+    "packs": "[]"
+  },
+  "contract_context": {
+    "contract_evidence": {
+      "schema_version": 1,
+      "identity_algorithm_version": 2,
+      "providers": [
+        {
+          "record": {
+            "id": "export_table:new",
+            "provider": "export_table",
+            "side": "new",
+            "domain_kind": "exports",
+            "status": "available",
+            "completeness": "partial",
+            "requested_scope": [
+              "export_table"
+            ],
+            "searched_scope": [
+              "export_table"
+            ],
+            "identity_coverage": "partial",
+            "configuration_coverage": "not_started",
+            "ambiguous_identities": [
+              "Dup",
+              "Tag",
+              "stat"
+            ],
+            "entity_class": "declaration",
+            "domain_identity": "libdemo.so.1@2",
+            "reason_code": "unmatched_exports",
+            "input_identity": {
+              "sha256": "7a618636f0a5e5f6cbc35d43226269f55adecad1c9a5c147cb00ca0237c83770",
+              "path": "libdemo.so.1"
+            }
+          },
+          "declarations": [
+            "decl:_ZN2ns3apiEPNS_6WidgetE",
+            "decl:foo",
+            "decl:g_count",
+            "decl:mode_of",
+            "decl:use_tag"
+          ],
+          "manifests": [
+            "elf"
+          ],
+          "type_graph": {
+            "nodes": [],
+            "edges": []
+          }
+        },
+        {
+          "record": {
+            "id": "public_header:new",
+            "provider": "public_header",
+            "side": "new",
+            "domain_kind": "public_headers",
+            "status": "available",
+            "completeness": "complete",
+            "requested_scope": [
+              "declarations",
+              "types"
+            ],
+            "searched_scope": [
+              "declarations",
+              "types"
+            ],
+            "identity_coverage": "partial",
+            "configuration_coverage": "not_started",
+            "ambiguous_identities": [
+              "Dup"
+            ],
+            "entity_class": "declaration",
+            "domain_identity": "libdemo.so.1@2",
+            "input_identity": {
+              "sha256": "7292771c607602cea4ba732e2ef63bd20a27512caa52f3c811f29cdc9568aa8e",
+              "path": "libdemo.so.1"
+            }
+          },
+          "declarations": [
+            "decl:_ZN2ns3apiEPNS_6WidgetE",
+            "decl:foo",
+            "decl:g_count",
+            "decl:mode_of",
+            "decl:over()->int",
+            "decl:use_tag"
+          ],
+          "manifests": [],
+          "type_graph": {
+            "nodes": [
+              "alias:Mode",
+              "alias:Widget",
+              "alias:api",
+              "alias:foo",
+              "alias:ns::api",
+              "alias:ns::foo",
+              "alias:over",
+              "decl:_ZN2ns3apiEPNS_6WidgetE",
+              "decl:_ZN2ns3fooEv",
+              "decl:foo",
+              "decl:g_count",
+              "decl:mode_of",
+              "decl:over()->int",
+              "decl:over(Secret *)->int",
+              "decl:use_tag",
+              "enum:ns::Mode",
+              "record:Dup",
+              "record:Secret",
+              "record:Tag",
+              "record:ns::Widget",
+              "record:stat",
+              "typedef:Tag",
+              "typedef:stat"
+            ],
+            "edges": [
+              [
+                "alias:Mode",
+                "enum:ns::Mode"
+              ],
+              [
+                "alias:Widget",
+                "record:ns::Widget"
+              ],
+              [
+                "alias:api",
+                "decl:_ZN2ns3apiEPNS_6WidgetE"
+              ],
+              [
+                "alias:foo",
+                "decl:_ZN2ns3fooEv"
+              ],
+              [
+                "alias:ns::api",
+                "decl:_ZN2ns3apiEPNS_6WidgetE"
+              ],
+              [
+                "alias:ns::foo",
+                "decl:_ZN2ns3fooEv"
+              ],
+              [
+                "alias:over",
+                "decl:over()->int"
+              ],
+              [
+                "alias:over",
+                "decl:over(Secret *)->int"
+              ],
+              [
+                "decl:_ZN2ns3apiEPNS_6WidgetE",
+                "record:ns::Widget"
+              ],
+              [
+                "decl:_ZN2ns3fooEv",
+                "record:stat"
+              ],
+              [
+                "decl:_ZN2ns3fooEv",
+                "typedef:stat"
+              ],
+              [
+                "decl:foo",
+                "record:Dup"
+              ],
+              [
+                "decl:mode_of",
+                "enum:ns::Mode"
+              ],
+              [
+                "decl:over(Secret *)->int",
+                "record:Secret"
+              ],
+              [
+                "decl:use_tag",
+                "record:Tag"
+              ],
+              [
+                "decl:use_tag",
+                "typedef:Tag"
+              ],
+              [
+                "typedef:Tag",
+                "record:Tag"
+              ],
+              [
+                "typedef:Tag",
+                "typedef:Tag"
+              ]
+            ]
+          }
+        },
+        {
+          "record": {
+            "id": "export_table:old",
+            "provider": "export_table",
+            "side": "old",
+            "domain_kind": "exports",
+            "status": "available",
+            "completeness": "complete",
+            "requested_scope": [
+              "export_table"
+            ],
+            "searched_scope": [
+              "export_table"
+            ],
+            "identity_coverage": "partial",
+            "configuration_coverage": "not_started",
+            "ambiguous_identities": [
+              "Dup",
+              "Tag",
+              "stat"
+            ],
+            "entity_class": "declaration",
+            "domain_identity": "libdemo.so.1@1",
+            "input_identity": {
+              "sha256": "0cc3fa4556b18f8ebc7bc25916744a2b59fc4371522c45f62c01069b5f5006b5",
+              "path": "libdemo.so.1"
+            }
+          },
+          "declarations": [
+            "decl:_ZN2ns3apiEPNS_6WidgetE",
+            "decl:foo",
+            "decl:g_count",
+            "decl:gone",
+            "decl:mode_of",
+            "decl:use_tag"
+          ],
+          "manifests": [
+            "elf"
+          ],
+          "type_graph": {
+            "nodes": [],
+            "edges": []
+          }
+        },
+        {
+          "record": {
+            "id": "public_header:old",
+            "provider": "public_header",
+            "side": "old",
+            "domain_kind": "public_headers",
+            "status": "available",
+            "completeness": "complete",
+            "requested_scope": [
+              "declarations",
+              "types"
+            ],
+            "searched_scope": [
+              "declarations",
+              "types"
+            ],
+            "identity_coverage": "partial",
+            "configuration_coverage": "not_started",
+            "ambiguous_identities": [
+              "Dup"
+            ],
+            "entity_class": "declaration",
+            "domain_identity": "libdemo.so.1@1",
+            "input_identity": {
+              "sha256": "6396c5dd79942fbc1b655e1dd304d8738b59143a785b76b312f081e0ab6b6e00",
+              "path": "libdemo.so.1"
+            }
+          },
+          "declarations": [
+            "decl:_ZN2ns3apiEPNS_6WidgetE",
+            "decl:foo",
+            "decl:g_count",
+            "decl:gone",
+            "decl:mode_of",
+            "decl:over()->int",
+            "decl:use_tag"
+          ],
+          "manifests": [],
+          "type_graph": {
+            "nodes": [
+              "alias:Mode",
+              "alias:Widget",
+              "alias:api",
+              "alias:foo",
+              "alias:ns::api",
+              "alias:ns::foo",
+              "alias:over",
+              "decl:_ZN2ns3apiEPNS_6WidgetE",
+              "decl:_ZN2ns3fooEv",
+              "decl:foo",
+              "decl:g_count",
+              "decl:gone",
+              "decl:mode_of",
+              "decl:over()->int",
+              "decl:over(Secret *)->int",
+              "decl:use_tag",
+              "enum:ns::Mode",
+              "record:Dup",
+              "record:Secret",
+              "record:Tag",
+              "record:ns::Widget",
+              "record:stat",
+              "typedef:Tag",
+              "typedef:stat"
+            ],
+            "edges": [
+              [
+                "alias:Mode",
+                "enum:ns::Mode"
+              ],
+              [
+                "alias:Widget",
+                "record:ns::Widget"
+              ],
+              [
+                "alias:api",
+                "decl:_ZN2ns3apiEPNS_6WidgetE"
+              ],
+              [
+                "alias:foo",
+                "decl:_ZN2ns3fooEv"
+              ],
+              [
+                "alias:ns::api",
+                "decl:_ZN2ns3apiEPNS_6WidgetE"
+              ],
+              [
+                "alias:ns::foo",
+                "decl:_ZN2ns3fooEv"
+              ],
+              [
+                "alias:over",
+                "decl:over()->int"
+              ],
+              [
+                "alias:over",
+                "decl:over(Secret *)->int"
+              ],
+              [
+                "decl:_ZN2ns3apiEPNS_6WidgetE",
+                "record:ns::Widget"
+              ],
+              [
+                "decl:_ZN2ns3fooEv",
+                "record:stat"
+              ],
+              [
+                "decl:_ZN2ns3fooEv",
+                "typedef:stat"
+              ],
+              [
+                "decl:foo",
+                "record:Dup"
+              ],
+              [
+                "decl:mode_of",
+                "enum:ns::Mode"
+              ],
+              [
+                "decl:over(Secret *)->int",
+                "record:Secret"
+              ],
+              [
+                "decl:use_tag",
+                "record:Tag"
+              ],
+              [
+                "decl:use_tag",
+                "typedef:Tag"
+              ],
+              [
+                "typedef:Tag",
+                "record:Tag"
+              ],
+              [
+                "typedef:Tag",
+                "typedef:Tag"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "evaluation_context": {
+      "schema_version": 4,
+      "evaluator_version": 1,
+      "identity_algorithm_version": 2,
+      "resolved_config": {
+        "contract": {
+          "mode": "public",
+          "unresolved": "not_checkable",
+          "overlays": [],
+          "packs": []
+        },
+        "evidence": {
+          "providers": [],
+          "variants": null
+        },
+        "surface": {
+          "explicit_scope": null,
+          "hints": {
+            "internal_namespaces": [],
+            "experimental_namespaces": []
+          }
+        },
+        "assurance": {
+          "require_evidence": true
+        },
+        "policy": {
+          "base": {
+            "id": "strict_abi",
+            "version": 1,
+            "sha256": "8c2f8c1d668ffd36c134c5829832cebaca70e6a53d9073867775a7f5db5adf71"
+          },
+          "packs": [],
+          "overrides": {},
+          "pack_overrides": {}
+        },
+        "gate": {
+          "exit_code_scheme": "legacy",
+          "preset": null,
+          "packs": [],
+          "severity": {
+            "abi_breaking": "error",
+            "potential_breaking": "warning",
+            "quality_issues": "warning",
+            "addition": "info"
+          },
+          "require_complete_analysis": false,
+          "scope": null
+        },
+        "suppressions": null
+      },
+      "field_provenance": {
+        "assurance.require_evidence": {
+          "layer": "built_in_default"
+        },
+        "contract.mode": {
+          "layer": "explicit_cli",
+          "source_kind": "contract_mode",
+          "selected_by": [
+            {
+              "layer": "explicit_cli",
+              "option": "--contract"
+            }
+          ]
+        },
+        "contract.overlays": {
+          "layer": "built_in_default"
+        },
+        "contract.packs": {
+          "layer": "built_in_default"
+        },
+        "contract.unresolved": {
+          "layer": "built_in_default"
+        },
+        "gate.packs": {
+          "layer": "built_in_default"
+        },
+        "gate.preset": {
+          "layer": "built_in_default"
+        },
+        "gate.severity.abi_breaking": {
+          "layer": "built_in_default"
+        },
+        "gate.severity.addition": {
+          "layer": "built_in_default"
+        },
+        "gate.severity.potential_breaking": {
+          "layer": "built_in_default"
+        },
+        "gate.severity.quality_issues": {
+          "layer": "built_in_default"
+        },
+        "policy.base": {
+          "layer": "built_in_default"
+        },
+        "policy.overrides": {
+          "layer": "built_in_default"
+        },
+        "policy.packs": {
+          "layer": "built_in_default"
+        },
+        "suppressions": {
+          "layer": "built_in_default"
+        },
+        "surface.explicit_scope": {
+          "layer": "built_in_default"
+        },
+        "surface.internal_namespaces": {
+          "layer": "built_in_default"
+        },
+        "versioning.policy": {
+          "layer": "built_in_default"
+        }
+      }
+    },
+    "decision_receipt": {
+      "schema_version": 1,
+      "evaluated_contract_roots": [
+        "decl:_ZN2ns3apiEPNS_6WidgetE",
+        "decl:foo",
+        "decl:g_count",
+        "decl:gone",
+        "decl:mode_of",
+        "decl:over()->int",
+        "decl:use_tag"
+      ],
+      "evaluated_type_closure": [
+        "decl:_ZN2ns3apiEPNS_6WidgetE",
+        "decl:foo",
+        "decl:g_count",
+        "decl:gone",
+        "decl:mode_of",
+        "decl:over()->int",
+        "decl:use_tag",
+        "enum:ns::Mode",
+        "record:Dup",
+        "record:Tag",
+        "record:ns::Widget",
+        "typedef:Tag"
+      ],
+      "relevance_by_finding": {
+        "19f0820b65d618be": "IN_CONTRACT",
+        "25b24ff7139a62dd": "PROVEN_OUT_OF_CONTRACT",
+        "4cd8b4d54af34ba1": "UNKNOWN_UNRESOLVED",
+        "653fecb66e043f1b": "IN_CONTRACT",
+        "6a9b7d92b6b95608": "PROVEN_OUT_OF_CONTRACT",
+        "8df4d5c60d7e5807": "IN_CONTRACT",
+        "a682680d7c900964": "UNKNOWN_UNRESOLVED",
+        "d00db3bed61b0008": "IN_CONTRACT"
+      }
+    }
+  },
+  "contract_conflicts": [
+    {
+      "conflict_kind": "exported_but_undeclared",
+      "entity": "gone",
+      "sources": [
+        {
+          "source_kind": "export_table",
+          "claim": "binary exports symbol 'gone'",
+          "detail": {
+            "symbol": "gone"
+          }
+        },
+        {
+          "source_kind": "public_header",
+          "claim": "no public header declaration matches this export",
+          "detail": {
+            "symbol": "gone"
+          }
+        }
+      ],
+      "reason_code": "export_unmatched_by_header_surface",
+      "side": "new",
+      "detail": {}
+    }
+  ],
+  "contract_coverage_failures": [
+    {
+      "provider": "public_header",
+      "side": "new",
+      "record_id": "public_header:new",
+      "reason": "identity_coverage_incomplete",
+      "status": "available",
+      "completeness": "complete",
+      "mode": "public",
+      "suppressible": false
+    },
+    {
+      "provider": "public_header",
+      "side": "old",
+      "record_id": "public_header:old",
+      "reason": "identity_coverage_incomplete",
+      "status": "available",
+      "completeness": "complete",
+      "mode": "public",
+      "suppressible": false
+    }
+  ],
+  "contract_coverage_exit_contribution": 1,
+  "detectors": [
+    {
+      "name": "fingerprint_renames",
+      "changes_count": 0,
+      "enabled": false,
+      "coverage_gap": "requires ELF metadata in elf_only_mode",
+      "not_evaluated": true
+    },
+    {
+      "name": "functions",
+      "changes_count": 1,
+      "enabled": true,
+      "coverage_gap": null,
+      "not_evaluated": false
+    },
+    {
+      "name": "kabi",
+      "changes_count": 0,
+      "enabled": false,
+      "coverage_gap": "missing Module.symvers (kABI) metadata",
+      "not_evaluated": true
+    },
+    {
+      "name": "types",
+      "changes_count": 5,
+      "enabled": true,
+      "coverage_gap": null,
+      "not_evaluated": false
+    },
+    {
+      "name": "enums",
+      "changes_count": 1,
+      "enabled": true,
+      "coverage_gap": null,
+      "not_evaluated": false
+    },
+    {
+      "name": "pe",
+      "changes_count": 0,
+      "enabled": false,
+      "coverage_gap": "missing PE metadata",
+      "not_evaluated": true
+    },
+    {
+      "name": "macho",
+      "changes_count": 0,
+      "enabled": false,
+      "coverage_gap": "missing Mach-O metadata",
+      "not_evaluated": true
+    },
+    {
+      "name": "dwarf",
+      "changes_count": 0,
+      "enabled": false,
+      "coverage_gap": "no DWARF debug info on either side",
+      "not_evaluated": true
+    },
+    {
+      "name": "python_ext",
+      "changes_count": 0,
+      "enabled": false,
+      "coverage_gap": "missing CPython extension metadata",
+      "not_evaluated": true
+    },
+    {
+      "name": "python_api",
+      "changes_count": 0,
+      "enabled": false,
+      "coverage_gap": "missing Python API surface (no .pyi stub recovered)",
+      "not_evaluated": true
+    },
+    {
+      "name": "sycl",
+      "changes_count": 0,
+      "enabled": false,
+      "coverage_gap": "missing SYCL metadata",
+      "not_evaluated": true
+    },
+    {
+      "name": "advanced_dwarf",
+      "changes_count": 0,
+      "enabled": false,
+      "coverage_gap": "missing DWARF advanced metadata",
+      "not_evaluated": true
+    }
+  ],
+  "confidence": "low",
+  "evidence_tier": "elf_only",
+  "evidence_tiers": [
+    "elf"
+  ],
+  "coverage_warnings": [
+    "Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode",
+    "Detector 'kabi' disabled: missing Module.symvers (kABI) metadata",
+    "Detector 'pe' disabled: missing PE metadata",
+    "Detector 'macho' disabled: missing Mach-O metadata",
+    "Detector 'dwarf' disabled: no DWARF debug info on either side",
+    "Detector 'python_ext' disabled: missing CPython extension metadata",
+    "Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered)",
+    "Detector 'sycl' disabled: missing SYCL metadata",
+    "Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata",
+    "Binary-only analysis without debug info; many ABI changes cannot be detected (struct layout, enum values, type changes)"
+  ],
+  "scope": {
+    "public_headers_applied": true,
+    "resolved": true,
+    "fell_back": false,
+    "manual_review_required": false,
+    "public_additions": 1,
+    "filtered_internal_count": 2,
+    "filtered_internal_changes": [
+      {
+        "kind": "type_size_changed",
+        "symbol": "Secret",
+        "description": "Size changed: Secret (64 \u2192 128 bits)",
+        "finding_id": "25b24ff7139a62dd",
+        "canonical_finding_id": "4a568d4b2c7f3a7e",
+        "contract_relevance": "PROVEN_OUT_OF_CONTRACT",
+        "contract_reason_code": "terminal_authoritative_exclusion",
+        "contract_assurance": "complete",
+        "compatibility_evaluation_status": "NOT_EVALUATED",
+        "compatibility_decision": null,
+        "gate_contribution": 0,
+        "contract_evidence_refs": [
+          "public_header:old"
+        ]
+      },
+      {
+        "kind": "type_size_changed",
+        "symbol": "stat",
+        "description": "Size changed: stat (64 \u2192 128 bits)",
+        "finding_id": "6a9b7d92b6b95608",
+        "canonical_finding_id": "a08fe30902eedb51",
+        "contract_relevance": "PROVEN_OUT_OF_CONTRACT",
+        "contract_reason_code": "terminal_authoritative_exclusion",
+        "contract_assurance": "complete",
+        "compatibility_evaluation_status": "NOT_EVALUATED",
+        "compatibility_decision": null,
+        "gate_contribution": 0,
+        "contract_evidence_refs": [
+          "public_header:old"
+        ]
+      }
+    ]
+  },
+  "run_outcome": {
+    "schema_version": "1.1",
+    "compatibility": "BREAKING",
+    "assurance": {
+      "schema_version": "1.2",
+      "status": "complete",
+      "requested_depth": "binary",
+      "requested_depth_source": "implicit",
+      "effective_depth": "binary",
+      "depth_satisfied": true,
+      "target_accounting": {
+        "requested": null,
+        "resolved": null,
+        "transitive_count": null
+      },
+      "translation_units": {
+        "selected": null,
+        "parsed": null,
+        "failed": null,
+        "skipped": null
+      },
+      "export_accounting": {
+        "total": null,
+        "source_linked": null,
+        "internal": null,
+        "unaccounted": null
+      },
+      "l0_context_status": "clean",
+      "header_context_status": "not_evaluated",
+      "dwarf_context_status": "not_evaluated",
+      "l3_context_status": "not_evaluated",
+      "schema_staleness_status": "clean",
+      "fact_set_comparability": "not_applicable",
+      "graph_completeness": "not_collected",
+      "layout_unverified_detectors": [
+        "dwarf",
+        "advanced_dwarf",
+        "layout_descriptor"
+      ],
+      "notes": [
+        "layout unverified: dwarf, advanced_dwarf, layout_descriptor"
+      ]
+    },
+    "gate": "abi_breaking",
+    "operational": "none",
+    "lifecycle": "existing",
+    "scope": "complete"
+  },
+  "old_evidence_depth": "binary",
+  "new_evidence_depth": "binary"
+}

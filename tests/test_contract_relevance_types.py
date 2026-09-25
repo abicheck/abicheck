@@ -198,7 +198,9 @@ class TestSchemaVersionStrategy:
         # fixes round 10/11) -- which is the whole point of keeping four
         # counters. Pin each one so a future change to a persisted format or
         # algorithm has to state which concern it moved.
-        assert CONTRACT_EVIDENCE_SCHEMA_VERSION == 1
+        # contract_evidence bumped to 2 when the replay graph moved to the
+        # Phase 1 entity node ids.
+        assert CONTRACT_EVIDENCE_SCHEMA_VERSION == 2
         assert EVALUATION_CONTEXT_SCHEMA_VERSION == 4
         assert EVALUATOR_VERSION == 1
         assert IDENTITY_ALGORITHM_VERSION == 2
@@ -206,8 +208,9 @@ class TestSchemaVersionStrategy:
     def test_version_counters_are_independent_objects(self):
         # Each concern must be able to bump independently -- guard against a
         # future refactor collapsing them into one shared constant. The
-        # identity counter having actually diverged from the other three is
-        # the executable proof of that, not just the key count.
+        # counters having actually diverged from one another (three distinct
+        # values across four concerns) is the executable proof of that, not
+        # just the key count.
         counters = {
             "contract_evidence": CONTRACT_EVIDENCE_SCHEMA_VERSION,
             "evaluation_context": EVALUATION_CONTEXT_SCHEMA_VERSION,
@@ -215,4 +218,6 @@ class TestSchemaVersionStrategy:
             "identity_algorithm": IDENTITY_ALGORITHM_VERSION,
         }
         assert len(counters) == 4
-        assert counters["identity_algorithm"] != counters["contract_evidence"]
+        assert len(set(counters.values())) == 3
+        assert counters["evaluation_context"] != counters["contract_evidence"]
+        assert counters["identity_algorithm"] != counters["evaluator"]
