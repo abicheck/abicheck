@@ -62,7 +62,9 @@ def _degraded_pair():
 
 
 def test_schema_version_is_bumped_for_edge_coverage():
-    assert REPORT_SCHEMA_VERSION == "5.4"
+    # edge_coverage arrived in 5.4; a later additive bump keeps it.
+    major, minor = (int(p) for p in REPORT_SCHEMA_VERSION.split("."))
+    assert (major, minor) >= (5, 4)
 
 
 def test_json_carries_both_sides_and_validates():

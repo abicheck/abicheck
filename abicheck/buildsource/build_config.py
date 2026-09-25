@@ -61,7 +61,11 @@ from .build_config_schema import (
     parse_policy_overrides as _parse_policy_overrides,
     subkey_findings as _subkey_type_findings,
 )
-from .build_config_scope import parse_ownership_rules, scope_block as _scope_block
+from .build_config_scope import (
+    OWNERSHIP_KEYS,
+    parse_ownership_rules,
+    scope_block as _scope_block,
+)
 from .compile_options_safety import (  # PR #1146 finding #2 (sibling leaf module)
     reject_plugin_loading_options as _reject_plugin_loading_options,
 )
@@ -432,9 +436,7 @@ class BuildConfig:
                 "public_header_dirs",
                 "exclude_headers",
                 "on_incomplete",
-                "dependencies",
-                "private_headers",
-                "private_namespaces",
+                *OWNERSHIP_KEYS,
             }
         ),
         "suppression": frozenset({"strict", "require_justification"}),

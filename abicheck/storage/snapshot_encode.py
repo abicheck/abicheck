@@ -35,6 +35,7 @@ from typing import Any
 from ..model import AbiSnapshot
 from .entity_id_codec import encode_entity_ids, encode_sidecar_entity_ids
 from .enum_codec import encode_platform_enums
+from .extraction_scope_codec import encode_extraction_scope
 from .fact_codec import encode_fact_fields
 from .sectioned_document import to_sectioned_document
 from .semantic_ir_codec import encode_semantic_ir
@@ -287,6 +288,7 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
         )
     encode_surface_graph(converted, snap)  # storage/surface_graph_codec.py
     encode_semantic_ir(converted, snap)  # storage/semantic_ir_codec.py (v38)
+    encode_extraction_scope(converted, snap)  # storage/extraction_scope_codec.py (v52)
 
     # Embed schema version for forward-compatibility.
     # Placed at top level so loaders can inspect it without parsing the full snapshot.

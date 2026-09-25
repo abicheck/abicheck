@@ -86,6 +86,7 @@ from ..snapshot_platform_blocks import (
     sycl_from_dict as _sycl_from_dict,
 )
 from . import closure_identity
+from .extraction_scope_codec import decode_extraction_scope
 from .fact_codec import (
     apply_legacy_fact_backfill,
     decode_snapshot_facts,
@@ -575,6 +576,7 @@ def decode_snapshot(
     )
     decode_surface_graph(d, snap)  # storage/surface_graph_codec.py (v29)
     decode_semantic_ir(d, snap)  # storage/semantic_ir_codec.py (v38)
+    decode_extraction_scope(d, snap)  # storage/extraction_scope_codec.py (v52)
     # ADR-063 Track T3: decode_semantic_ir() mutates snap.semantic_ir directly,
     # after AbiSnapshot.__post_init__ already ran (with semantic_ir still None
     # at that point) -- so a loaded snapshot's own Track T3 consistency check

@@ -1011,7 +1011,13 @@ _ARTIFACT_NAMES = frozenset(
 #:        ``unknown``. A stripped binary's debug join, an unread export
 #:        table, filtered dependency headers or a narrowed L5 pass show up
 #:        here as ``unknown`` rather than as a silent absence.
-REPORT_SCHEMA_VERSION = "5.4"
+#: 5.5 -- additive ``effective_config_fields["surface.ownership"]`` (ADR-075
+#:        D4): the fingerprint of the ownership rules both sides'
+#:        declarations were classified under (``old=…|new=…`` when they
+#:        differ, ``""`` when neither side recorded one). As with 5.2, the
+#:        digest *value* changes for every run, since
+#:        ``EFFECTIVE_CONFIG_FIELD_KEYS`` is hashed positionally.
+REPORT_SCHEMA_VERSION = "5.5"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

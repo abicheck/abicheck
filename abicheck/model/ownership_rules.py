@@ -39,6 +39,7 @@ __all__ = [
     "OWNER_TOOLCHAIN",
     "OWNER_UNRESOLVED",
     "DependencyRoots",
+    "OwnershipRequest",
     "OwnershipRules",
     "dependency_owner",
 ]
@@ -80,6 +81,10 @@ class OwnershipRules:
     dependencies: tuple[DependencyRoots, ...] = ()
     private_headers: tuple[str, ...] = ()
     private_namespaces: tuple[str, ...] = ()
+    #: ``scope.dependency_evidence`` -- what a dump keeps of dependency
+    #: declarations. Only ``"full"`` (keep everything, today's behaviour) is
+    #: accepted until retention by reference lands (ADR-075 D6).
+    dependency_evidence: str = "full"
 
     def is_configured(self) -> bool:
         """True when a key beyond ``public_header_dirs`` was stated -- the
@@ -87,3 +92,19 @@ class OwnershipRules:
         return bool(
             self.dependencies or self.private_headers or self.private_namespaces
         )
+
+
+@dataclass(frozen=True)
+class OwnershipRequest:
+    """What a dump classifies its declarations under (ADR-075 D1/D6).
+
+    *rules*' roots are **absolute** here -- the builder resolved each against
+    the directory it was spelled relative to (a config key against the
+    config's directory, a ``-H`` directory against the working directory).
+    *project_root* is only where the recorded form is made relative to, so a
+    baseline dumped on one machine fingerprints like a CI dump on another;
+    ``None`` (no project config) records absolute roots.
+    """
+
+    rules: OwnershipRules = OwnershipRules()
+    project_root: str | None = None

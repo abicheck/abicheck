@@ -191,7 +191,9 @@ class TestSlottingDidNotChangeBehaviour:
     def test_dataclasses_fields_are_unchanged(self) -> None:
         """Field count is part of the encode contract, not an implementation
         detail: the codecs iterate declared fields."""
-        assert len(dataclasses.fields(Function)) == 48
+        # 49: ADR-075 D2 added `ownership_fact` (persisted as a side table,
+        # stripped from the per-entity dict by storage/extraction_scope_codec).
+        assert len(dataclasses.fields(Function)) == 49
         assert len(dataclasses.fields(Param)) == 10
         assert len(dataclasses.fields(Fact)) == 4
 

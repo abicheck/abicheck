@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import cast
 
 from .elf_facts import SymbolBinding
+from .extraction_scope import EntityOwnership
 from .fact import Fact, _Omitted, bridge_legacy_and_fact
 from .identity import EntityId
 from .vocabulary import AccessLevel, ElfVisibility, ParamKind, ScopeOrigin, Visibility
@@ -261,6 +262,14 @@ class Function:
     # rationale, including why this is keyword-only, excluded from
     # equality, and not yet readable by any consumer.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
+    # ADR-075 D2: owner/contract/rule id, stamped once by
+    # ``extract.ownership_stamp``. ``None`` is *unclassified* (a pre-v52
+    # snapshot, a hand-built declaration) -- read it through
+    # ``model.extraction_scope.ownership_of``, never directly. Persisted as
+    # an interned table (``storage/extraction_scope_codec.py``), not per entity.
+    ownership_fact: Fact[EntityOwnership] | None = field(
+        default=None, kw_only=True, compare=False, repr=False
+    )
     # ADR-063 Phase 5 (fifth batch): Fact[...] siblings for this dataclass's
     # own ten case-(b) fields, mirroring Variable's identical fields exactly
     # -- each field's own None already unambiguously means "not captured",
@@ -402,6 +411,14 @@ class Variable:
     # rationale, including why this is keyword-only, excluded from
     # equality, and not yet readable by any consumer.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
+    # ADR-075 D2: owner/contract/rule id, stamped once by
+    # ``extract.ownership_stamp``. ``None`` is *unclassified* (a pre-v52
+    # snapshot, a hand-built declaration) -- read it through
+    # ``model.extraction_scope.ownership_of``, never directly. Persisted as
+    # an interned table (``storage/extraction_scope_codec.py``), not per entity.
+    ownership_fact: Fact[EntityOwnership] | None = field(
+        default=None, kw_only=True, compare=False, repr=False
+    )
     # ADR-063 Phase 5 (fourth batch): Fact[...] siblings for this dataclass's
     # own case-(b) fields, mirroring RecordType.source_header_fact/
     # EnumType.source_header_fact exactly — each field's own None already

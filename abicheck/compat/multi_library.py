@@ -304,6 +304,8 @@ _FIELD_POLICY: dict[str, str] = {
     # identical string -- run-wide in exactly the sense the two digests
     # around it are.
     "excluded_header_patterns": "first",
+    # ADR-075 D4: one descriptor's project rules classify every library.
+    "extraction_scope_identity": "first",
     "env_matrix_source_sha256": "first",
     "pattern_verdicts_enabled": "first",
     "collapse_versioned_symbols_enabled": "first",
