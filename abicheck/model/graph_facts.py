@@ -657,3 +657,65 @@ class SurfaceGraphLike(Protocol):
     def resolve_node_id(self, node_id: str) -> str: ...
 
     def to_dict(self) -> dict[str, Any]: ...
+
+
+_SHAREABLE_SCALARS = (str, int, float, bool, type(None))
+
+
+class SharedGraphValues:
+    """Per-graph flyweights for a live-built graph's repetitive values.
+
+    A graph built during a dump holds ~10^5 facts whose ``producer`` and
+    ``confidence`` take a handful of values, and whose ``attrs`` dicts take a
+    few dozen distinct contents -- but each producer allocated its own copy.
+    Measured on a oneDAL header graph: 42,532 ``confidence`` string objects
+    for 3 values, 96,881 attr-value objects for 21, and one ``attrs`` dict per
+    fact (91,835) where a stored graph decodes to 41. :meth:`share` folds an
+    entity's values onto one object per distinct value, the way the stored
+    graph codec already does from its string and fact tables.
+
+    Safe because none of these values is mutated after registration: strings
+    are immutable, and fact ``attrs`` are only ever replaced, never written
+    (identity normalization is copy-on-write). An ``attrs`` dict with a
+    non-scalar value is left alone, since a list or dict inside it could be.
+    The sharing key is order-sensitive, so a shared dict iterates -- and
+    serializes -- exactly as the one it replaces.
+    """
+
+    __slots__ = ("_attrs", "_strings")
+
+    def __init__(self) -> None:
+        self._strings: dict[str, str] = {}
+        self._attrs: dict[tuple[tuple[str, type, Any], ...], dict[str, Any]] = {}
+
+    def _str(self, value: str) -> str:
+        return self._strings.setdefault(value, value)
+
+    def _attrs_dict(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if not all(type(v) in _SHAREABLE_SCALARS for v in attrs.values()):
+            return attrs
+        items = tuple(
+            (self._str(k), self._str(v) if type(v) is str else v)
+            for k, v in attrs.items()
+        )
+        # `True == 1`: keep the value's type in the key so a bool and an int
+        # attr never share a dict.
+        key = tuple((k, type(v), v) for k, v in items)
+        shared = self._attrs.get(key)
+        if shared is None:
+            shared = self._attrs[key] = dict(items)
+        return shared
+
+    def share(self, entity: GraphNode | GraphEdge) -> None:
+        """Fold *entity*'s repetitive values onto shared objects, in place."""
+        single = len(entity.facts) == 1 and entity.attrs is entity.facts[0].attrs
+        for fact in entity.facts:
+            fact.producer = self._str(fact.producer)
+            fact.confidence = self._str(fact.confidence)
+            fact.attrs = self._attrs_dict(fact.attrs)
+        entity.kind = self._str(entity.kind)
+        entity.provenance = self._str(entity.provenance)
+        entity.confidence = self._str(entity.confidence)
+        if single:
+            # Keep the single-fact alias `resolve_entity_attrs` established.
+            entity.attrs = entity.resolved = entity.facts[0].attrs
