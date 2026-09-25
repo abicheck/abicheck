@@ -59,3 +59,12 @@ def test_decoder_shares_and_preserves():
     assert a is b and a == Fact.present(False)
     c = decode_fact({"status": "present", "value": 0}, 999, 0)
     assert c is not a and c.value == 0 and type(c.value) is int
+
+
+def test_full_table_still_returns_correct_unshared_facts(monkeypatch):
+    import abicheck.model.fact as fact_mod
+
+    monkeypatch.setattr(fact_mod, "_FLYWEIGHT", {})
+    monkeypatch.setattr(fact_mod, "_FLYWEIGHT_LIMIT", 0)
+    a, b = Fact.present(False, producer="p"), Fact.present(False, producer="p")
+    assert a == b and a is not b and a.producer == "p"

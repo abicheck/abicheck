@@ -259,3 +259,13 @@ class TestMigrateLegacyEntry:
         assert load_cached_ast("k", "clang", p, memoize=False) == doc
         assert b"\n" not in p.read_bytes() and p.read_bytes().isascii()
         assert load_cached_ast("k", "clang", p, memoize=False) == doc
+
+    def test_undecodable_entry_is_left_untouched(self, tmp_path):
+        from abicheck.storage.json_compact import migrate_legacy_entry
+
+        p = tmp_path / "bad.json"
+        raw = b'{\n  "a": "\xff\xfe"\n}'
+        p.write_bytes(raw)
+        assert migrate_legacy_entry(p) is False
+        assert p.read_bytes() == raw
+        assert list(tmp_path.iterdir()) == [p]
