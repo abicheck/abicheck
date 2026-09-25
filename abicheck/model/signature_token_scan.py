@@ -12,77 +12,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-"""Depth-aware string helpers for parameter-type spellings.
-
-Split out of :mod:`abicheck.model.signature_normalization` (which stays the
-one owner of the canonicalization *rules*) so that module stays under the
-model package's production file ceiling: these are its bracket-aware
-scanning primitives -- strip a qualifier outside nesting, decay a top-level
-array, split on top-level commas, find a matching parenthesis -- with no
-canonicalization policy of their own. A leaf: imports nothing first-party.
+"""Bracket-aware string scanners behind
+:mod:`abicheck.model.signature_normalization`: single-dimension array
+decay, top-level comma splitting, and paren matching. Split out of that
+module (which applies them) to keep it under the ADR-061 production file
+ceiling; none of these helpers decides any cv-stripping policy itself.
 """
 
 from __future__ import annotations
 
-import re
-
-# `restrict`/`__restrict`/`__restrict__` -- a qualifier attached to a
-# specific pointer, positioned exactly where a `const`/`volatile` on that
-# same pointer would be, and it turns out to be POSITION-SENSITIVE the
-# identical way: real-compiler verification (`g++ -c`, GCC's own Itanium
-# mangler) confirms `void f(int *)` and `void f(int * restrict)` are the
-# SAME function (restrict on the parameter's own outermost, by-value
-# pointer position drops from the mangled name, `_Z1fPi` both ways --
-# GCC even refuses to compile that pair as a legal overload set, exactly
-# the "same function" signal) -- but `void f(int **)` and
-# `void f(int * restrict *)` mangle to two DIFFERENT, simultaneously-
-# declarable symbols (`_Z1fPPi` vs `_Z1fPrPi`). So restrict is folded
-# into this same strippable-word set, reusing the SAME outermost-vs-
-# pointee position discipline `const`/`volatile` already have throughout
-# this module -- not stripped unconditionally (Codex review, PR #941,
-# eighteenth round: the sixteenth round's own "restrict never affects
-# mangling, strip it everywhere" fix turned out to be the wrong
-# generalization, verified wrong by direct compilation rather than mere
-# assertion -- restrict does NOT behave like a pure no-op token, it
-# behaves like cv).
-_CV_WORD_RE = re.compile(r"\b(?:const|volatile|restrict|__restrict__|__restrict)\b")
-
-
-def _strip_cv_tokens_outside_nesting(s: str) -> str:
-    """Blank out every ``const``/``volatile``/``restrict`` (any of its
-    three spellings) token in *s* that sits at nesting depth 0 (outside
-    any ``<...>``/``(...)``/``[...]``), then collapse the resulting
-    whitespace. The one primitive both branches of
-    :func:`canonicalize_function_signature_param_type` reduce to -- the
-    by-value case applies it to the whole string, the pointer case applies
-    it only to the suffix after the parameter's outermost pointer/
-    reference sigil (see that function's own docstring for why those are
-    the two, and only the two, safe places to strip). ``restrict`` shares
-    this exact position discipline with ``const``/``volatile`` -- it is
-    NOT unconditionally mangling-inert (see ``_CV_WORD_RE``'s own comment
-    for the direct-compilation evidence).
-    """
-    depth = 0
-    out: list[str] = []
-    i = 0
-    n = len(s)
-    while i < n:
-        ch = s[i]
-        if ch in "<([":
-            depth += 1
-            out.append(ch)
-            i += 1
-        elif ch in ">)]":
-            depth = max(0, depth - 1)
-            out.append(ch)
-            i += 1
-        elif depth == 0 and (m := _CV_WORD_RE.match(s, i)):
-            i = m.end()
-        else:
-            out.append(ch)
-            i += 1
-    return re.sub(r"\s+", " ", "".join(out)).strip()
+__all__ = ["_decay_top_level_array", "_find_matching_paren", "_split_top_level_commas"]
 
 
 def _decay_top_level_array(canonical_type: str) -> str:
