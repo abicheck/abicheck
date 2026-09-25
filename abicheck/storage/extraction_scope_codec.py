@@ -92,10 +92,15 @@ def decode_extraction_scope(d: Mapping[str, Any], snap: AbiSnapshot) -> None:
         return
     decisions: list[Fact[EntityOwnership]] = []
     for raw in ownership.get("decisions") or ():
-        if isinstance(raw, Sequence) and len(raw) == 3:
-            decisions.append(
-                Fact.present(EntityOwnership(str(raw[0]), str(raw[1]), str(raw[2])))
-            )
+        # Three strings exactly: a bare string is a Sequence too, and str()
+        # would coerce a non-string field into a decision nobody recorded.
+        if (
+            isinstance(raw, Sequence)
+            and not isinstance(raw, (str, bytes))
+            and len(raw) == 3
+            and all(isinstance(part, str) for part in raw)
+        ):
+            decisions.append(Fact.present(EntityOwnership(raw[0], raw[1], raw[2])))
         else:
             # Keep positions aligned; an unreadable entry is unclassified.
             decisions.append(Fact.not_collected("malformed ownership decision"))
@@ -105,5 +110,10 @@ def decode_extraction_scope(d: Mapping[str, Any], snap: AbiSnapshot) -> None:
         if not isinstance(indices, Sequence) or len(indices) != len(decls):
             continue
         for decl, index in zip(decls, indices):
-            if isinstance(index, int) and 0 <= index < len(decisions):
+            # `bool` is an `int`: `true` must not select decisions[1].
+            if (
+                isinstance(index, int)
+                and not isinstance(index, bool)
+                and 0 <= index < len(decisions)
+            ):
                 decl.ownership_fact = decisions[index]
