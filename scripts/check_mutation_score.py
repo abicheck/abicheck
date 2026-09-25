@@ -222,7 +222,7 @@ def load_only_mutate_globs(pyproject_path: Path | None = None) -> list[str] | No
     ``gate.REPO_ROOT`` — the established pattern in
     tests/test_mutation_score_gate.py — affects this too.
 
-    A local import: this module runs on any supported Python (3.10+), but the
+    A local import: this module runs on any supported Python (3.11+), but the
     ``--run`` scoping path this feeds only ever executes inside the mutation
     CI lane, which pins Python 3.13 (``tomllib`` is stdlib since 3.11). A
     stale-tomllib environment simply gets no scoping — the safe direction to

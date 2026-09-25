@@ -121,8 +121,7 @@ def _split_container_prefix(line: str) -> tuple[str, str]:
     and after the repetition, and the two compete for the same characters — so
     on a long line that ultimately does not match, the engine explores every
     way of splitting them. The first attempt here did exactly that and hung on
-    a 2000-marker line. Python 3.10 is supported, so atomic groups are not
-    available to forbid the backtracking; a linear scan sidesteps it entirely
+    a 2000-marker line. Atomic groups (3.11+) could now forbid the backtracking, but a linear scan sidesteps it entirely
     and is easier to check by eye besides.
     """
     index = 0

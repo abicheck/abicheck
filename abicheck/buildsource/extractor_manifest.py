@@ -749,7 +749,7 @@ def run_external_extractor(
     apply the collection-mode policy (D9).
     """
     extractor = ExternalCliExtractor(manifest, redaction=redaction, context=context)
-    started = _dt.datetime.now(_dt.timezone.utc)
+    started = _dt.datetime.now(_dt.UTC)
     capabilities = [k for k, v in manifest.capabilities.to_dict().items() if v is True]
     inputs = [redaction.path(x) for x in manifest.input_requirements]
 
@@ -855,7 +855,7 @@ def _finish(
     diagnostics: list[str],
 ) -> tuple[NormalizationResult, ExtractorRecord]:
     record.status = status
-    record.finished_at = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    record.finished_at = _dt.datetime.now(_dt.UTC).isoformat()
     record.diagnostics = list(diagnostics)
     if status != "ok" and diagnostics:
         record.detail = diagnostics[0][:200]

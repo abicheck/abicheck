@@ -4,11 +4,10 @@
 from __future__ import annotations
 
 import tarfile
+import tomllib
 import zipfile
 from email import message_from_bytes
 from pathlib import Path
-
-import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"

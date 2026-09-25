@@ -37,17 +37,17 @@ showing what the available evidence could not establish. The canonical
 product direction is the repository-root [`vision.md`](vision.md); this
 file owns development procedure, not direction.
 
-Mechanically: pure Python (3.10+); reads ELF, PE/COFF, and Mach-O binaries
+Mechanically: pure Python (3.11+); reads ELF, PE/COFF, and Mach-O binaries
 plus optional debug info, public headers, build data, and sources (L0–L5);
 detects 410 ABI/API change types categorized into `BREAKING_KINDS`,
 `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `RISK_KINDS` (see `ChangeKind`);
 drop-in replacement for abi-compliance-checker (ABICC).
 
 **Two different Python version numbers matter here, don't conflate them:**
-`pyproject.toml`'s `requires-python = ">=3.10"` is the *minimum supported*
+`pyproject.toml`'s `requires-python = ">=3.11"` is the *minimum supported*
 version (what a user's environment needs to run abicheck). CI testing is
 tiered: the full suite runs only on 3.13 (Linux/macOS/Windows), while
-`.github/workflows/python-compat.yml` covers 3.10, 3.11, 3.12, 3.14 and the
+`.github/workflows/python-compat.yml` covers 3.11, 3.12, 3.14 and the
 prerelease 3.15 (non-blocking) with a wheel-install + import-every-module +
 CLI + smoke-subset lane. **3.13** is the
 *canonical development/CI* version — `repo_facts.json`'s `canonical_python`,
@@ -1059,7 +1059,7 @@ cover the surrounding first-party trees this file doesn't detail.
 
 - **Commits**: Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`)
 - **Branches**: `feat/<name>` or `fix/<name>`
-- **Python**: 3.10+ syntax, type annotations, `from __future__ import annotations`
+- **Python**: 3.11+ syntax, type annotations, `from __future__ import annotations`
 - **No line length limit** (ruff E501 ignored)
 - **Tests**: use `assert` freely; parametrize when possible
 - **Changelog**: if your change touches `abicheck/**/*.py`, add a fragment

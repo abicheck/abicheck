@@ -4,8 +4,8 @@ name: Python compatibility
 # `ci.yml`'s `unit-tests` job, canonical Python 3.13 (Linux, plus the macOS
 # and Windows legs), which also owns the 95% coverage floor. Re-running all
 # ~50,000 tests on every other supported interpreter mostly re-proved the
-# same thing at a full suite's cost per leg, while 3.10/3.11 -- the floor
-# `requires-python = ">=3.10"` promises -- were not tested at all.
+# same thing at a full suite's cost per leg, while 3.11 -- the floor
+# `requires-python = ">=3.11"` promises -- were not tested at all.
 #
 # This workflow covers the rest of the supported range cheaply instead:
 # every non-canonical interpreter builds the sdist+wheel, installs the
@@ -43,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.10', '3.11', '3.12', '3.14']
+        python-version: ['3.11', '3.12', '3.14']
         experimental: [false]
         include:
           - python-version: '3.15'

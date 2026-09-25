@@ -28,7 +28,7 @@ pip install abicheck
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.11+
 - `castxml` + a C/C++ compiler — **required for header AST analysis** (all platforms)
 
 All Python dependencies (`pyelftools`, `pefile`, `macholib`) come with the `abicheck` install.

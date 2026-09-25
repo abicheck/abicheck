@@ -303,7 +303,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         # Full suite on the canonical interpreter only. Every other supported
-        # Python (3.10-3.12, 3.14, and the in-development 3.15) is covered by
+        # Python (3.11, 3.12, 3.14, and the in-development 3.15) is covered by
         # python-compat.yml's wheel-install + import + smoke-subset lane.
         python-version: ['3.13']
         allow-prereleases: [false]

@@ -64,7 +64,7 @@ DEFAULT_FACTS_FILE = "facts.jsonl"
 
 
 def _now() -> str:
-    return _dt.datetime.now(_dt.timezone.utc).isoformat()
+    return _dt.datetime.now(_dt.UTC).isoformat()
 
 
 def _write_manifest(root: Path, manifest: InputsManifest) -> None:

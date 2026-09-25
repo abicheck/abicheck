@@ -26,10 +26,10 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
-import tomllib
 
 _PATH = (
     Path(__file__).resolve().parent.parent / "scripts" / "check_bugfix_test_contract.py"

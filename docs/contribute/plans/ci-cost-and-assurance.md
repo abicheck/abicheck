@@ -163,7 +163,9 @@ an assertion nobody has seen hold.
 
 ## Explicitly not pursued
 
-**Adding Python 3.10 to the unit matrix.** `pyproject.toml` advertises
+**Adding Python 3.10 to the unit matrix.** *Superseded (2026-09-25): the floor
+was raised to 3.11 and `python-compat.yml` now smoke-tests every non-canonical
+supported interpreter; the full suite runs on 3.13 only.* Original note: `pyproject.toml` advertises
 `requires-python = ">=3.10"` while the matrix starts at 3.12, so the advertised
 floor is tested by nothing. The audit recommended adding the oldest supported
 interpreter. Reviewed and declined (2026-09-12): `AGENTS.md` documents the
