@@ -49,7 +49,7 @@ def _fresh_memo():
 def _write_keep_stat(path: Path, text: str) -> None:
     """Rewrite *path* but restore its mtime -- the case mtime stamps miss."""
     st = path.stat() if path.exists() else None
-    path.write_text(text, encoding="utf-8")
+    path.write_bytes(text.encode())
     if st is not None:
         os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
 
@@ -61,7 +61,7 @@ def _check(headers: list[Path], **kwargs) -> None:
 
 def test_unchanged_set_is_served_without_rescanning(tmp_path, monkeypatch):
     h = tmp_path / "a.h"
-    h.write_text(_CPP20, encoding="utf-8")
+    h.write_bytes(_CPP20.encode())
     first = _SCAN([h])
     calls = []
     real = cpp20._preprocess_headers
@@ -74,7 +74,7 @@ def test_unchanged_set_is_served_without_rescanning(tmp_path, monkeypatch):
 
 def test_same_size_same_mtime_rewrite_is_a_miss(tmp_path):
     h = tmp_path / "a.h"
-    h.write_text(_CPP20, encoding="utf-8")
+    h.write_bytes(_CPP20.encode())
     assert _SCAN([h])
     # Same length, same mtime, no C++20 syntax any more.
     _write_keep_stat(
@@ -87,9 +87,9 @@ def test_same_size_same_mtime_rewrite_is_a_miss(tmp_path):
 
 def test_include_target_appearing_later_is_a_miss(tmp_path):
     umbrella = tmp_path / "all.h"
-    umbrella.write_text('#include "impl.h"\n', encoding="utf-8")
+    umbrella.write_bytes(b'#include "impl.h"\n')
     assert _SCAN([umbrella]) == []
-    (tmp_path / "impl.h").write_text(_CPP20, encoding="utf-8")
+    (tmp_path / "impl.h").write_bytes(_CPP20.encode())
     _check([umbrella])
     assert _SCAN([umbrella])
 
@@ -111,11 +111,11 @@ def test_include_resolving_later_outside_the_including_dir_is_a_miss(
     for d in premade_dirs:
         (root / d).mkdir(parents=True)
     umbrella = root / "all.h"
-    umbrella.write_text(f'#include "{spelling}"\n', encoding="utf-8")
+    umbrella.write_bytes((f'#include "{spelling}"\n').encode())
     assert _SCAN([umbrella]) == []
     target = root / spelling
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(_CPP20, encoding="utf-8")
+    target.write_bytes(_CPP20.encode())
     _check([umbrella])
     assert _SCAN([umbrella])
 
@@ -141,7 +141,7 @@ def test_generated_nested_trees_match_a_fresh_scan(tmp_path, seed):
     for n in names:
         if n in present:
             (root / n).parent.mkdir(parents=True, exist_ok=True)
-            (root / n).write_text(text_for(n), encoding="utf-8")
+            (root / n).write_bytes(text_for(n).encode())
     roots = [root / n for n in sorted(present)[:2]]
     for _ in range(10):
         _check(roots)
@@ -157,14 +157,14 @@ def test_generated_nested_trees_match_a_fresh_scan(tmp_path, seed):
 
 def test_keyword_arguments_are_separate_entries(tmp_path):
     h = tmp_path / "a.h"
-    h.write_text("#ifdef __cplusplus\n" + _CPP20 + "#endif\n", encoding="utf-8")
+    h.write_bytes(("#ifdef __cplusplus\n" + _CPP20 + "#endif\n").encode())
     _check([h])
     _check([h], for_language_mode_decision=True)
 
 
 def test_returned_list_is_a_copy(tmp_path):
     h = tmp_path / "a.h"
-    h.write_text(_CPP20, encoding="utf-8")
+    h.write_bytes(_CPP20.encode())
     _SCAN([h]).clear()
     assert _SCAN([h])
 
@@ -180,7 +180,7 @@ def test_generated_edit_sequences_match_a_fresh_scan(tmp_path, seed):
         return t.format(rng.randrange(len(names))) if "{}" in t else t
 
     for n in names:
-        (tmp_path / n).write_text(render(), encoding="utf-8")
+        (tmp_path / n).write_bytes(render().encode())
     roots = [tmp_path / n for n in rng.sample(names, k=2)]
     for _ in range(12):
         _check(roots)
@@ -192,7 +192,7 @@ def test_generated_edit_sequences_match_a_fresh_scan(tmp_path, seed):
         elif op < 0.6:
             _write_keep_stat(target, render())
         else:
-            target.write_text(render(), encoding="utf-8")
+            target.write_bytes(render().encode())
     _check(roots)
 
 
@@ -207,7 +207,7 @@ def test_memo_is_bounded(tmp_path):
     files = []
     for i in range(80):
         f = tmp_path / f"f{i}.h"
-        f.write_text("x\n", encoding="utf-8")
+        f.write_bytes(b"x\n")
         files.append(f)
         scan([f])
     calls.clear()
