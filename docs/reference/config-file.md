@@ -226,12 +226,16 @@ directory/package comparison, where the rules are release-wide and are
 stated once rather than repeated per library.
 
 **Ownership keys** (`dependencies:`, `private_headers:`,
-`private_namespaces:`) say who owns each declaration a header parse sees:
-the target (this library), a named dependency, or the toolchain. **Today
-they are previewed, not applied**: `abicheck dump … --dry-run` prints the
-rules and the owner and contract of every `-H` header, and warns about a
-`-H` header that is not public target API. No dump keeps, drops or
-reclassifies a declaration because of them yet. The plan behind them is
+`private_namespaces:`, `dependency_evidence:`) say who owns each
+declaration a header parse sees: the target (this library), a named
+dependency, or the toolchain. **They classify, they do not filter**: every
+header dump records each declaration's owner and contract, and the rules it
+was classified under, in the snapshot's `extraction_scope`
+([ADR-075](../contribute/adr/075-target-ownership-and-extraction-scope.md)).
+No declaration is kept or dropped because of them. `abicheck dump …
+--dry-run` previews the
+rules and the owner of every `-H` header. The task guide is
+[Target ownership](../use/target-ownership.md); the plan behind the keys is
 [Target ownership and extraction scope](../contribute/plans/target-ownership-and-extraction-scope.md).
 
 ```yaml
@@ -242,10 +246,15 @@ scope:
       header_roots: [include/svs/third-party/fmt/include/]
   private_headers: [include/svs/*/detail/**]   # owned, not promised
   private_namespaces: [svs::detail]
+  dependency_evidence: full               # the only accepted value today
 ```
 
-Roots are relative to the directory holding the config file. A `-H`
-directory is also a target root. The rules are applied in this order:
+Roots are relative to the project root: the directory holding the config
+file, or the repository root for `.github/.abicheck.yml`. A `-H` directory
+is also a target root; a `-H` *file* is not. `dependency_evidence` accepts
+only `full` (keep every dependency declaration, today's behaviour);
+`referenced` is rejected until retention by reference lands. The rules are
+applied in this order:
 
 1. An explicit root beats the system-path heuristic: a target installed
    under `/usr/include/svs/` is still the target's.
@@ -269,6 +278,13 @@ directory is also a target root. The rules are applied in this order:
 
 There is deliberately no namespace-based ownership key: a namespace filter
 lost owned declarations on every real target measured (the plan's M2).
+
+Both sides of a `compare` are classified under the one project config, so
+their rules agree. A stored baseline keeps the rules it was dumped under;
+if they differ from the candidate's, the pair is still compared (presence
+is unchanged under `full`) and the report names the declarations that moved
+owner or contract. A baseline written before snapshot schema v52 has no
+recorded rules; it is compared with a note saying so.
 
 `on_incomplete:` (`warn`, the default, or `block`) is Phase 7d's
 (one-comparison-product.md §4.1) CONFIG-only replacement for the former

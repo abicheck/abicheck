@@ -96,6 +96,7 @@ from .frontends.cli.compare_report import (
 )
 from .frontends.cli.compare_use_cases import reject_use_cases_without_carrying_output
 from .frontends.cli.options.params import _load_suppression_and_policy
+from .frontends.cli.ownership_config import project_ownership_request
 from .frontends.cli.runtime import (
     _announce_exit_scheme,
     _exit_with_severity_or_verdict,
@@ -1923,6 +1924,7 @@ def run_compare(
             changed_paths=_enrich.changed_paths,
             config_public_header_dirs=project_config_public_header_dirs(project_cfg),
             exclude_headers=tuple(exclude_headers or ()),
+            ownership=project_ownership_request(project_cfg, cfg_path),
         )
     except deadline.DeadlineExceeded as exc:
         _exit_on_budget_overflow(

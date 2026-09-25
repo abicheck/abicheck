@@ -94,6 +94,7 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 |---|---|
 | `collapse_versioned_symbols` | bool |
 | `dependencies` | list[{name: str, header_roots: list[str]}] |
+| `dependency_evidence` | str ('full') |
 | `exclude_headers` | list[str] (or a single str) |
 | `on_incomplete` | str |
 | `private_headers` | list[str] (or a single str) |

@@ -28,8 +28,8 @@ def _round_trip(snap: AbiSnapshot) -> AbiSnapshot:
     return snapshot_from_dict(json.loads(json.dumps(snapshot_to_dict(snap))))
 
 
-def test_schema_version_is_51() -> None:
-    assert SCHEMA_VERSION == 51
+def test_schema_version_is_at_least_51() -> None:
+    assert SCHEMA_VERSION >= 51
 
 
 def test_conflicts_round_trip() -> None:

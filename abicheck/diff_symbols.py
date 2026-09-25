@@ -24,6 +24,7 @@ from typing import Any
 from .checker_types import Change
 from .compare import export_transition as _export_transition
 from .compare.constants import constant_index_pair, diff_constants
+from .compare.edge_query import export_table_covered
 from .compare.elf_only_demangle import (
     elf_only_demangled_name,
     prewarm_elf_only_demangling,
@@ -994,13 +995,15 @@ def _detect_newly_deleted_functions(
     old_exported = exported_symbol_names(
         getattr(old_snapshot, "elf", None), FUNCTION_SYMBOL_TYPES
     )
-    # Whether the new side has an ELF symbol table at all -- "no ELF evidence
-    # available" vs. "table present but this function is not exported": when a
-    # table exists, an empty *function* export set is authoritative (a
-    # DWARF-only DW_AT_deleted internal member is genuinely not exported).
-    # Keying on ``exported`` truthiness alone would only apply this when some
-    # *other* function happened to be exported.
-    has_elf_symbol_table = bool(getattr(new_elf, "symbols", None))
+    # "Not exported now and not exported before" is a proven absence only
+    # where each side's table was read (I4, ``export_table_covered``): a
+    # read table's empty *function* export set is authoritative (a
+    # DWARF-only DW_AT_deleted internal member is genuinely not exported),
+    # while an OLD side with no read table proves nothing about "before" and
+    # used to suppress a real deletion.
+    both_tables_read = export_table_covered(
+        new_snapshot, "elf"
+    ) and export_table_covered(old_snapshot, "elf")
     for mangled, f_new in new_all.items():
         if not f_new.is_deleted:
             continue
@@ -1011,7 +1014,7 @@ def _detect_newly_deleted_functions(
         # to this detector for it).
         if (
             f_new.deleted_from_dwarf
-            and has_elf_symbol_table
+            and both_tables_read
             and mangled not in exported
             and mangled not in old_exported
         ):

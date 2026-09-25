@@ -47,14 +47,16 @@ def _func(name: str, mangled: str, **kwargs: object) -> Function:
 
 
 def _elf_with_syms(*names: str) -> ElfMetadata:
-    """Build a minimal ElfMetadata with the given symbol names exported."""
+    """Build a minimal, *parsed* ElfMetadata with the given symbol names
+    exported (``machine`` set: an empty table read off a real binary, not a
+    default block nobody parsed -- I4)."""
     syms = [
         ElfSymbol(
             name=n, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC, size=0
         )
         for n in names
     ]
-    return ElfMetadata(symbols=syms)
+    return ElfMetadata(symbols=syms, machine="EM_X86_64")
 
 
 def _kinds(result: object) -> set[ChangeKind]:
@@ -94,6 +96,15 @@ class TestFuncDeletedElfFallbackDetection:
         result = compare(old, new)
         assert ChangeKind.FUNC_DELETED_ELF_FALLBACK in _kinds(result)
         assert result.verdict == Verdict.BREAKING
+
+    def test_unread_new_table_is_not_a_deletion(self) -> None:
+        """A NEW ELF block that was never parsed (no symbols, no machine) is
+        not a table that lacks the symbol (I4): no fallback finding."""
+        mangled = "_Z7processv"
+        old = _snap(functions=[_func("process", mangled)], elf=_elf_with_syms(mangled))
+        new = _snap(functions=[_func("process", mangled)], elf=ElfMetadata())
+        result = compare(old, new)
+        assert ChangeKind.FUNC_DELETED_ELF_FALLBACK not in _kinds(result)
 
     def test_symbol_present_in_both_elf_no_change(self) -> None:
         """Symbol exported in both old and new ELF → no fallback change."""

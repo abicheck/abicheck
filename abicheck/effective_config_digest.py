@@ -121,6 +121,7 @@ EFFECTIVE_CONFIG_FIELD_KEYS: tuple[str, ...] = (
     "surface.experimental_namespaces",
     "surface.explicit_scope",
     "surface.exclude_headers",
+    "surface.ownership",
     "surface.scope_to_public_surface",
     "surface.scope_to_public_surface_requested",
     "contract.mode",
@@ -515,6 +516,10 @@ def effective_config_fields_from_full_config(
         "surface.exclude_headers": str(
             getattr(result, "excluded_header_patterns", "") or ""
         ),
+        # ADR-075 D4: the ownership rules both sides were classified under.
+        "surface.ownership": str(
+            getattr(result, "extraction_scope_identity", "") or ""
+        ),
         "surface.scope_to_public_surface": str(
             bool(getattr(result, "scope_to_public_surface", False))
         ),
@@ -610,6 +615,10 @@ def effective_config_fields_from_diff_result(
         # See the rich tier's identical field above.
         "surface.exclude_headers": str(
             getattr(result, "excluded_header_patterns", "") or ""
+        ),
+        # ADR-075 D4: the ownership rules both sides were classified under.
+        "surface.ownership": str(
+            getattr(result, "extraction_scope_identity", "") or ""
         ),
         "surface.scope_to_public_surface": str(
             bool(getattr(result, "scope_to_public_surface", False))

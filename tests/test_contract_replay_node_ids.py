@@ -190,7 +190,7 @@ def test_fresh_report_carries_the_new_encoding_version() -> None:
     from abicheck.schemas import REPORT_SCHEMA_VERSION
 
     assert CONTRACT_EVIDENCE_SCHEMA_VERSION == 2
-    assert REPORT_SCHEMA_VERSION == "5.4"
+    assert REPORT_SCHEMA_VERSION == "5.6"
 
 
 def _fixture_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -243,3 +243,34 @@ def test_a_fresh_context_reevaluates_as_the_old_encoding_did(mode: str) -> None:
     )
     expected = json.loads((FIXTURE / f"decisions_{mode}.json").read_text())
     assert _decisions(ctx, changes) == expected
+
+
+@pytest.mark.parametrize(
+    ("node", "category"),
+    [
+        ("decl://_Z1fv", "decl"),
+        ("unresolved://decl/x", "decl"),
+        ("type://A", "type"),
+        ("type://A#typedef", "type"),
+        ("unresolved://type/x", "type"),
+        ("decl:f", "decl"),
+        ("record:A", "type"),
+        ("enum:A", "type"),
+        ("typedef:A", "type"),
+        ("name:A", None),
+        ("alias:A", None),
+        ("vtable://A", None),
+    ],
+)
+def test_node_category_covers_both_encodings(node: str, category: str | None) -> None:
+    from abicheck.policy.contract_graph_encoding import graph_node_category
+
+    assert graph_node_category(node) == category
+
+
+def test_a_schema1_node_with_an_empty_spelling_indexes_nothing() -> None:
+    from abicheck.contract_evidence import TypeGraphSnapshot
+    from abicheck.policy.contract_graph_encoding import graph_node_index
+
+    graph = TypeGraphSnapshot(nodes=("decl:", "record:A"), edges=())
+    assert graph_node_index(graph) == {"A": {"record:A"}}

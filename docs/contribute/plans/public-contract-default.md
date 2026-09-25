@@ -2198,7 +2198,7 @@ called out below rather than quietly resolved.
 walks the snapshot's whole record/enum/typedef/declaration graph and emits it
 as `TypeGraphSnapshot` nodes/edges. The node encoding (schema 1:
 `decl:`/`record:`/`enum:`/`typedef:`/`alias:`; since `contract_evidence`
-schema 2 / report schema 5.4, the Phase 1 entity node ids with `name:`/`alias:`
+schema 2 / report schema 5.6, the Phase 1 entity node ids with `name:`/`alias:`
 spelling tiers) is documented in that module,
 since `TypeGraphSnapshot` itself deliberately treats nodes as opaque. Two
 properties matter more than the encoding:

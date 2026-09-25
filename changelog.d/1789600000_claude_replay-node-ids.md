@@ -1,7 +1,7 @@
 ### Changed
 
 - **The `compare --contract` replay type graph now keys every declaration and
-  type by its Phase 1 entity node id (report schema 5.4, `contract_evidence`
+  type by its Phase 1 entity node id (report schema 5.6, `contract_evidence`
   schema 2).** `contract_context.contract_evidence`'s type graph, each
   provider's `declarations`, and the receipt's `evaluated_contract_roots`/
   `evaluated_type_closure` used their own `decl:`/`record:`/`enum:`/`typedef:`
