@@ -308,3 +308,71 @@ def test_exhaustive_small_domain_reaches_every_tier():
                 assert got.value == want, e
                 seen.add(want)
     assert seen == {m.value for m in ExportMatch}
+
+
+# ---------------------------------------------------------------------------
+# Edge states of the read-back and the adapters
+# ---------------------------------------------------------------------------
+
+
+def _fn_with(fact):
+    return Function(
+        name="f", mangled="f", return_type="void", binary_exported_fact=fact
+    )
+
+
+def test_binary_export_match_is_none_when_the_tier_is_not_recoverable():
+    from abicheck.model.fact import Fact
+    from abicheck.model.surface_facts import binary_export_match
+
+    assert binary_export_match(_fn_with(Fact.not_collected("no binary"))) is None
+    assert binary_export_match(_fn_with(Fact.partial(True, "other"))) is None
+    assert (
+        binary_export_match(_fn_with(Fact.partial(True, "export-match:bogus"))) is None
+    )
+    assert (
+        binary_export_match(_fn_with(Fact.partial(False, "export-match:static_only")))
+        is None
+    )
+    # Legacy-derived (no stored fact) is not a producer's tier either.
+    assert (
+        binary_export_match(Function(name="f", mangled="f", return_type="void")) is None
+    )
+
+
+def test_castxml_rewritten_c_linkage_spelling_is_dynamic_not_alias():
+    """A C-linkage entity whose pseudo-mangled name was rewritten to its bare
+    name: the bare-name hit *is* its linker spelling's hit."""
+    from types import SimpleNamespace
+
+    from abicheck.extract.headers.castxml.location import export_match
+    from abicheck.model.export_index import ExportMatch
+
+    ctx = SimpleNamespace(exported_dynamic={"x"}, exported_static={"x"})
+    assert export_match(ctx, "_Z1x", "x") is ExportMatch.NAME_ALIAS
+    assert export_match(ctx, "_Z1x", "x", "x") is ExportMatch.DYNAMIC
+    assert export_match(ctx, "_Z1x", "x", "_Z1x") is ExportMatch.NAME_ALIAS
+
+
+def test_clang_export_match_is_unknown_without_a_binary():
+    from abicheck.extract.headers.clang.context import export_match
+
+    assert export_match({"f"}, {"f"}, "f", "f", True) is None
+
+
+def test_dwarf_is_exported_is_any_tier_but_absent():
+    from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+
+    b = _DwarfSnapshotBuilder(
+        Path("libx.so"), ElfMetadata(symbols=[ElfSymbol(name="foo")])
+    )
+    assert b._is_exported("foo", "foo")
+    assert not b._is_exported("bar", "bar")
+
+
+def test_bare_bool_export_answer_is_a_plain_present_fact():
+    from abicheck.extract.surface_fact_producers import binary_exported_fact_for
+
+    for v in (True, False):
+        f = binary_exported_fact_for(v, producer="t")
+        assert f.status is FactStatus.PRESENT and f.value is v
