@@ -30,16 +30,16 @@ DEP_H = (
     "typedef int dep_unused_t;\ntypedef long dep_used_t;\n"
 )
 API_H = (
-    '#pragma once\n#include "dep.h"\nstatic const int API_CONSTANT = 3;\n'
+    '#pragma once\n#include "dep.h"\nstatic const int API_CONSTANT = {api};\n'
     "int api_function(dep_used_t x);\n"
 )
 LIB_C = '#include "api.h"\nint api_function(dep_used_t x){return (int)x;}\n'
 
 
-def _build(root: Path, value: int) -> Path:
+def _build(root: Path, value: int, api: int = 3) -> Path:
     root.mkdir()
     (root / "dep.h").write_text(DEP_H.format(value=value))
-    (root / "api.h").write_text(API_H)
+    (root / "api.h").write_text(API_H.format(api=api))
     (root / "lib.c").write_text(LIB_C)
     so = root / "libx.so"
     subprocess.run(
@@ -65,8 +65,8 @@ def test_excluded_header_constants_and_typedefs_are_scoped(tmp_path, frontend):
     if shutil.which(tool) is None:
         pytest.skip(f"{tool} not found")
     snaps = []
-    for label, value in (("old", 1), ("new", 2)):
-        so = _build(tmp_path / label, value)
+    for label, value, api in (("old", 1, 3), ("new", 2, 3), ("api", 1, 4)):
+        so = _build(tmp_path / label, value, api)
         out = tmp_path / f"{label}.json"
         r = _run(
             "dump", str(so), "-H", str(so.parent), "--exclude-header", "dep.h",
@@ -86,3 +86,8 @@ def test_excluded_header_constants_and_typedefs_are_scoped(tmp_path, frontend):
     r = _run("compare", str(snaps[0]), str(snaps[1]), frontend=frontend)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "DEP_CONSTANT" not in r.stdout
+
+    # Real break preserved: the library's OWN constant changing still gates.
+    r = _run("compare", str(snaps[0]), str(snaps[2]), frontend=frontend)
+    assert r.returncode != 0, r.stdout + r.stderr
+    assert "API_CONSTANT" in r.stdout
