@@ -227,6 +227,24 @@ class TestTestActionSummaryCoversEveryJob:
         )
         assert "contains(needs.*.result, 'skipped')" in run_step["run"]
 
+    def test_a_superseded_run_does_not_fail_the_gate(self) -> None:
+        """`cancel-in-progress` cancels a run a newer push superseded; the
+        `always()` summary then saw every dependency `cancelled` and went red
+        on `main`. The bypass must key off the workflow-level `cancelled()`
+        (false when one job merely times out) and exit before the check."""
+        test_action = _load_workflow("test-action.yml")
+        summary = _jobs(test_action)["test-action-summary"]
+        run_step = next(
+            s
+            for s in summary["steps"]
+            if s.get("name") == "Fail if any test-action.yml job did not succeed"
+        )
+        assert run_step["env"]["RUN_CANCELLED"] == "${{ cancelled() }}"
+        script = run_step["run"]
+        assert script.index('"$RUN_CANCELLED" == "true"') < script.index(
+            "contains(needs.*.result"
+        )
+
 
 class TestBranchRulesetArtifact:
     """`.github/branch-protection-ruleset.json` records the *non-fast-forward*
