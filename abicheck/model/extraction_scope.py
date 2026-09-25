@@ -333,7 +333,13 @@ def _ownership_index(snapshot: object) -> dict[tuple[str, str], EntityOwnership]
             decision = ownership_of(decl)
             if decision is None:
                 continue
-            key = str(getattr(decl, "mangled", "") or getattr(decl, "name", ""))
+            # A type's `name` is its unqualified leaf: `a::Impl` and `b::Impl`
+            # must not share a key.
+            key = str(
+                getattr(decl, "mangled", "")
+                or getattr(decl, "qualified_name", "")
+                or getattr(decl, "name", "")
+            )
             index.setdefault((kind, key), decision)
     return index
 
@@ -342,8 +348,8 @@ def moved_declarations(old: object, new: object) -> list[tuple[str, str, str]]:
     """``(name, old owner/contract, new owner/contract)`` for each declaration
     present on both sides whose classification differs, sorted by name.
 
-    A declaration is matched by its linker name, else its name, within its
-    kind. Only the owner and contract count: a changed rule id alone (a root
+    A declaration is matched by its linker name, else its qualified name, else
+    its name, within its kind. Only the owner and contract count: a changed rule id alone (a root
     spelled differently) moves nothing a reader sees.
     """
     old_index, new_index = _ownership_index(old), _ownership_index(new)

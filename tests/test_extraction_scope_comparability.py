@@ -212,3 +212,39 @@ def test_recording_equal_scopes_changes_no_verdict_or_finding() -> None:
     assert plain.changes  # non-vacuous: the pair really differs
     assert stamped.extraction_scope_identity == ExtractionScope(_RULES_A).fingerprint
     assert plain.extraction_scope_identity == ""
+
+
+@pytest.mark.parametrize(
+    ("old", "new"), [p for p in _PAIRS if _expected(*p) == _REFUSE]
+)
+def test_a_refusal_leaves_declaration_and_layout_unverified(old: str, new: str) -> None:
+    """Under ``--diagnostic-comparison`` a refused scope pair must not read
+    as trusted: each side extracted a different declaration surface."""
+    mismatch = check_contracts_comparable(
+        _snap(_VARIANTS[old]), _snap(_VARIANTS[new]), diagnostic=True
+    )
+    assert mismatch is not None and mismatch.kind == "scope"
+    assert {"declaration", "layout"} <= set(mismatch.dimensions)
+
+
+def test_same_leaf_types_in_different_scopes_are_matched_by_qualified_name() -> None:
+    """``RecordType.name`` is the unqualified leaf: two ``Impl``s in two
+    namespaces must not share an index slot, or a move is invented/missed."""
+    from abicheck.model import RecordType
+
+    def snap(first: str, second: str, scope: ExtractionScope) -> AbiSnapshot:
+        a = RecordType(name="Impl", kind="struct", qualified_name="lib::detail::Impl")
+        b = RecordType(name="Impl", kind="struct", qualified_name="fmt::Impl")
+        a.ownership_fact = Fact.present(EntityOwnership(first, "private", "r"))
+        b.ownership_fact = Fact.present(EntityOwnership(second, "external", "r"))
+        s = AbiSnapshot(library="lib", version="1", types=[a, b], from_headers=True)
+        s.extraction_scope = scope
+        return s
+
+    old = snap("target", "dependency:fmt", _VARIANTS["full_a"])
+    unchanged = snap("target", "dependency:fmt", _VARIANTS["full_b"])
+    assert moved_declarations(old, unchanged) == []
+    moved = snap("target", "dependency:other", _VARIANTS["full_b"])
+    assert moved_declarations(old, moved) == [
+        ("fmt::Impl", "dependency:fmt/external", "dependency:other/external")
+    ]
