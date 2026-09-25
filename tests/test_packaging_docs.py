@@ -27,9 +27,8 @@ installed and dist/ populated, so it can't run in the default fast lane).
 from __future__ import annotations
 
 import re
-from pathlib import Path
-
 import tomllib
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 

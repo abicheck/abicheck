@@ -38,7 +38,7 @@ several ``tests/test_pr_comment*.py`` modules).
 from __future__ import annotations
 
 from collections import OrderedDict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .pr_comment_base import (
     CommentModel,
@@ -682,7 +682,7 @@ def render_comment(
     """
     if detail not in DETAIL_LEVELS:
         detail = "standard"
-    ts = timestamp or datetime.now(timezone.utc)
+    ts = timestamp or datetime.now(UTC)
     short_sha = (sha or "")[:7]
     body = ""
     for i, (level, budget) in enumerate(_shortening_plan(detail)):

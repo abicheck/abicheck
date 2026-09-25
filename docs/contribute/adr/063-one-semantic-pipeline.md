@@ -1254,3 +1254,42 @@ their already-accepted decisions generalize and finish converging:
 See the [implementation plan](../plans/one-semantic-pipeline.md) for
 phasing, sequencing against the blockers named above, file-level targets,
 and acceptance criteria per phase.
+
+## Note (2026-09-24) — `binary_exported_fact` vs the observed `exports` join
+
+Two answers to "does the artifact export this declaration?" existed side by
+side: the surface fact (c) (`binary_exported_fact`, `model/surface_facts.py`)
+set by each producer, and the evidence-entity-model Phase 2 `exports` join
+(`compare/export_join.py`), which reads only the dynamic export table through
+`model/export_index.py`. They disagreed silently in three cases, each recorded
+as a plain `Fact.present(True)`: a `.symtab`-only symbol (castxml/clang
+`ELF_ONLY`), a bare-`name` hit for a declaration whose mangled spelling is not
+exported, and DWARF's demangled-name fallback (FIX-B).
+
+**Decision: the fact stays a separate observation, but its tier is explicit
+and produced by the one primitive the join's rule is stated in.**
+`model/export_index.py`'s `ExportMatch`/`match_export` classifies a
+declaration as `DYNAMIC` (a linker spelling in the dynamic table — exactly
+what the join matches), `NAME_ALIAS`, `DEMANGLED`, `STATIC_ONLY` or `ABSENT`,
+and every producer (castxml functions/variables, clang functions/variables,
+DWARF subprograms/variables) now calls it. `DYNAMIC` is recorded as
+`PRESENT(True)`, `ABSENT` as `PRESENT(False)`, and each weaker tier as
+`PARTIAL(True)` carrying an `export-match:<tier>` diagnostic
+(`surface_facts.binary_export_match` reads it back). So `PRESENT(True)` holds
+exactly when the join joins the declaration, and a static symbol — which is
+not an ABI export — can no longer be mistaken for one.
+
+Not chosen: making the fact a *projection* of the join (weaker tiers → `False`).
+Every reader (`is_binary_exported`, `is_abi_visible`, `in_public_surface`,
+`is_export_confirmed_absent`, bundle signature evidence) reads `PARTIAL(True)`
+as exported, as the legacy `Visibility.ELF_ONLY` bridge always did; flipping
+the truth value would move findings (and make fresh and pre-v46 snapshots
+disagree) and is a separate policy decision. Truthiness is therefore
+unchanged for every input, (b) keeps reading any non-absent tier as export
+evidence, and no stored field was added: the tier travels in the fact's
+already-persisted diagnostics, so no snapshot schema bump. A snapshot written
+before this note carries `PRESENT(True)` for the weaker tiers and reads as
+`DYNAMIC`; a re-dump makes it explicit. Pinned by
+`tests/test_binary_exported_fact_export_join.py` (generated dynamic,
+non-default-versioned, `.symtab`-only, literal `foo@@V`, bare-name and
+demangled-variant worlds against a ground-truth oracle).

@@ -343,7 +343,7 @@ def collect_inline_pack(
     pack = BuildSourcePack.empty(
         Path(""),
         abicheck_version="",
-        created_at=_dt.datetime.now(_dt.timezone.utc).isoformat(),
+        created_at=_dt.datetime.now(_dt.UTC).isoformat(),
     )
     pack.manifest.extractors = extractors
     pack.manifest.inputs = {

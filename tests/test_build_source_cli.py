@@ -420,7 +420,7 @@ def _collect(
     pack = BuildSourcePack.empty(
         output,
         abicheck_version=_abicheck_version,
-        created_at=_dt.datetime.now(_dt.timezone.utc).isoformat(),
+        created_at=_dt.datetime.now(_dt.UTC).isoformat(),
     )
     red = DEFAULT_REDACTION
     pack.manifest.extractors = extractors

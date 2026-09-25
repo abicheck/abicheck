@@ -9,7 +9,7 @@ description = "ABI/API compatibility checker for C/C++ libraries: see how a libr
 readme = "README.md"
 license = {text = "Apache-2.0"}
 authors = [{name = "Nikolay Petrov", email = "sfasp.post@gmail.com"}]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 keywords = ["abi", "api", "compatibility", "checker", "shared-library", "api-evolution", "ci", "elf", "pe", "macho", "dwarf", "castxml"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -20,11 +20,11 @@ classifiers = [
     "Operating System :: Microsoft :: Windows",
     "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: Software Development :: Libraries",
     "Topic :: Software Development :: Quality Assurance",
 ]
@@ -110,7 +110,7 @@ dist = [
 ]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = true
 ignore_missing_imports = true
 # ``unused-ignore`` flips on/off depending on the mypy + pyelftools combo

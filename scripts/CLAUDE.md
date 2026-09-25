@@ -1,7 +1,7 @@
 # CLAUDE.md — `scripts/`
 
 Maintenance and demo scripts. Not packaged; not part of the public API.
-Each must run with Python 3.10+ and the package installed in dev mode
+Each must run with Python 3.11+ and the package installed in dev mode
 (`pip install -e ".[dev]"`).
 
 ## Inventory

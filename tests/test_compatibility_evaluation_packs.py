@@ -332,7 +332,7 @@ class TestLoadPackManifestHappyPath:
 
         from abicheck.compatibility_evaluation_config import ImmutableIdentity
 
-        dt = datetime.datetime(2026, 1, 1, 12, 30, 45, 123456, datetime.timezone.utc)
+        dt = datetime.datetime(2026, 1, 1, 12, 30, 45, 123456, datetime.UTC)
         pack = LoadedPack(
             identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
             kind=PackKind.CONTRACT,
@@ -341,7 +341,7 @@ class TestLoadPackManifestHappyPath:
         value = pack.assignments["field"]
         assert type(value) is datetime.datetime
         assert value == dt
-        assert value.tzinfo == datetime.timezone.utc
+        assert value.tzinfo == datetime.UTC
 
     def test_directly_constructed_pack_preserves_datetime_fold(self) -> None:
         # `fold` disambiguates a wall-clock time that occurs twice (e.g. a
@@ -404,7 +404,7 @@ class TestLoadPackManifestHappyPath:
         assert stored == value
 
         tz.offset_minutes = 60
-        assert stored == datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+        assert stored == datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
 
     def test_directly_constructed_pack_rejects_a_tzinfo_with_no_offset(self) -> None:
         import datetime

@@ -9,7 +9,7 @@ Thank you for your interest in contributing!
 
 ## Requirements
 
-- Python >= 3.10
+- Python >= 3.11
 - `git`
 - Linux for full test suite: `castxml` + `g++` or `clang++` (ELF/DWARF/header tests)
 - Windows/macOS: unit tests and PE/Mach-O tests run without extra system dependencies
@@ -59,7 +59,7 @@ not a real regression — check the CI logs for the authoritative verdict.
 
 ```bash
 # Create a development environment with all dependencies
-conda create -n abicheck-dev python=3.10 castxml -c conda-forge
+conda create -n abicheck-dev python=3.11 castxml -c conda-forge
 conda activate abicheck-dev
 
 git clone https://github.com/abicheck/abicheck.git

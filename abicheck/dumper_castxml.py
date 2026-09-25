@@ -108,6 +108,7 @@ from .model import (
     Visibility,
 )
 from .model.declaration_headers import attributed
+from .model.export_index import ExportMatch
 from .model.identity import (
     EntityId,
     ScopePath,
@@ -540,22 +541,26 @@ class _CastxmlParser:
             # declaration and contract facts -- see model/surface_facts.py.
             # `_variable_visibility`'s CPO fallback promotes to PUBLIC with
             # no symbol looked up at all, so trust the raw lookup here.
+            # Tiered through the shared primitive (ADR-063, 2026-09-24 note)
+            # so a `.symtab`-only or bare-name hit is not recorded as the
+            # dynamic-export match the `exports` join makes.
             exported_ = (
                 None
                 if self._ctx.no_binary_evidence
-                else self._visibility(mangled, name)
-                in (Visibility.PUBLIC, Visibility.ELF_ONLY)
+                else _castxml_location.export_match(self._ctx, mangled, name)
             )
             # `_variable_visibility` resolved PUBLIC while the raw lookup
             # found no symbol: its CPO fallback fired, which is a contract
             # judgement, not an export observation. Record it as one or
             # `in_public_surface` answers False and the CPO drops out of
             # `detect_cpo_kind_changed` (CodeRabbit review).
-            # `exported_ is False`, not `not exported_`: a header-only dump
+            # `is ABSENT`, not "not exported": a header-only dump
             # leaves it None and resolves every visibility to PUBLIC, so the
             # looser test would assert contract membership for the entire
             # parsed surface on no evidence at all.
-            judged_public_ = vis is Visibility.PUBLIC and exported_ is False
+            judged_public_ = (
+                vis is Visibility.PUBLIC and exported_ is ExportMatch.ABSENT
+            )
             # ADR-063 Phase 2: whether `mangled` is a genuine mangling at
             # all. castxml emits a pseudo-Itanium `mangled` attribute even
             # for a C-linkage variable, and the ELF-export override above
