@@ -147,7 +147,7 @@ def test_list_length_mismatch_leaves_that_list_unclassified() -> None:
     assert ownership_of(back.variables[0]) == _TARGET
 
 
-@pytest.mark.parametrize("bad", [7, -3, "0", None])
+@pytest.mark.parametrize("bad", [7, -3, "0", None, True, False, 1.0])
 def test_out_of_range_or_malformed_index_is_unclassified(bad: object) -> None:
     d = _flat(_snapshot())
     d["extraction_scope"]["entity_ownership"]["functions"][0] = bad
@@ -186,3 +186,19 @@ def test_fingerprint_ignores_order_and_duplicates() -> None:
     assert a.fingerprint == b.fingerprint
     c = ExtractionScope(OwnershipRules(target_roots=("a",)))
     assert c.fingerprint != a.fingerprint
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["abc", b"abc", ["a", "b"], ["a", "b", "c", "d"], [1, "b", "c"], ["a", None, "c"]],
+)
+def test_a_malformed_decision_classifies_nothing(bad: object) -> None:
+    """Only three strings are a decision: a bare string is a length-3
+    Sequence, and coercing a non-string field would invent a decision."""
+    d = _flat(_snapshot())
+    d["extraction_scope"]["entity_ownership"]["decisions"][0] = bad
+    back = snapshot_from_dict(d)
+    first = d["extraction_scope"]["entity_ownership"]["functions"][0]
+    assert first == 0  # non-vacuous: the first function pointed at it
+    assert ownership_of(back.functions[0]) is None
+    assert ownership_of(back.functions[1]) == _DEP

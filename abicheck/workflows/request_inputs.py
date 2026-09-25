@@ -234,6 +234,7 @@ class InputSpec:
         follow_linker_scripts: bool = True,
         compile_db_filter: str | None = None,
         build_config: Path | str | None = None,
+        ownership: OwnershipRequest | None = None,
     ) -> InputSpec:
         """Build an :class:`InputSpec`, coercing loose front-end values."""
         return cls(
@@ -254,6 +255,7 @@ class InputSpec:
             follow_linker_scripts=follow_linker_scripts,
             compile_db_filter=compile_db_filter,
             build_config=Path(build_config) if build_config is not None else None,
+            ownership=ownership,
         )
 
 
