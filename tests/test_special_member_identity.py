@@ -89,9 +89,9 @@ def _node(ids, i):
 
 
 def _identities(snap):
-    from abicheck.model.graph_entity_identity import snapshot_identities
+    from abicheck.model.snapshot_identity_table import identities_for_snapshot
 
-    return snapshot_identities(snap)
+    return identities_for_snapshot(snap)
 
 
 # ---------------------------------------------------------------------------
@@ -134,14 +134,7 @@ def _scenario(rng):
     return functions, exports, expected
 
 
-_XFAIL = pytest.mark.xfail(
-    strict=True,
-    reason="castxml ctor/dtor placeholders are unresolved (Phase 1 gap)",
-)
-
-
 @needs_demangler
-@_XFAIL
 def test_placeholder_resolves_to_its_exported_variant_family():
     """60 generated scenarios in one test, so a failure names every
     disagreeing seed at once and the oracle cannot be vacuous."""
@@ -186,7 +179,6 @@ def test_resolution_does_not_depend_on_input_order(seed):
 
 class TestSpecialMemberCases:
     @needs_demangler
-    @_XFAIL
     def test_complete_and_base_object_ctor_variants(self):
         ids = _identities(
             _snap(
@@ -198,7 +190,6 @@ class TestSpecialMemberCases:
         assert ids.functions[0].aliases == ("decl://_ZN2ns1WC2Ei",)
 
     @needs_demangler
-    @_XFAIL
     def test_only_base_object_variant_exported_still_keys_on_complete(self):
         ids = _identities(
             _snap([_fn(_ctor_placeholder(("ns", "W"), []))], ["_ZN2ns1WC2Ev"])
@@ -206,7 +197,6 @@ class TestSpecialMemberCases:
         assert ids.functions[0].node_id == "decl://_ZN2ns1WC1Ev"
         assert ids.functions[0].aliases == ("decl://_ZN2ns1WC2Ev",)
 
-    @_XFAIL
     def test_deleting_complete_and_base_dtor_variants(self):
         ids = _identities(
             _snap(
@@ -229,7 +219,6 @@ class TestSpecialMemberCases:
         assert all(i.node_id.startswith("unresolved://") for i in ids.functions)
 
     @needs_demangler
-    @_XFAIL
     def test_implicit_copy_ctor_matches_its_substituted_mangling(self):
         # castxml spells the implicit copy ctor's parameter relative to its
         # scope; the mangling uses a substitution (S0_) the demangler expands.
@@ -259,7 +248,6 @@ class TestSpecialMemberCases:
         assert all(i.node_id.startswith("unresolved://") for i in ids.functions)
 
     @needs_demangler
-    @_XFAIL
     def test_typedef_parameter_found_by_scope_lookup(self):
         ids = _identities(
             _snap(
@@ -276,7 +264,6 @@ class TestSpecialMemberCases:
         assert ids.functions[0].node_id.startswith("unresolved://")
         assert ids.functions[1].node_id == "decl://_ZN2ns1WD1Ev"
 
-    @_XFAIL
     def test_real_ctor_linker_name_gains_observed_variant_aliases(self):
         ids = _identities(
             _snap([_fn("_ZN2ns1WC1Ei")], ["_ZN2ns1WC1Ei", "_ZN2ns1WC2Ei"])
@@ -284,7 +271,6 @@ class TestSpecialMemberCases:
         assert ids.functions[0].node_id == "decl://_ZN2ns1WC1Ei"
         assert ids.functions[0].aliases == ("decl://_ZN2ns1WC2Ei",)
 
-    @_XFAIL
     def test_class_named_like_a_variant_code_is_not_rewritten(self):
         # `C1Evil` embeds "C1E"; only the structural marker is a variant code.
         ids = _identities(
@@ -296,7 +282,6 @@ class TestSpecialMemberCases:
 
 class TestExportJoinOfSpecialMembers:
     @needs_demangler
-    @_XFAIL
     def test_placeholder_joins_every_variant_export(self):
         from abicheck.compare.export_join import join_exports
 

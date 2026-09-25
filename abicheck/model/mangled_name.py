@@ -469,6 +469,70 @@ def _step_next_component(
     return label, new_i, not nested, False, label
 
 
+def itanium_ctor_dtor_marker_span(mangled: str) -> tuple[int, int] | None:
+    """``(start, end)`` indices of *mangled*'s own Itanium ctor/dtor code
+    (``C1``/``C2``/``C3``/``D0``/``D1``/``D2``) -- the exact 2-character
+    span, structurally located the same length-prefix-aware way
+    :func:`itanium_scope_components` walks a nested name, so a class or
+    template-argument name that happens to embed the literal substring
+    ``"C1"``/``"D1"`` is never mistaken for the real marker: each
+    length-prefixed identifier is skipped as one whole unit via
+    :func:`_parse_source_name_component`, never scanned character-by-
+    character for a coincidental match.
+
+    Exists for a caller that needs to locate, not merely recognize, the
+    marker -- e.g. to derive a sibling ctor/dtor mangling (``buildsource.
+    template_graph._ctor_dtor_symbol_variants``, Codex review, fresh
+    evidence): a naive ``"C1E"`` substring search finds ``C1Evil<int>``'s
+    own embedded ``"C1E"`` inside its *class name* first (``_ZN6C1EvilIiE
+    C1Ev``), not the real ctor code that follows it, deriving the
+    genuinely different class ``C2Evil<int>``'s own real constructor
+    mangling by coincidence -- a false positive, not merely a missed one.
+
+    *mangled* need not be pre-normalized for the Mach-O double-underscore
+    prefix -- :func:`_itanium_strip_prefix` strips it on its own local
+    variable only, never mutating the caller's *mangled*, and this
+    function's own offset arithmetic (``offset = len(mangled) -
+    len(s)``) is computed against that same untouched *mangled*, so the
+    returned span is correct relative to whatever prefix form the caller
+    passed in (confirmed empirically: ``__ZN1CC1Ev`` and ``_ZN1CC1Ev``
+    both locate the identical ``"C1"`` text within their own respective
+    strings).
+
+    Returns ``None`` when *mangled* does not carry a ctor/dtor code this
+    parser can locate (a plain function/operator, a non-Itanium or
+    unmangled name, or any other form :func:`itanium_scope_components`
+    itself does not model)."""
+    prefix = _itanium_strip_prefix(mangled)
+    if prefix is None:
+        return None
+    s, nested = prefix
+    if not nested:
+        return None  # a free function's own single component is never a ctor/dtor
+    offset = len(mangled) - len(s)
+    i = 0
+    n = len(s)
+    if s[i : i + 2] == "St":
+        i += 2
+    while i < n:
+        c = s[i]
+        if c == "E":
+            return None  # nested name closed with no ctor/dtor component found
+        if c in _ASCII_DIGITS:
+            _name, new_i, _template_attached, _bare_name = _parse_source_name_component(
+                s, i
+            )
+            if new_i == i:
+                return None  # malformed source name
+            i = new_i
+            continue
+        label, new_i = _parse_ctor_dtor_component(s, i)
+        if label is not None:
+            return offset + i, offset + new_i
+        return None  # an operator or other non-source-name, non-ctor/dtor form
+    return None
+
+
 def itanium_scope_components_with_template_positions(
     mangled: str,
 ) -> tuple[list[str], frozenset[int]] | None:

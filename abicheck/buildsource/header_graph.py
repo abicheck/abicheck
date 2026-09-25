@@ -100,7 +100,6 @@ from ..model.graph_entity_identity import (
     SnapshotIdentities,
     endpoint_key,
     register_identity_alias,
-    snapshot_identities,
 )
 from ..model.graph_facts import (
     CONF_HIGH,
@@ -108,6 +107,7 @@ from ..model.graph_facts import (
     GraphEdge,
     GraphNode,
 )
+from ..model.snapshot_identity_table import identities_for_snapshot
 from ..model.source_graph import SourceGraphSummary, _header_node_id
 from ..provenance import (
     build_public_set,
@@ -507,7 +507,7 @@ def build_header_only_graph(
     for h in header_paths or ():
         header_node(h)
 
-    ids = snapshot_identities(snapshot)
+    ids = identities_for_snapshot(snapshot)
 
     def seed_decl(entity: Function | Variable, ident: GraphEntityIdentity) -> None:
         node_id = ident.node_id

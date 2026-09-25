@@ -2348,7 +2348,10 @@
               "resolved": {}
             }
           ],
-          "schema_version": 2
+          "schema_version": 2,
+          "identity_aliases": {
+            "decl://_ZN6WidgetC2Ev": "decl://_ZN6WidgetC1Ev"
+          }
         }
       },
       "section_kind": "graph",

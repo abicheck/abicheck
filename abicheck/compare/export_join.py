@@ -53,7 +53,11 @@ from ..model.export_index import (
     default_versioned_names,
     pe_export_ids_with_ordinal_placeholder,
 )
-from ..model.graph_entity_identity import SnapshotIdentities, snapshot_identities
+from ..model.graph_entity_identity import (
+    GraphEntityIdentity,
+    SnapshotIdentities,
+    endpoint_key,
+)
 from ..model.graph_join import (
     EXPORT_JOIN,
     CrossLayerJoin,
@@ -62,6 +66,8 @@ from ..model.graph_join import (
     binary_symbol_node_id,
     resolve_join_records,
 )
+from ..model.mangled_name import itanium_ctor_dtor_marker_span
+from ..model.snapshot_identity_table import identities_for_snapshot
 
 if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
@@ -180,6 +186,29 @@ def _declaration_spellings(
         spellings = out.setdefault(node_id, set())
         if spelling := mangled or name:
             spellings.add(spelling)
+    for node_id, variants in _variant_spellings(ids).items():
+        out.setdefault(node_id, set()).update(variants)
+    return out
+
+
+def _variant_spellings(ids: SnapshotIdentities) -> dict[str, set[str]]:
+    """Constructor/destructor node id -> its variant family's spellings (its
+    own key plus every alias, ``C1``/``C2``, ``D0``/``D1``/``D2`` --
+    :mod:`abicheck.model.special_member_identity`). These are one entity's
+    several exports, so matching more than one of them in one table is not a
+    competition (:func:`join_exports`). Any other alias (a Mach-O
+    decoration) keeps the ordinary one-export-per-table rule."""
+    out: dict[str, set[str]] = {}
+    for ident in ids.functions:
+        if not (ident.resolved and ident.aliases):
+            continue
+        key = endpoint_key(ident)
+        if itanium_ctor_dtor_marker_span(key) is None:
+            continue
+        out[ident.node_id] = {
+            key,
+            *(endpoint_key(GraphEntityIdentity(a, ident.state)) for a in ident.aliases),
+        }
     return out
 
 
@@ -199,7 +228,7 @@ def join_exports(
     identity table; it is otherwise computed here. The result is a pure
     function of the snapshot and independent of the order of its records.
     """
-    ids = identities if identities is not None else snapshot_identities(snap)
+    ids = identities if identities is not None else identities_for_snapshot(snap)
     spellings = _declaration_spellings(snap, ids)
     captured = bool(build_raw_export_indexes(snap))
     tables = export_tables(snap)
@@ -252,9 +281,25 @@ def join_exports(
         if any(len(right_cands[e]) > 1 for e in cands)
     }
 
+    proven = {
+        binary_symbol_node_id(platform, v)
+        for variants in _variant_spellings(ids).values()
+        for v in variants
+        for platform, names in by_platform.items()
+        if v in names
+    }
+
     def _same_table_twice(cands: set[str]) -> bool:
-        platforms = [entries[c].platform for c in cands]
-        return len(platforms) != len(set(platforms))
+        """Two entries of one table compete -- unless every entry sharing a
+        table is a proven spelling of the entity itself (``C1`` and ``C2``
+        of one constructor)."""
+        per_platform: dict[str, list[str]] = {}
+        for c in cands:
+            per_platform.setdefault(entries[c].platform, []).append(c)
+        return any(
+            len(group) > 1 and not all(c in proven for c in group)
+            for group in per_platform.values()
+        )
 
     left = resolve_join_records(
         left_cands,

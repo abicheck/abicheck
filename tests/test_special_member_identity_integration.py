@@ -72,12 +72,6 @@ EXPECTED = {
 }
 
 
-_XFAIL = pytest.mark.xfail(
-    strict=True,
-    reason="castxml ctor/dtor placeholders are unresolved (Phase 1 gap)",
-)
-
-
 def _dump(d: Path, frontend: str) -> Path:
     target = d / f"{frontend}.json"
     proc = subprocess.run(
@@ -112,9 +106,9 @@ def _load(path: Path):
 
 
 def _special_member_nodes(snap):
-    from abicheck.model.graph_entity_identity import snapshot_identities
+    from abicheck.model.snapshot_identity_table import identities_for_snapshot
 
-    ids = snapshot_identities(snap)
+    ids = identities_for_snapshot(snap)
     return {
         i.node_id: set(i.aliases)
         for f, i in zip(snap.functions, ids.functions)
@@ -122,7 +116,6 @@ def _special_member_nodes(snap):
     }
 
 
-@_XFAIL
 def test_castxml_placeholders_resolve_to_the_exported_variant_families(
     built: Path,
 ) -> None:
@@ -132,7 +125,6 @@ def test_castxml_placeholders_resolve_to_the_exported_variant_families(
     assert _special_member_nodes(snap) == EXPECTED
 
 
-@_XFAIL
 def test_every_special_member_export_joins_a_declaration(built: Path) -> None:
     from abicheck.compare.export_join import join_exports
     from abicheck.model.graph_join import JoinState
@@ -152,7 +144,6 @@ def test_every_special_member_export_joins_a_declaration(built: Path) -> None:
     assert unresolved and all(r.state is JoinState.UNMATCHED for r in unresolved)
 
 
-@_XFAIL
 def test_castxml_and_clang_dumps_share_the_special_member_nodes(built: Path) -> None:
     if shutil.which("clang++") is None and shutil.which("clang") is None:
         pytest.skip("clang not available")
@@ -160,3 +151,16 @@ def test_castxml_and_clang_dumps_share_the_special_member_nodes(built: Path) -> 
     clang_nodes = set(_special_member_nodes(_load(_dump(built, "clang"))))
     assert set(EXPECTED) <= castxml_nodes
     assert set(EXPECTED) <= clang_nodes
+
+
+def test_the_persisted_header_graph_uses_the_same_nodes(built: Path) -> None:
+    # Invariant I1: the header graph written at dump time and the identity
+    # table computed from the stored snapshot name each special member alike.
+    snap = _load(_dump(built, "castxml"))
+    graph = snap.surface_graph
+    assert graph is not None
+    node_ids = {n.id for n in graph.nodes}
+    assert set(EXPECTED) <= node_ids
+    for node, variants in EXPECTED.items():
+        for alias in variants:
+            assert graph.identity_aliases.get(alias) == node

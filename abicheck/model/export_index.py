@@ -85,6 +85,7 @@ __all__ = [
     "named_pe_exports",
     "ordinal_only_pe_exports",
     "pe_export_ids_with_ordinal_placeholder",
+    "snapshot_export_names",
 ]
 
 #: Which platform table a :class:`RawExportIndex` was read from.
@@ -433,3 +434,14 @@ def export_names_or_modeled_fallback(snap: AbiSnapshot) -> tuple[str, ...]:
     syms |= {v.mangled for v in snap.variables if getattr(v, "mangled", "")}
     syms.discard("")
     return tuple(sorted(syms))
+
+
+def snapshot_export_names(snap: AbiSnapshot) -> frozenset[str]:
+    """Every spelling any export table *snap* carries (:func:`all_export_names`
+    over :func:`build_raw_export_indexes`) -- the export evidence the graph
+    identity table's ctor/dtor variant rule reads
+    (``model.graph_entity_identity.snapshot_identities``)."""
+    names: set[str] = set()
+    for index in build_raw_export_indexes(snap):
+        names |= all_export_names(index)
+    return frozenset(names)
