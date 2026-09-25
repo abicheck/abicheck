@@ -51,6 +51,7 @@ from __future__ import annotations
 import concurrent.futures
 import contextvars
 import dataclasses
+import functools
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -417,8 +418,19 @@ def resolve_compare_request(
             new_public_header_dirs,
         )
 
+    from .workflows.side_isolation import isolation_enabled, run_isolated
+
     with ast_acquisition_scope():
-        if not allow_parallel or resolve_sides_sequentially(request):
+        if isolation_enabled():
+            _deadline_ts = deadline.current_deadline_ts()
+            old_res, new_res = run_isolated(
+                [
+                    functools.partial(_deadline_bound_side_worker, _deadline_ts, fn)
+                    for fn in (_resolve_old_side, _resolve_new_side)
+                ],
+                concurrent=allow_parallel and not resolve_sides_sequentially(request),
+            )
+        elif not allow_parallel or resolve_sides_sequentially(request):
             old_res = _resolve_old_side()
             new_res = _resolve_new_side()
         else:

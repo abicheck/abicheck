@@ -107,6 +107,32 @@ Two design notes worth not relearning:
   asserted, not argued:
   `test_a_group_holds_its_object_even_when_the_content_entry_goes`.
 
+## Per-side process isolation (opt-in)
+
+`ABICHECK_EXTRACTION_ISOLATION=process` (Linux) resolves each side of a
+`compare` in its own forked child and hands back only the finished snapshot
+(`abicheck/workflows/side_isolation.py`). It exists because most of a dump's
+residency after the parse is not live data: the AST is allocated interleaved
+with the snapshot it produces, so freeing the AST leaves arenas pinned by the
+few snapshot objects inside each. On a 45-root scan, live data was 366 MiB of
+a 2.66 GiB resident set; neither `gc.collect()`, `malloc_trim` nor
+`PYTHONMALLOC=malloc` returned the rest (the last was 7% worse on peak and
+41% slower). A child that exits returns all of it.
+
+| run | wall | peak (max over processes) | findings |
+|---|---|---|---|
+| oneDAL 2025.10 -> 2026.1, 3 headers, clang, in-process | 49.5 s | 1.338 GiB | 3548 |
+| same, `ABICHECK_EXTRACTION_ISOLATION=process` | 58.3 s | 0.888 GiB | 3548, identical |
+| 45-root scan, dump each side separately (reporter's measurement) | neutral | -49.8% | identical |
+
+The wall-time cost is copy-on-write: a child's first write into each page it
+inherited faults a copy (about twice the minor faults and twice the system
+time of the same work in-process), plus ~1 s each way to pickle a snapshot.
+It is proportionally smaller as the per-side work grows, which is why the
+large scan measured it as neutral. It stays opt-in until that trade-off is
+measured on more workloads; the CLI's sequential side resolution is kept, so
+at most one child is alive at a time.
+
 ## Results
 
 Two rounds are recorded here. The **first** (PR #1332) closed three
