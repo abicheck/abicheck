@@ -29,6 +29,7 @@ Phase 5 section for the design this page's data comes from.
 | `ElfMetadata.has_init` | `bool \| None` | elf | persisted | ✅ | — | ✅ | — | ✅ |
 | `EnumType.deprecated` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `EnumType.is_scoped` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `EnumType.ownership` | `EntityOwnership` | castxml, clang | persisted | ✅ | — | — | — | ✅ |
 | `EnumType.qualified_name` | `str \| None` | castxml, clang | persisted | ✅ | ✅ | ✅ | — | ✅ |
 | `EnumType.source_header` | `str \| None` | castxml, clang, dwarf, pdb | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.binary_exported` | `bool` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
@@ -44,6 +45,7 @@ Phase 5 section for the design this page's data comes from.
 | `Function.is_hidden_friend` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_override` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_variadic` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.ownership` | `EntityOwnership` | castxml, clang | persisted | ✅ | — | — | — | ✅ |
 | `Function.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `MachoMetadata.rpaths` | `list[str] \| None` | macho | persisted | ✅ | — | ✅ | — | ✅ |
 | `Param.is_restrict` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
@@ -57,6 +59,7 @@ Phase 5 section for the design this page's data comes from.
 | `RecordType.is_final` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.is_standard_layout` | `bool \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.is_trivially_copyable` | `bool \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `RecordType.ownership` | `EntityOwnership` | castxml, clang | persisted | ✅ | — | — | — | ✅ |
 | `RecordType.qualified_name` | `str \| None` | castxml, clang | persisted | ✅ | ✅ | ✅ | — | ✅ |
 | `RecordType.source_header` | `str \| None` | castxml, clang, dwarf, pdb | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.virtual_bases` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
@@ -74,6 +77,7 @@ Phase 5 section for the design this page's data comes from.
 | `Variable.deprecated` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.elf_binding` | `SymbolBinding \| None` | castxml, clang, elf | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.in_public_contract` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.ownership` | `EntityOwnership` | castxml, clang | persisted | ✅ | — | — | — | ✅ |
 | `Variable.source_header` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 
 ## Reliability-flag coverage (case (a))

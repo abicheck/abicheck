@@ -44,6 +44,7 @@ from ..model.header_ast_frontends import HEADER_AST_FRONTENDS as HEADER_AST_FRON
 if TYPE_CHECKING:
     from ..compile_context import CompileContext
     from ..dump_manifest import DumpManifest
+    from ..model.ownership_rules import OwnershipRequest
 
 #: Languages the C/C++ frontends accept (mirrors the CLI ``--lang`` choices).
 SUPPORTED_LANGS = frozenset({"c", "c++"})
@@ -204,6 +205,13 @@ class InputSpec:
     # see the same explicit config `embed_build_source` already honors at
     # real-execution time -- see `docs/contribute/known-gaps.md`'s "PR C".
     build_config: Path | None = None
+    # ADR-075 D1/D7: the project's ownership rules (``scope.dependencies``/
+    # ``private_*``/``dependency_evidence``, roots absolute) this side's
+    # declarations are classified under. ``None`` = no configured rules; the
+    # target roots (``public_header_dirs`` + ``-H`` directories) are folded in
+    # by ``resolve_input`` either way. Build it with
+    # ``workflows.ownership_request.ownership_request_from_config``.
+    ownership: OwnershipRequest | None = None
 
     @classmethod
     def of(

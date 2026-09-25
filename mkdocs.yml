@@ -57,6 +57,7 @@ nav:
       - CLI Usage: use/cli-usage.md
       - Evidence, Build-Context & Debug Flags: use/dump-compare-flags.md
       - Evidence Depth: use/evidence-depth.md
+      - Target Ownership: use/target-ownership.md
       - Producing Source Facts: use/producing-source-facts.md
       - Output Formats: use/output-formats.md
       - Baseline Management: use/baseline-management.md

@@ -75,6 +75,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .compile_context import CompileContext
+    from .model.ownership_rules import OwnershipRequest
     from .workflows.contracts import DumpRequest
 
 __all__ = ["build_dump_request"]
@@ -110,6 +111,7 @@ def build_dump_request(
     resolved_collect_mode: str | None = None,
     compile_db_filter: str | None = None,
     build_config: Path | None = None,
+    ownership: OwnershipRequest | None = None,
 ) -> DumpRequest:
     """One :class:`DumpRequest` describing this ``abicheck dump`` invocation.
 
@@ -182,6 +184,7 @@ def build_dump_request(
             compile=compile_context,
             compile_db_filter=compile_db_filter,
             build_config=build_config,
+            ownership=ownership,
         ),
         lang=lang,
         frontend=header_backend,

@@ -461,6 +461,18 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "it, so a hybrid snapshot keeps castxml's."
         ),
     ),
+    FactRow(
+        "Function",
+        "ownership_fact",
+        Capability.OTHER_LAYER,
+        Capability.OTHER_LAYER,
+        note=(
+            "ADR-075 D2: owner/contract/rule id, stamped after the parse by "
+            "`extract.ownership_stamp` from the declaring file -- neither "
+            "backend's parser sets it, and it is identical for both. "
+            "Persisted in `AbiSnapshot.extraction_scope`."
+        ),
+    ),
     # ── Variable ───────────────────────────────────────────────────────────
     FactRow("Variable", "name", _FULL, _FULL),
     FactRow("Variable", "mangled", _FULL, _FULL),
@@ -643,6 +655,18 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "during their own walk. Runtime-only -- never serialized, so a "
             "reloaded snapshot carries None; a hybrid merge does not backfill "
             "it, so a hybrid snapshot keeps castxml's."
+        ),
+    ),
+    FactRow(
+        "Variable",
+        "ownership_fact",
+        Capability.OTHER_LAYER,
+        Capability.OTHER_LAYER,
+        note=(
+            "ADR-075 D2: owner/contract/rule id, stamped after the parse by "
+            "`extract.ownership_stamp` from the declaring file -- neither "
+            "backend's parser sets it, and it is identical for both. "
+            "Persisted in `AbiSnapshot.extraction_scope`."
         ),
     ),
     # ── TypeField ──────────────────────────────────────────────────────────
@@ -1097,6 +1121,18 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "it, so a hybrid snapshot keeps castxml's."
         ),
     ),
+    FactRow(
+        "RecordType",
+        "ownership_fact",
+        Capability.OTHER_LAYER,
+        Capability.OTHER_LAYER,
+        note=(
+            "ADR-075 D2: owner/contract/rule id, stamped after the parse by "
+            "`extract.ownership_stamp` from the declaring file -- neither "
+            "backend's parser sets it, and it is identical for both. "
+            "Persisted in `AbiSnapshot.extraction_scope`."
+        ),
+    ),
     # ── EnumType ───────────────────────────────────────────────────────────
     FactRow("EnumType", "name", _FULL, _FULL),
     FactRow("EnumType", "members", _FULL, _FULL),
@@ -1199,6 +1235,18 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "during their own walk. Runtime-only -- never serialized, so a "
             "reloaded snapshot carries None; a hybrid merge does not backfill "
             "it, so a hybrid snapshot keeps castxml's."
+        ),
+    ),
+    FactRow(
+        "EnumType",
+        "ownership_fact",
+        Capability.OTHER_LAYER,
+        Capability.OTHER_LAYER,
+        note=(
+            "ADR-075 D2: owner/contract/rule id, stamped after the parse by "
+            "`extract.ownership_stamp` from the declaring file -- neither "
+            "backend's parser sets it, and it is identical for both. "
+            "Persisted in `AbiSnapshot.extraction_scope`."
         ),
     ),
     # ── Param ──────────────────────────────────────────────────────────────

@@ -124,6 +124,7 @@ from .dwarf_advanced import (
 )
 from .model import AbiSnapshot, advanced_facts_collected as _advanced_collected
 from .model.change_catalog.kinds import ChangeKind
+from .model.extraction_scope import snapshot_scope_identity
 from .model.header_exclusion_record import comparison_exclusion_identity
 from .model.surface_facts import is_abi_visible
 from .policy.classification import (
@@ -1402,6 +1403,7 @@ def compare(
         suppression_source_sha256=suppression_source_sha256,
         explicit_scope_source_sha256=receipt.explicit_scope_source_sha256,
         excluded_header_patterns=comparison_exclusion_identity(old, new),
+        extraction_scope_identity=snapshot_scope_identity(old, new),
         pattern_verdicts_enabled=bool(pattern_verdicts),
         collapse_versioned_symbols_enabled=bool(collapse_versioned_symbols),
         surface_metrics_enabled=bool(surface_metrics),
