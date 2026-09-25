@@ -181,7 +181,6 @@ def _canonical_linker_name(linker_name: str, plain_name: str) -> tuple[str, str]
 #: ``PeMetadata.machine`` records them) on which a C-linkage export carries a
 #: calling-convention decoration.
 _PE_MACHINE_I386 = "IMAGE_FILE_MACHINE_I386"
-_PE_MACHINE_AMD64 = "IMAGE_FILE_MACHINE_AMD64"
 
 # `N` is the argument-list size in bytes: decimal, no leading zero, and a
 # whole number of 4-byte stack slots (every argument is widened to one).
@@ -209,11 +208,10 @@ def pe_c_decoration_base(export: str, machine: str) -> str:
     * 32-bit x86 (``IMAGE_FILE_MACHINE_I386``): ``__stdcall`` ``_foo@8``,
       ``__fastcall`` ``@foo@8``, ``__vectorcall`` ``foo@@8``, ``__cdecl``
       ``_foo``;
-    * x64 (``IMAGE_FILE_MACHINE_AMD64``): ``__vectorcall`` ``foo@@8`` only --
-      MSVC keeps that decoration on x64, while stdcall/fastcall/cdecl
-      collapse to the undecorated x64 convention;
-    * any other machine, an unknown one included: nothing (fail closed -- a
-      leading underscore there is part of the real name).
+    * any other machine, x64 and an unknown one included: nothing (fail
+      closed -- a leading underscore there is part of the real name). MSVC
+      does keep the ``foo@@8`` vectorcall decoration on x64, but ``@N`` is
+      deliberately never stripped off 32-bit x86: no x64 alias is recorded.
 
     ``N`` is only checked for shape (decimal, a multiple of 4), never
     compared with the declaration's parameters: an L2 snapshot has no
@@ -222,27 +220,18 @@ def pe_c_decoration_base(export: str, machine: str) -> str:
     ``N`` would be invented evidence. The alias rests on the spelling and
     the machine alone, and ambiguity stays with the join.
     """
-    if machine == _PE_MACHINE_I386:
-        patterns: tuple[re.Pattern[str], ...] = (
-            _PE_STDCALL_RE,
-            _PE_FASTCALL_RE,
-            _PE_VECTORCALL_RE,
-        )
-    elif machine == _PE_MACHINE_AMD64:
-        patterns = (_PE_VECTORCALL_RE,)
-    else:
+    if machine != _PE_MACHINE_I386:
         return ""
-    for pattern in patterns:
+    for pattern in (_PE_STDCALL_RE, _PE_FASTCALL_RE, _PE_VECTORCALL_RE):
         m = pattern.fullmatch(export)
         if m is not None:
             base, arg_bytes = m.group(1), int(m.group(2))
             if arg_bytes % 4 or _is_cxx_mangled(base):
                 return ""
             return base
-    if machine == _PE_MACHINE_I386:
-        m = _PE_CDECL_RE.fullmatch(export)
-        if m is not None and not _is_cxx_mangled(m.group(1)):
-            return m.group(1)
+    m = _PE_CDECL_RE.fullmatch(export)
+    if m is not None and not _is_cxx_mangled(m.group(1)):
+        return m.group(1)
     return ""
 
 
