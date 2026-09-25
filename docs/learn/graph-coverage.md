@@ -41,6 +41,19 @@ Two collection strategies commonly produce exactly this shape:
   `DECL_CALLS_DECL` edge a public inline function's *body* creates into an
   internal specialization — the graph is real, just structurally unable to
   answer that question.
+
+  **This graph is always built from a clang whole-translation-unit AST,
+  whatever `--ast-frontend` selected.** A castxml-frontend run therefore
+  still invokes `clang -ast-dump=json` once per side for the graph
+  (`service_header_graph_attach.py`) and pays its cost even though the
+  snapshot's declarations came from castxml. Without a usable clang the
+  graph is simply not attached — the dump still succeeds, with the L5
+  header graph absent rather than empty.
+  A warm run skips that cost through the header-graph projection sidecar
+  stored next to the clang AST cache entry; a *cold* castxml run pays the
+  full clang parse. Budget memory for it the way you would for a
+  clang-frontend run: the document is compacted and ASCII-escaped when
+  cached, but the first parse still reads clang's full output.
 - **A collector-upgrade** (old snapshot dumped header-only, new snapshot
   with a real `--build-info` compile database) is not a "new
   dependency appeared" signal — it is the same project seen through two

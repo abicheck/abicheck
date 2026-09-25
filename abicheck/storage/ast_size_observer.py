@@ -38,7 +38,12 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-__all__ = ["observe_ast_sizes", "report_ast_size"]
+__all__ = [
+    "mark_ast_intake",
+    "observe_ast_sizes",
+    "report_ast_size",
+    "set_ast_intake_hook",
+]
 
 _SINK: ContextVar[Callable[[int], None] | None] = ContextVar(
     "abicheck_ast_size_sink", default=None
@@ -60,3 +65,24 @@ def report_ast_size(nbytes: int) -> None:
     sink = _SINK.get()
     if sink is not None and nbytes > 0:
         sink(nbytes)
+
+
+#: Process-wide stage-boundary hook for AST intake. Installed by
+#: ``workflows.memory_trace`` when it is imported: the parse sites live in
+#: layers that may not import ``workflows``, and without a boundary here the
+#: trace's first event landed ~35 s after a clang run's actual peak (the
+#: ``read_text`` of a 1 GB cache entry), so it could not see its worst moment.
+_INTAKE_HOOK: Callable[..., None] | None = None
+
+
+def set_ast_intake_hook(hook: Callable[..., None] | None) -> None:
+    """Install (or clear, with ``None``) the AST-intake boundary hook."""
+    global _INTAKE_HOOK
+    _INTAKE_HOOK = hook
+
+
+def mark_ast_intake(event: str, /, **attrs: object) -> None:
+    """Report an AST-intake boundary (``ast.intake:start``/``:done``)."""
+    hook = _INTAKE_HOOK
+    if hook is not None:
+        hook(event, **attrs)

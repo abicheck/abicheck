@@ -146,6 +146,67 @@ class TestCanonicalResolverIsWhatRuns:
         assert prov["layer"] == "project_config"
         assert prov["path"] == str(tmp_path / ".abicheck.yml")
 
+    def test_header_dirs_are_the_roots_the_run_classified_under(self, tmp_path):
+        """ADR-075 D7: ``-H`` directories root the target when each side is
+        classified, so the receipt must record them -- a missing forward
+        resolved as "not stated" while the snapshots used them. A ``-H`` file
+        is not a root and records nothing."""
+        import abicheck.cli_compare_receipt as receipt
+
+        inc = tmp_path / "inc"
+        inc.mkdir()
+        (inc / "a.h").write_text("int api_a(void);\n", encoding="utf-8")
+        seen: dict = {}
+        real = receipt.resolve_and_apply
+
+        def _spy(params: dict, **kwargs: Any) -> Any:
+            seen.update(params)
+            return real(params, **kwargs)
+
+        import pytest as _pytest
+
+        with _pytest.MonkeyPatch.context() as mp:
+            mp.setattr(receipt, "resolve_and_apply", _spy)
+            # Two stored snapshots: `-H` is ignored, so nothing was classified
+            # under it and the receipt must not claim it as a root.
+            old_p, new_p = _write_pair(tmp_path)
+            result = CliRunner().invoke(
+                main,
+                [
+                    "compare",
+                    str(old_p),
+                    str(new_p),
+                    "--contract",
+                    "auto",
+                    "-o",
+                    "json=-",
+                    "-H",
+                    str(inc),
+                    "-H",
+                    str(inc / "a.h"),
+                ],
+            )
+        # The "-H ignored" warning precedes the document on the mixed stream.
+        out = result.output
+        ctx = json.loads(out[out.index("{\n") :])["contract_context"][
+            "evaluation_context"
+        ]
+        assert "ignored when both inputs are snapshots" in out
+        assert seen["headers"] == ()
+        assert (
+            ctx["field_provenance"]["surface.ownership.header_dirs"]["layer"]
+            == "built_in_default"
+        )
+
+        # A side this run extracts: the -H directory (not the file) is the
+        # explicit root the receipt records.
+        from abicheck.compatibility_evaluation_frontend import compare_cli_inputs
+
+        params = {"headers": (inc, inc / "a.h")}
+        assert compare_cli_inputs(params, explicit_parameters=set()).header_dirs == (
+            str(inc.resolve()),
+        )
+
     def test_untyped_policy_default_is_not_reported_as_a_choice(self, tmp_path):
         """``--policy``'s click default (``strict_abi``) is indistinguishable
         from a typed value in the kwargs, which is exactly what
@@ -373,6 +434,7 @@ class TestGateParityWithTheLiveRun:
             "require_justification": False,
             "severity_preset": None,
             "pack_paths": (),
+            "headers": (),
             **params,
         }
         project_cfg = BuildConfig(**config_severity) if config_severity else None

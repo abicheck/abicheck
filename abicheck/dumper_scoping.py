@@ -102,6 +102,7 @@ from typing import Any
 from .dumper_clang_streaming import suppress_streaming_prune
 from .extract.dependency_exclusion import dependency_exclusion_scope
 from .extract.dump_manifest_roots import dump_manifest_header_roots
+from .extract.flat_map_dependency_scope import kept_reference_text, scope_flat_maps
 from .extract.header_exclusions import scoping_header_predicate
 from .extract.occurrence_dependency_scope import (
     scoped_occurrences_excluding_dependencies,
@@ -1118,13 +1119,11 @@ def _scoped_semantic_ir(
     slice's own functions/variables addition left this function only ever
     checking `EntityKind.TYPE`/`EntityKind.ENUM`, so a dependency-header
     function/variable's occurrence stayed reachable through `semantic_ir`
-    after its flat counterpart was already excluded). Typedef occurrences
-    are intentionally left untouched: this module's own docstring already
-    states typedefs carry no ``source_header`` and are never filtered by
-    this function at all (the legacy ``typedefs``/``typedefs_qualified``
-    fields stay unfiltered for the identical reason), so a typedef
-    occurrence would be inconsistent with the *legacy* fields if dropped
-    here. Also see :mod:`~abicheck.extract.occurrence_dependency_scope`
+    after its flat counterpart was already excluded). Typedef/constant
+    occurrences are not handled here: they are dropped together with their
+    flat ``typedefs``/``constants`` entries by
+    :func:`~abicheck.extract.flat_map_dependency_scope.scope_flat_maps`,
+    which owns the header attribution those maps carry. Also see :mod:`~abicheck.extract.occurrence_dependency_scope`
     for a second, per-occurrence check applied here (Codex review, PR
     #1024) -- it never drops every occurrence of a kept identity, only a
     dependency one that a surviving non-dependency sibling occurrence can
@@ -1324,6 +1323,18 @@ def scope_snapshot_excluding_dependencies(
         kept_variables,
         header_roots,
     )
+    flat = scope_flat_maps(
+        snap,
+        _is_dep,
+        kept_reference_text(
+            _kept_signature_haystack(kept_functions, kept_variables, kept_types),
+            kept_functions,
+            kept_types,
+            kept_enums,
+        ),
+        scoped_semantic_ir,
+        scoped_semantic_ir_conflicts,
+    )
     return dataclasses.replace(
         snap,
         functions=kept_functions,
@@ -1342,8 +1353,14 @@ def scope_snapshot_excluding_dependencies(
         # IR even though the flat kept_types/kept_enums lists above
         # correctly dropped it, defeating this function's whole
         # size/surface contract for any SemanticIR-aware consumer.
-        semantic_ir=scoped_semantic_ir,
-        semantic_ir_conflicts=scoped_semantic_ir_conflicts,
+        semantic_ir=flat.semantic_ir,
+        semantic_ir_conflicts=flat.semantic_ir_conflicts,
+        # PR #1001's omission, for the flat maps: extract/flat_map_dependency_scope.
+        constants=flat.constants,
+        constant_entity_ids=flat.constant_entity_ids,
+        typedefs=flat.typedefs,
+        typedefs_qualified=flat.typedefs_qualified,
+        typedef_entity_ids=flat.typedef_entity_ids,
         # Records that this snapshot went through dependency-exclusion —
         # comparability.check_contracts_comparable uses this to refuse to
         # compare a filtered snapshot against an unfiltered one (see

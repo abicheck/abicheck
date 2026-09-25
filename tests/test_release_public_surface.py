@@ -346,6 +346,8 @@ class TestAcquisitionIdentity:
         ("depth", "build"),
         ("include_dependencies", True),
         ("build_config_digest", "abc123"),
+        # ADR-075: two differently-classified requests owe different exports.
+        ("ownership", "rules-fingerprint"),
     )
 
     @pytest.mark.parametrize("field,value", DISTINGUISHING)

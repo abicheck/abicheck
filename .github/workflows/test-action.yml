@@ -807,7 +807,15 @@ jobs:
   # silently treated as "didn't run, so nothing to report."
   test-action-summary:
     name: test-action summary
-    if: always()
+    # `!cancelled()`, not `always()`: `cancel-in-progress` (above) cancels a
+    # run a newer push superseded, and `always()` then started this job, saw
+    # every dependency `cancelled`, and failed -- turning `main` red after
+    # every quick run of merges. A cancelled run now skips this job instead:
+    # never a false green (the `ci.yml` mirror accepts only success/neutral,
+    # so a manually cancelled run without a successor still blocks), never a
+    # false red. `cancelled()` is workflow-level: a dependency that fails or
+    # hits its own timeout leaves it false, so this job still runs and fails.
+    if: ${{ !cancelled() }}
     needs:
       - test-compare-breaking
       - test-compare-compatible

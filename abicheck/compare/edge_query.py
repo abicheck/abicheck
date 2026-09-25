@@ -28,6 +28,10 @@ kind                     class             producer the absence rests on
 ``references``           resolved_join     the header AST, and an
                                            unambiguous type spelling index
 ``declares_linker_name`` derived           the snapshot records it projects
+``owned_by``             derived           the ownership stamp's recorded
+``in_contract``                            decision (``not_run`` for an
+                                           unrecorded snapshot or an
+                                           unclassified entity)
 L5 kinds                 observed          the source-graph pass flags
 ======================== ================= =================================
 
@@ -77,6 +81,14 @@ from ..model.graph_join import (
 from ..model.source_graph_coverage import L5_EDGE_KINDS, pass_coverage_records
 from .debug_type_join import DebugTypeJoin, join_debug_types
 from .export_join import ExportJoin, join_exports
+from .ownership_relations import (
+    EDGE_KIND_IN_CONTRACT,
+    EDGE_KIND_OWNED_BY,
+    OwnershipRelations,
+    contract_relations,
+    ownership_coverage_record,
+    resolve_ownership_edge,
+)
 from .surface_graph import (
     EDGE_EVIDENCE_CLASS,
     EDGE_KIND_DECLARES,
@@ -129,6 +141,7 @@ UNIT_RECORDS = "records"
 _PLATFORMS = ("elf", "pe", "macho")
 
 #: Every edge kind :meth:`EdgeEvidence.query` answers.
+_OWNERSHIP_KINDS = frozenset({EDGE_KIND_OWNED_BY, EDGE_KIND_IN_CONTRACT})
 QUERYABLE_EDGE_KINDS: frozenset[str] = frozenset(EDGE_EVIDENCE_CLASS) | L5_EDGE_KINDS
 
 #: Itanium manglings of toolchain/runtime entities, whose declarations a
@@ -331,6 +344,10 @@ class EdgeEvidence:
         return join_debug_types(self.snap, self.identities)
 
     @cached_property
+    def _ownership(self) -> OwnershipRelations:
+        return contract_relations(self.snap)
+
+    @cached_property
     def export_records(self) -> tuple[CoverageRecord, ...]:
         return export_coverage_records(self.snap)
 
@@ -399,6 +416,8 @@ class EdgeEvidence:
             return (header_coverage_record(self.snap, edge_kind),)
         if edge_kind == EDGE_KIND_DECLARES_LINKER_NAME:
             return (self._records_record(),)
+        if edge_kind in _OWNERSHIP_KINDS:
+            return (ownership_coverage_record(self.snap, edge_kind),)
         if edge_kind in L5_EDGE_KINDS:
             if self.source_graph is None:
                 return (_no_source_graph(edge_kind),)
@@ -450,6 +469,10 @@ class EdgeEvidence:
             return self._resolve_header_edge(edge_kind, subject, target)
         if edge_kind == EDGE_KIND_DECLARES_LINKER_NAME:
             return self._resolve_linker_name(subject, target)
+        if edge_kind in _OWNERSHIP_KINDS:
+            return resolve_ownership_edge(
+                self.snap, self._ownership, edge_kind, subject, target
+            )
         return self._resolve_l5(edge_kind, subject, target)
 
     def _resolve_exports(

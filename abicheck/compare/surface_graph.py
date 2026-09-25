@@ -81,6 +81,12 @@ from ..model.graph_join import (
 )
 from .debug_type_join import join_debug_types
 from .export_join import join_exports
+from .ownership_relations import (
+    EDGE_KIND_IN_CONTRACT,
+    EDGE_KIND_OWNED_BY,
+    OwnershipRelations,
+    ownership_relations,
+)
 
 if TYPE_CHECKING:
     from ..model.fact import Fact
@@ -109,6 +115,9 @@ NODE_KIND_SYMBOL = "symbol"
 #: side of a Phase 2 join (``model/graph_join.py``).
 NODE_KIND_BINARY_SYMBOL = "binary_symbol"
 NODE_KIND_DEBUG_TYPE = "debug_type"
+#: ADR-075 D5: the targets of ``owned_by``/``in_contract``.
+NODE_KIND_OWNER = "owner"
+NODE_KIND_CONTRACT = "contract"
 #: The node/edge attr a join's per-subject state is stamped under.
 JOIN_STATE_ATTR = "join_state"
 #: The declaration-node attr carrying its ``exports`` join state, so an
@@ -132,6 +141,10 @@ EDGE_EVIDENCE_CLASS: Mapping[str, EdgeEvidenceClass] = MappingProxyType(
         EDGE_KIND_DECLARES_LINKER_NAME: EdgeEvidenceClass.DERIVED,
         EDGE_KIND_EXPORTS: EdgeEvidenceClass.RESOLVED_JOIN,
         EDGE_KIND_DEBUG_TYPE_OF: EdgeEvidenceClass.RESOLVED_JOIN,
+        # ADR-075 D5 (evidence-entity-model Phase 3): projections of each
+        # entity's persisted ownership_fact.
+        EDGE_KIND_OWNED_BY: EdgeEvidenceClass.DERIVED,
+        EDGE_KIND_IN_CONTRACT: EdgeEvidenceClass.DERIVED,
     }
 )
 
@@ -612,3 +625,31 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
         NODE_KIND_DEBUG_TYPE,
         {oid: o.name for oid, o in debug.occurrences.items()},
     )
+    _add_ownership_edges(graph, ownership_relations(snap, ids))
+
+
+def _add_ownership_edges(
+    graph: SurfaceGraphLike, relations: OwnershipRelations
+) -> None:
+    """``owned_by``/``in_contract`` edges (``derived``, ADR-075 D5) from each
+    classified entity to one ``owner``/``contract`` node per distinct value.
+    An unclassified entity gets no edge: the graph then says "unknown", not
+    "unresolved"."""
+
+    for src, dst, kind in relations.edges():
+        node_kind = (
+            NODE_KIND_OWNER if kind == EDGE_KIND_OWNED_BY else NODE_KIND_CONTRACT
+        )
+        graph.add_node(
+            GraphNode(
+                provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
+                id=dst,
+                kind=node_kind,
+                label=dst.split("://", 1)[1],
+            )
+        )
+        graph.add_edge(
+            GraphEdge(
+                provenance=PUBLIC_SURFACE_FACTS_PRODUCER, src=src, dst=dst, kind=kind
+            )
+        )

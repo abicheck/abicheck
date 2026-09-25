@@ -62,6 +62,20 @@ from ..model.export_index import (
 _UNSET = object()
 
 
+def member_export_platform(member: object) -> str | None:
+    """Which export table *member*'s names come from (``elf``/``pe``/
+    ``macho``), or ``None`` with none -- the same precedence
+    :func:`member_export_names` reads them in."""
+    projected = getattr(member, "export_names", _UNSET)
+    if projected is not _UNSET:
+        platform = getattr(member, "export_platform", None)
+        return str(platform) if projected is not None and platform else None
+    for platform in ("elf", "pe", "macho"):
+        if getattr(member, platform, None) is not None:
+            return platform
+    return None
+
+
 def member_export_names(member: object) -> frozenset[str] | None:
     """*member*'s default-export names, or ``None`` with no export table.
 
@@ -119,14 +133,15 @@ class BundleExportIndex:
     #: ``{member: reason}`` for a member expected on this side whose
     #: acquisition failed outright, so it contributed no exports.
     failed_members: Mapping[str, str] = field(default_factory=dict)
+    #: The export table kind every observed member's names came from
+    #: (``elf``/``pe``/``macho``); ``"mixed"`` if members disagree, ``""``
+    #: with none. Keys the ``provided_by`` relation onto the Phase 2
+    #: ``binary_symbol://<platform>/<spelling>`` node ids.
+    platform: str = ""
 
     def providers(self, symbol: str) -> tuple[str, ...]:
         """Which members export *symbol* (empty when none does)."""
         return self.providers_by_symbol.get(symbol, ())
-
-    def satisfies(self, symbol: str) -> bool:
-        """Whether any member of this side exports *symbol*."""
-        return bool(self.providers_by_symbol.get(symbol))
 
     @property
     def symbols(self) -> frozenset[str]:
@@ -193,11 +208,15 @@ def build_bundle_export_index(
     """
     providers: dict[str, list[str]] = {}
     without: list[str] = []
+    platforms: set[str] = set()
     for name in sorted(members):
         exports = member_export_names(members[name])
         if exports is None:
             without.append(name)
             continue
+        platform = member_export_platform(members[name])
+        if platform:
+            platforms.add(platform)
         for sym in exports:
             providers.setdefault(sym, []).append(name)
     return BundleExportIndex(
@@ -208,4 +227,11 @@ def build_bundle_export_index(
         members=tuple(sorted(members)),
         members_without_exports=tuple(without),
         failed_members=dict(sorted((failed_members or {}).items())),
+        platform=(
+            next(iter(platforms))
+            if len(platforms) == 1
+            else "mixed"
+            if platforms
+            else ""
+        ),
     )

@@ -840,9 +840,13 @@ Core pipeline (in order of data flow):
      recorded as `null` rather than `0`. Python allocation totals are a
      separate opt-in (`ABICHECK_MEMORY_TRACE_TRACEMALLOC`) because
      tracemalloc perturbs the time and RSS it would otherwise sit beside.
-     A dependency-free leaf (only `process_resources.py`, for the cgroup
-     walk), so any layer can sample; one boolean test per call site when
-     off, which is the default. The four figures are four *different*
+     A near-leaf (only `process_resources.py`, for the cgroup walk, and
+     `storage/ast_size_observer.py`, whose AST-intake hook it installs so
+     the `extract`/`storage` parse sites can report `ast.intake:start`/
+     `:done` without importing `workflows`); one boolean test per call site
+     when off, which is the default. Every sample also carries
+     `parent_rss_peak_bytes` (`VmHWM`), so a transient peak between two
+     samples is still visible. The four figures are four *different*
      numbers — conflating them is how a memory investigation reaches the
      wrong owner — and `docs/contribute/memory.md` is the reader's page.
      `scripts/bench_release_memory.py` is the benchmark harness that
