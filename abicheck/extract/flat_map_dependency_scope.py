@@ -27,15 +27,18 @@ because the maps carried no header at all; producers now attach one
 (:mod:`abicheck.model.declaration_headers`), and this module applies the
 same header-origin rule the other kinds already follow:
 
-* a **constant** whose declaring header is a dependency is dropped. Nothing
-  in the kept surface can *reference* a constant's value, so there is no
-  retention case -- the rule the other kinds apply ("dropped unless the
-  library's public surface references it") reduces to "dropped";
-* a **typedef** whose declaring header is a dependency is dropped unless its
-  leaf identifier occurs in the kept declarations' own signature text (a
-  public ``size_t`` parameter keeps ``size_t``). Deliberately generous:
-  over-retaining a typedef reproduces the old behaviour, under-retaining one
-  would hide an alias the public surface really names;
+* a **dependency** entry is one whose every recorded declaring header is a
+  dependency header (a multi-TU merge records each TU's; one non-dependency
+  or unknown sighting keeps it);
+* a dependency **typedef** or **constant** is dropped unless its leaf
+  identifier occurs in :func:`kept_reference_text` -- the kept declarations'
+  signatures, parameter/field default values, and enum underlying types (a
+  public ``size_t`` parameter keeps ``size_t``; a ``void f(int = DEP_MAX)``
+  keeps ``DEP_MAX``). Deliberately generous: over-retaining reproduces the
+  old behaviour, under-retaining would hide what the public surface names;
+* when any kept default is an opaque clang ``expr:`` fingerprint the
+  references inside it are not observable, so every dependency constant is
+  kept (weaker evidence narrows the conclusion, never the surface);
 * a key with **unknown** origin (no attribution, e.g. a loaded snapshot, or a
   producer that could not locate the declaration) is always kept.
 
@@ -49,21 +52,41 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 
-from ..model import AbiSnapshot
+from ..model import AbiSnapshot, EnumType, Function, RecordType
 from ..model.declaration_headers import (
     HeaderAttributedMap,
-    declaring_header,
+    declaring_header_set,
     has_attribution,
 )
 from ..model.identity import EntityId, EntityKind
 from ..model.semantic_ir import SemanticIR, semantic_ir_conflict_key
 
-__all__ = ["FlatMapScope", "scope_flat_maps"]
+__all__ = ["FlatMapScope", "kept_reference_text", "scope_flat_maps"]
 
 _IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _FLAT_KINDS = (EntityKind.TYPEDEF, EntityKind.CONSTANT)
+# ``dumper_clang_expr._expr_fingerprint``'s exact shape.
+_OPAQUE_EXPR_RE = re.compile(r"(?<![A-Za-z0-9_:])expr:[0-9a-f]{16}(?![0-9a-f])")
+
+
+def kept_reference_text(
+    signature_text: str,
+    kept_functions: Sequence[Function],
+    kept_types: Sequence[RecordType],
+    kept_enums: Sequence[EnumType],
+) -> str:
+    """*signature_text* plus every other place a kept declaration names a
+    typedef or constant: parameter and field default values, and enum
+    underlying types."""
+    texts: list[str] = [signature_text]
+    texts.extend(e.underlying_type for e in kept_enums)
+    for fn in kept_functions:
+        texts.extend(p.default or "" for p in fn.params)
+    for rec in kept_types:
+        texts.extend(f.default or "" for f in rec.fields)
+    return "\n".join(dict.fromkeys(t for t in texts if t))
 
 
 def _leaf_identifier(name: str) -> str:
@@ -83,8 +106,8 @@ def _kept_keys(
     dropped = {
         key
         for key in mapping
-        if (header := declaring_header(mapping, key))
-        and is_dep(header)
+        if (headers := declaring_header_set(mapping, key))
+        and all(is_dep(h) for h in headers)
         and not retain(key)
     }
     return None if not dropped else set(mapping) - dropped
@@ -93,7 +116,7 @@ def _kept_keys(
 def _restrict(mapping: dict[str, str], keep: set[str] | None) -> dict[str, str]:
     if keep is None:
         return mapping
-    headers = {k: declaring_header(mapping, k) for k in keep}
+    headers = {k: declaring_header_set(mapping, k) for k in keep}
     return HeaderAttributedMap({k: v for k, v in mapping.items() if k in keep}, headers)
 
 
@@ -125,13 +148,17 @@ def scope_flat_maps(
     back with every map as the identical object it passed in.
     """
     referenced = set(_IDENTIFIER_RE.findall(kept_signature_text))
+    opaque = _OPAQUE_EXPR_RE.search(kept_signature_text) is not None
 
-    def retain_typedef(key: str) -> bool:
+    def retain(key: str) -> bool:
         return _leaf_identifier(key) in referenced
 
-    keep_constants = _kept_keys(snap.constants, is_dep, lambda _k: False)
-    keep_typedefs = _kept_keys(snap.typedefs, is_dep, retain_typedef)
-    keep_qualified = _kept_keys(snap.typedefs_qualified, is_dep, retain_typedef)
+    def retain_constant(key: str) -> bool:
+        return opaque or retain(key)
+
+    keep_constants = _kept_keys(snap.constants, is_dep, retain_constant)
+    keep_typedefs = _kept_keys(snap.typedefs, is_dep, retain)
+    keep_qualified = _kept_keys(snap.typedefs_qualified, is_dep, retain)
     unchanged = FlatMapScope(
         snap.constants,
         snap.constant_entity_ids,

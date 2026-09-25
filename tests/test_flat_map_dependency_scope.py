@@ -21,6 +21,7 @@ from abicheck.model.declaration_headers import (
     HeaderAttributedMap,
     attributed,
     declaring_header,
+    declaring_header_set,
     has_attribution,
 )
 from abicheck.model.fact import Fact
@@ -80,16 +81,27 @@ def _ir(snap: AbiSnapshot) -> tuple[SemanticIR, dict[str, str]]:
 
 
 @settings(max_examples=300, deadline=None)
-@given(constants=entries, typedefs=entries, referenced=st.lists(names, max_size=4))
-def test_scoping_matches_independent_oracle(constants, typedefs, referenced):
+@given(
+    constants=entries,
+    typedefs=entries,
+    referenced=st.lists(names, max_size=4),
+    opaque=st.booleans(),
+)
+def test_scoping_matches_independent_oracle(constants, typedefs, referenced, opaque):
     snap = _snapshot(constants, typedefs)
     ir, conflicts = _ir(snap)
     haystack = " ".join(f"{r} *" for r in referenced)
+    if opaque:
+        haystack += "\nexpr:0123456789abcdef"
     out = scope_flat_maps(snap, _is_dep, haystack, ir, conflicts)
 
-    # Oracle: a constant survives iff its header is not a dependency one; a
-    # typedef additionally survives when the kept signatures name it.
-    want_c = {k for k, h in constants.items() if h not in DEP_HEADERS}
+    # Oracle: an entry survives when its header is not a dependency one or the
+    # kept surface names it; an opaque default keeps every constant.
+    want_c = {
+        k
+        for k, h in constants.items()
+        if h not in DEP_HEADERS or k in referenced or opaque
+    }
     want_t = {k for k, h in typedefs.items() if h not in DEP_HEADERS or k in referenced}
     assert set(out.constants) == want_c
     assert set(out.typedefs) == want_t
@@ -168,9 +180,84 @@ def test_tu_merge_keeps_attribution():
         kind="constant",
     )
     assert merged == {"A": "1", "B": "2", "C": "3"}
-    assert declaring_header(merged, "A") == "/usr/include/dep.h"
+    assert declaring_header_set(merged, "A") == ("/usr/include/dep.h", "/proj/api.h")
     assert declaring_header(merged, "B") == "/proj/api.h"
     assert declaring_header(merged, "C") == ""
+
+
+@settings(max_examples=300, deadline=None)
+@given(
+    tus=st.lists(
+        st.dictionaries(st.sampled_from("ABC"), st.sampled_from(HEADERS), max_size=3),
+        min_size=1,
+        max_size=4,
+    ),
+    order=st.randoms(use_true_random=False),
+)
+def test_tu_merge_scoping_keeps_any_non_dependency_sighting(tus, order):
+    """Codex review: first-TU-wins let a dependency TU drop a public name."""
+    from abicheck.tu_merge import _merge_scalar_group
+
+    sources = [
+        (f"tu{i}", attributed((k, "1", h) for k, h in tu.items()))
+        for i, tu in enumerate(tus)
+    ]
+    order.shuffle(sources)
+    merged = _merge_scalar_group(sources, kind="constant")
+    out = scope_flat_maps(
+        AbiSnapshot(library="x", version="1", constants=merged), _is_dep, "", None, {}
+    )
+    # Oracle: dropped iff every TU that declares the key saw it in a dependency.
+    want = {k for k in merged if not all(tu[k] in DEP_HEADERS for tu in tus if k in tu)}
+    assert set(out.constants) == want
+
+
+def test_references_from_defaults_and_enum_underlying_types_are_retained():
+    from abicheck.extract.flat_map_dependency_scope import kept_reference_text
+    from abicheck.model import EnumType, Function, Param, RecordType, TypeField
+
+    dep = "/usr/include/dep.h"
+    snap = AbiSnapshot(
+        library="x",
+        version="1",
+        constants=attributed(
+            [("DEP_MAX", "8", dep), ("DEP_FIELD", "2", dep), ("DEP_UNUSED", "3", dep)]
+        ),
+        typedefs=attributed([("dep_u8", "unsigned char", dep), ("dep_x", "int", dep)]),
+    )
+    text = kept_reference_text(
+        "",
+        [
+            Function(
+                name="f",
+                mangled="f",
+                return_type="void",
+                params=[Param(name="n", type="int", default="ns::DEP_MAX")],
+            )
+        ],
+        [
+            RecordType(
+                name="S",
+                kind="struct",
+                fields=[TypeField(name="a", type="int", default="DEP_FIELD + 1")],
+            )
+        ],
+        [EnumType(name="E", members=[], underlying_type="dep_u8")],
+    )
+    out = scope_flat_maps(snap, _is_dep, text, None, {})
+    assert set(out.constants) == {"DEP_MAX", "DEP_FIELD"}
+    assert set(out.typedefs) == {"dep_u8"}
+
+
+def test_opaque_fingerprint_only_matches_the_exact_shape():
+    snap = _snapshot({"D": "/usr/include/dep.h"}, {})
+    for text, kept in [
+        ("expr:0123456789abcdef", True),
+        ("ns::expr:0123456789abcdef", False),
+        ("expr:0123456789abcdeff", False),
+        ("expr:0123", False),
+    ]:
+        assert bool(scope_flat_maps(snap, _is_dep, text, None, {}).constants) is kept
 
 
 def test_dropped_entries_without_an_ir_or_matching_occurrence_leave_the_ir_alone():

@@ -52,6 +52,7 @@ __all__ = [
     "HeaderAttributedMap",
     "attributed",
     "declaring_header",
+    "declaring_header_set",
     "has_attribution",
 ]
 
@@ -71,12 +72,17 @@ class HeaderAttributedMap(dict[str, str]):
     def __init__(
         self,
         values: Mapping[str, str] | Iterable[tuple[str, str]] = (),
-        headers: Mapping[str, str] | None = None,
+        headers: Mapping[str, str | tuple[str, ...]] | None = None,
     ) -> None:
         super().__init__(values)
-        self.declaring_headers: dict[str, str] = {
-            k: h for k, h in (headers or {}).items() if h and k in self
-        }
+        # key -> every header a producer saw it declared in. A key that any
+        # producer saw with *unknown* origin stays unknown (absent): one
+        # unattributed sighting is enough to make "dependency-only" unproven.
+        self.declaring_headers: dict[str, tuple[str, ...]] = {}
+        for key, header in (headers or {}).items():
+            found = (header,) if isinstance(header, str) else tuple(header)
+            if key in self and found and all(found):
+                self.declaring_headers[key] = tuple(dict.fromkeys(found))
 
     def __reduce__(self) -> tuple[Any, ...]:
         # ``__slots__`` plus a dict base: the default protocol would drop the
@@ -106,7 +112,18 @@ def has_attribution(mapping: Mapping[str, str]) -> bool:
 
 
 def declaring_header(mapping: Mapping[str, str], key: str) -> str:
-    """*key*'s declaring header in *mapping*, or ``""`` when unknown."""
+    """*key*'s first recorded declaring header, or ``""`` when unknown."""
+    found = declaring_header_set(mapping, key)
+    return found[0] if found else ""
+
+
+def declaring_header_set(mapping: Mapping[str, str], key: str) -> tuple[str, ...]:
+    """Every header *key* was seen declared in; ``()`` when unknown.
+
+    A multi-TU merge can see one name declared in several headers; a
+    consumer asking "is this dependency-only?" must require *all* of them to
+    be dependency headers, never just the first TU's.
+    """
     if isinstance(mapping, HeaderAttributedMap):
-        return mapping.declaring_headers.get(key, "")
-    return ""
+        return mapping.declaring_headers.get(key, ())
+    return ()

@@ -102,7 +102,7 @@ from typing import Any
 from .dumper_clang_streaming import suppress_streaming_prune
 from .extract.dependency_exclusion import dependency_exclusion_scope
 from .extract.dump_manifest_roots import dump_manifest_header_roots
-from .extract.flat_map_dependency_scope import scope_flat_maps
+from .extract.flat_map_dependency_scope import kept_reference_text, scope_flat_maps
 from .extract.header_exclusions import scoping_header_predicate
 from .extract.occurrence_dependency_scope import (
     scoped_occurrences_excluding_dependencies,
@@ -1326,7 +1326,12 @@ def scope_snapshot_excluding_dependencies(
     flat = scope_flat_maps(
         snap,
         _is_dep,
-        _kept_signature_haystack(kept_functions, kept_variables, kept_types),
+        kept_reference_text(
+            _kept_signature_haystack(kept_functions, kept_variables, kept_types),
+            kept_functions,
+            kept_types,
+            kept_enums,
+        ),
         scoped_semantic_ir,
         scoped_semantic_ir_conflicts,
     )

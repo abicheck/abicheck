@@ -85,7 +85,7 @@ from .model import (
     replace_with_fact_sync,
 )
 from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
-from .model.declaration_headers import HeaderAttributedMap, declaring_header
+from .model.declaration_headers import HeaderAttributedMap, declaring_header_set
 from .provenance import build_public_set
 from .tu_fragment import MergedTuFragments, TuFragment, entity_key
 from .tu_merge_provenance import (
@@ -925,15 +925,18 @@ def _merge_scalar_group(
     ``name -> value`` mapping has no "richer declaration" to prefer, so a
     trivial merge only exists when every contributing TU agrees on the
     exact same value; any disagreement is an
-    :class:`~abicheck.errors.TuMergeError`. Keeps the first contributing
-    TU's declaring header (``model.declaration_headers``) with its value.
+    :class:`~abicheck.errors.TuMergeError`. Records every contributing TU's
+    declaring header (``model.declaration_headers``).
     """
     by_name: dict[str, list[tuple[str, str]]] = {}
-    headers: dict[str, str] = {}
+    headers: dict[str, tuple[str, ...]] = {}
     for tu_name, mapping in sources:
         for name, value in mapping.items():
             by_name.setdefault(name, []).append((tu_name, value))
-            headers.setdefault(name, declaring_header(mapping, name))
+            # Every TU's headers, not the first's: one TU's non-dependency (or
+            # unknown) declaration must keep the entry through scoping.
+            seen = declaring_header_set(mapping, name) or ("",)
+            headers[name] = (*headers.get(name, ()), *seen)
 
     merged: dict[str, str] = {}
     for name, candidates in by_name.items():
