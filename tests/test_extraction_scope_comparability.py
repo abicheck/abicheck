@@ -36,12 +36,18 @@ _RULES_B = OwnershipRules(
 _VARIANTS: dict[str, ExtractionScope | None] = {
     "unrecorded": None,
     "full_a": ExtractionScope(_RULES_A),
-    "full_a_again": ExtractionScope(OwnershipRules(target_roots=("include", "include"))),
+    "full_a_again": ExtractionScope(
+        OwnershipRules(target_roots=("include", "include"))
+    ),
     "full_b": ExtractionScope(_RULES_B),
     "ref_a": ExtractionScope(_RULES_A, dependency_evidence="referenced"),
     "ref_b": ExtractionScope(_RULES_B, dependency_evidence="referenced"),
-    "pre_a": ExtractionScope(_RULES_A, prefilter={"kind": "castxml_start", "names": ["x"]}),
-    "pre2_a": ExtractionScope(_RULES_A, prefilter={"kind": "castxml_start", "names": ["y"]}),
+    "pre_a": ExtractionScope(
+        _RULES_A, prefilter={"kind": "castxml_start", "names": ["x"]}
+    ),
+    "pre2_a": ExtractionScope(
+        _RULES_A, prefilter={"kind": "castxml_start", "names": ["y"]}
+    ),
 }
 
 # Outcome per the ADR-075 D3 table: "same", "note" (compared, report line),
@@ -65,10 +71,15 @@ def _expected(old: str, new: str) -> str:
         return table[(old, new)]
     if (new, old) in table:
         return table[(new, old)]
-    kinds = {"full_a": ("full", "A", None), "full_a_again": ("full", "A", None),
-             "full_b": ("full", "B", None), "ref_a": ("ref", "A", None),
-             "ref_b": ("ref", "B", None), "pre_a": ("full", "A", "x"),
-             "pre2_a": ("full", "A", "y")}
+    kinds = {
+        "full_a": ("full", "A", None),
+        "full_a_again": ("full", "A", None),
+        "full_b": ("full", "B", None),
+        "ref_a": ("ref", "A", None),
+        "ref_b": ("ref", "B", None),
+        "pre_a": ("full", "A", "x"),
+        "pre2_a": ("full", "A", "y"),
+    }
     (oe, orules, opre), (ne, nrules, npre) = kinds[old], kinds[new]
     if oe != ne:
         return _REFUSE
@@ -116,15 +127,21 @@ def _snap(scope: ExtractionScope | None, *, owner: str = "target") -> AbiSnapsho
     return snap
 
 
-@pytest.mark.parametrize(("old", "new"), [p for p in _PAIRS if _expected(*p) == _REFUSE])
+@pytest.mark.parametrize(
+    ("old", "new"), [p for p in _PAIRS if _expected(*p) == _REFUSE]
+)
 def test_refused_pairs_raise_scope_mismatch(old: str, new: str) -> None:
     with pytest.raises(ScopeMismatchError):
         check_contracts_comparable(_snap(_VARIANTS[old]), _snap(_VARIANTS[new]))
 
 
-@pytest.mark.parametrize(("old", "new"), [p for p in _PAIRS if _expected(*p) != _REFUSE])
+@pytest.mark.parametrize(
+    ("old", "new"), [p for p in _PAIRS if _expected(*p) != _REFUSE]
+)
 def test_comparable_pairs_pass_the_gate(old: str, new: str) -> None:
-    assert check_contracts_comparable(_snap(_VARIANTS[old]), _snap(_VARIANTS[new])) is None
+    assert (
+        check_contracts_comparable(_snap(_VARIANTS[old]), _snap(_VARIANTS[new])) is None
+    )
 
 
 def test_binary_only_side_is_never_judged() -> None:
@@ -150,7 +167,12 @@ def test_differing_rules_under_full_name_the_moved_declarations() -> None:
 
 
 def test_same_rules_produce_no_note() -> None:
-    assert extraction_scope_notes(_snap(_VARIANTS["full_a"]), _snap(_VARIANTS["full_a_again"])) == []
+    assert (
+        extraction_scope_notes(
+            _snap(_VARIANTS["full_a"]), _snap(_VARIANTS["full_a_again"])
+        )
+        == []
+    )
 
 
 def _pair_with_a_change() -> tuple[AbiSnapshot, AbiSnapshot]:

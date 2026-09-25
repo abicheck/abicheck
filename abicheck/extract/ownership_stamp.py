@@ -155,7 +155,7 @@ def stamp_ownership(snapshot: AbiSnapshot, request: OwnershipRequest) -> AbiSnap
         fact = interned.get(key)
         if fact is None:
             fact = interned[key] = Fact.present(EntityOwnership(*key))
-        decl.ownership_fact = fact  # type: ignore[union-attr]
+        decl.ownership_fact = fact  # type: ignore[union-attr,attr-defined]
     snapshot.extraction_scope = ExtractionScope(
         ownership_rules=recorded,
         dependency_evidence=recorded.dependency_evidence,

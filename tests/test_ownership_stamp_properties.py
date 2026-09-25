@@ -16,7 +16,11 @@ from hypothesis import given, settings, strategies as st
 from abicheck.extract.ownership_stamp import stamp_ownership
 from abicheck.model import AbiSnapshot, Function, RecordType
 from abicheck.model.extraction_scope import ownership_of
-from abicheck.model.ownership_rules import DependencyRoots, OwnershipRequest, OwnershipRules
+from abicheck.model.ownership_rules import (
+    DependencyRoots,
+    OwnershipRequest,
+    OwnershipRules,
+)
 
 _BASE = "/work/proj"
 _DIRS = ("inc", "inc/a", "inc/a/vendor", "inc/b", "third", "third/x", "other")
@@ -26,7 +30,10 @@ def _oracle_owner(path: str, roots: dict[str, str]) -> str:
     best, best_len = "unresolved", -1
     for root, owner in roots.items():
         root_parts = root.split("/")
-        if path.split("/")[: len(root_parts)] == root_parts and len(root_parts) > best_len:
+        if (
+            path.split("/")[: len(root_parts)] == root_parts
+            and len(root_parts) > best_len
+        ):
             best, best_len = owner, len(root_parts)
     return best
 
@@ -65,15 +72,21 @@ def _request(roots: dict[str, str], order: list[str]) -> OwnershipRequest:
 
 def _snapshot(files: list[str]) -> AbiSnapshot:
     fns = [
-        Function(name=f"f{i}", mangled=f"f{i}", return_type="int",
-                 source_location=f"{_BASE}/{path}:{i + 1}")
+        Function(
+            name=f"f{i}",
+            mangled=f"f{i}",
+            return_type="int",
+            source_location=f"{_BASE}/{path}:{i + 1}",
+        )
         for i, path in enumerate(files)
     ]
     types = [
         RecordType(name=f"T{i}", kind="struct", source_location=f"{_BASE}/{path}:1")
         for i, path in enumerate(files)
     ]
-    return AbiSnapshot(library="l", version="1", functions=fns, types=types, from_headers=True)
+    return AbiSnapshot(
+        library="l", version="1", functions=fns, types=types, from_headers=True
+    )
 
 
 @settings(max_examples=150, deadline=None)
@@ -139,11 +152,17 @@ def test_recorded_roots_are_relative_to_the_project_root() -> None:
 
 
 def test_builtin_is_toolchain_owned_whatever_file_declares_it() -> None:
-    fn = Function(name="__atomic_load_n", mangled="__atomic_load_n", return_type="int",
-                  source_location=f"{_BASE}/inc/h1.h:3")
+    fn = Function(
+        name="__atomic_load_n",
+        mangled="__atomic_load_n",
+        return_type="int",
+        source_location=f"{_BASE}/inc/h1.h:3",
+    )
     fn.is_compiler_generated = True
     snap = AbiSnapshot(library="l", version="1", functions=[fn], from_headers=True)
-    stamp_ownership(snap, OwnershipRequest(OwnershipRules(target_roots=(f"{_BASE}/inc",))))
+    stamp_ownership(
+        snap, OwnershipRequest(OwnershipRules(target_roots=(f"{_BASE}/inc",)))
+    )
     decision = ownership_of(fn)
     assert decision is not None
     assert (decision.owner, decision.rule_id) == ("toolchain", "builtin")
@@ -153,18 +172,33 @@ def test_castxml_leaf_name_gets_its_scope_from_the_linker_name() -> None:
     """castxml records ``lib::detail::hidden`` as ``hidden``; the private
     namespace rule must still see ``lib::detail`` (found through a real dump,
     ``tests/test_ownership_dump_integration.py``)."""
-    hidden = Function(name="hidden", mangled="_ZN3lib6detail6hiddenEv", return_type="int",
-                      source_location=f"{_BASE}/inc/h1.h:1")
-    shown = Function(name="shown", mangled="_ZN3lib5shownEv", return_type="int",
-                     source_location=f"{_BASE}/inc/h1.h:2")
-    c_api = Function(name="c_api", mangled="c_api", return_type="int",
-                     source_location=f"{_BASE}/inc/h1.h:3")
-    snap = AbiSnapshot(library="l", version="1", functions=[hidden, shown, c_api],
-                       from_headers=True)
+    hidden = Function(
+        name="hidden",
+        mangled="_ZN3lib6detail6hiddenEv",
+        return_type="int",
+        source_location=f"{_BASE}/inc/h1.h:1",
+    )
+    shown = Function(
+        name="shown",
+        mangled="_ZN3lib5shownEv",
+        return_type="int",
+        source_location=f"{_BASE}/inc/h1.h:2",
+    )
+    c_api = Function(
+        name="c_api",
+        mangled="c_api",
+        return_type="int",
+        source_location=f"{_BASE}/inc/h1.h:3",
+    )
+    snap = AbiSnapshot(
+        library="l", version="1", functions=[hidden, shown, c_api], from_headers=True
+    )
     stamp_ownership(
         snap,
         OwnershipRequest(
-            OwnershipRules(target_roots=(f"{_BASE}/inc",), private_namespaces=("lib::detail",))
+            OwnershipRules(
+                target_roots=(f"{_BASE}/inc",), private_namespaces=("lib::detail",)
+            )
         ),
     )
     contracts = {f.name: ownership_of(f).contract for f in snap.functions}  # type: ignore[union-attr]

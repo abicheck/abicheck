@@ -110,7 +110,16 @@ def _project(root: Path, config: str) -> Path:
         path.write_text(text)
     (root / "lib.cpp").write_text(_SOURCE)
     subprocess.run(
-        ["g++", "-shared", "-fPIC", "-Iusr/include/lib", "-Iextra", "-o", "liblib.so", "lib.cpp"],
+        [
+            "g++",
+            "-shared",
+            "-fPIC",
+            "-Iusr/include/lib",
+            "-Iextra",
+            "-o",
+            "liblib.so",
+            "lib.cpp",
+        ],
         check=True,
         cwd=root,
     )
@@ -120,7 +129,17 @@ def _project(root: Path, config: str) -> Path:
 
 def _dump(root: Path, out: str, *extra: str) -> Path:
     result = _abicheck(
-        ["dump", "liblib.so", "-H", "usr/include/lib", "-I", "extra", "-o", out, *extra],
+        [
+            "dump",
+            "liblib.so",
+            "-H",
+            "usr/include/lib",
+            "-I",
+            "extra",
+            "-o",
+            out,
+            *extra,
+        ],
         root,
     )
     assert result.returncode == 0, result.stderr
@@ -206,7 +225,9 @@ def test_equal_scopes_compare_clean(dumped: dict[str, Path]) -> None:
     assert "extraction scope" not in json.dumps(report.get("coverage_warnings", []))
 
 
-def test_differing_dependency_evidence_is_refused(dumped: dict[str, Path], tmp_path: Path) -> None:
+def test_differing_dependency_evidence_is_refused(
+    dumped: dict[str, Path], tmp_path: Path
+) -> None:
     doc = json.loads(dumped["b"].read_text())
     scope = _find_block(doc, "extraction_scope")
     scope["dependency_evidence"] = "referenced"
@@ -217,7 +238,9 @@ def test_differing_dependency_evidence_is_refused(dumped: dict[str, Path], tmp_p
     assert "dependency_evidence" in result.stderr + result.stdout
 
 
-def test_unrecorded_baseline_is_compared_with_a_note(dumped: dict[str, Path], tmp_path: Path) -> None:
+def test_unrecorded_baseline_is_compared_with_a_note(
+    dumped: dict[str, Path], tmp_path: Path
+) -> None:
     doc = json.loads(dumped["a"].read_text())
     _drop_block(doc, "extraction_scope")
     legacy = tmp_path / "legacy.json"
@@ -257,7 +280,9 @@ def _drop_block(doc: object, key: str) -> None:
             _drop_block(value, key)
 
 
-def test_typed_api_classifies_exactly_as_the_cli(dumped: dict[str, Path], monkeypatch) -> None:
+def test_typed_api_classifies_exactly_as_the_cli(
+    dumped: dict[str, Path], monkeypatch
+) -> None:
     """Front-end parity (``tests/CLAUDE.md``): a typed ``DumpRequest`` whose
     ``InputSpec.ownership`` carries the same project rules decides every
     declaration the way ``abicheck dump`` did."""
@@ -287,4 +312,7 @@ def test_typed_api_classifies_exactly_as_the_cli(dumped: dict[str, Path], monkey
     }
     assert api == _decisions(dumped["a"])
     assert snap.extraction_scope is not None
-    assert snap.extraction_scope.fingerprint == load_snapshot(dumped["a"]).extraction_scope.fingerprint  # type: ignore[union-attr]
+    assert (
+        snap.extraction_scope.fingerprint
+        == load_snapshot(dumped["a"]).extraction_scope.fingerprint
+    )  # type: ignore[union-attr]
