@@ -447,7 +447,7 @@ def ensure_facts_and_resolve(entity: GraphNode | GraphEdge) -> None:
         # spelling anywhere in the emitted graph" rule id/label/attrs
         # already follow, extended to the per-producer evidence trail too.
         for fact in entity.facts:
-            _normalize_identity_attrs(fact.attrs)
+            fact.attrs = _normalize_identity_attrs(fact.attrs)
     entity.resolved, entity.conflicts = resolve_entity_attrs(entity.facts)
     entity.attrs = entity.resolved
     # One fact is its own minimum; skip the JSON-dumping sort key for it.

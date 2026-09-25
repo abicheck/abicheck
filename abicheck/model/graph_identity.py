@@ -333,17 +333,27 @@ def identity_normalization_memo() -> Iterator[None]:
 _IDENTITY_ATTR_KEYS = ("name", "qualified_name")
 
 
-def _normalize_identity_attrs(attrs: dict[str, Any]) -> None:
-    """Normalize every :data:`_IDENTITY_ATTR_KEYS` string value in *attrs* in
-    place, the same way :func:`_normalize_graph_identity` normalizes a
-    decl/type node's own ``label``/``id``. A no-op for any other key, and for
-    a value that isn't a non-empty string (an absent/None/non-str attr is
-    left exactly as a producer supplied it -- never fabricated).
+def _normalize_identity_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
+    """*attrs* with every :data:`_IDENTITY_ATTR_KEYS` string value normalized
+    the way :func:`_normalize_graph_identity` normalizes a decl/type node's
+    own ``label``/``id``. Any other key, and a value that isn't a non-empty
+    string, is left exactly as a producer supplied it -- never fabricated.
+
+    Copy-on-write: *attrs* itself is returned when nothing changes (the
+    overwhelmingly common case) and never mutated, so one ``attrs`` dict can
+    back many facts -- the graph decoder shares a fact row's dict across
+    every entity that cites it.
     """
+    out = attrs
     for key in _IDENTITY_ATTR_KEYS:
         value = attrs.get(key)
         if isinstance(value, str) and value:
-            attrs[key] = _normalize_graph_identity(value)
+            normalized = _normalize_graph_identity(value)
+            if normalized != value:
+                if out is attrs:
+                    out = dict(attrs)
+                out[key] = normalized
+    return out
 
 
 #: ``_normalize_graph_identity`` is deliberately blind to *why* it might
