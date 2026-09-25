@@ -262,6 +262,20 @@ topics:
       - use/dump-compare-flags.md
       - use/evidence-depth.md
 
+  target-ownership:
+    canonical_page: use/target-ownership.md
+    fact_sources:
+      - abicheck/extract/ownership.py
+      - abicheck/extract/ownership_stamp.py
+      - abicheck/model/extraction_scope.py
+      - abicheck/model/ownership_rules.py
+      - abicheck/buildsource/build_config_scope.py
+      - abicheck/storage/extraction_scope_codec.py
+    reference_page: reference/config-file.md
+    task_pages:
+      - use/dump-compare-flags.md
+      - use/troubleshooting.md
+
   python-api:
     canonical_page: use/python-api.md
     fact_sources:

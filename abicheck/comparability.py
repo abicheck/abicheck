@@ -166,6 +166,7 @@ from .comparability_sequences import (
 )
 from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
 from .model import AbiSnapshot, ExtractionContract
+from .model.extraction_scope import extraction_scope_refusal
 
 # A sentinel distinct from every valid profile_fields/scope_fields value
 # (Codex review, PR #641 follow-up, fifth P1) -- used as the `.get()`
@@ -933,9 +934,13 @@ def _check_dependency_scope_comparable(
         "the same declared surface. Regenerate both snapshots with the same "
         "mode: pass --include-system-declarations on both sides, or on neither."
     )
-    return ComparabilityMismatch(
-        kind="dependency_scope", reason=reason, dimensions=_DEPENDENCY_SCOPE_DIMENSIONS
-    )
+    return _surface_refusal("dependency_scope", reason)
+
+
+def _surface_refusal(kind: str, reason: str | None) -> ComparabilityMismatch | None:
+    if reason is None:
+        return None
+    return ComparabilityMismatch(kind, reason, _DEPENDENCY_SCOPE_DIMENSIONS)
 
 
 def _check_header_exclusions_comparable(
@@ -1434,6 +1439,7 @@ def check_contracts_comparable(
     checks: tuple[Callable[[], ComparabilityMismatch | None], ...] = (
         lambda: _check_dependency_scope_comparable(old, new),
         lambda: _check_header_exclusions_comparable(old, new),
+        lambda: _surface_refusal("scope", extraction_scope_refusal(old, new)),
         lambda: _check_scope_fingerprint_comparable(old.contract, new.contract),
         lambda: _check_profile_fingerprint_comparable(old, new),
     )

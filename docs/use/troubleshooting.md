@@ -235,6 +235,25 @@ python3 -c "import json; r=json.load(open('result.json')); print(r['verdict']); 
 
 ---
 
+## "old and new snapshots keep dependency declarations differently" / "were narrowed by different frontend prefilters"
+
+Two refusals from the extraction-scope check
+([ADR-075](../contribute/adr/075-target-ownership-and-extraction-scope.md)
+D3). Each side records the rules its declarations were classified under;
+a pair that recorded a different `scope.dependency_evidence`, or a
+different frontend prefilter, did not keep the same declarations, so a
+dependency declaration present on one side only would read as an addition
+or a removal. Re-dump both sides under the same `.abicheck.yml`. The same
+refusal names an *unrecorded* side (a pre-v52 snapshot) when the other side
+was narrowed, since nothing proves what the old one kept.
+
+Differing ownership rules alone are **not** refused while both sides keep
+everything (`dependency_evidence: full`): the comparison runs and the report
+lists the declarations that changed owner or contract. See
+[Target ownership](target-ownership.md).
+
+---
+
 ## 3) "How does `compat` mode report API_BREAK?"
 
 `abicheck compat` uses ABICC-style report text, but still returns **exit code `2`**

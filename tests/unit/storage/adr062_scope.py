@@ -119,6 +119,8 @@ NON_ADR062_MODULES = frozenset(
         "fact_schema_versions",
         "enum_codec",
         "entity_id_codec",
+        # ADR-075: the extraction_scope / per-entity ownership side table.
+        "extraction_scope_codec",
         "surface_graph_codec",
         "graph_table_codec",
         "semantic_ir_codec",

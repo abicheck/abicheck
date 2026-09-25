@@ -27,10 +27,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..model.extraction_scope import (
+    DEPENDENCY_EVIDENCE_FULL,
+    DEPENDENCY_EVIDENCE_REFERENCED,
+    SUPPORTED_DEPENDENCY_EVIDENCE,
+)
 from ..model.ownership_rules import DependencyRoots, OwnershipRules
 
 __all__ = [
+    "OWNERSHIP_KEYS",
     "OWNERSHIP_LIST_KEYS",
+    "dependency_evidence_findings",
     "dependencies_findings",
     "parse_ownership_rules",
     "scope_block",
@@ -38,6 +45,33 @@ __all__ = [
 
 #: ``scope:`` ownership keys taking a string or a list of strings.
 OWNERSHIP_LIST_KEYS = frozenset({"private_headers", "private_namespaces"})
+#: Every ``scope:`` ownership key (ADR-075), for the recognized-key table.
+OWNERSHIP_KEYS = frozenset(
+    {"dependencies", "dependency_evidence", *OWNERSHIP_LIST_KEYS}
+)
+
+
+def dependency_evidence_findings(value: object) -> list[str]:
+    """``scope.dependency_evidence``: only ``full`` is accepted (ADR-075 D6).
+
+    ``referenced`` is named rather than lumped with a typo: it is a real
+    mode, just not one this build can honour, and accepting it would record
+    a narrowing the dump never performed.
+    """
+    # A YAML list or mapping is unhashable: type-check before membership so
+    # it reaches the ordinary finding below instead of raising TypeError.
+    if isinstance(value, str) and value in SUPPORTED_DEPENDENCY_EVIDENCE:
+        return []
+    if value == DEPENDENCY_EVIDENCE_REFERENCED:
+        return [
+            "scope.dependency_evidence: 'referenced' is not supported yet "
+            "(retention by reference is Phase 3 of the target-ownership plan); "
+            "use 'full' or omit the key"
+        ]
+    return [
+        "scope.dependency_evidence must be one of "
+        f"{sorted(SUPPORTED_DEPENDENCY_EVIDENCE)}, got {value!r}"
+    ]
 
 
 def _strs(value: object) -> tuple[str, ...]:
@@ -98,6 +132,9 @@ def parse_ownership_rules(scope: dict[str, object]) -> OwnershipRules:
         dependencies=tuple(dependencies),
         private_headers=_strs(scope.get("private_headers")),
         private_namespaces=_strs(scope.get("private_namespaces")),
+        dependency_evidence=str(
+            scope.get("dependency_evidence") or DEPENDENCY_EVIDENCE_FULL
+        ),
     )
 
 
@@ -128,4 +165,6 @@ def scope_block(cfg: Any) -> dict[str, Any]:
         scope["private_headers"] = list(rules.private_headers)
     if rules.private_namespaces:
         scope["private_namespaces"] = list(rules.private_namespaces)
+    if rules.dependency_evidence != DEPENDENCY_EVIDENCE_FULL:
+        scope["dependency_evidence"] = rules.dependency_evidence
     return scope

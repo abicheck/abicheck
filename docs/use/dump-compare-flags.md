@@ -313,6 +313,14 @@ abicheck dump libfoo.so -H include/ --sources . --dry-run
 abicheck compare old.so new.so -H include/ --depth source --sources . --dry-run
 ```
 
+When the project's `.abicheck.yml` sets an ownership key
+(`scope.dependencies`, `private_headers`, `private_namespaces`), `dump
+--dry-run` also prints the ownership rules and the owner and contract of each
+`-H` header, with a warning line for a `-H` header that is not public target
+API. It classifies files without parsing them; the per-declaration answer is
+recorded in the snapshot a real dump writes (`extraction_scope`). See
+[Target ownership](target-ownership.md).
+
 ## Debug artifact resolution
 
 abicheck achieves its highest accuracy with DWARF debug information, but in

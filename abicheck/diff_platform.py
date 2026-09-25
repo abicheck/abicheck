@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .compare.debug_type_scope import debug_layout_scope
+from .compare.edge_query import export_table_covered
 from .detector_registry import registry
 from .diff_helpers import _normalize_type_name, is_sentinel_enum_member, make_change
 from .diff_platform_elf_dynamic import (
@@ -1900,8 +1901,10 @@ def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
     old_elf = getattr(old, "elf", None)
     new_elf = getattr(new, "elf", None)
 
-    # Need ELF data on both sides to compare symbol presence
-    if old_elf is None or new_elf is None:
+    # A symbol missing from NEW's table is absent only when that table was
+    # read (I4): a default/parse-failed ElfMetadata() would otherwise report
+    # every old export as deleted.
+    if old_elf is None or new_elf is None or not export_table_covered(new, "elf"):
         return changes
 
     old_elf_names: set[str] = {s.name for s in old_elf.symbols}
