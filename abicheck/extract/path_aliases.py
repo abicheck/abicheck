@@ -207,6 +207,22 @@ def dedup_segments(
     return out
 
 
+def absolutize_include_roots(roots: list[Path] | None) -> list[Path] | None:
+    """*roots* (``-I`` directories) with each relative entry resolved.
+
+    A relative ``-I`` root makes the header parser spell every header it
+    reaches through that root relative to the working directory, while a
+    header named on the generated umbrella is spelled absolute
+    (``Path.resolve()``), so one snapshot mixed both forms for one checkout.
+    Relative entries are resolved the way the umbrella spells its headers;
+    an already-rooted entry is left exactly as given (see
+    :func:`absolutize_header_root` for why resolving one is wrong).
+    """
+    if not roots:
+        return roots
+    return [r if r.is_absolute() else r.resolve() for r in roots]
+
+
 def absolutize_header_root(h: Path | str) -> Path:
     """Absolutize a ``-H``/``--header`` root, but only when it is genuinely
     *relative* (e.g. ``-H include/api.h``).

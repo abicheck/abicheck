@@ -177,9 +177,11 @@ from .extract.header_ast_backend import (
     _resolve_effective_ast_backend as _resolve_effective_ast_backend,
     _resolve_header_backend as _resolve_header_backend,
     _resolve_single_ast_backend as _resolve_single_ast_backend,
+    lang_to_profile,
 )
 from .extract.header_ast_fields import parse_header_ast_fields
 from .extract.headers.clang.locations import materialize_locations
+from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed
 from .model import AbiSnapshot, RecordType
 from .storage import closure_identity
@@ -1272,13 +1274,7 @@ def dump(
     Returns:
         AbiSnapshot with functions, variables, and types populated.
     """
-    # A relative -I root makes the header parser report every header it
-    # reaches through that root relative to the working directory, while a
-    # header named on the umbrella is spelled absolute (`h.resolve()`), so
-    # one snapshot mixed both forms for the same checkout. Absolutize the
-    # same way the umbrella does; an already-rooted root is left as given.
-    if extra_includes:
-        extra_includes = [p if p.is_absolute() else p.resolve() for p in extra_includes]
+    extra_includes = absolutize_include_roots(extra_includes)
     if dump_manifest is not None:
         # Each has its own manifest-field equivalent (roots / per-TU includes /
         # public_header_paths+dirs); a flat value here would be silently
@@ -1470,22 +1466,6 @@ def dump(
     )
 
 
-def _lang_to_profile(lang: str | None) -> str | None:
-    """Convert a ``--lang`` flag value to an internal language-profile string.
-
-    Shared by the ELF/PE/Mach-O snapshot builders (C3) — previously this logic
-    was a helper for ELF but copy-pasted inline for the other two formats.
-    """
-    if lang is None:
-        return None
-    lu = lang.upper()
-    if lu == "C":
-        return "c"
-    if lu in ("C++", "CPP"):
-        return "cpp"
-    return None
-
-
 def _dump_elf(
     so_path: Path,
     headers: list[Path],
@@ -1557,7 +1537,7 @@ def _dump_elf(
             _dwarf_format_out[0] if _dwarf_format_out else debug_format
         )
         dwarf_session = _dwarf_session_out[0] if _dwarf_session_out else None
-        profile_hint = _lang_to_profile(lang)
+        profile_hint = lang_to_profile(lang)
         # ADR-003 fallback chain: --dwarf-only forces DWARF mode; no headers +
         # DWARF -> DWARF-only mode; no headers + no DWARF -> symbols-only. Both
         # legs gated on resolved_debug_format, not dwarf_meta.has_dwarf (which
@@ -1764,7 +1744,7 @@ def _dump_macho(
         if exp.name and _is_abi_relevant_symbol(exp.name)
     }
 
-    profile_hint = _lang_to_profile(lang)
+    profile_hint = lang_to_profile(lang)
 
     if not headers:
         # Advisory only (ADR-035 P6): info log, not a per-run UserWarning.
@@ -1928,7 +1908,7 @@ def _dump_pe(
     }
     exported_static: set[str] = set(exported_dynamic)
 
-    profile_hint = _lang_to_profile(lang)
+    profile_hint = lang_to_profile(lang)
 
     if not headers:
         # Advisory only (ADR-035 P6): info log, not a per-run UserWarning.
