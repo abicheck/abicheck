@@ -58,16 +58,29 @@ def _digest(data: bytes) -> str:
     return hashlib.blake2b(data, digest_size=16).hexdigest()
 
 
-def stamp_files(paths: Sequence[Path]) -> _Stamp | None:
-    """Digest every file and list every parent directory; ``None`` on failure."""
+def _nearest_existing_dir(path: Path) -> Path:
+    while not path.is_dir() and path != path.parent:
+        path = path.parent
+    return path
+
+
+def stamp_files(paths: Sequence[Path], probed: Sequence[Path] = ()) -> _Stamp | None:
+    """Digest every file and list every directory the result depends on.
+
+    The directories are each file's own parent plus, for every *probed* path
+    (an include looked up and not found), the nearest directory that exists
+    on the way to it: creating the missing file, or any missing directory
+    above it, changes that listing. ``None`` on any read failure.
+    """
     files = sorted({str(p) for p in paths})
-    dirs = sorted({str(p.parent) for p in paths})
+    dirs = {str(p.parent) for p in paths}
+    dirs |= {str(_nearest_existing_dir(p.parent)) for p in probed}
     out: list[tuple[str, str]] = []
     try:
         for name in files:
             with open(name, "rb") as fh:
                 out.append((name, _digest(fh.read())))
-        for name in dirs:
+        for name in sorted(dirs):
             listing = "\0".join(sorted(os.listdir(name)))
             out.append((name + os.sep, _digest(os.fsencode(listing))))
     except OSError:
@@ -76,8 +89,24 @@ def stamp_files(paths: Sequence[Path]) -> _Stamp | None:
 
 
 def _stamp_still_matches(stamp: _Stamp) -> bool:
-    files = [Path(name) for name, _ in stamp if not name.endswith(os.sep)]
-    return stamp_files(files) == stamp
+    files = [Path(n) for n, _ in stamp if not n.endswith(os.sep)]
+    dirs = [n for n, _ in stamp if n.endswith(os.sep)]
+    # Re-list exactly the recorded directories: re-deriving them from the
+    # probe paths now could pick a different "nearest existing" directory.
+    fresh = stamp_files(files)
+    if fresh is None:
+        return False
+    fresh_files = tuple(e for e in fresh if not e[0].endswith(os.sep))
+    if fresh_files != tuple(e for e in stamp if not e[0].endswith(os.sep)):
+        return False
+    try:
+        for name in dirs:
+            listing = "\0".join(sorted(os.listdir(name[: -len(os.sep)])))
+            if (name, _digest(os.fsencode(listing))) not in stamp:
+                return False
+    except OSError:
+        return False
+    return True
 
 
 def memoize_header_scan(
@@ -86,8 +115,9 @@ def memoize_header_scan(
     """Memoize ``fn(header_paths, **kwargs) -> list`` by input and file content.
 
     *expand* is the scan's own include expansion, called with the same header
-    list and keyword arguments. On a miss it tells the memo which files the
-    result depends on.
+    list and keyword arguments plus an ``unresolved`` collector. On a miss it
+    tells the memo which files the result depends on and where an include was
+    looked for and not found.
     """
 
     def decorate(fn: Callable[..., list[_R]]) -> Callable[..., list[_R]]:
@@ -104,7 +134,9 @@ def memoize_header_scan(
             # Stamped *before* the scan: a file edited while the scan runs
             # leaves a stamp that no longer matches, so the next call rescans
             # rather than trusting a result computed from the edited file.
-            stamp = stamp_files(expand(list(header_paths), **kwargs))
+            probed: list[Path] = []
+            reached = expand(list(header_paths), **kwargs, unresolved=probed)
+            stamp = stamp_files(reached, probed)
             result = fn(header_paths, **kwargs)
             if stamp is not None:
                 with lock:

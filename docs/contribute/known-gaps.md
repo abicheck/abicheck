@@ -8349,12 +8349,6 @@ it is a divergence waiting for a front-end change to expose it.
 ## A directory `compare`'s `-H`/`--header` set is applied to every member, so header-derived findings are reported against libraries they do not belong to — steps 1 and the export-obligation half CLOSED (2026-09-17); steps 2/3 open
 
 **Update (2026-09-17), read this first.** The release product model landed:
-
-**Performance face of the same gap (2026-09).** Every member walks the
-union header set, so the release cost grows super-linearly with its member
-count. See "Multi-library L2 compare scales quadratically with library count"
-above for the measurements, what has been memoized, and why steps 2/3 below
-are the complete fix.
 a directory/package comparison now judges **one** public contract backed by
 **several** binary providers (`docs/learn/products-not-libraries.md` § "One
 public surface, many providers"). Concretely, against the three steps this
@@ -8386,6 +8380,12 @@ entry proposes below:
   naming both members, which is the honest "which member this affects was not
   established" reading step 1 asks for, not the attribution step 3 would give.
   Over-reporting attribution, not duplication, is what is left.
+
+**Performance face of the same gap (2026-09).** Every member walks the
+union header set, so the release cost grows super-linearly with its member
+count. See "Multi-library L2 compare scales quadratically with library count"
+above for the measurements, what has been memoized, and why steps 2/3 in this entry
+are the complete fix.
 
 **Update (2026-09-18).** The model is no longer scoped to the live
 directory/package fan-out. The other three drivers that compare several

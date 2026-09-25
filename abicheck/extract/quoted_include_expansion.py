@@ -69,7 +69,10 @@ _QUOTED_INCLUDE_PATTERN = re.compile(
 
 
 def _expand_with_quoted_includes(
-    header_paths: list[Path], *, for_language_mode_decision: bool = False
+    header_paths: list[Path],
+    *,
+    for_language_mode_decision: bool = False,
+    unresolved: list[Path] | None = None,
 ) -> list[Path]:
     """Expand *header_paths* with files reachable via a quoted ``#include
     "..."``, resolved relative to the including file's own directory
@@ -79,6 +82,10 @@ def _expand_with_quoted_includes(
     itself — castxml/clang parse the transitive include as part of the
     same translation unit regardless of whether it was named directly, so
     the dialect decision must see it too.
+
+    *unresolved*, when given, collects the path each reachable quoted
+    include was looked up at but did not resolve to -- the one input a cache
+    of this expansion cannot see through the returned files alone.
 
     Deliberately narrow, matching this file's incremental-per-reported-
     case scope: only the quoted spelling is followed (an angle-bracket
@@ -181,4 +188,8 @@ def _expand_with_quoted_includes(
             included = p.parent / name
             if included.is_file():
                 stack.append(included)
+            elif unresolved is not None:
+                # Where a reachable include was looked for and not found:
+                # a caller caching this expansion must notice it appearing.
+                unresolved.append(included)
     return expanded

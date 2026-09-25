@@ -94,6 +94,67 @@ def test_include_target_appearing_later_is_a_miss(tmp_path):
     assert _SCAN([umbrella])
 
 
+@pytest.mark.parametrize(
+    ("spelling", "premade_dirs"),
+    [
+        ("sub/impl.h", ["sub"]),  # lookup dir exists, file does not
+        ("../common.h", []),  # lookup dir is the including dir's parent
+        ("a/b/impl.h", []),  # no directory on the way exists yet
+        ("a/b/impl.h", ["a"]),  # part of the way exists
+    ],
+)
+def test_include_resolving_later_outside_the_including_dir_is_a_miss(
+    tmp_path, spelling, premade_dirs
+):
+    root = tmp_path / "inc"
+    root.mkdir()
+    for d in premade_dirs:
+        (root / d).mkdir(parents=True)
+    umbrella = root / "all.h"
+    umbrella.write_text(f'#include "{spelling}"\n', encoding="utf-8")
+    assert _SCAN([umbrella]) == []
+    target = root / spelling
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_CPP20, encoding="utf-8")
+    _check([umbrella])
+    assert _SCAN([umbrella])
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_generated_nested_trees_match_a_fresh_scan(tmp_path, seed):
+    """Includes crossing directories, with targets created and removed."""
+    rng = random.Random(seed)
+    dirs = ["", "sub", "sub/deep", "other"]
+    names = [f"{d}/h{i}.h".lstrip("/") for d in dirs for i in range(2)]
+    root = tmp_path / "tree"
+
+    def include_text(from_name: str) -> str:
+        here = Path(from_name).parent
+        target = Path(rng.choice(names))
+        rel = os.path.relpath(target, here)
+        return f'#include "{Path(rel).as_posix()}"\n'
+
+    def text_for(name: str) -> str:
+        return rng.choice([_CPP20, _CPP17, include_text(name), include_text(name)])
+
+    present = set(rng.sample(names, k=4))
+    for n in names:
+        if n in present:
+            (root / n).parent.mkdir(parents=True, exist_ok=True)
+            (root / n).write_text(text_for(n), encoding="utf-8")
+    roots = [root / n for n in sorted(present)[:2]]
+    for _ in range(10):
+        _check(roots)
+        n = rng.choice(names)
+        target = root / n
+        if target.exists() and target not in roots and rng.random() < 0.3:
+            target.unlink()
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            _write_keep_stat(target, text_for(n))
+    _check(roots)
+
+
 def test_keyword_arguments_are_separate_entries(tmp_path):
     h = tmp_path / "a.h"
     h.write_text("#ifdef __cplusplus\n" + _CPP20 + "#endif\n", encoding="utf-8")
