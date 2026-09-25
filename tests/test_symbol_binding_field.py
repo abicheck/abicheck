@@ -160,7 +160,7 @@ class TestSerializationRoundTrip:
             version="1.0",
             functions=[func],
             variables=[var],
-            elf=ElfMetadata(symbols=[]),
+            elf=ElfMetadata(symbols=[], machine="EM_X86_64"),
         )
         d = snapshot_to_dict(snap)
         d["functions"][0].pop("elf_binding", None)
@@ -272,7 +272,7 @@ class TestChangeSymbolBindingStamp:
             library="lib.so",
             version="2.0",
             functions=[f_new],
-            elf=ElfMetadata(symbols=[]),
+            elf=ElfMetadata(symbols=[], machine="EM_X86_64"),
         )
         changes = _diff_elf_deleted_fallback(old, new)
         assert len(changes) == 1

@@ -29,6 +29,25 @@
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
 | Coverage gap | Binary-only analysis without debug info; many ABI changes cannot be detected (struct layout, enum values, type changes) |
 
+## Relationship Coverage
+
+> A relationship missing from the evidence (an export, a debug type, a header declaration, a source-graph edge) is proven absent only where its producer covered the scope; otherwise it is unknown.
+
+| Side | Relationship | Subjects | Present | Proven absent | Unknown | Producers |
+|---|---|---|---|---|---|---|
+| old | `debug_type_of` (resolved_join) | debug_types | 0 | 0 | 0 | debug_section[debug]: not_run (no_debug_info)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| old | `debug_type_of` (resolved_join) | header_types | 0 | 0 | 0 | debug_section[debug]: not_run (no_debug_info)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| old | `declares` (observed) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| old | `exports` (resolved_join) | declarations | 0 | 0 | 0 | export_table[elf]: failed (export_table_not_read)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| old | `exports` (resolved_join) | exports | 0 | 0 | 0 | export_table[elf]: failed (export_table_not_read)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| old | `references` (resolved_join) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| new | `debug_type_of` (resolved_join) | debug_types | 0 | 0 | 0 | debug_section[debug]: not_run (no_debug_info)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| new | `debug_type_of` (resolved_join) | header_types | 0 | 0 | 0 | debug_section[debug]: not_run (no_debug_info)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| new | `declares` (observed) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| new | `exports` (resolved_join) | declarations | 0 | 0 | 0 | export_table[elf]: failed (export_table_not_read)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| new | `exports` (resolved_join) | exports | 0 | 0 | 0 | export_table[elf]: failed (export_table_not_read)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| new | `references` (resolved_join) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+
 > **Policy**: `strict_abi`
 
 ## ⚠️ Deployment Risk Changes

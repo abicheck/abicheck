@@ -90,9 +90,11 @@ if TYPE_CHECKING:
 __all__ = [
     "EDGE_EVIDENCE_CLASS",
     "ReferencedIdentifiers",
+    "TypeSpellingIndex",
     "build_public_surface_facts",
     "fact_list",
     "referenced_identifiers_by_node",
+    "type_spelling_index",
 ]
 
 NODE_KIND_HEADER = "header"
@@ -387,26 +389,68 @@ def _node_attrs(refs: ReferencedIdentifiers, node_id: str) -> dict[str, object]:
     }
 
 
+class TypeSpellingIndex(NamedTuple):
+    """Type spelling -> node id, for every spelling naming exactly one
+    record/enum/typedef; ``ambiguous`` maps each spelling naming several to
+    all of them, since a reference through it resolves to none."""
+
+    by_spelling: dict[str, str]
+    ambiguous: dict[str, frozenset[str]]
+
+
+def type_spelling_index(
+    snap: AbiSnapshot, ids: SnapshotIdentities
+) -> TypeSpellingIndex:
+    """Both the bare leaf and the qualified spelling of every declared
+    record/enum/typedef, mirroring ``surface.py``'s own alias-index
+    convention -- bare names included, but never a silent first-wins pick: a
+    bare name shared by more than one type (``ns1::Foo``/``ns2::Foo``) is
+    ambiguous, exactly what ``surface.py``'s own ``ambiguous_type_names``
+    tracks and every one of its consumers checks before trusting a bare
+    match, so the index drops that key entirely rather than resolving it
+    arbitrarily; a qualified spelling shared by two declarations is dropped
+    the same way. The one owner of this rule: :func:`_add_references`
+    resolves against it and ``compare/edge_query.py`` reads its ambiguous
+    keys to tell "references nothing" from "reference never resolved"."""
+    index: dict[str, str] = {}
+    named: dict[str, set[str]] = {}
+    entries: list[tuple[str, str, str]] = [
+        *(
+            (rec.qualified_name or rec.name, rec.name, ident.node_id)
+            for rec, ident in zip(snap.types, ids.records)
+        ),
+        *(
+            (en.qualified_name or en.name, en.name, ident.node_id)
+            for en, ident in zip(snap.enums, ids.enums)
+        ),
+        *(
+            (alias, alias.rsplit("::", 1)[-1], ids.typedefs[alias].node_id)
+            for alias in snap.typedefs
+        ),
+    ]
+    for qname, bare, node_id in entries:
+        for key in {qname, bare}:
+            if key:
+                named.setdefault(key, set()).add(node_id)
+                index.setdefault(key, node_id)
+    ambiguous = {k: frozenset(v) for k, v in named.items() if len(v) > 1}
+    for key in ambiguous:
+        index.pop(key, None)
+    return TypeSpellingIndex(index, ambiguous)
+
+
 def _build_type_index(
     graph: SurfaceGraphLike,
     snap: AbiSnapshot,
     refs: ReferencedIdentifiers,
 ) -> dict[str, str]:
     """Register every declared record/enum/typedef as a type node, returning
-    a name → node-id index (both the bare leaf and the qualified spelling,
-    mirroring ``surface.py``'s own alias-index convention -- bare names
-    included, but never a silent first-wins pick: a bare name shared by more
-    than one type (``ns1::Foo``/``ns2::Foo``) is ambiguous, exactly what
-    ``surface.py``'s own ``ambiguous_type_names`` tracks and every one of its
-    consumers checks before trusting a bare match, so this index drops that
-    bare key entirely rather than resolving it arbitrarily; a qualified
-    spelling shared by two declarations is dropped the same way) for
+    :func:`type_spelling_index`'s name -> node-id index for
     :func:`_add_references` to resolve a signature/field type string
     against."""
-    index: dict[str, str] = {}
-    ambiguous: set[str] = set()
+    ids = refs.ids
 
-    def _register(qname: str, bare: str, ident: GraphEntityIdentity, kind: str) -> None:
+    def _register(qname: str, ident: GraphEntityIdentity, kind: str) -> None:
         node_id = ident.node_id
         graph.add_node(
             GraphNode(
@@ -417,28 +461,14 @@ def _build_type_index(
                 attrs={**_node_attrs(refs, node_id), **_identity_attrs(ident)},
             )
         )
-        for key in {qname, bare}:
-            if not key:
-                continue
-            if key in index and index[key] != node_id:
-                ambiguous.add(key)
-            else:
-                index.setdefault(key, node_id)
 
-    ids = refs.ids
     for rec, ident in zip(snap.types, ids.records):
-        qname = rec.qualified_name or rec.name
-        _register(qname, rec.name, ident, NODE_KIND_RECORD_TYPE)
+        _register(rec.qualified_name or rec.name, ident, NODE_KIND_RECORD_TYPE)
     for en, ident in zip(snap.enums, ids.enums):
-        qname = en.qualified_name or en.name
-        _register(qname, en.name, ident, NODE_KIND_ENUM_TYPE)
+        _register(en.qualified_name or en.name, ident, NODE_KIND_ENUM_TYPE)
     for alias in snap.typedefs:
-        _register(
-            alias, alias.rsplit("::", 1)[-1], ids.typedefs[alias], NODE_KIND_TYPEDEF
-        )
-    for key in ambiguous:
-        index.pop(key, None)
-    return index
+        _register(alias, ids.typedefs[alias], NODE_KIND_TYPEDEF)
+    return type_spelling_index(snap, ids).by_spelling
 
 
 def _add_linker_name_edges(

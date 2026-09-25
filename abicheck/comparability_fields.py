@@ -34,14 +34,19 @@ historically carried (``IncludeDir``, ``_sha256_of``,
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, TypeVar
 
 from .errors import SnapshotError
+
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True)
@@ -62,8 +67,54 @@ class IncludeDir:
     label: str | None = None
 
 
+#: A per-computation memo of ``Path.resolve()`` and of each resolved path's
+#: ancestor set, active only inside a :func:`_path_memo_scope` function.
+#: Fingerprinting asks the same few questions of the same paths many times:
+#: every depfile dependency (F) is tested against every declared header's
+#: parent and every ``-I`` slot (H + I), and each test used to resolve both
+#: paths afresh. A directory ``compare`` hands each member the whole
+#: release's header and include set, so H and I grow with the member count,
+#: and that resolve-heavy F x (H + I) work made the release cost quadratic in
+#: members (docs/contribute/known-gaps.md, "Multi-library L2 compare scales
+#: quadratically with library count"). Scoped rather than global because the
+#: filesystem may change between computations in a long-lived process;
+#: within one computation it is read as a single consistent view.
+_PATH_MEMO: ContextVar[dict[Path, tuple[Path, frozenset[Path]]] | None] = ContextVar(
+    "_comparability_path_memo", default=None
+)
+
+
+def _lookup(path: Path) -> tuple[Path, frozenset[Path]] | None:
+    """``(resolved, {resolved, *its ancestors})`` when a memo is active."""
+    memo = _PATH_MEMO.get()
+    if memo is None:
+        return None
+    entry = memo.get(path)
+    if entry is None:
+        resolved = path.resolve()
+        entry = memo[path] = (resolved, frozenset((resolved, *resolved.parents)))
+    return entry
+
+
+def _path_memo_scope(fn: Callable[..., _T]) -> Callable[..., _T]:
+    """Run *fn* with the path memo active, reusing an enclosing one."""
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> _T:
+        if _PATH_MEMO.get() is not None:
+            return fn(*args, **kwargs)
+        token = _PATH_MEMO.set({})
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _PATH_MEMO.reset(token)
+
+    return wrapper
+
+
 def _resolved(path: Path) -> Path:
-    return path.resolve()
+    entry = _lookup(path)
+    return entry[0] if entry is not None else path.resolve()
 
 
 def _common_root(candidates: Sequence[str]) -> Path | None:
@@ -92,6 +143,9 @@ def _side_local_identity(path: Path, root: Path | None) -> str:
 
 
 def _is_ancestor_or_equal(root: Path, path: Path) -> bool:
+    entry = _lookup(path)
+    if entry is not None:
+        return _resolved(root) in entry[1]
     root = _resolved(root)
     path = _resolved(path)
     return path == root or root in path.parents
@@ -518,6 +572,7 @@ def _declared_header_sequence(
     return sequence
 
 
+@_path_memo_scope
 def _compute_profile_fields(
     *,
     compiler_family: str | None,
@@ -640,6 +695,7 @@ def _normalized_identities(paths: Sequence[Path], root: Path | None) -> list[str
     return sorted({_side_local_identity(p, root) for p in paths})
 
 
+@_path_memo_scope
 def _compute_scope_fields(
     declared_headers: Sequence[Path],
     public_header_paths: Sequence[Path],
