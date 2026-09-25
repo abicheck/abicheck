@@ -298,3 +298,50 @@ class TestContractInputsProvenance:
         )
         back = resolved_config_from_dict(resolved_config_to_dict(cfg))
         assert back.surface.ownership == cfg.surface.ownership
+
+
+class TestOwnershipEdgeQueries:
+    """I4 over the ownership edges: absence is proven only for an entity the
+    stamp classified; an unclassified entity, a conflicting node or a
+    snapshot with no recorded scope answers unknown."""
+
+    def _q(self, snap, kind, subject, target=None):
+        from abicheck.compare.edge_query import EdgeEvidence
+
+        return EdgeEvidence(snap).query(kind, subject, target=target).answer
+
+    def test_every_state(self) -> None:
+        from abicheck.model.edge_coverage import EdgeAnswer
+
+        snap = _snap([_fn("a", "dep"), _fn("b", None)])
+        a, b = (i.node_id for i in snapshot_identities(snap).functions)
+        owner = "owner://dependency:other"
+        assert self._q(snap, EDGE_KIND_OWNED_BY, a) is EdgeAnswer.PRESENT
+        assert self._q(snap, EDGE_KIND_OWNED_BY, a, owner) is EdgeAnswer.PRESENT
+        assert (
+            self._q(snap, EDGE_KIND_OWNED_BY, a, "owner://target")
+            is EdgeAnswer.PROVEN_ABSENT
+        )
+        assert (
+            self._q(snap, EDGE_KIND_IN_CONTRACT, a, "contract://public")
+            is EdgeAnswer.PROVEN_ABSENT
+        )
+        # Unclassified: the stamp ran but left no decision -> unknown.
+        assert self._q(snap, EDGE_KIND_OWNED_BY, b, owner) is EdgeAnswer.UNKNOWN
+        # Not an entity at all.
+        assert self._q(snap, EDGE_KIND_OWNED_BY, "func://nope") is EdgeAnswer.UNKNOWN
+
+    def test_conflicting_node_and_unrecorded_scope_are_unknown(self) -> None:
+        from abicheck.model.edge_coverage import EdgeAnswer
+
+        clash = _snap([_fn("a", "target"), _fn("a", "dep")])
+        node = snapshot_identities(clash).functions[0].node_id
+        assert (
+            self._q(clash, EDGE_KIND_OWNED_BY, node, "owner://target")
+            is EdgeAnswer.UNKNOWN
+        )
+        bare = _snap([_fn("a", "target")])
+        bare.extraction_scope = None
+        node = snapshot_identities(bare).functions[0].node_id
+        for target in ("owner://target", "owner://toolchain"):
+            assert self._q(bare, EDGE_KIND_OWNED_BY, node, target) is EdgeAnswer.UNKNOWN

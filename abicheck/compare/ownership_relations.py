@@ -57,6 +57,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from ..model.edge_coverage import CoverageRecord, ProducerRun
 from ..model.extraction_scope import ownership_of
 from ..model.graph_entity_identity import SnapshotIdentities, snapshot_identities
 from ..model.graph_evidence_class import EdgeEvidenceClass
@@ -245,6 +246,57 @@ def ownership_relations(
         contract_of=contract_of,
         conflicting=frozenset(conflicting),
     )
+
+
+#: The producer an ``owned_by``/``in_contract`` absence rests on (ADR-075 D2:
+#: the stamp that recorded each entity's decision) and the unit it covers.
+PRODUCER_OWNERSHIP_STAMP = "ownership_stamp"
+UNIT_CLASSIFIED = "classified_declarations"
+
+
+def ownership_coverage_record(
+    snap: AbiSnapshot, edge_kind: str, *, reason: str = ""
+) -> CoverageRecord:
+    """I4's record for *edge_kind*: ``ran`` when *snap* recorded an
+    extraction scope (and *reason* is empty), ``not_run`` otherwise -- an
+    unrecorded snapshot, or an entity the stamp left unclassified, proves no
+    absence."""
+    if getattr(snap, "extraction_scope", None) is None:
+        reason = "no_extraction_scope"
+    run = ProducerRun.NOT_RUN if reason else ProducerRun.RAN
+    return CoverageRecord(
+        edge_kind, PRODUCER_OWNERSHIP_STAMP, run, frozenset({UNIT_CLASSIFIED}),
+        reason=reason, source="AbiSnapshot.extraction_scope",
+    )  # fmt: skip
+
+
+def resolve_ownership_edge(
+    snap: AbiSnapshot,
+    rel: OwnershipRelations,
+    edge_kind: str,
+    subject: str,
+    target: str | None,
+) -> tuple[bool, tuple[CoverageRecord, ...], None] | None:
+    """``(observed, records, default scope)`` for an ``owned_by``/
+    ``in_contract`` query, ``None`` for a subject that is not an entity."""
+    ids = rel.identities
+    if ids is None:
+        return False, (ownership_coverage_record(snap, edge_kind),), None
+    known = any(
+        i.node_id == subject
+        for group in (ids.functions, ids.variables, ids.records, ids.enums)
+        for i in group
+    )
+    if not known:
+        return None
+    owned = edge_kind == EDGE_KIND_OWNED_BY
+    value = rel.owner(subject) if owned else rel.contract(subject)
+    if value is None:
+        why = "conflicting_decisions" if subject in rel.conflicting else "unclassified"
+        return False, (ownership_coverage_record(snap, edge_kind, reason=why),), None
+    dst = owner_node_id(value) if owned else contract_node_id(value)
+    observed = target is None or target == dst
+    return observed, (ownership_coverage_record(snap, edge_kind),), None
 
 
 def contract_relations(snap: AbiSnapshot) -> OwnershipRelations:
