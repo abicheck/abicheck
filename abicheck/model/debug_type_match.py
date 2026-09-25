@@ -17,7 +17,8 @@ dump step (no snapshot exists yet) and a ``compare``-side join can import.
 qualified spelling (:func:`header_type_key`: ``qualified_name or name``)
 *equals* the debug name, and whose layout does not contradict it on any
 fact both sides carry (:func:`record_layout_verdict`: union-ness, total
-size, the offset of every non-bitfield field both name). No other spelling
+size, the offset of every non-bitfield field both name, and the direct
+non-virtual/virtual base lists when both producers established them). No other spelling
 tolerance applies -- no bare-name or last-``::``-segment fallback: two
 records sharing a leaf name in different scopes are different entities, and
 castxml's dropped inline-namespace segment stays a non-match (G15).
@@ -36,11 +37,13 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from .availability import FactStatus
 from .graph_join import JoinState, resolve_join_records
 
 if TYPE_CHECKING:
     from .dwarf_facts import StructLayout
     from .entities import EnumType, RecordType
+    from .fact import Fact
 
 __all__ = [
     "DebugRecordFacts",
@@ -66,6 +69,11 @@ class DebugRecordFacts:
     field_offsets_bits: Mapping[str, int] = field(
         default_factory=lambda: MappingProxyType({})
     )
+    #: Direct non-virtual / virtual base names, ``None`` unless the producer
+    #: established them (``Fact`` status ``PRESENT``) -- an unknown base list
+    #: is never compared.
+    base_names: tuple[str, ...] | None = None
+    virtual_base_names: tuple[str, ...] | None = None
 
     @classmethod
     def from_struct_layout(cls, layout: StructLayout) -> DebugRecordFacts:
@@ -95,7 +103,59 @@ class DebugRecordFacts:
                     if f.name and not f.is_bitfield and f.offset_bits is not None
                 }
             ),
+            base_names=_known_bases(rec.bases_fact),
+            virtual_base_names=_known_bases(rec.virtual_bases_fact),
         )
+
+
+def _known_bases(fact: Fact[list[str]] | None) -> tuple[str, ...] | None:
+    if fact is None or fact.status is not FactStatus.PRESENT or fact.value is None:
+        return None
+    return tuple(fact.value)
+
+
+def _base_segments(name: str) -> list[str]:
+    spelled = " ".join(name.split())
+    for prefix in ("struct ", "class ", "union "):
+        if spelled.startswith(prefix):
+            spelled = spelled[len(prefix) :]
+    return spelled.lstrip(":").split("::")
+
+
+def _same_base(a: str, b: str) -> bool:
+    """Whether two producers' spellings can name one base: equal on the
+    shorter spelling's complete ``::`` segments (``ns::B`` vs ``B``), so a
+    qualification difference is not a contradiction while ``a::B`` vs
+    ``b::B`` or ``B`` vs ``XB`` is."""
+    sa, sb = _base_segments(a), _base_segments(b)
+    k = min(len(sa), len(sb))
+    return sa[-k:] == sb[-k:]
+
+
+def _bases_verdict(
+    header: tuple[str, ...] | None, debug: tuple[str, ...] | None
+) -> bool | None:
+    """``False`` when two known base lists cannot name the same classes (a
+    different count, or a base with no compatible spelling on the other
+    side), ``True`` when they can, ``None`` when either is unknown.
+
+    A base whose spelling is a template/alias the other producer resolved
+    differently is indistinguishable here from a real difference only when
+    no partner spelling survives; a template-id spelling (``<``) is treated
+    as unresolvable and never contradicts."""
+    if header is None or debug is None:
+        return None
+    if len(header) != len(debug):
+        return False
+    remaining = list(debug)
+    for h in header:
+        hit = next((d for d in remaining if _same_base(h, d)), None)
+        if hit is None:
+            if "<" in h or any("<" in d for d in remaining):
+                return None
+            return False
+        remaining.remove(hit)
+    return True
 
 
 def header_type_key(entity: RecordType | EnumType) -> str:
@@ -113,6 +173,14 @@ def record_layout_verdict(rec: RecordType, debug: DebugRecordFacts) -> bool | No
         if rec.size_bits != debug.size_bits:
             return False
         compared = True
+    for header_bases, debug_bases in (
+        (_known_bases(rec.bases_fact), debug.base_names),
+        (_known_bases(rec.virtual_bases_fact), debug.virtual_base_names),
+    ):
+        base_verdict = _bases_verdict(header_bases, debug_bases)
+        if base_verdict is False:
+            return False
+        compared = compared or base_verdict is True
     for f in rec.fields:
         if (
             f.is_bitfield

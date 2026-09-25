@@ -27,6 +27,7 @@ the AI-readiness file-size cap.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
@@ -41,6 +42,30 @@ if TYPE_CHECKING:
     from .dwarf_metadata import DwarfMetadata
     from .dwarf_unified import DwarfSession
     from .elf_metadata import ElfMetadata
+    from .model.dwarf_facts import StructLayout
+
+
+def _record_from_layout(layout: StructLayout) -> RecordType:
+    """A layout-only ``RecordType`` for an ODR variant, so a header record
+    the matcher pairs with it is filled from that definition's own size and
+    field offsets (its vtable/base facts stay not collected)."""
+    return RecordType(
+        name=layout.name,
+        kind="union" if layout.is_union else "struct",
+        size_bits=layout.byte_size * 8 if layout.byte_size else None,
+        alignment_bits=layout.alignment * 8 if layout.alignment else None,
+        fields=[
+            TypeField(
+                name=f.name,
+                type=f.type_name,
+                offset_bits=f.byte_offset * 8 + (f.bit_offset if f.bit_size else 0),
+                is_bitfield=bool(f.bit_size),
+                bitfield_bits=f.bit_size or None,
+            )
+            for f in layout.fields
+        ],
+        is_union=layout.is_union,
+    )
 
 
 def dwarf_layout_types_or_empty(
@@ -269,6 +294,7 @@ def _backfilled_record(header: RecordType, dwarf: RecordType) -> RecordType:
 def backfill_dwarf_layout(
     header_types: list[RecordType],
     dwarf_types: list[RecordType],
+    odr_conflicts: Mapping[str, Sequence[StructLayout]] | None = None,
 ) -> tuple[list[RecordType], DwarfLayoutCoherence | None]:
     """Fill in missing struct/class layout on header-parsed types from DWARF.
 
@@ -296,11 +322,21 @@ def backfill_dwarf_layout(
     ``None`` when *dwarf_types* is empty (a no-op): only ``dumper.py`` knows
     whether that means "castxml, not a coherence question" or "clang, but
     no DWARF" -- see :func:`resolve_snapshot_layout_coherence`.
+
+    *odr_conflicts* (``DwarfMetadata.struct_odr_conflicts``) holds the
+    further, layout-distinct definitions other CUs gave a name; the DWARF
+    snapshot builder behind :func:`dwarf_layout_types_or_empty` keeps one
+    record per name and drops them. They are candidates like any other, so
+    a header record two compatible definitions could describe is
+    ``ambiguous`` -- the state the snapshot-level join reports for the same
+    inputs -- rather than matched against whichever definition was kept.
     """
     if not dwarf_types:
         return header_types, None
+    variants = [v for vs in (odr_conflicts or {}).values() for v in vs]
+    sources = [*dwarf_types, *(_record_from_layout(v) for v in variants)]
     matches = match_header_records(
-        header_types, [DebugRecordFacts.from_record_type(t) for t in dwarf_types]
+        header_types, [DebugRecordFacts.from_record_type(t) for t in sources]
     )
     matched: list[str] = []
     mismatched: list[str] = []
@@ -314,7 +350,7 @@ def backfill_dwarf_layout(
             continue
         if m.state is JoinState.MATCHED and m.debug_index is not None:
             matched.append(t.name)
-            out.append(_backfilled_record(t, dwarf_types[m.debug_index]))
+            out.append(_backfilled_record(t, sources[m.debug_index]))
             continue
         out.append(t)
         if m.state is JoinState.AMBIGUOUS:

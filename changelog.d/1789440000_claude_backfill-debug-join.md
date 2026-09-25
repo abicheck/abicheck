@@ -10,3 +10,8 @@
   reporting a false layout `mismatch`. Measured over the 142 catalog dumps
   and yaml-cpp 0.8.0 (clang backend, `-g`): no record lost its backfill,
   61 fieldless records gained one.
+  The shared rule also treats known, differing base classes as a layout
+  contradiction (qualification-only spelling differences are not), and the
+  backfill now sees a name's layout-distinct ODR definitions from other CUs,
+  so a record two compatible definitions could describe stays unfilled and
+  is reported `ambiguous`, matching the debug-type join.

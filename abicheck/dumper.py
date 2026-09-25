@@ -1650,7 +1650,7 @@ def _dump_elf(
             _sess.close()
 
     _backfilled_types, _layout_coherence = backfill_dwarf_layout(
-        list(ast_result.types), dwarf_layout_types
+        list(ast_result.types), dwarf_layout_types, dwarf_meta.struct_odr_conflicts
     )
     _dwarf_layout_coherence, _dwarf_layout_coherence_mismatches = (
         resolve_snapshot_layout_coherence(
