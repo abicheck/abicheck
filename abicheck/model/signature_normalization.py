@@ -49,15 +49,34 @@ from .declarator_qualifiers import (
     _is_declarator_group,
     _split_at_trailing_param_list,
 )
-from .signature_tokens import (
+from .signature_token_scan import (
     _decay_top_level_array,
     _find_matching_paren,
     _split_top_level_commas,
-    _strip_cv_tokens_outside_nesting,
 )
 
 __all__ = ["canonicalize_function_signature_param_type"]
 
+# `restrict`/`__restrict`/`__restrict__` -- a qualifier attached to a
+# specific pointer, positioned exactly where a `const`/`volatile` on that
+# same pointer would be, and it turns out to be POSITION-SENSITIVE the
+# identical way: real-compiler verification (`g++ -c`, GCC's own Itanium
+# mangler) confirms `void f(int *)` and `void f(int * restrict)` are the
+# SAME function (restrict on the parameter's own outermost, by-value
+# pointer position drops from the mangled name, `_Z1fPi` both ways --
+# GCC even refuses to compile that pair as a legal overload set, exactly
+# the "same function" signal) -- but `void f(int **)` and
+# `void f(int * restrict *)` mangle to two DIFFERENT, simultaneously-
+# declarable symbols (`_Z1fPPi` vs `_Z1fPrPi`). So restrict is folded
+# into this same strippable-word set, reusing the SAME outermost-vs-
+# pointee position discipline `const`/`volatile` already have throughout
+# this module -- not stripped unconditionally (Codex review, PR #941,
+# eighteenth round: the sixteenth round's own "restrict never affects
+# mangling, strip it everywhere" fix turned out to be the wrong
+# generalization, verified wrong by direct compilation rather than mere
+# assertion -- restrict does NOT behave like a pure no-op token, it
+# behaves like cv).
+_CV_WORD_RE = re.compile(r"\b(?:const|volatile|restrict|__restrict__|__restrict)\b")
 
 # Clang's own ``qualType`` spelling for a calling-convention-decorated
 # function-pointer declarator does NOT use the leading ``__cdecl``-style
@@ -138,6 +157,42 @@ _MAX_PARAM_TYPE_NESTING_DEPTH = 64
 # mistake in the sixteenth/eighteenth rounds' own restrict handling was
 # corrected the identical way: revert to the position that matches
 # confirmed compiler behavior rather than a plausible-sounding theory.
+
+
+def _strip_cv_tokens_outside_nesting(s: str) -> str:
+    """Blank out every ``const``/``volatile``/``restrict`` (any of its
+    three spellings) token in *s* that sits at nesting depth 0 (outside
+    any ``<...>``/``(...)``/``[...]``), then collapse the resulting
+    whitespace. The one primitive both branches of
+    :func:`canonicalize_function_signature_param_type` reduce to -- the
+    by-value case applies it to the whole string, the pointer case applies
+    it only to the suffix after the parameter's outermost pointer/
+    reference sigil (see that function's own docstring for why those are
+    the two, and only the two, safe places to strip). ``restrict`` shares
+    this exact position discipline with ``const``/``volatile`` -- it is
+    NOT unconditionally mangling-inert (see ``_CV_WORD_RE``'s own comment
+    for the direct-compilation evidence).
+    """
+    depth = 0
+    out: list[str] = []
+    i = 0
+    n = len(s)
+    while i < n:
+        ch = s[i]
+        if ch in "<([":
+            depth += 1
+            out.append(ch)
+            i += 1
+        elif ch in ">)]":
+            depth = max(0, depth - 1)
+            out.append(ch)
+            i += 1
+        elif depth == 0 and (m := _CV_WORD_RE.match(s, i)):
+            i = m.end()
+        else:
+            out.append(ch)
+            i += 1
+    return re.sub(r"\s+", " ", "".join(out)).strip()
 
 
 def _normalize_param_list_contents(inner: str, depth: int) -> str:
