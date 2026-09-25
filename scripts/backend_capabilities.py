@@ -464,12 +464,13 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "Function",
         "ownership_fact",
-        _FULL,
-        _FULL,
+        Capability.OTHER_LAYER,
+        Capability.OTHER_LAYER,
         note=(
             "ADR-075 D2: owner/contract/rule id, stamped after the parse by "
-            "`extract.ownership_stamp` from the declaring file, identically "
-            "for both backends. Persisted in `AbiSnapshot.extraction_scope`."
+            "`extract.ownership_stamp` from the declaring file -- neither "
+            "backend's parser sets it, and it is identical for both. "
+            "Persisted in `AbiSnapshot.extraction_scope`."
         ),
     ),
     # ── Variable ───────────────────────────────────────────────────────────
@@ -659,12 +660,13 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "Variable",
         "ownership_fact",
-        _FULL,
-        _FULL,
+        Capability.OTHER_LAYER,
+        Capability.OTHER_LAYER,
         note=(
             "ADR-075 D2: owner/contract/rule id, stamped after the parse by "
-            "`extract.ownership_stamp` from the declaring file, identically "
-            "for both backends. Persisted in `AbiSnapshot.extraction_scope`."
+            "`extract.ownership_stamp` from the declaring file -- neither "
+            "backend's parser sets it, and it is identical for both. "
+            "Persisted in `AbiSnapshot.extraction_scope`."
         ),
     ),
     # ── TypeField ──────────────────────────────────────────────────────────
@@ -1122,12 +1124,13 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "RecordType",
         "ownership_fact",
-        _FULL,
-        _FULL,
+        Capability.OTHER_LAYER,
+        Capability.OTHER_LAYER,
         note=(
             "ADR-075 D2: owner/contract/rule id, stamped after the parse by "
-            "`extract.ownership_stamp` from the declaring file, identically "
-            "for both backends. Persisted in `AbiSnapshot.extraction_scope`."
+            "`extract.ownership_stamp` from the declaring file -- neither "
+            "backend's parser sets it, and it is identical for both. "
+            "Persisted in `AbiSnapshot.extraction_scope`."
         ),
     ),
     # ── EnumType ───────────────────────────────────────────────────────────
@@ -1237,12 +1240,13 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "EnumType",
         "ownership_fact",
-        _FULL,
-        _FULL,
+        Capability.OTHER_LAYER,
+        Capability.OTHER_LAYER,
         note=(
             "ADR-075 D2: owner/contract/rule id, stamped after the parse by "
-            "`extract.ownership_stamp` from the declaring file, identically "
-            "for both backends. Persisted in `AbiSnapshot.extraction_scope`."
+            "`extract.ownership_stamp` from the declaring file -- neither "
+            "backend's parser sets it, and it is identical for both. "
+            "Persisted in `AbiSnapshot.extraction_scope`."
         ),
     ),
     # ── Param ──────────────────────────────────────────────────────────────
