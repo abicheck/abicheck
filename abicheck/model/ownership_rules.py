@@ -86,6 +86,47 @@ class OwnershipRules:
     #: accepted until retention by reference lands (ADR-075 D6).
     dependency_evidence: str = "full"
 
+    def to_dict(self) -> dict[str, object]:
+        """Receipt form (ADR-075 D7), spelled as stated."""
+        return {
+            "target_roots": list(self.target_roots),
+            "dependencies": [
+                {"name": d.name, "header_roots": list(d.header_roots)}
+                for d in self.dependencies
+            ],
+            "private_headers": list(self.private_headers),
+            "private_namespaces": list(self.private_namespaces),
+            "dependency_evidence": self.dependency_evidence,
+        }
+
+    @staticmethod
+    def receipt_entry(rules: OwnershipRules | None) -> dict[str, object]:
+        """``{"ownership": ...}`` for a receipt, ``{}`` when unstated -- so a
+        run without ownership inputs writes the receipt it always wrote."""
+        return {} if rules is None else {"ownership": rules.to_dict()}
+
+    @classmethod
+    def from_dict(cls, data: object) -> OwnershipRules | None:
+        """Inverse of :meth:`to_dict`; ``None`` for anything else."""
+        if not isinstance(data, dict):
+            return None
+
+        def strs(value: object) -> tuple[str, ...]:
+            return tuple(str(v) for v in value) if isinstance(value, list) else ()
+
+        deps = tuple(
+            DependencyRoots(str(d["name"]), strs(d.get("header_roots")))
+            for d in data.get("dependencies") or ()
+            if isinstance(d, dict) and "name" in d
+        )
+        return cls(
+            target_roots=strs(data.get("target_roots")),
+            dependencies=deps,
+            private_headers=strs(data.get("private_headers")),
+            private_namespaces=strs(data.get("private_namespaces")),
+            dependency_evidence=str(data.get("dependency_evidence") or "full"),
+        )
+
     def is_configured(self) -> bool:
         """True when a key beyond ``public_header_dirs`` was stated -- the
         condition under which the ownership preview is shown."""

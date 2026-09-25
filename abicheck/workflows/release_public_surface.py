@@ -59,6 +59,7 @@ from .crosscheck_ownership import (
     release_level_checks,
     release_owned_checks_scope,
 )
+from .ownership_request import project_ownership_key
 from .release_surface_acquisition import (
     SurfaceAcquisitionLedger,
     acquire_release_surface,
@@ -207,6 +208,7 @@ def build_side_identity(
         compile_options=_compile_options(compile_context),
         depth=depth,
         include_dependencies=include_dependencies,
+        ownership=project_ownership_key(),
     )
 
 

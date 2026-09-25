@@ -47,6 +47,7 @@ from typing import Any, TypeVar
 from .change_registry_types import Verdict
 from .contract_relevance_types import ContractMode, SelectorLayer
 from .model.change_catalog.kinds import ChangeKind
+from .model.ownership_rules import OwnershipRules
 from .policy.versioning_policy import (
     VersioningPolicy,
     built_in_default_versioning_policy,
@@ -641,10 +642,8 @@ class SurfaceConfig:
 
     ``internal_namespaces`` and similar hints inform reachability/
     out-of-contract proofs but cannot themselves demote a proven public fact
-    (ADR-049 D8: surface hints "cannot themselves silently demote a public
-    fact"); ADR-049 D6's illustrative ``hints: {internal_namespaces: []}``
-    carries no digest, unlike ``explicit_scope``, so it stays a plain tuple
-    here too.
+    (ADR-049 D8); like D6's illustrative ``hints: {internal_namespaces: []}``
+    it carries no digest, unlike ``explicit_scope``.
 
     ``explicit_scope`` is content-digested (ADR-049 D6:
     ``explicit_scope: {items: [], sha256: "..."}``) since it directly
@@ -658,11 +657,12 @@ class SurfaceConfig:
     #: Consumed set-wise, so canonicalized (sorted+deduped) the same way as
     #: ``overlays``/``packs`` for D7's equivalent-input equality guarantee.
     internal_namespaces: tuple[str, ...] = ()
-    #: ADR-069's `experimental_namespaces:` key -- a separate axis from
-    #: `internal_namespaces` above, recorded here because it changes which
-    #: findings a run emits, so omitting it let two differing comparisons
-    #: persist equal `resolved_config` receipts. Canonicalized like its sibling.
+    #: ADR-069's `experimental_namespaces:` key, separate from
+    #: `internal_namespaces`: it changes which findings a run emits, so it is
+    #: part of the receipt. Canonicalized like its sibling.
     experimental_namespaces: tuple[str, ...] = ()
+    #: ADR-075 D7: the ownership rules the contract is classified under.
+    ownership: OwnershipRules | None = None
 
     def __post_init__(self) -> None:
         _require_digested_items_or_none(
