@@ -360,6 +360,13 @@ snapshot). Decided by ADR-075 D5/D7.
   unclassified entity gets no edge and answers unknown.
 - **Graph**: the public-surface builder emits `owner`/`contract` nodes and
   the two `derived` edges (`EDGE_EVIDENCE_CLASS`). Nothing new is persisted.
+- **Typed absence (Phase 4)**: `owned_by`/`in_contract` are queryable
+  through `compare/edge_query.py`. Their producer is the ownership stamp
+  (`ownership_stamp[classified_declarations]`): absence is `proven_absent`
+  only for an entity the stamp classified; an unclassified entity, a node two
+  entities disagree on, or a snapshot with no recorded extraction scope (a
+  binary-only or pre-v52 dump) answers `unknown`, and the report's
+  relationship-coverage section lists it.
 - **Contract inputs (I5)**: `CompatibilityEvaluationConfig.surface.ownership`
   records the target roots (`-H` directories and `scope.public_header_dirs`,
   each its own D7 field), the dependency roots, the private headers and
