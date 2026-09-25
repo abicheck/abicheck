@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 
 from ..checker_policy import ChangeKind, Confidence
 from ..checker_types import Change
+from ..compare.edge_query import export_table_covered
 from ..model import AbiSnapshot
 from ..model.export_index import (
     build_raw_export_index,
@@ -99,10 +100,13 @@ def _exported_symbol_names(snapshot: AbiSnapshot) -> set[str] | None:
     Mach-O names are normalized the same way the dumper normalizes
     ``Function.mangled`` (its single leading underscore stripped), preserving
     this module's own ``set[str] | None`` signature and ``None``-for-no-table
-    contract.
+    contract. A table that was never read (a default or parse-failed
+    platform block) is ``None`` too, not an empty set: I4 (``compare.
+    edge_query.export_table_covered``) -- read as empty, it flagged every
+    declaration ``PUBLIC_NOT_EXPORTED`` at HIGH confidence.
     """
     index = build_raw_export_index(snapshot)
-    if index is None:
+    if index is None or not export_table_covered(snapshot, index.platform):
         return None
     return set(default_versioned_names(index))
 

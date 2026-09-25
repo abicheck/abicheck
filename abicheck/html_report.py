@@ -57,6 +57,7 @@ from .policy.evidence_status import EvidenceStatus
 # aliases unchanged.
 from .report.disposition_audit import DispositionAudit, compute_disposition_audit
 from .report.document import ReportDocument
+from .report.edge_coverage_section import compute_edge_coverage_section
 from .report.envelope import ReportEnvelope, resolved_document, resolved_gate
 from .report.render_html import (
     ChangeRow,
@@ -866,6 +867,11 @@ def build_html_document(
             ),
             "confidence": (
                 dataclasses.asdict(confidence) if confidence is not None else None
+            ),
+            "edge_coverage": (
+                None
+                if (edge_coverage := compute_edge_coverage_section(result)) is None
+                else dataclasses.asdict(edge_coverage)
             ),
             "gate_card": (
                 dataclasses.asdict(gate_card) if gate_card is not None else None

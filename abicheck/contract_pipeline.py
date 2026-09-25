@@ -491,11 +491,11 @@ def build_contract_stage(
 
     conflicts = [
         *(
-            detect_exported_but_undeclared(exports_old, side="old")
+            detect_exported_but_undeclared(exports_old, side="old", snapshot=old)
             if old is not None
             else ()
         ),
-        *detect_exported_but_undeclared(exports_new, side="new"),
+        *detect_exported_but_undeclared(exports_new, side="new", snapshot=new),
         # Baseline = the "old" side's own declared-public symbols, computed
         # with no manifest overlay (``surf_old``/``surf_new`` above are the
         # raw header-derived surfaces regardless of any POST manifest --

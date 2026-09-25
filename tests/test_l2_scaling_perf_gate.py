@@ -74,8 +74,15 @@ class TestMarginalExponent:
     def test_recovers_generating_exponent(self, k, floor, unit, sizes):
         pts = _points(sizes, lambda n: floor + unit * (n - 1) ** k)
         exponent, reason = gate_mod.marginal_exponent(pts)
-        if unit * (max(sizes) - 1) ** k < gate_mod.MIN_MARGINAL_SECONDS:
+        # Recomputed from the generated walls exactly as the fit sees them
+        # (float subtraction included), not from the formula: a margin that
+        # rounds just under the noise floor is excluded like a measured one.
+        margins = [(floor + unit * (n - 1) ** k) - floor for n in sizes if n > 1]
+        resolved = [m for m in margins if m >= gate_mod.NOISE_MARGIN_SECONDS]
+        if margins[-1] < gate_mod.MIN_MARGINAL_SECONDS:
             assert exponent is None and "no measurable work" in reason
+        elif len(resolved) < 2:
+            assert exponent is None and "resolvably" in reason
         else:
             assert reason is None
             assert exponent == pytest.approx(k, abs=1e-6)
@@ -110,6 +117,19 @@ class TestMarginalExponent:
         walls = {1: 2.0, 3: 1.9, 5: 3.0, 9: 6.0}
         exponent, reason = gate_mod.marginal_exponent(_points(walls, walls.get))
         assert reason is None and exponent is not None and exponent > 2.0
+
+    def test_positive_noise_margin_does_not_inflate_the_exponent(self):
+        # The truly linear work is 0.1 s per unit, but the n=3 point came in
+        # only 0.01 s above the floor. Fitted through it the exponent is ~3.
+        walls = {1: 1.0, 3: 1.01, 6: 1.5, 10: 1.9}
+        exponent, reason = gate_mod.marginal_exponent(_points(walls, walls.get))
+        assert reason is None
+        assert exponent == pytest.approx(1.0, abs=1e-6)
+
+    def test_all_but_one_point_in_the_noise_is_unfittable(self):
+        walls = {1: 1.0, 3: 1.01, 6: 1.02, 10: 1.9}
+        exponent, reason = gate_mod.marginal_exponent(_points(walls, walls.get))
+        assert exponent is None and "resolvably" in reason
 
 
 class TestGate:

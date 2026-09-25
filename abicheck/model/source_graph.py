@@ -57,6 +57,13 @@ from .graph_facts import (
     ensure_facts_and_resolve,
     merge_entity_facts,
 )
+from .source_graph_coverage import (
+    CALL_GRAPH_PASS,
+    HEADER_INCLUDE_GRAPH_PASS,
+    HEADER_TYPE_GRAPH_PASS,
+    INCLUDE_GRAPH_PASS,
+    TYPE_GRAPH_PASS,
+)
 
 #: Evidence-boundary label stamped on every source-graph finding (ADR-031 D9),
 #: mirroring ``DataLayer.L5_SOURCE_GRAPH``. It keeps a graph-derived risk
@@ -506,18 +513,18 @@ class SourceGraphSummary:
         # is, so neither ``call_edges.collected`` nor ``reference_edges.collected`` may be
         # granted from ``header_call_graph``/``header_type_graph`` alone (Codex review;
         # mirrors ``source_graph_findings._pass_trusted_kinds``'s structural-vs-body split).
-        call_pass_ran = self.extractor_passes.get("call_graph", False)
-        type_pass_ran = self.extractor_passes.get("type_graph", False)
-        header_type_pass_ran = self.extractor_passes.get("header_type_graph", False)
+        call_pass_ran = self.extractor_passes.get(CALL_GRAPH_PASS, False)
+        type_pass_ran = self.extractor_passes.get(TYPE_GRAPH_PASS, False)
+        header_type_pass_ran = self.extractor_passes.get(HEADER_TYPE_GRAPH_PASS, False)
         # ``include_graph``/``header_include_graph`` (build-integrated and header-only-graph
         # builder respectively) are pure file-inclusion facts with no body-dependent gap the
         # way calls/references have — a confirmed pass with zero edges (a leaf header with no
         # #includes of its own) is a genuine zero, not "never collected" (Codex review: this
         # mirrors ``has_calls``/``has_type_edges`` below, which already credit a
         # confirmed-but-empty pass; ``has_includes`` previously looked at edge presence alone).
-        include_pass_ran = self.extractor_passes.get("include_graph", False)
+        include_pass_ran = self.extractor_passes.get(INCLUDE_GRAPH_PASS, False)
         header_include_pass_ran = self.extractor_passes.get(
-            "header_include_graph", False
+            HEADER_INCLUDE_GRAPH_PASS, False
         )
         has_calls = call_pass_ran or any(
             e.kind == "DECL_CALLS_DECL" for e in self.edges

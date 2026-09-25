@@ -32,6 +32,7 @@ from .checker_types import (  # noqa: F401
     LibraryMetadata,
 )
 from .comparability import check_contracts_comparable, comparability_outcome
+from .compare.edge_query import edge_coverage_report
 from .compare.surface_reconcile import releases_reconciliation
 from .confidence import _compute_confidence
 from .contract_pipeline import (
@@ -1487,5 +1488,6 @@ def compare(
     # `cli_compare_helpers._report_compare_result`'s recomputation).
     from .workflows.analysis_assurance_attach import attach_analysis_assurance
 
+    result.edge_coverage = edge_coverage_report(old, new)  # I4, before the rollup
     attach_analysis_assurance(result, old, new)
     return result

@@ -433,7 +433,7 @@ One new snapshot field, `AbiSnapshot.extraction_scope` (schema bump):
   (unrecorded baseline; differing rules under `full`, naming the moved
   declarations).
 - **Digest**: `surface.ownership` (`DiffResult.extraction_scope_identity`),
-  report schema 5.4.
+  report schema 5.5.
 - **Config**: `scope.dependency_evidence` (`full` only). The project config
   reaches `InputSpec.ownership` in `dump` (`frontends/cli/ownership_config.py`)
   and in `compare` (`cli_resolve`), with roots resolved against the project
