@@ -510,6 +510,27 @@ layout-distinct second definition of a debug type another CU gave
 snapshot schema v51, written only when the DWARF walk ran, so a snapshot
 without one encodes exactly as v50.
 
+**Amendment (2026-09-24, accepted): typed absence (evidence-entity-model
+Phase 4, invariant I4).** A query for an edge kind *K* in a scope *S* answers
+`present`, `proven_absent` or `unknown`, never a bare "no edge".
+`proven_absent` requires a producer of *K* whose coverage record includes
+every queried scope unit; a producer that did not run, ran over part of
+*S* (a narrowed L5 pass, dependency headers filtered out of the header AST)
+or failed (an export-table block never parsed, a degraded pass) covers
+nothing, so it yields only `unknown`. The vocabulary (`EdgeAnswer`,
+`ProducerRun`, `CoverageRecord`) is `model/edge_coverage.py`; the L5
+per-pass table (which passes produce which kinds, and the header-only
+passes' body-blindness) is `model/source_graph_coverage.py`, the one owner
+the pairwise source-graph findings also read; the evaluation, one rule for
+every kind in `EDGE_EVIDENCE_CLASS` and the L5 kinds, is
+`compare/edge_query.py`. Readers that drew a negative conclusion from a
+missing edge or a missing export-table entry ask this API instead. The
+answer is persisted only in the compare report: report schema 5.4 adds
+`edge_coverage` (per side and edge kind, the coverage records and, for the
+two joins, answer counts), shown in Markdown/HTML as the "Relationship
+coverage" section. The snapshot schema is unchanged: coverage is derived
+from facts the snapshot already records.
+
 ### D4 — `AnalysisPlan` resolved before any extraction runs
 
 Before a single collector or backend is invoked, an immutable `AnalysisPlan`

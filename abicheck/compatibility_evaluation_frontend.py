@@ -115,6 +115,7 @@ from .compatibility_evaluation_wiring import (
 )
 from .contract_relevance_types import ContractMode, SelectorLayer, coerce_contract_mode
 from .model.change_catalog.registry import VALID_BASE_POLICIES
+from .model.ownership_rules import OwnershipRules
 from .policy.classification import policy_kind_sets
 from .policy.gate_pack_fold import gate_exit_code_scheme
 from .policy.versioning_policy import (
@@ -122,6 +123,11 @@ from .policy.versioning_policy import (
     built_in_default_versioning_policy,
 )
 from .severity import SEVERITY_PRESETS, SeverityConfig, SeverityLevel
+from .workflows.ownership_contract_inputs import (
+    header_dir_spellings,
+    project_ownership_inputs,
+    resolve_ownership_inputs,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .buildsource.build_config import BuildConfig
@@ -487,6 +493,8 @@ class ExplicitCompatibilityInputs:
     #: the plan's Phase 1 notes); the resolver accepts them so the composition
     #: path is real and tested ahead of the flag.
     pack_paths: tuple[str, ...] = ()
+    header_dirs: tuple[str, ...] = ()  # ADR-075 D7 (and `ownership` below)
+    ownership: OwnershipRules | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -538,6 +546,7 @@ class ProjectCompatibilityInputs:
     #: strings at this layer, mirroring ``_policy_file_override_slugs``'s
     #: own shape -- parsing/validation stays the caller's job.
     policy_overrides: Mapping[str, str] = field(default_factory=dict)
+    ownership: OwnershipRules | None = None  # ADR-075 D7, as the config spells it
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -580,6 +589,7 @@ class ProjectCompatibilityInputs:
             severity_quality_issues=cfg.severity_quality_issues,
             severity_addition=cfg.severity_addition,
             policy_overrides=dict(getattr(cfg, "policy_overrides", None) or {}),
+            ownership=project_ownership_inputs(cfg),
         )
 
 
@@ -669,20 +679,12 @@ def _resolve(
     project stated" is the reading that cannot surprise anyone, and a project
     that wants the pack's value simply stops stating its own.
 
-    *default_is_stated* extends that same rule to a field whose value is
-    *derived* from something the user or project stated rather than stated
-    directly, and therefore arrives as this call's ``default`` -- today, the
-    per-category severity levels a ``--severity-preset``/``severity.preset``
-    selection expands into. Without it, ``--severity-preset strict`` plus a
-    gate pack assigning ``gate.severity.addition: info`` resolved to
-    ``INFO``: the preset had put its ``ERROR`` in the default slot, leaving
-    the field looking unstated, so the pack replaced a level the user really
-    had asked for (Codex review, fresh evidence). The derived levels stay in
-    the ``default`` slot rather than becoming candidates because a candidate
-    at the stating layer would *tie* with an explicit per-category flag at
-    that same layer -- and refining a preset with one category flag
-    (``--severity-preset strict`` plus ``severity.addition: info``) is legal, not a
-    conflict.
+    *default_is_stated* extends that rule to a value *derived* from a stated
+    one and so arriving as ``default`` -- the per-category levels a severity
+    preset expands into. Without it a gate pack's ``gate.severity.addition``
+    replaced the level ``--severity-preset strict`` had asked for (Codex
+    review). The derived levels stay in the ``default`` slot because a
+    candidate there would *tie* with a legal per-category refinement.
     """
     all_candidates = list(candidates)
     if not all_candidates and pack is not None and not default_is_stated:
@@ -1199,9 +1201,18 @@ def resolve_compatibility_evaluation_config(
         symbol_option=spell("scope.public_symbols", "force_public_symbols"),
         list_option=spell("scope.public_symbols", "public_symbols_list"),
     )
+    ownership, ownership_prov = resolve_ownership_inputs(
+        explicit,
+        project,
+        layer,
+        resolve_field=resolve_field,
+        field_candidate=FieldCandidate,
+    )
+    prov.update(ownership_prov)
     surface = SurfaceConfig(
         explicit_scope=explicit_scope,
         internal_namespaces=cast("tuple[str, ...]", internal_namespaces),
+        ownership=ownership,
     )
 
     # ── assurance ───────────────────────────────────────────────────────────
@@ -1701,17 +1712,10 @@ def compare_cli_inputs(
     option is the file form.
 
     *public_symbols_list* is the same "pass what you already read" affordance
-    as *policy_file*/*suppression*: the CLI reads this file to build the live
-    force-public set, so re-reading it here could pair the receipt's digest
-    with content that did not score the run -- and a file deleted mid-run
-    would fail an otherwise-finished comparison (Codex review).
-
-    ``--public-symbols-list`` is read into its own
-    :class:`PublicSymbolsList` rather than flattened into ``public_symbols``,
-    so a list-file-only invocation resolves a real ``surface.explicit_scope``
-    *and* a receipt that names the file it came from. The union itself is
-    formed in :func:`_explicit_scope`, matching what the live CLI's
-    :func:`collect_force_public_symbols` produces.
+    (re-reading could pair the receipt's digest with content that did not
+    score the run). It stays its own :class:`PublicSymbolsList`, so the
+    receipt names the file; :func:`_explicit_scope` forms the union the live
+    CLI's :func:`collect_force_public_symbols` produces.
     """
     typed = set(explicit_parameters)
 
@@ -1748,6 +1752,7 @@ def compare_cli_inputs(
         severity_quality_issues=kwargs.get("severity_quality_issues"),
         severity_addition=kwargs.get("severity_addition"),
         pack_paths=tuple(str(p) for p in kwargs.get("pack_paths") or ()),
+        header_dirs=header_dir_spellings(kwargs.get("headers") or ()),
     )
 
 
@@ -1767,24 +1772,14 @@ def compare_request_inputs(
     and for the same reason (see ``_apply_contract_evaluation_shadow``'s
     ``scope_public_headers_is_explicit=True``).
 
-    ``severity_preset`` forwards too -- else this receipt's ``gate.*``
-    block could disagree with ``CompareResult.exit_decision``, which reads
-    it directly. It has no per-category or pack field on ``CompareRequest``,
-    so it resolves to a built-in default, matching a CLI run stating none
-    (:func:`cross_front_end_differences`). There is no ``exit_code_scheme``
-    field on ``CompareRequest`` to forward at all (CLI cleanup phase two PR
-    G2 deleted it) -- the gate algorithm is purely derived from whether a
-    severity setting is in effect, the identical computation on both sides.
-
-    ``policy_file_path`` and ``suppress`` *are* request fields, though, and
-    are loaded from the request when the caller does not pass an
-    already-loaded *policy_file*/*suppression* -- ignoring them otherwise
-    would let a request naming an ``sdk_vendor`` policy file resolve to
-    ``strict_abi`` with no suppression source at all.
-
-    ``policy_base`` goes through :func:`stated_policy_base`, not raw
-    ``request.policy`` -- else an unknown name paired with a valid file
-    (accepted; the file wins) raises post-comparison (scan adapter's gap).
+    ``severity_preset`` forwards too, else this receipt's ``gate.*`` block
+    could disagree with ``CompareResult.exit_decision``; with no
+    per-category or pack field it resolves like a CLI run stating none.
+    ``policy_file_path``/``suppress`` are loaded from the request unless the
+    caller passes them already loaded. ``policy_base`` goes through
+    :func:`stated_policy_base` (an unknown name beside a valid file is
+    accepted; the file wins). ADR-075 D7: the new side's ``-H`` directories
+    and ``InputSpec.ownership`` are the request's stated ownership inputs.
     """
     if policy_file is None and request.policy_file_path is not None:
         policy_file = _load_policy_file(request.policy_file_path)
@@ -1798,6 +1793,10 @@ def compare_request_inputs(
         public_symbols=tuple(sorted(request.force_public_symbols or ())),
         suppression=suppression,
         severity_preset=request.severity_preset,
+        header_dirs=header_dir_spellings(
+            (*request.new.headers, *request.new.public_header_dirs)
+        ),
+        ownership=getattr(request.new.ownership, "rules", None),
     )
 
 

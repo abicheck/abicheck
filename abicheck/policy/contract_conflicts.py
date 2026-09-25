@@ -30,8 +30,15 @@ both sides' claims (never resolved to one side, ADR-067). Case 3
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
+from ..compare.edge_query import UNIT_HEADERS, EdgeEvidence
 from ..export_surface import ExportSurface
+from ..model.edge_coverage import EdgeAnswer
+from ..model.graph_join import EDGE_KIND_EXPORTS, binary_symbol_node_id
+
+if TYPE_CHECKING:
+    from ..model.snapshot import AbiSnapshot
 from ..model.contract_conflicts import (
     CONFLICT_EXPORTED_BUT_UNDECLARED,
     CONFLICT_MANIFEST_NARROWED_SINCE_BASELINE,
@@ -44,6 +51,7 @@ def detect_exported_but_undeclared(
     export_surface: ExportSurface,
     *,
     side: str | None = None,
+    snapshot: AbiSnapshot | None = None,
 ) -> list[ContractSourceConflict]:
     """Symbols the binary exports that no public-header declaration matches.
 
@@ -61,11 +69,35 @@ def detect_exported_but_undeclared(
     (an export table was actually observed) -- with no observed table there
     is no export-side claim to conflict with the header side at all, so no
     conflict is recorded rather than one built on absent evidence.
+
+    With *snapshot* (the side *export_surface* was computed from), the
+    header half of the claim must be proven too (I4): an export is recorded
+    only when the ``exports`` query over the library's own headers answers
+    ``proven_absent`` for it. A snapshot with no header AST answers
+    ``unknown`` -- "no header declares it" would be an absence of evidence,
+    not a conflict.
     """
     if not export_surface.resolvable:
         return []
+    names = sorted(export_surface.unmatched_exports)
+    if snapshot is not None:
+        evidence = EdgeEvidence(snapshot)
+        platforms = sorted(export_surface_platforms(snapshot))
+        names = [
+            n
+            for n in names
+            if any(
+                evidence.query(
+                    EDGE_KIND_EXPORTS,
+                    binary_symbol_node_id(p, n),
+                    scope=frozenset({UNIT_HEADERS}),
+                ).answer
+                is EdgeAnswer.PROVEN_ABSENT
+                for p in platforms
+            )
+        ]
     conflicts: list[ContractSourceConflict] = []
-    for name in sorted(export_surface.unmatched_exports):
+    for name in names:
         conflicts.append(
             ContractSourceConflict(
                 conflict_kind=CONFLICT_EXPORTED_BUT_UNDECLARED,
@@ -87,6 +119,11 @@ def detect_exported_but_undeclared(
             )
         )
     return conflicts
+
+
+def export_surface_platforms(snapshot: AbiSnapshot) -> set[str]:
+    """Every export-table platform *snapshot* carries."""
+    return {p for p in ("elf", "pe", "macho") if getattr(snapshot, p, None) is not None}
 
 
 def detect_manifest_narrowing_since_baseline(

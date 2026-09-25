@@ -36,6 +36,8 @@ from abicheck.model.declarations import Function, Variable
 from abicheck.model.dwarf_facts import DwarfMetadata, StructLayout
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
 from abicheck.model.entities import RecordType, TypeField
+from abicheck.model.extraction_scope import EntityOwnership
+from abicheck.model.fact import Fact
 from abicheck.model.graph_evidence_class import EdgeEvidenceClass
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.model.source_graph import SourceGraphSummary
@@ -354,6 +356,10 @@ def _rich_snapshot(**extra: object) -> AbiSnapshot:
             structs={"S": StructLayout(name="S", byte_size=4)}, has_dwarf=True
         ),
     )
+    # ADR-075: one classified declaration, so owned_by/in_contract are emitted.
+    fns[0].ownership_fact = Fact.present(
+        EntityOwnership("target", "public", "target_root:inc")
+    )
     return _snapshot(functions=fns, variables=[var], types=[rec], **extra)
 
 
@@ -430,4 +436,14 @@ class TestEdgeEvidenceClass:
         assert derived(_rich_snapshot(elf=elf)) == baseline
         # Oracle independent of the builder: one edge per declaration that
         # carries its own mangled name, regardless of the export table.
-        assert {src for src, _dst, _k in baseline} == {"symbol://_Z1fv", "symbol://v"}
+        assert {
+            src for src, _dst, k in baseline if k == EDGE_KIND_DECLARES_LINKER_NAME
+        } == {"symbol://_Z1fv", "symbol://v"}
+        # ADR-075's owner/contract projections are derived too, and equally
+        # blind to the export table: only the one classified declaration.
+        assert {
+            (src, k) for src, _dst, k in baseline if k != EDGE_KIND_DECLARES_LINKER_NAME
+        } == {
+            ("decl://_Z1fv", "owned_by"),
+            ("decl://_Z1fv", "in_contract"),
+        }

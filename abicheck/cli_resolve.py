@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
     from .dry_run_estimate import CompileContext
     from .model import AbiSnapshot
+    from .model.ownership_rules import OwnershipRequest
     from .workflows.extraction import DumpManifest
 
 
@@ -535,6 +536,7 @@ def _resolve_compare_snapshots(
     # Appended, never inserted: this signature is long and has positional
     # callers (`api.positional_slot_rebinding`, tests/regressions/manifest.py).
     exclude_headers: tuple[str, ...] = (),
+    ownership: OwnershipRequest | None = None,  # ADR-075: both sides share it
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info.
 
@@ -645,6 +647,7 @@ def _resolve_compare_snapshots(
             public_header_dirs=(
                 () if old_dump_manifest is not None else _config_header_dirs
             ),
+            ownership=ownership,
         ),
         new=_request_inputs.InputSpec(
             path=new_input,
@@ -660,6 +663,7 @@ def _resolve_compare_snapshots(
             public_header_dirs=(
                 () if new_dump_manifest is not None else _config_header_dirs
             ),
+            ownership=ownership,
         ),
         lang=lang,
         lang_explicit=lang_explicit,

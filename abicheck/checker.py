@@ -32,6 +32,7 @@ from .checker_types import (  # noqa: F401
     LibraryMetadata,
 )
 from .comparability import check_contracts_comparable, comparability_outcome
+from .compare.edge_query import edge_coverage_report
 from .compare.surface_reconcile import releases_reconciliation
 from .confidence import _compute_confidence
 from .contract_pipeline import (
@@ -124,6 +125,7 @@ from .dwarf_advanced import (
 )
 from .model import AbiSnapshot, advanced_facts_collected as _advanced_collected
 from .model.change_catalog.kinds import ChangeKind
+from .model.extraction_scope import snapshot_scope_identity
 from .model.header_exclusion_record import comparison_exclusion_identity
 from .model.surface_facts import is_abi_visible
 from .policy.classification import (
@@ -1402,6 +1404,7 @@ def compare(
         suppression_source_sha256=suppression_source_sha256,
         explicit_scope_source_sha256=receipt.explicit_scope_source_sha256,
         excluded_header_patterns=comparison_exclusion_identity(old, new),
+        extraction_scope_identity=snapshot_scope_identity(old, new),
         pattern_verdicts_enabled=bool(pattern_verdicts),
         collapse_versioned_symbols_enabled=bool(collapse_versioned_symbols),
         surface_metrics_enabled=bool(surface_metrics),
@@ -1485,5 +1488,6 @@ def compare(
     # `cli_compare_helpers._report_compare_result`'s recomputation).
     from .workflows.analysis_assurance_attach import attach_analysis_assurance
 
+    result.edge_coverage = edge_coverage_report(old, new)  # I4, before the rollup
     attach_analysis_assurance(result, old, new)
     return result
