@@ -1,0 +1,106 @@
+name: Python compatibility
+
+# Tiered Python testing. The *full* suite runs on one modern interpreter --
+# `ci.yml`'s `unit-tests` job, canonical Python 3.13 (Linux, plus the macOS
+# and Windows legs), which also owns the 95% coverage floor. Re-running all
+# ~50,000 tests on every other supported interpreter mostly re-proved the
+# same thing at a full suite's cost per leg, while 3.10/3.11 -- the floor
+# `requires-python = ">=3.10"` promises -- were not tested at all.
+#
+# This workflow covers the rest of the supported range cheaply instead:
+# every non-canonical interpreter builds the sdist+wheel, installs the
+# *wheel* (not an editable checkout) into a clean venv, imports every
+# `abicheck` module (catches syntax/stdlib-API drift, which is what actually
+# breaks across versions), exercises the CLI, and runs a small, broad smoke
+# subset of the unit suite. The newest in-development CPython is tested as
+# a prerelease and is non-blocking until its final release.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Weekly, so a new CPython prerelease is picked up even on a quiet week.
+    - cron: '17 5 * * 1'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: smoke (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # A prerelease interpreter (or a dependency without wheels for it yet)
+    # must not block merges; drop the flag once that version is final.
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.14']
+        experimental: [false]
+        include:
+          - python-version: '3.15'
+            experimental: true
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: ${{ matrix.experimental }}
+          cache: 'pip'
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          twine check dist/*
+      - name: Install the built wheel into a clean venv
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip
+          wheel="$(ls dist/*.whl)"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install "${wheel}[dev]"
+      - name: Import every abicheck module from the installed wheel
+        # Run outside the checkout so the source tree cannot shadow the wheel.
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" - <<'EOF'
+          import importlib, pkgutil, sys
+          import abicheck
+          assert "site-packages" in abicheck.__file__, abicheck.__file__
+          failed = []
+          for mod in pkgutil.walk_packages(abicheck.__path__, "abicheck."):
+              try:
+                  importlib.import_module(mod.name)
+              except Exception as exc:  # noqa: BLE001 - report every failure
+                  failed.append(f"{mod.name}: {exc!r}")
+          print(f"Python {sys.version.split()[0]}: imported abicheck from {abicheck.__file__}")
+          if failed:
+              print("\n".join(failed))
+              sys.exit(1)
+          EOF
+      - name: CLI smoke
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/venv/bin/abicheck" --version
+          "$RUNNER_TEMP/venv/bin/abicheck" compare --help > /dev/null
+          "$RUNNER_TEMP/venv/bin/abicheck" dump --help > /dev/null
+          "$RUNNER_TEMP/venv/bin/python" -m abicheck --version
+      - name: Unit-test smoke subset
+        # A small, broad slice: root CLI surface, the core checker, snapshot
+        # serialization, packaged policies, and real compiled example pairs
+        # (gcc only, no castxml). The full suite is ci.yml's `unit-tests`.
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" -m pytest -q --tb=short -r fE -n auto \
+            -m "not integration and not libabigail and not abicc and not slow" \
+            tests/test_cli_root_surface.py \
+            tests/test_checker.py \
+            tests/test_serialization.py \
+            tests/test_packaged_policy_examples.py \
+            tests/test_castxml_free_examples.py

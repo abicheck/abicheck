@@ -299,15 +299,13 @@ class TestMatrixExpansionFollowsGitHub:
         )
         assert combos == [{"os": "b", "cov": True}]
 
-    def test_the_real_unit_tests_matrix_still_expands_to_its_five_legs(self) -> None:
+    def test_the_real_unit_tests_matrix_still_expands_to_its_three_legs(self) -> None:
         """The regression this must not cause: the live matrix is exactly the
         shape the old append-everything code got right by luck."""
         doc = yaml.safe_load(read_repo_text(WORKFLOW_DIR / "ci.yml"))
         combos = _matrix_combinations(doc["jobs"]["unit-tests"])
         assert [(c["os"], c["python-version"]) for c in combos] == [
-            ("ubuntu-latest", "3.12"),
             ("ubuntu-latest", "3.13"),
-            ("ubuntu-latest", "3.14"),
             ("windows-latest", "3.13"),
             ("macos-latest", "3.13"),
         ]

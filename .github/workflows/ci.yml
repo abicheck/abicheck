@@ -302,7 +302,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python-version: ['3.12', '3.13', '3.14']
+        # Full suite on the canonical interpreter only. Every other supported
+        # Python (3.10-3.12, 3.14, and the in-development 3.15) is covered by
+        # python-compat.yml's wheel-install + import + smoke-subset lane.
+        python-version: ['3.13']
         allow-prereleases: [false]
         include:
           - os: windows-latest
@@ -362,9 +365,8 @@ jobs:
           pip install -e ".[dev]"
       - name: Run tests with coverage (Linux 3.13 — canonical lane, enforces 95% floor)
         # Coverage + the 95% floor + the codecov upload run on ONE canonical
-        # Linux/Python lane (3.13). The other Linux Pythons (3.12/3.14) run the
-        # same suite *without* coverage instrumentation — they'd only re-check
-        # the identical floor, and coverage adds ~60% wall time. macOS/Windows
+        # Linux/Python lane (3.13). Other Pythons run only python-compat.yml's
+        # smoke lane, so there is no second Linux full-suite leg. macOS/Windows
         # skip the Linux-only ELF/DWARF tests, so they don't enforce the floor.
         # --durations=25 surfaces the slowest tests in the CI log every run so
         # timing regressions stay visible (test-time hygiene).
@@ -375,10 +377,6 @@ jobs:
           ABICHECK_DURATIONS_JSON: test-durations.json
         run: |
           pytest tests/ -q --tb=short -r fE -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25 --durations-min=1 --junitxml=test-results-${{ runner.os }}-py${{ matrix.python-version }}.xml --cov=abicheck --cov-report=term:skip-covered --cov-report=xml --cov-fail-under=95
-      - name: Run tests (Linux non-canonical Python — no coverage)
-        if: runner.os == 'Linux' && matrix.python-version != '3.13'
-        run: |
-          pytest tests/ -q --tb=short -r fE -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25 --durations-min=1 --junitxml=test-results-${{ runner.os }}-py${{ matrix.python-version }}.xml
       - name: Run tests (macOS — no coverage, platform tests skip)
         # Ran under --cov with an xml report until this change, and nothing
         # read it: the Codecov upload below is gated to Linux/3.13, no

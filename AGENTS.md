@@ -45,8 +45,11 @@ drop-in replacement for abi-compliance-checker (ABICC).
 
 **Two different Python version numbers matter here, don't conflate them:**
 `pyproject.toml`'s `requires-python = ">=3.10"` is the *minimum supported*
-version (what a user's environment needs to run abicheck) — CI tests 3.12,
-3.13, and 3.14 across platforms to keep that floor honest. **3.13** is the
+version (what a user's environment needs to run abicheck). CI testing is
+tiered: the full suite runs only on 3.13 (Linux/macOS/Windows), while
+`.github/workflows/python-compat.yml` covers 3.10, 3.11, 3.12, 3.14 and the
+prerelease 3.15 (non-blocking) with a wheel-install + import-every-module +
+CLI + smoke-subset lane. **3.13** is the
 *canonical development/CI* version — `repo_facts.json`'s `canonical_python`,
 the single Linux lane the 95% coverage floor runs on (see "Line-coverage
 floor" below), and what the `ai-readiness` CI job (including its
@@ -1419,8 +1422,8 @@ not, since it's the everyday inner loop and deliberately skips coverage
 instrumentation. This floor applies **only on the canonical Linux/Python-3.13
 unit-test lane** in `.github/workflows/ci.yml` — that's where the full unit
 suite runs under coverage.
-The other Linux Pythons (3.12/3.14) run the same suite *without* coverage (they would
-only re-check the identical floor, and coverage instrumentation adds ~60% wall time).
+Other Python versions do not run the full suite at all; `python-compat.yml`'s
+smoke lane covers them (a second full-suite leg would only re-check the same tests).
 macOS/Windows skip the Linux-only ELF/DWARF parsing tests, which structurally lowers
 their coverage (~93% on macOS), so those lanes run the same tests without the
 fail-under gate — and, since a CI audit found the reports had no reader, without
