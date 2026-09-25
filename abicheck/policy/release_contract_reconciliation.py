@@ -72,6 +72,7 @@ from dataclasses import dataclass, field
 from ..buildsource.cross_source_checks_base import _change
 from ..checker_types import Change
 from ..compare.bundle_export_index import BundleExportIndex
+from ..compare.ownership_relations import provider_relations
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.release_surface import PublicObligation, ReleasePublicSurface
 from .evidence_status import Confidence, CrossSourceEvolution
@@ -186,11 +187,15 @@ def reconcile_side(
             coverage_complete=index.complete,
             coverage_reason=surface.unresolved_reason or index.incompleteness_reason(),
         )
-    complete = index.complete
+    # ADR-075 D7: attribution reads the release's `provided_by` relation
+    # (export -> providing member, over this same index), the one provider
+    # model the graph exposes -- never a second symbol -> member lookup.
+    provided_by = provider_relations(index)
+    complete = provided_by.complete
     satisfied: dict[str, tuple[str, ...]] = {}
     absent: list[PublicObligation] = []
     for obligation in surface.obligations:
-        providers = index.providers(obligation.symbol)
+        providers = provided_by.providers(obligation.symbol)
         if providers:
             satisfied[obligation.symbol] = providers
         else:

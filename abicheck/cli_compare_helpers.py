@@ -111,6 +111,7 @@ from .report.report_modes import normalize_report_mode
 from .serialization import run_scoped_digest_cache
 from .service_render import ONELINE_FORMAT, resolve_demangle_for_format
 from .workflows.header_exclusion_audit import unmatched_exclusion_warning
+from .workflows.ownership_request import project_ownership_scope
 from .workflows.public_header_boundary import (
     project_config_public_header_dirs,
 )
@@ -1600,84 +1601,88 @@ def run_compare(
         from .frontends.cli.commands.compare import _dispatch_release_compare
         from .pack_application import resolve_release_project_policy_overrides
 
-        _dispatch_release_compare(
-            ctx,
-            old_dir=old_input,
-            new_dir=new_input,
-            project_policy_overrides=resolve_release_project_policy_overrides(
-                project_cfg, cfg_path
-            ),
-            headers=headers,
-            includes=directory_includes,
-            old_headers_only=old_headers_only,
-            new_headers_only=new_headers_only,
-            old_includes_only=old_includes_only,
-            new_includes_only=new_includes_only,
-            old_version=old_version,
-            new_version=new_version,
-            lang=lang,
-            fmt=fmt,
-            output=output,
-            output_dir=output_dir,
-            suppress=suppress,
-            strict_suppressions=strict_suppressions,
-            require_justification=require_justification,
-            policy=policy,
-            policy_file_path=policy_file_path,
-            dso_only=resolved_cfg.release_dso_only,  # Phase 7d: config-only, no CLI kwarg
-            fail_on_removed=resolved_cfg.fail_on_removed_library,
-            on_incomplete_scope=resolved_cfg.on_incomplete_scope,
-            # ADR-071: the release fan-out honors assurance.require_complete
-            # now (it folds every compared member's own assurance with max),
-            # so the resolved value is forwarded instead of being rejected.
-            require_complete_analysis=require_complete_analysis,
-            support_promise=resolved_cfg.release_support_promise,  # Phase 7: config-only, no CLI kwarg
-            select=select,
-            select_required=select_required,
-            debug_info1=debug_info1,
-            debug_info2=debug_info2,
-            devel_pkg1=devel_pkg1,
-            devel_pkg2=devel_pkg2,
-            include_private_dso=resolved_cfg.release_include_private_dso,
-            manifest_path=manifest_path,
-            bundle_system_providers=resolved_cfg.bundle_system_providers,
-            bundle_cohorts=resolved_cfg.bundle_cohorts,
-            bundle_facts_out=bundle_facts_out,
-            scope_public_headers=scope_public_headers,
-            include_dependencies=include_dependencies,
-            severity_preset=resolved_cfg.merged_severity_preset,
-            severity_abi_breaking=resolved_cfg.merged_severity_abi_breaking,
-            severity_potential_breaking=resolved_cfg.merged_severity_potential_breaking,
-            severity_quality_issues=resolved_cfg.merged_severity_quality_issues,
-            severity_addition=resolved_cfg.merged_severity_addition,
-            probe_matrix_old=probe_matrix_old,
-            probe_matrix_new=probe_matrix_new,
-            verbose=verbose,
-            contract_evaluation=contract_evaluation,
-            contract_mode=contract_mode,
-            pack_application=release_pack_application,
-            secondary_writes=secondary_writes,
-            compile_context=directory_compile_context,
-            config_includes=directory_config_includes,
-            depth=release_depth,
-            public_header_dirs=project_config_public_header_dirs(project_cfg),
-            collapse_versioned_symbols=collapse_versioned_symbols,
-            env_matrix=resolved_cfg.deployment,  # ADR-020b: config-only, no CLI kwarg
-            # Codex review (PR #1154 follow-up): --view's derived values were
-            # silently dropped from this dispatch -- forwarded raw
-            # (unnormalized against `fmt`/`report_mode`'s "impact" sugar);
-            # _dispatch_release_compare resolves and validates them.
-            report_mode=report_mode,
-            show_only=show_only,
-            # The canonical exclusion rules -- the same tuple the scalar
-            # path below hands `_resolve_compare_snapshots`. Forwarded
-            # rather than dropped: a directory operand accepted
-            # `--exclude-header` and silently ignored it, so a release tree
-            # that cannot be parsed whole (Intel MKL's FFTW2/FFTW3 typedef
-            # clash) failed every member under the exact arguments that made
-            # the single-file comparison succeed.
-            exclude_headers=tuple(exclude_headers or ()),
-        )
+        # ADR-075: every member dump and the release surface are classified
+        # under the one project config (a run-scoped rule, like crosschecks).
+        with project_ownership_scope(project_ownership_request(project_cfg, cfg_path)):
+            _dispatch_release_compare(
+                ctx,
+                old_dir=old_input,
+                new_dir=new_input,
+                project_policy_overrides=resolve_release_project_policy_overrides(
+                    project_cfg, cfg_path
+                ),
+                headers=headers,
+                includes=directory_includes,
+                old_headers_only=old_headers_only,
+                new_headers_only=new_headers_only,
+                old_includes_only=old_includes_only,
+                new_includes_only=new_includes_only,
+                old_version=old_version,
+                new_version=new_version,
+                lang=lang,
+                lang_explicit=lang_explicit,
+                fmt=fmt,
+                output=output,
+                output_dir=output_dir,
+                suppress=suppress,
+                strict_suppressions=strict_suppressions,
+                require_justification=require_justification,
+                policy=policy,
+                policy_file_path=policy_file_path,
+                dso_only=resolved_cfg.release_dso_only,  # Phase 7d: config-only, no CLI kwarg
+                fail_on_removed=resolved_cfg.fail_on_removed_library,
+                on_incomplete_scope=resolved_cfg.on_incomplete_scope,
+                # ADR-071: the release fan-out honors assurance.require_complete
+                # now (it folds every compared member's own assurance with max),
+                # so the resolved value is forwarded instead of being rejected.
+                require_complete_analysis=require_complete_analysis,
+                support_promise=resolved_cfg.release_support_promise,  # Phase 7: config-only, no CLI kwarg
+                select=select,
+                select_required=select_required,
+                debug_info1=debug_info1,
+                debug_info2=debug_info2,
+                devel_pkg1=devel_pkg1,
+                devel_pkg2=devel_pkg2,
+                include_private_dso=resolved_cfg.release_include_private_dso,
+                manifest_path=manifest_path,
+                bundle_system_providers=resolved_cfg.bundle_system_providers,
+                bundle_cohorts=resolved_cfg.bundle_cohorts,
+                bundle_facts_out=bundle_facts_out,
+                scope_public_headers=scope_public_headers,
+                include_dependencies=include_dependencies,
+                severity_preset=resolved_cfg.merged_severity_preset,
+                severity_abi_breaking=resolved_cfg.merged_severity_abi_breaking,
+                severity_potential_breaking=resolved_cfg.merged_severity_potential_breaking,
+                severity_quality_issues=resolved_cfg.merged_severity_quality_issues,
+                severity_addition=resolved_cfg.merged_severity_addition,
+                probe_matrix_old=probe_matrix_old,
+                probe_matrix_new=probe_matrix_new,
+                verbose=verbose,
+                contract_evaluation=contract_evaluation,
+                contract_mode=contract_mode,
+                pack_application=release_pack_application,
+                secondary_writes=secondary_writes,
+                compile_context=directory_compile_context,
+                config_includes=directory_config_includes,
+                depth=release_depth,
+                public_header_dirs=project_config_public_header_dirs(project_cfg),
+                collapse_versioned_symbols=collapse_versioned_symbols,
+                env_matrix=resolved_cfg.deployment,  # ADR-020b: config-only, no CLI kwarg
+                # Codex review (PR #1154 follow-up): --view's derived values were
+                # silently dropped from this dispatch -- forwarded raw
+                # (unnormalized against `fmt`/`report_mode`'s "impact" sugar);
+                # _dispatch_release_compare resolves and validates them.
+                report_mode=report_mode,
+                show_only=show_only,
+                # The canonical exclusion rules -- the same tuple the scalar
+                # path below hands `_resolve_compare_snapshots`. Forwarded
+                # rather than dropped: a directory operand accepted
+                # `--exclude-header` and silently ignored it, so a release tree
+                # that cannot be parsed whole (Intel MKL's FFTW2/FFTW3 typedef
+                # clash) failed every member under the exact arguments that made
+                # the single-file comparison succeed.
+                exclude_headers=tuple(exclude_headers or ()),
+            )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.
     _reject_bundle_facts_out_for_single_pair(bundle_facts_out)

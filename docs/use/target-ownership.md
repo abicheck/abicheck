@@ -74,6 +74,16 @@ fingerprint, and one owner/contract/rule per declaration. See
 
 ## 4. What changes in the report
 
+- A declaration whose contract is `private` or `external` **owes no
+  export**, so it produces no `public_not_exported` finding. A component's
+  headers that ride along in one shared header tree (the Intel MKL / oneDAL
+  shape) stop being demanded from a binary that was never meant to export
+  them. The same rule applies to a single library, a one-member package and
+  a multi-library release, where the release-level check reconciles the
+  contract against the union of every member's exports.
+- The resolved configuration records where each ownership input came from
+  (`-H`, `.abicheck.yml`, or a typed `InputSpec.ownership`), in the
+  contract-context receipt's `surface.ownership`.
 - Nothing is dropped. The dependency's declarations are still parsed and
   still compared. Only their classification is recorded. Keeping fewer of
   them (`dependency_evidence: referenced`) is a later phase and is rejected

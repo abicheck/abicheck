@@ -368,4 +368,5 @@ def build_bundle_signature_evidence(
         export_names=(
             None if raw_exports is None else default_versioned_names(raw_exports)
         ),
+        export_platform=None if raw_exports is None else raw_exports.platform,
     )
