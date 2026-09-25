@@ -18,7 +18,4 @@
   unchanged. Some super-linear cost remains, because each member still
   receives the union header set.
 - The quoted-include expansion used by the dialect scan moved to
-  `abicheck/extract/quoted_include_expansion.py`, and
-  `signature_normalization`'s nesting-aware scanners moved to
-  `abicheck/model/nesting_scan.py`. The second move brings that module back
-  under the ADR-061 800-line ceiling it crossed in #1362.
+  `abicheck/extract/quoted_include_expansion.py`.
