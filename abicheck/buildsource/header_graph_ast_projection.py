@@ -91,6 +91,7 @@ from ..model.source_graph_coverage import (
     HEADER_CALL_GRAPH_PASS as _HEADER_CALL_GRAPH_PASS,
     HEADER_TYPE_GRAPH_PASS as _HEADER_TYPE_GRAPH_PASS,
 )
+from .ast_special_members import collect_special_member_names
 from .call_graph import augment_graph_with_calls, parse_clang_ast_calls
 from .inline_graph_fold import _mark_role_coverage
 from .type_graph import (
@@ -143,6 +144,10 @@ class HeaderGraphAstProjection:
     #: computation this replaced -- never a claim that the AST declares
     #: nothing.
     entity_files: dict[str, str] = field(default_factory=dict)
+    #: Every constructor/destructor linker name the AST declares
+    #: (``ast_special_members``) -- binary-independent identity evidence for
+    #: castxml's unmangled ctor/dtor placeholders.
+    special_member_names: frozenset[str] = frozenset()
 
 
 def project_header_graph_ast(ast_root: dict[str, Any]) -> HeaderGraphAstProjection:
@@ -152,11 +157,14 @@ def project_header_graph_ast(ast_root: dict[str, Any]) -> HeaderGraphAstProjecti
     call_edges = parse_clang_ast_calls(ast_root)
     needs_entity_files = any(e.kind == "DECL_REFERENCES_DECL" for e in type_edges)
     entity_files = index_declared_entity_files(ast_root) if needs_entity_files else {}
+    special: set[str] = set()
+    collect_special_member_names(ast_root, special)
     return HeaderGraphAstProjection(
         type_files=type_files,
         type_edges=type_edges,
         call_edges=call_edges,
         entity_files=entity_files,
+        special_member_names=frozenset(special),
     )
 
 

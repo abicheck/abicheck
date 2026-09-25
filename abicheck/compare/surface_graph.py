@@ -67,7 +67,6 @@ from ..model.graph_entity_identity import (
     GraphEntityIdentity,
     SnapshotIdentities,
     register_identity_alias,
-    snapshot_identities,
 )
 from ..model.graph_evidence_class import (
     PUBLIC_SURFACE_FACTS_PRODUCER,
@@ -79,6 +78,7 @@ from ..model.graph_join import (
     EDGE_KIND_EXPORTS,
     CrossLayerJoin,
 )
+from ..model.snapshot_identity_table import identities_for_snapshot
 from .debug_type_join import join_debug_types
 from .export_join import join_exports
 from .ownership_relations import (
@@ -332,7 +332,7 @@ def referenced_identifiers_by_node(snap: AbiSnapshot) -> ReferencedIdentifiers:
     rather than either silently trusting a blurred union or (worse) an
     arbitrary single contributor's value.
     """
-    ids = snapshot_identities(snap)
+    ids = identities_for_snapshot(snap)
     node_ids: dict[int, str] = {}
     acc: dict[str, set[str]] = {}
     contributor_counts: dict[str, int] = {}
