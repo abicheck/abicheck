@@ -655,11 +655,12 @@ def edge_coverage_summary(
                 right: _answer_counts(evidence.query(kind, s) for s in join.right),
             }
             entry["answers"] = answers
-            entry["absence"] = (
-                EdgeAnswer.UNKNOWN.value
-                if any(c[EdgeAnswer.UNKNOWN.value] for c in answers.values())
-                else EdgeAnswer.PROVEN_ABSENT.value
-            )
+            # With no subject at all the records-based answer above stands:
+            # an empty join is not proof that its producers covered anything.
+            if any(c[EdgeAnswer.UNKNOWN.value] for c in answers.values()):
+                entry["absence"] = EdgeAnswer.UNKNOWN.value
+            elif any(sum(c.values()) for c in answers.values()):
+                entry["absence"] = EdgeAnswer.PROVEN_ABSENT.value
         out[kind] = entry
     return out
 

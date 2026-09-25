@@ -152,3 +152,18 @@ def test_section_round_trips_through_its_mapping():
     mapping = json.loads(json.dumps(dataclasses.asdict(section)))
     assert edge_coverage_section_from_mapping(mapping) == section
     assert edge_coverage_section_from_mapping(None) is None
+
+
+def test_empty_counted_join_keeps_the_records_answer():
+    """No subject on either side of a join proves nothing: with an unread
+    export table the kind's absence stays ``unknown`` (CodeRabbit review)."""
+    from abicheck.compare.edge_query import edge_coverage_summary
+
+    snap = AbiSnapshot(library="l", version="1", elf=ElfMetadata(), from_headers=True)
+    summary = edge_coverage_summary(snap)
+    assert summary["exports"]["answers"]["declarations"] == {
+        "present": 0,
+        "proven_absent": 0,
+        "unknown": 0,
+    }
+    assert summary["exports"]["absence"] == "unknown"

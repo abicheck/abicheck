@@ -48,13 +48,14 @@ Exports with no declaration:
 1. ``unknown`` -- the query answers ``unknown`` under the export's default
    scope (a toolchain export whose system headers the dump filtered out, or a
    snapshot without a header AST).
-2. ``compiler-generated`` -- vtables/typeinfo/VTT/thunks/guard variables and
+2. ``structor variant`` -- a ``C1``/``C2``/``D0``/``D1``/``D2`` variant of a
+   structor some declaration names through another variant (before the
+   artifact check, which also matches structors).
+3. ``compiler-generated`` -- vtables/typeinfo/VTT/thunks/guard variables and
    other ABI artifacts (``model.cxx_artifact_symbols.
    is_cxx_class_artifact_symbol``, ``elf_symbol_filter.
    is_abi_relevant_elf_symbol``).
-3. ``versioned alias`` -- exists only as a non-default version.
-4. ``structor variant`` -- a ``C1``/``C2``/``D0``/``D1``/``D2`` variant of a
-   structor some declaration names through another variant.
+4. ``versioned alias`` -- exists only as a non-default version.
 5. ``internal namespace`` -- as above, on the demangled name.
 6. ``template instantiation`` -- a template instantiation the header AST
    records only as the template.
@@ -161,13 +162,13 @@ def _export_cause(entry, answer, demangled, declared_structors) -> str:
     s = entry.spelling
     if answer is EdgeAnswer.UNKNOWN:
         return "unknown"
+    key = _structor_key(s)
+    if key is not None and key in declared_structors:
+        return "structor variant"
     if is_cxx_class_artifact_symbol(s) or not is_abi_relevant_elf_symbol(s):
         return "compiler-generated"
     if not entry.default_version:
         return "versioned alias"
-    key = _structor_key(s)
-    if key is not None and key in declared_structors:
-        return "structor variant"
     if _scope_segments(demangled.split("(", 1)[0]) & _INTERNAL_SEGMENTS:
         return "internal namespace"
     if "<" in demangled.split("(", 1)[0]:
