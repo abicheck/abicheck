@@ -49,6 +49,11 @@ from .declarator_qualifiers import (
     _is_declarator_group,
     _split_at_trailing_param_list,
 )
+from .signature_token_scan import (
+    _decay_top_level_array,
+    _find_matching_paren,
+    _split_top_level_commas,
+)
 
 __all__ = ["canonicalize_function_signature_param_type"]
 
@@ -188,103 +193,6 @@ def _strip_cv_tokens_outside_nesting(s: str) -> str:
             out.append(ch)
             i += 1
     return re.sub(r"\s+", " ", "".join(out)).strip()
-
-
-def _decay_top_level_array(canonical_type: str) -> str:
-    """Best-effort single-dimension array-to-pointer decay for a function
-    *parameter* type: ``T[]``/``T[N]`` -> ``T *`` (the bound is dropped --
-    it plays no part in the adjusted parameter type at all, so ``T[]``,
-    ``T[3]``, and ``T[4]`` must all canonicalize identically -- and any
-    element-level cv-qualifier survives verbatim as the decayed pointer's
-    pointee cv, e.g. ``const int [3]`` -> ``const int *``). Codex review,
-    PR #941: an earlier revision of this module treated a top-level ``[``
-    as "pointer-shaped enough not to strip its cv" but never performed the
-    decay itself, so ``int []``/``int [3]``/``int [4]``/``int *`` -- all
-    the identical adjusted parameter type -- still canonicalized to four
-    different strings.
-
-    Deliberately narrow: a genuinely *multi-dimensional* array parameter
-    (``T[][N]``, which adjusts to ``T(*)[N]``, a pointer to an array, not
-    a plain pointer) is left entirely unchanged rather than attempted --
-    correctly re-spelling that adjusted type needs declarator-rewriting
-    (inserting a grouping ``(*)``) this function does not implement, and
-    it is a genuinely rare shape for a real ABI-relevant function
-    parameter. Likewise left unchanged whenever a top-level ``(`` appears
-    before the bracket at all -- a *parenthesized* declarator
-    (``int (*)[3]``, "pointer to array of 3 ints") already has its own
-    outermost ``*``, and the trailing ``[3]`` there names the *pointee's*
-    array bound, not the parameter's own top-level shape; naively decaying
-    it would wrongly append a second, spurious ``*``. Both are accepted,
-    documented limitations, not a silent gap -- the same "don't solve the
-    fully general C declarator grammar, scope to the shapes review
-    evidence actually names" discipline ``_strip_cv_in_segment``'s own
-    docstring already applies to the strict/non-strict split it makes.
-    """
-    # Fast path: with no ``[`` anywhere there is no top-level bracket either,
-    # so the scan below would return the input unchanged. The vast majority
-    # of parameter spellings take this path, and the per-character loop was
-    # a measurable self-time hot spot on large header surfaces.
-    if "[" not in canonical_type:
-        return canonical_type
-    depth = 0
-    bracket_positions: list[int] = []
-    has_top_level_paren = False
-    for i, ch in enumerate(canonical_type):
-        if ch == "(" and depth == 0:
-            has_top_level_paren = True
-        if ch in "<(":
-            depth += 1
-        elif ch in ">)":
-            depth = max(0, depth - 1)
-        elif ch == "[" and depth == 0:
-            bracket_positions.append(i)
-    if len(bracket_positions) != 1 or has_top_level_paren:
-        return canonical_type
-    prefix = canonical_type[: bracket_positions[0]].rstrip()
-    return f"{prefix} *"
-
-
-def _split_top_level_commas(s: str) -> list[str]:
-    """Split *s* on commas that sit at nesting depth 0 (outside any
-    ``<...>``/``(...)``/``[...]``) -- the boundaries between a parameter
-    list's own individual parameters, as opposed to a comma nested inside
-    one parameter's own type (a template-argument list, a nested callback's
-    own parameter list).
-    """
-    depth = 0
-    parts: list[str] = []
-    current: list[str] = []
-    for ch in s:
-        if ch in "<([":
-            depth += 1
-            current.append(ch)
-        elif ch in ">)]":
-            depth = max(0, depth - 1)
-            current.append(ch)
-        elif ch == "," and depth == 0:
-            parts.append("".join(current))
-            current = []
-        else:
-            current.append(ch)
-    parts.append("".join(current))
-    return parts
-
-
-def _find_matching_paren(s: str, open_idx: int) -> int:
-    """Index of the ``)`` matching the ``(`` at *open_idx* (which must
-    itself be ``"("``), tracking only paren nesting -- ``s[open_idx]`` is
-    always ``(`` at every call site. Defensively returns ``len(s)`` for a
-    malformed, unmatched string rather than raising.
-    """
-    depth = 0
-    for i in range(open_idx, len(s)):
-        if s[i] == "(":
-            depth += 1
-        elif s[i] == ")":
-            depth -= 1
-            if depth == 0:
-                return i
-    return len(s)
 
 
 def _normalize_param_list_contents(inner: str, depth: int) -> str:
