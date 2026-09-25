@@ -393,8 +393,49 @@ snapshot). Decided by ADR-075 D5/D7.
   directory `compare`): the MKL/oneDAL shape with one member, with two, and
   a one-member package matching the scalar path.
 
+### Measured on oneDAL
+
+Measured 2026-09-25 with `scripts/bench_graph_materialization.py`
+(`graph` variant, one repetition, 4 vCPU / 15 GiB host, cold caches),
+oneDAL 2025.10.0 -> 2025.11.0. Base is the ADR commit (#1364), candidate is
+this stack's head. One sample per row, so a difference under ~10% is noise.
+
+| Step | Base time | Candidate time | Base peak RSS | Candidate peak RSS |
+|---|---|---|---|---|
+| single `dump` OLD (`libonedal_core.so.3`) | 70.0 s | 78.6 s | 1041.8 MiB | 1042.4 MiB |
+| single `dump` NEW | 73.7 s | 77.9 s | 1042.1 MiB | 1046.5 MiB |
+| single `compare` | 77.1 s | 76.4 s | 691.9 MiB | 710.7 MiB |
+| release: 4 member dumps | 53.3-58.9 s | 53.3-55.0 s | 609-645 MiB | 611-646 MiB |
+| release `compare` (stored) | 42.7 s | 41.6 s | 589.8 MiB | 594.0 MiB |
+| release `compare` (live directory) | 201.1 s | 187.7 s | 1517.5 MiB | **1740.6 MiB** |
+
+Snapshot size: +0.2% single (127.94 -> 128.21 MB), +0.09% per release
+member (55.44 -> 55.49 MB) -- the `extraction_scope` block and its interned
+decision table.
+
+Per-owner counts, NEW single snapshot (the bench passes a header *file* and
+no `.abicheck.yml`, so there is no target root and nearly everything is
+`unresolved`, which is the ADR's documented answer, not a guess): functions
+13,818 unresolved / 4 toolchain; types 1,171 unresolved / 9 toolchain;
+enums 438 and variables 360 unresolved.
+
+Findings: the release reports (live and stored) are identical member by
+member, including all 7 `missing_exports` and 1,980 shared findings. The
+single-library compare drops exactly 4 `public_not_exported` findings --
+`__atomic_add_fetch`, `__atomic_load_n`, `__atomic_store_n`,
+`__atomic_sub_fetch`: compiler builtins now classified `toolchain/external`,
+which owe no export (ADR-075 D6). That is the documented fix; nothing else
+moved.
+
+The live-release peak RSS rose 15% (+223 MiB) in this single sample and is
+**not attributed**: the stored-release path, which runs the same
+reconciliation, did not move. It is recorded as a gap below, to be
+re-measured with `ABICHECK_MEMORY_TRACE` and three repetitions before it is
+called either a regression or noise.
+
 ### Remaining documented gaps
 
+- The live-release RSS increase above is unexplained (one sample).
 - `scope.private_namespaces` narrows the contract but is not merged into
   `policy.internal_namespaces` (ADR-075 D7.1): that key scopes findings,
   which is the retention phase's decision.

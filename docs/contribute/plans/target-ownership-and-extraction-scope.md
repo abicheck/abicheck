@@ -454,6 +454,12 @@ One new snapshot field, `AbiSnapshot.extraction_scope` (schema bump):
   precedence properties through a real castxml `dump`, typed-API parity,
   the CLI refusal and the unrecorded-baseline note).
 
+- **Measured on oneDAL** (2026-09-25; the full table is in the
+  evidence-entity-model plan's Phase 3 section): the snapshot grows 0.2%
+  single and 0.09% per release member; dump time and RSS are within one
+  sample's noise. The only change in findings is 4 compiler-builtin
+  `public_not_exported` false positives, now `toolchain`.
+
 ## Tests
 
 - Phase 1: primitive-level property tests for the classifier, per
