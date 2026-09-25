@@ -171,3 +171,14 @@ def test_tu_merge_keeps_attribution():
     assert declaring_header(merged, "A") == "/usr/include/dep.h"
     assert declaring_header(merged, "B") == "/proj/api.h"
     assert declaring_header(merged, "C") == ""
+
+
+def test_dropped_entries_without_an_ir_or_matching_occurrence_leave_the_ir_alone():
+    snap = _snapshot({"DEP": "/usr/include/dep.h"}, {})
+    out = scope_flat_maps(snap, _is_dep, "", None, {})
+    assert out.constants == {} and out.semantic_ir is None
+
+    unrelated = SemanticIR(occurrences={})
+    out = scope_flat_maps(snap, _is_dep, "", unrelated, {"k": "v"})
+    assert out.constants == {}
+    assert out.semantic_ir is unrelated and out.semantic_ir_conflicts == {"k": "v"}

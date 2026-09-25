@@ -168,3 +168,22 @@ def test_module_does_not_depend_on_line_layout_beyond_rfc():
     """A raw line feed inside a string is invalid JSON; the stdlib agrees."""
     with pytest.raises(json.JSONDecodeError):
         json.loads(b'"a\nb"')
+
+
+def test_failed_cross_directory_publish_removes_its_temp_and_raises(
+    tmp_path, monkeypatch
+):
+    import abicheck.storage.json_compact as jc
+
+    src = tmp_path / "ast.json"
+    src.write_text('{"k": 1}')
+    other = tmp_path / "other"
+    other.mkdir()
+
+    def _boom(_src, _dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(jc.shutil, "copyfileobj", _boom)
+    with pytest.raises(OSError, match="disk full"):
+        CompactedAst(src, None).publish(other / "e.json")
+    assert list(other.iterdir()) == []

@@ -662,3 +662,39 @@ def test_ast_intake_hook_is_installed_and_records(
     record = json.loads(path.read_text().splitlines()[-1])
     assert record["event"] == "ast.intake:start"
     assert record["attrs"] == {"backend": "clang"}
+
+
+def test_peak_rss_is_none_when_status_is_unreadable_or_lacks_vmhwm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import builtins
+    import io
+
+    real_open = builtins.open
+
+    def _no_vmhwm(path, *a, **kw):  # type: ignore[no-untyped-def]
+        if str(path) == "/proc/self/status":
+            return io.StringIO("Name:\tx\nVmRSS:\t1 kB\n")
+        return real_open(path, *a, **kw)
+
+    monkeypatch.setattr(builtins, "open", _no_vmhwm)
+    assert memory_trace._self_rss_peak_bytes() is None
+
+    def _gone(path, *a, **kw):  # type: ignore[no-untyped-def]
+        if str(path) == "/proc/self/status":
+            raise OSError("gone")
+        return real_open(path, *a, **kw)
+
+    monkeypatch.setattr(builtins, "open", _gone)
+    assert memory_trace._self_rss_peak_bytes() is None
+
+
+def test_parent_scan_degrades_to_empty_without_proc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _no_proc(_path: str) -> list[str]:
+        raise OSError("no /proc")
+
+    monkeypatch.setattr(memory_trace.os, "listdir", _no_proc)
+    assert memory_trace._parent_map() == {}
+    assert memory_trace._read_ppid(str(2**30)) is None
