@@ -93,7 +93,10 @@ def test_compacted_ast_publishes_by_rename(tmp_path):
         assert doc.path != src and doc.path.parent == cache_dir
         doc.publish(cache_dir / "entry.json")
     assert (cache_dir / "entry.json").read_bytes() == b'{"k": [1,2]}'
-    assert sorted(p.name for p in cache_dir.iterdir()) == ["entry.json"]
+    assert sorted(p.name for p in cache_dir.iterdir()) == [
+        "entry.json",
+        "entry.json.sha256",
+    ]
     assert src.exists()
 
 
@@ -116,7 +119,10 @@ def test_compaction_failure_degrades_to_the_original(tmp_path):
         assert doc.path == src
         doc.publish(cache_dir / "entry.json")
     assert (cache_dir / "entry.json").read_bytes() == src.read_bytes()
-    assert sorted(p.name for p in cache_dir.iterdir()) == ["entry.json"]
+    assert sorted(p.name for p in cache_dir.iterdir()) == [
+        "entry.json",
+        "entry.json.sha256",
+    ]
 
 
 def test_publish_across_directories_copies(tmp_path):

@@ -57,11 +57,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import BinaryIO
 
+from .cache_integrity import entry_intact, record_digest
+
 __all__ = [
     "CompactedAst",
     "compact_json_stream",
     "compacted_ast",
     "migrate_legacy_entry",
+    "open_cached_entry",
 ]
 
 _NON_ASCII = re.compile(r"[^\x00-\x7f]")
@@ -150,12 +153,14 @@ class CompactedAst:
         if self._compact is not None and self._compact.parent == cached.parent:
             os.replace(self._compact, cached)
             self._compact = None
+            record_digest(cached)
             return
         fd, tmp = tempfile.mkstemp(dir=str(cached.parent), prefix=f".{cached.name}.")
         try:
             with os.fdopen(fd, "wb") as out, self.path.open("rb") as inp:
                 shutil.copyfileobj(inp, out)
             os.replace(tmp, cached)
+            record_digest(cached)
         except OSError:
             Path(tmp).unlink(missing_ok=True)
             raise
@@ -226,4 +231,20 @@ def migrate_legacy_entry(path: Path) -> bool:
         if tmp is not None:
             tmp.unlink(missing_ok=True)
         return False
+    # The old sidecar (if any) described the pretty bytes.
+    record_digest(path)
+    return True
+
+
+def open_cached_entry(path: Path) -> bool:
+    """Ready the AST cache entry at *path* for reading.
+
+    ``False`` (the entry evicted) when it fails its content digest, else
+    ``True`` with a pre-compaction pretty entry migrated in place. The order
+    is the point: migration re-records the digest, so migrating first would
+    launder an edited entry into a "valid" one.
+    """
+    if not entry_intact(path):
+        return False
+    migrate_legacy_entry(path)
     return True
