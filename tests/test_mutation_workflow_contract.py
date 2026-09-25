@@ -30,10 +30,10 @@ from __future__ import annotations
 import ast
 import functools
 import importlib.util
+import tomllib
 from pathlib import Path, PurePosixPath
 
 import pytest
-import tomllib
 
 yaml = pytest.importorskip("yaml")
 

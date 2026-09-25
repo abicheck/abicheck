@@ -267,6 +267,6 @@ symbols files — is its own page:
 For the internal pipeline and module map (dumper → checker → resolver → reporters),
 see the [Codebase Overview](../contribute/codebase-overview.md) and the
 [Architecture](../learn/architecture.md) concept page. For the runtime
-dependencies (Python 3.10+, castxml, pyelftools, …) and per-platform setup, see
+dependencies (Python 3.11+, castxml, pyelftools, …) and per-platform setup, see
 [Install abicheck](../start/install.md#requirements).
 

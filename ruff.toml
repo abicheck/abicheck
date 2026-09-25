@@ -11,7 +11,13 @@ force-exclude = true
 
 [lint]
 select = ["E", "F", "W", "I", "UP"]
-ignore = ["E501"]  # line length
+ignore = [
+    "E501",   # line length
+    # `class X(str, Enum)` -> `StrEnum` is not behavior-preserving: StrEnum's
+    # __str__/format() return the value, while (str, Enum) renders
+    # "X.MEMBER". Reports and serialized output depend on the existing spelling.
+    "UP042",
+]
 
 [lint.isort]
 # Keep redundant-alias re-exports (`from .leaf import (a as a, b as b)`) in a

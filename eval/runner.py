@@ -348,7 +348,7 @@ def run(manifest: dict, only: set[str] | None, tiers: set[str]) -> dict:
 
     payload = {
         "result_schema": RESULT_SCHEMA,
-        "generated_utc": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+        "generated_utc": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
         "abicheck_version": _abicheck_version(),
         "host": {"platform": platform.platform(), "python": platform.python_version()},
         "tier": "+".join(sorted(tiers)),
