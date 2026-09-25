@@ -19,4 +19,4 @@
   are compared, with a coverage warning naming the declarations that moved
   owner or contract, and a pre-v52 baseline is compared with a note. The rules'
   fingerprint joins the configuration digest as `surface.ownership` (report
-  schema 5.4).
+  schema 5.5).

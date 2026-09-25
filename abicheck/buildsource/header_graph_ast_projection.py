@@ -87,6 +87,10 @@ from ..model.graph_facts import (
     _decl_node_id,
     _type_node_id,
 )
+from ..model.source_graph_coverage import (
+    HEADER_CALL_GRAPH_PASS as _HEADER_CALL_GRAPH_PASS,
+    HEADER_TYPE_GRAPH_PASS as _HEADER_TYPE_GRAPH_PASS,
+)
 from .call_graph import augment_graph_with_calls, parse_clang_ast_calls
 from .inline_graph_fold import _mark_role_coverage
 from .type_graph import (
@@ -109,9 +113,11 @@ if TYPE_CHECKING:
 #: _common_dependency_edge_kinds``) never conflates a header-only pass with
 #: a full build-integrated one. Owned here rather than in ``header_graph``
 #: because the code that stamps them lives here and that module imports
-#: this one, never the reverse; ``header_graph`` re-exports both names.
-HEADER_CALL_GRAPH_PASS = "header_call_graph"
-HEADER_TYPE_GRAPH_PASS = "header_type_graph"
+#: this one, never the reverse; ``header_graph`` re-exports both names. The
+#: strings themselves are owned by ``model.source_graph_coverage``, which
+#: states what each pass vouches for (evidence-entity-model I4).
+HEADER_CALL_GRAPH_PASS = _HEADER_CALL_GRAPH_PASS
+HEADER_TYPE_GRAPH_PASS = _HEADER_TYPE_GRAPH_PASS
 
 #: Provenance tag for nodes/edges built from the clang AST.
 _PROVENANCE = "header_ast_l2"

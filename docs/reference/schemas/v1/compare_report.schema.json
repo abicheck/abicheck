@@ -1184,6 +1184,239 @@
         }
       ]
     },
+    "edge_coverage": {
+      "type": "object",
+      "description": "Evidence-entity-model invariant I4 (report schema 5.4): per side, per edge kind, the producer coverage records a relationship's absence rests on, and for the exports/debug_type_of joins how many subjects answer present / proven_absent / unknown under the default scope. proven_absent requires the producer to have covered the scope; anything else is unknown.",
+      "required": [
+        "old",
+        "new"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "old": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "evidence_class",
+              "records",
+              "answers",
+              "absence"
+            ],
+            "additionalProperties": true,
+            "properties": {
+              "absence": {
+                "type": "string",
+                "enum": [
+                  "proven_absent",
+                  "unknown"
+                ]
+              },
+              "evidence_class": {
+                "type": "string",
+                "enum": [
+                  "observed",
+                  "resolved_join",
+                  "derived"
+                ]
+              },
+              "records": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "edge_kind",
+                    "producer",
+                    "run",
+                    "units",
+                    "covered"
+                  ],
+                  "additionalProperties": true,
+                  "properties": {
+                    "edge_kind": {
+                      "type": "string"
+                    },
+                    "producer": {
+                      "type": "string"
+                    },
+                    "run": {
+                      "type": "string",
+                      "enum": [
+                        "ran",
+                        "partial",
+                        "not_run",
+                        "failed"
+                      ]
+                    },
+                    "units": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "covered": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "answers": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": {
+                  "type": "object",
+                  "required": [
+                    "present",
+                    "proven_absent",
+                    "unknown"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "present": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "proven_absent": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "unknown": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "new": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "evidence_class",
+              "records",
+              "answers",
+              "absence"
+            ],
+            "additionalProperties": true,
+            "properties": {
+              "absence": {
+                "type": "string",
+                "enum": [
+                  "proven_absent",
+                  "unknown"
+                ]
+              },
+              "evidence_class": {
+                "type": "string",
+                "enum": [
+                  "observed",
+                  "resolved_join",
+                  "derived"
+                ]
+              },
+              "records": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "edge_kind",
+                    "producer",
+                    "run",
+                    "units",
+                    "covered"
+                  ],
+                  "additionalProperties": true,
+                  "properties": {
+                    "edge_kind": {
+                      "type": "string"
+                    },
+                    "producer": {
+                      "type": "string"
+                    },
+                    "run": {
+                      "type": "string",
+                      "enum": [
+                        "ran",
+                        "partial",
+                        "not_run",
+                        "failed"
+                      ]
+                    },
+                    "units": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "covered": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "answers": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": {
+                  "type": "object",
+                  "required": [
+                    "present",
+                    "proven_absent",
+                    "unknown"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "present": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "proven_absent": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "unknown": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "layer_coverage": {
       "type": "array",
       "description": "Optional source/build evidence coverage (ADR-028 D7). One row per layer (L0 binary, L1 debug, L2 header AST, L3 build context, L4 source ABI, L5 source graph), present only when an BuildSourcePack was supplied to compare. Lets consumers distinguish artifact-proven from build-context-only findings.",
