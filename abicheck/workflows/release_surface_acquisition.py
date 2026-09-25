@@ -86,6 +86,7 @@ def surface_from_snapshot(
         _origin_resolvable,
         _var_has_export_obligation,
     )
+    from ..compare.ownership_relations import contract_relations
     from ..model.vocabulary import ScopeOrigin
 
     if not _origin_resolvable(snapshot):
@@ -100,10 +101,12 @@ def surface_from_snapshot(
 
     obligations: list[PublicObligation] = []
     declared: set[str] = set()
-    for fn in snapshot.functions:
+    # ADR-075 D7: the same contract relation the per-member check reads.
+    owned = contract_relations(snapshot)
+    for i, fn in enumerate(snapshot.functions):
         if fn.origin == ScopeOrigin.PUBLIC_HEADER:
             declared.update(_candidate_symbols(fn))
-        if _has_export_obligation(fn):
+        if _has_export_obligation(fn) and not owned.function_owes_no_export(i):
             obligations.append(
                 PublicObligation(
                     symbol=fn.mangled or fn.name,
@@ -112,10 +115,10 @@ def surface_from_snapshot(
                     source_location=fn.source_location,
                 )
             )
-    for var in snapshot.variables:
+    for i, var in enumerate(snapshot.variables):
         if var.origin == ScopeOrigin.PUBLIC_HEADER:
             declared.update(_candidate_symbols(var))
-        if _var_has_export_obligation(var):
+        if _var_has_export_obligation(var) and not owned.variable_owes_no_export(i):
             obligations.append(
                 PublicObligation(
                     symbol=var.mangled or var.name,
@@ -282,6 +285,7 @@ def acquire_release_surface(
                 reason=f"public-header acquisition failed: {exc}",
             )
         from ..provenance import apply_provenance
+        from .ownership_request import classify_extracted
 
         # `build_header_only_snapshot` parses; it does not classify. Origin
         # classification is a separate, caller-owned pass everywhere else in
@@ -301,6 +305,12 @@ def acquire_release_surface(
             list(public_headers),
             list(public_header_dirs),
             include_search_dirs=list(includes),
+        )
+        # ADR-075: the same one classification a member dump records, under
+        # the run's project rules (`project_ownership_scope`), so the
+        # obligations below read the contract relation a member would.
+        classify_extracted(
+            snapshot, None, [*public_headers, *public_header_dirs], public_header_dirs
         )
         return surface_from_snapshot(
             snapshot, acquisition_key=identity.key(), side=side

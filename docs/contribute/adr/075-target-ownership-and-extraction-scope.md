@@ -200,8 +200,12 @@ declaration is dropped, kept or rewritten because of them in this ADR;
    each with D7 (`ADR-049`) provenance (`explicit_cli` for a `-H` directory,
    `project_config` for a `.abicheck.yml` key, `api_request` for a typed
    `InputSpec`), so a receipt says where every contract input came from
-   instead of leaving it implicit in paths. `scope.private_namespaces` merges
-   into the effective `internal_namespaces`, as the plan specifies.
+   instead of leaving it implicit in paths. `scope.private_namespaces` is
+   recorded here and narrows the *contract* (D2); it is **not** merged into
+   `policy.internal_namespaces`, whose effect is finding scoping, not
+   classification. Merging would change which findings a run emits for a
+   key that ADR-075 defines as classification only, so it is left to the
+   phase that changes retention, with its own measurement.
 2. **One obligation predicate.** A public declaration owes an export only
    when its contract is `public` — or unknown, where today's `ScopeOrigin`
    reading still decides. A declaration classified `private` or `external`
@@ -212,6 +216,15 @@ declaration is dropped, kept or rewritten because of them in this ADR;
 3. **One provider model.** Export → member attribution in a release comes
    from the `provided_by` relation built over `BundleExportIndex`; no second
    `symbol → member` derivation exists.
+
+   The release fan-out classifies every member dump and its acquired
+   release surface under the one project config. That config is a property
+   of the run, so it is scoped to the fan-out
+   (`workflows.ownership_request.project_ownership_scope`, the run-scoped
+   `ContextVar` mechanism `workflows.crosscheck_ownership` already uses)
+   rather than threaded through each layer, and it is folded into
+   `SurfaceAcquisitionIdentity` (version 2) so two differently-classified
+   requests never share one acquired surface.
 
 ## Consequences
 
