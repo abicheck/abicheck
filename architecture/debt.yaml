@@ -828,7 +828,7 @@
     },
     {
       "path": "abicheck/dumper_ast_config_cpp20.py",
-      "baseline_lines": 1443,
+      "baseline_lines": 1299,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
