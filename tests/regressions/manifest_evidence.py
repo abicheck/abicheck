@@ -755,7 +755,10 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "silent True the join contradicts."
         ),
         fixed_by=(1368,),
-        seed_tests=("tests/test_binary_exported_fact_export_join.py",),
+        seed_tests=(
+            "tests/test_binary_exported_fact_export_join.py",
+            "tests/test_binary_exported_fact_real_elf.py",
+        ),
         axes={
             "producer": ("castxml", "clang", "dwarf"),
             "table": (
