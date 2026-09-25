@@ -294,7 +294,7 @@ def run(
         tree_rows = [measure_tree(t, jobs_list, reps, executor) for t in trees]
     return {
         "result_schema": SCALING_SCHEMA,
-        "generated_utc": _dt.datetime.now(_dt.timezone.utc).isoformat(
+        "generated_utc": _dt.datetime.now(_dt.UTC).isoformat(
             timespec="seconds"
         ),
         "abicheck_version": runner._abicheck_version(),

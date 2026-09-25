@@ -44,10 +44,9 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import tomllib
 import urllib.request
 from pathlib import Path
-
-import tomllib
 
 _OUT = Path(__file__).resolve().parent.parent / "abicheck" / "stable_abi_data.py"
 _SYMBOL_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")

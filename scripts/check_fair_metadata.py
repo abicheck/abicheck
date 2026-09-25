@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import json
 import sys
+import tomllib
 from pathlib import Path
 from urllib.parse import urlparse
 
-import tomllib
 import yaml
 from packaging.requirements import InvalidRequirement, Requirement
 

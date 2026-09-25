@@ -237,7 +237,7 @@ def _module_has_deferred_annotations(tree: ast.Module) -> bool:
     at module level -- under it every annotation (parameter, return, or
     variable) is stored as source text and never evaluated at runtime,
     the repository-mandated convention this module's own scan target
-    (`abicheck/`) follows throughout (AGENTS.md: "Python: 3.10+ syntax,
+    (`abicheck/`) follows throughout (AGENTS.md: "Python: 3.11+ syntax,
     type annotations, `from __future__ import annotations`")."""
     return any(
         isinstance(node, ast.ImportFrom)

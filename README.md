@@ -5,6 +5,7 @@
 **See how a C/C++ library's API/ABI changed, know whether the change breaks the programs already built against it, and gate it in CI.**
 
 [![CI](https://github.com/abicheck/abicheck/actions/workflows/ci.yml/badge.svg)](https://github.com/abicheck/abicheck/actions/workflows/ci.yml)
+[![Python compatibility](https://github.com/abicheck/abicheck/actions/workflows/python-compat.yml/badge.svg)](https://github.com/abicheck/abicheck/actions/workflows/python-compat.yml)
 [![codecov](https://codecov.io/gh/abicheck/abicheck/branch/main/graph/badge.svg)](https://codecov.io/gh/abicheck/abicheck)
 [![PyPI version](https://img.shields.io/pypi/v/abicheck.svg)](https://pypi.org/project/abicheck/)
 [![conda-forge](https://img.shields.io/conda/vn/conda-forge/abicheck.svg)](https://anaconda.org/conda-forge/abicheck)

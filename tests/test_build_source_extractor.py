@@ -1017,7 +1017,7 @@ def _run_collect(
     pack = BuildSourcePack.empty(
         out,
         abicheck_version=_abicheck_version,
-        created_at=_dt.datetime.now(_dt.timezone.utc).isoformat(),
+        created_at=_dt.datetime.now(_dt.UTC).isoformat(),
     )
     pack.manifest.extractors = extractors
     has_build = bool(

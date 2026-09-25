@@ -144,7 +144,7 @@ elif [[ -f "$BASELINE_PATH" ]]; then
       # naive Python-side zstd fallback on Python 3.10/3.11 without a
       # system zstd binary could extract a `../`-escaping member outside
       # $BASELINE_DIR before the symlink/manifest checks below even run).
-      # -I (isolated mode, supported since Python 3.10, this project's
+      # -I (isolated mode, supported since Python 3.10, below this project's
       # floor): do not prepend the script's own directory / the current
       # working directory to sys.path, and ignore PYTHONPATH/other PYTHON*
       # env vars entirely. Without it, a malicious caller repository could

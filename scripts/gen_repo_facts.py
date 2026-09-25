@@ -56,7 +56,7 @@ import json
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -117,8 +117,8 @@ _PROJECT_VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
 def _project_version() -> str:
     """`pyproject.toml`'s `project.version`, via a targeted regex rather than
     `tomllib` — `tomllib` is stdlib only from Python 3.11 (CLAUDE.md
-    "M1-6"/Codex review: this repo advertises `requires-python = ">=3.10"`,
-    and adding a `tomli` backport dependency for one string field isn't
+    "M1-6"/Codex review: this repo advertised `requires-python = ">=3.10"`
+    when this was written (the floor is 3.11 now), and adding a `tomli` backport dependency for one string field isn't
     worth it — see CLAUDE.md "What NOT to do" on dependencies)."""
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     table_match = _PROJECT_TABLE_RE.search(text)
@@ -258,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{FACTS_PATH.name} is up to date.")
         return 0
 
-    fresh["generated_utc"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    fresh["generated_utc"] = datetime.now(UTC).isoformat(timespec="seconds")
     FACTS_PATH.write_text(
         json.dumps(fresh, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )

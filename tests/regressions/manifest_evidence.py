@@ -767,6 +767,36 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         },
     ),
     BugClass(
+        id="evidence.export_fact_join_disagreement",
+        invariant=(
+            "The export surface fact (binary_exported_fact) and the observed "
+            "`exports` join answer 'does the artifact export this "
+            "declaration?' through one primitive "
+            "(model.export_index.match_export): PRESENT(True) holds exactly "
+            "when the join joins the declaration's linker spelling to a "
+            "dynamic export, PRESENT(False) exactly when no table carries "
+            "it, and every weaker hit (.symtab-only, bare-name alias, "
+            "demangled variant) is PARTIAL(True) naming its tier -- never a "
+            "silent True the join contradicts."
+        ),
+        fixed_by=(1368,),
+        seed_tests=(
+            "tests/test_binary_exported_fact_export_join.py",
+            "tests/test_binary_exported_fact_real_elf.py",
+        ),
+        axes={
+            "producer": ("castxml", "clang", "dwarf"),
+            "table": (
+                "dynamic default",
+                "dynamic non-default",
+                "symtab-only",
+                "symtab foo@@V literal",
+                "bare name",
+                "demangled variant",
+            ),
+        },
+    ),
+    BugClass(
         id="identity.pe_x86_c_decoration_alias",
         invariant=(
             "A PE export decorated with a C calling convention (`_foo@N`, "

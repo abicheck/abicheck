@@ -276,7 +276,7 @@ def _safe_resolve(path: Path) -> Path | None:
     except RuntimeError:
         # Path.resolve() raises RuntimeError (not OSError) for a symlink
         # loop on Python < 3.13 -- OSError only became the documented
-        # behavior in 3.13, and this project supports 3.10+ (Codex review).
+        # behavior in 3.13, and this project supports 3.11+ (Codex review).
         # An uncaught RuntimeError here would abort the whole compile
         # database load instead of degrading this one @file to its literal
         # token, same as any other unreadable response file.

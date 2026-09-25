@@ -724,7 +724,7 @@ def ingest_inputs_pack(
         root=Path(""),
         manifest=BuildSourceManifest(
             abicheck_version="",
-            created_at=_dt.datetime.now(_dt.timezone.utc).isoformat(),
+            created_at=_dt.datetime.now(_dt.UTC).isoformat(),
             extractors=[extractor],
             coverage=coverage,
         ),

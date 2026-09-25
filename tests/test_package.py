@@ -1630,7 +1630,7 @@ class TestParseWheelNumpyRequirement:
         # Codex review: a cp39-abi3 wheel genuinely installs on Python 3.9
         # AND every later 3.x minor, so pinning python_version="3.9" would
         # make a "later minor" marker wrongly evaluate inactive. This
-        # project requires Python 3.10+ to run at all (CLAUDE.md), so
+        # project requires Python 3.11+ to run at all (CLAUDE.md), so
         # python_version >= "3.10" is guaranteed true on whatever host runs
         # this test -- the old buggy derivation (pinning "3.9") would have
         # made this assert ">=1.23" instead.
