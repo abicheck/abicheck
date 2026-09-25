@@ -1000,7 +1000,18 @@ _ARTIFACT_NAMES = frozenset(
 #:        summary *does* now count only the observed subset and states the
 #:        inventory in its own ``; hygiene: ...`` clause -- text output,
 #:        not a machine contract.
-REPORT_SCHEMA_VERSION = "5.3"
+#: 5.4 -- additive ``edge_coverage`` (evidence-entity-model Phase 4,
+#:        invariant I4, "absence is typed"): per side (``old``/``new``, the
+#:        former ``null`` without a baseline), per graph edge kind, its
+#:        evidence class, the producer coverage records a relationship's
+#:        absence rests on (``run``: ``ran``/``partial``/``not_run``/
+#:        ``failed``, the ``units`` it is responsible for and what it
+#:        ``covered``), and for the ``exports``/``debug_type_of`` joins the
+#:        number of subjects answering ``present``/``proven_absent``/
+#:        ``unknown``. A stripped binary's debug join, an unread export
+#:        table, filtered dependency headers or a narrowed L5 pass show up
+#:        here as ``unknown`` rather than as a silent absence.
+REPORT_SCHEMA_VERSION = "5.4"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

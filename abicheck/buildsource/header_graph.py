@@ -65,7 +65,7 @@ the module's own pass names (:data:`HEADER_CALL_GRAPH_PASS` /
 mistaken for (and never grants the same build-integrated "confirmed full
 pass" trust to a comparison against) a real L4/L5 graph. A header-only
 confirmation only ever grants trust for the structural kinds it has genuine
-project-wide visibility of (``source_graph_findings._HEADER_FULL_VISIBILITY_KINDS``)
+project-wide visibility of (``model.source_graph_coverage.HEADER_FULL_VISIBILITY_KINDS``)
 — never the two body-dependent kinds, regardless of the other side's shape.
 
 **Header include graph** (:class:`ClangHeaderIncludeExtractor`): an optional,
@@ -109,6 +109,9 @@ from ..model.graph_facts import (
     GraphNode,
 )
 from ..model.source_graph import SourceGraphSummary, _header_node_id
+from ..model.source_graph_coverage import (
+    HEADER_INCLUDE_GRAPH_PASS as _HEADER_INCLUDE_GRAPH_PASS,
+)
 from ..provenance import (
     build_public_set,
     classify_origin,
@@ -141,7 +144,7 @@ if TYPE_CHECKING:
 #: ``HEADER_TYPE_GRAPH_PASS`` moved to ``header_graph_ast_projection`` with
 #: the code that stamps them -- import them from there, not from here
 #: (ADR-061: no delegation-only re-export).
-HEADER_INCLUDE_GRAPH_PASS = "header_include_graph"
+HEADER_INCLUDE_GRAPH_PASS = _HEADER_INCLUDE_GRAPH_PASS
 
 
 def _identity_attrs(ident: GraphEntityIdentity) -> dict[str, Any]:

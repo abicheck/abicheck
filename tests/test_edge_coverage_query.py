@@ -423,3 +423,35 @@ def test_result_serializes_its_records():
     assert d["answer"] == UNKNOWN
     assert d["records"][0]["run"] == "failed"
     assert d["records"][0]["covered"] == []
+
+
+#: Hand-stated: which exports name a toolchain/runtime entity (whose
+#: declaration a default dump filters out with the system headers).
+TOOLCHAIN_CASES = {
+    "_ZNSt6thread4joinEv": True,
+    "_ZSt4cout": True,
+    "_ZNKSt6vectorIiSaIiEE4sizeEv": True,
+    "_ZNSaIcED1Ev": True,  # std::allocator<char> via the Sa substitution
+    "_ZTVSt9exception": True,
+    "_ZTISt9exception": True,
+    "_ZThn8_NSt9exception4whatEv": True,
+    "_ZN9__gnu_cxx13new_allocatorE": True,
+    "_ZNSt7__cxx1112basic_stringIcEE": True,
+    "__ZNSt6thread4joinEv": True,  # Mach-O decoration
+    "_ZN5daal4algo3runEv": False,
+    "_ZNK5daal4Base3getEv": False,
+    "_ZTVN5daal4BaseE": False,
+    "_ZThn8_N5daal4Base3fooEv": False,
+    "_ZN2St3fooEv": False,  # a user namespace spelled "St"
+    "_ZN4Sbar3fooEv": False,
+    "_Z3foov": False,
+    "mylib_init": False,
+    "std": False,
+}
+
+
+@pytest.mark.parametrize("spelling", sorted(TOOLCHAIN_CASES))
+def test_toolchain_symbol_classification(spelling):
+    from abicheck.compare.edge_query import is_toolchain_symbol
+
+    assert is_toolchain_symbol(spelling) is TOOLCHAIN_CASES[spelling]

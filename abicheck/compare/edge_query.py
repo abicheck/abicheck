@@ -46,6 +46,7 @@ subject. ``debug_type_of``: ``debug``; ``headers`` for an occurrence subject.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -105,10 +106,13 @@ __all__ = [
     "EdgeEvidence",
     "decide",
     "debug_coverage_record",
+    "edge_coverage_report",
+    "edge_coverage_summary",
     "export_coverage_records",
     "export_table_covered",
     "header_coverage_record",
     "is_toolchain_symbol",
+    "source_graph_covers",
 ]
 
 PRODUCER_EXPORT_TABLE = "export_table"
@@ -127,10 +131,14 @@ _PLATFORMS = ("elf", "pe", "macho")
 #: Every edge kind :meth:`EdgeEvidence.query` answers.
 QUERYABLE_EDGE_KINDS: frozenset[str] = frozenset(EDGE_EVIDENCE_CLASS) | L5_EDGE_KINDS
 
-#: Demangled prefixes of toolchain/runtime entities, whose declarations a
+#: Itanium manglings of toolchain/runtime entities, whose declarations a
 #: default (``dependency_scope="filtered"``) dump drops with the system
-#: headers that declare them.
-_TOOLCHAIN_PREFIXES = ("std::", "__gnu_cxx::", "__cxxabiv1::", "__gnu_debug::")
+#: headers that declare them (``_Z`` with its leading underscores stripped:
+#: a Mach-O trie spelling may carry one more or one fewer).
+_ITANIUM_TOOLCHAIN = re.compile(
+    r"Z(?:T[VISTFH]|Th[n0-9_]*|Tv[n0-9_]*|Tc[hv0-9n_]*|GV)?N?[KVr]*"
+    r"(?:S[tabsiod]|9__gnu_cxx|10__cxxabiv1|11__gnu_debug)"
+)
 
 
 def decide(
@@ -276,13 +284,17 @@ def header_coverage_record(snap: AbiSnapshot, edge_kind: str) -> CoverageRecord:
 
 
 def is_toolchain_symbol(spelling: str) -> bool:
-    """Whether the export *spelling* names a toolchain/runtime entity."""
-    from ..demangle import demangle
+    """Whether the Itanium export *spelling* names a toolchain/runtime entity
+    (``std::``, ``__gnu_cxx::``, ``__cxxabiv1::``, ``__gnu_debug::``) --
+    including its vtable/typeinfo/thunk special names.
 
-    text = demangle(spelling) or spelling
-    return text.startswith(_TOOLCHAIN_PREFIXES) or spelling.startswith(
-        ("_ZNSt", "_ZSt", "_ZNKSt", "_ZN9__gnu_cxx", "_ZN10__cxxabiv1")
-    )
+    Read off the mangling alone: the ``std`` substitutions (``St``, and the
+    ``Sa``/``Sb``/``Ss``/``Si``/``So``/``Sd`` abbreviations) or a runtime
+    namespace's length-prefixed name as the first component, after the
+    special-name (``_ZT...``) and nested-name (``N``, cv ``K``/``V``/``r``)
+    prefixes. No demangler runs: this is asked once per observed export."""
+    m = _ITANIUM_TOOLCHAIN.match(spelling.lstrip("_")) if spelling else None
+    return m is not None
 
 
 # ---------------------------------------------------------------------------
@@ -406,7 +418,7 @@ class EdgeEvidence:
         if edge_kind not in QUERYABLE_EDGE_KINDS:
             raise KeyError(f"not a queryable edge kind: {edge_kind!r}")
         query = EdgeQuery(edge_kind, subject, target, scope)
-        resolved = self._resolve(edge_kind, subject, target)
+        resolved = self._resolve(edge_kind, subject, target, scope)
         if resolved is None:
             return EdgeQueryResult(
                 query,
@@ -422,12 +434,16 @@ class EdgeEvidence:
     # -- per-kind resolution -------------------------------------------------
 
     def _resolve(
-        self, edge_kind: str, subject: str, target: str | None
+        self,
+        edge_kind: str,
+        subject: str,
+        target: str | None,
+        scope: frozenset[str] | None = None,
     ) -> tuple[bool, tuple[CoverageRecord, ...], frozenset[str] | None] | None:
         """``(observed, records, default scope)``, or ``None`` when *subject*
         is not an entity the evidence knows about."""
         if edge_kind == EDGE_KIND_EXPORTS:
-            return self._resolve_exports(subject, target)
+            return self._resolve_exports(subject, target, scope)
         if edge_kind == EDGE_KIND_DEBUG_TYPE_OF:
             return self._resolve_debug(subject, target)
         if edge_kind in (EDGE_KIND_DECLARES, EDGE_KIND_REFERENCES):
@@ -437,20 +453,22 @@ class EdgeEvidence:
         return self._resolve_l5(edge_kind, subject, target)
 
     def _resolve_exports(
-        self, subject: str, target: str | None
+        self, subject: str, target: str | None, scope: frozenset[str] | None
     ) -> tuple[bool, tuple[CoverageRecord, ...], frozenset[str] | None] | None:
         join = self.exports.join
         if subject.startswith(BINARY_SYMBOL_PREFIX):
             rec = join.right.get(subject)
             if rec is None:
                 return None
-            entry = self.exports.entries[subject]
+            records = (header_coverage_record(self.snap, EDGE_KIND_EXPORTS),)
+            if scope is not None:
+                return _join_observed(rec, target), records, scope
+            spelling = self.exports.entries[subject].spelling
             unit = (
                 UNIT_DEPENDENCY_HEADERS
-                if is_toolchain_symbol(entry.spelling)
+                if is_toolchain_symbol(spelling)
                 else UNIT_HEADERS
             )
-            records = (header_coverage_record(self.snap, EDGE_KIND_EXPORTS),)
             return _join_observed(rec, target), records, frozenset({unit})
         if subject not in join.left:
             return None
@@ -570,3 +588,106 @@ def query_edges(
 ) -> Mapping[str, EdgeQueryResult]:
     """:meth:`EdgeEvidence.query` for many subjects at once."""
     return {s: evidence.query(edge_kind, s, scope=scope) for s in subjects}
+
+
+# ---------------------------------------------------------------------------
+# The report summary
+# ---------------------------------------------------------------------------
+
+#: Edge kinds whose subjects the summary enumerates (the two joins, whose
+#: subjects are already materialized); the others list their coverage
+#: records only, since counting them would build the whole projection.
+_COUNTED_KINDS: Mapping[str, tuple[str, str]] = {
+    EDGE_KIND_EXPORTS: ("declarations", "exports"),
+    EDGE_KIND_DEBUG_TYPE_OF: ("header_types", "debug_types"),
+}
+
+
+def _answer_counts(results: Iterable[EdgeQueryResult]) -> dict[str, int]:
+    counts = {a.value: 0 for a in EdgeAnswer}
+    for res in results:
+        counts[res.answer.value] += 1
+    return counts
+
+
+def edge_coverage_summary(
+    snap: AbiSnapshot, source_graph: SourceGraphSummary | None = None
+) -> dict[str, object]:
+    """JSON-safe I4 summary of one snapshot: per edge kind, its evidence
+    class, the producer coverage records, ``absence`` (what an absent edge
+    answers under the kind's default scope), and -- for the two joins -- how many
+    subjects on each side answer ``present``/``proven_absent``/``unknown``
+    under the default scope. L5 kinds appear only when *source_graph* is
+    given. The report's "Relationship coverage" section reads this."""
+    from ..model.source_graph_coverage import L5_EDGE_KINDS as _L5
+
+    evidence = EdgeEvidence(snap, source_graph=source_graph)
+    out: dict[str, object] = {}
+    kinds = sorted(EDGE_EVIDENCE_CLASS) + (sorted(_L5) if source_graph else [])
+    for kind in kinds:
+        entry: dict[str, object] = {
+            "evidence_class": EDGE_EVIDENCE_CLASS[kind].value
+            if kind in EDGE_EVIDENCE_CLASS
+            else "observed",
+            "records": [r.to_dict() for r in evidence.coverage_records(kind)],
+            "answers": None,
+        }
+        # What an absent edge answers under the kind's default scope: the
+        # library's own headers for the header-side kinds, every owed unit
+        # otherwise. For a counted join, "unknown" as soon as any subject is.
+        scope = (
+            frozenset({UNIT_HEADERS})
+            if kind in (EDGE_KIND_DECLARES, EDGE_KIND_REFERENCES)
+            else None
+        )
+        entry["absence"] = decide(False, evidence.coverage_records(kind), scope)[
+            0
+        ].value
+        if kind in _COUNTED_KINDS:
+            join = (
+                evidence.exports.join
+                if kind == EDGE_KIND_EXPORTS
+                else evidence.debug_types.join
+            )
+            left, right = _COUNTED_KINDS[kind]
+            answers = {
+                left: _answer_counts(evidence.query(kind, s) for s in join.left),
+                right: _answer_counts(evidence.query(kind, s) for s in join.right),
+            }
+            entry["answers"] = answers
+            entry["absence"] = (
+                EdgeAnswer.UNKNOWN.value
+                if any(c[EdgeAnswer.UNKNOWN.value] for c in answers.values())
+                else EdgeAnswer.PROVEN_ABSENT.value
+            )
+        out[kind] = entry
+    return out
+
+
+def edge_coverage_report(
+    old: AbiSnapshot | None, new: AbiSnapshot
+) -> dict[str, object]:
+    """``{"old": summary | None, "new": summary}`` for a comparison, each
+    side's L5 graph resolved the one shared way
+    (``evidence_depth.resolve_l5_source_graph``)."""
+    from ..evidence_depth import resolve_l5_source_graph
+
+    def _side(snap: AbiSnapshot) -> dict[str, object]:
+        graph = resolve_l5_source_graph(snap, snap.build_source)
+        return edge_coverage_summary(snap, graph)
+
+    return {"old": _side(old) if old is not None else None, "new": _side(new)}
+
+
+def source_graph_covers(graph: SourceGraphSummary, edge_kind: str) -> bool:
+    """Whether an *edge_kind* edge absent from *graph* is proven absent
+    project-wide: the query over the whole project answers ``proven_absent``
+    from *graph*'s own pass records (a narrowed, degraded or header-only
+    body-blind pass does not). A graph recording no pass flag at all (a
+    hand-built or pre-flag graph) keeps the legacy edge-presence reading
+    ``buildsource/source_graph_findings.py``'s other gates also fall back to
+    -- a documented gap of evidence-entity-model Phase 4."""
+    records = pass_coverage_records(graph, edge_kind)
+    if all(r.reason == "pass_not_recorded" for r in records):
+        return True
+    return decide(False, records, None)[0] is EdgeAnswer.PROVEN_ABSENT

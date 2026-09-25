@@ -578,6 +578,8 @@ class DiffResult(ReportSideFacts):
     # machine consumers can tell artifact-proven from build-context-only
     # findings; empty when no evidence was involved.
     layer_coverage: list[dict[str, object]] = field(default_factory=list)
+    # I4 per-side edge coverage (compare.edge_query.edge_coverage_report).
+    edge_coverage: dict[str, object] = field(default_factory=dict)
     # ADR-033 D6/D9 — evidence-collection timing and observability metrics for
     # the compare. Populated only when build-info/source facts were involved
     # (mirrors ``layer_coverage``). Keys follow the D9 metric names (e.g.

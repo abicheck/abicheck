@@ -116,9 +116,18 @@ def trusted_kinds(
     graph: SourceGraphSummary, pass_name: str, family: frozenset[str]
 ) -> frozenset[str]:
     """Which kinds in *family* a confirmed whole-project *pass_name* vouches
-    for on *graph*: the whole family for the build-integrated pass, only
-    :data:`HEADER_FULL_VISIBILITY_KINDS` for its header-only counterpart,
-    nothing when neither ran to completion."""
+    for on *graph*: nothing when neither pass ran to completion.
+
+    A build-integrated confirmation vouches for the *whole* family -- a real
+    per-TU AST replay sees function bodies too, so its "zero" is
+    authoritative for every kind. A header-only confirmation vouches only
+    for :data:`HEADER_FULL_VISIBILITY_KINDS`, whatever the *other* side of a
+    comparison is: a header-only pass's blindness to out-of-line bodies is a
+    property of that side alone. This loses a little recall for a
+    header-only-vs-header-only comparison's body-dependent kinds, in
+    exchange for never tracking the other side's shape -- the simpler,
+    strictly-safe rule (``buildsource/source_graph_findings.py``'s pairwise
+    comparisons read it)."""
     if graph.extractor_passes.get(pass_name, False):
         return family
     header = HEADER_PASS_ALIAS.get(pass_name, "")
