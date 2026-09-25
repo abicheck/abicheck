@@ -1272,6 +1272,13 @@ def dump(
     Returns:
         AbiSnapshot with functions, variables, and types populated.
     """
+    # A relative -I root makes the header parser report every header it
+    # reaches through that root relative to the working directory, while a
+    # header named on the umbrella is spelled absolute (`h.resolve()`), so
+    # one snapshot mixed both forms for the same checkout. Absolutize the
+    # same way the umbrella does; an already-rooted root is left as given.
+    if extra_includes:
+        extra_includes = [p if p.is_absolute() else p.resolve() for p in extra_includes]
     if dump_manifest is not None:
         # Each has its own manifest-field equivalent (roots / per-TU includes /
         # public_header_paths+dirs); a flat value here would be silently

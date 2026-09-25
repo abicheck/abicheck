@@ -283,6 +283,20 @@ class _NormalizeMemoState:
 _NORMALIZE_MEMO_STATE = _NormalizeMemoState()
 
 
+def checkout_stable_spelling(spelling: str) -> str:
+    """*spelling* with every embedded anonymous-type/lambda location reduced
+    to its checkout-independent ``basename:line:col`` form.
+
+    The public name for :func:`_normalize_graph_identity`, for callers
+    outside the graph-id choke point that *hash* a raw clang type or name
+    spelling -- a signature key, a body fingerprint. Hashing the raw
+    ``(lambda at /abs/checkout/x.h:4:37)`` spelling made two byte-identical
+    checkouts under different directory names hash differently, which the
+    L5 diff then read as ``declaration_renamed``/``inline_body_changed``.
+    """
+    return _normalize_graph_identity(spelling)
+
+
 @contextlib.contextmanager
 def identity_normalization_memo() -> Iterator[None]:
     """Memoize :func:`_normalize_graph_identity` for the duration of the
