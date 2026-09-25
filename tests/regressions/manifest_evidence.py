@@ -741,4 +741,21 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "window": ("whole-text", "caller start/end"),
         },
     ),
+    BugClass(
+        id="evidence.backfill_bare_name_match",
+        invariant=(
+            "The dump-time DWARF layout backfill takes a header record's "
+            "layout only from the debug record the debug-type join matches "
+            "one-to-one (identical qualified spelling, no layout "
+            "contradiction, mutually unique): never from a same-leaf record "
+            "in another scope, an inline-namespace variant, or a candidate "
+            "whose layout contradicts the header."
+        ),
+        fixed_by=(1380,),
+        seed_tests=("tests/test_backfill_debug_join.py",),
+        axes={
+            "scope": ("global", "namespace", "inline-namespace", "nested-class"),
+            "kind": ("struct", "union"),
+        },
+    ),
 )
