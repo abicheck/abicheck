@@ -38,7 +38,6 @@ no existing behaviour changes (decision D4 of the provenance design).
 from __future__ import annotations
 
 import re
-import sys
 from functools import partial
 from itertools import chain
 from pathlib import Path
@@ -748,8 +747,7 @@ def tag_provenance(
     # what was observed about the entity -- see is_export_table_only_record's
     # own docstring for why the three split facts cannot answer that.
     export_only = is_export_table_only_record(cast("SurfaceFactBearing", decl))
-    # Few distinct headers back thousands of declarations; one object each.
-    decl.source_header = sys.intern(sh) if sh else sh  # type: ignore[attr-defined]
+    decl.source_header = sh  # type: ignore[attr-defined]
     # ADR-063 Phase 5: this function sets source_header via plain
     # post-construction attribute assignment, which never re-runs
     # __post_init__'s Fact[T] bridge (model/fact.py's own documented trap —
