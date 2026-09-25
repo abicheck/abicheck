@@ -190,7 +190,7 @@ def merge_graph_facts(
 
 def resolve_entity_attrs(
     facts: list[GraphFact],
-) -> tuple[dict[str, Any], list[FactConflict]]:
+) -> tuple[dict[str, Any], Sequence[FactConflict]]:
     """:func:`merge_graph_facts` with a single-producer fast path.
 
     The overwhelmingly common shape of a real graph is *one* fact per
@@ -231,8 +231,9 @@ def resolve_entity_attrs(
     point, not that one.
     """
     if len(facts) == 1:
-        return facts[0].attrs, []
-    return merge_graph_facts(facts)
+        return facts[0].attrs, ()
+    resolved, conflicts = merge_graph_facts(facts)
+    return resolved, conflicts or ()
 
 
 @dataclass(slots=True)
@@ -253,7 +254,10 @@ class GraphNode:
     confidence: str = CONF_UNKNOWN
     facts: list[GraphFact] = field(default_factory=list)
     resolved: dict[str, Any] = field(default_factory=dict)
-    conflicts: list[FactConflict] = field(default_factory=list)
+    # Empty in ~100% of real entities: a shared immutable ``()`` rather than a
+    # fresh list each (~14 MiB on a oneDAL-scale graph). Derived, never
+    # mutated -- ``ensure_facts_and_resolve`` reassigns it.
+    conflicts: Sequence[FactConflict] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -326,8 +330,11 @@ class GraphEdge:
     attrs: dict[str, Any] = field(default_factory=dict)
     facts: list[GraphFact] = field(default_factory=list)
     resolved: dict[str, Any] = field(default_factory=dict)
-    conflicts: list[FactConflict] = field(default_factory=list)
-    occurrences: list[str] = field(default_factory=list)
+    # Empty in ~100% of real entities: a shared immutable ``()`` rather than a
+    # fresh list each (~14 MiB on a oneDAL-scale graph). Derived, never
+    # mutated -- ``ensure_facts_and_resolve`` reassigns it.
+    conflicts: Sequence[FactConflict] = ()
+    occurrences: Sequence[str] = ()
 
     def key(self) -> tuple[str, str, str]:
         """Identity for diffing/de-dup: (src, dst, kind) — ADR-046 D1's
@@ -579,7 +586,7 @@ def edge_occurrence_id(
     return "sha256:" + hashlib.sha256(blob).hexdigest()
 
 
-def _compute_occurrences(edge: GraphEdge) -> list[str]:
+def _compute_occurrences(edge: GraphEdge) -> Sequence[str]:
     """Recompute :attr:`GraphEdge.occurrences` from *edge*'s current facts.
 
     Called by :func:`ensure_facts_and_resolve` alongside ``resolved``/
@@ -587,7 +594,7 @@ def _compute_occurrences(edge: GraphEdge) -> list[str]:
     loaded pack, matching that function's self-healing convention.
     """
     if all(_OCCURRENCE_ATTR_KEY_SET.isdisjoint(f.attrs) for f in edge.facts):
-        return []  # the common case: no fact carries occurrence-level attrs
+        return ()  # the common case: no fact carries occurrence-level attrs
     rk = edge.relation_key()
     seen: list[str] = []
     for fact in edge.facts:

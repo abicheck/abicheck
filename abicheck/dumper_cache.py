@@ -26,6 +26,7 @@ from . import deadline
 from .storage.acyclic_json import gc_paused
 from .storage.ast_size_observer import mark_ast_intake, report_ast_size
 from .storage.derived_ast import offer_derived_ast_source
+from .storage.json_compact import migrate_legacy_entry
 
 log = logging.getLogger(__name__)
 
@@ -672,6 +673,9 @@ def load_cached_ast(
     if not cache_path.exists():
         return None
     deadline.check()
+    # Entries stored before compaction-at-store are pretty-printed; migrate
+    # them once so this and every later read pays ~30% of the bytes.
+    migrate_legacy_entry(cache_path)
     mark_ast_intake("ast.intake:start", backend=backend, source="cache")
     try:
         text = cache_path.read_text(encoding="utf-8")

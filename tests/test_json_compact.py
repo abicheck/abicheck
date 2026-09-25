@@ -187,3 +187,75 @@ def test_failed_cross_directory_publish_removes_its_temp_and_raises(
     with pytest.raises(OSError, match="disk full"):
         CompactedAst(src, None).publish(other / "e.json")
     assert list(other.iterdir()) == []
+
+
+class TestMigrateLegacyEntry:
+    """On-read migration of pretty-printed cache entries (value-preserving, idempotent)."""
+
+    @staticmethod
+    def _docs():
+        import random
+
+        rng = random.Random(1234)
+        docs = [
+            {
+                "kind": "TranslationUnitDecl",
+                "inner": [{"name": "café — \U0001f600", "loc": {"line": 1}}],
+            },
+            [1, 2.5, None, True, "a\\nb", {"x": " spaced  value "}],
+        ]
+        for _ in range(40):
+
+            def gen(depth):
+                r = rng.random()
+                if depth > 3 or r < 0.3:
+                    return rng.choice(
+                        [rng.randint(-9, 9), "sé" * rng.randint(0, 3), None, "  x \t"]
+                    )
+                if r < 0.65:
+                    return [gen(depth + 1) for _ in range(rng.randint(0, 4))]
+                return {f"k{i}—": gen(depth + 1) for i in range(rng.randint(0, 4))}
+
+            docs.append(gen(0))
+        return docs
+
+    def test_pretty_entry_is_rewritten_equal_and_idempotent(self, tmp_path):
+        import json
+
+        from abicheck.storage.json_compact import migrate_legacy_entry
+
+        for i, doc in enumerate(self._docs()):
+            p = tmp_path / f"e{i}.json"
+            p.write_text(
+                json.dumps(doc, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+            if b"\n" not in p.read_bytes():
+                continue  # scalar-only document: already compact
+            assert migrate_legacy_entry(p) is True
+            raw = p.read_bytes()
+            assert b"\n" not in raw and raw.isascii()
+            assert json.loads(raw) == doc
+            assert migrate_legacy_entry(p) is False
+            assert p.read_bytes() == raw
+
+    def test_compact_or_missing_entry_untouched(self, tmp_path):
+        from abicheck.storage.json_compact import migrate_legacy_entry
+
+        p = tmp_path / "c.json"
+        p.write_bytes(b'{"a": [1,2]}')
+        assert migrate_legacy_entry(p) is False
+        assert p.read_bytes() == b'{"a": [1,2]}'
+        assert migrate_legacy_entry(tmp_path / "missing.json") is False
+        assert list(tmp_path.iterdir()) == [p]
+
+    def test_load_cached_ast_migrates_on_read(self, tmp_path):
+        import json
+
+        from abicheck.dumper_cache import load_cached_ast
+
+        doc = {"kind": "TranslationUnitDecl", "inner": [{"name": "—"}]}
+        p = tmp_path / "ast.json"
+        p.write_text(json.dumps(doc, indent=2, ensure_ascii=False), encoding="utf-8")
+        assert load_cached_ast("k", "clang", p, memoize=False) == doc
+        assert b"\n" not in p.read_bytes() and p.read_bytes().isascii()
+        assert load_cached_ast("k", "clang", p, memoize=False) == doc

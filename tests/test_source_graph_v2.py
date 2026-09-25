@@ -55,7 +55,7 @@ class TestSingleProducer:
         (n,) = g.nodes
         assert n.attrs == {"visibility": "public_header"}
         assert n.resolved == {"visibility": "public_header"}
-        assert n.conflicts == []
+        assert list(n.conflicts) == []
         assert [f.producer for f in n.facts] == ["build_evidence"]
 
     def test_re_registration_by_same_producer_is_idempotent(self) -> None:
@@ -166,7 +166,7 @@ class TestEvidencePreservingMerge:
         g.add_node(_node("producer-a", CONF_HIGH, is_virtual=True))
         g.add_node(_node("producer-b", CONF_HIGH, is_virtual=True))
         (n,) = g.nodes
-        assert n.conflicts == []
+        assert list(n.conflicts) == []
         assert n.resolved["is_virtual"] is True
 
     def test_re_adding_an_already_multi_fact_node_preserves_all_its_facts(
@@ -227,7 +227,7 @@ class TestEdgeMerge:
         (e,) = g.edges
         assert len(e.facts) == 2
         assert e.resolved == {"call_kind": "direct", "resolution": "exact"}
-        assert e.conflicts == []
+        assert list(e.conflicts) == []
 
     def test_re_adding_an_already_multi_fact_edge_preserves_all_its_facts(
         self,
@@ -313,7 +313,7 @@ class TestEdgeMerge:
         }
         # Neither edge's own facts/resolved were contaminated by the other's.
         for e in g.edges:
-            assert e.conflicts == []
+            assert list(e.conflicts) == []
             assert len(e.facts) == 1
         # The coarse key() still collapses both, as documented -- callers
         # that only need family-level (not role-level) precision still can.
@@ -463,7 +463,7 @@ class TestSerializationRoundTrip:
         assert len(node.facts) == 1
         assert node.facts[0].producer == "build_evidence"
         assert node.facts[0].confidence == CONF_HIGH
-        assert node.conflicts == []
+        assert list(node.conflicts) == []
         # Original v1 fields are untouched.
         assert node.attrs == {"visibility": "public_header"}
         assert node.provenance == "build_evidence"
@@ -708,7 +708,7 @@ class TestOccurrenceId:
             )
         )
         (edge,) = g.edges
-        assert edge.occurrences == []
+        assert list(edge.occurrences) == []
 
     def test_edge_occurrence_id_returns_none_without_occurrence_attrs(self) -> None:
         assert edge_occurrence_id(("a", "b", "K", ""), {"role": "return"}) is None
