@@ -1017,7 +1017,22 @@ _ARTIFACT_NAMES = frozenset(
 #:        differ, ``""`` when neither side recorded one). As with 5.2, the
 #:        digest *value* changes for every run, since
 #:        ``EFFECTIVE_CONFIG_FIELD_KEYS`` is hashed positionally.
-REPORT_SCHEMA_VERSION = "5.5"
+#: 5.6 -- ``contract_context.contract_evidence`` (``compare --contract``
+#:        only) moves to its own ``schema_version`` 2: the persisted replay
+#:        type graph's canonical nodes and every provider's ``declarations``
+#:        are now the Phase 1 entity node ids (``decl://<linker name>``,
+#:        ``type://<qualified name>``, explicit ``unresolved://...`` ids for
+#:        an entity with no resolvable identity), the same ids the L2 header
+#:        and public-surface graphs use, with a ``name:<spelling>`` exact
+#:        tier beside ``alias:``. ``decision_receipt.evaluated_contract_roots``/
+#:        ``evaluated_type_closure`` carry the same ids. Shape-compatible
+#:        (every field is still a string list) but the node *values* change,
+#:        so a consumer parsing schema-1 ``decl:``/``record:`` keys must
+#:        check ``contract_evidence.schema_version``; ``abicheck``'s own
+#:        replay reads both. Entities the old keys merged (two ODR-distinct
+#:        records sharing one name, identical unmangled overloads) are now
+#:        separate nodes, with unchanged replay decisions.
+REPORT_SCHEMA_VERSION = "5.6"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

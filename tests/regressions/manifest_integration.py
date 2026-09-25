@@ -206,4 +206,44 @@ INTEGRATION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="identity.second_node_key_scheme",
+        invariant=(
+            "A graph that names declarations and types keys each one by the "
+            "Phase 1 entity node id (`model.graph_entity_identity."
+            "snapshot_identities`, invariant I1), never by a key scheme of "
+            "its own: the canonical node set equals the I1 id set, so two "
+            "entities I1 keeps apart (an ODR-duplicate record pair, two "
+            "unmangled overloads, a C typedef beside an unrelated same-named "
+            "tag) never share a node, and two it merges (`typedef struct A "
+            "A`) never split. The reported instance was the persisted "
+            "`compare --contract` replay graph, whose own `decl:`/`record:` "
+            "keys merged the ODR pair and could not be joined with any other "
+            "graph. A persisted graph written under an older scheme is read "
+            "as written -- never remapped onto I1 ids, since the old key "
+            "does not carry the evidence to pick one -- and must replay to "
+            "the decisions its producer gave."
+        ),
+        fixed_by=(1358,),
+        seed_tests=(
+            # Exhaustive small-domain enumeration (all 1-3 element subsets of
+            # eleven identity shapes) against `snapshot_identities` as the
+            # oracle, plus a pre-change report recorded from origin/main and
+            # replayed under the new reader.
+            "tests/test_contract_replay_node_ids.py",
+        ),
+        axes={
+            "entity_shape": (
+                "mangled_function",
+                "unmangled_overload",
+                "odr_duplicate_record",
+                "qualified_record",
+                "enum",
+                "typedef_unrelated_tag",
+                "typedef_same_tag",
+                "variable",
+            ),
+            "persisted_encoding": ("schema1", "schema2"),
+        },
+    ),
 )

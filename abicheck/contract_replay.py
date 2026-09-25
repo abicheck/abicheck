@@ -67,7 +67,6 @@ from .contract_evidence import (
     TypeGraphSnapshot,
     check_persisted_context_versions_supported,
 )
-from .contract_evidence_collect import graph_node_index
 from .contract_relevance_types import (
     ContractAssurance,
     ContractMode,
@@ -76,6 +75,7 @@ from .contract_relevance_types import (
     EvidenceProviderStatus,
     coerce_contract_mode,
 )
+from .policy import contract_graph_encoding as _enc
 
 
 def load_replayable_context(ctx: PersistedContractContext) -> PersistedContractContext:
@@ -120,12 +120,11 @@ def _type_scoped(change: Change) -> bool:
     )
 
 
-#: ``decl:``/type node-kind prefixes, as :mod:`contract_evidence_collect`
-#: spells them. A spelling resolves through one flat index, so the *kind* of
-#: node it lands on is what separates the two questions the live evaluator
-#: asks separately -- see :func:`_entity_lookups`.
-_DECL_NODE_KINDS: tuple[str, ...] = ("decl:",)
-_TYPE_NODE_KINDS: tuple[str, ...] = ("record:", "enum:", "typedef:")
+#: Node categories (``_enc.graph_node_category``, either encoding). A spelling
+#: resolves through one flat index, so the *category* of node it lands on is
+#: what separates the two questions the live evaluator asks separately.
+_DECL_NODE_KINDS: tuple[str, ...] = (_enc.NODE_CATEGORY_DECL,)
+_TYPE_NODE_KINDS: tuple[str, ...] = (_enc.NODE_CATEGORY_TYPE,)
 
 
 def _symbol_may_name_a_declaration(change: Change) -> bool:
@@ -309,14 +308,15 @@ class _PersistedDomain:
         # call, which is O(findings x graph) over a graph the collector
         # documents as whole-snapshot (CodeRabbit review).
         self.node_index: dict[str, dict[str, set[str]]] = {
-            side: graph_node_index(graph) for side, graph in self.graph_by_side.items()
+            side: _enc.graph_node_index(graph)
+            for side, graph in self.graph_by_side.items()
         }
         # Only `exports` needs the alias-free view (see `resolve`), and it
         # costs a second pass over every node -- so it is built for that mode
         # alone rather than for every re-evaluation.
         self.exact_node_index: dict[str, dict[str, set[str]]] = (
             {
-                side: graph_node_index(graph, follow_aliases=False)
+                side: _enc.graph_node_index(graph, follow_aliases=False)
                 for side, graph in self.graph_by_side.items()
             }
             if mode is ContractMode.EXPORTS
@@ -358,7 +358,7 @@ class _PersistedDomain:
         rooted = nodes & roots
         if not rooted:
             return nodes
-        sharing = {n for n in nodes if n.startswith("decl:")} - roots
+        sharing = {n for n in nodes if _enc.is_decl_node(n)} - roots
         if not sharing:
             return nodes
         if self.exact_node_index.get(side, {}).get(spelling, set()) & roots:
@@ -635,7 +635,7 @@ def _reevaluate_one(
     for spelling, kinds in _entity_lookups(change, mode):
         resolved = domain.resolve(side, spelling)
         nodes |= resolved
-        admissible = {n for n in resolved if n.startswith(kinds)}
+        admissible = {n for n in resolved if _enc.graph_node_category(n) in kinds}
         member_nodes |= admissible
         if set(_TYPE_NODE_KINDS) <= set(kinds) and _type_identity_is_ambiguous(
             domain, side, spelling
