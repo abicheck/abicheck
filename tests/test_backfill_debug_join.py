@@ -96,13 +96,6 @@ def _all_cases():
                     yield hscopes, dscopes
 
 
-_XFAIL = pytest.mark.xfail(
-    strict=True,
-    reason="backfill still matches by bare name / scope suffix instead of the debug-type join",
-)
-
-
-@_XFAIL
 def test_backfill_takes_layout_only_from_the_joined_debug_record():
     """Exhaustive over every 1-2 header / 0-3 debug scope subset of SCOPES."""
     errors: list[str] = []
@@ -122,7 +115,6 @@ def test_backfill_takes_layout_only_from_the_joined_debug_record():
     assert not errors, f"{len(errors)} of {n} cases:\n" + "\n".join(errors[:20])
 
 
-@_XFAIL
 @pytest.mark.parametrize("header_union", [False, True])
 def test_layout_conflicting_candidate_is_never_the_source(header_union):
     """The same-spelled debug record disagrees on union-ness; a
@@ -138,7 +130,6 @@ def test_layout_conflicting_candidate_is_never_the_source(header_union):
         assert coherence is not None and coherence.mismatched, (hs, other)
 
 
-@_XFAIL
 def test_backfill_agrees_with_the_snapshot_level_join():
     """For every generated case, the records the backfill fills are exactly
     the header records the snapshot-level ``join_debug_types`` matches
@@ -181,3 +172,29 @@ def test_backfill_agrees_with_the_snapshot_level_join():
         if filled != joined:
             disagreements.append((hscopes, dscopes, filled, joined))
     assert not disagreements, disagreements[:10]
+
+
+def test_match_is_independent_of_input_order():
+    """``match_header_records`` is a pure function of the two *sets*: every
+    permutation of either side pairs the same (header, debug) records."""
+    from abicheck.model.debug_type_match import DebugRecordFacts, match_header_records
+
+    checked = 0
+    for hscopes, dscopes in _all_cases():
+        header = [_header(s) for s in hscopes]
+        debug = [_debug(s, 64 * (k + 1)) for k, s in enumerate(dscopes)]
+        facts = [DebugRecordFacts.from_record_type(d) for d in debug]
+
+        def pairs(hs, fs):
+            return {
+                (h.qualified_name or h.name, fs[m.debug_index].size_bits)
+                for h, m in zip(hs, match_header_records(hs, fs))
+                if m.debug_index is not None
+            }
+
+        want = pairs(header, facts)
+        for hp in itertools.permutations(header):
+            for fp in itertools.permutations(facts):
+                assert pairs(list(hp), list(fp)) == want, (hscopes, dscopes)
+                checked += 1
+    assert checked > 1000
