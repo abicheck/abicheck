@@ -9,7 +9,9 @@ prefix, so the system heuristic cannot interfere.
 
 from __future__ import annotations
 
+import os
 import random
+from pathlib import Path
 
 from hypothesis import given, settings, strategies as st
 
@@ -143,10 +145,10 @@ def test_recorded_roots_are_relative_to_the_project_root() -> None:
         ),
     )
     assert snap.extraction_scope is not None
-    assert snap.extraction_scope.ownership_rules.target_roots == (
-        "inc",
-        "/elsewhere/include",
-    )
+    # A root outside the project stays absolute -- in the host's own absolute
+    # form, which on Windows carries the current drive.
+    outside = Path(os.path.abspath("/elsewhere/include")).as_posix()
+    assert snap.extraction_scope.ownership_rules.target_roots == ("inc", outside)
     decision = ownership_of(snap.functions[0])
     assert decision is not None and decision.rule_id == "target_root:inc"
 
