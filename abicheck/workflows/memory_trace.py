@@ -281,14 +281,20 @@ def _parent_map() -> dict[int, list[int]]:
     except OSError:
         return children
     for entry in entries:
-        try:
-            with open(f"/proc/{entry}/stat", encoding="ascii", errors="replace") as fh:
-                stat = fh.read()
-            ppid = int(stat[stat.rindex(")") + 2 :].split()[1])
-        except (OSError, ValueError, IndexError):
-            continue
-        children.setdefault(ppid, []).append(int(entry))
+        ppid = _read_ppid(entry)
+        if ppid is not None:
+            children.setdefault(ppid, []).append(int(entry))
     return children
+
+
+def _read_ppid(pid: str) -> int | None:
+    """*pid*'s parent pid from ``/proc/<pid>/stat``, or ``None`` if it exited."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="ascii", errors="replace") as fh:
+            stat = fh.read()
+        return int(stat[stat.rindex(")") + 2 :].split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
 
 
 def _proc_tree_pids(root: int | None = None) -> list[int]:
