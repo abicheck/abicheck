@@ -621,6 +621,43 @@ _OWNER_FACT_KEY_TUPLES: dict[str, str] = {
 }
 
 
+#: Side-table codecs: a persisted ``Fact[T]`` a codec writes *outside* the
+#: per-entity dicts (ADR-075's interned ``extraction_scope`` table), which
+#: ``fact_codec.py``'s per-entity receivers therefore never see. Each entry
+#: names the file, the fact attribute and the owners it covers; the file
+#: must itself define an ``encode_*`` and a ``decode_*`` function and name
+#: the attribute, or it counts as no wiring at all.
+_SIDE_TABLE_CODECS: tuple[tuple[Path, str, tuple[str, ...]], ...] = (
+    (
+        PKG / "storage" / "extraction_scope_codec.py",
+        "ownership_fact",
+        ("Function", "Variable", "RecordType", "EnumType"),
+    ),
+)
+
+
+def _side_table_wired(prefix: str) -> set[tuple[str, str]]:
+    """``(owner, fact_attr)`` pairs a side-table codec wires on the *prefix*
+    (``encode_``/``decode_``) side, verified against the file's own AST."""
+    wired: set[tuple[str, str]] = set()
+    for path, attr, owners in _SIDE_TABLE_CODECS:
+        if not path.is_file():
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        has_side = any(
+            isinstance(n, ast.FunctionDef) and n.name.startswith(prefix)
+            for n in tree.body
+        )
+        names_attr = any(
+            isinstance(n, ast.Constant) and n.value == attr for n in ast.walk(tree)
+        ) or any(
+            isinstance(n, ast.Attribute) and n.attr == attr for n in ast.walk(tree)
+        )
+        if has_side and names_attr:
+            wired.update((owner, attr) for owner in owners)
+    return wired
+
+
 def _encode_wired_fact_attrs() -> set[tuple[str, str]]:
     """Every ``(owner, fact_attr)`` pair ``fact_codec.encode_fact_fields()``
     actually reaches — real, *owner-scoped* encode-side evidence only
@@ -920,8 +957,8 @@ def check_fact_registry_completeness(f: Findings) -> None:
     # other owner sharing the same field name, e.g. a future
     # Function.deprecated_fact wired alone would also satisfy a
     # still-unwired Variable.deprecated_fact).
-    encode_wired = _encode_wired_fact_attrs()  # {(owner, fact_attr)}
-    decode_wired = _decode_wired_fact_attrs()
+    encode_wired = _encode_wired_fact_attrs() | _side_table_wired("encode_")
+    decode_wired = _decode_wired_fact_attrs() | _side_table_wired("decode_")
     for entry in FACT_REGISTRY.entries.values():
         if not entry.persisted:
             continue

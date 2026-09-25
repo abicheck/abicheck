@@ -131,6 +131,7 @@ from typing import TYPE_CHECKING
 
 from ..buildsource.model import CoverageStatus, DataLayer, LayerCoverage
 from ..compare.debug_type_scope import debug_layout_scope
+from ..compare.edge_query import export_table_covered
 from ..evidence_depth import DEPTH_RANK
 from ..model import ScopeOrigin, Visibility
 from ..model.export_index import build_raw_export_index, default_versioned_names
@@ -212,9 +213,14 @@ def _exported_symbol_names(snap: AbiSnapshot) -> frozenset[str] | None:
     differently from "parsed and confirmed empty," so
     :func:`_strip_header_and_above_evidence` skips this check entirely
     rather than misreading an absent platform block as zero exports).
+
+    A block whose table was never read (a default or parse-failed
+    ``ElfMetadata()``) is ``None`` too: its emptiness is not a proven
+    absence (I4, ``compare.edge_query.export_table_covered``), and reading
+    it as one stripped every declaration from the projected snapshot.
     """
     index = build_raw_export_index(snap)
-    if index is None:
+    if index is None or not export_table_covered(snap, index.platform):
         return None
     return default_versioned_names(index)
 

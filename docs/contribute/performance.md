@@ -199,7 +199,7 @@ runs the scaling benchmark and the `slow` performance tests. Now that every
   existing comment claiming otherwise); for a PR that touches neither, run
   it on demand with `workflow_dispatch`.
 - **Armed budgets:** the scaling step runs with `--max-exponent 1.4` (the tail,
-  largest-two-size slope) and `--max-rss-mb 2048`; the `regression` job blocks
+  largest-two-size slope) and `--max-rss-mb 1024`; the `regression` job blocks
   on a PR-vs-base slowdown exceeding `max(15%, 100ms)` per (scenario, size)
   point (`--regress-tolerance 0.15 --regress-min-delta-seconds 0.1` — the
   "stable synthetic PR scenario" tier; a flat 50 % tolerance is an emergency
@@ -498,6 +498,49 @@ hundreds of milliseconds.
 Note also that `--no-spy` disables every extraction-count assertion, so it is a
 measurement aid, never a cheaper way to run the lane.
 
+### L2 scaling gate (headers x libraries)
+
+`scripts/check_l2_scaling_perf.py` runs in the `l2-cli-perf` PR job after the
+PR-vs-base comparison. That comparison measures one small fixture, so it
+catches a constant-factor regression but not a change in *shape*. This gate
+sweeps two axes through the real CLI and gates how cost **grows**:
+
+| Axis | Operation | Sizes | Budget (marginal exponent) | Measured (2026-09, 4 CPUs) |
+|---|---|---|---:|---:|
+| `headers` | `compare --depth headers`, one library | 1 / 4 / 12 / 30 headers | 1.4 | 0.95 (1.3 s → 2.6 s) |
+| `libraries` | directory `compare` (release fan-out), 2 headers each | 1 / 3 / 6 / 10 libraries | 1.7 | 1.39 (1.2 s → 8.6 s); 1.64 (→ 11.5 s) before the fixes below |
+
+Peak process-tree RSS is gated at 1024 MB per point (observed ≤ 365 MB).
+The whole gate takes about 75 s at `--repeat 3`.
+
+The gated number is the **marginal** exponent: the slope of
+`log(wall(n) - wall(1))` against `log(n - 1)`. Every CLI run pays a ~1 s fixed
+floor (startup, imports, config, report writing), so a raw log-log slope at
+these sizes reads close to 0 whatever the product does. Subtracting the `n = 1`
+floor measures the work the axis *adds*: a linear step reads ~1.0, and a step
+that redoes all previous units' work reads ~2.0. If the largest point is less
+than 0.25 s above the floor, the sweep fails as unfittable rather than passing.
+
+**The library axis is still super-linear, and the budget does not bless
+that.** Every member of a directory compare is dumped against the release's
+*union* header and include set, so any per-member step that walks that set
+grows with the member count. The total then grows faster than linearly. The
+two largest such steps are now memoized:
+
+- contract fingerprinting's path resolution (`comparability_fields`), about
+  35% of wall time at 16 libraries;
+- the C++20 dialect scan (`extract/header_scan_memo.py`), which ran several
+  times per dump over the identical set.
+
+The first measurement blamed `bundle_symbol_status` → `qualified_name_segments_walk`.
+That was a profiling artifact: cProfile attributed worker threads' time
+wrongly, and py-spy corrected it. Before → after, 4 CPUs, cold cache:
+6 libraries 5.0 s → 4.2 s, 10 libraries 11.5 s → 8.6 s,
+and 16 libraries 32.2 s → 19.1 s.
+The 1.7 budget catches regression; lower it toward ~1.1 once members stop
+receiving the union set. Recorded in
+[Known gaps](known-gaps.md#multi-library-l2-compare-scales-quadratically-with-library-count).
+
 ### Real-integration profiles (oneDAL, SVS, PVXS)
 
 `scripts/l2_real_profiles.py` pins the live integrations declaratively: each
@@ -559,6 +602,30 @@ project's name.** Five further constraints it encodes:
   alike risks reading correct detection of a build-induced ABI change as a
   scanner defect, or suppressing it to satisfy the wrong expectation.
 
+#### oneDAL solo L2 compare across the 2026-09 perf series
+
+User-supplied receipts for one identical command (solo run, 125 header roots,
+fresh cache) at four revisions. The operands are not in this repository and
+no CI lane reproduces this run, so these are **reference expectations for the
+manual real-integration profile**, not gated numbers:
+
+| Revision | Wall | Peak RSS | Exit | Verdict | `lambda at` spellings |
+|---|---:|---:|---:|---|---:|
+| 0.6.0 | 2:43:53 | 15,176,116 KB | 4 | BREAKING | 146 |
+| main `e9d820797` | 11:47.46 | 16,239,532 KB | 4 | BREAKING | 290 |
+| main `963138528` | 11:04.71 | 16,525,332 KB | 2 | API_BREAK | 0 |
+| main `577d856a4` | 7:49.88 | 16,525,160 KB | 0 | NO_CHANGE | 0 |
+
+Read it as three signals, not one. Wall time fell ~21x since 0.6.0 and ~33%
+across the last step. Peak RSS did **not** fall (15.2 → 16.5 GB) — the series
+bought time, not memory, and ~16 GB sits at the edge of a nominal 16 GB host
+(see [memory.md](memory.md)). And the verdict moved BREAKING → API_BREAK →
+NO_CHANGE as checkout-path-dependent `lambda at` spellings were stripped
+(#1343, #1355): at this scale, a correctness regression that re-introduces
+path-dependent identity shows up first as a spurious verdict, which no
+synthetic lane below would catch. A re-measurement should record all five
+columns, not wall time alone.
+
 ## Coverage gaps this workflow does not close
 
 An external performance audit (2026-08) found that `compare()`/dump/scan
@@ -602,6 +669,15 @@ convention — root `AGENTS.md`):
   alternately from the workflow (or a driver script that shells out to both
   venvs in turn), then aggregates medians across rounds — a real, separate
   piece of orchestration, not a flag on the existing single-shot invocation.
+- **No scheduled real-scale lane.** Every gated lane is synthetic and small
+  (≤ 20k functions in-process, ≤ 30 headers / 10 libraries through the CLI
+  — see "L2 scaling gate" above). The
+  oneDAL receipts above — minutes of wall time, ~16 GB RSS, and a verdict that
+  depends on path-independent identity — are reproducible only by hand via
+  `scripts/l2_real_profiles.py`, and `scripts/bench_release_memory.py`,
+  `bench_graph_materialization.py` and `bench_extraction_scope.py` are wired
+  into no workflow. A peak-RSS regression on a real multi-GB AST, or a
+  scale-only identity/verdict drift, therefore has no automated guard.
 - **A maintained end-to-end depth/backend matrix.** The `slow` perf tests and
   the scaling/header-graph harnesses cover `compare()` and the L2 attach cost
   well; there is no equivalent maintained CI matrix over binary / headers
@@ -686,12 +762,13 @@ peak-memory tracking and PR-vs-base drift detection. Current status:
 | **Historical / PR-vs-base regression** | ✅ covered (now gating) | `--baseline`/`--regress-tolerance` + the `regression` workflow job measure the base branch and PR head on the same runner and flag scenarios that got slower by more than the tolerance — catching *gradual* drift the per-run exponent misses. `continue-on-error` is dropped, so it now blocks. See [Baseline regression](#baseline-regression). |
 | **Dump / snapshot creation (DWARF/PE/PDB)** | ⚠️ partial | The synthetic harness can't run the real parsers. The ELF **symbol-table** parse **and** the **DWARF** debug-info parse (`-g` build) are now guarded by `tests/test_perf_dump_scaling.py` (`integration`, gcc-only) — DWARF being the dominant real-library dump cost (ICU 18.6 MB snapshot, openblas 23 MB / 9.5 s). The `serialize` scenario proxies the rest of the pipeline. **PE/COFF + PDB parsing remains unbenchmarked** — those need a committed binary or a synthetic byte-stream generator (no Linux-only toolchain produces them). |
 | Appcompat HTML / stack analysis / appcompat filtering | ⚠️ not benchmarked | `stack_checker` runs one `compare()` per dependency (inherent). Appcompat filtering uses set-membership lookups (`appcompat.py` — O(1) per change, **likely already fine**) and `appcompat_html.py` is linear by inspection; neither is timed. |
-| Bundle / multi-library & environment-matrix compare | ⚠️ not benchmarked | O(libraries) compares; per-library cost is covered, cross-library orchestration is not. |
+| Directory multi-library compare (release fan-out) | ✅ covered (scaling) | `check_l2_scaling_perf.py`'s library axis: 1 / 3 / 6 / 10 libraries through the real CLI, marginal exponent gated at 1.7 (measured 1.39). |
+| Bundle / environment-matrix compare | ⚠️ not benchmarked | Per-library cost is covered; bundle and environment-matrix orchestration is not. |
 
 ### Recommended next steps (in priority order)
 
 1. ~~**Wire a budget gate**~~ — done: the lane now runs `--max-exponent 1.4`
-   (`nested_types` exempt via `gate_exponent=False`) and `--max-rss-mb 2048`, and
+   (`nested_types` exempt via `gate_exponent=False`) and `--max-rss-mb 1024`, and
    `continue-on-error` is dropped on both the scaling and `regression` jobs. The
    `--regress-tolerance 0.5` PR-vs-base check also blocks now; loosen a threshold
    rather than re-adding `continue-on-error` if runner variance flakes a lane.
@@ -700,9 +777,10 @@ peak-memory tracking and PR-vs-base drift detection. Current status:
    gcc + `-g`); the PE/COFF and PDB parsers still need a committed binary or a
    synthetic byte-stream generator behind the `integration` marker (no Linux-only
    toolchain emits them).
-3. **Benchmark the cross-library orchestration** — bundle / environment-matrix
-   compares are O(libraries) over an already-covered per-library cost, but the
-   orchestration layer (and appcompat/stack fan-out) is still untimed.
+3. **Benchmark bundle / environment-matrix orchestration** — directory
+   multi-library scaling is covered by the L2 scaling gate. Bundle and
+   environment-matrix orchestration, including appcompat/stack fan-out, is
+   still untimed.
 4. ~~**Optimise the super-linear residuals**~~ — done: fix #8 linearized the
    enrichment (typedef/union/vtable/enum/opaque), fix #9 the opaque pointer-only
    check (`type_churn`). No quadratic `compare()` path remains at tracked sizes.
@@ -778,7 +856,7 @@ and cancels; the timing tolerance there is explicitly neutralised
 checked only against the absolute ceilings `--max-memory-mb`/`--max-rss-mb`.
 An absolute ceiling catches a regression only once it crosses the ceiling, so
 a change doubling a scenario's allocation from 200 MiB to 400 MiB passed the
-2048 MiB ceiling in silence — exactly the gradual drift the timing side had
+then-2048 MiB ceiling in silence — exactly the gradual drift the timing side had
 had a base-branch comparison for since PR #768.
 
 Each point's reported/gated figure is the **median** of its timed repeats (plus

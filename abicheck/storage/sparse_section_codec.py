@@ -473,6 +473,7 @@ class LayoutSection(_SparseSectionMixin):
             "header_only",
             "excluded_header_patterns",
             "excluded_header_matching",
+            "extraction_scope",
         }
     )
     #: `.dwarf_layout_coherence`/`.scope_fallback`/`.dependency_scope` are
@@ -494,6 +495,7 @@ class LayoutSection(_SparseSectionMixin):
         "header_only": _BOOL,
         "excluded_header_patterns": _LIST,
         "excluded_header_matching": _STR,
+        "extraction_scope": _MAPPING_OR_NONE,
     }
 
     extra: Mapping[str, Any] = field(default_factory=dict)

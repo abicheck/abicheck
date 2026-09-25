@@ -45,7 +45,11 @@ the concrete accounting.
 from __future__ import annotations
 
 from ..environment_matrix import EnvironmentMatrix
-from .build_config_scope import OWNERSHIP_LIST_KEYS, dependencies_findings
+from .build_config_scope import (
+    OWNERSHIP_LIST_KEYS,
+    dependencies_findings,
+    dependency_evidence_findings,
+)
 
 #: Phase 7g (one-comparison-product.md §4.1/§3 #21): the calibrated JSON
 #: decode resource limit, demoted off the CLI (`--max-json-object-nodes`).
@@ -120,7 +124,10 @@ DICT_STR_STR_SUBKEYS: dict[str, frozenset[str]] = {
 #: Sub-keys whose value is a structured YAML shape with its own validator
 #: (dispatched in `subkey_findings`), spelled as the reference docs show it.
 STRUCTURED_SUBKEY_TYPES: dict[str, dict[str, str]] = {
-    "scope": {"dependencies": "list[{name: str, header_roots: list[str]}]"},
+    "scope": {
+        "dependencies": "list[{name: str, header_roots: list[str]}]",
+        "dependency_evidence": "str ('full')",
+    },
 }
 # `_strs()` accepts either a list of strings or a single bare string (folded
 # to a 1-element list), so both shapes are valid here — anything else isn't.
@@ -160,6 +167,8 @@ def subkey_findings(key: str, sub: str, sub_value: object) -> list[str]:
     """
     if key == "scope" and sub == "dependencies":
         return dependencies_findings(sub_value)
+    if key == "scope" and sub == "dependency_evidence":
+        return dependency_evidence_findings(sub_value)
     if sub in BOOL_SUBKEYS.get(key, ()) and not isinstance(sub_value, bool):
         return [
             f"{key}.{sub} must be a boolean, got "

@@ -80,6 +80,7 @@ from .contract_relevance_types import (
     EvidenceProviderStatus,
     SelectorLayer,
 )
+from .model.ownership_rules import OwnershipRules
 from .severity import SeverityConfig, SeverityLevel
 
 
@@ -381,6 +382,7 @@ def resolved_config_to_dict(config: CompatibilityEvaluationConfig) -> dict[str, 
                 # ADR-069; always emitted, so "absent" never means "empty".
                 "experimental_namespaces": list(config.surface.experimental_namespaces),
             },
+            **OwnershipRules.receipt_entry(config.surface.ownership),  # ADR-075 D7
         },
         "assurance": {"require_evidence": config.assurance.require_evidence},
         "policy": {
@@ -390,8 +392,7 @@ def resolved_config_to_dict(config: CompatibilityEvaluationConfig) -> dict[str, 
                 kind: verdict.value
                 for kind, verdict in sorted(config.policy.overrides.items())
             },
-            # Round 9/10: previously omitted, dropping pack-provenance on
-            # round-trip -- see `resolved_config_from_dict`'s own comment.
+            # Round 9/10: see `resolved_config_from_dict`'s own comment.
             "pack_overrides": {
                 kind: verdict.value
                 for kind, verdict in sorted(config.policy.pack_overrides.items())
@@ -536,6 +537,7 @@ def resolved_config_from_dict(
             internal_namespaces=tuple(
                 _sequence(hints.get("internal_namespaces"), what="internal_namespaces")
             ),
+            ownership=OwnershipRules.from_dict(surface.get("ownership")),
         ),
         assurance=AssuranceConfig(
             require_evidence=bool(assurance.get("require_evidence", True))

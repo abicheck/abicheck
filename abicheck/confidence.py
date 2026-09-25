@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 from .checker_policy import Confidence, EvidenceTier
 from .detectors import DetectorResult
 from .model import AbiSnapshot
+from .model.extraction_scope import extraction_scope_notes
 from .model.header_exclusion_record import exclusions_are_symmetric
 
 if TYPE_CHECKING:
@@ -295,6 +296,7 @@ def compute_confidence(
             warnings.append(detector_disablement_warning(dr.name, dr.coverage_gap))
 
     warnings.extend(header_exclusion_warnings(old, new))
+    warnings.extend(extraction_scope_notes(old, new))  # ADR-075 D3
 
     confidence = _determine_confidence_level(
         has_elf,

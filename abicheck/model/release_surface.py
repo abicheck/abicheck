@@ -60,7 +60,7 @@ from dataclasses import dataclass, replace
 #: widens the identity can never reuse a surface acquired under the
 #: narrower one -- the same discipline ``dumper_ast_config._cache_key``'s
 #: own ``_CLANG_CACHE_SCHEMA_VERSION`` applies to the AST cache.
-SURFACE_ACQUISITION_IDENTITY_VERSION = 1
+SURFACE_ACQUISITION_IDENTITY_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -116,6 +116,10 @@ class SurfaceAcquisitionIdentity:
     include_dependencies: bool = False
     #: Digest of the build configuration in effect, when one was resolved.
     build_config_digest: str | None = None
+    #: The project ownership rules the surface is classified under (ADR-075;
+    #: ``""`` with none). Two requests that classify differently owe
+    #: different exports, so they must not share one acquired surface.
+    ownership: str = ""
 
     def key(self) -> str:
         """A stable content key for this acquisition request."""
@@ -134,6 +138,7 @@ class SurfaceAcquisitionIdentity:
             "depth": self.depth,
             "include_dependencies": self.include_dependencies,
             "build_config_digest": self.build_config_digest,
+            "ownership": self.ownership,
         }
         blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()

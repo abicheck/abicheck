@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from .build_mode_facts import BuildMode
     from .dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
     from .elf_facts import ElfMetadata
+    from .extraction_scope import ExtractionScope
     from .identity import EntityId
     from .kabi_facts import KabiMetadata
     from .macho_facts import MachoMetadata
@@ -228,16 +229,15 @@ class AbiSnapshot:
         default_factory=tuple, kw_only=True
     )
 
-    # Schema v47 -- the `--exclude-header PATTERN` values this snapshot was
-    # dumped under, empty when none were given; v48 adds the rule they were
-    # matched *by*, because the same text is not the same scope under both
-    # (`"glob"` fnmatch, `"exact"` descriptor membership). Rules, rationale
-    # and readers: `model/header_exclusion_record.py`,
-    # `extract/header_exclusions.py`, `confidence.header_exclusion_warnings`.
+    # v47: the `--exclude-header` patterns this snapshot was dumped under; v48:
+    # the rule they matched by (`"glob"`/`"exact"`). Rules and readers:
+    # `model/header_exclusion_record.py`, `extract/header_exclusions.py`.
     excluded_header_matching: str = field(default="glob", kw_only=True)
     excluded_header_patterns: tuple[str, ...] = field(
         default_factory=tuple, kw_only=True
     )
+    # v52 (ADR-075): ownership rules; None = unrecorded, never "full".
+    extraction_scope: ExtractionScope | None = field(default=None, kw_only=True)
 
     # G28 Phase 3 — per-fact producer provenance for a "hybrid" snapshot only
     # (empty for every ordinary single-backend snapshot; ``ast_producer`` alone

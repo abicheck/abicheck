@@ -108,8 +108,9 @@ class TestDefaults:
         # No `gate.exit_code_scheme` receipt entry any more (CLI cleanup
         # phase two PR G2): it is purely derived from `severity_active`,
         # with no candidates/D7 resolution of its own to record.
-        # +1 for `versioning.policy` (ADR-066 D4/S2).
-        assert len(cfg.provenance) == 18
+        # +1 for `versioning.policy` (ADR-066 D4/S2); +6 for ADR-075 D7's
+        # `surface.ownership.*` inputs.
+        assert len(cfg.provenance) == 24
 
 
 class TestContractModePrecedence:

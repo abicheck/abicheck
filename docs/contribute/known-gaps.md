@@ -8015,6 +8015,47 @@ and `scripts/l2_real_profiles.py`'s oneDAL profile (five header-bearing
 libraries across two compile contexts) is the realistic case to judge it
 against.
 
+### Multi-library L2 compare scales quadratically with library count
+
+Found by `scripts/check_l2_scaling_perf.py` (2026-09). A directory `compare`
+of N generated libraries (2 public headers each, shared dependency context,
+`--depth headers`, cold cache, 4 CPUs) costs:
+
+| libraries | 1 | 3 | 6 | 7 | 10 | 16 |
+|---|---:|---:|---:|---:|---:|---:|
+| wall (s) | 1.3 | 2.2 | 5.0 | 6.9 | 11.5 | 32.2 |
+
+Above the ~1.2 s fixed floor, the added cost grows with a marginal exponent of
+~1.6 over 1–10 libraries and ~1.9 between 7 and 16. The directory compare is
+therefore close to quadratic, not linear, in the member count. Peak RSS stays
+flat (~230 → 365 MB), so this is time, not memory.
+
+**Partly fixed (2026-09).** py-spy (the first cProfile reading misattributed
+worker-thread time to `bundle_symbol_status`) showed the per-member time
+going to work over the union header set. The two largest pieces are now
+memoized:
+
+- extraction-contract fingerprinting resolved paths on every dependency ×
+  header/include-root test, about 35% at 16 libraries. It now resolves each
+  path once per computation (`comparability_fields`).
+- the C++20 dialect scan ran several times per dump. It is now
+  content-validated and memoized in-process (`extract/header_scan_memo.py`).
+
+Result: 10 libraries 11.5 s → 8.6 s and 16 libraries 32.2 s → 19.1 s, with
+the marginal exponent over 1–10 falling from 1.64 to 1.39. The gate budget is
+now 1.7.
+
+**What remains** is many small per-member walks of the union set: header
+expansion, inferred include roots, dependency-scope roots, one `clang -M`
+include probe per header, and the include-graph gate's deliberate per-probe
+memory re-read. Each is linear per member, so the release is still
+super-linear. This is the performance face of the "`-H`/`--header` set is
+applied to every member" entry below. Its steps 2/3 remove all of these at
+once: give each member only its own headers, or compute the release-scoped
+part once. Lower the budget toward ~1.1 when that lands. The oneDAL receipts
+(`performance.md`, "oneDAL solo L2 compare") involve a handful of libraries
+with 125 header roots, which is where this term shows up at real scale.
+
 ### ~~`compare --format` repeated silently keeps only the last format~~ — CLOSED by the export grammar
 
 Recorded while building the full-CLI harness against `main` at `f6aa2aae`, where
@@ -8339,6 +8380,12 @@ entry proposes below:
   naming both members, which is the honest "which member this affects was not
   established" reading step 1 asks for, not the attribution step 3 would give.
   Over-reporting attribution, not duplication, is what is left.
+
+**Performance face of the same gap (2026-09).** Every member walks the
+union header set, so the release cost grows super-linearly with its member
+count. See "Multi-library L2 compare scales quadratically with library count"
+above for the measurements, what has been memoized, and why steps 2/3 in this entry
+are the complete fix.
 
 **Update (2026-09-18).** The model is no longer scoped to the live
 directory/package fan-out. The other three drivers that compare several
