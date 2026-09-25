@@ -43,6 +43,7 @@ class SourceGraphSummary(Protocol):
     narrowed_scope: dict[str, frozenset[str]]
     degraded_passes: dict[str, bool]
 
+
 __all__ = [
     "CALL_GRAPH_PASS",
     "HEADER_CALL_GRAPH_PASS",
