@@ -38,6 +38,7 @@ import re
 from xml.etree.ElementTree import Element
 
 from ....model import AccessLevel, Fact, Function, Param, Visibility
+from ....model.export_index import ExportMatch
 from ....model.identity import entity_id_for_function
 from ...surface_fact_producers import header_ast_surface_facts
 from .context import CastxmlParserContext
@@ -46,6 +47,7 @@ from .location import (
     contract_attributes as _extract_contract_attributes,
     decl_is_public,
     deprecation_marker as _deprecation_marker,
+    export_match,
     is_builtin_element,
     qualified_name,
     source_line_has_explicit,
@@ -558,7 +560,7 @@ def parse_function_element(
     # mangled name to look up. "Not looked up" must stay distinguishable
     # from "looked up and absent", which is what let a lost export read
     # as a lost declaration.
-    exported_: bool | None
+    exported_: ExportMatch | None
     judged_public_ = False
     if ctx.no_binary_evidence or (
         el.tag in ("Constructor", "Destructor") and not raw_mangled
@@ -579,12 +581,18 @@ def parse_function_element(
         # pre-v46 snapshot and unexported from a fresh one -- exactly the
         # vintage-dependent divergence this split exists to remove
         # (CodeRabbit review).
-        raw_vis_ = visibility(ctx, raw_mangled, name)
-        exported_ = raw_vis_ in (Visibility.PUBLIC, Visibility.ELF_ONLY)
+        #
+        # Tiered (ADR-063, 2026-09-24 note): the same first-match order as
+        # `visibility()`, so "not ABSENT" is exactly its PUBLIC/ELF_ONLY, but
+        # a `.symtab`-only or bare-name hit is recorded as its own PARTIAL
+        # state instead of the dynamic-export match the `exports` join makes.
+        exported_ = export_match(ctx, raw_mangled, name, mangled)
         # The promotion itself is a *contract* judgement, so record it as
         # one rather than leaving (b) unknown beside a confirmed-absent (c)
         # -- which is what made `in_public_surface` answer False.
-        judged_public_ = visibility_ is Visibility.PUBLIC and not exported_
+        judged_public_ = (
+            visibility_ is Visibility.PUBLIC and exported_ is ExportMatch.ABSENT
+        )
 
     # Hoisted so the identity constructor is handed the identical values
     # the model object records, rather than a second, independently

@@ -65,15 +65,19 @@ from __future__ import annotations
 from typing import Protocol
 
 from .availability import FactStatus
+from .export_index import ExportMatch
 from .fact import Fact
 from .vocabulary import ScopeOrigin, Visibility
 
 __all__ = [
     "DERIVED_FROM_LEGACY",
+    "EXPORT_MATCH_DIAGNOSTIC_PREFIX",
     "SurfaceFactBearing",
+    "binary_export_match",
     "binary_exported",
     "declaration_confirmed_absent",
     "declared_in_headers",
+    "export_match_diagnostic",
     "has_observed_contract_evidence",
     "headers_discarded_surface_facts",
     "in_public_contract",
@@ -96,6 +100,17 @@ __all__ = [
 #: Diagnostic stamped on every fact this module derives from the legacy
 #: ``Visibility`` enum rather than reading from a producer-set field.
 DERIVED_FROM_LEGACY = "derived-from-legacy-visibility"
+
+#: Prefix of the diagnostic a producer stamps on a ``PARTIAL(True)`` export
+#: fact whose evidence is weaker than the ``exports`` join's own rule (see
+#: :class:`~abicheck.model.export_index.ExportMatch`). Persisted with the
+#: fact's diagnostics, so no stored field is needed to recover the tier.
+EXPORT_MATCH_DIAGNOSTIC_PREFIX = "export-match:"
+
+
+def export_match_diagnostic(match: ExportMatch) -> str:
+    """The diagnostic recording a weaker-than-dynamic export tier."""
+    return EXPORT_MATCH_DIAGNOSTIC_PREFIX + match.value
 
 
 class SurfaceFactBearing(Protocol):
@@ -196,6 +211,29 @@ def binary_exported(decl: SurfaceFactBearing) -> Fact[bool]:
     if vis is Visibility.HIDDEN:
         return Fact.partial(False, DERIVED_FROM_LEGACY)
     return Fact.partial(True, DERIVED_FROM_LEGACY)
+
+
+def binary_export_match(decl: SurfaceFactBearing) -> ExportMatch | None:
+    """Which :class:`ExportMatch` tier the producer recorded for (c).
+
+    ``PRESENT(True)`` is ``DYNAMIC`` -- the tier the ``exports`` join
+    (``compare/export_join.py``) itself observes -- and ``PRESENT(False)``
+    is ``ABSENT``; a ``PARTIAL(True)`` fact names its weaker tier in its
+    diagnostics. ``None`` when the tier is not recoverable: no evidence, a
+    legacy-derived reading (a pre-v46 snapshot or a hand-built record), or
+    a partial fact a producer stamped without a tier.
+    """
+    fact = binary_exported(decl)
+    if fact.status is FactStatus.PRESENT:
+        return ExportMatch.DYNAMIC if fact.value is True else ExportMatch.ABSENT
+    if fact.status is FactStatus.PARTIAL and fact.value is True:
+        for diag in fact.diagnostics:
+            if diag.startswith(EXPORT_MATCH_DIAGNOSTIC_PREFIX):
+                try:
+                    return ExportMatch(diag[len(EXPORT_MATCH_DIAGNOSTIC_PREFIX) :])
+                except ValueError:
+                    return None
+    return None
 
 
 # ---------------------------------------------------------------------------

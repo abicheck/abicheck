@@ -31,6 +31,7 @@ from typing import Any
 from xml.etree.ElementTree import Element
 
 from ....model import AccessLevel, ScopeOrigin, Visibility
+from ....model.export_index import ExportMatch, match_export
 from ....name_classification import strip_anonymous_type_location
 from ....provenance import classify_origin, header_from_location
 from .context import CastxmlParserContext
@@ -289,6 +290,38 @@ def visibility(ctx: CastxmlParserContext, mangled: str, name: str = "") -> Visib
     if ctx.no_binary_evidence:
         return Visibility.PUBLIC
     return Visibility.HIDDEN
+
+
+def export_match(
+    ctx: CastxmlParserContext,
+    mangled: str,
+    name: str = "",
+    linker_spelling: str | None = None,
+) -> ExportMatch:
+    """The tiered export lookup behind :func:`visibility`'s export half.
+
+    Same tables, same first-match order as :func:`visibility` -- so
+    "anything but ``ABSENT``" is exactly its ``PUBLIC``/``ELF_ONLY`` -- but
+    through the one shared primitive
+    (:func:`~abicheck.model.export_index.match_export`), so a ``.symtab``-only
+    hit or a bare-name hit for a mangled declaration is recorded as such
+    rather than as the dynamic-export match the ``exports`` join makes.
+
+    *linker_spelling*: the spelling the declaration is finally recorded
+    under (``Function.mangled``/``Variable.mangled``), when a rewrite made it
+    differ from the raw *mangled* castxml emitted -- a C-linkage entity whose
+    pseudo-Itanium ``mangled`` was rewritten to its bare name. Its bare-name
+    hit then *is* its linker spelling's hit, which is what the join sees.
+    """
+    match = match_export(
+        (mangled,),
+        name,
+        dynamic=ctx.exported_dynamic,
+        static=ctx.exported_static,
+    )
+    if match is ExportMatch.NAME_ALIAS and linker_spelling == name:
+        return ExportMatch.DYNAMIC
+    return match
 
 
 def access_level(el: Element) -> AccessLevel:

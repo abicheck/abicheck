@@ -39,17 +39,45 @@ from __future__ import annotations
 from typing import Any
 
 from ..model import Fact
+from ..model.export_index import ExportMatch
+from ..model.surface_facts import export_match_diagnostic
 
 __all__ = [
+    "binary_exported_fact_for",
     "debug_info_surface_facts",
     "export_table_surface_facts",
     "header_ast_surface_facts",
 ]
 
 
+def binary_exported_fact_for(
+    exported: bool | ExportMatch, *, producer: str | None
+) -> Fact[bool]:
+    """(c) from an export lookup's answer.
+
+    An :class:`ExportMatch` is the tiered answer every producer now computes
+    through :func:`~abicheck.model.export_index.match_export`: only
+    ``DYNAMIC`` -- the ``exports`` join's own rule -- is ``PRESENT(True)``,
+    ``ABSENT`` is ``PRESENT(False)``, and every weaker tier (``.symtab``-only,
+    bare-name alias, demangled-name match) is ``PARTIAL(True)`` carrying a
+    named diagnostic. Truthiness is unchanged -- each weaker tier was already
+    read as exported -- but the fact can no longer claim what the join
+    denies (ADR-063, 2026-09-24 note). A bare ``bool`` is kept for a caller
+    that has no symbol table to tier against (an export-table-synthesized
+    entry is ``DYNAMIC`` by construction).
+    """
+    if isinstance(exported, ExportMatch):
+        if exported is ExportMatch.DYNAMIC:
+            return Fact.present(True, producer=producer)
+        if exported is ExportMatch.ABSENT:
+            return Fact.present(False, producer=producer)
+        return Fact.partial(True, export_match_diagnostic(exported), producer=producer)
+    return Fact.present(exported, producer=producer)
+
+
 def header_ast_surface_facts(
     *,
-    exported: bool | None,
+    exported: bool | ExportMatch | None,
     judged_public: bool = False,
     producer: str | None = None,
 ) -> dict[str, Any]:
@@ -78,6 +106,15 @@ def header_ast_surface_facts(
     Deliberately ``PARTIAL``: it is a judgement the producer derived from
     its own attribute evidence, not a public-header set it was handed.
     """
+    # (b) keeps reading any non-absent tier as export evidence, exactly as
+    # before the tiers were explicit: narrowing it to `DYNAMIC` would change
+    # which declarations `has_observed_contract_evidence` protects, i.e. move
+    # findings, and that is a separate decision from making (c) honest.
+    exported_any: bool | None = (
+        exported is not ExportMatch.ABSENT
+        if isinstance(exported, ExportMatch)
+        else exported
+    )
     return {
         "declared_in_headers_fact": Fact.present(True, producer=producer),
         # A confirmed export is positive evidence of contract membership
@@ -88,7 +125,7 @@ def header_ast_surface_facts(
         # scope selection.
         "in_public_contract_fact": (
             Fact.present(True, producer=producer)
-            if exported
+            if exported_any
             else Fact.partial(
                 True,
                 "backend resolved visibility to public without export evidence",
@@ -103,13 +140,13 @@ def header_ast_surface_facts(
         "binary_exported_fact": (
             Fact.not_collected("no binary in this dump", producer=producer)
             if exported is None
-            else Fact.present(exported, producer=producer)
+            else binary_exported_fact_for(exported, producer=producer)
         ),
     }
 
 
 def debug_info_surface_facts(
-    *, exported: bool, producer: str | None = "dwarf"
+    *, exported: bool | ExportMatch, producer: str | None = "dwarf"
 ) -> dict[str, Any]:
     """Facts for a declaration recovered from debug info (DWARF/BTF/CTF).
 
@@ -134,13 +171,17 @@ def debug_info_surface_facts(
         ),
         "in_public_contract_fact": (
             Fact.present(True, producer=producer)
-            if exported
+            if (
+                exported is not ExportMatch.ABSENT
+                if isinstance(exported, ExportMatch)
+                else exported
+            )
             else Fact.not_collected(
                 "no public-header set declared and no export evidence",
                 producer=producer,
             )
         ),
-        "binary_exported_fact": Fact.present(exported, producer=producer),
+        "binary_exported_fact": binary_exported_fact_for(exported, producer=producer),
     }
 
 

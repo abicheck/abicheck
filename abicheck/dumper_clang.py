@@ -1478,11 +1478,12 @@ class _ClangAstParser:
                     # fact, the header declaration another. ``None`` for a
                     # header-only dump -- no export table was consulted.
                     **header_ast_surface_facts(
-                        exported=(
-                            None
-                            if self._no_binary_evidence
-                            else self._visibility(mangled, name)
-                            in (Visibility.PUBLIC, Visibility.ELF_ONLY)
+                        exported=_clang_context.export_match(
+                            self._exported_dynamic,
+                            self._exported_static,
+                            mangled,
+                            name,
+                            self._no_binary_evidence,
                         ),
                         producer="clang",
                     ),
