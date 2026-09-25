@@ -191,8 +191,18 @@ one repeat per variant, `main` at `87731bc` vs this phase:
 - PDB/BTF/CTF function/variable identity stays `unresolved` (ADR-063 Phase 6):
   no linker name reaches those records here.
 - A castxml-only constructor/destructor (synthetic placeholder, no mangling)
-  is `unresolved` and does not join clang's mangled node for the same
-  constructor; only a hybrid dump, which reconciles the two, joins them.
+  was `unresolved` and did not join clang's mangled node. **Closed
+  ([#1370](https://github.com/abicheck/abicheck/pull/1370)):** castxml 0.7.0
+  records no `mangled` attribute on `Constructor`/`Destructor` elements, but
+  the export table does. `model/special_member_identity.py` pairs each
+  placeholder one-to-one with an exported Itanium variant family (exact owner;
+  for a constructor, the demangled parameter list after normalization and
+  typedef lookup) and keys the node on the complete-object `C1`/`D1`
+  spelling clang reports, with the observed `C2`/`D0`/`D2` as aliases the
+  exports join matches as one entity. Still `unresolved` by design: inline or
+  unexported members, templated owners, overloads indistinguishable after
+  namespace-leaf reduction, typedefs reachable only through using-declarations
+  or base classes, and constructors when no demangler is available.
 - castxml drops an inline-namespace segment (`ns::S` vs clang `ns::v1::S`);
   per G15 the two stay separate without further evidence.
 - Kythe/CodeQL-ingested nodes keep their VName-signature ids.
@@ -311,29 +321,85 @@ Join cost and states on the stored snapshots (old / new):
 
 ### Remaining documented gaps
 
-- `dumper_layout_backfill.backfill_dwarf_layout` (clang backend, dump time)
-  keeps its own bare-name/suffix candidate lookup with field-name
-  corroboration. It is an extraction transform that fills layout, not a
-  per-query reader; moving it onto the qualified-name join would change
-  which records get backfilled, so it needs its own measured change.
-- `binary_exported_fact` can be true where the export join is `unmatched`:
-  the castxml/clang producers also count a `.symtab`-only (static) symbol,
-  and `dwarf_snapshot._is_exported` has a demangled-name tier. The join reads
-  only the dynamic export tables. No contradiction appears on the tested
-  fixtures; making the fact a projection of the join is left open.
-- `diff_helpers.record_canonical_names` still bridges a DWARF-qualified and
-  a header-bare *finding symbol* by bare name for deduplication. That is
-  finding identity, not an entity join.
-- x86 PE `stdcall`/`fastcall` decoration (`_foo@8`) has no alias record, so
-  such an export stays `unmatched` against `foo`.
+Status after the gap-closing round (2026-09-25). Each gap got its own PR;
+"closed" means a PR with the fix and a bug-class test, "kept" means the reason
+below was checked and recorded.
+
+- **Backfill onto the debug-type join — closed
+  ([#1380](https://github.com/abicheck/abicheck/pull/1380)).**
+  `backfill_dwarf_layout` now pairs records under the join's own rule
+  (qualified spelling, no layout contradiction, mutually unique), shared from
+  `model/debug_type_match.py`; the bare-name/suffix matcher is deleted.
+  Measured on the clang backend with `-g`: 142 gcc-built catalog dumps
+  168 -> 215 records backfilled, yaml-cpp 0.8.0 (git tag 0.8.0, CMake Debug
+  `-g -O0`) 46 -> 60, no record lost its backfill. Every gained record has no
+  data members, which the old field-name corroboration refused and reported as
+  a mismatch. Records nested in class templates stay unmatched (clang's
+  pattern scope has no template arguments, DWARF's instantiation scope does).
+- **`binary_exported_fact` vs the export join — closed
+  ([#1368](https://github.com/abicheck/abicheck/pull/1368)).** Decision in an
+  ADR-063 dated note: the fact stays a separate observation, but every
+  producer (castxml, clang, DWARF) classifies through
+  `model.export_index.match_export`. Only `DYNAMIC`, the join's own rule, is
+  `PRESENT(True)`; `.symtab`-only, bare-name and demangled-only hits are
+  `PARTIAL(True)` with an `export-match:<tier>` diagnostic
+  (`surface_facts.binary_export_match`), so they keep counting as exported
+  and no finding moves. No schema change. Whether the weaker tiers should stop
+  counting as exported is a separate policy question. The castxml
+  constructor/destructor placeholders #1370 resolves stay `NOT_COLLECTED` for
+  the fact while the join now matches them: an unknown, not a contradiction.
+- **Findings-dedup name bridges — kept, both.**
+  `diff_helpers.record_canonical_names` cannot make a false bridge: a header
+  finding carries `Change.qualified_name` from its matched `RecordType` pair,
+  which outranks the name table, and a type unqualified on both sides has a
+  global competitor on each side, so the table never registers it (checked
+  over an exhaustive 4,096-case two-snapshot enumeration; forcing the table
+  empty changed no test). `debug_type_join` would add no identity here and
+  would lose dedup where header and binary layout disagree. The table is
+  effectively inert and a candidate for a separate cleanup.
+  `buildsource/source_link.py`'s L4 matcher joins source-replay declarations,
+  a different left side from the export join, and needs constructor/destructor
+  clone folding, synthesized-symbol attribution and a demangled rematch that
+  the export join deliberately refuses.
+- **x86 PE decoration — closed
+  ([#1367](https://github.com/abicheck/abicheck/pull/1367)).**
+  `graph_entity_identity.pe_c_decoration_base` relates `_foo@N`, `@foo@N`,
+  `foo@@N` and `_foo` to `foo` on `IMAGE_FILE_MACHINE_I386` only, never on a
+  C++-mangled name or any other machine; the join applies it like the Mach-O
+  shift (refused when another declaration owns the spelling, a non-one-to-one
+  collapse stays `ambiguous`). `@N` is checked for shape only, not against
+  parameter sizes, which L2 does not carry reliably. MinGW i386 `__Z` exports
+  are not undecorated.
 - PDB/BTF/CTF function/variable identity stays `unresolved` (ADR-063
   Phase 6), so those declarations join an export only through their recorded
   spelling. Their debug shapes do not observe ODR conflicts.
-- `contract_evidence_collect.py`'s replay type graph keeps its own
-  `decl:`/`record:` node keys (persisted in the compare report's contract
-  context); unifying them with the I1 ids is a report-schema change.
-- The L4 `SOURCE_DECL_MAPS_TO_SYMBOL` link (`buildsource/source_link.py`)
-  keeps its own matcher; it joins L4 source entities, not L2 declarations.
+- **Replay type graph node keys — closed
+  ([#1369](https://github.com/abicheck/abicheck/pull/1369)).** The
+  `compare --contract` replay graph keys every declaration and type by its I1
+  id, with `name:`/`alias:` spelling tiers owned by
+  `policy/contract_graph_encoding.py` (report schema 5.6, `contract_evidence`
+  schema 2). A stored schema-1 context is read under its own encoding and
+  never remapped, since a `decl:` key does not say which entity it merged;
+  replaying a stored pre-change report reproduces its decisions. Cost on the
+  FP corpus: about 2x graph nodes/edges, +7.5% persisted context bytes, no
+  decision changed.
+
+### Join counts after the round (oneDAL)
+
+Same operands and invocation as above, dumped with all five gap PRs merged on
+`main` at 42cb529 (castxml backend):
+
+| Join | main (old / new) | after the round (old / new) |
+|---|---|---|
+| `exports`, declarations matched / unmatched | 2,494 / 11,687 · 2,495 / 11,687 | 3,276 / 10,905 · 3,281 / 10,901 |
+| `exports`, exports matched / unmatched | 2,494 / 10,858 · 2,495 / 10,864 | 3,794 / 9,558 · 3,799 / 9,560 |
+| `debug_type_of` | 1,618 `unknown` | 1,618 `unknown` |
+| `binary_exported_fact` `PRESENT:True` / `PRESENT:False` / `NOT_COLLECTED` | 2,494 / 7,422 / 4,265 | unchanged |
+
+The export-join gain is the castxml constructor/destructor families #1370
+resolves (782 declarations, 1,300 exports on the old side). The PE, fact and
+replay changes cannot move ELF counts, and the backfill does not run on the
+castxml backend.
 
 ## Phase 3 — landed
 
