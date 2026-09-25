@@ -78,7 +78,7 @@ def _make_snapshot(
 class TestLargeComparisonBenchmark:
     """Generate two AbiSnapshots with 1000 functions each and time compare()."""
 
-    def test_compare_1000_functions_under_5_seconds(self) -> None:
+    def test_compare_1000_functions_under_3_seconds(self) -> None:
         # Old: functions 0..999
         old = _make_snapshot("1.0", num_funcs=1000)
 
@@ -96,7 +96,9 @@ class TestLargeComparisonBenchmark:
         result = compare(old, new)
         elapsed = time.monotonic() - start
 
-        assert elapsed < 5.0, f"compare() took {elapsed:.2f}s, expected < 5s"
+        # ~0.5s locally (2026-09, 4 CPUs); 3s keeps ~6x headroom for a slow
+        # shared runner while catching a real multi-x regression.
+        assert elapsed < 3.0, f"compare() took {elapsed:.2f}s, expected < 3s"
         assert result.verdict != Verdict.NO_CHANGE, "Expected changes to be detected"
         assert len(result.changes) > 0
 
@@ -171,7 +173,7 @@ class TestReporterScaling:
         md = to_markdown(diff)
         elapsed = time.monotonic() - start
 
-        assert elapsed < 2.0, f"to_markdown took {elapsed:.2f}s, expected < 2s"
+        assert elapsed < 0.75, f"to_markdown took {elapsed:.2f}s, expected < 0.75s"
         assert len(md) > 0
 
     def test_to_json_scaling(self) -> None:
@@ -180,7 +182,7 @@ class TestReporterScaling:
         j = to_json(diff)
         elapsed = time.monotonic() - start
 
-        assert elapsed < 2.0, f"to_json took {elapsed:.2f}s, expected < 2s"
+        assert elapsed < 0.75, f"to_json took {elapsed:.2f}s, expected < 0.75s"
         assert len(j) > 0
 
     def test_to_html_scaling(self) -> None:
@@ -191,7 +193,9 @@ class TestReporterScaling:
         html = generate_html_report(diff, lib_name="libperf.so")
         elapsed = time.monotonic() - start
 
-        assert elapsed < 2.0, f"generate_html_report took {elapsed:.2f}s, expected < 2s"
+        assert elapsed < 0.75, (
+            f"generate_html_report took {elapsed:.2f}s, expected < 0.75s"
+        )
         assert len(html) > 0
 
     def test_to_sarif_scaling(self) -> None:
@@ -200,7 +204,7 @@ class TestReporterScaling:
         sarif = to_sarif_str(diff)
         elapsed = time.monotonic() - start
 
-        assert elapsed < 2.0, f"to_sarif_str took {elapsed:.2f}s, expected < 2s"
+        assert elapsed < 0.75, f"to_sarif_str took {elapsed:.2f}s, expected < 0.75s"
         assert len(sarif) > 0
 
 
@@ -258,8 +262,9 @@ class TestSuppressionAuditScaling:
         audit = supp.audit(changes)
         elapsed = time.monotonic() - start
 
-        # Generous bound for shared CI runners (~0.1s locally for 40 rules x 2000).
-        assert elapsed < 20.0, f"audit took {elapsed:.2f}s, expected < 20s"
+        # ~0.1s locally for 40 rules x 2000 (2026-09); 2s leaves ~20x headroom
+        # for shared CI runners.
+        assert elapsed < 2.0, f"audit took {elapsed:.2f}s, expected < 2s"
         assert audit.total_rules == 40
         # The workload must actually match (else the bookkeeping/high_risk paths
         # the gate is meant to exercise stay dormant — see PR #336 review).
@@ -404,8 +409,9 @@ class TestTypeChurnScaling:
         result = compare(old, new)
         elapsed = time.monotonic() - start
 
-        # ~3.5s locally; allow a wide margin for slow shared CI runners.
-        assert elapsed < 30.0, f"type-churn compare took {elapsed:.2f}s, expected < 30s"
+        # ~0.6s locally (2026-09; was ~3.5s before the compare perf series);
+        # 6s keeps a wide margin for slow shared CI runners.
+        assert elapsed < 6.0, f"type-churn compare took {elapsed:.2f}s, expected < 6s"
         assert result.verdict == Verdict.BREAKING
         assert len(result.changes) > 0
 
