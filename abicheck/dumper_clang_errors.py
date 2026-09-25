@@ -668,7 +668,6 @@ def _parse_clang_ast_result(
             f"clang produced no AST for the header(s) (exit {result.returncode}): "
             f"{result.stderr[:1000].strip()}"
         )
-    report_ast_size(ast_size)
     # A pathological header's AST can be hundreds of MB to multiple GB, so
     # loading and walking it costs real time on its own, on top of the
     # subprocess wall-clock run_bounded already bounded. Re-check here (before
@@ -682,6 +681,7 @@ def _parse_clang_ast_result(
         if not dpcpp_capable
         else nullcontext(CompactedAst(ast_path, None))
     ) as doc:
+        report_ast_size(doc.path.stat().st_size)  # what warm reads, too
         if dpcpp_capable:
             selected = decode_and_select_frontend_context_from_path(
                 ast_path, result.stderr or "", frontend_context
