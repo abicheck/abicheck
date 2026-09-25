@@ -82,6 +82,28 @@ unknown reachability](../use/suppressions.md#proven-vs-unknown-reachability)
 for the rule syntax and the `suppression_reachability_unknown` diagnostic it
 produces when coverage isn't good enough to prove a match.
 
+## Typed absence across every relationship
+
+The same rule applies beyond the L5 graph. Every relationship abicheck
+relates evidence through answers one of three things for a given subject:
+**present**, **proven absent**, or **unknown**
+(`compare/edge_query.py`, evidence-entity-model invariant I4). "Proven
+absent" needs the producer of that relationship to have covered the scope
+it was asked about:
+
+| Relationship | Absence is proven when | Otherwise unknown, for example |
+|---|---|---|
+| `exports` (a declaration and the export table) | every export table the snapshot owes was read | no table captured; a platform block that was never parsed |
+| `exports` (an export and the declarations) | the library's own headers were parsed | a binary-only or DWARF-only dump; a toolchain export whose system headers were filtered out |
+| `debug_type_of` (a header type and the debug info) | the binary carries debug info | a stripped binary |
+| `declares` / `references` | the header AST ran | no header AST; a type spelling that names several types |
+| L5 source-graph edges | the pass covered the scope (see above) | a narrowed, degraded, or header-only body-blind pass |
+
+The compare report states this per side in its **Relationship coverage**
+section (JSON: `edge_coverage`). It lists only the relationships whose
+absence is unknown, with the producer status behind each, and says so
+explicitly when every producer covered its scope.
+
 ## Migration: header-graph is now default-on
 
 Before G29 Phase A, the L2 header-only graph (and its

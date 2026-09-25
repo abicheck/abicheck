@@ -714,7 +714,11 @@ def _enp_snapshot(state: str) -> AbiSnapshot:
         version="1.0",
         from_headers=True,
         functions=functions,
-        elf=ElfMetadata(symbols=[ElfSymbol(name=n) for n in exported]),
+        # A parsed table (``machine`` set): CLEAN's empty one is read, not
+        # an unparsed default block (I4).
+        elf=ElfMetadata(
+            symbols=[ElfSymbol(name=n) for n in exported], machine="EM_X86_64"
+        ),
     )
 
 
@@ -807,7 +811,11 @@ def _pne_snapshot(state: str) -> AbiSnapshot:
         version="1.0",
         from_headers=True,
         functions=functions,
-        elf=ElfMetadata(symbols=[ElfSymbol(name=n) for n in exported]),
+        # A parsed table (``machine`` set): CLEAN's empty one is read, not
+        # an unparsed default block (I4).
+        elf=ElfMetadata(
+            symbols=[ElfSymbol(name=n) for n in exported], machine="EM_X86_64"
+        ),
     )
 
 
@@ -878,7 +886,11 @@ def _rtti_snapshot(state: str) -> AbiSnapshot:
         version="1.0",
         from_headers=True,
         types=types,
-        elf=ElfMetadata(symbols=[ElfSymbol(name=n) for n in exported]),
+        # A parsed table (``machine`` set): CLEAN's empty one is read, not
+        # an unparsed default block (I4).
+        elf=ElfMetadata(
+            symbols=[ElfSymbol(name=n) for n in exported], machine="EM_X86_64"
+        ),
     )
 
 

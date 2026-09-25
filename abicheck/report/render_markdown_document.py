@@ -106,9 +106,14 @@ from .disposition_audit import (
     render_disposition_audit_section,
 )
 from .document import ReportDocument
+from .edge_coverage_section import (
+    compute_edge_coverage_section,
+    edge_coverage_section_from_mapping,
+)
 from .envelope import ReportEnvelope, resolved_document
 from .finding import build_report_findings
 from .pattern_modulations_markdown import render_pattern_modulations_from_mapping
+from .render_edge_coverage import render_edge_coverage_markdown
 from .render_markdown import (
     ConfidenceSection,
     EnvironmentDriftEntry,
@@ -482,6 +487,7 @@ def build_markdown_document(
         "headline": asdict(headline_table),
         "rtti_note": _opt_asdict(rm.compute_rtti_note(breaking)),
         "confidence": _opt_asdict(rm.compute_confidence_section(result)),
+        "edge_coverage": _opt_asdict(compute_edge_coverage_section(result)),
         "contract_conflicts": _opt_asdict(
             rm.compute_contract_conflicts_section(result)
         ),
@@ -678,6 +684,9 @@ def render_markdown_document(doc: ReportDocument) -> str:
     )
     lines += render_confidence_section(
         None if d["confidence"] is None else ConfidenceSection(**d["confidence"])
+    )
+    lines += render_edge_coverage_markdown(
+        edge_coverage_section_from_mapping(d.get("edge_coverage"))
     )
     lines += render_contract_conflicts_section(
         _contract_conflicts_section_from_mapping(d.get("contract_conflicts"))

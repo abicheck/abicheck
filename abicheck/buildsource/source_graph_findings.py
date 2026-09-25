@@ -33,6 +33,7 @@ override an artifact-proven break.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from abicheck.model.source_graph_query import (
@@ -43,12 +44,16 @@ from abicheck.model.source_graph_query import (
     is_public_dependency_node,
 )
 
+from ..compare.edge_query import source_graph_covers
 from ..model.graph_facts import GraphEdge
 from ..model.source_graph import EVIDENCE_TIER_L5, SourceGraphSummary
-from .header_graph import HEADER_INCLUDE_GRAPH_PASS
-from .header_graph_ast_projection import (
-    HEADER_CALL_GRAPH_PASS,
-    HEADER_TYPE_GRAPH_PASS,
+from ..model.source_graph_coverage import (
+    CALL_GRAPH_PASS,
+    HEADER_FULL_VISIBILITY_KINDS,
+    HEADER_PASS_ALIAS,
+    PASS_EDGE_KINDS,
+    TYPE_GRAPH_PASS,
+    trusted_kinds,
 )
 from .source_graph_compare import _kind_map, _label_map
 
@@ -299,7 +304,7 @@ def _format_dependency_path(graph: SourceGraphSummary, path: list[GraphEdge]) ->
 #: still leak back in as "common" under a second, unmarked ``header_type_graph``
 #: entry for the very same kind, since that entry's own narrowed/degraded
 #: flags are independently (and here, vacuously) false. Instead,
-#: ``_pass_trusted_kinds`` resolves each pass name's header-only counterpart
+#: ``trusted_kinds`` resolves each pass name's header-only counterpart
 #: *within the same iteration*, capped to the structural kinds a header-only
 #: pass genuinely has project-wide visibility of
 #: (:data:`_HEADER_FULL_VISIBILITY_KINDS`) — never the whole family, so a
@@ -307,15 +312,8 @@ def _format_dependency_path(graph: SourceGraphSummary, path: list[GraphEdge]) ->
 #: build-integrated one for a body-dependent kind, on either side of the
 #: comparison, regardless of the *other* side's shape.
 _DEPENDENCY_EDGE_FAMILIES: dict[str, frozenset[str]] = {
-    "call_graph": frozenset({"DECL_CALLS_DECL"}),
-    "type_graph": frozenset(
-        {
-            "DECL_REFERENCES_DECL",
-            "DECL_HAS_TYPE",
-            "TYPE_HAS_FIELD_TYPE",
-            "TYPE_INHERITS",
-        }
-    ),
+    pass_name: PASS_EDGE_KINDS[pass_name]
+    for pass_name in (CALL_GRAPH_PASS, TYPE_GRAPH_PASS)
 }
 
 
@@ -332,11 +330,7 @@ _DEPENDENCY_EDGE_FAMILIES: dict[str, frozenset[str]] = {
 #: *both* names for the *same* pass-name iteration, so a header-only graph's
 #: own confirmed-pass/narrowed/degraded markers are honored without ever
 #: double-counting a kind under two separate loop iterations (Codex review).
-_HEADER_PASS_ALIAS: dict[str, str] = {
-    "call_graph": HEADER_CALL_GRAPH_PASS,
-    "type_graph": HEADER_TYPE_GRAPH_PASS,
-    "include_graph": HEADER_INCLUDE_GRAPH_PASS,
-}
+_HEADER_PASS_ALIAS: Mapping[str, str] = HEADER_PASS_ALIAS
 
 
 def _pass_ran(graph: SourceGraphSummary, pass_name: str) -> bool:
@@ -390,38 +384,7 @@ def _pass_scope(graph: SourceGraphSummary, pass_name: str) -> frozenset[str]:
 #: from header-only to build-integrated. The three structural kinds have no
 #: such gap: a base class, a field type, and a parameter/return type are
 #: fully visible in headers regardless of where the function body lives.
-_HEADER_FULL_VISIBILITY_KINDS: frozenset[str] = frozenset(
-    {"DECL_HAS_TYPE", "TYPE_HAS_FIELD_TYPE", "TYPE_INHERITS"}
-)
-
-
-def _pass_trusted_kinds(
-    graph: SourceGraphSummary, pass_name: str, family: frozenset[str]
-) -> frozenset[str]:
-    """Which kinds in *family* a confirmed *pass_name* genuinely vouches for.
-
-    A build-integrated confirmation (``graph.extractor_passes[pass_name]``)
-    vouches for the *whole* family — a real per-TU AST replay sees function
-    bodies too, so its "zero" is authoritative for every kind in the family,
-    exactly as before this addendum. A header-only confirmation
-    (``graph.extractor_passes[header_name]``) only vouches for the structural
-    subset it has true project-wide visibility of
-    (:data:`_HEADER_FULL_VISIBILITY_KINDS`) — regardless of what the *other*
-    side of the comparison is (build-integrated, another header-only graph, or
-    unmarked): a header-only pass's blindness to out-of-line bodies is a
-    property of *that side alone*, not something the other side's shape can
-    make trustworthy. This deliberately loses a little recall for a
-    header-only-vs-header-only comparison's body-dependent kinds (which *are*
-    symmetric, and so arguably safe to widen too) in exchange for never
-    needing to track which specific shape the *other* side is — the simpler,
-    strictly-safe rule a Codex review asked for.
-    """
-    if graph.extractor_passes.get(pass_name, False):
-        return family
-    header_name = _HEADER_PASS_ALIAS.get(pass_name, "")
-    if header_name and graph.extractor_passes.get(header_name, False):
-        return family & _HEADER_FULL_VISIBILITY_KINDS
-    return frozenset()
+_HEADER_FULL_VISIBILITY_KINDS: frozenset[str] = HEADER_FULL_VISIBILITY_KINDS
 
 
 def _dependency_kinds_covered(
@@ -753,7 +716,7 @@ def _common_dependency_edge_kinds(
     """
     common: set[str] = set()
     for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items():
-        # ``_pass_trusted_kinds`` resolves *pass_name*'s header-only-graph
+        # ``trusted_kinds`` resolves *pass_name*'s header-only-graph
         # counterpart (``header_call_graph``/``header_type_graph``, ADR-041
         # header-only-graph addendum) too, but caps what a header-only
         # confirmation vouches for to its true structural visibility —
@@ -764,8 +727,8 @@ def _common_dependency_edge_kinds(
         # ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` for a pre-existing,
         # invisible-to-headers call/reference the moment a baseline switched
         # from header-only to build-integrated collection).
-        old_trusted = _pass_trusted_kinds(old, pass_name, family)
-        new_trusted = _pass_trusted_kinds(new, pass_name, family)
+        old_trusted = trusted_kinds(old, pass_name, family)
+        new_trusted = trusted_kinds(new, pass_name, family)
         old_narrowed = _pass_narrowed(old, pass_name)
         new_narrowed = _pass_narrowed(new, pass_name)
         old_scope = _pass_scope(old, pass_name)
@@ -1133,6 +1096,9 @@ def _generated_public_closure_findings(
     return findings
 
 
+_CALLS = "DECL_CALLS_DECL"
+
+
 def _call_reachability_findings(
     old: SourceGraphSummary,
     new: SourceGraphSummary,
@@ -1150,6 +1116,10 @@ def _call_reachability_findings(
     from ..model.change_catalog.kinds import ChangeKind
 
     findings: list[Change] = []
+    # A callee missing from one side is a negative claim about that side's
+    # call graph (I4): only a pass that covered the whole project proves it.
+    if not (source_graph_covers(old, _CALLS) and source_graph_covers(new, _CALLS)):
+        return findings
     # Needs Clang call edges. Quality signal only — reported for entries
     # present in both graphs whose approximate call-reachable set differs.
     old_reach = _public_entry_call_reachability(old)

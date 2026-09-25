@@ -360,6 +360,7 @@ _FIELD_POLICY: dict[str, str] = {
     "evidence_metrics": "drop",
     "comparability_assurance": "drop",
     "contract_context": "drop",
+    "edge_coverage": "drop",
     "contract_conflicts": "drop",
     "use_case_impact": "drop",
     "evaluation_config": "drop",

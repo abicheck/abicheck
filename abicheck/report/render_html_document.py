@@ -35,6 +35,8 @@ from typing import Any
 from ..demangle import prewarm_demangle_from_json_value
 from ..html_template import _VERDICT_STYLE, render_document, render_footer
 from .document import ReportDocument
+from .edge_coverage_section import edge_coverage_section_from_mapping
+from .render_edge_coverage import render_edge_coverage_html
 from .render_html import (
     ChangeRow,
     ConfidenceData,
@@ -259,6 +261,9 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
     nav = _nav_bar_from_mapping(d["nav_bar"])
     nav_html = render_nav_bar(nav)
     confidence_html = render_confidence(_confidence_from_mapping(d["confidence"]))
+    edge_coverage_html = render_edge_coverage_html(
+        edge_coverage_section_from_mapping(d.get("edge_coverage"))
+    )
     file_metadata_html = render_file_metadata(
         _file_metadata_from_mapping(d["file_metadata"])
     )
@@ -396,6 +401,7 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
 {gate_html}
 {scoped_html}
 {confidence_html}
+{edge_coverage_html}
 {nav_html}
 {summary_html}
 {filter_note}
