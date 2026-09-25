@@ -68,7 +68,9 @@ def test_no_config_means_no_request(tmp_path: Path) -> None:
     assert ownership_request_from_config(None, tmp_path) is None
 
 
-def test_target_roots_are_header_dirs_and_public_header_dirs_only(tmp_path: Path) -> None:
+def test_target_roots_are_header_dirs_and_public_header_dirs_only(
+    tmp_path: Path,
+) -> None:
     hdir = tmp_path / "include"
     hdir.mkdir()
     hfile = hdir / "api.h"

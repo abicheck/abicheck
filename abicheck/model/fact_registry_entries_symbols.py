@@ -513,4 +513,34 @@ SYMBOL_FACTS: list[FactDefinition] = [
             "(c) of the three facts Visibility conflated: the artifact's export table carries a symbol for this entity. Unknown -- not False -- for a header-only dump, which has no export table to have been absent from. See model/surface_facts.py."
         ),
     ),
+    _E(
+        owner="Function",
+        field="ownership",
+        value_type="EntityOwnership",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=False,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "ADR-075 D2: owner/contract/rule id from the declaring file, stamped once by extract.ownership_stamp after the parse (so both header backends, identically) and persisted as model.extraction_scope's interned table. No legacy scalar sibling; unset is unclassified (a pre-v52 snapshot), never a guessed owner. Read only through model.extraction_scope.ownership_of."
+        ),
+    ),
+    _E(
+        owner="Variable",
+        field="ownership",
+        value_type="EntityOwnership",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=False,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "ADR-075 D2: owner/contract/rule id from the declaring file, stamped once by extract.ownership_stamp after the parse (so both header backends, identically) and persisted as model.extraction_scope's interned table. No legacy scalar sibling; unset is unclassified (a pre-v52 snapshot), never a guessed owner. Read only through model.extraction_scope.ownership_of."
+        ),
+    ),
 ]

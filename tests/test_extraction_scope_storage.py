@@ -49,7 +49,9 @@ def _snapshot() -> AbiSnapshot:
             dependencies=(DependencyRoots("fmt", ("third/fmt",)),),
             private_namespaces=("lib::detail",),
         ),
-        diagnostics=("x is declared in a target file but in dependency namespace 'fmt'",),
+        diagnostics=(
+            "x is declared in a target file but in dependency namespace 'fmt'",
+        ),
     )
     return snap
 

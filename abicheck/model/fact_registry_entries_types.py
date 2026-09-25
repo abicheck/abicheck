@@ -435,4 +435,34 @@ TYPE_FACTS: list[FactDefinition] = [
             "says so."
         ),
     ),
+    _E(
+        owner="RecordType",
+        field="ownership",
+        value_type="EntityOwnership",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=False,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "ADR-075 D2: owner/contract/rule id from the declaring file, stamped once by extract.ownership_stamp after the parse (so both header backends, identically) and persisted as model.extraction_scope's interned table. No legacy scalar sibling; unset is unclassified (a pre-v52 snapshot), never a guessed owner. Read only through model.extraction_scope.ownership_of."
+        ),
+    ),
+    _E(
+        owner="EnumType",
+        field="ownership",
+        value_type="EntityOwnership",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=False,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "ADR-075 D2: owner/contract/rule id from the declaring file, stamped once by extract.ownership_stamp after the parse (so both header backends, identically) and persisted as model.extraction_scope's interned table. No legacy scalar sibling; unset is unclassified (a pre-v52 snapshot), never a guessed owner. Read only through model.extraction_scope.ownership_of."
+        ),
+    ),
 ]
