@@ -401,13 +401,18 @@ resolves (782 declarations, 1,300 exports on the old side). The PE, fact and
 replay changes cannot move ELF counts, and the backfill does not run on the
 castxml backend.
 
-Findings on the same operands: `main` reports 2,671 (COMPATIBLE); with the
-five PRs merged, 2,672 (COMPATIBLE_WITH_RISK). The one addition is a
-`public_reachability_changed` risk finding on `BatchBase`, reproduced with
-#1370 alone. **Open follow-up:** its cause (a genuine reachability change
-`main` missed, or a constructor/destructor identity that resolves on one side
-only) is being established on #1370; this entry records the outcome once it
-is known.
+Findings on the same operands: `main` reports 2,671 (COMPATIBLE), and so
+does the round with all five PRs merged. An earlier #1370 head added one
+spurious `public_reachability_changed` on `BatchBase`: 2025.11 began exporting
+the unchanged `BatchBase(ParameterType*)` constructor's `C2`, and because the
+castxml placeholder was resolved from exports alone, its node id flipped from
+`unresolved://` to `decl://…C1` between versions. #1370 now also resolves
+placeholders from the header AST's own `C1`/`D1` manglings
+(`buildsource/ast_special_members.py`), which do not depend on what the binary
+exports, and records the export-only id as an alias; a generated test pins
+that an export-only change never flips an unchanged member's identity.
+Resolving from the AST adds cost: a standalone `join_exports` call on
+oneDAL takes about 0.8 s instead of 0.33 s.
 
 ## Phase 3 — landed
 
