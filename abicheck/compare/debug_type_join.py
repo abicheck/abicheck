@@ -47,7 +47,7 @@ from ..model.debug_type_match import (
     record_candidates,
 )
 from ..model.dwarf_facts import EnumInfo, StructLayout
-from ..model.graph_entity_identity import SnapshotIdentities, snapshot_identities
+from ..model.graph_entity_identity import SnapshotIdentities
 from ..model.graph_join import (
     DEBUG_TYPE_JOIN,
     CrossLayerJoin,
@@ -56,6 +56,7 @@ from ..model.graph_join import (
     debug_type_node_id,
     resolve_join_records,
 )
+from ..model.snapshot_identity_table import identities_for_snapshot
 
 if TYPE_CHECKING:
     from ..model.dwarf_facts import DwarfMetadata
@@ -180,7 +181,7 @@ def join_debug_types(
 
     A pure function of the snapshot, independent of the order of its
     records."""
-    ids = identities if identities is not None else snapshot_identities(snap)
+    ids = identities if identities is not None else identities_for_snapshot(snap)
     records: dict[str, list[tuple[str, RecordType]]] = {}
     enums: dict[str, list[tuple[str, EnumType]]] = {}
     left_ids: list[str] = []

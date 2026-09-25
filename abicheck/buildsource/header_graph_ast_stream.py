@@ -184,6 +184,7 @@ from pathlib import Path
 from typing import Any
 
 from ..storage.acyclic_json import loads_acyclic
+from .ast_special_members import collect_special_member_names
 from .call_graph import (
     _dedupe_edges as _dedupe_call_edges,
     _fill_callee_files,
@@ -629,7 +630,9 @@ def project_header_graph_ast_file(path: Path) -> HeaderGraphAstProjection:
     member_index: dict[str, dict[str, Any]] = {}
     cur_file = ""
     extents: list[tuple[int, int]] = []
+    special: set[str] = set()
     for element in stream_top_level_decls(path, extents):
+        collect_special_member_names(element, special)
         _index_member_decls(element, member_index)
         cur_file = _index_declared_entities(element, [], cur_file, idx)
         del element
@@ -670,4 +673,5 @@ def project_header_graph_ast_file(path: Path) -> HeaderGraphAstProjection:
         type_edges=type_edges,
         call_edges=_dedupe_call_edges(_fill_callee_files(call_edges, decl_files)),
         entity_files=dict(idx.decl_file) if needs_entity_files else {},
+        special_member_names=frozenset(special),
     )

@@ -85,7 +85,7 @@ __all__ = [
 #: caught by the field lists themselves. ``/2``: ``type_files`` is in
 #: document order; a ``/1`` entry holds it in per-process string-hash order,
 #: which the header graph's node order inherited.
-PROJECTION_CACHE_SCHEMA = "abicheck-header-graph-projection/2"
+PROJECTION_CACHE_SCHEMA = "abicheck-header-graph-projection/3"
 
 _TYPE_EDGE_FIELDS = [f.name for f in fields(TypeEdge)]
 _CALL_EDGE_FIELDS = [f.name for f in fields(CallEdge)]
@@ -110,6 +110,7 @@ def encode_projection(projection: HeaderGraphAstProjection) -> str:
             "call_edge_fields": _CALL_EDGE_FIELDS,
             "type_files": projection.type_files,
             "entity_files": projection.entity_files,
+            "special_member_names": sorted(projection.special_member_names),
             "type_edges": [
                 [getattr(e, n) for n in _TYPE_EDGE_FIELDS]
                 for e in projection.type_edges
@@ -147,6 +148,7 @@ def decode_projection(blob: str) -> HeaderGraphAstProjection | None:
             entity_files=dict(doc["entity_files"]),
             type_edges=[TypeEdge(*row) for row in doc["type_edges"]],
             call_edges=[CallEdge(*row) for row in doc["call_edges"]],
+            special_member_names=frozenset(doc["special_member_names"]),
         )
     except (KeyError, TypeError, ValueError):
         return None

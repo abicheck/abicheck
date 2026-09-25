@@ -2518,7 +2518,10 @@
               "resolved": {}
             }
           ],
-          "schema_version": 2
+          "schema_version": 2,
+          "identity_aliases": {
+            "decl://_ZN6BufferC2Ev": "decl://_ZN6BufferC1Ev"
+          }
         }
       },
       "section_kind": "graph",

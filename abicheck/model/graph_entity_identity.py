@@ -49,6 +49,15 @@ can never collide with a resolved node, and two different pieces of evidence
 never share one. :class:`UnresolvedOccurrences` separates repeats of
 *identical* evidence within one graph build.
 
+**Constructors and destructors.** castxml records no mangling for either,
+so a castxml dump carries the placeholder above. When the snapshot's export
+table pairs a placeholder one-to-one with an exported Itanium variant family,
+the placeholder resolves to the complete-object spelling (``C1``/``D1`` --
+what clang reports) and the family's other observed variants (``C2``,
+``D0``/``D2``) become its aliases; a real ctor/dtor linker name gains the same
+aliases. The rule and its refusals live in :mod:`.special_member_identity`;
+a spelling another declaration already owns is refused here.
+
 **Aliases.** A second spelling of a proven-same entity (today: the Mach-O
 linker decoration of an Itanium or C-linkage name) is returned in
 :attr:`GraphEntityIdentity.aliases`; producers record it through
@@ -77,6 +86,10 @@ from .graph_identity import (
 )
 from .identity import _packed
 from .mangled_name import strip_macho_itanium_decoration
+from .special_member_identity import (
+    resolve_special_member_linker_names,
+    special_member_variant_aliases,
+)
 
 if TYPE_CHECKING:
     from .declarations import Function, Variable
@@ -502,14 +515,67 @@ def _without_aliases_in(
     return GraphEntityIdentity(ident.node_id, ident.state, kept)
 
 
-def snapshot_identities(snap: SnapshotLike) -> SnapshotIdentities:
+def _with_variant_aliases(
+    ident: GraphEntityIdentity, linker_names: Collection[str]
+) -> GraphEntityIdentity:
+    if not linker_names:
+        return ident
+    extra = tuple(_decl_node_id(n) for n in linker_names)
+    kept = tuple(a for a in extra if a != ident.node_id and a not in ident.aliases)
+    if not kept:
+        return ident
+    return GraphEntityIdentity(ident.node_id, ident.state, (*ident.aliases, *kept))
+
+
+def _function_identities(
+    snap: SnapshotLike, exports: frozenset[str]
+) -> list[GraphEntityIdentity]:
+    """Each function's identity, with the ctor/dtor variant rule
+    (:mod:`.special_member_identity`) applied: a castxml placeholder the
+    export table pairs one-to-one resolves to its complete-object spelling,
+    and a real ctor/dtor linker name gains its observed sibling variants as
+    aliases. A resolution whose spelling another declaration already owns
+    is refused -- the placeholder stays ``unresolved``."""
+    idents = [identity_for_function(f) for f in snap.functions]
+    if not exports:
+        return idents
+    resolved = resolve_special_member_linker_names(
+        snap.functions, exports, getattr(snap, "typedefs_qualified", None) or {}
+    )
+    owned = {i.node_id for i in idents if i.resolved}
+    for idx, names in resolved.items():
+        node = _decl_node_id(names.canonical)
+        if node in owned:
+            continue
+        idents[idx] = _with_variant_aliases(
+            GraphEntityIdentity(node, IdentityState.RESOLVED), names.variants
+        )
+    for idx, (fn, ident) in enumerate(zip(snap.functions, idents)):
+        if idx not in resolved and ident.resolved and is_linker_name(fn.mangled):
+            idents[idx] = _with_variant_aliases(
+                ident, special_member_variant_aliases(fn.mangled, exports)
+            )
+    return idents
+
+
+def snapshot_identities(
+    snap: SnapshotLike, *, export_names: Collection[str] = ()
+) -> SnapshotIdentities:
     """Build the table. A record/enum qualified spelling shared by more than
     one declaration (two ODR-distinct occurrences, or a scope-less legacy
     snapshot naming two different types ``Impl``) proves nothing about which
     one a reference means, so each such declaration becomes its own explicit
-    ``unresolved`` node instead of one shared ``type://`` node."""
+    ``unresolved`` node instead of one shared ``type://`` node.
+
+    *export_names* is every spelling the snapshot's export tables carry
+    (``model.export_index.snapshot_export_names``) -- the evidence the
+    ctor/dtor variant rule needs. Every graph producer passes it, so they
+    agree; this leaf module cannot compute it itself without importing
+    ``model.snapshot`` (see :class:`SnapshotLike`)."""
     occ = UnresolvedOccurrences()
-    functions = tuple(occ.allocate(identity_for_function(f)) for f in snap.functions)
+    functions = tuple(
+        occ.allocate(i) for i in _function_identities(snap, frozenset(export_names))
+    )
     variables = tuple(occ.allocate(identity_for_variable(v)) for v in snap.variables)
     # An alias is only a second spelling of *this* entity while no other
     # declaration owns that spelling as its canonical id (Mach-O: `exit`'s
