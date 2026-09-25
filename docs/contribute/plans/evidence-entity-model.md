@@ -401,6 +401,14 @@ resolves (782 declarations, 1,300 exports on the old side). The PE, fact and
 replay changes cannot move ELF counts, and the backfill does not run on the
 castxml backend.
 
+Findings on the same operands: `main` reports 2,671 (COMPATIBLE); with the
+five PRs merged, 2,672 (COMPATIBLE_WITH_RISK). The one addition is a
+`public_reachability_changed` risk finding on `BatchBase`, reproduced with
+#1370 alone. **Open follow-up:** its cause (a genuine reachability change
+`main` missed, or a constructor/destructor identity that resolves on one side
+only) is being established on #1370; this entry records the outcome once it
+is known.
+
 ## Phase 3 — landed
 
 Ownership as graph relations over the Phase 1 keys, on top of the
