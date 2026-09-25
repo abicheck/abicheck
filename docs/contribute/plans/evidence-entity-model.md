@@ -449,7 +449,12 @@ structor variants for the L4 link and is the natural rule to reuse.
 
 Cost: the join takes 0.21–0.22 s and the queries over every declaration and
 export 1.8–1.9 s per side; `edge_coverage_report` (every compare) adds the
-same per side.
+same per side. `scripts/bench_graph_materialization.py --variants graph
+--repeat 1` on this branch (same host class as "Phase 2 — landed", one run,
+so within run-to-run noise): dump 66.3 / 71.1 s at 1,034 / 1,038 MiB parent
+RSS, stored/stored compare 74.9 s at 690 MiB. Both are below Phase 2's
+figures, but the base also moved (#1362's canonicalization speed-up), so no
+Phase 4 delta is attributable beyond the ~2 s per side measured directly.
 
 ### Remaining documented gaps
 
