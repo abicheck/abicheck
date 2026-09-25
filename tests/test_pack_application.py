@@ -1034,6 +1034,7 @@ class TestOnlyAppliedFieldsAreAccepted:
             "require_justification": False,
             "severity_preset": None,
             "pack_paths": (),
+            "headers": (),
         }
         application = resolve_release_pack_application(
             params, typed=set(), project_cfg=None, project_path=None
