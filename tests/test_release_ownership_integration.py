@@ -169,3 +169,21 @@ def test_a_stated_cxx_language_is_the_release_contract(toolchain, tmp_path) -> N
     missing = _release_missing(_compare(root, "old", "new"))
     assert missing and all(s.startswith("_Z") for s in missing), missing
     assert {"_Z4a_fnv", "_Z4b_fnv", "_Z9a_missingv"} <= missing
+
+
+def test_scalar_receipt_records_the_roots_the_run_classified_under(
+    toolchain, tmp_path
+) -> None:
+    """ADR-075 D7 on the single-pair path: both sides are extracted under
+    ``-H include``, so the contract receipt names that root as an explicit
+    CLI input (CodeRabbit review, PR #1377: it was dropped before the
+    resolver and the receipt read "not stated")."""
+    root = _tree(tmp_path, ("liba",), config=False)
+    report = _compare(root, "old/liba.so", "new/liba.so", "--contract", "auto")
+    ctx = report["contract_context"]["evaluation_context"]
+    assert (
+        ctx["field_provenance"]["surface.ownership.header_dirs"]["layer"]
+        == "explicit_cli"
+    )
+    roots = ctx["resolved_config"]["surface"]["ownership"]["target_roots"]
+    assert roots == [str((root / "include").resolve())]

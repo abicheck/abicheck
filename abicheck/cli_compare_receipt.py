@@ -75,16 +75,8 @@ COMPARE_CONFIG_PARAMS: tuple[str, ...] = (
     "require_justification",
     "severity_preset",
     "pack_paths",
-)
-
-#: The four :class:`~abicheck.severity.SeverityConfig` categories, in the
-#: spelling ``compatibility_evaluation_frontend.SEVERITY_CATEGORY_FIELDS``
-#: keys its ``gate.severity.<category>`` provenance entries by.
-_SEVERITY_CATEGORIES = (
-    "abi_breaking",
-    "potential_breaking",
-    "quality_issues",
-    "addition",
+    # ADR-075 D7: the -H roots the snapshots were classified under.
+    "headers",
 )
 
 
@@ -485,6 +477,7 @@ def resolve_release_pack_application_from_ctx(
     policy_option: str | None,
     policy_path: Path | None,
     policy_sha256: str | None,
+    headers: tuple[Path, ...] = (),
 ) -> Any:
     """``resolve_release_pack_application``, but reading "was this typed?"
     (and a best-effort ``--policy-file`` pre-read) off the real Click *ctx*
@@ -534,6 +527,7 @@ def resolve_release_pack_application_from_ctx(
                 "require_justification": require_justification,
                 "severity_preset": severity_preset,
                 "pack_paths": pack_paths,
+                "headers": headers,
             },
             contract_evaluation=contract_evaluation,
             typed=typed,
@@ -637,7 +631,7 @@ def record_resolved_config(
         severity=resolved_cfg.severity,
         severity_provenance={
             category: config.provenance[SEVERITY_CATEGORY_FIELDS[category]]
-            for category in _SEVERITY_CATEGORIES
+            for category in SEVERITY_CATEGORY_FIELDS
         },
         require_complete_analysis=resolved_cfg.require_complete_analysis,
         require_complete_analysis_stated=require_complete_analysis_stated,

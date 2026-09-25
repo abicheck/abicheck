@@ -142,7 +142,15 @@ def resolve_ownership_inputs(
             )
         ]
 
-    header_dirs = tuple(sorted(set(getattr(explicit, "header_dirs", ()) or ())))
+    # A typed request's own `ownership.rules.target_roots` root the target
+    # exactly as `-H` does (`with_target_roots` keeps them), so they share the
+    # explicit-tier field rather than being classified under but unrecorded.
+    header_dirs = tuple(
+        sorted(
+            set(getattr(explicit, "header_dirs", ()) or ())
+            | set(api_rules.target_roots if api_rules is not None else ())
+        )
+    )
     resolved_header_dirs, prov[HEADER_DIRS_FIELD] = resolve_field(
         HEADER_DIRS_FIELD,
         [_candidate(field_candidate, layer, header_dirs, option="-H")]

@@ -22,3 +22,8 @@
   `scope.dependencies` stop being demanded from a binary never meant to
   export them. Release member dumps and the release's acquired public surface
   are classified under the same project rules.
+- **The contract receipt records the roots each side was classified under.**
+  `compare`'s ADR-049 receipt names the `-H` directories of every side it
+  extracted (none when both operands are stored snapshots, which ignore `-H`)
+  and a typed request's own `ownership.rules.target_roots`, under
+  `surface.ownership.header_dirs`.

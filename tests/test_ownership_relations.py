@@ -282,6 +282,24 @@ class TestContractInputsProvenance:
             is SelectorLayer.API_REQUEST
         )
 
+    def test_a_typed_requests_own_target_roots_are_recorded(self) -> None:
+        """``InputSpec.ownership.rules.target_roots`` classify the snapshot
+        (``with_target_roots`` keeps them), so they join the explicit-tier
+        ``header_dirs`` field instead of rooting the target unrecorded."""
+        cfg = resolve_compatibility_evaluation_config(
+            front_end=FrontEnd.API,
+            explicit=ExplicitCompatibilityInputs(
+                header_dirs=("/abs/inc",),
+                ownership=OwnershipRules(target_roots=("sdk/include",)),
+            ),
+        )
+        assert cfg.surface.ownership is not None
+        assert set(cfg.surface.ownership.target_roots) == {"/abs/inc", "sdk/include"}
+        assert (
+            cfg.provenance["surface.ownership.header_dirs"].layer
+            is SelectorLayer.API_REQUEST
+        )
+
     def test_the_receipt_round_trips(self) -> None:
         from abicheck.contract_context_io import (
             resolved_config_from_dict,

@@ -696,6 +696,7 @@ def _embed_inline_source_sides(
 def _resolve_evaluation_config(
     ctx: click.Context,
     *,
+    headers: tuple[Path, ...],
     resolved_cfg: Any,
     project_cfg: Any,
     cfg_path: Path | None,
@@ -747,6 +748,8 @@ def _resolve_evaluation_config(
                 "require_justification": require_justification,
                 "severity_preset": severity_preset,
                 "pack_paths": pack_paths,
+                # The roots each side was classified under (ADR-075 D7).
+                "headers": headers,
             },
             resolved_cfg=resolved_cfg,
             policy=policy,
@@ -1445,6 +1448,7 @@ def run_compare(
             policy_option=policy_selected_by,
             policy_path=policy_selected_path,
             policy_sha256=policy_selected_sha,
+            headers=(*headers, *old_headers_only, *new_headers_only),
         )
 
     # Parsed here, in the preflight, not only at the post-comparison
@@ -1972,6 +1976,13 @@ def run_compare(
 
     evaluation_config, pf, resolved_cfg = _resolve_evaluation_config(
         ctx,
+        # Only a side this run extracts is classified under -H; a stored
+        # snapshot side ignores it (`_warn_ignored_flags`).
+        headers=(
+            *(headers if old_fmt or new_fmt else ()),
+            *(old_headers_only if old_fmt else ()),
+            *(new_headers_only if new_fmt else ()),
+        ),
         resolved_cfg=resolved_cfg,
         project_cfg=project_cfg,
         cfg_path=cfg_path,
