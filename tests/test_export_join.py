@@ -165,9 +165,11 @@ class TestExportJoinStates:
         )
         assert _state(j, "decl://?run@ns@@YAHXZ") is JoinState.MATCHED
 
-    def test_pe_x86_stdcall_decoration_has_no_alias_record(self):
-        # `_foo@8` is not a spelling any declaration records, and no alias
-        # record proves it names `foo`: no join without evidence.
+    def test_pe_decoration_without_a_recorded_machine_does_not_join(self):
+        # With no machine type the x86 decoration alias cannot apply (fail
+        # closed): `_foo@8` is not a spelling any declaration records. The
+        # full machine x convention matrix is in
+        # test_export_join_pe_decoration.py.
         j = _join(
             _snap(
                 [_fn("foo", "foo")],

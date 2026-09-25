@@ -231,15 +231,24 @@ class TestCompareUsesTheJoins:
         # (`impl::use`, `get_anon`) leave the export provider incomplete.
         report = self._compare(dumps, "--contract", "exports")
         providers = report["contract_context"]["contract_evidence"]["providers"]
-        for side in ("old", "new"):
+        from abicheck.model.graph_entity_identity import snapshot_identities
+
+        rooted = {"_ZN3api3runEPNS_3FooE", "_ZN3api6helperEPNS_2v11SE", "cfunc"}
+        for side, dump in (("old", "v1"), ("new", "v2")):
             (entry,) = [
                 p for p in providers if p["record"]["id"] == f"export_table:{side}"
             ]
-            assert entry["declarations"] == [
-                "decl:_ZN3api3runEPNS_3FooE",
-                "decl:_ZN3api6helperEPNS_2v11SE",
-                "decl:cfunc",
-            ]
+            # Roots are recorded as each declaration's Phase 1 (I1) node id,
+            # taken from the snapshot's own identity table.
+            snap = _load(dumps[dump])
+            ids = snapshot_identities(snap)
+            expected = sorted(
+                ident.node_id
+                for fn, ident in zip(snap.functions, ids.functions, strict=True)
+                if fn.mangled in rooted
+            )
+            assert len(expected) == len(rooted)
+            assert entry["declarations"] == expected
             assert entry["record"]["reason_code"] == "unmatched_exports"
 
 

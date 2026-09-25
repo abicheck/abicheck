@@ -758,4 +758,23 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "kind": ("struct", "union"),
         },
     ),
+    BugClass(
+        id="identity.pe_x86_c_decoration_alias",
+        invariant=(
+            "A PE export decorated with a C calling convention (`_foo@N`, "
+            "`@foo@N`, `foo@@N`, `_foo`) joins exactly the declaration "
+            "spelled `foo` -- only on a machine type that decorates that "
+            "convention (i386; AMD64 for vectorcall only), never for a "
+            "C++-mangled name or an unknown machine, never when another "
+            "declaration owns the decorated spelling exactly, and "
+            "`ambiguous` whenever the collapse is not one-to-one."
+        ),
+        fixed_by=(1367,),
+        seed_tests=("tests/test_export_join_pe_decoration.py",),
+        axes={
+            "machine": ("i386", "amd64", "arm64", "unknown"),
+            "convention": ("cdecl", "stdcall", "fastcall", "vectorcall", "none"),
+            "declaration": ("unmangled", "itanium-mangled"),
+        },
+    ),
 )
