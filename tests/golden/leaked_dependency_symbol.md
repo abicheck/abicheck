@@ -38,8 +38,12 @@
 | old | `debug_type_of` (resolved_join) | header_types | 0 | 0 | 0 | debug_section[debug]: not_run (no_debug_info)<br>header_ast[dependency_headers,headers]: partial (dependency_headers_excluded) |
 | old | `exports` (resolved_join) | declarations | 1 | 0 | 0 | export_table[elf]: ran<br>header_ast[dependency_headers,headers]: partial (dependency_headers_excluded) |
 | old | `exports` (resolved_join) | exports | 1 | 0 | 1 | export_table[elf]: ran<br>header_ast[dependency_headers,headers]: partial (dependency_headers_excluded) |
+| old | `in_contract` (derived) | — | — | — | — | ownership_stamp[classified_declarations]: not_run (no_extraction_scope) |
+| old | `owned_by` (derived) | — | — | — | — | ownership_stamp[classified_declarations]: not_run (no_extraction_scope) |
 | new | `debug_type_of` (resolved_join) | debug_types | 0 | 0 | 0 | debug_section[debug]: not_run (no_debug_info)<br>header_ast[dependency_headers,headers]: partial (dependency_headers_excluded) |
 | new | `debug_type_of` (resolved_join) | header_types | 0 | 0 | 0 | debug_section[debug]: not_run (no_debug_info)<br>header_ast[dependency_headers,headers]: partial (dependency_headers_excluded) |
+| new | `in_contract` (derived) | — | — | — | — | ownership_stamp[classified_declarations]: not_run (no_extraction_scope) |
+| new | `owned_by` (derived) | — | — | — | — | ownership_stamp[classified_declarations]: not_run (no_extraction_scope) |
 
 > **Policy**: `strict_abi`
 

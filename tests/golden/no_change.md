@@ -50,12 +50,16 @@
 | old | `declares` (observed) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
 | old | `exports` (resolved_join) | declarations | 0 | 0 | 1 | export_table[export_table]: not_run (no_export_table)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
 | old | `exports` (resolved_join) | exports | 0 | 0 | 0 | export_table[export_table]: not_run (no_export_table)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| old | `in_contract` (derived) | — | — | — | — | ownership_stamp[classified_declarations]: not_run (no_extraction_scope) |
+| old | `owned_by` (derived) | — | — | — | — | ownership_stamp[classified_declarations]: not_run (no_extraction_scope) |
 | old | `references` (resolved_join) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
 | new | `debug_type_of` (resolved_join) | debug_types | 0 | 0 | 0 | debug_section[debug]: not_run (no_debug_info)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
 | new | `debug_type_of` (resolved_join) | header_types | 0 | 0 | 0 | debug_section[debug]: not_run (no_debug_info)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
 | new | `declares` (observed) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
 | new | `exports` (resolved_join) | declarations | 0 | 0 | 1 | export_table[export_table]: not_run (no_export_table)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
 | new | `exports` (resolved_join) | exports | 0 | 0 | 0 | export_table[export_table]: not_run (no_export_table)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| new | `in_contract` (derived) | — | — | — | — | ownership_stamp[classified_declarations]: not_run (no_extraction_scope) |
+| new | `owned_by` (derived) | — | — | — | — | ownership_stamp[classified_declarations]: not_run (no_extraction_scope) |
 | new | `references` (resolved_join) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
 
 > **Policy**: `strict_abi`
