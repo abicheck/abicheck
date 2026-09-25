@@ -26,8 +26,13 @@ more or fewer than the trie's already-stripped name (clang keeps the Darwin
 underscore; ``strip_macho_itanium_decoration`` is the same fact), refused
 whenever another declaration owns the shifted spelling exactly -- the alias
 exists for one entity spelled two ways, never to hand one declaration's
-export to another. A PE (x86 ``_foo@8``) decoration carries no alias record,
-so it does not join.
+export to another. On a PE table, Phase 1's x86 calling-convention alias
+applies the same way (:func:`~abicheck.model.graph_entity_identity.
+pe_c_decoration_base`): an export ``_foo@8``/``@foo@8``/``foo@@8``/``_foo``
+joins the declaration spelled ``foo`` -- only on the machine types that
+decorate (32-bit x86; x64 for ``__vectorcall`` only), never for a
+C++-mangled name, never on an unknown machine, and refused whenever another
+declaration owns the decorated spelling exactly.
 
 **States (I2).** An export with no declaration is ``unmatched``; with one
 entity, ``matched``; with several, ``ambiguous`` listing them. A
@@ -57,6 +62,7 @@ from ..model.graph_entity_identity import (
     GraphEntityIdentity,
     SnapshotIdentities,
     endpoint_key,
+    pe_c_decoration_base,
 )
 from ..model.graph_join import (
     EXPORT_JOIN,
@@ -219,6 +225,17 @@ def _macho_shifted(spelling: str) -> tuple[str, ...]:
     return tuple(c for c in (shorter, "_" + spelling) if c)
 
 
+def _pe_decorated_by_base(snap: AbiSnapshot, names: set[str]) -> dict[str, set[str]]:
+    """Undecorated C name -> the PE export spellings decorating it, on the
+    machine *snap*'s PE header records (``{}`` with none or an unknown one)."""
+    machine = snap.pe.machine if snap.pe is not None else ""
+    out: dict[str, set[str]] = {}
+    for name in names:
+        if base := pe_c_decoration_base(name, machine):
+            out.setdefault(base, set()).add(name)
+    return out
+
+
 def join_exports(
     snap: AbiSnapshot, identities: SnapshotIdentities | None = None
 ) -> ExportJoin:
@@ -258,6 +275,7 @@ def join_exports(
         for s in node_spellings
         if any(s in names for names in by_platform.values())
     }
+    pe_by_base = _pe_decorated_by_base(snap, by_platform.get("pe", set()))
     left_cands: dict[str, set[str]] = {}
     right_cands: dict[str, set[str]] = {eid: set() for eid in entries}
     for node, node_spellings in spellings.items():
@@ -271,6 +289,12 @@ def join_exports(
                         binary_symbol_node_id(platform, c)
                         for c in _macho_shifted(s)
                         if c in names and c not in exact_owners
+                    )
+                if platform == "pe":
+                    cands.update(
+                        binary_symbol_node_id(platform, c)
+                        for c in pe_by_base.get(s, ())
+                        if c not in exact_owners
                     )
         for eid in cands:
             right_cands[eid].add(node)

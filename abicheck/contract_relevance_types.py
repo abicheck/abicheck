@@ -328,9 +328,23 @@ CONTRACT_REASON_CODES: MappingProxyType[str, str] = MappingProxyType(
 # on-disk/wire shape changes in a way older readers cannot parse correctly;
 # unrelated concerns keep their own counters unchanged.
 
-CONTRACT_EVIDENCE_SCHEMA_VERSION: int = 1
+CONTRACT_EVIDENCE_SCHEMA_VERSION: int = 2
 """Version of the persisted, policy-independent ``contract_evidence`` block
-(observed provider records, declarations, manifests, raw type graph)."""
+(observed provider records, declarations, manifests, raw type graph).
+
+Bumped to 2 when the raw type graph's canonical nodes -- and every
+provider's ``declarations`` root list -- became the Phase 1 entity node ids
+(``decl://``/``type://``/``unresolved://``, evidence-entity-model plan I1)
+with a ``name:`` exact-spelling tier beside the existing ``alias:`` one,
+replacing schema 1's own ``decl:``/``record:``/``enum:``/``typedef:`` keys.
+A version-1 reader would find none of its prefixes on a version-2 node, so
+every spelling would resolve to nothing: a silent weakening at best, which
+D6 forbids passing off as a supported read. This build still *reads*
+version 1 as written (``policy.contract_graph_encoding.graph_node_index``/
+``graph_node_category`` recognize both encodings node by node); it never
+maps a schema-1 key onto an I1 id, since a schema-1 ``decl:over`` stands for
+every unmangled ``over`` at once and nothing persisted says which I1 id each
+would get."""
 
 EVALUATION_CONTEXT_SCHEMA_VERSION: int = 4
 """Version of the persisted ``evaluation_context`` block (the resolved

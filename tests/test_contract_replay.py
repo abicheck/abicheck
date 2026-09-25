@@ -242,7 +242,7 @@ class TestReevaluateFromEvidence:
             snap, snap, surf, surf, force_public_symbols={"hidden"}
         )
         roots = domain_roots(block, ContractMode.PUBLIC)
-        assert "decl:hidden" in roots
+        assert "decl://hidden" in roots
         ctx = build_persisted_context(block, mode=ContractMode.PUBLIC)
         forced = Change(
             kind=ChangeKind.FUNC_REMOVED, symbol="hidden", description="hidden removed"
@@ -254,7 +254,7 @@ class TestReevaluateFromEvidence:
         # the overlaid declaration's signature happens to reference is not
         # forced public along with it (Codex review, fresh evidence).
         receipt = build_decision_receipt(block, ContractMode.PUBLIC)
-        assert "record:Secret" not in receipt.evaluated_type_closure
+        assert "type://Secret" not in receipt.evaluated_type_closure
         secret_change = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED,
             symbol="Secret",
@@ -288,13 +288,13 @@ class TestReevaluateFromEvidence:
             snap, snap, surf, surf, public_surface_allowlist={"foo"}
         )
         roots = domain_roots(block, ContractMode.PUBLIC)
-        assert "decl:_ZN2ns3fooEv" not in roots
+        assert "decl://_ZN2ns3fooEv" not in roots
         # The looser overlay keeps its own semantics: the same bare spelling
         # under `scope.public_symbols` still resolves through the alias tier.
         forced = collect_contract_evidence(
             snap, snap, surf, surf, force_public_symbols={"foo"}
         )
-        assert "decl:_ZN2ns3fooEv" in domain_roots(forced, ContractMode.PUBLIC)
+        assert "decl://_ZN2ns3fooEv" in domain_roots(forced, ContractMode.PUBLIC)
 
     def test_post_manifest_narrows_the_public_roots(self) -> None:
         """A manifest states the whole committed surface, not an addition.
@@ -321,8 +321,8 @@ class TestReevaluateFromEvidence:
             snap, snap, surf, surf, public_surface_allowlist={"kept"}
         )
         roots = domain_roots(block, ContractMode.PUBLIC)
-        assert "decl:kept" in roots
-        assert "decl:api" not in roots
+        assert "decl://kept" in roots
+        assert "decl://api" not in roots
 
     def test_overlay_rooted_decision_cites_the_overlay_record(self) -> None:
         """A decision resting on an overlay root names that overlay.
@@ -386,7 +386,7 @@ class TestReevaluateFromEvidence:
             exports_new=exports,
             force_public_symbols={"hidden"},
         )
-        assert "decl:hidden" not in domain_roots(block, ContractMode.EXPORTS)
+        assert "decl://hidden" not in domain_roots(block, ContractMode.EXPORTS)
 
     def test_a_different_mode_needs_no_new_evidence(self) -> None:
         """The whole point of a policy-independent block.
@@ -1209,8 +1209,8 @@ class TestDecisionReceipt:
     def test_receipt_closure_comes_from_the_persisted_graph(self) -> None:
         _result, ctx = _run()
         receipt = build_decision_receipt(ctx.contract_evidence, ContractMode.PUBLIC)
-        assert "decl:api" in receipt.evaluated_contract_roots
-        assert "record:Widget" in receipt.evaluated_type_closure
+        assert "decl://api" in receipt.evaluated_contract_roots
+        assert "type://Widget" in receipt.evaluated_type_closure
 
     def test_receipt_is_order_independent(self) -> None:
         _result, ctx = _run()

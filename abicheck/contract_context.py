@@ -39,7 +39,7 @@ binds all three:
   not yet.
 - ``decision_receipt`` -- the mode/root-dependent closure and the per-finding
   relevance map. Computed *from the evidence block's own persisted graph*
-  (:func:`~abicheck.contract_evidence_collect.closure_from_graph`), not from
+  (:func:`~abicheck.policy.contract_graph_encoding.closure_from_graph`), not from
   the live surfaces, so the receipt is reproducible by a replay that has only
   the block (plan Section 5.1's round-trip requirement).
 
@@ -81,9 +81,7 @@ from .contract_evidence_collect import (
     PROVIDER_FORCED_PUBLIC,
     PROVIDER_POST_MANIFEST,
     PROVIDER_PUBLIC_HEADER,
-    closure_from_graph,
     content_digest,
-    graph_node_index,
 )
 from .contract_relevance_types import (
     ContractMode,
@@ -91,6 +89,7 @@ from .contract_relevance_types import (
     SelectorLayer,
     coerce_contract_mode,
 )
+from .policy.contract_graph_encoding import closure_from_graph, graph_node_index
 from .severity import SeverityConfig
 
 _API_REQUEST_REFERENCE = "checker.compare"
@@ -625,7 +624,7 @@ def _resolved_overlay_roots(
 ) -> set[str]:
     """Canonical node ids the overlay *spellings* name in *graph*.
 
-    Built through :func:`~abicheck.contract_evidence_collect.graph_node_index`
+    Built through :func:`~abicheck.policy.contract_graph_encoding.graph_node_index`
     so an overlay entry resolves by the same rule its own live matching uses
     -- see :data:`_OVERLAY_FOLLOWS_ALIASES` for why that rule is per-provider
     rather than one shared tier.

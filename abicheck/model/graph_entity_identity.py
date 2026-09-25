@@ -73,6 +73,7 @@ from __future__ import annotations
 
 import enum
 import hashlib
+import re
 from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
@@ -110,6 +111,7 @@ __all__ = [
     "identity_for_variable",
     "is_linker_name",
     "is_unresolved_node_id",
+    "pe_c_decoration_base",
     "register_identity_alias",
     "SnapshotIdentities",
     "signature_key",
@@ -186,6 +188,64 @@ def _canonical_linker_name(linker_name: str, plain_name: str) -> tuple[str, str]
     ):
         return plain_name, linker_name
     return linker_name, ""
+
+
+#: PE ``machine`` values (``pefile.MACHINE_TYPE`` spellings, as
+#: ``PeMetadata.machine`` records them) on which a C-linkage export carries a
+#: calling-convention decoration.
+_PE_MACHINE_I386 = "IMAGE_FILE_MACHINE_I386"
+
+# `N` is the argument-list size in bytes: decimal, no leading zero, and a
+# whole number of 4-byte stack slots (every argument is widened to one).
+_PE_ARG_BYTES = r"(?:0|[1-9][0-9]*)"
+_PE_STDCALL_RE = re.compile(rf"_([A-Za-z_][A-Za-z0-9_]*)@({_PE_ARG_BYTES})")
+_PE_FASTCALL_RE = re.compile(rf"@([A-Za-z_][A-Za-z0-9_]*)@({_PE_ARG_BYTES})")
+_PE_VECTORCALL_RE = re.compile(rf"([A-Za-z_][A-Za-z0-9_]*)@@({_PE_ARG_BYTES})")
+_PE_CDECL_RE = re.compile(r"_([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _is_cxx_mangled(name: str) -> bool:
+    return name.startswith(("?", "_Z"))
+
+
+def pe_c_decoration_base(export: str, machine: str) -> str:
+    """The undecorated C name a PE export spelling is a calling-convention
+    decoration of, or ``""`` when it is not provably one.
+
+    The x86 PE decoration alias (evidence-entity-model Phase 1's identity
+    table, the PE counterpart of :func:`_canonical_linker_name`'s Mach-O
+    underscore). Only a C-linkage name is decorated this way -- an MSVC
+    ``?...`` or Itanium ``_Z...`` name carries its convention inside the
+    mangling, so neither side of the alias may be one:
+
+    * 32-bit x86 (``IMAGE_FILE_MACHINE_I386``): ``__stdcall`` ``_foo@8``,
+      ``__fastcall`` ``@foo@8``, ``__vectorcall`` ``foo@@8``, ``__cdecl``
+      ``_foo``;
+    * any other machine, x64 and an unknown one included: nothing (fail
+      closed -- a leading underscore there is part of the real name). MSVC
+      does keep the ``foo@@8`` vectorcall decoration on x64, but ``@N`` is
+      deliberately never stripped off 32-bit x86: no x64 alias is recorded.
+
+    ``N`` is only checked for shape (decimal, a multiple of 4), never
+    compared with the declaration's parameters: an L2 snapshot has no
+    reliable per-parameter stack size (types may be opaque, and a by-value
+    aggregate's size needs layout the header may not carry), so a computed
+    ``N`` would be invented evidence. The alias rests on the spelling and
+    the machine alone, and ambiguity stays with the join.
+    """
+    if machine != _PE_MACHINE_I386:
+        return ""
+    for pattern in (_PE_STDCALL_RE, _PE_FASTCALL_RE, _PE_VECTORCALL_RE):
+        m = pattern.fullmatch(export)
+        if m is not None:
+            base, arg_bytes = m.group(1), int(m.group(2))
+            if arg_bytes % 4 or _is_cxx_mangled(base):
+                return ""
+            return base
+    m = _PE_CDECL_RE.fullmatch(export)
+    if m is not None and not _is_cxx_mangled(m.group(1)):
+        return m.group(1)
+    return ""
 
 
 def signature_key(type_spelling: str) -> str:

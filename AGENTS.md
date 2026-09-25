@@ -659,8 +659,11 @@ Core pipeline (in order of data flow):
      overlays when a run configures them — each with its own status,
      completeness, identity coverage, requested-vs-searched scope and
      content digest, so a provider failure stays scoped to its own domain.
-     Also owns the `decl:`/`record:`/`enum:`/`typedef:`/`alias:` node
-     encoding of `TypeGraphSnapshot` and the closure walk over it, and maps
+     Also owns the node encoding of `TypeGraphSnapshot` (canonical nodes
+     are the Phase 1 `model/graph_entity_identity.py` ids since
+     `contract_evidence` schema 2, with `name:`/`alias:` spelling tiers; a
+     schema-1 `decl:`/`record:` graph is still read as written, never
+     remapped) and the closure walk over it, and maps
      a decision's reason code to the records it rests on
      (`evidence_refs_for_reason` → `Change.contract_evidence_refs`). "Not
      consulted" is deliberately encoded as an absent entry, never as a
