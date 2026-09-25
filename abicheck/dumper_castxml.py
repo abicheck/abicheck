@@ -107,6 +107,7 @@ from .model import (
     Variable,
     Visibility,
 )
+from .model.declaration_headers import attributed
 from .model.identity import (
     EntityId,
     ScopePath,
@@ -629,7 +630,7 @@ class _CastxmlParser:
         headers are excluded). Returns ``name -> value``; empty when no public
         header set is available (e.g. DWARF/symbols-only mode).
         """
-        return {name: init for _, name, init, _h in self._iter_public_constants()}
+        return attributed((n, v, h) for _, n, v, h in self._iter_public_constants())
 
     def parse_constant_entity_ids(self) -> dict[str, EntityId]:
         """``EntityId`` sidecar for :meth:`parse_constants` (ADR-063 Phase 2),
@@ -810,8 +811,15 @@ class _CastxmlParser:
 
     def parse_typedefs(self) -> dict[str, str]:
         return _typedefs_helpers.parse_typedefs(
-            self._typedef_els, self._is_builtin_element, self._underlying_type_name
+            self._typedef_els,
+            self._is_builtin_element,
+            self._underlying_type_name,
+            self._declaring_header,
         )
+
+    def _declaring_header(self, el: Any) -> str:
+        """*el*'s declaring header path, or ``""`` (see ``declaration_headers``)."""
+        return header_from_location(self._source_location(el)) or ""
 
     def parse_typedefs_qualified(self) -> dict[str, str]:
         """Same mapping as :meth:`parse_typedefs`, keyed by qualified name
@@ -821,6 +829,7 @@ class _CastxmlParser:
             self._is_builtin_element,
             self._underlying_type_name,
             self._qualified_name,
+            self._declaring_header,
         )
 
     def parse_typedef_entity_ids(self) -> dict[str, EntityId]:

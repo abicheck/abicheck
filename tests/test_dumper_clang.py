@@ -4582,7 +4582,7 @@ def test_parse_clang_ast_result_missing_ast_file_reports_no_ast(tmp_path: Path) 
 def test_parse_clang_ast_result_swallows_cache_write_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # The cache write (_atomic_copy) is best-effort: a failure there (e.g. an
+    # The cache write (CompactedAst.publish) is best-effort: a failure there (e.g. an
     # unwritable cache dir) must not turn a successful parse into an error —
     # the caller already has the parsed root; only the cache population is lost.
     ast_path = tmp_path / "ast.json"
@@ -4591,10 +4591,10 @@ def test_parse_clang_ast_result_swallows_cache_write_failure(
     )
     result = _fake_proc(stdout="", stderr="", returncode=0)
 
-    def _boom(_src, _dst):
+    def _boom(_self, _cached):
         raise OSError("cache dir unwritable")
 
-    monkeypatch.setattr(dumper_clang_errors, "_atomic_copy", _boom)
+    monkeypatch.setattr(dumper_clang_errors.CompactedAst, "publish", _boom)
     root = _parse_clang_ast_result(result, tmp_path / "cache.json", ast_path)
     assert root == {"kind": "TranslationUnitDecl", "inner": []}
 
@@ -4627,7 +4627,7 @@ def test_parse_clang_ast_result_rechecks_deadline_after_json_load(
 def test_parse_clang_ast_result_rechecks_deadline_after_cache_copy(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # CodeRabbit review (PR #591): the streamed cache copy (_atomic_copy) can
+    # CodeRabbit review (PR #591): the cache publish (CompactedAst.publish) can
     # also consume the remaining budget on a huge AST; re-check once more
     # before returning so a budget that expired during the copy doesn't
     # silently hand the result to the (also potentially expensive) caller.
@@ -4637,10 +4637,10 @@ def test_parse_clang_ast_result_rechecks_deadline_after_cache_copy(
     )
     result = _fake_proc(stdout="", stderr="", returncode=0)
 
-    def _slow_copy(_src, _dst):
+    def _slow_copy(_self, _cached):
         time.sleep(0.05)
 
-    monkeypatch.setattr(dumper_clang_errors, "_atomic_copy", _slow_copy)
+    monkeypatch.setattr(dumper_clang_errors.CompactedAst, "publish", _slow_copy)
     with dumper_clang_errors.deadline.deadline_scope(0.03):
         with pytest.raises(dumper_clang_errors.deadline.DeadlineExceeded):
             _parse_clang_ast_result(result, tmp_path / "cache.json", ast_path)

@@ -54,6 +54,7 @@ from .extract.headers.castxml.location import (
     contract_attributes,
     deprecation_marker,
 )
+from .model.declaration_headers import attributed
 
 
 def _extract_contract_attributes(attributes: str) -> list[str]:
@@ -89,14 +90,16 @@ def parse_typedefs(
     typedef_els: list[Element],
     is_builtin_element: Callable[[Element], bool],
     underlying_type_name: Callable[[str], str],
+    declaring_header: Callable[[Element], str] = lambda _el: "",
 ) -> dict[str, str]:
-    """Bare-name-keyed alias -> underlying-type mapping."""
-    return {
-        el.get("name", ""): underlying
+    """Bare-name-keyed alias -> underlying-type mapping, header-attributed
+    (see :mod:`abicheck.model.declaration_headers`)."""
+    return attributed(
+        (el.get("name", ""), underlying, declaring_header(el))
         for el, underlying in iter_typedef_entries(
             typedef_els, is_builtin_element, underlying_type_name
         )
-    }
+    )
 
 
 def parse_typedefs_qualified(
@@ -104,11 +107,12 @@ def parse_typedefs_qualified(
     is_builtin_element: Callable[[Element], bool],
     underlying_type_name: Callable[[str], str],
     qualified_name: Callable[[Any], str],
+    declaring_header: Callable[[Element], str] = lambda _el: "",
 ) -> dict[str, str]:
     """Same mapping as :func:`parse_typedefs`, keyed by qualified name."""
-    return {
-        qualified_name(el): underlying
+    return attributed(
+        (qualified_name(el), underlying, declaring_header(el))
         for el, underlying in iter_typedef_entries(
             typedef_els, is_builtin_element, underlying_type_name
         )
-    }
+    )

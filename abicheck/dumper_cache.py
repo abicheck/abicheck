@@ -24,7 +24,7 @@ from defusedxml import ElementTree as DefusedET
 
 from . import deadline
 from .storage.acyclic_json import gc_paused
-from .storage.ast_size_observer import report_ast_size
+from .storage.ast_size_observer import mark_ast_intake, report_ast_size
 from .storage.derived_ast import offer_derived_ast_source
 
 log = logging.getLogger(__name__)
@@ -672,6 +672,7 @@ def load_cached_ast(
     if not cache_path.exists():
         return None
     deadline.check()
+    mark_ast_intake("ast.intake:start", backend=backend, source="cache")
     try:
         text = cache_path.read_text(encoding="utf-8")
         with gc_paused():  # a tree has no cycles: storage.acyclic_json
@@ -680,6 +681,7 @@ def load_cached_ast(
         cache_path.unlink(missing_ok=True)
         return None
     report_ast_size(len(text))
+    mark_ast_intake("ast.intake:done", backend=backend, chars=len(text))
     del text
     deadline.check()  # loading a huge cached AST can eat the rest of the budget
     if on_disk_load is not None:

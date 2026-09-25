@@ -208,9 +208,14 @@ class TestTestActionSummaryCoversEveryJob:
         assert set(needs) == other_jobs
 
     def test_runs_even_if_a_dependency_failed_or_was_cancelled(self) -> None:
+        """`!cancelled()` still runs after a failed or timed-out dependency
+        (unlike the implicit `success()`), but skips -- rather than fails --
+        when the whole run was cancelled by a newer push (`cancel-in-progress`).
+        A skipped summary is never a false green: `ci.yml`'s mirror accepts
+        only success/neutral."""
         test_action = _load_workflow("test-action.yml")
         summary = _jobs(test_action)["test-action-summary"]
-        assert summary.get("if") == "always()"
+        assert summary.get("if") == "${{ !cancelled() }}"
 
     def test_fails_on_a_skipped_dependency_too(self) -> None:
         """`if: always()` (above) makes a skipped dependency visible to this
