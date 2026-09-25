@@ -157,3 +157,15 @@ def test_one_member_package_matches_the_scalar_path(toolchain, tmp_path) -> None
             if c.get("kind") == "public_not_exported"
         }
         assert package == scalar, config
+
+
+def test_a_stated_cxx_language_is_the_release_contract(toolchain, tmp_path) -> None:
+    """A stated ``compile.lang: c++`` parses the language-ambiguous tree as
+    C++, so C exports do not satisfy its C++ contract. Reading explicitness
+    off the spelling instead made every C export satisfy it and the release
+    reported nothing missing (Codex review, PR #1374)."""
+    root = _tree(tmp_path, ("liba", "libb"), config=False)
+    (root / ".abicheck.yml").write_text("compile:\n  lang: c++\n")
+    missing = _release_missing(_compare(root, "old", "new"))
+    assert missing and all(s.startswith("_Z") for s in missing), missing
+    assert {"_Z4a_fnv", "_Z4b_fnv", "_Z9a_missingv"} <= missing

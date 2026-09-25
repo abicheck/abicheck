@@ -6,7 +6,8 @@
   so a C header tree was parsed as C++ while every member was parsed as C: each
   declaration's obligation became its C++ mangling, which no member exports,
   and all of them were listed under `missing_exports`. The release surface now
-  resolves the language exactly as the member dumps do.
+  resolves the language exactly as the member dumps do: an unstated default
+  auto-detects, while a stated `compile.lang` (including `c++`) is forced.
 
 ### Changed
 
