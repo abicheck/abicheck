@@ -232,8 +232,9 @@ dependency, or the toolchain. **They classify, they do not filter**: every
 header dump records each declaration's owner and contract, and the rules it
 was classified under, in the snapshot's `extraction_scope`
 ([ADR-075](../contribute/adr/075-target-ownership-and-extraction-scope.md)).
-No declaration is kept or dropped because of them. `abicheck dump …
---dry-run` previews the
+No declaration is kept or dropped because of them. A declaration whose
+contract is `private` or `external` owes no export, so it produces no
+`public_not_exported` finding. `abicheck dump … --dry-run` previews the
 rules and the owner of every `-H` header. The task guide is
 [Target ownership](../use/target-ownership.md); the plan behind the keys is
 [Target ownership and extraction scope](../contribute/plans/target-ownership-and-extraction-scope.md).

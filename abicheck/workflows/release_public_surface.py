@@ -200,7 +200,15 @@ def build_side_identity(
             sorted(str(Path(p).resolve()) for p in (public_header_dirs or ()))
         ),
         lang=lang or "",
-        lang_explicit=bool(lang),
+        # The member dumps' own rule (``resolve_input`` honours *lang* only
+        # when it is ``"c"``, and auto-detects otherwise): the release
+        # fan-out never states explicitness, so ``compare``'s default
+        # ``"c++"`` is not a request. Reading any non-empty *lang* as
+        # explicit parsed a C header tree as C++ here while every member
+        # parsed it as C, so each C declaration's obligation was its C++
+        # mangling -- which no member exports -- and every one of them was
+        # reported missing from the whole bundle.
+        lang_explicit=lang == "c",
         backend=resolve_surface_backend(compile_context),
         frontend_context=str(
             getattr(compile_context, "frontend_context", None) or "host"
