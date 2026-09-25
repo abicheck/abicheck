@@ -29,12 +29,19 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 from .edge_coverage import ALL_UNITS, CoverageRecord, ProducerRun
 
-if TYPE_CHECKING:
-    from .source_graph import SourceGraphSummary
+
+class SourceGraphSummary(Protocol):
+    """The pass-flag fields of ``model.source_graph.SourceGraphSummary`` this
+    module reads -- a protocol, since ``source_graph`` imports this module."""
+
+    extractor_passes: dict[str, bool]
+    narrowed_passes: dict[str, bool]
+    narrowed_scope: dict[str, frozenset[str]]
+    degraded_passes: dict[str, bool]
 
 __all__ = [
     "CALL_GRAPH_PASS",

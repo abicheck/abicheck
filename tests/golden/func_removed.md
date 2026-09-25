@@ -39,6 +39,21 @@
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
 | Coverage gap | No binary metadata available; verdict is based on header analysis only |
 
+## Relationship Coverage
+
+> A relationship missing from the evidence (an export, a debug type, a header declaration, a source-graph edge) is proven absent only where its producer covered the scope; otherwise it is unknown.
+
+| Side | Relationship | Subjects | Present | Proven absent | Unknown | Producers |
+|---|---|---|---|---|---|---|
+| old | `declares` (observed) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| old | `exports` (resolved_join) | declarations | 0 | 0 | 2 | export_table[export_table]: not_run (no_export_table)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| old | `exports` (resolved_join) | exports | 0 | 0 | 0 | export_table[export_table]: not_run (no_export_table)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| old | `references` (resolved_join) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| new | `declares` (observed) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| new | `exports` (resolved_join) | declarations | 0 | 0 | 1 | export_table[export_table]: not_run (no_export_table)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| new | `exports` (resolved_join) | exports | 0 | 0 | 0 | export_table[export_table]: not_run (no_export_table)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| new | `references` (resolved_join) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+
 > **Policy**: `strict_abi`
 
 ## ❌ Breaking Changes

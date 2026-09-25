@@ -28,6 +28,15 @@
 | Coverage gap | Detector 'vtable_layout' disabled: missing DWARF/header type metadata (inheritance) |
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
 
+## Relationship Coverage
+
+> A relationship missing from the evidence (an export, a debug type, a header declaration, a source-graph edge) is proven absent only where its producer covered the scope; otherwise it is unknown.
+
+| Side | Relationship | Subjects | Present | Proven absent | Unknown | Producers |
+|---|---|---|---|---|---|---|
+| old | `exports` (resolved_join) | declarations | 1 | 0 | 0 | export_table[elf]: ran<br>header_ast[dependency_headers,headers]: partial (dependency_headers_excluded) |
+| old | `exports` (resolved_join) | exports | 1 | 0 | 1 | export_table[elf]: ran<br>header_ast[dependency_headers,headers]: partial (dependency_headers_excluded) |
+
 > **Policy**: `strict_abi`
 
 ## ⚠️ Deployment Risk Changes

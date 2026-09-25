@@ -29,6 +29,17 @@
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
 | Coverage gap | Binary-only analysis without debug info; many ABI changes cannot be detected (struct layout, enum values, type changes) |
 
+## Relationship Coverage
+
+> A relationship missing from the evidence (an export, a debug type, a header declaration, a source-graph edge) is proven absent only where its producer covered the scope; otherwise it is unknown.
+
+| Side | Relationship | Subjects | Present | Proven absent | Unknown | Producers |
+|---|---|---|---|---|---|---|
+| old | `declares` (observed) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| old | `references` (resolved_join) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| new | `declares` (observed) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| new | `references` (resolved_join) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+
 > **Policy**: `strict_abi`
 
 ## ⚠️ Deployment Risk Changes

@@ -261,7 +261,9 @@ class TestHeaderDeclaredFunctionMissingFromBinary:
                 )
             ],
         )
-        new_elf = ElfMetadata(symbols=[])  # symbol disappeared from binary
+        # A parsed table (machine set) that lacks the symbol -- an unparsed
+        # default block would prove nothing (I4).
+        new_elf = ElfMetadata(symbols=[], machine="EM_X86_64")
 
         old = _snap(functions=[f], elf=old_elf)
         new = _snap(functions=[f], elf=new_elf)  # still in headers
