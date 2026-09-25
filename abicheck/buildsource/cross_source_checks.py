@@ -76,6 +76,7 @@ from abicheck.model.source_graph_query import (
 )
 
 from ..checker_types import Change
+from ..compare.ownership_relations import contract_relations
 from ..evidence_depth import resolve_l5_source_graph
 from ..model import (
     AbiSnapshot,
@@ -504,9 +505,13 @@ def _check_public_not_exported(
     reconciled = _l4_reconciled_symbols(snapshot, exported)
     satisfied = exported | reconciled | cfg.sibling_exported_symbols
 
+    # ADR-075 D7: a declaration whose recorded contract is private/external
+    # (another owner's, or not promised) is nobody's missing export here --
+    # read through the one graph relation, never re-derived from paths.
+    owned = contract_relations(snapshot)
     findings: list[Change] = []
-    for fn in snapshot.functions:
-        if not _has_export_obligation(fn):
+    for i, fn in enumerate(snapshot.functions):
+        if not _has_export_obligation(fn) or owned.function_owes_no_export(i):
             continue
         if fn.mangled not in satisfied:
             findings.append(
@@ -521,8 +526,8 @@ def _check_public_not_exported(
                     source_location=fn.source_location,
                 )
             )
-    for var in snapshot.variables:
-        if not _var_has_export_obligation(var):
+    for i, var in enumerate(snapshot.variables):
+        if not _var_has_export_obligation(var) or owned.variable_owes_no_export(i):
             continue
         if var.mangled not in satisfied:
             findings.append(

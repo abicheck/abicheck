@@ -62,6 +62,7 @@ from ..model import AbiSnapshot, Function
 from ..serialization import load_snapshot
 from ..service_dump_cache import cached_run_dump
 from .header_exclusion_audit import record_achieved_header_exclusions
+from .ownership_request import classify_extracted
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -435,26 +436,29 @@ def resolve_input(
     manifest, and the right reader is chosen from the content rather than
     the name. :func:`_resolve_input_impl` does that work.
 
-    What this wrapper adds is one line: the snapshot records the
-    ``--exclude-header`` patterns it was built under
-    (:func:`~abicheck.workflows.header_exclusion_audit.record_achieved_header_exclusions`).
-    That stamp is deliberately here rather than at each of the resolution
-    body's eight exits -- a snapshot that reached one of them unstamped
-    would claim a complete surface it does not have, and "the branch nobody
-    updated" is exactly how that happens, so there is one exit to forget.
-    It is idempotent (the body re-enters this wrapper for a symlink target).
+    What this wrapper adds: the snapshot records the ``--exclude-header``
+    patterns it was built under (:func:`~abicheck.workflows.
+    header_exclusion_audit.record_achieved_header_exclusions`) and, when this
+    run extracted it, its ownership classification (ADR-075). Both stamps sit
+    here rather than at the body's eight exits, so there is one exit to
+    forget. Idempotent (the body re-enters this wrapper for a symlink target).
     """
     exclude_headers = tuple(kwargs.get("exclude_headers") or ())
+    ownership = kwargs.pop("ownership", None)  # ADR-075: not an impl kwarg
     reject_exclusions_against_a_manifest(exclude_headers, kwargs.get("dump_manifest"))
     snapshot = _resolve_input_impl(path, headers, includes, version, lang, **kwargs)
-    # The *achieved* narrowing, never the request -- see that function.
-    # `headers` is still the unfiltered operand here; `_resolve_input_impl`
-    # applies the patterns internally.
+    extracted_now = not is_stored_snapshot_operand(path)
+    if extracted_now:  # ADR-075 D1: a loaded snapshot keeps its recorded scope
+        classify_extracted(
+            snapshot, ownership, headers, kwargs.get("public_header_dirs")
+        )
+    # The *achieved* narrowing, never the request; `headers` is still the
+    # unfiltered operand (`_resolve_input_impl` applies the patterns).
     return record_achieved_header_exclusions(
         snapshot,
         headers or [],
         exclude_headers,
-        extracted_now=not is_stored_snapshot_operand(path),
+        extracted_now=extracted_now,
         scope_inputs=kwargs,
     )
 
@@ -466,12 +470,9 @@ def _resolve_input_impl(
     version: str = "",
     lang: str = "c++",
     *,
-    # Keyword-only, and *appended* rather than inserted next to `headers`
-    # where it reads best: this signature has positional callers, and a
-    # mid-signature insertion silently rebinds every one of them a slot to
-    # the left without raising or failing to type-check (the
-    # `api.positional_slot_rebinding` bug class in
-    # `tests/regressions/manifest.py`).
+    # Keyword-only and *appended*: this signature has positional callers a
+    # mid-signature insertion would silently rebind (the
+    # `api.positional_slot_rebinding` class in `tests/regressions/manifest.py`).
     exclude_headers: Sequence[str] = (),
     lang_explicit: bool = False,
     is_elf: bool | None = None,
@@ -491,8 +492,7 @@ def _resolve_input_impl(
     notify: Callable[[str], None] | None = None,
     include_labels: dict[Path, str] | None = None,
     dump_manifest: DumpManifest | None = None,
-    # `False` matches the CLI flag, `InputSpec.include_dependencies` and
-    # `run_dump`; see that field's note for why every front end must agree.
+    # `False` matches the CLI flag, `InputSpec.include_dependencies`, `run_dump`.
     include_dependencies: bool = False,
     public_include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:

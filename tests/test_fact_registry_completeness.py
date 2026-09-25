@@ -676,8 +676,15 @@ class TestValueTypeCrossCheck:
 
 class TestPersistedEncodeDecodeWiring:
     def test_real_repo_every_persisted_entry_has_real_wiring(self) -> None:
-        encode_wired = fact_registry_completeness._encode_wired_fact_attrs()
-        decode_wired = fact_registry_completeness._decode_wired_fact_attrs()
+        # The same union the gate takes: per-entity codec wiring plus the
+        # side-table codecs (ADR-075's extraction_scope table).
+        side = fact_registry_completeness._side_table_wired
+        encode_wired = fact_registry_completeness._encode_wired_fact_attrs() | side(
+            "encode_"
+        )
+        decode_wired = fact_registry_completeness._decode_wired_fact_attrs() | side(
+            "decode_"
+        )
         for entry in FACT_REGISTRY.entries.values():
             if entry.persisted:
                 key = (entry.owner, entry.fact_attr)
@@ -963,3 +970,41 @@ class TestCrossCheckAgainstBackendCapabilities:
             "NoSuchOwner", "no_such_field", ("castxml",)
         )
         assert problems == []
+
+
+class TestSideTableWiring:
+    """A side-table codec counts as wiring only when the file really
+    defines the side and names the attribute (not merely exists)."""
+
+    def test_real_extraction_scope_codec_wires_both_sides(self) -> None:
+        for prefix in ("encode_", "decode_"):
+            wired = fact_registry_completeness._side_table_wired(prefix)
+            assert ("Function", "ownership_fact") in wired
+            assert ("EnumType", "ownership_fact") in wired
+
+    def test_a_codec_missing_one_side_wires_only_the_other(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        codec = tmp_path / "side.py"
+        codec.write_text('def encode_x(d):\n    d.pop("ownership_fact")\n')
+        monkeypatch.setattr(
+            fact_registry_completeness,
+            "_SIDE_TABLE_CODECS",
+            ((codec, "ownership_fact", ("Function",)),),
+        )
+        assert fact_registry_completeness._side_table_wired("encode_") == {
+            ("Function", "ownership_fact")
+        }
+        assert fact_registry_completeness._side_table_wired("decode_") == set()
+
+    def test_a_codec_not_naming_the_attribute_wires_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        codec = tmp_path / "side.py"
+        codec.write_text("def encode_x(d):\n    pass\ndef decode_x(d):\n    pass\n")
+        monkeypatch.setattr(
+            fact_registry_completeness,
+            "_SIDE_TABLE_CODECS",
+            ((codec, "ownership_fact", ("Function",)),),
+        )
+        assert fact_registry_completeness._side_table_wired("encode_") == set()

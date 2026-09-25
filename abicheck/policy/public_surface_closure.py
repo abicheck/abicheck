@@ -100,7 +100,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from ..compare.export_join import join_exports
+from ..compare.edge_query import UNIT_HEADERS, EdgeEvidence
 from ..compare.surface_graph import (
     ReferencedIdentifiers,
     fact_list,
@@ -108,7 +108,8 @@ from ..compare.surface_graph import (
 )
 from ..diff_cxx_rules import owner_class_of
 from ..model.cxx_artifact_symbols import is_cxx_class_artifact_symbol
-from ..model.graph_join import JoinState
+from ..model.edge_coverage import EdgeAnswer
+from ..model.graph_join import EDGE_KIND_EXPORTS
 from ..model.surface_facts import in_public_surface
 from ..model.vocabulary import ScopeOrigin
 from .public_surface import (
@@ -346,9 +347,8 @@ def _seed_undeclared_exports(
     """
     if not surface.has_provenance:
         return
-    join = join_exports(snap, ids)
-    if not join.complete:
-        return
+    evidence = EdgeEvidence(snap, identities=ids)
+    exports = evidence.exports
     # The Phase 2 ``exports`` join over the same projection
     # ``buildsource.cross_source_checks_base._exported_symbol_names`` uses --
     # default/unversioned exports only (``ExportEntry.default_version``).
@@ -371,15 +371,25 @@ def _seed_undeclared_exports(
     # the artifact is absent from the declaration list for a reason that
     # says nothing about the contract. Demoting one made an identical binary
     # pair report BREAKING without ``-H`` and clean with it.
+    #
+    # "Undeclared" is a typed absence (I4): the ``exports`` query over the
+    # library's own headers (``scope={"headers"}`` -- a toolchain export is
+    # never declared there either) must answer ``proven_absent``. That needs
+    # the header AST to have run; an export the join could not relate to a
+    # declaration of a side whose headers were never parsed is ``unknown``
+    # and demotes nothing.
     exported = {
         e.spelling
-        for e in join.entries.values()
+        for e in exports.entries.values()
         if e.default_version and not is_cxx_class_artifact_symbol(e.spelling)
     }
+    headers = frozenset({UNIT_HEADERS})
     surface.undeclared_export_symbols |= {
         e.spelling
-        for e in join.entries_in_state(JoinState.UNMATCHED)
+        for node, e in exports.entries.items()
         if e.spelling in exported
+        and evidence.query(EDGE_KIND_EXPORTS, node, scope=headers).answer
+        is EdgeAnswer.PROVEN_ABSENT
     }
     surface.all_symbols |= exported
 

@@ -728,6 +728,10 @@ def _add_evidence_fields(d: dict[str, object], result: DiffResult) -> None:
     # findings. Additive, present only when evidence was involved.
     if getattr(result, "layer_coverage", None):
         d["layer_coverage"] = result.layer_coverage
+    # Evidence-entity-model I4: which relationships' absence is proven vs
+    # unknown, per side (`compare.edge_query.edge_coverage_report`).
+    if getattr(result, "edge_coverage", None):
+        d["edge_coverage"] = result.edge_coverage
     # Evidence metrics (ADR-033 D6/D9) — collection timing + finding split, when
     # build-info/source facts were involved. Additive; lets CI tune mode choice.
     if getattr(result, "evidence_metrics", None):

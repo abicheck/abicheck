@@ -41,6 +41,19 @@ Two collection strategies commonly produce exactly this shape:
   `DECL_CALLS_DECL` edge a public inline function's *body* creates into an
   internal specialization — the graph is real, just structurally unable to
   answer that question.
+
+  **This graph is always built from a clang whole-translation-unit AST,
+  whatever `--ast-frontend` selected.** A castxml-frontend run therefore
+  still invokes `clang -ast-dump=json` once per side for the graph
+  (`service_header_graph_attach.py`) and pays its cost even though the
+  snapshot's declarations came from castxml. Without a usable clang the
+  graph is simply not attached — the dump still succeeds, with the L5
+  header graph absent rather than empty.
+  A warm run skips that cost through the header-graph projection sidecar
+  stored next to the clang AST cache entry; a *cold* castxml run pays the
+  full clang parse. Budget memory for it the way you would for a
+  clang-frontend run: the document is compacted and ASCII-escaped when
+  cached, but the first parse still reads clang's full output.
 - **A collector-upgrade** (old snapshot dumped header-only, new snapshot
   with a real `--build-info` compile database) is not a "new
   dependency appeared" signal — it is the same project seen through two
@@ -81,6 +94,28 @@ rule to require actual proof, opt into the stricter gate with
 unknown reachability](../use/suppressions.md#proven-vs-unknown-reachability)
 for the rule syntax and the `suppression_reachability_unknown` diagnostic it
 produces when coverage isn't good enough to prove a match.
+
+## Typed absence across every relationship
+
+The same rule applies beyond the L5 graph. Every relationship abicheck
+relates evidence through answers one of three things for a given subject:
+**present**, **proven absent**, or **unknown**
+(`compare/edge_query.py`, evidence-entity-model invariant I4). "Proven
+absent" needs the producer of that relationship to have covered the scope
+it was asked about:
+
+| Relationship | Absence is proven when | Otherwise unknown, for example |
+|---|---|---|
+| `exports` (a declaration and the export table) | every export table the snapshot owes was read | no table captured; a platform block that was never parsed |
+| `exports` (an export and the declarations) | the library's own headers were parsed | a binary-only or DWARF-only dump; a toolchain export whose system headers were filtered out |
+| `debug_type_of` (a header type and the debug info) | the binary carries debug info | a stripped binary |
+| `declares` / `references` | the header AST ran | no header AST; a type spelling that names several types |
+| L5 source-graph edges | the pass covered the scope (see above) | a narrowed, degraded, or header-only body-blind pass |
+
+The compare report states this per side in its **Relationship coverage**
+section (JSON: `edge_coverage`). It lists only the relationships whose
+absence is unknown, with the producer status behind each, and says so
+explicitly when every producer covered its scope.
 
 ## Migration: header-graph is now default-on
 
