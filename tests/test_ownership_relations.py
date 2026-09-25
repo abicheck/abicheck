@@ -34,7 +34,7 @@ from abicheck.compatibility_evaluation_frontend import (
     resolve_compatibility_evaluation_config,
 )
 from abicheck.contract_relevance_types import SelectorLayer
-from abicheck.model import AbiSnapshot, Function, RecordType, Variable
+from abicheck.model import AbiSnapshot, Function, RecordType
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
 from abicheck.model.extraction_scope import EntityOwnership, ExtractionScope
 from abicheck.model.fact import Fact
@@ -81,14 +81,24 @@ def _snap(fns: list[Function], *, exports: tuple[str, ...] = ()) -> AbiSnapshot:
 
 class TestRelationSpecs:
     def test_each_relation_declares_its_evidence_class(self) -> None:
-        assert OWNERSHIP_RELATION_SPECS[EDGE_KIND_OWNED_BY].evidence_class is EdgeEvidenceClass.DERIVED
-        assert OWNERSHIP_RELATION_SPECS[EDGE_KIND_IN_CONTRACT].evidence_class is EdgeEvidenceClass.DERIVED
+        assert (
+            OWNERSHIP_RELATION_SPECS[EDGE_KIND_OWNED_BY].evidence_class
+            is EdgeEvidenceClass.DERIVED
+        )
+        assert (
+            OWNERSHIP_RELATION_SPECS[EDGE_KIND_IN_CONTRACT].evidence_class
+            is EdgeEvidenceClass.DERIVED
+        )
         assert (
             OWNERSHIP_RELATION_SPECS[EDGE_KIND_PROVIDED_BY].evidence_class
             is EdgeEvidenceClass.RESOLVED_JOIN
         )
         for spec in OWNERSHIP_RELATION_SPECS.values():
-            assert spec.producer and spec.inputs and "never persisted" in spec.recompute_rule
+            assert (
+                spec.producer
+                and spec.inputs
+                and "never persisted" in spec.recompute_rule
+            )
 
 
 class TestOwnershipRelations:
@@ -121,7 +131,9 @@ class TestOwnershipRelations:
 
     def test_types_are_related_too(self) -> None:
         rec = RecordType(name="ns::S", kind="struct")
-        rec.ownership_fact = Fact.present(EntityOwnership("toolchain", "external", "system_path"))
+        rec.ownership_fact = Fact.present(
+            EntityOwnership("toolchain", "external", "system_path")
+        )
         snap = _snap([])
         snap.types.append(rec)
         rel = ownership_relations(snap)
@@ -136,7 +148,10 @@ class TestOwnershipRelations:
 
 
 @settings(max_examples=60, deadline=None)
-@given(st.lists(st.sampled_from([*_OWNERS, None]), min_size=1, max_size=10), st.integers(0, 999))
+@given(
+    st.lists(st.sampled_from([*_OWNERS, None]), min_size=1, max_size=10),
+    st.integers(0, 999),
+)
 def test_relations_do_not_depend_on_declaration_order(owners, seed) -> None:
     fns = [_fn(f"f{i}", o) for i, o in enumerate(owners)]
     shuffled = list(fns)
@@ -151,7 +166,9 @@ class TestObligationPredicate:
     ``private``/``external`` lift an obligation."""
 
     def _reported(self, owner: str | None) -> set[str]:
-        snap = _snap([_fn("present", "target"), _fn("missing", owner)], exports=("_Z7presentv",))
+        snap = _snap(
+            [_fn("present", "target"), _fn("missing", owner)], exports=("_Z7presentv",)
+        )
         out = _check_public_not_exported(snap, CrosscheckConfig())  # type: ignore[arg-type]
         return {c.symbol for c in out.findings}
 
@@ -175,8 +192,16 @@ class TestProviderRelations:
         rel = provider_relations(index)
         assert index.platform == "elf"
         edges = set(rel.edges())
-        assert (binary_symbol_node_id("elf", "shared"), "release_member://liba.so", EDGE_KIND_PROVIDED_BY) in edges
-        assert (binary_symbol_node_id("elf", "shared"), "release_member://libb.so", EDGE_KIND_PROVIDED_BY) in edges
+        assert (
+            binary_symbol_node_id("elf", "shared"),
+            "release_member://liba.so",
+            EDGE_KIND_PROVIDED_BY,
+        ) in edges
+        assert (
+            binary_symbol_node_id("elf", "shared"),
+            "release_member://libb.so",
+            EDGE_KIND_PROVIDED_BY,
+        ) in edges
         assert rel.providers("x") == ("liba.so",)
         assert rel.complete
 
@@ -192,7 +217,10 @@ class TestContractInputsProvenance:
     def test_nothing_stated_leaves_the_field_unset(self) -> None:
         cfg = resolve_compatibility_evaluation_config()
         assert cfg.surface.ownership is None
-        assert cfg.provenance["surface.ownership.dependencies"].layer is SelectorLayer.BUILT_IN_DEFAULT
+        assert (
+            cfg.provenance["surface.ownership.dependencies"].layer
+            is SelectorLayer.BUILT_IN_DEFAULT
+        )
 
     def test_project_rules_are_recorded_as_project_config(self) -> None:
         project = ProjectCompatibilityInputs(
@@ -206,21 +234,36 @@ class TestContractInputsProvenance:
         cfg = resolve_compatibility_evaluation_config(project=project)
         assert cfg.surface.ownership is not None
         assert cfg.surface.ownership.target_roots == ("include",)
-        assert cfg.surface.ownership.dependencies == (DependencyRoots("fmt", ("third/fmt",)),)
+        assert cfg.surface.ownership.dependencies == (
+            DependencyRoots("fmt", ("third/fmt",)),
+        )
         for key in ("public_header_dirs", "dependencies", "private_namespaces"):
-            assert cfg.provenance[f"surface.ownership.{key}"].layer is SelectorLayer.PROJECT_CONFIG
+            assert (
+                cfg.provenance[f"surface.ownership.{key}"].layer
+                is SelectorLayer.PROJECT_CONFIG
+            )
 
-    def test_header_dirs_and_config_roots_are_a_union_with_two_receipts(self, tmp_path) -> None:
+    def test_header_dirs_and_config_roots_are_a_union_with_two_receipts(
+        self, tmp_path
+    ) -> None:
         hdir = tmp_path / "inc"
         hdir.mkdir()
         cfg = resolve_compatibility_evaluation_config(
             explicit=ExplicitCompatibilityInputs(header_dirs=(str(hdir),)),
-            project=ProjectCompatibilityInputs(ownership=OwnershipRules(target_roots=("pub",))),
+            project=ProjectCompatibilityInputs(
+                ownership=OwnershipRules(target_roots=("pub",))
+            ),
         )
         assert cfg.surface.ownership is not None
         assert set(cfg.surface.ownership.target_roots) == {str(hdir), "pub"}
-        assert cfg.provenance["surface.ownership.header_dirs"].layer is SelectorLayer.EXPLICIT_CLI
-        assert cfg.provenance["surface.ownership.public_header_dirs"].layer is SelectorLayer.PROJECT_CONFIG
+        assert (
+            cfg.provenance["surface.ownership.header_dirs"].layer
+            is SelectorLayer.EXPLICIT_CLI
+        )
+        assert (
+            cfg.provenance["surface.ownership.public_header_dirs"].layer
+            is SelectorLayer.PROJECT_CONFIG
+        )
 
     def test_a_typed_request_outranks_the_project(self) -> None:
         cfg = resolve_compatibility_evaluation_config(
@@ -234,7 +277,10 @@ class TestContractInputsProvenance:
         )
         assert cfg.surface.ownership is not None
         assert cfg.surface.ownership.private_namespaces == ("api::detail",)
-        assert cfg.provenance["surface.ownership.private_namespaces"].layer is SelectorLayer.API_REQUEST
+        assert (
+            cfg.provenance["surface.ownership.private_namespaces"].layer
+            is SelectorLayer.API_REQUEST
+        )
 
     def test_the_receipt_round_trips(self) -> None:
         from abicheck.contract_context_io import (

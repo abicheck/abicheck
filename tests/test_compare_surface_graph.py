@@ -441,7 +441,9 @@ class TestEdgeEvidenceClass:
         } == {"symbol://_Z1fv", "symbol://v"}
         # ADR-075's owner/contract projections are derived too, and equally
         # blind to the export table: only the one classified declaration.
-        assert {(src, k) for src, _dst, k in baseline if k != EDGE_KIND_DECLARES_LINKER_NAME} == {
+        assert {
+            (src, k) for src, _dst, k in baseline if k != EDGE_KIND_DECLARES_LINKER_NAME
+        } == {
             ("decl://_Z1fv", "owned_by"),
             ("decl://_Z1fv", "in_contract"),
         }
