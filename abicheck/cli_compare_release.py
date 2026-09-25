@@ -502,6 +502,10 @@ def compare_release_cmd(
     # scalar `compare` does. `()` (the default) is a true no-op: every
     # library is compared exactly as it was before this parameter existed.
     exclude_headers: tuple[str, ...] = (),
+    # Whether `lang` was stated (`compile.lang`), as `run_compare` resolved
+    # it: the release surface forces a stated language and auto-detects an
+    # unstated default, the same rule a scalar `compare` applies.
+    lang_explicit: bool = False,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -953,6 +957,7 @@ def compare_release_cmd(
                 old_includes=old_inc,
                 new_includes=new_inc,
                 lang=lang,
+                lang_explicit=lang_explicit,
                 exclude_headers=exclude_headers,
                 public_header_dirs=public_header_dirs,
                 compile_context=compile_context,

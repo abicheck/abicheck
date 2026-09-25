@@ -31,8 +31,10 @@ Two halves, joined in one place:
 
 from __future__ import annotations
 
+import contextvars
 import os
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -42,7 +44,37 @@ from ..model.ownership_rules import DependencyRoots, OwnershipRequest, Ownership
 if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
 
-__all__ = ["classify_extracted", "ownership_request_from_config", "with_target_roots"]
+__all__ = [
+    "classify_extracted",
+    "ownership_request_from_config",
+    "project_ownership_key",
+    "project_ownership_scope",
+    "with_target_roots",
+]
+
+#: The project's ownership request for the enclosing run, when a front end
+#: declared one for a whole fan-out (see :func:`project_ownership_scope`).
+_PROJECT_OWNERSHIP: contextvars.ContextVar[OwnershipRequest | None] = (
+    contextvars.ContextVar("abicheck_project_ownership", default=None)
+)
+
+
+@contextmanager
+def project_ownership_scope(request: OwnershipRequest | None) -> Iterator[None]:
+    """Classify every snapshot extracted inside this block under *request*.
+
+    For the directory/package release fan-out: one project config states the
+    rules for every member, and the fan-out already propagates a copy of the
+    calling thread's context into each parallel worker (the mechanism
+    ``workflows.crosscheck_ownership`` documents), so each member dump sees
+    the same rules without a parameter threaded through five layers. An
+    explicit ``InputSpec.ownership`` still wins. Restored on exit.
+    """
+    token = _PROJECT_OWNERSHIP.set(request)
+    try:
+        yield
+    finally:
+        _PROJECT_OWNERSHIP.reset(token)
 
 
 def ownership_request_from_config(
@@ -96,7 +128,7 @@ def with_target_roots(
     """
     roots = [str(Path(h).resolve()) for h in headers if Path(h).is_dir()]
     roots += [str(Path(d).resolve()) for d in public_header_dirs]
-    base = request or OwnershipRequest()
+    base = request or _PROJECT_OWNERSHIP.get() or OwnershipRequest()
     return replace(
         base,
         rules=replace(
@@ -132,3 +164,14 @@ def classify_extracted(
         )
     except OwnershipRuleError as exc:
         raise ValidationError(f"invalid ownership rules: {exc}") from exc
+
+
+def project_ownership_key() -> str:
+    """A stable key for the enclosing run's project ownership request, ``""``
+    with none -- what ``SurfaceAcquisitionIdentity.ownership`` folds in."""
+    request = _PROJECT_OWNERSHIP.get()
+    if request is None:
+        return ""
+    import hashlib
+
+    return hashlib.sha256(repr(request).encode("utf-8")).hexdigest()
