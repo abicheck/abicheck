@@ -58,4 +58,38 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="scoping.declaration_kind_forwarded_unfiltered",
+        invariant=(
+            "Dump-time dependency scoping (and --exclude-header) applies one "
+            "header-origin rule to every declaration kind a snapshot "
+            "carries: an entry whose declaring header is a dependency is "
+            "either dropped or retained by a stated reference rule, never "
+            "carried through verbatim because the scoping pass's closing "
+            "dataclasses.replace did not name its field. Unknown origin "
+            "means kept, never dropped."
+        ),
+        fixed_by=(1001,),
+        seed_tests=(
+            "tests/test_flat_map_dependency_scope.py",
+            "tests/test_exclude_header_flat_maps_integration.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "frontend": ("castxml", "clang"),
+            "kind": ("constant", "typedef", "typedef_qualified", "semantic_ir"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Attribution is runtime-only, so scoping a *loaded* "
+                    "snapshot (whose maps decode as plain dicts) still "
+                    "leaves its constants/typedefs untouched; nothing "
+                    "enumerates AbiSnapshot fields to prove no further "
+                    "kind is forwarded unfiltered."
+                ),
+                reference="abicheck/model/declaration_headers.py",
+            ),
+        ),
+    ),
 )

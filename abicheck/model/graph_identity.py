@@ -161,6 +161,11 @@ def _strip_bare_anonymous_type_location(name: str) -> str:
     normalized identity, fabricating a same-identity collision between two
     genuinely different declarations.
     """
+    # Exact prefilter: every match contains one of the regex's three literal
+    # markers. 97% of the ~548k calls on a oneDAL compare hold none of them
+    # and still paid `_quoted_spans` plus the nested-lookahead scan.
+    if "lambda" not in name and "unnamed" not in name and "anonymous" not in name:
+        return name
     quoted_spans = _quoted_spans(name)
 
     def _inside_quotes(pos: int) -> bool:

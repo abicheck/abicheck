@@ -666,16 +666,33 @@ def _type_is_by_value_referenced(tname: str, text: str) -> bool:
     the regex entirely for the common miss case on a snapshot with many
     opaque candidates and few actual references (CodeRabbit review on
     PR #1041)."""
+    return _referenced_by_value(tname, _leaf_candidate(tname), text)
+
+
+def _leaf_candidate(tname: str) -> str | None:
+    """*tname*'s unqualified leaf spelling, or ``None`` when it offers no
+    second candidate (unqualified, or a leaf equal to the full name)."""
+    if "::" not in tname:
+        return None
+    leaf = depth_aware_bare_name(tname)
+    return leaf if leaf and leaf != tname else None
+
+
+def _referenced_by_value(tname: str, leaf: str | None, text: str) -> bool:
+    """:func:`_type_is_by_value_referenced` with *leaf* already derived.
+
+    Split out so :func:`find_by_value_types` derives each candidate's leaf
+    once, not once per (declaration, candidate) pair: its inner loop made
+    4.2M ``depth_aware_bare_name`` calls over 1,682 distinct names on a
+    oneDAL compare, the argument being invariant in that loop.
+    """
     matched = False
     if tname in text:
         for m in _type_token_matches(tname, text):
             matched = True
             if not _occurrence_is_indirect(text, m.end()):
                 return True
-    if matched or "::" not in tname:
-        return False
-    leaf = depth_aware_bare_name(tname)
-    if not leaf or leaf == tname:
+    if matched or leaf is None:
         return False
     if leaf in text:
         for m in _unqualified_type_token_matches(leaf, text):
@@ -686,31 +703,25 @@ def _type_is_by_value_referenced(tname: str, text: str) -> bool:
 
 def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
     """Return the subset of *opaque* types that any public function/variable uses by value."""
+    candidates = [(tname, _leaf_candidate(tname)) for tname in opaque]
     by_value_types: set[str] = set()
+
+    def scan(text: str) -> None:
+        for tname, leaf in candidates:
+            if tname not in by_value_types and _referenced_by_value(tname, leaf, text):
+                by_value_types.add(tname)
+
     for func in snap.functions:
         if not is_abi_visible(func):
             continue
-        rt = func.return_type.strip()
-        for tname in opaque:
-            if tname in by_value_types:
-                continue
-            if _type_is_by_value_referenced(tname, rt):
-                by_value_types.add(tname)
+        scan(func.return_type.strip())
         for param in func.params:
-            pt = param.type.strip()
-            for tname in opaque:
-                if tname in by_value_types:
-                    continue
-                if _type_is_by_value_referenced(tname, pt) and param.pointer_depth == 0:
-                    by_value_types.add(tname)
+            # Only a by-value parameter can expose a type by value.
+            if param.pointer_depth == 0:
+                scan(param.type.strip())
     # Also check variables — a public variable of this type means it's by-value
     for var in snap.variables:
         if not is_abi_visible(var):
             continue
-        vt = var.type.strip()
-        for tname in opaque:
-            if tname in by_value_types:
-                continue
-            if _type_is_by_value_referenced(tname, vt):
-                by_value_types.add(tname)
+        scan(var.type.strip())
     return by_value_types

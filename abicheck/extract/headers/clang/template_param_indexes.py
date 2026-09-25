@@ -117,8 +117,13 @@ def build_template_param_indexes(root: dict[str, Any]) -> TemplateParamIndexes:
     often* they run, never what they answer.
     """
 
+    names = _index_template_param_names(root)
     return TemplateParamIndexes(
         kinds=_freeze_template_param_index(_index_template_param_kinds(root)),
-        defaults=_freeze_template_param_index(_index_template_param_defaults(root)),
-        names=_freeze_template_param_index(_index_template_param_names(root)),
+        # Handed the names index rather than rebuilding it internally: that
+        # rebuild was the fourth whole-document walk per root.
+        defaults=_freeze_template_param_index(
+            _index_template_param_defaults(root, names)
+        ),
+        names=_freeze_template_param_index(names),
     )
