@@ -143,10 +143,6 @@ class BundleExportIndex:
         """Which members export *symbol* (empty when none does)."""
         return self.providers_by_symbol.get(symbol, ())
 
-    def satisfies(self, symbol: str) -> bool:
-        """Whether any member of this side exports *symbol*."""
-        return bool(self.providers_by_symbol.get(symbol))
-
     @property
     def symbols(self) -> frozenset[str]:
         return frozenset(self.providers_by_symbol)

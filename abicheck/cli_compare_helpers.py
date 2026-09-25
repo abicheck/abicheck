@@ -1620,6 +1620,7 @@ def run_compare(
                 old_version=old_version,
                 new_version=new_version,
                 lang=lang,
+                lang_explicit=lang_explicit,
                 fmt=fmt,
                 output=output,
                 output_dir=output_dir,

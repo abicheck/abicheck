@@ -165,6 +165,7 @@ def build_side_identity(
     compile_context: CompileContext | None,
     depth: str | None,
     include_dependencies: bool,
+    lang_explicit: bool = False,
 ) -> SurfaceAcquisitionIdentity:
     """The acquisition identity for one release side's header request.
 
@@ -200,7 +201,14 @@ def build_side_identity(
             sorted(str(Path(p).resolve()) for p in (public_header_dirs or ()))
         ),
         lang=lang or "",
-        lang_explicit=bool(lang),
+        # The member dumps' own rule (``resolve_input`` forces *lang* when it
+        # is explicit or ``"c"``, and auto-detects otherwise). Explicitness
+        # is the caller's resolved answer (``compile.lang`` was stated), never
+        # read off the spelling: treating any non-empty *lang* as explicit
+        # parsed a C tree as C++ under ``compare``'s default ``"c++"``, and
+        # treating only ``"c"`` as explicit dropped a stated ``c++`` -- an
+        # ambiguous header then became a C contract its C export satisfied.
+        lang_explicit=bool(lang) and (lang_explicit or lang == "c"),
         backend=resolve_surface_backend(compile_context),
         frontend_context=str(
             getattr(compile_context, "frontend_context", None) or "host"
@@ -339,6 +347,7 @@ def reconcile_release_public_surface(
     depth: str | None = None,
     include_dependencies: bool = False,
     has_baseline: bool = True,
+    lang_explicit: bool = False,
 ) -> ReleaseSurfaceStage:
     """Acquire both sides' surfaces once and reconcile the product contract.
 
@@ -370,6 +379,7 @@ def reconcile_release_public_surface(
             headers,
             includes,
             lang=lang,
+            lang_explicit=lang_explicit,
             exclude_headers=exclude_headers,
             public_header_dirs=public_header_dirs,
             compile_context=compile_context,
