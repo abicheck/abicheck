@@ -352,7 +352,9 @@ def _template_param_defaults(class_template_decl: dict[str, Any]) -> list[str | 
     return defaults
 
 
-def _index_template_param_defaults(root: dict[str, Any]) -> dict[str, list[str | None]]:
+def _index_template_param_defaults(
+    root: dict[str, Any], names: Mapping[str, Sequence[str | None]] | None = None
+) -> dict[str, list[str | None]]:
     """``qualified template name -> per-position default-spelling list``
     (see :func:`_template_param_defaults`), scope-tracked identically to
     :func:`_index_template_param_kinds` (same reasoning applies here for
@@ -361,52 +363,46 @@ def _index_template_param_defaults(root: dict[str, Any]) -> dict[str, list[str |
     same-named member template nested in two DIFFERENT explicit outer
     specializations -- see that function's own docstring).
 
-    A dependent default's raw spelling (``"T"`` in ``template<class T,
-    class U=T> struct A;``) names an EARLIER parameter of the SAME
-    declaration it appears on -- :func:`_specialization_spelling` resolves
-    it by looking up that text in the *tracked* names index
-    (:func:`_index_template_param_names`'s own fully-merged output). When
-    a CONFIRMED redeclaration (the sixth round's merge) contributes a
-    NEWLY adopted default and that redeclaration also renamed its
-    parameters, the raw text it carries names one of ITS OWN (renamed)
-    parameters, not the tracked ones -- e.g. ``template<class T, class U>
-    struct A;`` followed by ``template<class X, class Y=X> struct
-    A {...};`` spells the added default as literal ``"X"``, which the
-    tracked names index (still ``["T", "U"]`` here) never contains, so the
-    substitution silently fails (Codex review, fresh evidence, eighth
-    round; confirmed end to end this left the base unresolvable and a
-    real virtual-method addition undetected). Fixed by translating a
-    newly adopted default's dependent reference through THIS
-    declaration's own positional name list into the TRACKED name at that
-    same position (parameter order/count can't legally change across a
-    redeclaration of the same template, so position always lines up)
-    before merging it in.
+    A dependent default's raw spelling (``"T"`` in ``template<class T, class
+    U=T> struct A;``) names an EARLIER parameter of the SAME declaration it
+    appears on -- :func:`_specialization_spelling` resolves it by looking up
+    that text in the *tracked* names index
+    (:func:`_index_template_param_names`'s own fully-merged output). When a
+    CONFIRMED redeclaration (the sixth round's merge) contributes a NEWLY
+    adopted default and that redeclaration also renamed its parameters, the raw
+    text it carries names one of ITS OWN (renamed) parameters, not the tracked
+    ones -- e.g. ``template<class T, class U> struct A;`` followed by
+    ``template<class X, class Y=X> struct A {...};`` spells the added default
+    as literal ``"X"``, which the tracked names index (still ``["T", "U"]``
+    here) never contains, so the substitution silently fails (Codex review,
+    fresh evidence, eighth round; confirmed end to end this left the base
+    unresolvable and a real virtual-method addition undetected). Fixed by
+    translating a newly adopted default's dependent reference through THIS
+    declaration's own positional name list into the TRACKED name at that same
+    position (parameter order/count can't legally change across a redeclaration
+    of the same template, so position always lines up) before merging it in.
 
-    The translation target is :func:`_index_template_param_names`'s own
-    output for the WHOLE tree, computed once up front, not a locally
-    hand-rolled "first name seen for this qualname" copy -- an earlier
-    version of this fix kept its own local shadow, updated only at a
-    qualname's very first sighting here, and it silently went stale
-    whenever an INTERMEDIATE redeclaration was the one that actually
-    named a previously-unnamed parameter: ``template<class, class>
-    struct A;`` (both unnamed) then ``template<class X, class Y> struct
-    A;`` (a redeclaration that names them) then ``template<class T, class
-    U=T> struct A {...};`` (a further redeclaration that adds a default)
-    -- the real, fully-merged names index correctly resolves to
-    ``["X", "Y"]``, but the stale local shadow here still held
-    ``[None, None]`` from the very first sighting, so the translation
-    target for the added default's position was falsy and the raw,
-    untranslated text was kept -- reproducing the identical unresolvable-
-    base failure (Codex review, fresh evidence, ninth round). Reusing
-    :func:`_index_template_param_names`'s own already-correct, fully-
-    merged result sidesteps the whole class of "which registration counts
-    as authoritative" bug rather than re-deriving (and risking
-    re-diverging) it a second time here.
+    The translation target is :func:`_index_template_param_names`'s own output
+    for the WHOLE tree, not a locally hand-rolled "first name seen for this
+    qualname" copy -- an earlier version of this fix kept its own local shadow,
+    updated only at a qualname's very first sighting here, and it silently went
+    stale whenever an INTERMEDIATE redeclaration was the one that actually
+    named a previously-unnamed parameter: ``template<class, class> struct A;``
+    (both unnamed) then ``template<class X, class Y> struct A;`` (a
+    redeclaration that names them) then ``template<class T, class U=T> struct A
+    {...};`` (a further redeclaration that adds a default) -- the real,
+    fully-merged names index correctly resolves to ``["X", "Y"]``, but the
+    stale local shadow here still held ``[None, None]`` from the very first
+    sighting, so the translation target for the added default's position was
+    falsy and the raw, untranslated text was kept -- reproducing the identical
+    unresolvable-base failure (Codex review, fresh evidence, ninth round).
+    Reusing that fully-merged result (passed in as *names* when already built)
+    avoids re-deriving "which registration counts as authoritative" here.
     """
     idx: dict[str, list[str | None]] = {}
     ambiguous: set[str] = set()
     node_ids: dict[str, str] = {}
-    tracked_names_by_qualname = _index_template_param_names(root)
+    tracked_names_by_qualname = names or _index_template_param_names(root)
 
     def walk(node: Any, scope: tuple[str, ...]) -> None:
         if not isinstance(node, dict):
@@ -721,10 +717,12 @@ def build_specialization_index(
     """
     if param_kinds_by_qualname is None:
         param_kinds_by_qualname = _index_template_param_kinds(root)
-    if param_defaults_by_qualname is None:
-        param_defaults_by_qualname = _index_template_param_defaults(root)
     if param_names_by_qualname is None:
         param_names_by_qualname = _index_template_param_names(root)
+    if param_defaults_by_qualname is None:
+        param_defaults_by_qualname = _index_template_param_defaults(
+            root, param_names_by_qualname
+        )
     idx: dict[str, dict[str, Any]] = {}
 
     def walk(node: Any, scope: tuple[str, ...], lookup_scope: tuple[str, ...]) -> None:

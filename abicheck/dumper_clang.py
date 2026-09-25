@@ -153,6 +153,7 @@ from .model import (
     Variable,
     Visibility,
 )
+from .model.declaration_headers import attributed
 from .model.identity import (
     EntityId,
     ScopePath,
@@ -1525,10 +1526,10 @@ class _ClangAstParser:
         to the public-header surface via provenance; empty when no public set was
         supplied (provenance is opt-in).
         """
-        return {
-            self._qualified(entry): value
+        return attributed(
+            (self._qualified(entry), value, entry.file or "")
             for entry, value in self._iter_public_constants()
-        }
+        )
 
     def parse_constant_entity_ids(self) -> dict[str, EntityId]:
         """``EntityId`` sidecar for :meth:`parse_constants` (ADR-063 Phase 2),
@@ -1669,17 +1670,18 @@ class _ClangAstParser:
         )
 
     def parse_typedefs(self) -> dict[str, str]:
-        typedefs: dict[str, str] = {}
-        for entry in self._typedefs:
-            node = entry.node
-            if _is_builtin_file(entry.file):
-                continue
-            name = str(node.get("name", ""))
-            if not name:
-                continue
-            underlying = _typedef_underlying(node)
-            typedefs[name] = underlying or "?"
-        return typedefs
+        return attributed(
+            (name, _typedef_underlying(entry.node) or "?", entry.file or "")
+            for entry, name in self._named_typedefs()
+        )
+
+    def _named_typedefs(self) -> list[tuple[_Decl, str]]:
+        """``(decl, bare name)`` for every named, non-builtin typedef."""
+        return [
+            (e, n)
+            for e in self._typedefs
+            if not _is_builtin_file(e.file) and (n := str(e.node.get("name", "")))
+        ]
 
     def parse_typedefs_qualified(self) -> dict[str, str]:
         """Same alias -> underlying-type mapping as :meth:`parse_typedefs`,
@@ -1688,17 +1690,10 @@ class _ClangAstParser:
         docstring for why ``parse_typedefs`` cannot be relied on alone for
         a member typedef whose bare spelling collides across classes.
         """
-        typedefs: dict[str, str] = {}
-        for entry in self._typedefs:
-            node = entry.node
-            if _is_builtin_file(entry.file):
-                continue
-            name = str(node.get("name", ""))
-            if not name:
-                continue
-            underlying = _typedef_underlying(node)
-            typedefs[self._qualified(entry)] = underlying or "?"
-        return typedefs
+        return attributed(
+            (self._qualified(e), _typedef_underlying(e.node) or "?", e.file or "")
+            for e, _name in self._named_typedefs()
+        )
 
     def parse_typedef_entity_ids(self) -> dict[str, EntityId]:
         """``EntityId`` sidecar for :meth:`parse_typedefs_qualified` (ADR-063

@@ -396,9 +396,10 @@ def qualified_declaration_name(name: str, mangled: str) -> str:
         hit; the result is a pure function of the two spellings.
     """
     if _needs_demangle(name, mangled):
-        from ..demangle import demangle_batch
+        from ..demangle import demangle_one_batched
 
-        return demangle_batch([mangled]).get(mangled, name)
+        demangled = demangle_one_batched(mangled)
+        return name if demangled is None else demangled
     return name
 
 
