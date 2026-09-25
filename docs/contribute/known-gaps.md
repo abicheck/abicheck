@@ -8015,6 +8015,37 @@ and `scripts/l2_real_profiles.py`'s oneDAL profile (five header-bearing
 libraries across two compile contexts) is the realistic case to judge it
 against.
 
+### Multi-library L2 compare scales quadratically with library count
+
+Found by `scripts/check_l2_scaling_perf.py` (2026-09). A directory `compare`
+of N generated libraries (2 public headers each, shared dependency context,
+`--depth headers`, cold cache, 4 CPUs) costs:
+
+| libraries | 1 | 3 | 6 | 7 | 10 | 16 |
+|---|---:|---:|---:|---:|---:|---:|
+| wall (s) | 1.3 | 2.2 | 5.0 | 6.9 | 11.5 | 32.2 |
+
+Above the ~1.2 s fixed floor, the added cost grows with a marginal exponent of
+~1.6 over 1–10 libraries and ~1.9 between 7 and 16. The directory compare is
+therefore close to quadratic, not linear, in the member count. Peak RSS stays
+flat (~230 → 365 MB), so this is time, not memory.
+
+Profile of the 16-library run: the per-member work is dominated by
+`workflows/bundle_symbol_status.build_bundle_signature_evidence` →
+`symbol_signature_statuses` → `qualified_name_segments_walk.collect_and_flag`
+(~2M calls), plus ~78k `Path.resolve` calls. Each member is dumped and walked
+against the release's **union** header set, so every member's cost grows with
+the total header count, which is proportional to N. This is the performance
+face of the "`-H`/`--header` set is applied to every member" entry below. Its
+steps 2/3 (giving each member only its own headers, or computing the
+release-scoped part once) would also remove the N² term.
+
+The gate's library-axis budget is 2.0, which catches this getting worse
+without blessing it. Lower it to ~1.3 when the per-member walk is shared or
+scoped. The oneDAL receipts (`performance.md`, "oneDAL solo L2 compare")
+involve a handful of libraries with 125 header roots, which is where the same
+term would show up at real scale.
+
 ### ~~`compare --format` repeated silently keeps only the last format~~ — CLOSED by the export grammar
 
 Recorded while building the full-CLI harness against `main` at `f6aa2aae`, where
