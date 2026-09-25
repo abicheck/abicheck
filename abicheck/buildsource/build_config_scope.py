@@ -58,7 +58,9 @@ def dependency_evidence_findings(value: object) -> list[str]:
     mode, just not one this build can honour, and accepting it would record
     a narrowing the dump never performed.
     """
-    if value in SUPPORTED_DEPENDENCY_EVIDENCE:
+    # A YAML list or mapping is unhashable: type-check before membership so
+    # it reaches the ordinary finding below instead of raising TypeError.
+    if isinstance(value, str) and value in SUPPORTED_DEPENDENCY_EVIDENCE:
         return []
     if value == DEPENDENCY_EVIDENCE_REFERENCED:
         return [
