@@ -22,7 +22,6 @@ import pytest
 from abicheck.dumper_layout_backfill import (
     DwarfLayoutCoherence,
     _backfilled_record,
-    _topmost_scope_suffix,
     backfill_dwarf_layout,
     dwarf_layout_types_or_empty,
 )
@@ -179,34 +178,6 @@ class TestDwarfLayoutTypesOrEmpty:
             session=None,
         )
         assert result == expected
-
-
-class TestTopmostScopeSuffix:
-    """_topmost_scope_suffix must strip only the outermost `::` scope
-    qualifier, not descend into `::` nested inside template arguments
-    (Codex review)."""
-
-    @pytest.mark.parametrize(
-        ("name", "expected"),
-        [
-            ("Foo", "Foo"),
-            ("api::Foo", "Foo"),
-            ("a::b::Foo", "Foo"),
-            ("api::Base<detail::Tag>", "Base<detail::Tag>"),
-            ("Base<detail::Tag>", "Base<detail::Tag>"),
-            ("api::Outer<a::b::Inner<c::D>>", "Outer<a::b::Inner<c::D>>"),
-        ],
-        ids=[
-            "unscoped",
-            "single-scope",
-            "nested-scope",
-            "templated-base-strips-only-own-scope",
-            "templated-base-already-bare",
-            "nested-template-args-untouched",
-        ],
-    )
-    def test_strips_only_outermost_scope(self, name: str, expected: str) -> None:
-        assert _topmost_scope_suffix(name) == expected
 
 
 class TestBackfillDwarfLayout:
@@ -553,19 +524,14 @@ class TestBackfillDwarfLayout:
     def test_exact_name_match_with_populated_header_and_empty_dwarf_is_never_guessed(
         self,
     ) -> None:
-        """Regression (Codex review, fresh evidence): an *exact* name match
-        was previously trusted unconditionally on the reasoning that
-        `dwarf.name == header.name` implies a genuinely unscoped type with
-        no ambiguity — but the clang header parser never namespace-
-        qualifies RecordType.name at all regardless of the type's *real*
-        scope, so an exact match only shows the DWARF *candidate* itself
-        has no scope of its own, not that it is the header's actual
-        (possibly namespaced) counterpart. A public `api::Foo { int x; }`
-        with no DWARF emission of its own must not be backfilled from an
-        unrelated, genuinely global-scope, empty `Foo` reached only because
-        both stored names happen to be the bare string "Foo"."""
+        """A public `api::Foo { int x; }` with no DWARF emission of its own
+        must not be backfilled from an unrelated, genuinely global-scope,
+        empty `Foo` just because both carry the bare `name` "Foo": the
+        match key is the qualified spelling (`qualified_name`), which the
+        clang header parser sets for every scoped record."""
         header = RecordType(
             name="Foo",
+            qualified_name="api::Foo",
             kind="struct",
             fields=[TypeField(name="x", type="int")],
         )
@@ -584,6 +550,7 @@ class TestBackfillDwarfLayout:
         and equal."""
         header = RecordType(
             name="Foo",
+            qualified_name="api::Foo",
             kind="struct",
             fields=[TypeField(name="i", type="int"), TypeField(name="f", type="float")],
             has_anonymous_aggregate_fields=True,
@@ -609,7 +576,9 @@ class TestBackfillDwarfLayout:
         because both names are bare and equal and neither has fields. The
         `not dwarf.vtable` guard applies to the trivial-fieldless branch,
         not only the anonymous-aggregate one."""
-        header = RecordType(name="Foo", kind="class", fields=[], bases=[])
+        header = RecordType(
+            name="Foo", qualified_name="api::Foo", kind="class", fields=[], bases=[]
+        )
         unrelated = RecordType(
             name="Foo",
             kind="class",
@@ -639,6 +608,7 @@ class TestBackfillDwarfLayout:
         is set and dwarf.vtable is empty here."""
         header = RecordType(
             name="Foo",
+            qualified_name="api::Foo",
             kind="struct",
             fields=[TypeField(name="i", type="int"), TypeField(name="f", type="float")],
             has_anonymous_aggregate_fields=True,
@@ -721,12 +691,15 @@ class TestBackfillDwarfLayout:
         assert out[0].is_template_pattern
         assert [f.name for f in out[0].fields] == ["data_"]
 
-    def test_matches_namespaced_dwarf_name_by_unambiguous_suffix(self) -> None:
-        """The clang header backend emits a bare name ("Foo") while DWARF
-        qualifies it ("api::Foo"); an unambiguous suffix match must still
-        recover the layout (Codex review)."""
+    def test_matches_namespaced_dwarf_name_by_qualified_name(self) -> None:
+        """The clang header backend keeps the bare `name` ("Foo") and puts
+        the scope in `qualified_name` ("api::Foo"), which DWARF spells as
+        the record's own name; the qualified spelling is the match key."""
         header = RecordType(
-            name="Foo", kind="struct", fields=[TypeField(name="v", type="int")]
+            name="Foo",
+            qualified_name="api::Foo",
+            kind="struct",
+            fields=[TypeField(name="v", type="int")],
         )
         dwarf = RecordType(
             name="api::Foo",
@@ -750,18 +723,24 @@ class TestBackfillDwarfLayout:
         out, _coherence = backfill_dwarf_layout([header], [dwarf_a, dwarf_b])
         assert out[0].size_bits is None
 
-    def test_global_and_namespaced_same_bare_name_is_never_guessed(self) -> None:
-        """A global ``Foo`` matches the header's bare "Foo" by exact name just
-        as validly as a namespaced ``api::Foo`` matches it by suffix — an
-        exact-match-first lookup would silently pick the global one and never
-        even reach the ambiguity check (Codex review: the dangerous mixed
-        global/namespaced case). Both must be left unmatched."""
-        header = RecordType(name="Foo", kind="struct")
+    def test_global_and_namespaced_same_bare_name_each_take_their_own(
+        self,
+    ) -> None:
+        """A global ``Foo`` and a namespaced ``api::Foo`` share a leaf name
+        but are different entities: each header record takes the layout of
+        the DWARF record spelled exactly like its own qualified name, never
+        the other's."""
+        header_global = RecordType(name="Foo", kind="struct")
+        header_api = RecordType(name="Foo", qualified_name="api::Foo", kind="struct")
         dwarf_global = RecordType(name="Foo", kind="struct", size_bits=64)
         dwarf_namespaced = RecordType(name="api::Foo", kind="struct", size_bits=999)
-        out, _coherence = backfill_dwarf_layout(
-            [header], [dwarf_global, dwarf_namespaced]
-        )
+        for dwarf in (
+            [dwarf_global, dwarf_namespaced],
+            [dwarf_namespaced, dwarf_global],
+        ):
+            out, _coherence = backfill_dwarf_layout([header_global, header_api], dwarf)
+            assert [o.size_bits for o in out] == [64, 999]
+        out, _coherence = backfill_dwarf_layout([header_global], [dwarf_namespaced])
         assert out[0].size_bits is None
 
     def test_no_dwarf_types_is_a_no_op(self) -> None:
@@ -780,11 +759,13 @@ class TestBackfillDwarfLayout:
         genuinely unique and unambiguous on its own."""
         header_a = RecordType(
             name="Foo",
+            qualified_name="api::Foo",
             kind="struct",
             fields=[TypeField(name="x", type="int")],
         )
         header_b = RecordType(
             name="Foo",
+            qualified_name="api::Foo",
             kind="struct",
             fields=[TypeField(name="x", type="int")],
         )
@@ -852,24 +833,25 @@ class TestDwarfLayoutCoherence:
         assert coherence.mismatched == ("Foo",)
         assert coherence.matched == ()
 
-    def test_field_corroboration_failure_is_mismatch_status(self) -> None:
+    def test_same_leaf_in_another_scope_is_unavailable_not_mismatch(self) -> None:
         header = RecordType(
             name="Foo", kind="struct", fields=[TypeField(name="x", type="int")]
         )
-        # Unique name-suffix candidate, but no field overlap -- rejected by
-        # _fields_corroborate, distinct from "no candidate at all".
+        # Same leaf name, different scope: a different entity, so there is
+        # no candidate at all -- not a candidate that disagreed.
         unrelated = RecordType(
             name="ns::Foo",
             kind="struct",
             size_bits=64,
-            fields=[TypeField(name="y", type="int", offset_bits=0)],
+            fields=[TypeField(name="x", type="int", offset_bits=0)],
         )
         out, coherence = backfill_dwarf_layout([header], [unrelated])
         assert out[0].size_bits is None
-        assert coherence.status == "mismatch"
-        assert coherence.mismatched == ("Foo",)
+        assert coherence.status == "partial"
+        assert coherence.unavailable_types == ("Foo",)
+        assert coherence.mismatched == ()
 
-    def test_ambiguous_bare_name_is_partial_ambiguous(self) -> None:
+    def test_ambiguous_qualified_name_is_partial_ambiguous(self) -> None:
         header_a = RecordType(
             name="Foo", kind="struct", fields=[TypeField(name="x", type="int")]
         )
@@ -877,7 +859,7 @@ class TestDwarfLayoutCoherence:
             name="Foo", kind="struct", fields=[TypeField(name="x", type="int")]
         )
         dwarf = RecordType(
-            name="api::Foo",
+            name="Foo",
             kind="struct",
             size_bits=32,
             fields=[TypeField(name="x", type="int", offset_bits=0)],

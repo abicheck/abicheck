@@ -41,9 +41,10 @@ are pure producer/merge code. That is false for *two of their own
 functions*: `dwarf_snapshot._DwarfSnapshotBuilder._filter_types_by_
 reachability` reads `bases`/`virtual_bases` to decide which types survive
 into the exported snapshot (a real compatibility-relevant decision, not a
-value computation), and `dumper_layout_backfill._fields_corroborate` reads
+value computation), and `dumper_layout_backfill._fields_corroborate` read
 `bases`/`virtual_bases`/`vtable` to decide whether two records structurally
-match (also a decision, not a merge). A whole-module exemption hid both
+match (also a decision, not a merge; since deleted -- the backfill now pairs
+records through `model/debug_type_match.py`, which reads none of them). A whole-module exemption hid both
 from this scan entirely, and would silently hide the next such function
 added to either file. `EXEMPT_FUNCTIONS` is keyed by qualified function
 name (`Class.method` for a method, tracked through nested `def`s) so only
@@ -180,7 +181,7 @@ EXEMPT_FUNCTIONS: frozenset[str] = frozenset(
 #: `type_reachability.py`, and the two decision functions living inside
 #: otherwise-exempt producer modules --
 #: `dwarf_snapshot._DwarfSnapshotBuilder._filter_types_by_reachability` and
-#: `dumper_layout_backfill._fields_corroborate`) has migrated to read the
+#: `dumper_layout_backfill._fields_corroborate`, since deleted) has migrated to read the
 #: `Fact[...]` sibling via `model.resolved_fact_value()` instead of the bare
 #: legacy attribute -- see `docs/contribute/plans/one-semantic-pipeline.md`
 #: Phase 0's own "Detector migration -- landed" note. This stays a real,

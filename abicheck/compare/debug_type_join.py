@@ -13,7 +13,8 @@ debug_type_node_id`. A further, layout-distinct definition of one name
 (``DwarfMetadata.struct_odr_conflicts``, an ODR conflict across CUs) is its
 own occurrence and is never merged with the first.
 
-**Rule.** An occurrence's candidates are the header entities of the same
+**Rule.** (Record half owned by ``model/debug_type_match.py``, which the
+dump-time layout backfill shares.) An occurrence's candidates are the header entities of the same
 kind (struct/class/union -> record, enum -> enum) whose qualified spelling
 (``qualified_name or name``) *equals* the debug name, and whose layout does
 not contradict it on any fact both sides carry: union-ness, total size, the
@@ -40,6 +41,11 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..model.debug_type_match import (
+    DebugRecordFacts,
+    header_type_key,
+    record_candidates,
+)
 from ..model.dwarf_facts import EnumInfo, StructLayout
 from ..model.graph_entity_identity import SnapshotIdentities
 from ..model.graph_join import (
@@ -125,28 +131,6 @@ class DebugTypeJoin:
         )
 
 
-def _record_layout_verdict(rec: RecordType, layout: StructLayout) -> bool | None:
-    """``False`` on a contradiction, ``True`` when at least one layout fact
-    was compared and agreed, ``None`` when no fact was comparable."""
-    compared = False
-    if rec.is_union != layout.is_union:
-        return False
-    if rec.size_bits is not None and layout.byte_size:
-        if rec.size_bits != layout.byte_size * 8:
-            return False
-        compared = True
-    debug_offsets = {
-        f.name: f.byte_offset * 8 for f in layout.fields if f.name and not f.bit_size
-    }
-    for f in rec.fields:
-        if f.is_bitfield or f.offset_bits is None or f.name not in debug_offsets:
-            continue
-        if f.offset_bits != debug_offsets[f.name]:
-            return False
-        compared = True
-    return True if compared else None
-
-
 def _enum_layout_verdict(en: EnumType, info: EnumInfo) -> bool | None:
     compared = False
     for m in en.members:
@@ -181,8 +165,9 @@ def _candidate_verdicts(
     spelled exactly like *occ*."""
     if occ.kind == _KIND_RECORD:
         assert isinstance(layout, StructLayout)
-        for node, rec in records.get(occ.name, ()):
-            yield node, _record_layout_verdict(rec, layout)
+        yield from record_candidates(
+            DebugRecordFacts.from_struct_layout(layout), records
+        )
     else:
         assert isinstance(layout, EnumInfo)
         for node, en in enums.get(occ.name, ()):
@@ -201,12 +186,10 @@ def join_debug_types(
     enums: dict[str, list[tuple[str, EnumType]]] = {}
     left_ids: list[str] = []
     for rec, ident in zip(snap.types, ids.records):
-        records.setdefault(rec.qualified_name or rec.name, []).append(
-            (ident.node_id, rec)
-        )
+        records.setdefault(header_type_key(rec), []).append((ident.node_id, rec))
         left_ids.append(ident.node_id)
     for en, ident in zip(snap.enums, ids.enums):
-        enums.setdefault(en.qualified_name or en.name, []).append((ident.node_id, en))
+        enums.setdefault(header_type_key(en), []).append((ident.node_id, en))
         left_ids.append(ident.node_id)
 
     dwarf = snap.dwarf
