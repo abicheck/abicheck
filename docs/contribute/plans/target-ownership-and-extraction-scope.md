@@ -13,9 +13,10 @@ hundred public declarations). The investigation started as "pass
 records what was measured, which designs the measurements rule out, and the
 configuration, storage, and documentation the surviving design needs.
 
-**ADR:** needs one before Phase 2 — it adds `.abicheck.yml` keys, a
-snapshot field (`SCHEMA_VERSION` bump) and a comparability rule. Phase 0
-and Phase 1 are additive and can land first.
+**ADR:** [ADR-075](../adr/075-target-ownership-and-extraction-scope.md)
+decides Phase 2 — the `.abicheck.yml` keys, the snapshot field
+(`SCHEMA_VERSION` bump), the per-entity facts and the comparability rule.
+Phase 0 and Phase 1 were additive and landed first.
 
 **Type:** Initiative plan (`extract/`, `model/`, `storage/`,
 `comparability.py`, `buildsource/build_config*.py`, `report/`, docs).
