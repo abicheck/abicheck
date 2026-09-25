@@ -214,6 +214,17 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     # to report a pass it never earned.
     "scripts/check_l2_cli_perf.py",
     "scripts/l2_cli_fixture.py",
+    # The growth-rate sibling (headers x libraries sweep through the real CLI),
+    # and the multi-library release path it is the only gate for: the
+    # directory compare's per-member signature walk and release-level
+    # reconciliation, which is where its measured super-linear term lives
+    # (docs/contribute/known-gaps.md, "Multi-library L2 compare scales
+    # quadratically with library count").
+    "scripts/check_l2_scaling_perf.py",
+    "tests/test_l2_scaling_perf_gate.py",
+    "abicheck/qualified_name_segments_walk.py",
+    "abicheck/policy/release_*.py",
+    "abicheck/compare/bundle_*.py",
     "scripts/perf_receipt.py",
     "scripts/l2_real_profiles.py",
     "tests/test_l2_cli_perf_gate.py",
