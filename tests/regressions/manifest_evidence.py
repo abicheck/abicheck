@@ -741,4 +741,26 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "window": ("whole-text", "caller start/end"),
         },
     ),
+    BugClass(
+        id="identity.special_member_variant_family",
+        invariant=(
+            "One C++ constructor/destructor is several linker symbols "
+            "(Itanium C1/C2/C3, D0/D1/D2). A castxml placeholder (no "
+            "mangling) resolves to the complete-object spelling exactly when "
+            "the export table pairs it one-to-one with an exported variant "
+            "family of the same owner and unqualified signature; the other "
+            "observed variants are aliases, never competing exports; "
+            "anything ambiguous or unevidenced stays unresolved."
+        ),
+        fixed_by=(1370,),
+        seed_tests=(
+            "tests/test_special_member_identity.py",
+            "tests/test_special_member_identity_integration.py",
+        ),
+        axes={
+            "variant": ("C1", "C2", "C3", "D0", "D1", "D2"),
+            "owner": ("namespaced", "top-level", "templated"),
+            "frontend": ("castxml", "clang"),
+        },
+    ),
 )
